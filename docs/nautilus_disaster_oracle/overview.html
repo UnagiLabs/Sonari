@@ -261,7 +261,7 @@
       <div class="eyebrow">Sonari / Nautilus Application Layer</div>
       <h1>Sonari</h1>
       <p class="subtitle">
-        地震データをNautilusで検証可能なオンチェーン証明に変換し、Sui上の災害支払い・支援金ClaimへつなげるためのNautilusアプリケーション層 要件定義です。
+        地震データをNautilusで検証可能なオンチェーン証明に変換し、Sui上のDisasterEvent、支援金Claim、災害支払いへつなげるためのNautilus Disaster Oracle層 要件定義です。
       </p>
       <div class="summary">
         <div class="card blue">
@@ -278,27 +278,30 @@
     <section>
       <h2>1. 今回の決定事項</h2>
       <div class="decision">
-        Sonari v1では、津波・台風・洪水は扱わず、地震だけに絞る。支払い判定はMagnitudeではなく、揺れの強さを表すUSGS MMI / JMA震度を使う。
+        Sonari Disaster Oracle v1では、津波・台風・洪水は扱わず、地震だけに絞る。災害Event判定はMagnitudeではなく、揺れの強さを表すUSGS MMI / JMA震度を使う。
       </div>
       <table>
         <tbody>
           <tr><th>アプリ名</th><td><strong>Sonari</strong></td></tr>
           <tr><th>MVP災害</th><td>地震のみ</td></tr>
+          <tr><th>対象レイヤー</th><td>Disaster Oracle層。ユーザーEligibility Claim、資金Pool、支払い実行は別レイヤー</td></tr>
           <tr><th>世界基準</th><td>USGS MMI / ShakeMap</td></tr>
           <tr><th>日本デモ</th><td>JMA震度をSuiRelief/Sonari内のBandへ換算</td></tr>
-          <tr><th>Magnitudeのみ</th><td>自動支払いしない。<code>pending_mmi</code> として待機またはManual Reviewへ</td></tr>
+          <tr><th>Magnitudeのみ</th><td>DisasterEventをfinalizeしない。<code>pending_mmi</code> として待機またはManual Reviewへ</td></tr>
           <tr><th>H3 resolution</th><td>MVPは7固定。将来はPoolごとに6〜8で設定可能</td></tr>
           <tr><th>affected_cells</th><td>MVPは半径方式。将来はShakeMap polygon方式へ拡張</td></tr>
-          <tr><th>raw data</th><td><code>raw_data_hash</code> は必須。<code>raw_data_uri</code> はoptional</td></tr>
+          <tr><th>raw data</th><td><code>raw_data_hash</code> は必須。<code>raw_data_uri</code> はMVPではoptional</td></tr>
+          <tr><th>Claim接続</th><td><code>finalized</code> eventでは、Claim側がMerkle proofを作れるように <code>affected_cells_uri</code> を必須にする</td></tr>
+          <tr><th>Flood Pool</th><td>全体デモのDesignated Pool表示のみ。Nautilus Oracle v1の自動検知対象には含めない</td></tr>
           <tr><th>TEE方針</th><td>第一候補 Marlin Oyster、第二候補 AWS Nitro Enclaves self-managed</td></tr>
-          <tr><th>Move検証</th><td>標準検証を採用。signature / intent / freshness / duplicate / source / root を検証</td></tr>
+          <tr><th>Move検証</th><td>標準検証を採用。signature / intent / status / freshness / revision / source / root を検証</td></tr>
         </tbody>
       </table>
     </section>
 
     <section>
       <h2>2. このアプリの責任範囲</h2>
-      <p class="lead">この資料では、Nautilusアプリケーション層だけを扱います。資金Pool、Claim、支払い、収益モデルは別レイヤーです。</p>
+      <p class="lead">この資料では、Nautilus Disaster Oracle層だけを扱います。資金Pool、ユーザーEligibility Claim、支払い、収益モデルは別レイヤーです。</p>
       <div class="grid two">
         <div class="card green">
           <div class="card-title">Sonari Earthquake Oracleがやること</div>
@@ -320,7 +323,7 @@
             <li>保険料や支援金額の計算</li>
             <li>ReliefPoolの資金管理</li>
             <li>ユーザーへの支払い実行</li>
-            <li>ClaimReceiptの発行</li>
+            <li>Eligibility Proof / ClaimReceiptの発行</li>
             <li>ユーザーが本当にその地域に住んでいるかの証明</li>
             <li>Appealの最終承認</li>
             <li>法規制やKYC判断</li>
@@ -330,6 +333,32 @@
       </div>
       <div class="note">
         <strong>責任の切り分け：</strong> SonariのNautilus層は「地震の揺れと対象地域を検証可能にする係」。Moveコントラクトは「その証明を検証してDisasterEvent Objectを作る係」です。
+      </div>
+      <h3>Sonari全体との接続</h3>
+      <table>
+        <thead>
+          <tr><th>レイヤー</th><th>主な出力</th><th>責任</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Disaster Oracle</td>
+            <td><code>DisasterOracleResponse</code> / <code>DisasterEvent</code></td>
+            <td>地震の発生、揺れの強さ、対象H3 cell rootを検証可能にする</td>
+          </tr>
+          <tr>
+            <td>Eligibility Claim</td>
+            <td><code>EligibilityProof</code> / <code>ReliefReceipt</code></td>
+            <td>会員登録時期、地域滞在、地域変更クールダウン、重複申請リスクを評価する</td>
+          </tr>
+          <tr>
+            <td>Payment / Pool</td>
+            <td>Relief Cash transfer / Sponsor Impact update</td>
+            <td>PoolPolicy、流動性、支払い上限、スポンサー実績更新を扱う</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note">
+        Sonari全体資料の「Nautilusがユーザー適格性を秘匿検証する」という表現は、将来のEligibility Claim層を含む全体像です。本資料のOracle v1は、その前段であるDisasterEvent作成に責務を限定します。
       </div>
     </section>
 
@@ -343,12 +372,12 @@
         </div>
         <div class="card blue">
           <div class="card-title">Intensity / MMI / JMA震度</div>
-          <p>ある場所で実際にどれくらい揺れたかを表します。支払い判定にはこちらが向いています。</p>
+          <p>ある場所で実際にどれくらい揺れたかを表します。災害Event判定にはこちらが向いています。</p>
           <p class="small">Sonariでは「対象地域がどれくらい揺れたか」を見てClaim可能性を決めます。</p>
         </div>
       </div>
       <div class="decision">
-        自動支払いの条件にはMagnitudeを使わない。Magnitudeは候補地震の検出に使い、最終判定はMMIまたはJMA震度で行う。
+        災害Event finalizeの条件にはMagnitudeを使わない。Magnitudeは候補地震の検出に使い、最終判定はMMIまたはJMA震度で行う。
       </div>
     </section>
 
@@ -360,10 +389,10 @@
           <tr><th>Sonari Band</th><th>USGS MMI</th><th>JMA震度</th><th>意味</th></tr>
         </thead>
         <tbody>
-          <tr><td>Band 0</td><td>MMI VI未満</td><td>震度5強未満</td><td>自動支払い対象外</td></tr>
-          <tr><td>Band 1</td><td>MMI VII以上</td><td>震度6弱</td><td>強い揺れ。少額支援対象</td></tr>
-          <tr><td>Band 2</td><td>MMI VIII以上</td><td>震度6強</td><td>大きな被害の可能性。中額支援対象</td></tr>
-          <tr><td>Band 3</td><td>MMI IX以上</td><td>震度7</td><td>深刻な被害の可能性。最大支援対象</td></tr>
+          <tr><td>Band 0</td><td>MMI VI未満</td><td>震度5強未満</td><td>DisasterEvent finalize対象外</td></tr>
+          <tr><td>Band 1</td><td>MMI VII以上</td><td>震度6弱</td><td>強い揺れ。少額支援ティア候補</td></tr>
+          <tr><td>Band 2</td><td>MMI VIII以上</td><td>震度6強</td><td>大きな被害の可能性。中額支援ティア候補</td></tr>
+          <tr><td>Band 3</td><td>MMI IX以上</td><td>震度7</td><td>深刻な被害の可能性。最大支援ティア候補</td></tr>
         </tbody>
       </table>
       <h3>判定ロジック案</h3>
@@ -381,7 +410,7 @@
   return 0;
 }</code></pre>
       <div class="note">
-        <strong>優先順位：</strong> 1. USGS MMI / ShakeMap、2. JMA震度、3. どちらもなければ自動支払いせず <code>pending_mmi</code> にする。
+        <strong>優先順位：</strong> 1. USGS MMI / ShakeMap、2. JMA震度、3. どちらもなければDisasterEventをfinalizeせず <code>pending_mmi</code> にする。
       </div>
     </section>
 
@@ -411,6 +440,21 @@
   status = "pending_mmi";
   auto_trigger = false;
 }</code></pre>
+      <h3>イベントライフサイクル</h3>
+      <p>地震データは発生直後に更新されるため、同じ <code>event_uid</code> に対して状態遷移とrevisionを持たせます。<code>pending_mmi</code> はClaim接続対象ではなく、MMI / ShakeMapまたはJMA震度が取得できた時点で <code>finalized</code> revisionを作ります。</p>
+      <table>
+        <thead>
+          <tr><th>Status</th><th>意味</th><th>Moveでの扱い</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>pending_mmi</code></td><td>候補地震は検出したが、揺れの強さが未確定</td><td>DisasterEventは作ってもClaim接続不可、またはMVPでは作成しない</td></tr>
+          <tr><td><code>finalized</code></td><td>Band、対象H3 cell、監査hashが確定</td><td>DisasterEvent作成とClaim接続を許可</td></tr>
+          <tr><td><code>rejected</code></td><td>古い、不完全、対象外、許可source外</td><td>DisasterEvent作成不可</td></tr>
+        </tbody>
+      </table>
+      <div class="note">
+        <strong>revision方針：</strong> <code>event_uid</code> は同じ地震で固定し、<code>event_revision</code> と <code>source_updated_at_ms</code> で更新を表す。Move側は同一 <code>event_uid</code> の古いrevisionを再利用できないようにする。
+      </div>
     </section>
 
     <section>
@@ -427,7 +471,7 @@
           </ul>
         </div>
         <div class="card green">
-          <div class="card-title">Claim判定のイメージ</div>
+          <div class="card-title">Claim対象地域判定のイメージ</div>
           <pre><code>user_geo_cell = "8a2a1072b59ffff"
 
 affected_cells = [
@@ -484,6 +528,9 @@ Band 3: 150km以内</code></pre>
       <div class="decision">
         MVPは半径方式で実装する。ただしデータモデルは、将来ShakeMap polygonへ置き換えられる形にしておく。
       </div>
+      <div class="note">
+        <strong>注意：</strong> 半径方式はデモ実装を優先する近似です。USGS ShakeMap polygonが利用できる場合は、実際の揺れ分布に近いShakeMap方式を優先する設計へ移行します。
+      </div>
     </section>
 
     <section>
@@ -513,7 +560,10 @@ Band 3: 150km以内</code></pre>
 raw_data_uri: optional。空文字OK
 
 affected_cells_root: 必須
-affected_cells_uri: optional。空文字OK</code></pre>
+affected_cells_uri: finalized eventでは必須。pending / rejectedでは空文字OK</code></pre>
+      <div class="note">
+        <strong>Claim接続上の理由：</strong> Claim側はユーザーのH3 cellが <code>affected_cells_root</code> に含まれることをMerkle proofで示す必要があります。そのため、<code>finalized</code> eventではproof生成に必要な <code>affected_cells</code> 一覧へ到達できるURIを必須にします。
+      </div>
     </section>
 
     <section>
@@ -521,7 +571,7 @@ affected_cells_uri: optional。空文字OK</code></pre>
       <div class="flow">
         <div class="flow-item"><strong>USGS地震データを取得</strong><br />event_idまたは直近地震検索で、地震の緯度・経度・Magnitude・MMI・更新時刻を取得します。</div>
         <div class="flow-item"><strong>データを正規化</strong><br />APIの形式を、Sonari内の共通データ形式に変換します。</div>
-        <div class="flow-item"><strong>鮮度チェック</strong><br />古い地震データで支払いが起きないように、更新時刻と有効期限を確認します。</div>
+        <div class="flow-item"><strong>鮮度チェック</strong><br />古い地震データでDisasterEventが作られないように、更新時刻と有効期限を確認します。</div>
         <div class="flow-item"><strong>MMI / JMA震度でBand判定</strong><br />Magnitudeではなく、揺れの強さからBand 1〜3を決めます。</div>
         <div class="flow-item"><strong>H3 affected_cellsを生成</strong><br />MVPでは震源からの半径方式で対象H3セルを作ります。</div>
         <div class="flow-item"><strong>Merkle rootを生成</strong><br />対象H3セル一覧をMerkle tree化し、rootだけをPayloadに入れます。</div>
@@ -553,20 +603,24 @@ affected_cells_uri: optional。空文字OK</code></pre>
     "hazard_type": 1,
     "severity_band": 2,
     "status": "finalized",
+    "event_revision": 1,
     "occurred_at_ms": 1760000000000,
     "observed_at_ms": 1760000060000,
+    "source_updated_at_ms": 1760000060000,
     "primary_source": "USGS",
     "source_set_hash": "0x...",
     "raw_data_hash": "0x...",
     "raw_data_uri": "https://... or walrus://...",
     "affected_cells_root": "0x...",
     "affected_cells_uri": "https://... or walrus://...",
+    "geo_resolution": 7,
+    "cells_generation_method": "radius_v1",
     "freshness_deadline_ms": 1760001860000
   },
   "signature": "0x..."
 }</code></pre>
       <div class="note">
-        <strong>statusの例：</strong> <code>finalized</code> は自動支払い可能、<code>pending_mmi</code> はMMI不足で自動支払い不可。
+        <strong>statusの例：</strong> <code>finalized</code> はDisasterEvent作成とClaim接続が可能、<code>pending_mmi</code> はMMI不足でClaim接続不可。
       </div>
     </section>
 
@@ -586,9 +640,13 @@ affected_cells_uri: optional。空文字OK</code></pre>
           <tr><td>FR-7</td><td>H3 affected_cells生成</td><td>H3 resolution 7で対象セルを作る。MVPでは半径方式。</td><td><span class="ok">Must</span></td></tr>
           <tr><td>FR-8</td><td>Merkle root生成</td><td>対象H3セル一覧からMerkle rootを作る。</td><td><span class="ok">Must</span></td></tr>
           <tr><td>FR-9</td><td>raw_data_hash生成</td><td>取得した元データをcanonical JSON化してhash化する。</td><td><span class="ok">Must</span></td></tr>
-          <tr><td>FR-10</td><td>URI保存</td><td>raw_data_uri / affected_cells_uriを任意でPayloadに入れられるようにする。</td><td><span class="maybe">Should</span></td></tr>
+          <tr><td>FR-10</td><td>URI保存</td><td>raw_data_uriを任意でPayloadに入れられるようにする。affected_cells_uriはfinalized eventでは必須。</td><td><span class="ok">Must</span></td></tr>
           <tr><td>FR-11</td><td>署名付きPayload生成</td><td>Moveと同じ構造をBCSでシリアライズし、Enclave秘密鍵で署名する。</td><td><span class="ok">Must</span></td></tr>
           <tr><td>FR-12</td><td>event_uid生成</td><td>hazard_type、source、source_event_id、occurred_atから決定的IDを作る。</td><td><span class="ok">Must</span></td></tr>
+          <tr><td>FR-13</td><td>状態遷移</td><td>pending_mmi / finalized / rejectedを明確に分け、finalizedだけをClaim接続対象にする。</td><td><span class="ok">Must</span></td></tr>
+          <tr><td>FR-14</td><td>revision管理</td><td>同じevent_uidの更新をevent_revisionとsource_updated_at_msで表現する。</td><td><span class="ok">Must</span></td></tr>
+          <tr><td>FR-15</td><td>Claim proof素材</td><td>finalized eventではaffected_cells_uriを必須にし、Claim側がMerkle proofを生成できるようにする。</td><td><span class="ok">Must</span></td></tr>
+          <tr><td>FR-16</td><td>監査hash正規化</td><td>raw_data_hash / source_set_hashはcanonical JSONまたはBCSで決定的に生成する。</td><td><span class="ok">Must</span></td></tr>
         </tbody>
       </table>
     </section>
@@ -621,16 +679,23 @@ affected_cells_uri: optional。空文字OK</code></pre>
   hazard_type: number;        // EARTHQUAKE = 1
   severity_band: number;      // 0, 1, 2, 3
   status: string;             // finalized / pending_mmi / rejected
+  event_revision: number;
   occurred_at_ms: number;
   observed_at_ms: number;
+  source_updated_at_ms: number;
   primary_source: string;
   source_set_hash: string;
   raw_data_hash: string;
   raw_data_uri: string;
   affected_cells_root: string;
   affected_cells_uri: string;
+  geo_resolution: number;
+  cells_generation_method: string; // radius_v1 / shakemap_polygon_v1
   freshness_deadline_ms: number;
 };</code></pre>
+      <div class="note">
+        <strong>hash方針：</strong> MVPでは、取得した元データをcanonical JSON化して <code>raw_data_hash</code> を作ります。<code>source_set_hash</code> は、source名、source_event_id、source_updated_at_ms、raw_data_hash、oracle_versionを決定的順序でまとめてhash化します。
+      </div>
     </section>
 
     <section>
@@ -672,13 +737,16 @@ affected_cells_uri: optional。空文字OK</code></pre>
           <tr><td>signature</td><td>登録済みNautilus Enclaveが署名したPayloadか確認する。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>intent</td><td>別用途の署名を使い回されないようにする。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>oracle_version</td><td>許可された判定ロジックのversionか確認する。</td><td><span class="ok">必須</span></td></tr>
+          <tr><td>status</td><td>pending_mmi / rejectedをClaim接続可能なDisasterEventとして扱わない。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>freshness</td><td>古いPayloadで災害Eventを作られないようにする。</td><td><span class="ok">必須</span></td></tr>
-          <tr><td>duplicate</td><td>同じ地震でDisasterEventを二重作成しない。</td><td><span class="ok">必須</span></td></tr>
+          <tr><td>revision</td><td>同じevent_uidの古いrevisionや同一revisionの再投稿を拒否する。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>hazard_type</td><td>MVPは地震のみなので、EARTHQUAKE以外を拒否する。</td><td><span class="ok">必須</span></td></tr>
-          <tr><td>severity_band</td><td>Band 1〜3だけを自動支払い対象にする。</td><td><span class="ok">必須</span></td></tr>
+          <tr><td>severity_band</td><td>Band 1〜3だけをfinalized DisasterEvent対象にする。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>primary_source</td><td>USGSなど許可されたsourceか確認する。</td><td><span class="ok">必須</span></td></tr>
+          <tr><td>source_set_hash</td><td>監査用source集合のhashが空でないことを確認する。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>raw_data_hash</td><td>監査可能性のため、空でない32-byte hashを必須にする。</td><td><span class="ok">必須</span></td></tr>
           <tr><td>affected_cells_root</td><td>Claim対象地域のrootが空でないことを確認する。</td><td><span class="ok">必須</span></td></tr>
+          <tr><td>affected_cells_uri</td><td>finalized eventではClaim proof生成に必要なURIが空でないことを確認する。</td><td><span class="ok">必須</span></td></tr>
         </tbody>
       </table>
       <pre><code>public entry fun create_disaster_event_from_sonari(
@@ -692,14 +760,18 @@ affected_cells_uri: optional。空文字OK</code></pre>
     assert!(verify_enclave_signature(enclave, signature, response), E_BAD_SIGNATURE);
     assert!(response.intent == SONARI_EARTHQUAKE_ORACLE_INTENT, E_BAD_INTENT);
     assert!(is_allowed_oracle_version(response.oracle_version), E_BAD_VERSION);
+    assert!(response.status == STATUS_FINALIZED, E_BAD_STATUS);
     assert!(clock::timestamp_ms(clock) <= response.freshness_deadline_ms, E_STALE);
-    assert!(!registry::contains(registry, response.event_uid), E_DUPLICATE);
+    assert!(registry::is_new_revision(registry, response.event_uid, response.event_revision), E_OLD_REVISION);
     assert!(response.hazard_type == HAZARD_EARTHQUAKE, E_BAD_HAZARD);
     assert!(response.severity_band >= 1 && response.severity_band <= 3, E_BAD_SEVERITY);
+    assert!(is_allowed_source(response.primary_source), E_BAD_SOURCE);
+    assert!(vector::length(&response.source_set_hash) == 32, E_BAD_SOURCE_HASH);
     assert!(vector::length(&response.raw_data_hash) == 32, E_BAD_RAW_HASH);
     assert!(vector::length(&response.affected_cells_root) == 32, E_BAD_ROOT);
+    assert!(!is_empty_string(&response.affected_cells_uri), E_EMPTY_CELLS_URI);
 
-    registry::mark_seen(registry, response.event_uid);
+    registry::mark_revision(registry, response.event_uid, response.event_revision);
     create_disaster_event_object(response, ctx);
 }</code></pre>
     </section>
@@ -711,7 +783,7 @@ affected_cells_uri: optional。空文字OK</code></pre>
         <tbody>
           <tr><td>NFR-1</td><td>検証可能性</td><td>EnclaveのPCR、公開鍵、oracle_versionをSui上で確認できるようにする。</td></tr>
           <tr><td>NFR-2</td><td>改ざん耐性</td><td>秘密鍵はEnclaveの外に出さない。RelayerがPayloadを改ざんしたら署名検証に失敗する。</td></tr>
-          <tr><td>NFR-3</td><td>鮮度</td><td>古い地震情報で支払いが起きないように、freshness_deadline_msを必須にする。</td></tr>
+          <tr><td>NFR-3</td><td>鮮度</td><td>古い地震情報でDisasterEventが作られないように、freshness_deadline_msを必須にする。</td></tr>
           <tr><td>NFR-4</td><td>監査性</td><td>raw_data_hash、source_set_hash、affected_cells_root、event_uidを保存し、あとから検証できるようにする。</td></tr>
           <tr><td>NFR-5</td><td>拡張性</td><td>地震MVPから、将来は津波・台風・洪水に拡張できる構造にする。</td></tr>
           <tr><td>NFR-6</td><td>可用性</td><td>将来は複数Enclaveを登録し、1台停止しても動く構成にする。</td></tr>
@@ -813,6 +885,8 @@ affected_cells_uri: optional。空文字OK</code></pre>
             <li>Band 1〜3判定</li>
             <li>H3 resolution 7 affected_cells生成</li>
             <li>Merkle root生成</li>
+            <li>finalized event用affected_cells_uri生成</li>
+            <li>source_set_hash生成</li>
             <li>BCS Payload生成</li>
             <li>Nautilus Enclave署名</li>
             <li>Moveで標準検証</li>
@@ -823,8 +897,6 @@ affected_cells_uri: optional。空文字OK</code></pre>
           <ul>
             <li>JMA震度fixture</li>
             <li>raw_data_uri</li>
-            <li>affected_cells_uri</li>
-            <li>source_set_hash</li>
             <li>Marlin OysterでTEE化</li>
           </ul>
         </div>
@@ -838,6 +910,9 @@ affected_cells_uri: optional。空文字OK</code></pre>
             <li>複数Enclave quorum</li>
           </ul>
         </div>
+      </div>
+      <div class="note">
+        Sonari全体デモではFlood PoolをDesignated Poolの将来拡張例として表示してよい。ただし、このNautilus Oracle v1の実装範囲は地震のみであり、Flood Poolの自動災害検知・自動Event作成は含めない。
       </div>
     </section>
 
