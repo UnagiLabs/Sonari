@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sonari / ソナリ 企画概要</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page-wrapper">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">企画概要</p>
+        <h1>Sonari / ソナリ</h1>
+        <p class="subtitle">災害支援を、透明で自動化されたProgrammable Paymentへ。</p>
+      </div>
+      <div class="hero-copy">
+        <p>Sonariは、災害時に寄付プールから対象地域の個人へ、透明かつ自動で支援金を届ける新しい災害支援プロダクトです。</p>
+      </div>
+    </header>
+
+    <main>
+      <section class="section intro">
+        <h2>プロダクト概要</h2>
+        <p>企業や個人の寄付をSui上の寄付プールで管理し、災害発生・地域登録・不正リスク等の条件に応じて、対象地域の個人へ直接支援金を届けます。寄付者・スポンサー・受給者の全員にとって透明な支援体験を目指します。</p>
+      </section>
+
+      <section class="section highlight">
+        <h2>一言コンセプト</h2>
+        <p>災害寄付を、ただの送金から、条件に応じて対象地域の人へ自動で届くProgrammable Paymentに変える。</p>
+      </section>
+
+      <section class="section cards">
+        <article class="card">
+          <h3>製品名</h3>
+          <p><strong>Sonari / ソナリ</strong></p>
+          <p>「備え」を想起させ、日本語由来の響きと海外でも発音しやすいブランド感を両立。</p>
+          <ul>
+            <li>ソナリ — 災害時、支援が直接届く。</li>
+            <li>寄付を、もっと速く。支援を、もっと透明に。</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h3>解決したい課題</h3>
+          <ul>
+            <li>寄付の透明性が低い</li>
+            <li>支援金が本当に必要な人に届きにくい</li>
+            <li>災害トリガーが曖昧</li>
+            <li>支援に時間がかかる</li>
+            <li>身分証や住所証明がない人が支援から漏れる</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h3>基本方針</h3>
+          <ul>
+            <li>支援団体ではなく、個人に直接届ける</li>
+            <li>現金支援をメインにする</li>
+            <li>クレジットはサブ機能にする</li>
+            <li>保険ではなく、寄付型の直接支援</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section">
+        <h2>主なユーザー</h2>
+        <div class="grid-2">
+          <div>
+            <h3>支援を受ける個人</h3>
+            <p>対象地域に住む、または一定期間滞在している個人。スマホで地域登録やチェックインを行い、災害時に条件を満たすと支援対象になります。</p>
+          </div>
+          <div>
+            <h3>企業スポンサー</h3>
+            <p>CSR・ESG・地域貢献を目的に寄付する企業。支援の効果を可視化し、実績を証明できるインフラとして活用します。</p>
+          </div>
+          <div>
+            <h3>個人寄付者</h3>
+            <p>災害支援に参加したい個人。寄付金の流れと使われ方を透明に確認できます。</p>
+          </div>
+          <div>
+            <h3>地域パートナー</h3>
+            <p>避難所、学校、地域店舗、自治体、NPOなどが地域確認やコミュニティ証明を担う将来像を想定。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section cards">
+        <article class="card">
+          <h3>支援の種類</h3>
+          <h4>Relief Cash</h4>
+          <p>災害発生時に対象地域の個人へ直接送る現金・ステーブルコイン・SUIなど。自由に使える、すぐ使える支援を提供します。</p>
+          <h4>Relief Credits</h4>
+          <p>用途別クレジットやクーポン。通信、食料、宿泊、移動など企業スポンサーが提供する補助機能です。</p>
+        </article>
+
+        <article class="card">
+          <h3>スポンサー向け価値</h3>
+          <ul>
+            <li>CSR/ESGレポートに使える</li>
+            <li>支援実績を可視化できる</li>
+            <li>Dynamic Corporate Impact SBTの発行</li>
+            <li>Impact Pageによる証明と透明性</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h3>不正対策</h3>
+          <p>不正をゼロにするのではなく、不正コストを上げてリスクに応じた対応を行います。支援可否や支援額を調整し、慎重な対象判定を目指します。</p>
+        </article>
+      </section>
+
+      <section class="section">
+        <h2>技術・設計要素</h2>
+        <div class="grid-2">
+          <div>
+            <h3>位置情報の扱い</h3>
+            <p>GPS生データは保存せず、地域単位に変換した情報を利用。対象地域・人数・支援総額を公開し、個人の移動履歴は公開しません。</p>
+          </div>
+          <div>
+            <h3>複垢対策</h3>
+            <p>電話番号・端末情報・チェックイン履歴・IP帯などを組み合わせたリスクスコアで判定し、支援対象を調整します。</p>
+          </div>
+          <div>
+            <h3>地域変更対策</h3>
+            <p>地域変更にクールダウンを設け、登録直後は支援対象外または少額支援とします。継続チェックインで支援ティアを上げます。</p>
+          </div>
+          <div>
+            <h3>代替証明</h3>
+            <p>身分証がない人のために、電話番号、チェックイン、地域滞在履歴、コミュニティ証明、避難所スタッフ確認などを検討します。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section highlight">
+        <h2>将来的な構想</h2>
+        <p>BLEタグを補助的に利用し、スマホだけでは証明しにくい人の地域滞在を支援。住所や身分証がない人にも支援を届けやすくする仕組みを検討します。</p>
+      </section>
+
+      <section class="section cards">
+        <article class="card">
+          <h3>Nautilusの役割</h3>
+          <p>判定処理を非公開で行い、Suiには結果だけを出すことでプライバシーを守ります。災害トリガー・対象地域・不正リスク・支援額などを判定します。</p>
+        </article>
+
+        <article class="card">
+          <h3>Suiで表現したい価値</h3>
+          <ul>
+            <li>寄付プール</li>
+            <li>支援金の分配</li>
+            <li>企業スポンサーの寄付証明</li>
+            <li>Dynamic Corporate Impact SBT</li>
+            <li>ランキング・ダッシュボード</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section">
+        <h2>ハッカソンMVP</h2>
+        <div class="grid-2">
+          <div>
+            <h3>作るもの</h3>
+            <ul>
+              <li>スポンサー寄付画面</li>
+              <li>個人の地域チェックイン画面</li>
+              <li>災害トリガーデモ</li>
+              <li>Donation Pool on Sui</li>
+              <li>自動支払い</li>
+              <li>Dynamic SBT / 企業ランキング</li>
+              <li>Impact Page / 透明性ダッシュボード</li>
+            </ul>
+          </div>
+          <div>
+            <h3>作らないもの</h3>
+            <ul>
+              <li>専用BLEタグ</li>
+              <li>本格KYC</li>
+              <li>実災害APIの完全連携</li>
+              <li>本番法務対応</li>
+              <li>企業向け本格クレジット決済</li>
+              <li>実際の被災者への配布</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section cards">
+        <article class="card">
+          <h3>デモの流れ</h3>
+          <ol>
+            <li>企業スポンサーが寄付</li>
+            <li>Dynamic SBTが更新</li>
+            <li>ランキングとImpact Pageに反映</li>
+            <li>個人が地域チェックイン</li>
+            <li>災害トリガー発火</li>
+            <li>Eligible Member判定</li>
+            <li>Relief Cash自動送金</li>
+            <li>支援履歴と金額を表示</li>
+            <li>スポンサーが支援到達を確認</li>
+          </ol>
+        </article>
+
+        <article class="card">
+          <h3>対象にできる災害</h3>
+          <p>地震・台風・洪水・山火事・熱波・津波・火山噴火・大雪・寒波・停電・通信障害など、客観的データで判定しやすい災害を対象に展開できます。</p>
+        </article>
+      </section>
+
+      <section class="section">
+        <h2>市場性とハッカソン適性</h2>
+        <p>寄付・フィランソロピー市場は巨大で、企業のCSR/ESGニーズと相性が良い。Sonariは災害支援における透明性と条件付き自動支払いを示す、SuiのDeFi & Paymentsトラック向けのプロダクトです。</p>
+      </section>
+
+      <section class="section quote">
+        <h2>ピッチ案</h2>
+        <p><strong>日本語:</strong> Sonariは、災害寄付をただの送金から、条件に応じて対象地域の人へ自動で届くProgrammable Paymentに変えるプロダクトです。</p>
+        <p><strong>English:</strong> Sonari turns disaster donations into programmable payments. Sponsors fund transparent relief pools on Sui, and when a verified disaster trigger occurs, funds are automatically distributed to eligible people in the affected region.</p>
+      </section>
+
+      <section class="section core-message">
+        <h2>コアメッセージ</h2>
+        <p>寄付を、もっと速く。支援を、もっと透明に。お金を、本当に必要な人へ直接届ける。</p>
+      </section>
+    </main>
+
+    <footer>
+      <p>作成: Sonari企画概要 HTML版</p>
+    </footer>
+  </div>
+</body>
+</html>
