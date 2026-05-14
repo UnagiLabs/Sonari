@@ -1,610 +1,385 @@
-# Sonari
+# Sonari Nautilus Earthquake Oracle 要件定義
 
-Sonari / Nautilus Application Layer
+Sonari Earthquake Oracle は、地震データをNautilus / TEE内で再検証し、Sui Moveで検証可能な署名付きDisasterEvent Payloadへ変換する層です。
 
-地震データをNautilusで検証可能なオンチェーン証明に変換し、Sui上のDisasterEvent、支援金Claim、災害支払いへつなげるためのNautilus Disaster Oracle層 要件定義です。
+## 主なワークフロー
 
-## 概要
+1. Cloudflare CronがCloudflare Workerを起動する。
+2. WorkerがUSGS recent earthquakes APIを取得する。
+3. Workerが候補地震を状態管理し、必要時のみNautilus runnerを起動する。
+4. Nautilus / TEEがUSGS詳細を再取得・再検証する。
+5. Nautilus / TEEがBand、H3 cell、Merkle root、監査hash、BCS Payload、署名を生成する。
+6. Relayerが署名付きPayloadをSui Moveへ投稿する。
+7. Moveが署名、status、freshness、revision、source、rootを検証してDisasterEventを作成する。
 
-### 一言でいうと
+## このワークフローの要点
 
-**Sonari Earthquake Oracle** は、USGSなどの地震データを読み、「どの地域がどれくらい揺れたか」をTEE内で判定し、署名付きPayloadとしてSuiへ渡すアプリです。
+- Workerは軽量Watcherであり、候補検出、状態管理、Nautilus起動だけを担当する。
+- Nautilus / TEEは最終判定者として、外部sourceを再取得し、Band判定、H3生成、Payload生成、署名を行う。
+- Relayerは単なる配送係であり、MoveはRelayerやWorkerを信頼しない。
+- Moveは登録済みNautilus / TEE署名Payloadだけを検証し、`finalized` のDisasterEventだけをClaim接続対象にする。
 
-### MVP方針
+## 目的
 
-対象災害は**地震のみ**。世界基準は**USGS MMI / ShakeMap**、日本シナリオでは**JMA震度を同等Bandへ換算**します。
+USGSなどの地震データをもとに、対象地域・揺れの強さ・監査用hash・対象H3 cell rootを確定し、Sui上のDisasterEvent作成へ接続します。
 
-## 1. 今回の決定事項
+この文書では、MVPで実装判断に必要な責任分界、構成、データ要件、Move検証要件だけを定義します。
 
-**決定:** Sonari Disaster Oracle v1では、津波・台風・洪水は扱わず、地震だけに絞る。災害Event判定はMagnitudeではなく、揺れの強さを表すUSGS MMI / JMA震度を使う。
+## MVP対象
 
-| 項目 | 内容 |
+- 対象災害は地震のみ。
+- MagnitudeのみではDisasterEventをfinalizeしない。
+- 最終Band判定はUSGS MMI / ShakeMap、または日本デモ用のJMA震度で行う。
+- `finalized` のDisasterEventのみClaim接続可能にする。
+- H3 resolutionは7固定。
+- `affected_cells` はMVPでは半径方式で生成する。
+
+## 信頼境界
+
+- Cloudflare Workerは候補地震を見つけてNautilusを起動する係であり、最終判定者ではない。
+- Nautilus / TEEは外部sourceを再取得・再検証し、Payload生成と署名を行う。
+- Relayerは信用しない。Moveは署名付きPayloadだけを検証対象にする。
+- MoveはWorkerを一切信頼しない。
+
+## 1. MVP方針
+
+Sonari Disaster Oracle v1は、地震の発生そのものではなく「対象地域がどれくらい揺れたか」を検証可能にすることを目的にします。
+
+| 項目 | 方針 |
 | --- | --- |
-| アプリ名 | **Sonari** |
 | MVP災害 | 地震のみ |
-| 対象レイヤー | Disaster Oracle層。ユーザーEligibility Claim、資金Pool、支払い実行は別レイヤー |
-| 世界基準 | USGS MMI / ShakeMap |
-| 日本デモ | JMA震度をSuiRelief/Sonari内のBandへ換算 |
-| Magnitudeのみ | DisasterEventをfinalizeしない。`pending_mmi` として待機またはManual Reviewへ |
-| H3 resolution | MVPは7固定。将来はPoolごとに6〜8で設定可能 |
-| affected_cells | MVPは半径方式。将来はShakeMap polygon方式へ拡張 |
-| raw data | `raw_data_hash` は必須。`raw_data_uri` はMVPではoptional |
-| Claim接続 | `finalized` eventでは、Claim側がMerkle proofを作れるように `affected_cells_uri` を必須にする |
-| Flood Pool | 全体デモのDesignated Pool表示のみ。Nautilus Oracle v1の自動検知対象には含めない |
-| TEE方針 | 第一候補 Marlin Oyster、第二候補 AWS Nitro Enclaves self-managed |
-| Move検証 | 標準検証を採用。signature / intent / status / freshness / revision / source / root を検証 |
+| 候補検出 | Cloudflare WorkerがUSGS recent earthquakes APIを定期取得 |
+| 最終検証 | Nautilus / TEEがUSGS詳細を再取得して実施 |
+| Band判定 | USGS MMI優先、日本デモではJMA震度を補助 |
+| Magnitude | 候補検出には使うがfinalize条件には使わない |
+| Claim接続 | `finalized` のみ許可 |
+| H3 | resolution 7固定 |
+| affected_cells | MVPは半径方式、将来はShakeMap polygon方式へ拡張 |
+| raw data | `raw_data_hash` は必須、`raw_data_uri` はMVPではoptional |
+| TEE | Nautilus実行環境。Marlin OysterまたはAWS Nitro Enclavesを想定 |
 
-## 2. このアプリの責任範囲
+## 2. 補足: 全体構成
 
-この資料では、Nautilus Disaster Oracle層だけを扱います。資金Pool、ユーザーEligibility Claim、支払い、収益モデルは別レイヤーです。
+```txt
+Cloudflare Cron Trigger
+  -> Cloudflare Worker: Sonari Earthquake Watcher
+  -> USGS recent earthquakes API
+  -> Cloudflare KV / D1 / Queue
+  -> 必要時のみ AWS EC2 + Nautilus / TEE 起動
+  -> Nautilus内で詳細検証・署名
+  -> Relayer
+  -> Sui Move
+```
 
-### Sonari Earthquake Oracleがやること
+MVPでは、Cloudflare Workerを常時稼働の軽量Watcherとして使います。AWS EC2 / Nautilus / TEEは重い検証・署名環境であり、候補地震が見つかった時だけ起動API経由で呼び出します。この図は冒頭ワークフローの実行基盤を補足するものです。
 
-- USGSなどの地震データを取得する
-- 必要に応じてJMA震度データを補助入力として扱う
-- 取得データを共通形式に正規化する
-- 古いデータや不完全なデータを拒否・保留する
-- USGS MMI / JMA震度からseverity bandを判定する
-- 対象地域をH3 geo cellに変換する
-- 対象H3 cellのMerkle rootを作る
-- Moveで検証可能なBCS Payloadを生成する
-- PayloadにNautilus Enclave内の秘密鍵で署名する
+## 3. 責任分界
 
-### Sonari Earthquake Oracleがやらないこと
+### Cloudflare Workerがやること
 
-- 保険料や支援金額の計算
-- ReliefPoolの資金管理
-- ユーザーへの支払い実行
-- Eligibility Proof / ClaimReceiptの発行
-- ユーザーが本当にその地域に住んでいるかの証明
-- Appealの最終承認
-- 法規制やKYC判断
-- フロントエンド全体
+- Cloudflare Cron Triggerで3〜5分ごとに起動する。
+- USGS recent earthquakes APIを取得する。
+- 過去60分の地震を重複スキャンする。
+- `source_event_id` による冪等管理を行う。
+- KVまたはD1にイベント状態を保存する。
+- Cloudflare Queueを使う場合はNautilus起動ジョブを投入する。
+- 候補地震を見つけたらAWS Nautilus runner起動APIを呼ぶ。
+- `pending_mmi` の再チェック予定を管理する。
+- 手動投入APIで `source_event_id` を受け付ける。
+- Worker失敗、Nautilus起動失敗、再試行上限到達を通知対象にする。
 
-**責任の切り分け:** SonariのNautilus層は「地震の揺れと対象地域を検証可能にする係」。Moveコントラクトは「その証明を検証してDisasterEvent Objectを作る係」です。
+### Cloudflare Workerがやらないこと
 
-### Sonari全体との接続
+- DisasterEventをfinalizeしない。
+- Band最終判定をしない。
+- H3 cellを生成しない。
+- Merkle rootを生成しない。
+- BCS Payloadを生成しない。
+- TEE署名をしない。
+- SuiへDisasterEventを直接作成しない。
 
-| レイヤー | 主な出力 | 責任 |
+### Nautilus / TEEがやること
+
+- Workerから受け取った `source_event_id` をもとにUSGS詳細を再取得する。
+- 必要に応じてUSGS ShakeMap productまたはJMA震度データを取得・照合する。
+- source freshness、source更新時刻、許可sourceを検証する。
+- MMI / JMA震度からBand 1〜3を判定する。
+- `pending_mmi` / `finalized` / `rejected` を決定する。
+- H3 resolution 7で `affected_cells` を生成する。
+- MVPではBand別半径方式で `affected_cells` を生成する。
+- `affected_cells_root` を生成する。
+- `raw_data_hash` と `source_set_hash` を生成する。
+- Moveと同じ構造のBCS Payloadを生成する。
+- Nautilus / TEE内の秘密鍵でPayloadに署名する。
+
+### Relayerがやること
+
+- Nautilus / TEEが生成した署名付きPayloadをSui Moveへ送信する。
+- Payloadの内容を変更しない。
+- 信頼対象ではないため、Move検証を通らないPayloadは無効になる。
+
+### Sui Moveがやること
+
+- Nautilus署名Payloadを検証する。
+- `finalized` 以外をClaim接続可能なDisasterEventとして扱わない。
+- 古いrevision、期限切れPayload、許可されていないsourceを拒否する。
+- `affected_cells_root` と `affected_cells_uri` を保存し、Claim側のMerkle proof検証へ接続する。
+
+## 4. 技術スタックと各プログラム
+
+MVPでは、責任分界をそのままプログラム境界に対応させます。実装コードやpackage manifestはこの文書では追加せず、採用方針だけを定義します。
+
+| 対象 | 採用技術 | 役割 |
 | --- | --- | --- |
-| Disaster Oracle | `DisasterOracleResponse` / `DisasterEvent` | 地震の発生、揺れの強さ、対象H3 cell rootを検証可能にする |
-| Eligibility Claim | `EligibilityProof` / `ReliefReceipt` | 会員登録時期、地域滞在、地域変更クールダウン、重複申請リスクを評価する |
-| Payment / Pool | Relief Cash transfer / Sponsor Impact update | PoolPolicy、流動性、支払い上限、スポンサー実績更新を扱う |
+| `nautilus_disaster_oracle/watcher/` | Cloudflare Workers、TypeScript、Wrangler | Cron、USGS recent earthquakes API取得、KV / D1状態管理、Queue投入、AWS起動API呼び出し、手動投入API |
+| `nautilus_disaster_oracle/tee/` | Rust、Nautilus、serde、reqwest、bcs、sha2、h3oまたはh3ron | USGS詳細再取得、Band判定、H3生成、Merkle root生成、監査hash生成、BCS Payload生成、TEE署名 |
+| `nautilus_disaster_oracle/relayer/` | TypeScriptまたはRust、Sui SDK | 署名済みPayloadのSui投稿、投稿結果の記録、再試行 |
+| `nautilus_disaster_oracle/shared/` | TypeScript | Oracle内部の共有型、定数、validator |
+| `nautilus_disaster_oracle/fixtures/` | JSON | USGS / JMAの再現用サンプルデータ、TEE・Watcher・Relayerの共通テスト入力 |
+| `contracts/` | Sui Move | 署名Payload検証、revision管理、DisasterEvent Object作成、Claim接続用root保存 |
+| `dapp/` | React / Next.js、TypeScript、Sui dApp Kit | Dashboard、Claim、DisasterEvent表示、Wallet接続 |
+| `packages/` | TypeScript | 全体共有のUI / configのみ。Oracle専用コードは置かない |
+| `scripts/` | shellまたはTypeScript補助スクリプト | ローカル実行、TEEデプロイ、Enclave登録、Payload投稿 |
+| storage / queue | Cloudflare KVまたはD1、Cloudflare Queues、optional R2 | 候補地震の状態管理、TEE起動ジョブ管理、必要に応じたwatcher snapshot保存 |
+| TEE / runtime | Marlin Oyster第一候補、AWS Nitro Enclaves第二候補 | Nautilus実行環境、秘密鍵隔離、署名生成 |
 
-Sonari全体資料の「Nautilusがユーザー適格性を秘匿検証する」という表現は、将来のEligibility Claim層を含む全体像です。本資料のOracle v1は、その前段であるDisasterEvent作成に責務を限定します。
+## 5. DisasterEvent判定方針
 
-## 3. なぜMagnitudeではなくMMI / JMA震度か
+DisasterEventのfinalize条件にはMagnitudeを使いません。Magnitudeは候補地震の検出にだけ使います。
 
-### Magnitude
-
-地震そのもののエネルギーの大きさです。M7.0などで表されます。
-
-ただし、深い地震や海域の地震では、Magnitudeが大きくても地上の被害が小さいことがあります。
-
-### Intensity / MMI / JMA震度
-
-ある場所で実際にどれくらい揺れたかを表します。災害Event判定にはこちらが向いています。
-
-Sonariでは「対象地域がどれくらい揺れたか」を見てClaim可能性を決めます。
-
-**決定:** 災害Event finalizeの条件にはMagnitudeを使わない。Magnitudeは候補地震の検出に使い、最終判定はMMIまたはJMA震度で行う。
-
-## 4. USGS MMIとJMA震度のBand定義
-
-JMA震度とMMIは完全に同じ尺度ではありません。そのため、厳密な換算ではなく、Sonari内の支払いルールとして保守的なBand対応を定義します。
-
-| Sonari Band | USGS MMI | JMA震度 | 意味 |
+| Sonari Band | USGS MMI | JMA震度 | Moveでの扱い |
 | --- | --- | --- | --- |
-| Band 0 | MMI VI未満 | 震度5強未満 | DisasterEvent finalize対象外 |
-| Band 1 | MMI VII以上 | 震度6弱 | 強い揺れ。少額支援ティア候補 |
-| Band 2 | MMI VIII以上 | 震度6強 | 大きな被害の可能性。中額支援ティア候補 |
-| Band 3 | MMI IX以上 | 震度7 | 深刻な被害の可能性。最大支援ティア候補 |
+| Band 0 | MMI VII未満 | 震度6弱未満 | finalized対象外 |
+| Band 1 | MMI VII以上 | 震度6弱 | finalized対象 |
+| Band 2 | MMI VIII以上 | 震度6強 | finalized対象 |
+| Band 3 | MMI IX以上 | 震度7 | finalized対象 |
 
-### 判定ロジック案
+判定優先順位は、USGS MMI / ShakeMap、JMA震度、`pending_mmi` の順です。どちらの揺れ指標も取得できない場合、Nautilus / TEEはDisasterEventをfinalizeせず `pending_mmi` とします。
 
-```js
-function decideEarthquakeBand(input) {
-  // 世界基準: USGS MMI / ShakeMapを優先
-  if (input.usgs_mmi >= 9.0) return 3;
-  if (input.usgs_mmi >= 8.0) return 2;
-  if (input.usgs_mmi >= 7.0) return 1;
-
-  // 日本デモ・日本ローカル補助: JMA震度をBandへ換算
-  if (input.jma_shindo === "7") return 3;
-  if (input.jma_shindo === "6_upper") return 2;
-  if (input.jma_shindo === "6_lower") return 1;
-
-  return 0;
-}
-```
-
-**優先順位:** 1. USGS MMI / ShakeMap、2. JMA震度、3. どちらもなければDisasterEventをfinalizeせず `pending_mmi` にする。
-
-## 5. MMIがない場合の扱い
-
-USGSの地震データに、常にMMIが入っているとは限りません。小さい地震、発生直後、海域・遠隔地、ShakeMap未生成のケースでは、Magnitudeや震源情報だけが先に出る場合があります。
-
-### やらないこと
-
-- MagnitudeだけでBandを決めない
-- M7以上だから即支払い、のような判定をしない
-- MMIが空のままDisasterEventをfinalizeしない
-
-### やること
-
-- Magnitudeは候補検出に使う
-- MMI / ShakeMapが出るまで再取得する
-- 一定時間出ない場合は `pending_mmi`
-- 必要ならAppeal / Manual Reviewへ回す
-
-```txt
-if (!usgs_mmi && !jma_shindo) {
-  status = "pending_mmi";
-  auto_trigger = false;
-}
-```
-
-### イベントライフサイクル
-
-地震データは発生直後に更新されるため、同じ `event_uid` に対して状態遷移とrevisionを持たせます。`pending_mmi` はClaim接続対象ではなく、MMI / ShakeMapまたはJMA震度が取得できた時点で `finalized` revisionを作ります。
-
-| Status | 意味 | Moveでの扱い |
+| Status | 意味 | Claim接続 |
 | --- | --- | --- |
-| `pending_mmi` | 候補地震は検出したが、揺れの強さが未確定 | DisasterEventは作ってもClaim接続不可、またはMVPでは作成しない |
-| `finalized` | Band、対象H3 cell、監査hashが確定 | DisasterEvent作成とClaim接続を許可 |
-| `rejected` | 古い、不完全、対象外、許可source外 | DisasterEvent作成不可 |
+| `pending_mmi` | 候補地震は検出したが、揺れの強さが未確定 | 不可 |
+| `finalized` | Band、対象H3 cell、監査hashが確定 | 可 |
+| `rejected` | 古い、不完全、対象外、許可source外 | 不可 |
 
-**revision方針:** `event_uid` は同じ地震で固定し、`event_revision` と `source_updated_at_ms` で更新を表す。Move側は同一 `event_uid` の古いrevisionを再利用できないようにする。
+`event_uid` は同じ地震で固定し、更新は `event_revision` と `source_updated_at_ms` で表します。Move側は古いrevisionと同一revisionの再投稿を拒否します。
 
-## 6. H3セルとは何か
+## 6. データ・Payload要件
 
-H3は、地球全体を小さな六角形のマス目に分ける仕組みです。住所や市区町村ではなく、「地球上のこのマス」というIDで地域を表します。
+### 入力要件
 
-### H3を使う理由
+Nautilus / TEEは、Workerまたは手動投入APIから最低限以下を受け取ります。
 
-- 世界中を同じ仕組みで扱える
-- 国や自治体の境界に依存しない
-- ユーザーの登録地域と災害地域を同じIDで比較できる
-- オンチェーンで扱いやすい
-
-### Claim対象地域判定のイメージ
-
-```txt
-user_geo_cell = "8a2a1072b59ffff"
-
-affected_cells = [
-  "8a2a1072b59ffff",
-  "8a2a1072b597fff"
-]
-
-user_geo_cell ∈ affected_cells
-→ Claim OK
-```
-
-### H3 resolution
-
-| Resolution | ざっくりした粒度 | 用途イメージ |
-| --- | --- | --- |
-| 6 | やや広い地域 | 台風・広域災害向き |
-| **7** | 近所・小地域 | **地震MVPの推奨** |
-| 8 | かなり細かい地域 | 洪水・津波など局所災害向き |
-
-**決定:** MVPではH3 resolution 7で固定する。将来はPoolごとに6〜8を選べるようにする。
-
-## 7. affected_cells生成：半径方式とShakeMap方式
-
-`affected_cells` は、Claim対象になるH3セル一覧です。つまり「どの地域のユーザーがClaimできるか」を表すリストです。
-
-### MVP：半径方式
-
-震源地を中心に、Bandごとの半径内に入るH3セルを対象にします。
-
-```txt
-Band 1: 50km以内
-Band 2: 100km以内
-Band 3: 150km以内
-```
-
-- 実装が簡単
-- USGSの緯度経度だけで動く
-- デモしやすい
-
-### 将来：ShakeMap polygon方式
-
-USGS ShakeMapの「MMI VII以上の地域」など、実際の揺れ分布に近い形を使います。
-
-- 実際の被害分布に近い
-- 地盤や震源方向の違いを反映しやすい
-- ただしpolygon parser実装が重い
-
-**決定:** MVPは半径方式で実装する。ただしデータモデルは、将来ShakeMap polygonへ置き換えられる形にしておく。
-
-**注意:** 半径方式はデモ実装を優先する近似です。USGS ShakeMap polygonが利用できる場合は、実際の揺れ分布に近いShakeMap方式を優先する設計へ移行します。
-
-## 8. raw data hash と URIの違い
-
-raw dataは、USGSなどから取得した元データです。Sonariでは、元データそのものをオンチェーンに載せず、hashやURIを使って監査できるようにします。
-
-### raw_data_hash
-
-元データの指紋です。同じデータからは同じhashができます。
-
-- オンチェーンが軽い
-- 改ざん検知ができる
-- 必須項目にする
-
-### raw_data_uri
-
-元データの保存場所です。Walrus、S3、GitHub rawなどを使えます。
-
-- あとから人間が確認しやすい
-- 監査・デモに強い
-- MVPではoptionalにする
-
-```txt
-raw_data_hash: 必須
-raw_data_uri: optional。空文字OK
-
-affected_cells_root: 必須
-affected_cells_uri: finalized eventでは必須。pending / rejectedでは空文字OK
-```
-
-**Claim接続上の理由:** Claim側はユーザーのH3 cellが `affected_cells_root` に含まれることをMerkle proofで示す必要があります。そのため、`finalized` eventではproof生成に必要な `affected_cells` 一覧へ到達できるURIを必須にします。
-
-## 9. 全体フロー
-
-1. **USGS地震データを取得**  
-   event_idまたは直近地震検索で、地震の緯度・経度・Magnitude・MMI・更新時刻を取得します。
-2. **データを正規化**  
-   APIの形式を、Sonari内の共通データ形式に変換します。
-3. **鮮度チェック**  
-   古い地震データでDisasterEventが作られないように、更新時刻と有効期限を確認します。
-4. **MMI / JMA震度でBand判定**  
-   Magnitudeではなく、揺れの強さからBand 1〜3を決めます。
-5. **H3 affected_cellsを生成**  
-   MVPでは震源からの半径方式で対象H3セルを作ります。
-6. **Merkle rootを生成**  
-   対象H3セル一覧をMerkle tree化し、rootだけをPayloadに入れます。
-7. **Payloadを署名**  
-   BCS形式のPayloadを作り、Nautilus Enclave内の秘密鍵で署名します。
-8. **Suiへ投稿**  
-   Relayerが署名付きPayloadをMoveコントラクトへ渡します。Relayerは信用しなくてよい設計です。
-9. **Moveで標準検証**  
-   署名、intent、期限、重複、source、rootを確認し、DisasterEvent Objectを作ります。
-
-## 10. 入力と出力
-
-### 入力：Sonari Nautilusに渡すリクエスト
-
-```json
-{
-  "payload": {
-    "request_type": "DETECT_BY_EVENT_ID",
-    "hazard_type": "EARTHQUAKE",
-    "primary_source": "USGS",
-    "source_event_id": "us7000abcd",
-    "geo_resolution": 7
-  }
-}
-```
-
-### 出力：Suiへ渡す署名付きPayload
-
-```json
-{
-  "response": {
-    "intent": 1001,
-    "oracle_version": 1,
-    "event_uid": "0x...",
-    "hazard_type": 1,
-    "severity_band": 2,
-    "status": "finalized",
-    "event_revision": 1,
-    "occurred_at_ms": 1760000000000,
-    "observed_at_ms": 1760000060000,
-    "source_updated_at_ms": 1760000060000,
-    "primary_source": "USGS",
-    "source_set_hash": "0x...",
-    "raw_data_hash": "0x...",
-    "raw_data_uri": "https://... or walrus://...",
-    "affected_cells_root": "0x...",
-    "affected_cells_uri": "https://... or walrus://...",
-    "geo_resolution": 7,
-    "cells_generation_method": "radius_v1",
-    "freshness_deadline_ms": 1760001860000
-  },
-  "signature": "0x..."
-}
-```
-
-**statusの例:** `finalized` はDisasterEvent作成とClaim接続が可能、`pending_mmi` はMMI不足でClaim接続不可。
-
-## 11. 機能要件
-
-| ID | 要件 | 内容 | MVP優先度 |
-| --- | --- | --- | --- |
-| FR-1 | 地震イベント取得 | USGSからsource_event_idまたは検索条件を使って地震データを取得する。 | Must |
-| FR-2 | USGS MMI取得 | USGS Summary / Detail / ShakeMapからMMIを取得する。なければpending_mmi。 | Must |
-| FR-3 | JMA震度補助 | 日本デモではJMA震度をBandへ換算できるようにする。MVPではfixture/mockでも可。 | Should |
-| FR-4 | データ正規化 | API形式をNormalizedEarthquakeEventに変換する。 | Must |
-| FR-5 | 鮮度チェック | 古いデータを拒否する。地震は30分以内を初期値にする。 | Must |
-| FR-6 | Band判定 | MMI VII/VIII/IX+、JMA震度6弱/6強/7からBand 1/2/3を決める。 | Must |
-| FR-7 | H3 affected_cells生成 | H3 resolution 7で対象セルを作る。MVPでは半径方式。 | Must |
-| FR-8 | Merkle root生成 | 対象H3セル一覧からMerkle rootを作る。 | Must |
-| FR-9 | raw_data_hash生成 | 取得した元データをcanonical JSON化してhash化する。 | Must |
-| FR-10 | URI保存 | raw_data_uriを任意でPayloadに入れられるようにする。affected_cells_uriはfinalized eventでは必須。 | Must |
-| FR-11 | 署名付きPayload生成 | Moveと同じ構造をBCSでシリアライズし、Enclave秘密鍵で署名する。 | Must |
-| FR-12 | event_uid生成 | hazard_type、source、source_event_id、occurred_atから決定的IDを作る。 | Must |
-| FR-13 | 状態遷移 | pending_mmi / finalized / rejectedを明確に分け、finalizedだけをClaim接続対象にする。 | Must |
-| FR-14 | revision管理 | 同じevent_uidの更新をevent_revisionとsource_updated_at_msで表現する。 | Must |
-| FR-15 | Claim proof素材 | finalized eventではaffected_cells_uriを必須にし、Claim側がMerkle proofを生成できるようにする。 | Must |
-| FR-16 | 監査hash正規化 | raw_data_hash / source_set_hashはcanonical JSONまたはBCSで決定的に生成する。 | Must |
-
-## 12. データモデル
-
-### NormalizedEarthquakeEvent
-
-```ts
-type NormalizedEarthquakeEvent = {
-  source: "USGS" | "JMA";
-  source_event_id: string;
-  hazard_type: "EARTHQUAKE";
-  occurred_at_ms: number;
-  observed_at_ms: number;
-  latitude_e7?: number;
-  longitude_e7?: number;
-  depth_m?: number;
-  magnitude_x10?: number;
-  mmi_x10?: number;
-  jma_shindo_code?: number;
-  raw_data_hash: string;
-  raw_data_uri?: string;
-};
-```
-
-Moveとの整合性を保つため、浮動小数点は整数に変換します。例：M7.3 → 73、MMI 7.2 → 72、緯度35.1234567 → 351234567。
-
-### DisasterOracleResponse
-
-```ts
-type DisasterOracleResponse = {
-  intent: number;
-  oracle_version: number;
-  event_uid: string;
-  hazard_type: number;        // EARTHQUAKE = 1
-  severity_band: number;      // 0, 1, 2, 3
-  status: string;             // finalized / pending_mmi / rejected
-  event_revision: number;
-  occurred_at_ms: number;
-  observed_at_ms: number;
-  source_updated_at_ms: number;
-  primary_source: string;
-  source_set_hash: string;
-  raw_data_hash: string;
-  raw_data_uri: string;
-  affected_cells_root: string;
-  affected_cells_uri: string;
-  geo_resolution: number;
-  cells_generation_method: string; // radius_v1 / shakemap_polygon_v1
-  freshness_deadline_ms: number;
-};
-```
-
-**hash方針:** MVPでは、取得した元データをcanonical JSON化して `raw_data_hash` を作ります。`source_set_hash` は、source名、source_event_id、source_updated_at_ms、raw_data_hash、oracle_versionを決定的順序でまとめてhash化します。
-
-## 13. 本番TEEインフラ方針
-
-本番TEEまで持っていく方針。ハッカソンでは速さと確実性のバランスが重要です。
-
-### 第一候補：Marlin Oyster
-
-- Docker imageベースでTEE化しやすい
-- Sui / Nautilus文脈と相性が良い
-- AWS Nitroを直接触るより早い可能性が高い
-- ハッカソンでは最優先で試す
-
-### 第二候補：AWS Nitro Enclaves
-
-- 公式で確実
-- Nautilusの標準構成に近い
-- EC2代が主なコスト
-- ただし設定・運用は重め
-
-**決定:** 実装戦略：ローカル署名版でPayload仕様を固める → Marlin OysterでTEE化 → 詰まったらAWS Nitro Enclavesへ切り替える。
-
-## 14. Move側の標準検証
-
-SonariのPayloadをMoveがそのまま信じてはいけません。Move側では、最低限以下を検証します。
-
-| 検証項目 | なぜ必要か | MVP |
-| --- | --- | --- |
-| signature | 登録済みNautilus Enclaveが署名したPayloadか確認する。 | 必須 |
-| intent | 別用途の署名を使い回されないようにする。 | 必須 |
-| oracle_version | 許可された判定ロジックのversionか確認する。 | 必須 |
-| status | pending_mmi / rejectedをClaim接続可能なDisasterEventとして扱わない。 | 必須 |
-| freshness | 古いPayloadで災害Eventを作られないようにする。 | 必須 |
-| revision | 同じevent_uidの古いrevisionや同一revisionの再投稿を拒否する。 | 必須 |
-| hazard_type | MVPは地震のみなので、EARTHQUAKE以外を拒否する。 | 必須 |
-| severity_band | Band 1〜3だけをfinalized DisasterEvent対象にする。 | 必須 |
-| primary_source | USGSなど許可されたsourceか確認する。 | 必須 |
-| source_set_hash | 監査用source集合のhashが空でないことを確認する。 | 必須 |
-| raw_data_hash | 監査可能性のため、空でない32-byte hashを必須にする。 | 必須 |
-| affected_cells_root | Claim対象地域のrootが空でないことを確認する。 | 必須 |
-| affected_cells_uri | finalized eventではClaim proof生成に必要なURIが空でないことを確認する。 | 必須 |
-
-```move
-public entry fun create_disaster_event_from_sonari(
-    enclave: &Enclave,
-    signature: vector<u8>,
-    response: DisasterOracleResponse,
-    clock: &Clock,
-    registry: &mut EventRegistry,
-    ctx: &mut TxContext
-) {
-    assert!(verify_enclave_signature(enclave, signature, response), E_BAD_SIGNATURE);
-    assert!(response.intent == SONARI_EARTHQUAKE_ORACLE_INTENT, E_BAD_INTENT);
-    assert!(is_allowed_oracle_version(response.oracle_version), E_BAD_VERSION);
-    assert!(response.status == STATUS_FINALIZED, E_BAD_STATUS);
-    assert!(clock::timestamp_ms(clock) <= response.freshness_deadline_ms, E_STALE);
-    assert!(registry::is_new_revision(registry, response.event_uid, response.event_revision), E_OLD_REVISION);
-    assert!(response.hazard_type == HAZARD_EARTHQUAKE, E_BAD_HAZARD);
-    assert!(response.severity_band >= 1 && response.severity_band <= 3, E_BAD_SEVERITY);
-    assert!(is_allowed_source(response.primary_source), E_BAD_SOURCE);
-    assert!(vector::length(&response.source_set_hash) == 32, E_BAD_SOURCE_HASH);
-    assert!(vector::length(&response.raw_data_hash) == 32, E_BAD_RAW_HASH);
-    assert!(vector::length(&response.affected_cells_root) == 32, E_BAD_ROOT);
-    assert!(!is_empty_string(&response.affected_cells_uri), E_EMPTY_CELLS_URI);
-
-    registry::mark_revision(registry, response.event_uid, response.event_revision);
-    create_disaster_event_object(response, ctx);
-}
-```
-
-## 15. 非機能要件
-
-| ID | 要件 | 内容 |
-| --- | --- | --- |
-| NFR-1 | 検証可能性 | EnclaveのPCR、公開鍵、oracle_versionをSui上で確認できるようにする。 |
-| NFR-2 | 改ざん耐性 | 秘密鍵はEnclaveの外に出さない。RelayerがPayloadを改ざんしたら署名検証に失敗する。 |
-| NFR-3 | 鮮度 | 古い地震情報でDisasterEventが作られないように、freshness_deadline_msを必須にする。 |
-| NFR-4 | 監査性 | raw_data_hash、source_set_hash、affected_cells_root、event_uidを保存し、あとから検証できるようにする。 |
-| NFR-5 | 拡張性 | 地震MVPから、将来は津波・台風・洪水に拡張できる構造にする。 |
-| NFR-6 | 可用性 | 将来は複数Enclaveを登録し、1台停止しても動く構成にする。 |
-
-## 16. 技術スタック案
-
-| 項目 | 内容 |
+| Field | 要件 |
 | --- | --- |
-| 言語 | Rust |
-| TEE | Marlin Oyster / AWS Nitro Enclaves |
-| Nautilus | MystenLabs Nautilus template |
-| HTTP server | Nautilus template / Axum系 |
-| 外部API client | reqwest |
-| Serialization | serde, serde_json, bcs |
-| Hash | sha2 / SHA-256 |
-| Geo cell | h3o または h3ron |
-| Merkle tree | rs_merkle またはcustom implementation |
-| Error handling | anyhow / thiserror |
-| Logging | tracing |
-| Testing | cargo test, wiremock / mockito, fixture JSON |
-| Sui連携 | Sui Move, Nautilus Move package, Sui CLI |
+| `request_type` | `DETECT_BY_EVENT_ID` をMVPの基本形にする |
+| `hazard_type` | `EARTHQUAKE` のみ許可 |
+| `primary_source` | MVPでは `USGS` を基本にする |
+| `source_event_id` | USGS event id。冪等管理と再取得の主キー |
+| `geo_resolution` | 7固定 |
 
-## 17. ディレクトリ構成案
+### 署名Payload要件
 
-```txt
-sonari-nautilus/
-  README.md
-  Cargo.toml
+Nautilus / TEEがMoveへ渡すBCS Payloadには、少なくとも以下を含めます。
 
-  src/
-    main.rs
-    app.rs
-    config.rs
-    error.rs
+| Field | 要件 |
+| --- | --- |
+| `intent` | Sonari Earthquake Oracle専用intent |
+| `oracle_version` | 許可された判定ロジックversion |
+| `event_uid` | hazard type、source、source event id、occurred timeから決定的に生成 |
+| `hazard_type` | EARTHQUAKE |
+| `severity_band` | `finalized` では1〜3 |
+| `status` | `pending_mmi` / `finalized` / `rejected` |
+| `event_revision` | 同一eventの更新番号 |
+| `occurred_at_ms` | 地震発生時刻 |
+| `observed_at_ms` | Oracle観測時刻 |
+| `source_updated_at_ms` | source側の更新時刻 |
+| `primary_source` | 許可source名 |
+| `source_set_hash` | source集合の監査hash |
+| `raw_data_hash` | 元データの監査hash。Nautilus / TEE内で生成 |
+| `raw_data_uri` | MVPではoptional |
+| `affected_cells_root` | H3 cell集合のMerkle root。Nautilus / TEE内で生成 |
+| `affected_cells_uri` | `finalized` では必須 |
+| `geo_resolution` | 7 |
+| `cells_generation_method` | MVPでは `radius_v1` |
+| `freshness_deadline_ms` | Payload有効期限 |
 
-    api/
-      mod.rs
-      usgs.rs
-      jma.rs
+`raw_data_hash`、`source_set_hash`、`affected_cells_root` はNautilus / TEE内で生成します。Workerが渡した値は信頼しません。
 
-    domain/
-      earthquake.rs
-      trigger.rs
-      severity.rs
-      geo.rs
-      merkle.rs
-      payload.rs
+## 7. Move検証要件
 
-    tests/
-      fixtures/
-        usgs_mmi_vii.json
-        usgs_pending_mmi.json
-        jma_shindo_6_lower.json
+MoveはWorker、Relayer、外部APIレスポンスを直接信頼しません。登録済みNautilus / TEE署名Payloadに対して、最低限以下を検証します。
 
-  allowed_endpoints.yaml
+| 検証項目 | 要件 |
+| --- | --- |
+| signature | 登録済みNautilus / TEE公開鍵で検証できること |
+| intent | Sonari Earthquake Oracle専用intentであること |
+| oracle_version | 許可versionであること |
+| status | `finalized` のみDisasterEvent作成・Claim接続を許可 |
+| freshness | `freshness_deadline_ms` を過ぎていないこと |
+| revision | 古いrevision、同一revision再投稿を拒否 |
+| hazard_type | EARTHQUAKEのみ許可 |
+| severity_band | finalizedでは1〜3のみ許可 |
+| primary_source | USGSなど許可sourceのみ許可 |
+| source_set_hash | 空でない32-byte hashであること |
+| raw_data_hash | 空でない32-byte hashであること |
+| affected_cells_root | 空でない32-byte rootであること |
+| affected_cells_uri | finalizedでは空でないこと |
 
-  move/
-    Move.toml
-    sources/
-      sonari_oracle.move
-      enclave_config.move
+## 8. 見逃しリスク対策
 
-  scripts/
-    local_process_data.sh
-    deploy_oyster.sh
-    register_enclave.sh
-    post_disaster_event.sh
-```
+Cloudflare Cronは失敗、遅延、API一時障害を前提に設計します。
 
-## 18. allowed_endpoints.yaml案
+- Cronは3〜5分ごとに再実行する。
+- 各Cronで過去60分のUSGS recent earthquakesを重複スキャンする。
+- `source_event_id` で冪等管理し、同じ候補を重複起動しない。
+- 状態は `new` / `processing` / `pending_mmi` / `completed` / `failed` で管理する。
+- `pending_mmi` は再チェック予定時刻を持つ。
+- 過去24時間の定期バックフィルをShould要件にする。
+- Worker失敗、Nautilus起動失敗、再試行上限到達は通知する。
+- 手動投入APIで特定 `source_event_id` を再処理できるようにする。
 
-```yaml
-allowed_endpoints:
-  - host: earthquake.usgs.gov
-    port: 443
-    protocol: https
+## 9. インフラ方針
 
-  - host: www.data.jma.go.jp
-    port: 443
-    protocol: https
+AWSは軽量Watcherではなく、Nautilus / TEE実行環境として扱います。
 
-  - host: www.jma.go.jp
-    port: 443
-    protocol: https
-```
+- 軽量WatcherはCloudflare Workers Cron Triggerで実装する。
+- MVPではEC2 / Nitro Enclaveを常時稼働させない。
+- Workerが候補地震を検出した時だけ、AWS Nautilus runner起動APIを呼ぶ。
+- 処理完了後、または一定時間ジョブがなければEC2を停止する。
+- Cloudflare KVまたはD1を状態管理に使う。
+- Cloudflare QueuesはNautilus起動ジョブ化に使う。
+- Marlin Oysterを第一候補、AWS Nitro Enclaves self-managedを第二候補にする。
+- Could要件として、複数AWS Region / 複数Enclave fallbackを検討する。
 
-## 19. ハッカソンMVPの実装範囲
+## 10. MVP Must / Should / Could
 
 ### Must
 
-- USGS地震データ取得
-- MMI / pending_mmi判定
-- Band 1〜3判定
-- H3 resolution 7 affected_cells生成
-- Merkle root生成
-- finalized event用affected_cells_uri生成
-- source_set_hash生成
-- BCS Payload生成
-- Nautilus Enclave署名
-- Moveで標準検証
+- Cloudflare Workers Cron Trigger。
+- USGS recent earthquakes API取得。
+- 過去60分の重複スキャン。
+- `source_event_id` 冪等管理。
+- KVまたはD1による状態管理。
+- WorkerからAWS Nautilus runner起動APIを呼ぶ。
+- 手動投入API。
+- Workerではfinalizeせず、Nautilus / TEEが再取得・再検証する責任分界。
+- USGS詳細の再取得。
+- MMI / `pending_mmi` 判定。
+- Band 1〜3判定。
+- H3 resolution 7の `affected_cells` 生成。
+- MVPの `affected_cells` 半径方式。
+- Merkle root生成。
+- finalized event用 `affected_cells_uri`。
+- `raw_data_hash` / `source_set_hash` 生成。
+- BCS Payload生成。
+- Nautilus / TEE署名。
+- Moveでsignature / status / freshness / revision / source / rootを検証。
 
 ### Should
 
-- JMA震度fixture
-- raw_data_uri
-- Marlin OysterでTEE化
+- `pending_mmi` 再チェックスケジューリング。
+- Cloudflare Queuesによるジョブ化。
+- 過去24時間の定期バックフィル。
+- Worker失敗・Nautilus起動失敗通知。
+- JMA震度fixture。
+- `raw_data_uri`。
+- Marlin OysterでのTEE化。
 
 ### Could
 
-- 本物のJMA parser
-- ShakeMap polygon parser
-- Walrus保存
-- AWS Nitro fallback
-- 複数Enclave quorum
+- permissionless trigger。
+- USGS + JMAなど複数Watcher source。
+- R2 watcher snapshot保存。
+- Durable Objectsによるロック管理。
+- 複数AWS Region / 複数Enclave fallback。
+- 本物のJMA parser。
+- ShakeMap polygon parser。
+- Walrus保存。
+- 複数Enclave quorum。
 
-Sonari全体デモではFlood PoolをDesignated Poolの将来拡張例として表示してよい。ただし、このNautilus Oracle v1の実装範囲は地震のみであり、Flood Poolの自動災害検知・自動Event作成は含めない。
+## 11. ディレクトリ構成
 
-## 20. 今後一緒に決めたい論点
+```txt
+dapp/
+  src/
+    app/
+      dashboard/
+      claim/
+      disaster_event/
+    components/
+    wallet/
+  public/
 
-1. **USGS MMI取得はSummaryだけで足りるか、Detail / ShakeMap productまで読むか。**
-2. **JMA震度fixtureをどの形式で持つか。**
-3. **MMIがない場合、何分まで再取得し、その後pendingにするか。**
-4. **Bandごとの半径を50/100/150kmでよいか。**
-5. **raw_data_uriをMVPでS3/GitHubにするか、Walrusまで入れるか。**
-6. **Marlin Oysterで詰まった場合、AWS Nitro Enclavesへ切り替える期限をどこに置くか。**
+nautilus_disaster_oracle/
+  tee/
+    README.md
+    Cargo.toml
+    src/
+      main.rs
+      app.rs
+      config.rs
+      error.rs
+      api/
+        mod.rs
+        usgs.rs
+        jma.rs
+      domain/
+        earthquake.rs
+        trigger.rs
+        severity.rs
+        geo.rs
+        merkle.rs
+        payload.rs
+    allowed_endpoints.yaml
+  watcher/
+    package.json
+    wrangler.toml
+    src/
+      index.ts
+      usgs.ts
+      state.ts
+      trigger_tee.ts
+      manual_submit.ts
+    tests/
+      usgs_fixture.test.ts
+  relayer/
+    package.json
+    src/
+      index.ts
+      sui.ts
+      submit_payload.ts
+  shared/
+    src/
+      types.ts
+      constants.ts
+      validators.ts
+  fixtures/
+    usgs_mmi_vii.json
+    usgs_pending_mmi.json
+    jma_shindo_6_lower.json
 
-## 21. まとめ
+contracts/
+  Move.toml
+  sources/
+    sonari_oracle.move
+    enclave_config.move
 
-### Sonari Earthquake Oracle v1の目的
+packages/
+  ui/
+  config/
 
-USGS MMIを世界基準とし、日本シナリオではJMA震度を同等Bandへ換算して、地震データをSui上で検証可能なDisasterEvent Objectへ変換すること。
+docs/
 
-### ハッカソンで狙う最小構成
+scripts/
+  local_process_data.sh
+  deploy_oyster.sh
+  register_enclave.sh
+  post_disaster_event.sh
+```
 
-USGS Earthquake API → Nautilus Rust app → MMI/JMA Band判定 → H3 affected_cells_root → 署名付きPayload → Move標準検証 → DisasterEvent Object作成。
+## まとめ
 
-### このレイヤーの本質
+Sonari Earthquake Oracle v1は、Cloudflare Workerで候補地震を見つけ、Nautilus / TEEで地震データを再取得・再検証し、署名付きPayloadとしてSui Moveへ渡す最小構成にします。
 
-災害検知の結果を、管理者の手入力ではなく、検証可能なNautilus OracleとしてSuiに届けること。Sonariは、現実世界の地震データをSuiの災害支払いレールへ接続する入口になる。
-
-Sonari Nautilus Earthquake Oracle Requirements / Draft for discussion
+Workerは起動・状態管理・見逃し対策に限定し、DisasterEventの最終判定、H3生成、Merkle root生成、BCS Payload生成、署名はNautilus / TEEが担います。MoveはWorkerを信頼せず、Nautilus署名Payloadのsignature / status / freshness / revision / source / rootを検証してDisasterEventを作成します。
