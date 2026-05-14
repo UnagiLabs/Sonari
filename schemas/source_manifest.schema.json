@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sonari.example/schemas/source_manifest.schema.json",
+  "title": "Sonari Source Manifest",
+  "$comment": "source_set_hash is the hash of this canonical JSON object after deterministic serialization. Keys must be emitted in schema order, source entries must be sorted by name then event_id then product, and strings must be UTF-8.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sources", "cells_generation_method", "oracle_version"],
+  "properties": {
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "event_id",
+          "product",
+          "product_version",
+          "map_status",
+          "updated_at_ms",
+          "url_hash"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["USGS", "JMA"]
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "product": {
+            "type": "string",
+            "minLength": 1
+          },
+          "product_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "map_status": {
+            "type": "string",
+            "enum": ["REVIEWED", "RELEASED", "CANCELLED"]
+          },
+          "updated_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "url_hash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-fA-F]{64}$"
+          }
+        }
+      }
+    },
+    "cells_generation_method": {
+      "type": "string",
+      "enum": [
+        "shakemap_gridxml_h3_grid_point_p90_v1",
+        "shakemap_hdf_h3_area_weighted_p90_v1",
+        "jma_250m_h3_p90_v1"
+      ]
+    },
+    "oracle_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}
