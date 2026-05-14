@@ -43,7 +43,7 @@ scripts/
 | `contracts/` | Sui Move package。追加階層を挟まず、Move packageを直下に置く。 | Sui Move |
 | `packages/` | Sonari全体で共有するUI、configだけを置く。Oracle専用コードは置かない。 | TypeScript |
 | `docs/` | 仕様書、説明資料、提出用ドキュメント。 | Markdown、HTML |
-| `schemas/` | Payload、Merkle leaf、source manifest、affected cellsの仕様。Rust、TypeScript、Moveの構造ズレを防ぐ。 | Markdown、JSON Schema |
+| `schemas/` | repository rootに置くroot共通仕様。Payload、Merkle leaf、source manifest、affected cellsの仕様を定義し、Rust、TypeScript、Moveの構造ズレを防ぐ。 | Markdown、JSON Schema |
 | `scripts/` | ローカル実行、デプロイ、登録、補助作業用スクリプト。 | shell、TypeScript |
 
 ## 採用方針
@@ -52,6 +52,7 @@ scripts/
 - dAppは `dapp/` に置き、Dashboard、Claim、DisasterEvent表示、Wallet接続を同じプロダクト面として扱う。
 - Nautilus Earthquake Oracleの専用コードは `nautilus_disaster_oracle/` に閉じる。
 - Oracle内部の共有型・定数・validatorは `nautilus_disaster_oracle/shared/` に置き、`packages/` へ漏らさない。
+- `schemas/` はroot共通仕様として扱い、Oracle実装とMove packageの両方から参照する。
 - Move packageは `contracts/` 直下に置き、追加階層は作らない。
 - `packages/` は全体共有のUI / configに限定し、ドメイン固有ロジックの置き場にしない。
 
