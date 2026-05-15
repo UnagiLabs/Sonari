@@ -1,0 +1,10 @@
+{
+  "case_id": "usgs/rejected_no_affected_cells",
+  "status": "rejected",
+  "source_event_id": "us7000no-affected",
+  "hazard_type": "EARTHQUAKE",
+  "primary_source": "USGS",
+  "geo_resolution": 7,
+  "error_code": "NO_AFFECTED_CELLS",
+  "next_retry_at_ms": null
+}

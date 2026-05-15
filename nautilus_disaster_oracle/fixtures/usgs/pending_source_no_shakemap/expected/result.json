@@ -1,0 +1,10 @@
+{
+  "case_id": "usgs/pending_source_no_shakemap",
+  "status": "pending_source",
+  "source_event_id": "us7000pending-source",
+  "hazard_type": "EARTHQUAKE",
+  "primary_source": "USGS",
+  "geo_resolution": 7,
+  "error_code": "SHAKEMAP_PRODUCT_MISSING",
+  "next_retry_at_ms": 1704070800000
+}
