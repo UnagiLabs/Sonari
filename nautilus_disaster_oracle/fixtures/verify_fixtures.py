@@ -72,6 +72,8 @@ SOURCE_ENTRY_ORDER = [
     "updated_at_ms",
     "url_hash",
 ]
+RAW_ORDER = ["entries", "oracle_version"]
+RAW_ENTRY_ORDER = ["name", "event_id", "product", "uri", "content_hash"]
 AFFECTED_ORDER = [
     "event_uid",
     "event_revision",
@@ -235,16 +237,16 @@ def merkle_root(leaf_hashes: list[str]) -> str:
     return hx(level[0])
 
 
-def proof_root(leaf_hash: str, proof: list[str], leaf_index: int) -> str:
+def proof_root(leaf_hash: str, proof: list[dict[str, str]]) -> str:
     current = hex_bytes(leaf_hash)
-    index = leaf_index
-    for sibling_hash in proof:
-        sibling = hex_bytes(sibling_hash)
-        if index % 2 == 0:
+    for step in proof:
+        sibling = hex_bytes(step["sibling_hash"])
+        if step["direction"] == "LEFT":
+            current = sha3_256(b"\x01" + sibling + current).digest()
+        elif step["direction"] == "RIGHT":
             current = sha3_256(b"\x01" + current + sibling).digest()
         else:
-            current = sha3_256(b"\x01" + sibling + current).digest()
-        index //= 2
+            fail(f"bad proof direction {step['direction']!r}")
     return hx(current)
 
 
@@ -320,8 +322,8 @@ def validate_result(case_id: str, case_dir: Path) -> dict[str, Any]:
             fail(f"{case_id}: result.{key} expected {value!r}, found {result.get(key)!r}")
     if not isinstance(result.get("source_event_id"), str) or not result["source_event_id"]:
         fail(f"{case_id}: result.source_event_id must be a non-empty string")
-    if "next_retry_at_ms" not in result:
-        fail(f"{case_id}: result.next_retry_at_ms is required")
+    if result.get("next_retry_at_ms") is not None:
+        fail(f"{case_id}: result.next_retry_at_ms must be absent or null")
 
     grid_path = case_dir / "input" / "usgs_grid.xml"
     if expected["grid_required"] and not grid_path.exists():
@@ -386,7 +388,7 @@ def validate_payload_affected_cross_check(
 def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> None:
     readme = (case_dir / "README.md").read_text(encoding="utf-8")
     for required_text in [
-        "Step 2 fixture uses plain `input/usgs_grid.xml` as raw source bytes",
+        "Step 3 fixture uses plain `input/usgs_grid.xml` and `input/usgs_detail.json` as raw source bytes",
         "P90 definition:",
         "`rank = ceil(0.90 * n) - 1`",
         "finalized_multi_point_same_cell",
@@ -411,23 +413,25 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
     validate_h3_cells(case_id, affected)
     validate_payload_affected_cross_check(case_id, payload, affected)
 
-    grid_bytes = (case_dir / "input" / "usgs_grid.xml").read_bytes()
-    raw_data_hash = sha3_hex(grid_bytes)
-
-    raw_sources = raw_manifest.get("raw_sources")
-    if not isinstance(raw_sources, list) or len(raw_sources) != 1:
-        fail(f"{case_id}: raw_data_manifest.raw_sources must contain one grid source")
-    raw_source = raw_sources[0]
-    if raw_source.get("path") != "input/usgs_grid.xml":
-        fail(f"{case_id}: raw source path must be input/usgs_grid.xml")
-    if raw_source.get("content_hash_algorithm") != "SHA3-256":
-        fail(f"{case_id}: raw source content_hash_algorithm must be SHA3-256")
-    if raw_source.get("content_hash") != raw_data_hash:
-        fail(f"{case_id}: raw source content_hash mismatch")
+    sorted_raw = sorted(
+        raw_manifest["entries"],
+        key=lambda item: (item["name"], item["event_id"], item["product"], item["uri"]),
+    )
+    if raw_manifest["entries"] != sorted_raw:
+        fail(f"{case_id}: raw_data_manifest.entries is not sorted")
+    for entry in raw_manifest["entries"]:
+        raw_path = ROOT / entry["uri"]
+        if not raw_path.exists():
+            fail(f"{case_id}: raw source does not exist: {entry['uri']}")
+        content_hash = sha3_hex(raw_path.read_bytes())
+        if entry["content_hash"] != content_hash:
+            fail(f"{case_id}: raw source content_hash mismatch for {entry['uri']}")
 
     source_bytes = canonical_json_bytes(source, SOURCE_ORDER, SOURCE_ENTRY_ORDER)
+    raw_bytes = canonical_json_bytes(raw_manifest, RAW_ORDER, RAW_ENTRY_ORDER)
     affected_bytes = canonical_json_bytes(affected, AFFECTED_ORDER, AFFECTED_CELL_ORDER)
     source_set_hash = sha3_hex(source_bytes)
+    raw_data_hash = sha3_hex(raw_bytes)
     affected_cells_data_hash = sha3_hex(affected_bytes)
     leaf_hashes = [
         {
@@ -444,10 +448,10 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         "raw_data_hash": raw_data_hash,
         "raw_source_content_hashes": [
             {
-                "path": "input/usgs_grid.xml",
-                "content_hash": raw_data_hash,
-                "content_hash_algorithm": "SHA3-256",
+                "uri": entry["uri"],
+                "content_hash": entry["content_hash"],
             }
+            for entry in raw_manifest["entries"]
         ],
         "affected_cells_data_hash": affected_cells_data_hash,
         "leaf_hashes": leaf_hashes,
@@ -469,13 +473,11 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         if payload.get(key) != value:
             fail(f"{case_id}: payload.{key} mismatch")
 
-    if sample_proof.get("leaf_index") != 0:
-        fail(f"{case_id}: sample_proof.leaf_index must be 0")
-    if sample_proof.get("h3_index") != leaf_hashes[0]["h3_index"]:
-        fail(f"{case_id}: sample_proof.h3_index mismatch")
-    if sample_proof.get("leaf_hash") != leaf_hashes[0]["leaf_hash"]:
-        fail(f"{case_id}: sample_proof.leaf_hash mismatch")
-    if proof_root(sample_proof["leaf_hash"], sample_proof["proof"], 0) != affected_cells_root:
+    if sample_proof["target_leaf"] not in leaf_hashes:
+        fail(f"{case_id}: sample_proof target leaf does not match a fixture leaf")
+    if sample_proof.get("expected_root") != affected_cells_root:
+        fail(f"{case_id}: sample_proof expected_root mismatch")
+    if proof_root(sample_proof["target_leaf"]["leaf_hash"], sample_proof["proof"]) != affected_cells_root:
         fail(f"{case_id}: sample_proof does not reproduce affected_cells_root")
 
     if payload["status"] != 3:
@@ -548,10 +550,10 @@ def main() -> int:
         if not root_readme.exists():
             fail("missing fixtures README.md")
         if (
-            "Step 2 fixture uses plain `input/usgs_grid.xml` as raw source bytes"
+            "Step 3 fixture uses plain `input/usgs_grid.xml` and `input/usgs_detail.json` as raw source bytes"
             not in root_readme.read_text(encoding="utf-8")
         ):
-            fail("fixtures README.md must document raw grid byte hashing")
+            fail("fixtures README.md must document raw source byte hashing")
         for case_id in CASES:
             validate_case(case_id)
     except Exception as exc:

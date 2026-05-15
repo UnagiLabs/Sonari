@@ -5,6 +5,5 @@
   "hazard_type": "EARTHQUAKE",
   "primary_source": "USGS",
   "geo_resolution": 7,
-  "error_code": "SHAKEMAP_CANCELLED",
-  "next_retry_at_ms": null
+  "error_code": "SHAKEMAP_CANCELLED"
 }
