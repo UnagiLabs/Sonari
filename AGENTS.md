@@ -13,13 +13,18 @@ Sonari は Sui Overflow 2026 提出用のハッカソンプロジェクトです
 
 ## ビルド・テスト・開発コマンド
 
-ルートには package manifest やビルド対象アプリはまだありません。作業時は以下の軽量コマンドを使います。
+root `package.json` は pnpm workspace の集約コマンドを提供します。作業時は以下のコマンドを使います。
 
+- `pnpm install` - TypeScript workspace 依存関係を解決します。
+- `pnpm typecheck` - workspace package の TypeScript 型検証を実行します。
+- `pnpm test` - TypeScript の unit test を実行します。
+- `pnpm test:oracle` - Nautilus Oracle の TypeScript test と Rust TEE crate test をまとめて実行します。
+- `cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml` - TEE crate 単体の Rust test を実行します。
 - `python3 -m http.server 8000` - ルートから HTML を配信し、`http://localhost:8000/docs/...` で確認します。
 - `git diff --check` - 末尾空白やパッチ形式の問題を検出します。
 - `find docs -maxdepth 2 -type f` - 現在のドキュメント一覧を確認します。
 
-今後アプリやビルドシステムを追加した場合は、install / dev / build / test の正確なコマンドをこの節に追記してください。
+今後 dApp や contracts のビルドシステムを追加した場合は、dev / build / deploy の正確なコマンドをこの節に追記してください。
 
 ## コーディングスタイルと命名規則
 

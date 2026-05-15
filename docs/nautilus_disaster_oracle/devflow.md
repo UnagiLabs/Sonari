@@ -56,11 +56,15 @@
 - status、error code、source、cell metric、generation method などの定数を定義する。
 - Worker、TEE core、Relayer の入出力型を分ける。
 - root `schemas/` の enum 値、field order、hash 仕様を実装側の型へ写す。
+- root に `pnpm@10.27.0` workspace を用意し、`nautilus_disaster_oracle/shared`、`watcher`、`relayer` を workspace package として初期化する。
+- `watcher` / `relayer` は `@sonari/oracle-shared` を `workspace:*` で参照し、Step 1 では shared の型契約だけを境界として固定する。
+- `nautilus_disaster_oracle/tee` は Nautilus / network / signature / H3 依存を入れず、Rust crate の共有定数から始める。
 
 完了条件:
 
 - 各コンポーネントの責務と入出力型が決まっている。
 - Worker から core logic へ信頼済み値を渡さない設計になっている。
+- `pnpm test`、`pnpm typecheck`、`cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml` で Step 1 の型契約を検証できる。
 
 ### 2. Fixture と golden output を作る
 
