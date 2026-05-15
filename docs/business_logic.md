@@ -734,6 +734,135 @@ Future Disaster Reserveを残す
 
 MVPでは、複雑な実運用よりも、資金設計の透明性とProgrammable Paymentの流れを見せる。
 
+### 12.1 MVPで完璧に完成させるEnd-to-End Flow
+
+ハッカソンMVPでは、広い機能を浅く見せるよりも、以下の1本の流れを完成度高く見せることを最優先にする。
+
+```text
+Sponsor donates to Earthquake Pool
+  -> 50% goes to Earthquake Pool
+  -> 50% goes to Main Pool
+  -> earthquake event is verified by Nautilus
+  -> eligible user's Eligibility Proof is accepted
+  -> PayoutPolicy calculates payout amount
+  -> Earthquake Pool pays first
+  -> Main Pool covers shortage if needed
+  -> Relief Receipt is issued
+  -> Sponsor Impact is updated
+```
+
+日本語でのデモ説明:
+
+```text
+スポンサーがEarthquake Poolへ寄付する
+  -> 50%がEarthquake Pool、50%がMain Poolへ分配される
+  -> 地震イベントがNautilusで検証される
+  -> 対象ユーザーのEligibility Proofが通る
+  -> PayoutPolicyで支払額が決まる
+  -> Earthquake Poolから先に支払い、不足分をMain Poolが補填する
+  -> Relief ReceiptとSponsor Impactが更新される
+```
+
+この流れは、Sonariの審査上の強みを最も短く伝える。
+
+- 寄付者の意図がDesignated Poolに反映される
+- Main Poolにより、単一災害Pool不足時も支援を継続できる
+- Nautilusにより、災害情報とEligibilityを検証できる
+- Sui Moveにより、Pool選択、支払額計算、Receipt発行をオンチェーンで実行できる
+- Sponsor Impactにより、企業側の寄付メリットを可視化できる
+
+### 12.2 MVP実装優先順位
+
+優先順位は以下とする。
+
+#### Priority 0 / 必ず完成させる
+
+審査デモで必ず通すコアフロー。
+
+1. スポンサー寄付の受付
+2. Designated Donationの50% / 50%分配
+3. Earthquake PoolとMain Poolの残高更新
+4. Nautilusによる地震イベント検証
+5. Eligibility Proof検証
+6. PayoutPolicyによる支払額計算
+7. Earthquake Pool優先の支払い
+8. 不足時のMain Pool補填
+9. Relief Receipt発行
+10. Sponsor Impact更新
+11. ダッシュボードで一連の状態遷移を表示
+
+完成条件:
+
+- 1回のデモで、寄付から支払い、Receipt、Sponsor Impact更新まで途切れず見せられる
+- Pool残高の変化が画面上で追える
+- Earthquake Pool優先、Main Pool補填の順序が明確に見える
+- PayoutPolicyの入力と出力が説明できる
+- Nautilusが何を検証し、Moveが何を実行するかが分離して伝わる
+
+#### Priority 1 / できれば入れる
+
+コアフローの説得力を高める要素。
+
+- Event Budget Cap
+- Future Disaster Reserve
+- Pool不足時の比例配分
+- 会員期間による支払額調整
+- risk tierによる支払額調整
+- Sponsor Ranking
+- Partner Badge
+- Designated Pool別の残高表示
+
+#### Priority 2 / デモでは表示中心でよい
+
+実運用では重要だが、ハッカソンMVPでは実資金連携まで行わなくてよい要素。
+
+- SUI Native Staking実運用
+- Scallop Stablecoin Strategy実入金
+- 複雑なPoolPolicy UI
+- Flood Poolや他災害Poolの完全実装
+- 本番レベルの本人確認
+- 本番レベルの通知・サポート運用
+
+### 12.3 MVPで扱う主要Object
+
+コアフローでは、以下のObjectまたは状態を使う。
+
+```text
+SponsorProfile
+DonationReceipt
+MainPool
+EarthquakePool
+DisasterEvent
+EligibilityProof
+PayoutPolicy
+ReliefReceipt
+SponsorImpact
+```
+
+Object間の関係:
+
+```text
+SponsorProfile
+  -> DonationReceipt
+  -> EarthquakePool / MainPool balance update
+
+DisasterEvent
+  -> verified by Nautilus
+  -> selects EarthquakePool
+
+EligibilityProof
+  -> verifies user eligibility
+  -> provides risk tier and max amount
+
+PayoutPolicy
+  -> calculates payout
+  -> applies event budget and pool priority
+
+ReliefReceipt
+  -> records payout result
+  -> updates SponsorImpact
+```
+
 作るもの:
 
 - Main Pool
