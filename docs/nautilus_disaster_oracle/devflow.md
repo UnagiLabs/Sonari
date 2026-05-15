@@ -23,18 +23,23 @@
 - `schemas/affected_cell_leaf.md`
 - `schemas/affected_cells.schema.json`
 - `schemas/source_manifest.schema.json`
+- `schemas/raw_data_manifest.schema.json`
+- `schemas/examples/`
 
 やること:
 
 - BCS Payload の field order、enum 値、integer encoding を固定する。
 - Affected cell leaf の hash 対象 field と sort rule を固定する。
-- `source_manifest` と `affected_cells` の canonical JSON ルールを固定する。
+- `source_manifest`、`raw_data_manifest`、`affected_cells` の canonical JSON ルールを固定する。
+- `event_uid`、`source_set_hash`、`raw_data_hash`、`affected_cells_data_hash`、Merkle root のhash仕様を固定する。
+- golden vectorでcanonical JSON、hash、Merkle proof、unsigned BCS Payload bytesを検証可能にする。
 - Rust、TypeScript、Relayer、Move entry argument が参照する共通契約として扱う。
 
 完了条件:
 
 - Oracle 実装中に field order、enum 値、hash 対象 field を変更しなくてよい状態になっている。
-- 変更が必要な場合は、まず `schemas/` を更新してから Oracle 実装へ反映する方針が明確になっている。
+- `oracle_version = 1` のPayload field orderはimmutable contractとして扱い、field追加、順序変更、型変更が必要な場合は `oracle_version` bumpと新schema追加を必須にする。
+- 変更が必要な場合は、まず `schemas/` とgolden vectorを更新してから Oracle 実装へ反映する方針が明確になっている。
 
 ### 1. ディレクトリと共有型を用意する
 
