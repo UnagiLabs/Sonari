@@ -151,6 +151,26 @@
       margin-top: 10px;
     }
 
+    .summary-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .summary-card {
+      padding: 20px;
+      border: 1px solid rgba(18, 71, 153, 0.1);
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 14px 26px rgba(31, 62, 120, 0.05);
+    }
+
+    .summary-card strong {
+      display: block;
+      margin-bottom: 6px;
+      color: #10214f;
+      font-size: 1.08rem;
+    }
+
     .cards {
       display: grid;
       gap: 20px;
@@ -253,11 +273,18 @@
         #f6f9ff;
     }
 
-    .fund-split > div:last-child {
+    .fund-split > div:nth-child(2) {
       border: 1px solid rgba(47, 157, 120, 0.2);
       background:
-        linear-gradient(90deg, rgba(47, 157, 120, 0.16) 30%, rgba(47, 157, 120, 0.04) 30%),
+        linear-gradient(90deg, rgba(47, 157, 120, 0.16) 15%, rgba(47, 157, 120, 0.04) 15%),
         #f3fbf7;
+    }
+
+    .fund-split > div:nth-child(3) {
+      border: 1px solid rgba(205, 151, 45, 0.24);
+      background:
+        linear-gradient(90deg, rgba(205, 151, 45, 0.18) 15%, rgba(205, 151, 45, 0.05) 15%),
+        #fff9ec;
     }
 
     .fund-split strong {
@@ -333,6 +360,48 @@
       font-size: 1.2rem;
       font-weight: 800;
       text-align: center;
+    }
+
+    .policy-section {
+      padding: 26px;
+      border: 1px solid rgba(35, 105, 164, 0.12);
+      border-radius: 16px;
+      background: #ffffff;
+      box-shadow: 0 18px 34px rgba(31, 62, 120, 0.06);
+    }
+
+    .policy-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .policy-card {
+      padding: 20px;
+      border: 1px solid rgba(47, 111, 237, 0.14);
+      border-radius: 8px;
+      background: #f8fbff;
+    }
+
+    .policy-card h3 {
+      margin: 0 0 8px;
+      font-size: 1.1rem;
+    }
+
+    .amount-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .amount-list div {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      color: #10214f;
+      font-weight: 800;
     }
 
     .diagram-section {
@@ -654,21 +723,23 @@
       text-align: center;
     }
 
-    @media (min-width: 760px) {
-      .cards {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
+@media (min-width: 760px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 
-      .grid-2 {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
+  .grid-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 
-      .sponsor-grid,
-      .adoption-grid,
-      .pool-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-    }
+  .summary-grid,
+  .sponsor-grid,
+  .adoption-grid,
+  .pool-grid,
+  .policy-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 
     @media (min-width: 980px) {
       header.hero {
@@ -700,13 +771,14 @@
       }
 
       header.hero,
-      .diagram-section,
-      .flow-section,
-      .funds-section,
-      .pool-section,
-      .sponsor-section,
-      .adoption-section,
-      .mvp-section {
+  .diagram-section,
+  .flow-section,
+  .funds-section,
+  .pool-section,
+  .policy-section,
+  .sponsor-section,
+  .adoption-section,
+  .mvp-section {
         padding: 22px;
       }
 
@@ -731,7 +803,7 @@
         <p class="subtitle-ja">災害支援を、秘匿性を保った検証とSui上の自動支払いに変える。</p>
       </div>
       <div class="hero-copy">
-        <p>Sonariは、災害検知APIとユーザーの地域滞在情報をNautilus内で検証し、個人情報を公開せずに「支援対象であること」だけをSui上で証明します。Moveコントラクトはその証明を検証し、Donation Poolから対象者へRelief Cashを自動分配します。支援元本は災害支払い専用に保ち、運営費は会員登録費とSuiネイティブステーキング報酬で賄います。</p>
+        <p>Sonariは、災害検知APIとユーザーの地域滞在情報をNautilus内で検証し、個人情報を公開せずに「支援対象であること」だけをSui上で証明します。Moveコントラクトはその証明、PoolPolicy、PayoutPolicyを使い、対象PoolからRelief Cashを自動分配します。寄付元本は支援Poolへ入り、Main Poolの透明なYield Reserveから生まれる利回りで運営費を賄います。</p>
       </div>
     </header>
 
@@ -743,15 +815,36 @@
       </section>
 
       <section class="section">
+        <div class="section-heading">
+          <p class="eyebrow">Readable Summary</p>
+          <h2>まず伝えたい設計</h2>
+        </div>
+        <div class="summary-grid">
+          <div class="summary-card">
+            <strong>保険ではなく支援アクセス</strong>
+            <p>ユーザーは一度きりのVerification FeeでWallet Address、地域、本人性を事前登録します。支払いは保証せず、災害条件とPool残高に基づきます。</p>
+          </div>
+          <div class="summary-card">
+            <strong>寄付はMain Poolと指定Poolへ</strong>
+            <p>未指定寄付はMain Poolへ。指定寄付は50%を指定Pool、50%をMain Poolへ入れ、指定Pool不足時はMain Poolが補填します。</p>
+          </div>
+          <div class="summary-card">
+            <strong>Poolを使い切らない</strong>
+            <p>1災害ごとにEvent Budget Capを設定し、Future Disaster Reserveを残します。不足時は早い者勝ちではなく比例配分します。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
         <h2>1. プロダクト概要</h2>
-        <p>企業や個人の寄付をSui上の寄付プールで管理し、災害発生・対象地域・ユーザーの滞在証明・不正リスクを検証したうえで、対象地域の個人へ直接支援金を届けます。寄付は静的な送金ではなく、条件に応じて実行されるProgrammable Paymentになります。個人は平時に地域・電話番号・位置情報などを登録し、少額の会員登録費を支払って検証済み会員になります。</p>
+        <p>企業や個人の寄付をSui上の支援Poolで管理し、災害発生・対象地域・ユーザーの滞在証明・不正リスク・Pool残高を検証したうえで、対象地域の個人へ直接支援金を届けます。寄付は静的な送金ではなく、条件に応じて実行されるProgrammable Paymentになります。個人は平時に地域・電話番号・位置情報・受け取りAddressを登録し、一度きりのVerification Feeを支払って検証済み会員になります。</p>
       </section>
 
       <section class="section cards">
         <article class="card accent-blue">
           <h3>DeFi & Paymentsとの接続</h3>
           <ul>
-            <li>寄付をGeneral Relief PoolとDesignated PoolとしてSui上で管理</li>
+            <li>寄付をMain PoolとDesignated PoolとしてSui上で管理</li>
             <li>災害トリガーと適格性証明に応じて支払いを自動化</li>
             <li>PTBで検証、支払い、レシート発行、Impact更新を一括実行</li>
             <li>Dynamic SBTでスポンサーの支援実績を更新</li>
@@ -778,27 +871,32 @@
           <div class="fund-card relief-fund">
             <span class="node-label">Relief Principal</span>
             <h3>Relief Pools</h3>
-            <p>スポンサー・寄付者からの支援元本。MVPではGeneral Relief Poolを中心にし、地震・洪水などのDesignated Poolを任意で追加できる構成にします。支援元本は災害時のRelief Cash支払いに使い、運営費として直接取り崩しません。</p>
+            <p>スポンサー・寄付者からの支援元本。MVPではMain Poolを中心にし、地震・洪水などのDesignated Poolを任意で追加できる構成にします。寄付元本は支援Poolへ入り、運営費はMain PoolのYield Reserveから生まれる利回りを中心に賄います。</p>
           </div>
           <div class="fund-split">
             <div>
               <strong>70%</strong>
-              <span>Relief Liquid Pool</span>
-              <p>即時支払い用に流動性を保持</p>
+              <span>Liquid Relief Reserve</span>
+              <p>即時支払いとMain Pool補填用に保持</p>
             </div>
             <div>
-              <strong>30%</strong>
-              <span>Native Staked Reserve</span>
-              <p>Suiネイティブバリデータへステーキング</p>
+              <strong>15%</strong>
+              <span>SUI Native Staking</span>
+              <p>Suiネイティブ運用。報酬はOperations Poolへ</p>
+            </div>
+            <div>
+              <strong>15%</strong>
+              <span>Scallop Stablecoin Strategy</span>
+              <p>ステーブルコイン運用のデモ枠。MVPでは実入金しない</p>
             </div>
           </div>
           <div class="fund-card operations-fund">
             <span class="node-label">Operations</span>
             <h3>Operations Pool</h3>
-            <p>会員登録費とステーキング報酬で、Nautilus実行、検証、通知、インフラ、サポート費用を賄います。</p>
+            <p>一度きりのVerification FeeとYield Reserveの利回りで、Nautilus実行、検証、通知、インフラ、サポート費用を賄います。</p>
           </div>
         </div>
-        <p class="note">例として、全体資金の70%を即時支払い用、30%をSuiネイティブステーキング準備金に分けます。この割合、ステーキング先、報酬の使途はダッシュボードで透明化します。</p>
+        <p class="note">MVPではMain Poolを70% Liquid、15% SUI native staking、15% Scallop-style stablecoin strategyとして表示します。運用比率、運用先、利回り、Operations Poolへの送金額はダッシュボードで透明化します。</p>
       </section>
 
       <section class="section pool-section">
@@ -809,30 +907,30 @@
         <div class="pool-grid">
           <article class="pool-card primary-pool">
             <span class="node-label">MVP Core</span>
-            <h3>General Relief Pool</h3>
-            <p>ハッカソンではまず共通プールを中心にします。災害種別を限定せず、Nautilusが検証した災害タイプ、地域、重大度に応じて、最も必要な地域へRelief Cashを分配します。</p>
+            <h3>Main Pool</h3>
+            <p>災害種別を限定しない共通支援Pool。未指定寄付の受け皿であり、Designated Pool不足時のバックストップになります。</p>
           </article>
 
           <article class="pool-card">
-            <span class="node-label">Optional</span>
+            <span class="node-label">Designated</span>
             <h3>Designated Pools</h3>
-            <p>寄付者や企業が用途を指定できるプールです。MVPではEarthquake PoolとFlood Poolを例として見せ、将来的に台風、山火事、地域指定、企業キャンペーンへ拡張します。</p>
+            <p>寄付者や企業が用途を指定できるPoolです。MVPではEarthquake PoolとFlood Poolを例として見せます。指定寄付は50%を指定Pool、50%をMain Poolへ入れます。</p>
           </article>
 
           <article class="pool-card">
             <span class="node-label">Policy</span>
             <h3>Pool Policy</h3>
-            <p>各プールに、対象災害、対象地域、ステーキング比率、最低流動性、優先順位、有効期限を設定します。寄付者の意図を守りながら、未指定資金は柔軟に使えます。</p>
+            <p>対象災害、対象地域、最低流動性、Yield Reserve比率、Event Budget Cap、Future Disaster Reserveを定義します。</p>
           </article>
         </div>
         <div class="pool-flow" aria-label="Donation pool allocation diagram">
           <div>Donation</div>
           <span>→</span>
-          <div>General Relief Pool</div>
+          <div>Main Pool</div>
           <span>+</span>
-          <div>Earthquake / Flood Pool</div>
+          <div>Designated Pool</div>
           <span>→</span>
-          <div>Nautilus Verified Payout</div>
+          <div>PayoutPolicy</div>
         </div>
         <p class="note">戦争や紛争支援は法務・制裁・政治リスクが大きいため、ハッカソンMVPではnatural disasters firstとし、地震・洪水・台風など客観データで検証しやすい災害に絞ります。</p>
       </section>
@@ -892,7 +990,7 @@
             <tbody>
               <tr>
                 <td>秘匿する情報</td>
-                <td>GPS履歴、チェックイン詳細、電話番号、端末情報、IP帯、会員登録費の支払い手段、個別リスク要素</td>
+                <td>GPS履歴、チェックイン詳細、電話番号、端末情報、IP帯、Verification Feeの支払い手段、個別リスク要素</td>
                 <td>Nautilus内でのみ処理し、オンチェーンには出さない</td>
               </tr>
               <tr>
@@ -920,14 +1018,14 @@
             <span>01</span>
             <div>
               <h3>個人が会員登録</h3>
-              <p>地域、電話番号、位置情報を登録し、少額の会員登録費をOperations Poolへ支払います。これは保険料ではなく、検証と不正対策の費用です。</p>
+              <p>地域、電話番号、位置情報、受け取りAddressを登録し、一度きりのVerification Feeを支払います。これは保険料ではなく、検証と重複受け取り防止の費用です。</p>
             </div>
           </li>
           <li>
             <span>02</span>
             <div>
               <h3>スポンサーが寄付</h3>
-              <p>Sui上のGeneral Relief PoolまたはDesignated PoolへSUI、ステーブルコイン、またはハッカソン用テストトークンを入金します。支援元本は災害支払い専用です。</p>
+              <p>Sui上のMain PoolまたはDesignated PoolへSUI、ステーブルコイン、またはハッカソン用テストトークンを入金します。支援元本は災害支払い専用です。</p>
             </div>
           </li>
           <li>
@@ -980,17 +1078,49 @@
         <p class="note">審査向けには、「寄付金が人手を介さず、検証済み条件に応じて安全に動く」瞬間をデモで見せることが重要です。</p>
       </section>
 
+      <section class="section policy-section">
+        <div class="section-heading">
+          <p class="eyebrow">Payout Policy</p>
+          <h2>8. 支払額と災害予算上限</h2>
+        </div>
+        <div class="policy-grid">
+          <article class="policy-card">
+            <h3>Band別の目安額</h3>
+            <p>Relief Cashは生活再建の全額補償ではなく、災害直後の一時支援です。</p>
+            <div class="amount-list">
+              <div><span>Band 1</span><span>$50</span></div>
+              <div><span>Band 2</span><span>$150</span></div>
+              <div><span>Band 3</span><span>$300</span></div>
+            </div>
+          </article>
+
+          <article class="policy-card">
+            <h3>会員期間とリスクで調整</h3>
+            <p>登録30日未満は対象外、30〜90日は50%、90日以上は100%。Medium riskは50%、High riskは対象外にします。</p>
+            <p class="note">Nautilusは詳細な個人情報を出さず、member_since_bucket、risk_tier、max_amountだけを証明します。</p>
+          </article>
+
+          <article class="policy-card">
+            <h3>Poolを使い切らない</h3>
+            <p>Designated Poolは1イベント最大80%、Main Pool補填はLiquid Reserveの最大20%。最低50%をFuture Disaster Reserveとして残します。</p>
+            <p class="note">不足時は `target_amount * event_budget / total_target` で比例配分します。</p>
+          </article>
+        </div>
+      </section>
+
       <section class="section cards">
         <article class="card">
-          <h3>8. Sui Object設計案</h3>
+          <h3>9. Sui Object設計案</h3>
           <ul class="object-list">
-            <li><strong>GeneralReliefPool</strong><span>災害種別を限定しない共通支援プール。MVPの中心</span></li>
+            <li><strong>MainPool / GeneralReliefPool</strong><span>災害種別を限定しない共通支援Pool。MVPの中心</span></li>
             <li><strong>DesignatedReliefPool</strong><span>地震、洪水、地域、企業キャンペーンなど用途指定の支援プール</span></li>
-            <li><strong>PoolPolicy</strong><span>対象災害、対象地域、流動性比率、ステーキング比率、優先順位を定義</span></li>
+            <li><strong>PoolPolicy</strong><span>対象災害、流動性比率、Yield Reserve比率、Event Budget Capを定義</span></li>
+            <li><strong>PayoutPolicy</strong><span>Band別支払額、会員期間係数、リスク係数、按分ルールを定義</span></li>
             <li><strong>ReliefLiquidPool</strong><span>即時支払い用に保持する流動性プール</span></li>
-            <li><strong>StakedReserve</strong><span>全体資金の一部をSuiネイティブバリデータへステーキングする準備金</span></li>
-            <li><strong>OperationsPool</strong><span>会員登録費とステーキング報酬を受け取り、検証・インフラ費用を支払う</span></li>
-            <li><strong>MembershipPass</strong><span>保険証券ではなく、検証済み会員であることを示す権限</span></li>
+            <li><strong>SuiStakingReserve</strong><span>Main Poolの最大15%をSUI native stakingへ配分する運用枠</span></li>
+            <li><strong>ScallopStablecoinStrategy</strong><span>Main Poolの最大15%をステーブルコイン運用として表示する戦略枠</span></li>
+            <li><strong>OperationsPool</strong><span>Verification FeeとYield Reserve利回りを受け取り、検証・インフラ費用を支払う</span></li>
+            <li><strong>MembershipPass</strong><span>保険証券ではなく、検証済み会員と受け取りAddressを示す権限</span></li>
             <li><strong>DisasterEvent</strong><span>検証済み災害イベント。地域、種類、重大度、発生時刻を保持</span></li>
             <li><strong>EligibilityProof</strong><span>Nautilusが署名した対象可否と支援ティア</span></li>
             <li><strong>ReliefReceipt</strong><span>受給者に支払いが実行されたことを示すレシート</span></li>
@@ -1001,7 +1131,7 @@
         </article>
 
         <article class="card">
-          <h3>9. 審査基準との対応</h3>
+          <h3>10. 審査基準との対応</h3>
           <ul>
             <li><strong>Clear financial use case:</strong> 災害時の条件付き直接支援</li>
             <li><strong>Correct asset ownership:</strong> Relief Pool、Pool Policy、支払いレシートをSui Objectとして扱う</li>
@@ -1013,11 +1143,11 @@
       </section>
 
       <section class="section">
-        <h2>10. ユーザーと価値</h2>
+        <h2>11. ユーザーと価値</h2>
         <div class="grid-2">
           <div>
             <h3>支援を受ける個人</h3>
-            <p>平時に地域、電話番号、位置情報を登録し、少額の会員登録費を支払って検証済み会員になります。災害時に条件を満たすと支援対象になりますが、支払いは保証されません。</p>
+            <p>平時に地域、電話番号、位置情報、受け取りAddressを登録し、一度きりのVerification Feeを支払って検証済み会員になります。災害時に条件を満たすと支援対象になりますが、支払いは保証されません。</p>
           </div>
           <div>
             <h3>企業スポンサー</h3>
@@ -1037,7 +1167,7 @@
       <section class="section sponsor-section">
         <div class="section-heading">
           <p class="eyebrow">Sponsor Growth Loop</p>
-          <h2>11. 企業スポンサー機能</h2>
+          <h2>12. 企業スポンサー機能</h2>
         </div>
         <div class="sponsor-grid">
           <article class="sponsor-panel">
@@ -1071,7 +1201,7 @@
       <section class="section adoption-section">
         <div class="section-heading">
           <p class="eyebrow">Why It Gets Used</p>
-          <h2>12. ユーザー側・企業側のメリット</h2>
+          <h2>13. ユーザー側・企業側のメリット</h2>
         </div>
         <div class="adoption-grid">
           <div>
@@ -1095,9 +1225,9 @@
           <div>
             <h3>成立しやすい理由</h3>
             <ul>
-              <li>ユーザーは少額の会員登録費で災害前の備えを作れる</li>
+              <li>ユーザーは一度きりのVerification Feeで災害前の備えを作れる</li>
               <li>企業は寄付の透明性、広報、社会貢献証明を同時に得られる</li>
-              <li>運営費は会員登録費とSuiネイティブステーキング報酬で支えられる</li>
+              <li>運営費はVerification FeeとMain Poolの透明なYield Reserve利回りで支えられる</li>
               <li>Sui上で資金配分、支援実績、スポンサー貢献を一体で見せられる</li>
             </ul>
           </div>
@@ -1106,31 +1236,33 @@
 
       <section class="section cards">
         <article class="card">
-          <h3>13. 不正対策</h3>
-          <p>不正をゼロにするのではなく、不正コストを上げ、支援可否や支援額をリスクに応じて調整します。会員登録費は大量登録や複数アカウント作成への経済的ハードルになります。登録直後、地域変更直後、災害発生後の登録は対象外または低ティアにします。</p>
+          <h3>14. 不正対策</h3>
+          <p>不正をゼロにするのではなく、不正コストを上げ、支援可否や支援額をリスクに応じて調整します。Verification Feeは大量登録や複数アカウント作成への経済的ハードルになります。登録直後、地域変更直後、災害発生後の登録は対象外または低ティアにします。</p>
         </article>
 
         <article class="card">
-          <h3>14. Relief Cash / Relief Credits</h3>
+          <h3>15. Relief Cash / Relief Credits</h3>
           <p><strong>Relief Cash:</strong> 災害発生時に対象地域の個人へ直接送る現金・ステーブルコイン・SUIなど。</p>
           <p><strong>Relief Credits:</strong> 通信、食料、宿泊、移動などに使える用途別クレジット。MVPではサブ機能として扱います。</p>
         </article>
       </section>
 
       <section class="section mvp-section">
-        <h2>15. ハッカソンMVP</h2>
+        <h2>16. ハッカソンMVP</h2>
         <div class="grid-2">
           <div>
             <h3>作るもの</h3>
             <ul>
-              <li>個人会員登録と会員登録費の支払い</li>
+              <li>個人会員登録と一度きりのVerification Fee支払い</li>
               <li>スポンサー寄付画面</li>
-              <li>General Relief Poolへの寄付</li>
+              <li>Main Poolへの寄付</li>
               <li>Earthquake Pool / Flood Poolの指定寄付デモ</li>
               <li>個人の地域チェックイン画面</li>
               <li>災害トリガーデモ</li>
-              <li>General Relief Pool、Designated Pool、Relief Liquid Pool、Staked Reserve、Operations Poolの表示</li>
-              <li>70% / 30%などの資金配分ダッシュボード</li>
+              <li>Main Pool、Designated Pool、Liquid Reserve、Yield Reserve、Operations Poolの表示</li>
+              <li>70% / 15% / 15%の資金配分ダッシュボード</li>
+              <li>Event Budget Cap / Future Disaster Reserveの表示</li>
+              <li>PayoutPolicyとBand別支払額の表示</li>
               <li>Nautilusによる災害API・適格性検証</li>
               <li>Relief Pools on Sui</li>
               <li>Eligibility Proof検証</li>
@@ -1154,16 +1286,18 @@
       </section>
 
       <section class="section demo-card">
-        <h2>16. デモシナリオ</h2>
+        <h2>17. デモシナリオ</h2>
         <ol>
-          <li>個人ユーザーが地域、電話番号、位置情報を登録し、会員登録費をOperations Poolへ支払う</li>
-          <li>企業スポンサーがGeneral Relief Poolへ寄付する</li>
+          <li>個人ユーザーが地域、電話番号、位置情報、受け取りAddressを登録し、一度きりのVerification Feeを支払う</li>
+          <li>企業スポンサーがMain Poolへ寄付する</li>
           <li>別のスポンサーがEarthquake PoolまたはFlood Poolを指定して寄付する</li>
-          <li>資金配分ダッシュボードで70%が即時支払い用、30%がSuiネイティブステーキング準備金であることを表示する</li>
-          <li>ステーキング報酬がOperations Poolへ入り、Nautilus実行やインフラ費用に使われることを表示する</li>
+          <li>指定寄付が50%指定Pool、50%Main Poolへ入ることを表示する</li>
+          <li>資金配分ダッシュボードで70% Liquid、15% SUI staking、15% Scallop strategyを表示する</li>
+          <li>Yield Reserveの利回りがOperations Poolへ入り、Nautilus実行やインフラ費用に使われることを表示する</li>
           <li>災害APIから地震イベントを取得する</li>
           <li>Nautilusが災害条件、対象地域、会員登録期間、地域変更クールダウンを検証する</li>
           <li>MoveコントラクトがEligibility Proofを検証する</li>
+          <li>PayoutPolicyがBand、会員期間、リスク、Event Budget Capから支払額を計算する</li>
           <li>PTBで対象Pool選択、Relief Cash送金、Relief Receipt発行、Sponsor Impact SBT更新を一括実行する</li>
           <li>企業ランキング、Partner Badge、スポンサー紹介ページに寄付実績を反映する</li>
           <li>Impact Pageで支援総額、対象地域、到達人数、スポンサー貢献、資金配分を表示する</li>
@@ -1171,7 +1305,7 @@
       </section>
 
       <section class="section market-analysis">
-        <h2>17. 市場規模とSuiへのインパクト</h2>
+        <h2>18. 市場規模とSuiへのインパクト</h2>
         <p>世界のフィランソロピー市場は年間5,000億ドルを超える巨大市場です。災害支援や緊急寄付だけでも数十億ドルから100億ドル規模の資金が動いており、企業CSR/ESGの需要が高まる中で、透明性と自動化を備えた支援インフラには大きな成長余地があります。</p>
         <div class="grid-2">
           <div>
@@ -1187,8 +1321,9 @@
 
       <section class="section quote">
         <h2>Pitch</h2>
-        <p><strong>日本語:</strong> Sonariは、災害寄付を、Nautilusで秘匿検証された条件に応じて対象地域の人へ自動で届くProgrammable Paymentに変えるプロダクトです。支援元本は災害支払い専用に保ち、会員登録費とSuiネイティブステーキング報酬で検証・インフラコストを賄います。</p>
-        <p><strong>English:</strong> Sonari turns disaster donations into privacy-preserving programmable payments. Nautilus verifies disaster data and user eligibility offchain, while Sui Move distributes relief funds only when the proof is valid. Relief principal stays dedicated to payouts, while membership fees and native Sui staking rewards fund verification and infrastructure costs.</p>
+        <p><strong>日本語:</strong> Sonariは、災害寄付を、Nautilusで秘匿検証された条件に応じて対象地域の人へ自動で届くProgrammable Paymentに変えるプロダクトです。指定寄付は50%を指定Pool、50%をMain Poolへ入れ、災害時は指定Poolから先に支払い、不足分をMain Poolが補填します。Main Poolは最低70%を即時支払い用に保持し、最大15%をSUI native staking、最大15%をScallop等のステーブルコイン戦略に配分できます。</p>
+        <p><strong>English:</strong> Sonari turns disaster donations into privacy-preserving programmable payments. Designated donations are split between the selected disaster pool and the Main Pool. When a verified disaster occurs, the matching pool pays first and the Main Pool acts as a backstop. At least 70% of the Main Pool stays liquid, while up to 15% can be allocated to SUI native staking and up to 15% to a Scallop-style stablecoin strategy.</p>
+        <p><strong>支払設計:</strong> 支払額は災害Band、会員登録期間、不正リスク、Pool残高に基づくPayoutPolicyで決まります。1回の災害でPoolを使い切らないようにEvent Budget CapとFuture Disaster Reserveを設定し、不足時は対象者全体に比例配分します。</p>
       </section>
 
       <section class="section core-message">
