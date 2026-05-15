@@ -1,0 +1,25 @@
+{
+    "name": "sonari",
+    "version": "0.1.0",
+    "private": true,
+    "packageManager": "pnpm@10.27.0",
+    "type": "module",
+    "scripts": {
+        "format": "pnpm format:ts && pnpm format:rust",
+        "format:ts": "biome check --write .",
+        "format:rust": "cargo fmt --manifest-path nautilus_disaster_oracle/tee/Cargo.toml",
+        "check": "pnpm format && pnpm check:ts && pnpm check:rust",
+        "check:ts": "biome check .",
+        "check:rust": "cargo check --manifest-path nautilus_disaster_oracle/tee/Cargo.toml",
+        "lint": "pnpm check",
+        "typecheck": "pnpm -r typecheck",
+        "test": "pnpm -r test",
+        "test:oracle": "pnpm --filter './nautilus_disaster_oracle/**' test && cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "^2.4.15",
+        "@types/node": "^24.10.2",
+        "typescript": "^5.9.3",
+        "vitest": "^4.0.15"
+    }
+}

@@ -9,17 +9,26 @@ Sonari は Sui Overflow 2026 提出用のハッカソンプロジェクトです
 - `docs/nautilus_disaster_oracle/spec.html` - Nautilus Earthquake Oracle の要件定義ページ。
 - `docs/tech_stack.md` と `docs/business_logic.md` - 今後の技術構成、事業ロジック整理用。
 
-`.codex/` と `.agents/` はローカルの Codex / agent 設定です。現在は `.gitignore` 対象なので、共有方針が変わらない限りコミットしないでください。
+`.codex/` と `.agents/` はローカルの Codex / agent 設定です。`.codex/config.toml` と `.codex/hooks.json` は project-local Codex hook の共有設定として track します。それ以外の `.codex/` と `.agents/` は `.gitignore` 対象なので、共有方針が変わらない限りコミットしないでください。
 
 ## ビルド・テスト・開発コマンド
 
-ルートには package manifest やビルド対象アプリはまだありません。作業時は以下の軽量コマンドを使います。
+root `package.json` は pnpm workspace の集約コマンドを提供します。作業時は以下のコマンドを使います。
 
+- `pnpm install` - TypeScript workspace 依存関係を解決します。
+- `pnpm format` - Biome で TypeScript / JSON 設定を整形し、Rust TEE crate に `cargo fmt` を実行します。
+- `pnpm check` - `pnpm format` の後、Biome check と Rust `cargo check` を実行します。
+- `pnpm check:ts` - Biome による TypeScript / JSON 設定の format / lint 検証を実行します。
+- `pnpm check:rust` - Rust TEE crate の `cargo check` を実行します。
+- `pnpm typecheck` - workspace package の TypeScript 型検証を実行します。
+- `pnpm test` - TypeScript の unit test を実行します。
+- `pnpm test:oracle` - Nautilus Oracle の TypeScript test と Rust TEE crate test をまとめて実行します。
+- `cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml` - TEE crate 単体の Rust test を実行します。
 - `python3 -m http.server 8000` - ルートから HTML を配信し、`http://localhost:8000/docs/...` で確認します。
 - `git diff --check` - 末尾空白やパッチ形式の問題を検出します。
 - `find docs -maxdepth 2 -type f` - 現在のドキュメント一覧を確認します。
 
-今後アプリやビルドシステムを追加した場合は、install / dev / build / test の正確なコマンドをこの節に追記してください。
+今後 dApp や contracts のビルドシステムを追加した場合は、dev / build / deploy の正確なコマンドをこの節に追記してください。
 
 ## コーディングスタイルと命名規則
 
@@ -29,7 +38,11 @@ Sonari は Sui Overflow 2026 提出用のハッカソンプロジェクトです
 
 ## テスト方針
 
-自動テストは未設定です。ドキュメント変更では、対象 HTML をブラウザで開き、デスクトップ幅とモバイル幅の表示を確認してください。Markdown は見出し、箇条書き、日英併記の改行が意図通り表示されるか確認します。提出前に `git diff --check` を実行してください。
+TypeScript / Rust 変更では `pnpm check`、`pnpm typecheck`、`pnpm test` を基本の検証コマンドにします。Nautilus Oracle の横断確認では `pnpm test:oracle` または `cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml` を実行してください。ドキュメント変更では、対象 HTML をブラウザで開き、デスクトップ幅とモバイル幅の表示を確認してください。Markdown は見出し、箇条書き、日英併記の改行が意図通り表示されるか確認します。提出前に `git diff --check` を実行してください。
+
+## Project-local Codex hook
+
+`.codex/config.toml` で `[features] hooks = true` を有効化し、`.codex/hooks.json` の `PostToolUse` hook が file edit tool (`apply_patch` / `Edit` / `Write`) の後に `pnpm check` を直接実行します。Codex CLI では `/hooks` で `/home/manji/github/Sonari/.codex` の hook を review/trust してから使ってください。
 
 ## MVP 開発方針
 

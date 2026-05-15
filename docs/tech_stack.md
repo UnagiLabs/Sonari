@@ -31,6 +31,12 @@ schemas/
 scripts/
 ```
 
+## Package Manager / Workspace 方針
+
+TypeScript package manager は `pnpm@10.27.0` を採用します。root `package.json` は workspace の集約コマンドだけを持ち、実装単位は `pnpm-workspace.yaml` で `dapp/*`、`packages/*`、`nautilus_disaster_oracle/*` を対象にします。
+
+Nautilus Earthquake Oracle の TypeScript package は `nautilus_disaster_oracle/shared`、`nautilus_disaster_oracle/watcher`、`nautilus_disaster_oracle/relayer` に分けます。`shared` は Oracle 内部専用の型契約・定数・validator を持つ workspace package とし、`watcher` と `relayer` からは `workspace:*` で参照します。
+
 | ディレクトリ | 役割 | 主な技術 |
 | --- | --- | --- |
 | `dapp/` | フロントエンド本体。Dashboard、Claim、DisasterEvent表示、Wallet接続を担当する。 | React / Next.js、TypeScript、Sui dApp Kit |
@@ -49,6 +55,7 @@ scripts/
 ## 採用方針
 
 - 機能単位のルート構成を優先し、汎用的な中間ディレクトリは使わない。
+- TypeScript workspace は pnpm で管理し、root から `pnpm typecheck`、`pnpm test`、`pnpm test:oracle` を実行できる状態を保つ。
 - dAppは `dapp/` に置き、Dashboard、Claim、DisasterEvent表示、Wallet接続を同じプロダクト面として扱う。
 - Nautilus Earthquake Oracleの専用コードは `nautilus_disaster_oracle/` に閉じる。
 - Oracle内部の共有型・定数・validatorは `nautilus_disaster_oracle/shared/` に置き、`packages/` へ漏らさない。

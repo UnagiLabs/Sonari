@@ -1,0 +1,46 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.4.15/schema.json",
+    "root": true,
+    "files": {
+        "includes": [
+            "package.json",
+            "tsconfig.json",
+            "tsconfig.base.json",
+            "biome.json",
+            "nautilus_disaster_oracle/shared/package.json",
+            "nautilus_disaster_oracle/shared/tsconfig.json",
+            "nautilus_disaster_oracle/shared/src/**/*.ts",
+            "nautilus_disaster_oracle/watcher/package.json",
+            "nautilus_disaster_oracle/watcher/tsconfig.json",
+            "nautilus_disaster_oracle/watcher/src/**/*.ts",
+            "nautilus_disaster_oracle/relayer/package.json",
+            "nautilus_disaster_oracle/relayer/tsconfig.json",
+            "nautilus_disaster_oracle/relayer/src/**/*.ts"
+        ]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineEnding": "lf",
+        "lineWidth": 100
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "double",
+            "semicolons": "always",
+            "trailingCommas": "all"
+        }
+    },
+    "json": {
+        "formatter": {
+            "trailingCommas": "none"
+        }
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true
+        }
+    }
+}
