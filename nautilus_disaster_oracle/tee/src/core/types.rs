@@ -1,4 +1,4 @@
-use crate::artifacts::{
+use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, RawDataManifest, SampleProof, SignatureArtifact,
     SourceManifest, UnsignedPayloadV1,
 };

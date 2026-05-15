@@ -1,25 +1,20 @@
-mod artifacts;
-mod bcs_payload;
+mod compute;
+mod core;
 mod crypto;
-mod geo;
-mod intensity;
-mod json;
-mod merkle;
-mod processing;
-mod types;
-mod usgs;
+mod encoding;
+mod source;
 
-pub use artifacts::{
+pub use compute::intensity::{cell_band, mmi_decimal_to_x100, p90_x100};
+pub use compute::merkle::merkle_root_from_leaf_hashes;
+pub use core::artifacts::{
     AffectedCellJson, AffectedCellsArtifact, ExpectedHashes, LeafHash, ProofStep, RawDataEntry,
     RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact, SourceEntry,
     SourceManifest, UnsignedPayloadV1,
 };
+pub use core::processing::process_usgs;
+pub use core::types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
 pub use crypto::{LocalEd25519Signer, PayloadSigner, sha3_256_bytes};
-pub use intensity::{cell_band, mmi_decimal_to_x100, p90_x100};
-pub use json::canonical_json_bytes;
-pub use merkle::merkle_root_from_leaf_hashes;
-pub use processing::process_usgs;
-pub use types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
+pub use encoding::json::canonical_json_bytes;
 
 pub const INTENT_SONARI_EARTHQUAKE_ORACLE: u8 = 1;
 pub const HAZARD_TYPE_EARTHQUAKE: u8 = 1;

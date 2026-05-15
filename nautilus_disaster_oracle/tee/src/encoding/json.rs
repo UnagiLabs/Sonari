@@ -1,4 +1,4 @@
-use crate::types::OracleError;
+use crate::core::types::OracleError;
 use serde::Serialize;
 
 pub fn canonical_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, OracleError> {

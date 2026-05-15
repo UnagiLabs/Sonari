@@ -1,4 +1,4 @@
-use crate::artifacts::{LeafHash, ProofStep, SampleProof};
+use crate::core::artifacts::{LeafHash, ProofStep, SampleProof};
 use crate::crypto::{sha3_256_bytes, to_hex};
 
 pub fn merkle_root_from_leaf_hashes(leaf_hashes: &[[u8; 32]]) -> Option<[u8; 32]> {
