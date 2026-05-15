@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+import math
 import struct
 import sys
 from hashlib import sha3_256
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "nautilus_disaster_oracle" / "fixtures"
@@ -90,6 +92,52 @@ INTENSITY_SCALE = {"MMI_X100": 1, "JMA_SHINDO_X10": 2}
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def detail_products(detail: dict[str, Any]) -> dict[str, Any]:
+    properties = detail.get("properties")
+    if not isinstance(properties, dict):
+        fail("USGS detail properties must be an object")
+    products = properties.get("products")
+    if not isinstance(products, dict):
+        fail("USGS detail properties.products must be an object")
+    return products
+
+
+def get_shakemap_products(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    shakemap = detail_products(detail).get("shakemap", [])
+    if not isinstance(shakemap, list):
+        fail("USGS detail properties.products.shakemap must be an array")
+    if not all(isinstance(product, dict) for product in shakemap):
+        fail("USGS detail shakemap products must be objects")
+    return shakemap
+
+
+def grid_data_text(grid_path: Path) -> str:
+    root = ElementTree.fromstring(grid_path.read_text(encoding="utf-8"))
+    grid_data = root.find(".//grid_data")
+    if grid_data is None:
+        fail(f"{grid_path}: missing grid_data element")
+    return grid_data.text or ""
+
+
+def grid_mmi_values(grid_path: Path) -> list[float]:
+    text = grid_data_text(grid_path).strip()
+    if not text:
+        return []
+    tokens = text.split()
+    if len(tokens) % 3 != 0:
+        fail(f"{grid_path}: grid_data must contain lon lat mmi triples")
+    values: list[float] = []
+    for index in range(2, len(tokens), 3):
+        try:
+            value = float(tokens[index])
+        except ValueError as exc:
+            raise ValueError(f"{grid_path}: invalid MMI value {tokens[index]!r}") from exc
+        if not math.isfinite(value):
+            fail(f"{grid_path}: MMI value must be finite")
+        values.append(value)
+    return values
 
 
 def hx(data: bytes) -> str:
@@ -307,6 +355,34 @@ def validate_h3_cells(case_id: str, affected: dict[str, Any]) -> None:
         fail(f"{case_id}: affected_cells contains duplicate h3_index")
 
 
+def validate_payload_affected_cross_check(
+    case_id: str,
+    payload: dict[str, Any],
+    affected: dict[str, Any],
+) -> None:
+    direct_checks = [
+        "event_uid",
+        "event_revision",
+        "oracle_version",
+        "geo_resolution",
+    ]
+    for field in direct_checks:
+        if payload.get(field) != affected.get(field):
+            fail(f"{case_id}: payload.{field} does not match affected_cells.{field}")
+
+    enum_checks = [
+        ("cells_generation_method", CELLS_GENERATION_METHOD),
+        ("cell_metric", CELL_METRIC),
+        ("intensity_scale", INTENSITY_SCALE),
+    ]
+    for field, values in enum_checks:
+        affected_value = affected.get(field)
+        if affected_value not in values:
+            fail(f"{case_id}: affected_cells.{field} has unsupported value {affected_value!r}")
+        if payload.get(field) != values[affected_value]:
+            fail(f"{case_id}: payload.{field} does not match affected_cells.{field}")
+
+
 def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> None:
     readme = (case_dir / "README.md").read_text(encoding="utf-8")
     for required_text in [
@@ -333,6 +409,7 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
     payload = load_json(expected_dir / "unsigned_payload_v1.json")
 
     validate_h3_cells(case_id, affected)
+    validate_payload_affected_cross_check(case_id, payload, affected)
 
     grid_bytes = (case_dir / "input" / "usgs_grid.xml").read_bytes()
     raw_data_hash = sha3_hex(grid_bytes)
@@ -418,6 +495,40 @@ def validate_non_finalized(case_id: str, case_dir: Path, result: dict[str, Any])
     forbidden_files = sorted(path for path in FINALIZED_ONLY_FILES if (expected_dir / path).exists())
     if forbidden_files:
         fail(f"{case_id}: forbidden finalized files: {', '.join(forbidden_files)}")
+
+    detail = load_json(case_dir / "input" / "usgs_detail.json")
+    grid_path = case_dir / "input" / "usgs_grid.xml"
+
+    if case_id == "usgs/pending_source_no_shakemap":
+        if "shakemap" in detail_products(detail):
+            fail(f"{case_id}: products.shakemap must not exist")
+        return
+
+    if case_id == "usgs/pending_mmi_empty_grid":
+        if not get_shakemap_products(detail):
+            fail(f"{case_id}: expected at least one ShakeMap product")
+        if grid_data_text(grid_path).strip():
+            fail(f"{case_id}: grid_data must be empty")
+        return
+
+    if case_id == "usgs/rejected_cancelled_shakemap":
+        products = get_shakemap_products(detail)
+        if not any(
+            product.get("properties", {}).get("map-status") == "CANCELLED"
+            for product in products
+            if isinstance(product.get("properties"), dict)
+        ):
+            fail(f"{case_id}: expected a CANCELLED ShakeMap product")
+        return
+
+    if case_id == "usgs/rejected_no_affected_cells":
+        if not get_shakemap_products(detail):
+            fail(f"{case_id}: expected at least one ShakeMap product")
+        mmi_values = grid_mmi_values(grid_path)
+        if not mmi_values:
+            fail(f"{case_id}: expected at least one valid MMI value")
+        if any(value >= 7.0 for value in mmi_values):
+            fail(f"{case_id}: expected all MMI values to be below 7.0")
 
 
 def validate_case(case_id: str) -> None:
