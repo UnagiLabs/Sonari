@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./nautilus_disaster_oracle/shared" },
+    { "path": "./nautilus_disaster_oracle/watcher" },
+    { "path": "./nautilus_disaster_oracle/relayer" }
+  ]
+}
