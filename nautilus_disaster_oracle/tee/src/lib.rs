@@ -25,7 +25,10 @@ mod tests {
         assert_eq!(HAZARD_TYPE_EARTHQUAKE, 1);
         assert_eq!(ONCHAIN_STATUS_FINALIZED, 3);
         assert_eq!(PRIMARY_SOURCE_USGS, 1);
-        assert_eq!(CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, 1);
+        assert_eq!(
+            CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
+            1
+        );
         assert_eq!(CELL_METRIC_USGS_MMI, 1);
         assert_eq!(CELL_AGGREGATION_GRID_POINT_P90, 1);
         assert_eq!(INTENSITY_SCALE_MMI_X100, 1);
