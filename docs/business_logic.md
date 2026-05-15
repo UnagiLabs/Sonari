@@ -734,6 +734,128 @@ Future Disaster Reserveを残す
 
 MVPでは、複雑な実運用よりも、資金設計の透明性とProgrammable Paymentの流れを見せる。
 
+ただし、審査員に短時間で伝えるMVP説明では、会員登録費、Operations Pool、SUI staking、Scallop運用を深掘りしない。主役はあくまで、Nautilusによる災害検証と、Sui Move上のPayoutPolicyに基づくRelief Cash自動支払いである。
+
+### 12.0 MVP説明での扱い
+
+MVPピッチでは、各要素を以下の粒度で扱う。
+
+| 要素 | MVPでの扱い |
+| --- | --- |
+| 事前登録 | 最小限だけ触れる |
+| 登録費 / 会員費 | 基本的に触れない |
+| Scallop運用 | 将来拡張として軽く触れる |
+| SUI staking | ほぼ触れない |
+| Operations Pool | 必要なら1文だけ |
+| 主役 | Nautilus検証と自動支払い |
+
+ユーザー登録は、支払い対象者を判定するための前提として扱う。
+
+良い説明:
+
+```text
+Users pre-register their region and payout wallet before a disaster.
+When a disaster is verified, Sonari checks eligibility and sends relief cash automatically.
+```
+
+日本語:
+
+```text
+ユーザーは平時に地域と受取ウォレットを事前登録します。
+災害発生後、Sonariは対象地域、登録状態、不正リスクを検証し、
+条件を満たすユーザーへ自動でRelief Cashを送ります。
+```
+
+MVP説明で避ける表現:
+
+- 会員登録費を払う
+- 会員になる
+- 支援を受けられる
+- 掛け金ではない
+- 保険ではない
+
+登録費や保険との違いを説明し始めると、逆に保険に近い印象を与える。MVPでは「事前登録された対象者に、自動で支援金を送る」という説明に留める。
+
+### 12.0.1 Sui向けの位置づけ
+
+Sonariは、単なる災害支援アプリとして見せるよりも、Sui上の `disaster-triggered liquidity activation protocol` として見せる。
+
+整理:
+
+```text
+災害支援
+  -> ユースケース
+
+本質
+  -> 条件付きで資金Poolを動かすProgrammable Payment / Treasury Infrastructure
+```
+
+Sui関係者・スポンサー向けの一言:
+
+```text
+Sonari turns corporate disaster relief budgets into transparent,
+programmable liquidity on Sui, verified by Nautilus and activated
+only when real-world disasters happen.
+```
+
+日本語:
+
+```text
+Sonariは、企業の災害支援予算をSui上の透明でプログラム可能な流動性に変え、
+Nautilusで現実世界の災害が検証されたときだけ支払いを実行します。
+```
+
+重要なのは、寄付金を「外部からSuiへ入ってくるRelief Pool TVL」として語ることである。
+
+```text
+Corporate sponsors / donors
+  -> deposit USDC or SUI into Sui-based Relief Pools
+  -> funds remain visible on-chain
+  -> disaster-specific pools create sticky TVL
+  -> payouts generate real payment transactions and receipts
+  -> future idle liquidity can compose with Sui DeFi such as Scallop
+```
+
+SonariがSuiにもたらすもの:
+
+- 外部の企業CSR、防災、寄付予算をSui上のPool TVLに変える
+- Relief Pool残高をオンチェーンで透明化する
+- 災害発生時に多数の小口Payment TxとReceiptを発生させる
+- Sponsor Impactにより、企業が継続寄付する理由を作る
+- 将来的にScallop、zkLogin、WalrusなどのSuiインフラと合成できる
+
+運用については、将来拡張として以下の程度に留める。
+
+```text
+Future versions can allocate a capped portion of idle pool liquidity
+to transparent treasury strategies such as Scallop, but the MVP focuses
+only on verified disaster-triggered payouts.
+```
+
+日本語:
+
+```text
+将来的には、Poolの一部をScallopのような透明なTreasury Strategyに
+割り当てることもできます。ただし、MVPでは災害検証と自動支払いに集中します。
+```
+
+ScallopはMVPの主役ではなく、将来の持続運営レイヤーとして説明する。
+
+```text
+Sonari can become a new source of stable, purpose-driven TVL for Sui DeFi.
+Relief pools stay mostly liquid for emergency payouts, but a capped portion
+of idle liquidity can later be routed into Scallop to fund operations transparently.
+```
+
+日本語:
+
+```text
+Sonariは、Sui DeFiに対して新しい種類のTVLを持ち込めます。
+Relief Poolの大部分は即時支払い用に保持しつつ、
+将来的には未使用流動性の一部をScallopに接続し、
+運営費を透明に賄うことができます。
+```
+
 ### 12.1 MVPで完璧に完成させるEnd-to-End Flow
 
 ハッカソンMVPでは、広い機能を浅く見せるよりも、以下の1本の流れを完成度高く見せることを最優先にする。
@@ -806,7 +928,7 @@ Sponsor donates to Earthquake Pool
 - Event Budget Cap
 - Future Disaster Reserve
 - Pool不足時の比例配分
-- 会員期間による支払額調整
+- 事前登録期間による支払額調整
 - risk tierによる支払額調整
 - Sponsor Ranking
 - Partner Badge
@@ -863,23 +985,18 @@ ReliefReceipt
   -> updates SponsorImpact
 ```
 
-作るもの:
+デモ本体で作るもの:
 
 - Main Pool
 - Earthquake Pool
-- Flood Pool
 - Designated Donationの50% / 50%配分デモ
-- Main Poolの70% / 15% / 15%配分表示
 - Liquid Relief Reserve
-- SUI Native Staking Reserve
-- Scallop Stablecoin Strategy
 - Future Disaster Reserve
-- Operations Pool
 - Nautilusによる災害検証
 - Eligibility Proof検証
 - PayoutPolicy表示
 - Band別支払額の表示
-- 会員期間・リスク係数による支払額調整
+- 事前登録期間・リスク係数による支払額調整
 - Event Budget Cap表示
 - Future Disaster Reserve表示
 - Pool不足時の按分デモ
@@ -888,6 +1005,16 @@ ReliefReceipt
 - Relief Receipt発行
 - Sponsor Impact SBT更新
 - 透明性ダッシュボード
+
+将来拡張または補足として薄く触れるもの:
+
+- Flood Pool
+- Main Poolの70% / 15% / 15%配分表示
+- SUI Native Staking Reserve
+- Scallop Stablecoin Strategy
+- Operations Pool
+- Sponsor Ranking
+- Partner Badge
 
 MVPではやらないもの:
 
@@ -941,14 +1068,80 @@ PayoutPolicy
 
 ## 14. Pitch用表現
 
+### 14.1 MVP Pitch Structure
+
+MVPピッチは以下の順番にする。
+
+1. Problem
+
+災害時の支援金は遅く、不透明で、申請が複雑。
+
+2. Solution
+
+Sonariは、企業スポンサーや寄付者の資金をSui上の透明なRelief Poolとして取り込み、Nautilusで検証された現実世界の災害条件に応じて、Sui Move上のPayoutPolicyで即時支払いを実行する。
+
+3. Demo
+
+地震イベント発生、Nautilus検証、対象者判定、Relief Cash送金、Receipt発行、Dashboard更新までを一気通貫で見せる。
+
+4. Why Sui
+
+Move ObjectでPool、Policy、Receiptを透明に管理できる。Suiの高速決済により、災害直後の小口支払いに向いている。
+
+5. Future
+
+スポンサーPool、Scallop Treasury Strategy、Sponsor Impact SBT、地域拡張。
+
+### 14.2 審査員向けの3つのメッセージ
+
+1. Real-world payment rail
+
+Sonari proves Sui can power real-world emergency payments, not just crypto-native trading.
+
+2. New TVL source
+
+Corporate and donor relief funds become transparent on-chain pools on Sui.
+
+3. Ecosystem composability
+
+Once relief pools exist, they can compose with Scallop, zkLogin, Walrus, and other Sui infrastructure.
+
 日本語:
 
-> Sonariでは、指定寄付は半分を指定災害プールへ、半分をMain Poolへ入れます。災害時は指定プールから先に支払い、不足分をMain Poolが補填します。Main Poolの最低70%は即時支払い用に保持し、最大15%をSUIネイティブステーキング、最大15%をScallop等のステーブルコイン戦略に配分できます。利回りはNautilus、インフラ、通知などのOperations Poolへ送られ、比率・運用先・使途はすべて透明化されます。
+1. Real-world payment rail
 
-> 支払額は、災害Band、会員登録期間、不正リスク、Pool残高に基づいてPayoutPolicyで決まります。1回の災害でPoolを使い切らないようにEvent Budget CapとFuture Disaster Reserveを設定し、不足時は早い者勝ちではなく対象者全体に比例配分します。
+Sonariは、Suiがcrypto-nativeな取引だけでなく、現実世界の緊急支払いにも使えることを示す。
+
+2. New TVL source
+
+企業や寄付者の災害支援資金が、Sui上の透明なPool TVLになる。
+
+3. Ecosystem composability
+
+Relief Poolが存在すれば、Scallop、zkLogin、WalrusなどのSuiインフラと将来的に合成できる。
+
+### 14.3 MVP Pitch Copy
+
+日本語:
+
+> Sonariは、企業の災害支援予算をSui上の透明でプログラム可能な流動性に変え、Nautilusで現実世界の災害が検証されたときだけ支払いを実行するProgrammable Disaster Relief Networkです。
+
+> 災害支援は単なるチャリティではなく、企業にとって継続的なCSR、防災、地域支援予算です。Sonariは、その予算をSui上のRelief Pool TVLに変換し、災害時には小口Payment TxとオンチェーンReceiptを発生させます。
+
+> ユーザーは平時に地域と受取ウォレットを事前登録します。災害発生後、Sonariは対象地域、登録状態、不正リスクを検証し、条件を満たすユーザーへ自動で支援金を送ります。
+
+> MVPでは、スポンサーがEarthquake Poolへ寄付し、50%がEarthquake Pool、50%がMain Poolへ分配されます。地震イベントが検証されると、PayoutPolicyが支払額を決め、Earthquake Poolから先に支払い、不足分をMain Poolが補填します。最後にRelief ReceiptとSponsor Impactが更新されます。
+
+> 将来的には、Relief Poolの一部をScallopのような透明なTreasury Strategyに接続し、未使用流動性を運営費の原資にできます。ただし、MVPでは災害検証と自動支払いに集中します。
 
 English:
 
-> Sonari splits designated donations between the selected disaster pool and the Main Pool. When a verified disaster occurs, the matching designated pool pays first, and the Main Pool acts as a backstop. At least 70% of the Main Pool stays liquid for immediate payouts, while up to 15% can be allocated to SUI native staking and up to 15% to a Scallop-style stablecoin strategy. Yield funds Nautilus compute, infrastructure, and notifications through the Operations Pool, with all allocation ratios, strategies, and uses shown transparently.
+> Sonari turns corporate disaster relief budgets into transparent, programmable liquidity on Sui, verified by Nautilus and activated only when real-world disasters happen.
 
-> Payout amounts are determined by a transparent PayoutPolicy based on disaster band, membership age, fraud risk, and pool liquidity. Sonari does not drain the pool in a single event: each disaster has an Event Budget Cap and the Main Pool keeps a Future Disaster Reserve. If the pool is insufficient, Sonari distributes funds proportionally instead of relying on first-come-first-served claims.
+> Disaster relief is not just a charity use case. It is a recurring corporate budget category for CSR, preparedness, and local support. Sonari turns that budget into Relief Pool TVL on Sui, then generates real payment transactions and on-chain receipts when disasters occur.
+
+> Users pre-register their region and payout wallet before a disaster. When a disaster is verified, Sonari checks the affected region, registration state, and fraud risk, then sends relief cash automatically to eligible users.
+
+> In the MVP, a sponsor donates to the Earthquake Pool, and the donation is split between the Earthquake Pool and the Main Pool. Once the earthquake event is verified, PayoutPolicy calculates the payout amount, the Earthquake Pool pays first, and the Main Pool covers any shortage. Relief Receipt and Sponsor Impact are updated at the end of the flow.
+
+> Future versions can route a capped portion of idle relief liquidity into transparent treasury strategies such as Scallop to fund operations, but the MVP focuses only on verified disaster-triggered payouts.
