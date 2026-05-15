@@ -5,6 +5,5 @@
   "hazard_type": "EARTHQUAKE",
   "primary_source": "USGS",
   "geo_resolution": 7,
-  "error_code": "MMI_NOT_AVAILABLE",
-  "next_retry_at_ms": 1704072600000
+  "error_code": "MMI_NOT_AVAILABLE"
 }

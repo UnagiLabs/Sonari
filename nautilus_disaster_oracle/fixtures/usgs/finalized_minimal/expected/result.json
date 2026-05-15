@@ -6,6 +6,5 @@
   "primary_source": "USGS",
   "geo_resolution": 7,
   "error_code": null,
-  "next_retry_at_ms": null,
   "expected_payload": "unsigned_payload_v1.json"
 }
