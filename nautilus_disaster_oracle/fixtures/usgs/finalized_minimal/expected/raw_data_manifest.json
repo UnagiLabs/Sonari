@@ -1,0 +1,10 @@
+{
+  "raw_sources": [
+    {
+      "name": "USGS_SHAKEMAP_GRID_XML",
+      "path": "input/usgs_grid.xml",
+      "content_hash": "0xe55a5726bce3bdfcecd89473fcdd9a2a0d223fb4a32d319f85c71a65f0e6c0cf",
+      "content_hash_algorithm": "SHA3-256"
+    }
+  ]
+}

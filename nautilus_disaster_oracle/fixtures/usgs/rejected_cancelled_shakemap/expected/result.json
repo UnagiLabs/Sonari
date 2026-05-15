@@ -1,0 +1,10 @@
+{
+  "case_id": "usgs/rejected_cancelled_shakemap",
+  "status": "rejected",
+  "source_event_id": "us7000cancelled",
+  "hazard_type": "EARTHQUAKE",
+  "primary_source": "USGS",
+  "geo_resolution": 7,
+  "error_code": "SHAKEMAP_CANCELLED",
+  "next_retry_at_ms": null
+}
