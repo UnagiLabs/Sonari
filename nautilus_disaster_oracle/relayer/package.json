@@ -8,10 +8,15 @@
     },
     "types": "./src/index.ts",
     "scripts": {
+        "cli": "tsx src/cli.ts",
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "test": "vitest run"
     },
     "dependencies": {
+        "@mysten/sui": "^2.16.3",
         "@sonari/oracle-shared": "workspace:*"
+    },
+    "devDependencies": {
+        "tsx": "^4.22.0"
     }
 }

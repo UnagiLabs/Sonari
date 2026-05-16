@@ -211,7 +211,6 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 rpcUrl,
-                signer: undefined,
                 client: {
                     signAndExecuteTransaction: async () => ({
                         digest: "abc",
