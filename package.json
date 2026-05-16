@@ -14,7 +14,7 @@
         "lint": "pnpm check",
         "typecheck": "pnpm -r typecheck && pnpm typecheck:scripts",
         "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
-        "test": "pnpm -r test",
+        "test": "pnpm -r test && pnpm test:local-e2e",
         "test:local-e2e": "vitest run scripts",
         "test:relayer": "pnpm --filter @sonari/oracle-relayer test",
         "relayer": "pnpm --filter @sonari/oracle-relayer cli",
