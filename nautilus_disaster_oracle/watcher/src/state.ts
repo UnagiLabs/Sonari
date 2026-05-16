@@ -64,63 +64,42 @@ export class D1StateRepository implements StateRepository {
     constructor(private readonly db: D1Database) {}
 
     async upsertCandidate(candidate: UsgsEarthquakeCandidate, nowMs: number): Promise<void> {
-        const existing = await this.get(candidate.source_event_id);
-        if (existing === null) {
-            await this.db
-                .prepare(
-                    `INSERT INTO earthquake_events (
-                      source_event_id,
-                      event_uid,
-                      status,
-                      retry_count,
-                      next_retry_at_ms,
-                      finalization_deadline_at_ms,
-                      latest_revision,
-                      last_seen_at_ms,
-                      source_updated_at_ms,
-                      error_code,
-                      created_at_ms,
-                      updated_at_ms
-                    ) VALUES (?, NULL, 'new', 0, NULL, ?, 0, ?, ?, NULL, ?, ?)`,
-                )
-                .bind(
-                    candidate.source_event_id,
-                    candidate.occurred_at_ms + FINALIZATION_WINDOW_MS,
-                    nowMs,
-                    candidate.source_updated_at_ms,
-                    nowMs,
-                    nowMs,
-                )
-                .run();
-            return;
-        }
-
-        if (TERMINAL_STATUSES.has(existing.status)) {
-            await this.db
-                .prepare(
-                    `UPDATE earthquake_events
-                     SET last_seen_at_ms = ?,
-                         updated_at_ms = ?
-                     WHERE source_event_id = ?`,
-                )
-                .bind(nowMs, nowMs, candidate.source_event_id)
-                .run();
-            return;
-        }
-
-        const sourceUpdatedAtMs = Math.max(
-            existing.source_updated_at_ms ?? 0,
-            candidate.source_updated_at_ms,
-        );
         await this.db
             .prepare(
-                `UPDATE earthquake_events
-                 SET last_seen_at_ms = ?,
-                     source_updated_at_ms = ?,
-                     updated_at_ms = ?
-                 WHERE source_event_id = ?`,
+                `INSERT INTO earthquake_events (
+                  source_event_id,
+                  event_uid,
+                  status,
+                  retry_count,
+                  next_retry_at_ms,
+                  finalization_deadline_at_ms,
+                  latest_revision,
+                  last_seen_at_ms,
+                  source_updated_at_ms,
+                  error_code,
+                  created_at_ms,
+                  updated_at_ms
+                ) VALUES (?, NULL, 'new', 0, NULL, ?, 0, ?, ?, NULL, ?, ?)
+                ON CONFLICT(source_event_id) DO UPDATE SET
+                  last_seen_at_ms = excluded.last_seen_at_ms,
+                  source_updated_at_ms = CASE
+                    WHEN earthquake_events.status IN ('finalized', 'submitted', 'rejected')
+                      THEN earthquake_events.source_updated_at_ms
+                    ELSE MAX(
+                      COALESCE(earthquake_events.source_updated_at_ms, 0),
+                      excluded.source_updated_at_ms
+                    )
+                  END,
+                  updated_at_ms = excluded.updated_at_ms`,
             )
-            .bind(nowMs, sourceUpdatedAtMs, nowMs, candidate.source_event_id)
+            .bind(
+                candidate.source_event_id,
+                candidate.occurred_at_ms + FINALIZATION_WINDOW_MS,
+                nowMs,
+                candidate.source_updated_at_ms,
+                nowMs,
+                nowMs,
+            )
             .run();
     }
 
