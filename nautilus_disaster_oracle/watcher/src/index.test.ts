@@ -89,8 +89,9 @@ describe("watcher state transitions", () => {
             status: "pending_source",
             error_code: "SHAKEMAP_PRODUCT_MISSING",
         });
+        expect(row).not.toBeNull();
         expect(row?.next_retry_at_ms).toBeGreaterThan(baseNow);
-        expect(row?.next_retry_at_ms).toBeLessThanOrEqual(row.finalization_deadline_at_ms);
+        expect(row?.next_retry_at_ms).toBeLessThanOrEqual(row?.finalization_deadline_at_ms ?? 0);
     });
 
     it("auto-rejects pending results once the 72 hour deadline is exceeded", async () => {
