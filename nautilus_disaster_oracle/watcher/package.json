@@ -8,10 +8,15 @@
     },
     "types": "./src/index.ts",
     "scripts": {
+        "dev": "wrangler dev --local",
+        "d1:migrate:local": "wrangler d1 migrations apply sonari-oracle-watcher-local --local",
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "test": "vitest run"
     },
     "dependencies": {
         "@sonari/oracle-shared": "workspace:*"
+    },
+    "devDependencies": {
+        "wrangler": "^4.92.0"
     }
 }
