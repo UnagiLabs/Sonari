@@ -18,6 +18,7 @@ import {
     processDueEvents,
     scanCandidates,
 } from "./index.js";
+import type { EarthquakeEventRow, StateRepository } from "./state.js";
 
 const baseNow = 1_800_000_000_000;
 
@@ -129,6 +130,31 @@ describe("watcher state transitions", () => {
         });
     });
 
+    it("does not overwrite finalized payload metadata during later scans", async () => {
+        const repository = new InMemoryStateRepository();
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processDueEvents(repository, new MockRunnerAdapter(), baseNow);
+        await scanCandidates(
+            repository,
+            [
+                candidate("us7000sonari", {
+                    source_updated_at_ms: 1_900_000_000_000,
+                }),
+            ],
+            baseNow + HOUR_MS,
+        );
+
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            event_uid: "us7000sonari",
+            latest_revision: 3,
+            source_updated_at_ms: 1_700_000_010_000,
+            last_seen_at_ms: baseNow + HOUR_MS,
+            updated_at_ms: baseNow + HOUR_MS,
+        });
+    });
+
     it("persists rejected runner errors", async () => {
         const repository = new InMemoryStateRepository();
 
@@ -165,7 +191,10 @@ describe("watcher state transitions", () => {
         const repository = new InMemoryStateRepository();
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await repository.markProcessing("us7000sonari", baseNow - PROCESSING_STALE_AFTER_MS - 1);
+        await repository.claimForProcessing(
+            "us7000sonari",
+            baseNow - PROCESSING_STALE_AFTER_MS - 1,
+        );
         const summary = await processDueEvents(repository, new MockRunnerAdapter(), baseNow);
 
         expect(summary.recovered).toBe(1);
@@ -173,6 +202,96 @@ describe("watcher state transitions", () => {
             status: "failed",
             error_code: "AWS_RUNNER_TIMEOUT",
             retry_count: 1,
+            next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+        });
+    });
+
+    it("claims due rows atomically before invoking the runner", async () => {
+        const repository = new InMemoryStateRepository();
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await expect(repository.claimForProcessing("us7000sonari", baseNow)).resolves.toBe(true);
+        await expect(repository.claimForProcessing("us7000sonari", baseNow)).resolves.toBe(false);
+    });
+
+    it("skips runner execution when a due row was already claimed", async () => {
+        const row: EarthquakeEventRow = {
+            source_event_id: "us7000sonari",
+            event_uid: null,
+            status: "new",
+            retry_count: 0,
+            next_retry_at_ms: null,
+            finalization_deadline_at_ms: baseNow + FINALIZATION_WINDOW_MS,
+            latest_revision: 0,
+            last_seen_at_ms: baseNow,
+            source_updated_at_ms: baseNow,
+            error_code: null,
+            created_at_ms: baseNow,
+            updated_at_ms: baseNow,
+        };
+        const repository: StateRepository = {
+            upsertCandidate: async () => {},
+            get: async () => row,
+            listDue: async () => [row],
+            claimForProcessing: async () => false,
+            deferUntil: async () => {},
+            markRejected: async () => {},
+            markFailed: async () => {},
+            applyRunnerResult: async () => {},
+            recoverStaleProcessing: async () => 0,
+        };
+        const runner = new MockRunnerAdapter();
+
+        const summary = await processDueEvents(repository, runner, baseNow);
+
+        expect(summary.processed).toBe(0);
+        expect(runner.requests).toHaveLength(0);
+    });
+
+    it("clamps pending runner retries to the finalization deadline", async () => {
+        const repository = new InMemoryStateRepository();
+        const runner: RunnerAdapter = {
+            run: async (_request, context) => ({
+                status: "pending_source",
+                source_event_id: "us7000pending-source",
+                next_retry_at_ms: context.finalizationDeadlineAtMs + HOUR_MS,
+                error_code: "SHAKEMAP_PRODUCT_MISSING",
+            }),
+        };
+
+        await scanCandidates(repository, [candidate("us7000pending-source")], baseNow);
+        await processDueEvents(repository, runner, baseNow);
+
+        const row = await repository.get("us7000pending-source");
+        expect(row).toMatchObject({ status: "pending_source" });
+        expect(row?.next_retry_at_ms).toBe(row?.finalization_deadline_at_ms);
+    });
+
+    it("fails malformed finalized payload metadata without storing finalized metadata", async () => {
+        const repository = new InMemoryStateRepository();
+        const runner: RunnerAdapter = {
+            run: async () => ({
+                status: "finalized",
+                payload: {
+                    event_uid: "",
+                    event_revision: Number.MAX_SAFE_INTEGER + 1,
+                    source_updated_at_ms: "bad",
+                },
+                payload_bcs_hex: "0x01",
+                signature: "0xsig",
+                public_key: "0xpub",
+            }),
+        };
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processDueEvents(repository, runner, baseNow);
+
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "failed",
+            error_code: "BCS_SERIALIZATION_FAILED",
+            event_uid: null,
+            latest_revision: 0,
+            source_updated_at_ms: baseNow - HOUR_MS,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
         });
     });
@@ -230,7 +349,7 @@ describe("manual submit API", () => {
         expect(emptyId.status).toBe(400);
     });
 
-    it("accepts a valid manual earthquake and stores it idempotently", async () => {
+    it("accepts a valid manual earthquake and processes only that event", async () => {
         const repository = new InMemoryStateRepository();
         const app = createWorkerApp({ now: () => baseNow });
         const response = await app.fetch(
@@ -247,11 +366,42 @@ describe("manual submit API", () => {
         );
 
         expect(response.status).toBe(202);
-        await expect(response.json()).resolves.toMatchObject({ accepted: true });
+        await expect(response.json()).resolves.toMatchObject({
+            accepted: true,
+            source_event_id: "us7000sonari",
+            summary: {
+                processed: 1,
+                deferred: 0,
+                recovered: 0,
+                failed: 0,
+                rejected: 0,
+            },
+            event: {
+                source_event_id: "us7000sonari",
+                status: "finalized",
+                event_uid: "us7000sonari",
+            },
+        });
         expect(await repository.get("us7000sonari")).toMatchObject({
             source_event_id: "us7000sonari",
-            status: "new",
-            source_updated_at_ms: baseNow - HOUR_MS,
+            status: "finalized",
+            event_uid: "us7000sonari",
+        });
+    });
+});
+
+describe("health endpoint", () => {
+    it("does not require the D1 binding", async () => {
+        const app = createWorkerApp();
+        const response = await app.fetch(
+            new Request("https://watcher.test/health"),
+            {} as WorkerEnv,
+        );
+
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({
+            ok: true,
+            service: "sonari-oracle-watcher",
         });
     });
 });

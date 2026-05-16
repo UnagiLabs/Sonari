@@ -2,17 +2,6 @@ import type { OffchainStatus, OracleErrorCode, TeeCoreResult } from "@sonari/ora
 import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
 import type { UsgsEarthquakeCandidate } from "./usgs.js";
 
-export interface D1Database {
-    prepare(query: string): D1PreparedStatement;
-}
-
-export interface D1PreparedStatement {
-    bind(...values: unknown[]): D1PreparedStatement;
-    first<T = unknown>(): Promise<T | null>;
-    all<T = unknown>(): Promise<{ results: T[] }>;
-    run(): Promise<unknown>;
-}
-
 export interface EarthquakeEventRow {
     source_event_id: string;
     event_uid: string | null;
@@ -32,7 +21,7 @@ export interface StateRepository {
     upsertCandidate(candidate: UsgsEarthquakeCandidate, nowMs: number): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
-    markProcessing(sourceEventId: string, nowMs: number): Promise<void>;
+    claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean>;
     deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void>;
     markRejected(
         sourceEventId: string,
@@ -41,7 +30,7 @@ export interface StateRepository {
     ): Promise<void>;
     markFailed(
         sourceEventId: string,
-        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT">,
+        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT" | "BCS_SERIALIZATION_FAILED">,
         nowMs: number,
         nextRetryAtMs: number,
     ): Promise<void>;
@@ -106,6 +95,19 @@ export class D1StateRepository implements StateRepository {
             return;
         }
 
+        if (TERMINAL_STATUSES.has(existing.status)) {
+            await this.db
+                .prepare(
+                    `UPDATE earthquake_events
+                     SET last_seen_at_ms = ?,
+                         updated_at_ms = ?
+                     WHERE source_event_id = ?`,
+                )
+                .bind(nowMs, nowMs, candidate.source_event_id)
+                .run();
+            return;
+        }
+
         const sourceUpdatedAtMs = Math.max(
             existing.source_updated_at_ms ?? 0,
             candidate.source_updated_at_ms,
@@ -146,18 +148,22 @@ export class D1StateRepository implements StateRepository {
         return result.results.map(normalizeRow);
     }
 
-    async markProcessing(sourceEventId: string, nowMs: number): Promise<void> {
-        await this.db
+    async claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean> {
+        const placeholders = DUE_STATUSES.map(() => "?").join(", ");
+        const result = await this.db
             .prepare(
                 `UPDATE earthquake_events
                  SET status = 'processing',
                      next_retry_at_ms = NULL,
                      error_code = NULL,
                      updated_at_ms = ?
-                 WHERE source_event_id = ?`,
+                 WHERE source_event_id = ?
+                   AND status IN (${placeholders})
+                   AND (next_retry_at_ms IS NULL OR next_retry_at_ms <= ?)`,
             )
-            .bind(nowMs, sourceEventId)
+            .bind(nowMs, sourceEventId, ...DUE_STATUSES, nowMs)
             .run();
+        return d1RowsChanged(result);
     }
 
     async deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void> {
@@ -193,7 +199,7 @@ export class D1StateRepository implements StateRepository {
 
     async markFailed(
         sourceEventId: string,
-        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT">,
+        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT" | "BCS_SERIALIZATION_FAILED">,
         nowMs: number,
         nextRetryAtMs: number,
     ): Promise<void> {
@@ -317,10 +323,9 @@ export class InMemoryStateRepository implements StateRepository {
         this.rows.set(candidate.source_event_id, {
             ...existing,
             last_seen_at_ms: nowMs,
-            source_updated_at_ms: Math.max(
-                existing.source_updated_at_ms ?? 0,
-                candidate.source_updated_at_ms,
-            ),
+            source_updated_at_ms: TERMINAL_STATUSES.has(existing.status)
+                ? existing.source_updated_at_ms
+                : Math.max(existing.source_updated_at_ms ?? 0, candidate.source_updated_at_ms),
             updated_at_ms: nowMs,
         });
     }
@@ -342,13 +347,22 @@ export class InMemoryStateRepository implements StateRepository {
             .map(cloneRow);
     }
 
-    async markProcessing(sourceEventId: string, nowMs: number): Promise<void> {
+    async claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean> {
+        const row = this.require(sourceEventId);
+        if (
+            !DUE_STATUSES.includes(row.status) ||
+            (row.next_retry_at_ms !== null && row.next_retry_at_ms > nowMs)
+        ) {
+            return false;
+        }
+
         this.patch(sourceEventId, {
             status: "processing",
             next_retry_at_ms: null,
             error_code: null,
             updated_at_ms: nowMs,
         });
+        return true;
     }
 
     async deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void> {
@@ -374,7 +388,7 @@ export class InMemoryStateRepository implements StateRepository {
 
     async markFailed(
         sourceEventId: string,
-        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT">,
+        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT" | "BCS_SERIALIZATION_FAILED">,
         nowMs: number,
         nextRetryAtMs: number,
     ): Promise<void> {
@@ -491,4 +505,12 @@ function normalizeRow(row: RawEarthquakeEventRow): EarthquakeEventRow {
 
 function cloneRow(row: EarthquakeEventRow): EarthquakeEventRow {
     return { ...row };
+}
+
+function d1RowsChanged(result: D1Result): boolean {
+    const meta = result.meta as { changes?: unknown; rows_written?: unknown } | undefined;
+    if (meta?.changes !== undefined) {
+        return Number(meta.changes) > 0;
+    }
+    return meta?.rows_written !== undefined && Number(meta.rows_written) > 0;
 }

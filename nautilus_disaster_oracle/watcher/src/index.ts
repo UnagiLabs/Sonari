@@ -13,7 +13,7 @@ import {
     FINALIZATION_WINDOW_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
-import { type D1Database, D1StateRepository, type StateRepository } from "./state.js";
+import { D1StateRepository, type EarthquakeEventRow, type StateRepository } from "./state.js";
 import { MockRunnerAdapter, type RunnerAdapter } from "./trigger_tee.js";
 import { fetchUsgsRecentCandidates, type UsgsEarthquakeCandidate } from "./usgs.js";
 
@@ -25,7 +25,7 @@ export {
     HOUR_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
-export type { D1Database, StateRepository } from "./state.js";
+export type { EarthquakeEventRow, StateRepository } from "./state.js";
 export { D1StateRepository, InMemoryStateRepository } from "./state.js";
 export type { RunnerAdapter, RunnerContext } from "./trigger_tee.js";
 export { MockRunnerAdapter } from "./trigger_tee.js";
@@ -39,7 +39,7 @@ export {
 const TERMINAL_STATUSES = new Set<OffchainStatus>(["finalized", "submitted", "rejected"]);
 
 export interface WorkerEnv {
-    EARTHQUAKE_EVENTS: StateRepository | D1Database;
+    EARTHQUAKE_EVENTS?: StateRepository | D1Database;
     MANUAL_SUBMIT_TOKEN?: string;
 }
 
@@ -114,43 +114,7 @@ export async function processDueEvents(
 
     const rows = await repository.listDue(nowMs, limit);
     for (const row of rows) {
-        if (TERMINAL_STATUSES.has(row.status)) {
-            continue;
-        }
-
-        const occurredAtMs = row.finalization_deadline_at_ms - FINALIZATION_WINDOW_MS;
-        const firstEligibleAtMs = occurredAtMs + DAY_MS;
-
-        if (nowMs < firstEligibleAtMs) {
-            await repository.deferUntil(row.source_event_id, firstEligibleAtMs, nowMs);
-            summary.deferred += 1;
-            continue;
-        }
-
-        if (isDeadlineExceededPending(row.status, nowMs, row.finalization_deadline_at_ms)) {
-            await repository.markRejected(row.source_event_id, "REJECTED_AUTO_TRIGGER", nowMs);
-            summary.rejected += 1;
-            continue;
-        }
-
-        await repository.markProcessing(row.source_event_id, nowMs);
-
-        try {
-            const result = await runner.run(buildWorkerToTeeRequest(row.source_event_id), {
-                nowMs,
-                finalizationDeadlineAtMs: row.finalization_deadline_at_ms,
-            });
-            await applyRunnerResult(repository, row.source_event_id, result, nowMs);
-            summary.processed += 1;
-        } catch {
-            await repository.markFailed(
-                row.source_event_id,
-                "AWS_RUNNER_TIMEOUT",
-                nowMs,
-                nowMs + FAILED_RETRY_BACKOFF_MS,
-            );
-            summary.failed += 1;
-        }
+        await processSingleDueEvent(repository, runner, row, nowMs, summary);
     }
 
     return summary;
@@ -164,14 +128,15 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
     return {
         async fetch(request: Request, env: WorkerEnv): Promise<Response> {
             const url = new URL(request.url);
-            const repository = repositoryFromEnv(env);
 
             if (request.method === "GET" && url.pathname === "/health") {
-                return json({ ok: true });
+                return json({ ok: true, service: "sonari-oracle-watcher" });
             }
 
+            const repository = repositoryFromEnv(env);
+
             if (request.method === "POST" && url.pathname === "/manual/earthquakes") {
-                return handleManualEarthquake(request, env, repository, now());
+                return handleManualEarthquake(request, env, repository, runner, now());
             }
 
             if (request.method === "POST" && url.pathname === "/tasks/process-due") {
@@ -200,6 +165,7 @@ async function handleManualEarthquake(
     request: Request,
     env: WorkerEnv,
     repository: StateRepository,
+    runner: RunnerAdapter,
     nowMs: number,
 ): Promise<Response> {
     if (env.MANUAL_SUBMIT_TOKEN === undefined || env.MANUAL_SUBMIT_TOKEN.length === 0) {
@@ -235,7 +201,70 @@ async function handleManualEarthquake(
         nowMs,
     );
 
-    return json({ accepted: true, source_event_id: sourceEventId }, { status: 202 });
+    const summary = emptyProcessSummary();
+    const row = await repository.get(sourceEventId);
+    if (row !== null) {
+        await processSingleDueEvent(repository, runner, row, nowMs, summary);
+    }
+
+    return json(
+        {
+            accepted: true,
+            source_event_id: sourceEventId,
+            summary,
+            event: await repository.get(sourceEventId),
+        },
+        { status: 202 },
+    );
+}
+
+async function processSingleDueEvent(
+    repository: StateRepository,
+    runner: RunnerAdapter,
+    row: EarthquakeEventRow,
+    nowMs: number,
+    summary: ProcessSummary,
+): Promise<void> {
+    if (TERMINAL_STATUSES.has(row.status)) {
+        return;
+    }
+
+    const occurredAtMs = row.finalization_deadline_at_ms - FINALIZATION_WINDOW_MS;
+    const firstEligibleAtMs = occurredAtMs + DAY_MS;
+
+    if (nowMs < firstEligibleAtMs) {
+        await repository.deferUntil(row.source_event_id, firstEligibleAtMs, nowMs);
+        summary.deferred += 1;
+        return;
+    }
+
+    if (isDeadlineExceededPending(row.status, nowMs, row.finalization_deadline_at_ms)) {
+        await repository.markRejected(row.source_event_id, "REJECTED_AUTO_TRIGGER", nowMs);
+        summary.rejected += 1;
+        return;
+    }
+
+    const claimed = await repository.claimForProcessing(row.source_event_id, nowMs);
+    if (!claimed) {
+        return;
+    }
+
+    try {
+        const result = await runner.run(buildWorkerToTeeRequest(row.source_event_id), {
+            nowMs,
+            finalizationDeadlineAtMs: row.finalization_deadline_at_ms,
+        });
+        await applyRunnerResult(repository, row.source_event_id, result, nowMs);
+        summary.processed += 1;
+    } catch {
+        await repository.markFailed(
+            row.source_event_id,
+            "AWS_RUNNER_TIMEOUT",
+            nowMs,
+            nowMs + FAILED_RETRY_BACKOFF_MS,
+        );
+        summary.failed += 1;
+    }
 }
 
 async function applyRunnerResult(
@@ -244,6 +273,16 @@ async function applyRunnerResult(
     result: TeeCoreResult,
     nowMs: number,
 ): Promise<void> {
+    if (result.status === "finalized" && !hasValidFinalizedMetadata(result.payload)) {
+        await repository.markFailed(
+            sourceEventId,
+            "BCS_SERIALIZATION_FAILED",
+            nowMs,
+            nowMs + FAILED_RETRY_BACKOFF_MS,
+        );
+        return;
+    }
+
     if (result.status === "pending_source" || result.status === "pending_mmi") {
         const row = await repository.get(sourceEventId);
         if (
@@ -251,6 +290,20 @@ async function applyRunnerResult(
             isDeadlineExceededPending(result.status, nowMs, row.finalization_deadline_at_ms)
         ) {
             await repository.markRejected(sourceEventId, "REJECTED_AUTO_TRIGGER", nowMs);
+            return;
+        }
+        if (row !== null) {
+            await repository.applyRunnerResult(
+                sourceEventId,
+                {
+                    ...result,
+                    next_retry_at_ms: Math.min(
+                        result.next_retry_at_ms,
+                        row.finalization_deadline_at_ms,
+                    ),
+                },
+                nowMs,
+            );
             return;
         }
     }
@@ -267,6 +320,9 @@ function isDeadlineExceededPending(
 }
 
 function repositoryFromEnv(env: WorkerEnv): StateRepository {
+    if (env.EARTHQUAKE_EVENTS === undefined) {
+        throw new Error("EARTHQUAKE_EVENTS binding is required");
+    }
     if (isStateRepository(env.EARTHQUAKE_EVENTS)) {
         return env.EARTHQUAKE_EVENTS;
     }
@@ -274,7 +330,7 @@ function repositoryFromEnv(env: WorkerEnv): StateRepository {
 }
 
 function isStateRepository(input: StateRepository | D1Database): input is StateRepository {
-    return "upsertCandidate" in input;
+    return typeof input === "object" && input !== null && "upsertCandidate" in input;
 }
 
 function json(body: unknown, init: JsonResponseInit = {}): Response {
@@ -307,6 +363,32 @@ function readOptionalMs(value: unknown): number | null {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function hasValidFinalizedMetadata(payload: unknown): payload is {
+    event_uid: string;
+    event_revision: number;
+    source_updated_at_ms: number;
+} {
+    if (!isRecord(payload)) {
+        return false;
+    }
+    return (
+        typeof payload.event_uid === "string" &&
+        payload.event_uid.length > 0 &&
+        Number.isSafeInteger(payload.event_revision) &&
+        Number.isSafeInteger(payload.source_updated_at_ms)
+    );
+}
+
+function emptyProcessSummary(): ProcessSummary {
+    return {
+        processed: 0,
+        deferred: 0,
+        recovered: 0,
+        failed: 0,
+        rejected: 0,
+    };
 }
 
 const app = createWorkerApp();
