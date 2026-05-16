@@ -1,5 +1,6 @@
 import type { OffchainStatus, OracleErrorCode, TeeCoreResult } from "@sonari/oracle-shared";
 import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
+import { screenUsgsCandidate } from "./screening.js";
 import type { UsgsEarthquakeCandidate } from "./usgs.js";
 
 export interface EarthquakeEventRow {
@@ -18,7 +19,11 @@ export interface EarthquakeEventRow {
 }
 
 export interface StateRepository {
-    upsertCandidate(candidate: UsgsEarthquakeCandidate, nowMs: number): Promise<void>;
+    upsertCandidate(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+        options?: UpsertCandidateOptions,
+    ): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
     claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean>;
@@ -42,6 +47,10 @@ export interface StateRepository {
     ): Promise<number>;
 }
 
+export interface UpsertCandidateOptions {
+    bypassScreening?: boolean;
+}
+
 const DUE_STATUSES: OffchainStatus[] = ["new", "pending_source", "pending_mmi", "failed"];
 const TERMINAL_STATUSES = new Set<OffchainStatus>(["finalized", "submitted", "rejected"]);
 
@@ -63,7 +72,14 @@ const SELECT_COLUMNS = `
 export class D1StateRepository implements StateRepository {
     constructor(private readonly db: D1Database) {}
 
-    async upsertCandidate(candidate: UsgsEarthquakeCandidate, nowMs: number): Promise<void> {
+    async upsertCandidate(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+        options: UpsertCandidateOptions = {},
+    ): Promise<void> {
+        const screening = options.bypassScreening
+            ? { status: "new" as const, error_code: null }
+            : screenUsgsCandidate(candidate);
         await this.db
             .prepare(
                 `INSERT INTO earthquake_events (
@@ -79,8 +95,20 @@ export class D1StateRepository implements StateRepository {
                   error_code,
                   created_at_ms,
                   updated_at_ms
-                ) VALUES (?, NULL, 'new', 0, NULL, ?, 0, ?, ?, NULL, ?, ?)
+                ) VALUES (?, NULL, ?, 0, NULL, ?, 0, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_event_id) DO UPDATE SET
+                  status = CASE
+                    WHEN earthquake_events.status IN ('finalized', 'submitted', 'rejected')
+                      THEN earthquake_events.status
+                    WHEN earthquake_events.status = 'ignored_small' AND excluded.status = 'new'
+                      THEN 'new'
+                    ELSE earthquake_events.status
+                  END,
+                  next_retry_at_ms = CASE
+                    WHEN earthquake_events.status = 'ignored_small'
+                      THEN NULL
+                    ELSE earthquake_events.next_retry_at_ms
+                  END,
                   last_seen_at_ms = excluded.last_seen_at_ms,
                   source_updated_at_ms = CASE
                     WHEN earthquake_events.status IN ('finalized', 'submitted', 'rejected')
@@ -90,13 +118,24 @@ export class D1StateRepository implements StateRepository {
                       excluded.source_updated_at_ms
                     )
                   END,
+                  error_code = CASE
+                    WHEN earthquake_events.status IN ('finalized', 'submitted', 'rejected')
+                      THEN earthquake_events.error_code
+                    WHEN earthquake_events.status = 'ignored_small' AND excluded.status = 'new'
+                      THEN NULL
+                    WHEN earthquake_events.status = 'ignored_small' AND excluded.status = 'ignored_small'
+                      THEN excluded.error_code
+                    ELSE earthquake_events.error_code
+                  END,
                   updated_at_ms = excluded.updated_at_ms`,
             )
             .bind(
                 candidate.source_event_id,
+                screening.status,
                 candidate.occurred_at_ms + FINALIZATION_WINDOW_MS,
                 nowMs,
                 candidate.source_updated_at_ms,
+                screening.error_code,
                 nowMs,
                 nowMs,
             )
@@ -279,32 +318,53 @@ export class D1StateRepository implements StateRepository {
 export class InMemoryStateRepository implements StateRepository {
     private readonly rows = new Map<string, EarthquakeEventRow>();
 
-    async upsertCandidate(candidate: UsgsEarthquakeCandidate, nowMs: number): Promise<void> {
+    async upsertCandidate(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+        options: UpsertCandidateOptions = {},
+    ): Promise<void> {
+        const screening = options.bypassScreening
+            ? { status: "new" as const, error_code: null }
+            : screenUsgsCandidate(candidate);
         const existing = this.rows.get(candidate.source_event_id);
         if (existing === undefined) {
             this.rows.set(candidate.source_event_id, {
                 source_event_id: candidate.source_event_id,
                 event_uid: null,
-                status: "new",
+                status: screening.status,
                 retry_count: 0,
                 next_retry_at_ms: null,
                 finalization_deadline_at_ms: candidate.occurred_at_ms + FINALIZATION_WINDOW_MS,
                 latest_revision: 0,
                 last_seen_at_ms: nowMs,
                 source_updated_at_ms: candidate.source_updated_at_ms,
-                error_code: null,
+                error_code: screening.error_code,
                 created_at_ms: nowMs,
                 updated_at_ms: nowMs,
             });
             return;
         }
 
+        const promotedFromIgnoredSmall =
+            existing.status === "ignored_small" && screening.status === "new";
+        const refreshedIgnoredSmall =
+            existing.status === "ignored_small" && screening.status === "ignored_small";
         this.rows.set(candidate.source_event_id, {
             ...existing,
+            status: promotedFromIgnoredSmall ? "new" : existing.status,
+            next_retry_at_ms:
+                promotedFromIgnoredSmall || refreshedIgnoredSmall
+                    ? null
+                    : existing.next_retry_at_ms,
             last_seen_at_ms: nowMs,
             source_updated_at_ms: TERMINAL_STATUSES.has(existing.status)
                 ? existing.source_updated_at_ms
                 : Math.max(existing.source_updated_at_ms ?? 0, candidate.source_updated_at_ms),
+            error_code: promotedFromIgnoredSmall
+                ? null
+                : refreshedIgnoredSmall
+                  ? screening.error_code
+                  : existing.error_code,
             updated_at_ms: nowMs,
         });
     }

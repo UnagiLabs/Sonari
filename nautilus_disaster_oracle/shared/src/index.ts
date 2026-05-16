@@ -82,6 +82,7 @@ export const OFFCHAIN_STATUSES = [
     "processing",
     "pending_source",
     "pending_mmi",
+    "ignored_small",
     "finalized",
     "submitted",
     "failed",
@@ -107,6 +108,7 @@ export const ERROR_CODES = [
     "RELAYER_SUBMIT_FAILED",
     "MOVE_REJECTED",
     "REJECTED_AUTO_TRIGGER",
+    "WATCHER_BELOW_AUTO_THRESHOLD",
 ] as const;
 
 export type PayloadV1Field = (typeof PAYLOAD_V1_FIELD_ORDER)[number];

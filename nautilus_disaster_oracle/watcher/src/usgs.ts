@@ -2,7 +2,13 @@ export interface UsgsEarthquakeCandidate {
     source_event_id: string;
     occurred_at_ms: number;
     source_updated_at_ms: number;
+    magnitude: number | null;
+    summary_mmi: number | null;
+    alert: UsgsAlertLevel | null;
+    tsunami: boolean;
 }
+
+export type UsgsAlertLevel = "green" | "yellow" | "orange" | "red";
 
 export const USGS_RECENT_FEED_URL =
     "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson";
@@ -51,7 +57,21 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         source_event_id: feature.id,
         occurred_at_ms: occurredAtMs,
         source_updated_at_ms: sourceUpdatedAtMs,
+        magnitude: readFiniteNumber(feature.properties.mag),
+        summary_mmi: readFiniteNumber(feature.properties.mmi),
+        alert: readAlert(feature.properties.alert),
+        tsunami: feature.properties.tsunami === 1,
     };
+}
+
+function readFiniteNumber(input: unknown): number | null {
+    return typeof input === "number" && Number.isFinite(input) ? input : null;
+}
+
+function readAlert(input: unknown): UsgsAlertLevel | null {
+    return input === "green" || input === "yellow" || input === "orange" || input === "red"
+        ? input
+        : null;
 }
 
 function isUnixMs(input: unknown): input is number {

@@ -13,7 +13,12 @@ import {
     FINALIZATION_WINDOW_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
-import { D1StateRepository, type EarthquakeEventRow, type StateRepository } from "./state.js";
+import {
+    D1StateRepository,
+    type EarthquakeEventRow,
+    type StateRepository,
+    type UpsertCandidateOptions,
+} from "./state.js";
 import { MockRunnerAdapter, type RunnerAdapter } from "./trigger_tee.js";
 import { fetchUsgsRecentCandidates, type UsgsEarthquakeCandidate } from "./usgs.js";
 
@@ -25,7 +30,13 @@ export {
     HOUR_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
-export type { EarthquakeEventRow, StateRepository } from "./state.js";
+export {
+    screenUsgsCandidate,
+    WATCHER_ALERT_LEVELS,
+    WATCHER_MIN_MAGNITUDE,
+    WATCHER_MIN_SUMMARY_MMI,
+} from "./screening.js";
+export type { EarthquakeEventRow, StateRepository, UpsertCandidateOptions } from "./state.js";
 export { D1StateRepository, InMemoryStateRepository } from "./state.js";
 export type { RunnerAdapter, RunnerContext } from "./trigger_tee.js";
 export { MockRunnerAdapter } from "./trigger_tee.js";
@@ -36,7 +47,12 @@ export {
     USGS_RECENT_FEED_URL,
 } from "./usgs.js";
 
-const TERMINAL_STATUSES = new Set<OffchainStatus>(["finalized", "submitted", "rejected"]);
+const TERMINAL_STATUSES = new Set<OffchainStatus>([
+    "ignored_small",
+    "finalized",
+    "submitted",
+    "rejected",
+]);
 
 export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
@@ -85,9 +101,10 @@ export async function scanCandidates(
     repository: StateRepository,
     candidates: readonly UsgsEarthquakeCandidate[],
     nowMs: number,
+    options: UpsertCandidateOptions = {},
 ): Promise<number> {
     for (const candidate of candidates) {
-        await repository.upsertCandidate(candidate, nowMs);
+        await repository.upsertCandidate(candidate, nowMs, options);
     }
     return candidates.length;
 }
@@ -196,9 +213,14 @@ async function handleManualEarthquake(
                 source_event_id: sourceEventId,
                 occurred_at_ms: occurredAtMs,
                 source_updated_at_ms: sourceUpdatedAtMs,
+                magnitude: null,
+                summary_mmi: null,
+                alert: null,
+                tsunami: false,
             },
         ],
         nowMs,
+        { bypassScreening: true },
     );
 
     const summary = emptyProcessSummary();
