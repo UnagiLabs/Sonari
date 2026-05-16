@@ -1,11 +1,20 @@
 # USGS pending_source_no_shakemap
 
+出典:
+- 派生元の USGS イベント: us7000pending-source
+- 取得日: 2026-05-15
+- フィクスチャ用の変更: yes
+- テストに必要なネットワークアクセス: no
+
+<!--
+verifier:
 Source:
-- Derived from USGS event: us7000pending-source
-- Captured at: 2026-05-15
-- Modified for fixture: yes
+- Derived from USGS event:
+- Captured at:
+- Modified for fixture:
 - Network access required for tests: no
+-->
 
-This artificial fixture represents a USGS detail response that was fetched successfully, but `products.shakemap` is absent. The Oracle must not finalize and should return `pending_source` with `SHAKEMAP_PRODUCT_MISSING`.
+この人工フィクスチャは、取得自体は成功したものの `products.shakemap` が存在しない USGS 詳細レスポンスを表します。Oracle は確定してはならず、`pending_source` と `SHAKEMAP_PRODUCT_MISSING` を返す必要があります。
 
-The USGS detail JSON is minimized to the fields needed by Oracle workflow tests.
+USGS 詳細 JSON は、Oracle ワークフローテストに必要なフィールドまで最小化されています。

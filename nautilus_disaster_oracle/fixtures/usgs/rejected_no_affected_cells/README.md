@@ -1,11 +1,20 @@
 # USGS rejected_no_affected_cells
 
+出典:
+- 派生元の USGS イベント: us7000no-affected
+- 取得日: 2026-05-15
+- フィクスチャ用の変更: yes
+- テストに必要なネットワークアクセス: no
+
+<!--
+verifier:
 Source:
-- Derived from USGS event: us7000no-affected
-- Captured at: 2026-05-15
-- Modified for fixture: yes
+- Derived from USGS event:
+- Captured at:
+- Modified for fixture:
 - Network access required for tests: no
+-->
 
-This artificial fixture represents a USGS ShakeMap source with valid MMI values, but all values are below MMI VII. The Oracle must reject because no `cell_band >= 1` affected cell exists.
+この人工フィクスチャは、有効な MMI 値を持つものの、すべての値が MMI VII を下回る USGS の ShakeMap ソースを表します。`cell_band >= 1` の影響セルが存在しないため、Oracle は拒否する必要があります。
 
-The USGS detail JSON is minimized to the fields needed by Oracle workflow tests.
+USGS 詳細 JSON は、Oracle ワークフローテストに必要なフィールドまで最小化されています。

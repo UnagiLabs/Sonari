@@ -1,11 +1,20 @@
 # USGS pending_mmi_empty_grid
 
+出典:
+- 派生元の USGS イベント: us7000pending-mmi
+- 取得日: 2026-05-15
+- フィクスチャ用の変更: yes
+- テストに必要なネットワークアクセス: no
+
+<!--
+verifier:
 Source:
-- Derived from USGS event: us7000pending-mmi
-- Captured at: 2026-05-15
-- Modified for fixture: yes
+- Derived from USGS event:
+- Captured at:
+- Modified for fixture:
 - Network access required for tests: no
+-->
 
-This artificial fixture represents a USGS detail response with a ShakeMap source and a fetched grid, but the grid has no usable MMI values. The Oracle must not finalize and should return `pending_mmi` with `MMI_NOT_AVAILABLE`.
+この人工フィクスチャは、ShakeMap ソースと取得済みグリッドを含むものの、グリッドに利用可能な MMI 値がない USGS 詳細レスポンスを表します。Oracle は確定してはならず、`pending_mmi` と `MMI_NOT_AVAILABLE` を返す必要があります。
 
-The USGS detail JSON is minimized to the fields needed by Oracle workflow tests.
+USGS 詳細 JSON は、Oracle ワークフローテストに必要なフィールドまで最小化されています。
