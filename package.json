@@ -12,15 +12,19 @@
         "check:ts": "biome check .",
         "check:rust": "cargo fmt --manifest-path nautilus_disaster_oracle/tee/Cargo.toml --check && cargo check --manifest-path nautilus_disaster_oracle/tee/Cargo.toml",
         "lint": "pnpm check",
-        "typecheck": "pnpm -r typecheck",
+        "typecheck": "pnpm -r typecheck && pnpm typecheck:scripts",
+        "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
         "test": "pnpm -r test",
+        "test:local-e2e": "vitest run scripts",
         "test:relayer": "pnpm --filter @sonari/oracle-relayer test",
         "relayer": "pnpm --filter @sonari/oracle-relayer cli",
+        "oracle:e2e:local": "tsx scripts/nautilus_local_e2e.ts",
         "test:oracle": "pnpm --filter './nautilus_disaster_oracle/**' test && cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml"
     },
     "devDependencies": {
         "@biomejs/biome": "^2.4.15",
         "@types/node": "^24.10.2",
+        "tsx": "^4.22.0",
         "typescript": "^5.9.3",
         "vitest": "^4.0.15"
     }

@@ -5,8 +5,10 @@
         "includes": [
             "package.json",
             "tsconfig.json",
+            "tsconfig.scripts.json",
             "tsconfig.base.json",
             "biome.json",
+            "scripts/**/*.ts",
             "nautilus_disaster_oracle/shared/package.json",
             "nautilus_disaster_oracle/shared/tsconfig.json",
             "nautilus_disaster_oracle/shared/src/**/*.ts",
