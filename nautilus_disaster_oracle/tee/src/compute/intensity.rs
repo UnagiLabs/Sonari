@@ -1,4 +1,4 @@
-use crate::types::OracleError;
+use crate::core::types::OracleError;
 
 pub fn mmi_decimal_to_x100(input: &str) -> Result<u16, OracleError> {
     let value = input.trim();

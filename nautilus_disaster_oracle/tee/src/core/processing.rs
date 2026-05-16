@@ -1,14 +1,14 @@
-use crate::artifacts::{
+use crate::compute::geo::affected_cells_from_points;
+use crate::compute::merkle::{merkle_root_from_leaf_hashes, sample_proof};
+use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest,
     RawSourceContentHash, SourceEntry, SourceManifest, UnsignedPayloadV1,
 };
-use crate::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
+use crate::core::types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
 use crate::crypto::{LocalEd25519Signer, PayloadSigner, sha3_256_bytes, to_hex};
-use crate::geo::affected_cells_from_points;
-use crate::json::canonical_json_bytes;
-use crate::merkle::{merkle_root_from_leaf_hashes, sample_proof};
-use crate::types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
-use crate::usgs::{UsgsDetail, UsgsShakeMapProduct, parse_detail, parse_grid_points};
+use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
+use crate::encoding::json::canonical_json_bytes;
+use crate::source::usgs::{UsgsDetail, UsgsShakeMapProduct, parse_detail, parse_grid_points};
 use crate::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_NAME, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,

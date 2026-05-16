@@ -1,8 +1,8 @@
 use crate::MIN_CLAIM_BAND;
-use crate::artifacts::AffectedCellJson;
-use crate::intensity::{cell_band, p90_x100};
-use crate::types::OracleError;
-use crate::usgs::GridPoint;
+use crate::compute::intensity::{cell_band, p90_x100};
+use crate::core::artifacts::AffectedCellJson;
+use crate::core::types::OracleError;
+use crate::source::usgs::GridPoint;
 use h3o::{LatLng, Resolution};
 use std::collections::BTreeMap;
 

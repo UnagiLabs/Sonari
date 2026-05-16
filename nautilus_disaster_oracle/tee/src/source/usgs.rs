@@ -1,5 +1,5 @@
-use crate::intensity::mmi_decimal_to_x100;
-use crate::types::OracleError;
+use crate::compute::intensity::mmi_decimal_to_x100;
+use crate::core::types::OracleError;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use serde::Deserialize;

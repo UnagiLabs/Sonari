@@ -1,6 +1,6 @@
-use crate::artifacts::{AffectedCellsArtifact, UnsignedPayloadV1};
+use crate::core::artifacts::{AffectedCellsArtifact, UnsignedPayloadV1};
+use crate::core::types::OracleError;
 use crate::crypto::{hex_to_32, sha3_256_bytes};
-use crate::types::OracleError;
 use crate::{
     CELL_METRIC_USGS_MMI, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
     INTENSITY_SCALE_MMI_X100,

@@ -1,5 +1,6 @@
-use crate::artifacts::SignatureArtifact;
-use crate::types::OracleError;
+// Cryptographic hashing and signing helpers.
+use crate::core::artifacts::SignatureArtifact;
+use crate::core::types::OracleError;
 use ed25519_dalek::{Signer, SigningKey};
 use sha3::{Digest, Sha3_256};
 
