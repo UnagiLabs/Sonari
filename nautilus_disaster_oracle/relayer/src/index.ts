@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { SuiJsonRpcClient as SuiClient } from "@mysten/sui/jsonRpc";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { type RelayerSubmitInput, validateRelayerSubmitInput } from "@sonari/oracle-shared";
 
@@ -42,8 +42,9 @@ export interface RelayerTransaction {
 }
 
 export interface RelayerDryRunClient {
-    dryRunTransactionBlock(input: {
-        transactionBlock: Uint8Array;
+    simulateTransaction(input: {
+        transaction: Uint8Array;
+        include: { effects: true };
     }): Promise<RelayerExecutionResponse>;
 }
 
@@ -51,18 +52,38 @@ export interface RelayerSubmitClient {
     signAndExecuteTransaction(input: {
         transaction: unknown;
         signer: RelayerSigner;
-        options: { showEffects: true };
+        include: { effects: true };
     }): Promise<RelayerExecutionResponse>;
 }
 
-export interface RelayerExecutionResponse {
+export type RelayerTransactionEffects = Record<string, unknown>;
+
+export interface RelayerTransactionResult {
     digest?: string;
-    effects?: {
-        status?: {
-            status?: string;
-            error?: string;
-        };
-    };
+    status?: RelayerExecutionStatus;
+    effects?: RelayerTransactionEffects;
+}
+
+export type RelayerExecutionStatus =
+    | { success: true; error: null }
+    | { success: false; error?: { message?: string } | string | null };
+
+export type RelayerExecutionResponse =
+    | {
+          $kind: "Transaction";
+          Transaction: RelayerTransactionResult;
+          FailedTransaction?: never;
+      }
+    | {
+          $kind: "FailedTransaction";
+          Transaction?: never;
+          FailedTransaction: RelayerTransactionResult;
+      }
+    | Record<string, unknown>;
+
+interface NormalizedTransactionResult {
+    digest?: string;
+    effects: RelayerTransactionEffects;
 }
 
 export interface ParsedRelayerSubmitInput {
@@ -86,13 +107,13 @@ export interface RelayerRequestPreview {
 export interface RelayerDryRunSuccess {
     request: RelayerRequestPreview;
     transactionBytes: number[];
-    effects: NonNullable<RelayerExecutionResponse["effects"]>;
+    effects: RelayerTransactionEffects;
 }
 
 export interface RelayerSubmitSuccess {
     request: RelayerRequestPreview;
     digest?: string;
-    effects: NonNullable<RelayerExecutionResponse["effects"]>;
+    effects: RelayerTransactionEffects;
 }
 
 const ED25519_SIGNATURE_BYTES = 64;
@@ -182,12 +203,13 @@ export async function dryRunRelayerSubmit(
                 senderAddress: config.senderAddress,
             })) as RelayerTransaction;
         const transactionBytes = await transaction.build({ client });
-        const response = await client.dryRunTransactionBlock({
-            transactionBlock: transactionBytes,
+        const response = await client.simulateTransaction({
+            transaction: transactionBytes,
+            include: { effects: true },
         });
-        const effectsResult = normalizeEffects(response);
-        if (!effectsResult.ok) {
-            return effectsResult;
+        const result = normalizeTransactionResult(response);
+        if (!result.ok) {
+            return result;
         }
 
         return {
@@ -195,7 +217,7 @@ export async function dryRunRelayerSubmit(
             value: {
                 request: preview.value,
                 transactionBytes: Array.from(transactionBytes),
-                effects: effectsResult.value,
+                effects: result.value.effects,
             },
         };
     } catch (error) {
@@ -228,19 +250,19 @@ export async function submitRelayerPayload(
         const response = await client.signAndExecuteTransaction({
             transaction,
             signer: config.signer,
-            options: { showEffects: true },
+            include: { effects: true },
         });
-        const effectsResult = normalizeEffects(response);
-        if (!effectsResult.ok) {
-            return effectsResult;
+        const result = normalizeTransactionResult(response);
+        if (!result.ok) {
+            return result;
         }
 
         const value: RelayerSubmitSuccess = {
             request: preview.value,
-            effects: effectsResult.value,
+            effects: result.value.effects,
         };
-        if (response.digest !== undefined) {
-            value.digest = response.digest;
+        if (result.value.digest !== undefined) {
+            value.digest = result.value.digest;
         }
 
         return {
@@ -319,9 +341,9 @@ function validateRequestConfig(config: RelayerRequestConfig): RelayerResult<Rela
 }
 
 function createSuiClient(rpcUrl: string): RelayerDryRunClient & RelayerSubmitClient {
-    return new SuiClient({
-        url: rpcUrl,
+    return new SuiGrpcClient({
         network: inferSuiNetwork(rpcUrl),
+        baseUrl: rpcUrl,
     }) as unknown as RelayerDryRunClient & RelayerSubmitClient;
 }
 
@@ -367,26 +389,94 @@ function parseHexBytes(
     return { ok: true, value: bytes };
 }
 
-function normalizeEffects(
+function normalizeTransactionResult(
     response: RelayerExecutionResponse,
-): RelayerResult<NonNullable<RelayerExecutionResponse["effects"]>> {
-    if (response.effects?.status?.status === "success") {
-        return { ok: true, value: response.effects };
+): RelayerResult<NormalizedTransactionResult> {
+    if (!isRecord(response)) {
+        return relayerSubmitFailed("Sui response was not an object");
     }
 
-    if (response.effects?.status?.status === "failure") {
-        return {
-            ok: false,
-            error_code: MOVE_REJECTED,
-            message: response.effects.status.error ?? "Move transaction effects reported failure",
+    if (response.$kind === "Transaction") {
+        const transaction = response.Transaction;
+        if (!isRecord(transaction)) {
+            return relayerSubmitFailed("Sui response did not include transaction data");
+        }
+
+        const status = readExecutionStatus(transaction.status);
+        if (status?.success === false) {
+            return moveRejected(status.errorMessage ?? "Move transaction reported failure");
+        }
+
+        if (status?.success !== true) {
+            return relayerSubmitFailed("Sui response did not include transaction status");
+        }
+
+        if (!isRecord(transaction.effects)) {
+            return relayerSubmitFailed("Sui response did not include transaction effects");
+        }
+
+        const value: NormalizedTransactionResult = {
+            effects: transaction.effects,
         };
+        if (typeof transaction.digest === "string") {
+            value.digest = transaction.digest;
+        }
+
+        return { ok: true, value };
     }
 
-    return relayerSubmitFailed("Sui response did not include transaction effects status");
+    if (response.$kind === "FailedTransaction") {
+        const failedTransaction = response.FailedTransaction;
+        const status = isRecord(failedTransaction)
+            ? readExecutionStatus(failedTransaction.status)
+            : undefined;
+
+        return moveRejected(status?.errorMessage ?? "Move transaction failed");
+    }
+
+    return relayerSubmitFailed("Sui response used an unknown transaction result shape");
 }
 
 function relayerSubmitFailed<T = never>(message: string): RelayerResult<T> {
     return { ok: false, error_code: RELAYER_SUBMIT_FAILED, message };
+}
+
+function moveRejected<T = never>(message: string): RelayerResult<T> {
+    return { ok: false, error_code: MOVE_REJECTED, message };
+}
+
+function readExecutionStatus(
+    value: unknown,
+):
+    | { success: true; errorMessage?: undefined }
+    | { success: false; errorMessage?: string }
+    | undefined {
+    if (!isRecord(value) || typeof value.success !== "boolean") {
+        return undefined;
+    }
+
+    if (value.success) {
+        return { success: true };
+    }
+
+    const errorMessage = readExecutionErrorMessage(value.error);
+    return errorMessage === undefined ? { success: false } : { success: false, errorMessage };
+}
+
+function readExecutionErrorMessage(value: unknown): string | undefined {
+    if (typeof value === "string" && value.length > 0) {
+        return value;
+    }
+
+    if (isRecord(value) && typeof value.message === "string" && value.message.length > 0) {
+        return value.message;
+    }
+
+    return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
 }
 
 function cloneMoveArguments(

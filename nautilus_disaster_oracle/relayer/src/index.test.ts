@@ -41,6 +41,28 @@ function makeThrowingTransaction(error = new Error("build failed")) {
     };
 }
 
+function successfulTransactionResponse(effects = { status: { success: true, error: null } }) {
+    return {
+        $kind: "Transaction" as const,
+        Transaction: {
+            digest: "abc",
+            status: { success: true as const, error: null },
+            effects,
+        },
+    };
+}
+
+function failedTransactionResponse(effects = { status: { success: false, error: null } }) {
+    return {
+        $kind: "FailedTransaction" as const,
+        FailedTransaction: {
+            digest: "abc",
+            status: { success: false as const, error: { message: "Move abort" } },
+            effects,
+        },
+    };
+}
+
 describe("relayer request preview", () => {
     it("converts the finalized fixture into deterministic Move entry arguments", () => {
         const result = buildRelayerRequestPreview(fixtureInput, { target, registry });
@@ -130,11 +152,10 @@ describe("relayer request preview", () => {
 });
 
 describe("relayer submit execution", () => {
-    it("maps dry-run and submit effects failures to MOVE_REJECTED", async () => {
-        const failedEffects = { status: { status: "failure", error: "Move abort" } };
+    it("maps dry-run and submit transaction failures to MOVE_REJECTED", async () => {
         const client = {
-            dryRunTransactionBlock: async () => ({ effects: failedEffects }),
-            signAndExecuteTransaction: async () => ({ digest: "abc", effects: failedEffects }),
+            simulateTransaction: async () => failedTransactionResponse(),
+            signAndExecuteTransaction: async () => failedTransactionResponse(),
         };
 
         await expect(
@@ -168,9 +189,7 @@ describe("relayer submit execution", () => {
                 rpcUrl,
                 senderAddress: "",
                 client: {
-                    dryRunTransactionBlock: async () => ({
-                        effects: { status: { status: "success" } },
-                    }),
+                    simulateTransaction: async () => successfulTransactionResponse(),
                 },
                 transaction: makeFakeTransaction(),
             }),
@@ -183,9 +202,7 @@ describe("relayer submit execution", () => {
                 rpcUrl,
                 senderAddress,
                 client: {
-                    dryRunTransactionBlock: async () => ({
-                        effects: { status: { status: "success" } },
-                    }),
+                    simulateTransaction: async () => successfulTransactionResponse(),
                 },
                 transaction: makeThrowingTransaction(),
             }),
@@ -198,7 +215,7 @@ describe("relayer submit execution", () => {
                 rpcUrl,
                 senderAddress,
                 client: {
-                    dryRunTransactionBlock: async () => {
+                    simulateTransaction: async () => {
                         throw new Error("network down");
                     },
                 },
@@ -212,13 +229,110 @@ describe("relayer submit execution", () => {
                 registry,
                 rpcUrl,
                 client: {
-                    signAndExecuteTransaction: async () => ({
-                        digest: "abc",
-                        effects: { status: { status: "success" } },
-                    }),
+                    signAndExecuteTransaction: async () => successfulTransactionResponse(),
                 },
                 transaction: makeFakeTransaction(),
             }),
         ).resolves.toMatchObject({ ok: false, error_code: "RELAYER_SUBMIT_FAILED" });
+    });
+
+    it("dry-runs with simulateTransaction and built transaction bytes", async () => {
+        const transactionBytes = new Uint8Array([4, 5, 6]);
+        const calls: unknown[] = [];
+        const client = {
+            simulateTransaction: async (input: unknown) => {
+                calls.push(input);
+                return successfulTransactionResponse();
+            },
+        };
+
+        const result = await dryRunRelayerSubmit(fixtureInput, {
+            target,
+            registry,
+            rpcUrl,
+            senderAddress,
+            client,
+            transaction: makeFakeTransaction(transactionBytes),
+        });
+
+        expect(result).toMatchObject({
+            ok: true,
+            value: {
+                transactionBytes: [4, 5, 6],
+            },
+        });
+        expect(calls).toEqual([
+            {
+                transaction: transactionBytes,
+                include: { effects: true },
+            },
+        ]);
+        expect(client).not.toHaveProperty(["dryRun", "TransactionBlock"].join(""));
+    });
+
+    it("submits with effects included and returns the current API digest and effects", async () => {
+        const effects = { status: { success: true, error: null }, transactionDigest: "abc" };
+        const calls: unknown[] = [];
+        const client = {
+            signAndExecuteTransaction: async (input: unknown) => {
+                calls.push(input);
+                return successfulTransactionResponse(effects);
+            },
+        };
+        const signer = { toSuiAddress: () => senderAddress };
+        const transaction = makeFakeTransaction();
+
+        const result = await submitRelayerPayload(fixtureInput, {
+            target,
+            registry,
+            rpcUrl,
+            signer,
+            client,
+            transaction,
+        });
+
+        expect(result).toMatchObject({
+            ok: true,
+            value: {
+                digest: "abc",
+                effects,
+            },
+        });
+        expect(calls).toEqual([
+            {
+                transaction,
+                signer,
+                include: { effects: true },
+            },
+        ]);
+    });
+
+    it("normalizes missing effects and unknown SDK response shapes to RELAYER_SUBMIT_FAILED", async () => {
+        for (const response of [
+            {
+                $kind: "Transaction",
+                Transaction: {
+                    digest: "abc",
+                    status: { success: true, error: null },
+                },
+            },
+            {
+                $kind: "Other",
+                Other: {},
+            },
+        ]) {
+            await expect(
+                dryRunRelayerSubmit(fixtureInput, {
+                    target,
+                    registry,
+                    rpcUrl,
+                    senderAddress,
+                    client: {
+                        simulateTransaction: async () => response,
+                    },
+                    transaction: makeFakeTransaction(),
+                }),
+            ).resolves.toMatchObject({ ok: false, error_code: "RELAYER_SUBMIT_FAILED" });
+        }
     });
 });
