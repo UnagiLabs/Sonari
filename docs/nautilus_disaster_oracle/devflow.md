@@ -10,7 +10,7 @@
 - Fixture は人間が期待値を確認できる最小 grid から始める。
 - Oracle Core はまず署名なし Payload 生成まで作り、hash / root が安定してから local 署名を追加する。
 - TEE 化の前に、通常の Rust CLI と Node script E2E で同じ出力を再現できる状態にする。
-- `finalized` Payload だけを Relayer に渡す。`pending_source`、`pending_mmi`、`rejected` は D1 状態として扱う。
+- `finalized` Payload だけを Relayer に渡す。`pending_source`、`pending_mmi`、`rejected`、`ignored_small` は D1 状態として扱う。
 - 外部サービス接続は adapter 境界に閉じ、core logic は fixture と unit test で検証できるようにする。
 
 ## 推奨順序
@@ -54,6 +54,9 @@
 やること:
 
 - status、error code、source、cell metric、generation method などの定数を定義する。
+- status に `ignored_small`、error code に `WATCHER_BELOW_AUTO_THRESHOLD` を追加する設計にする。
+- `ignored_small` は Watcher auto-screening で小さい地震として runner / TEE 起動を skip した offchain status として定義し、`rejected` とは分ける。
+- `NO_AFFECTED_CELLS` は TEE/Core 検証後に対象セルがない場合、`WATCHER_BELOW_AUTO_THRESHOLD` は TEE/Core を呼ぶ前に Watcher が skip した場合、`REJECTED_AUTO_TRIGGER` は 72h finalization deadline 超過として整理する。
 - Worker、TEE core、Relayer の入出力型を分ける。
 - root `schemas/` の enum 値、field order、hash 仕様を実装側の型へ写す。
 - root に `pnpm@10.27.0` workspace を用意し、`nautilus_disaster_oracle/shared`、`watcher`、`relayer` を workspace package として初期化する。
@@ -64,6 +67,7 @@
 
 - 各コンポーネントの責務と入出力型が決まっている。
 - Worker から core logic へ信頼済み値を渡さない設計になっている。
+- `ignored_small` と `WATCHER_BELOW_AUTO_THRESHOLD` の意味が shared 型・D1 状態・runner 対象判定で一貫している。
 - `pnpm test`、`pnpm typecheck`、`cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml` で Step 1 の型契約を検証できる。
 
 ### 2. Fixture と golden output を作る
@@ -139,14 +143,23 @@
 
 - Cloudflare Worker、Wrangler、D1 migration を用意する。
 - Cron で USGS recent earthquakes API を取得する。
-- 過去 60 分の重複スキャンと `source_event_id` の冪等管理を実装する。
+- 過去 60 分の `type === "earthquake"` event id を重複スキャンし、`source_event_id` の冪等管理を実装する。
+- USGS recent feed summary fields の `mag`、`mmi`、`alert`、`tsunami` を parser / D1 upsert 境界で保持する。
+- D1 upsert 時に summary auto-screening を実行し、`mag >= 5.5 OR mmi >= 6.0 OR alert IN ("yellow", "orange", "red") OR tsunami == 1` を満たすeventは `new`、満たさないeventは `ignored_small` + `WATCHER_BELOW_AUTO_THRESHOLD` にする。
+- null / 不正値の summary field は条件不一致として扱う。
+- `ignored_small` は `next_retry_at_ms = NULL`、`finalization_deadline_at_ms = occurred_at_ms + 72h` とし、due query、runner、TEE 起動対象から除外する。
+- 後続 USGS summary update で auto-screening 条件を満たした場合のみ `ignored_small -> new` に昇格する。
 - D1 status と `next_retry_at_ms` を管理する。
-- 手動投入 API を実装する。
+- 手動投入 API を実装し、summary auto-screening を bypass して任意の `source_event_id` を runner 対象にできるようにする。
 - 最初は AWS / TEE ではなく mock runner または local runner adapter を呼ぶ。
 
 完了条件:
 
-- `new`、`processing`、`pending_source`、`pending_mmi`、`finalized`、`submitted`、`failed`、`rejected` の遷移を D1 で追跡できる。
+- `new`、`processing`、`pending_source`、`pending_mmi`、`finalized`、`submitted`、`failed`、`rejected`、`ignored_small` の遷移を D1 で追跡できる。
+- USGS recent feed の `type === "earthquake"` event id が、auto-screening 結果にかかわらず D1 に upsert される。
+- threshold 未満のeventは `ignored_small` として残るが、mock runner / local runner adapter には渡らない。
+- 後続 summary update で条件を満たした `ignored_small` event だけが `new` へ昇格する。
+- manual submit は summary auto-screening を bypass して runner 対象にできる。
 - 24h / 48h / 72h の finalization rule を状態遷移として表現できる。
 - Worker は finalize 判定や Payload 生成をしていない。
 
@@ -263,6 +276,18 @@
 - HDF area weighted 集約。
 - Worker による Band 推定。
 - Relayer による Payload 補正。
+
+## Implementation follow-up TODO
+
+次PRでは docs-only ではなく実装として以下を反映する。
+
+- shared status / error code に `ignored_small` と `WATCHER_BELOW_AUTO_THRESHOLD` を追加する。
+- watcher parser で `mag`、`mmi`、`alert`、`tsunami` を保持する。
+- D1 upsert 時に summary auto-screening を実行する。
+- due 対象と runner / TEE 起動対象から `ignored_small` を除外する。
+- 後続 summary update による `ignored_small -> new` 昇格を実装する。
+- manual submit の summary auto-screening bypass を維持する。
+- threshold 境界値、null / 不正値、`ignored_small` 除外、昇格、manual submit bypass のテストを追加する。
 
 ## 最初のゴール
 
