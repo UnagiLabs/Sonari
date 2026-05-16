@@ -130,10 +130,17 @@ export async function runLocalOracleE2e(
     };
 
     if (runnerResult.status === "finalized") {
+        const relayerPreview = buildRelayerRequestPreview(runnerResult, { target, registry });
+        if (!relayerPreview.ok) {
+            throw new Error(
+                `Local E2E relayer preview failed: ${relayerPreview.error_code}: ${relayerPreview.message}`,
+            );
+        }
+
         return {
             ...baseOutput,
             runner_result: runnerResult,
-            relayer_preview: buildRelayerRequestPreview(runnerResult, { target, registry }),
+            relayer_preview: relayerPreview,
         };
     }
 

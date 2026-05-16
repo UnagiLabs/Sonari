@@ -52,6 +52,16 @@ describe("Nautilus local oracle E2E", () => {
         expect(output).not.toHaveProperty("relayer_skipped");
     });
 
+    it("fails finalized cases when relayer preview generation fails", async () => {
+        await expect(
+            runLocalOracleE2e({
+                caseId: "usgs/finalized_minimal",
+                target: "",
+                registry,
+            }),
+        ).rejects.toThrow(/Local E2E relayer preview failed: .*target and registry/);
+    });
+
     it.each([
         ["usgs/pending_source_no_shakemap", "pending_source", "SHAKEMAP_PRODUCT_MISSING"],
         ["usgs/pending_mmi_empty_grid", "pending_mmi", "MMI_NOT_AVAILABLE"],
