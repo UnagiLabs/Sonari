@@ -30,6 +30,10 @@ function candidate(
         source_event_id,
         occurred_at_ms: baseNow - 25 * HOUR_MS,
         source_updated_at_ms: baseNow - HOUR_MS,
+        magnitude: 6,
+        summary_mmi: null,
+        alert: null,
+        tsunami: false,
         ...patch,
     };
 }
@@ -55,6 +59,68 @@ describe("watcher state transitions", () => {
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "finalized",
             retry_count: 0,
+        });
+    });
+
+    it("stores below-threshold candidates but excludes them from runner selection", async () => {
+        const repository = new InMemoryStateRepository();
+        const runner = new MockRunnerAdapter();
+
+        await scanCandidates(
+            repository,
+            [
+                candidate("us7000small", {
+                    magnitude: 5.4,
+                    summary_mmi: null,
+                    alert: "green",
+                    tsunami: false,
+                }),
+            ],
+            baseNow,
+        );
+        const summary = await processDueEvents(repository, runner, baseNow);
+
+        expect(summary.processed).toBe(0);
+        expect(runner.requests).toHaveLength(0);
+        expect(await repository.get("us7000small")).toMatchObject({
+            status: "ignored_small",
+            error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            next_retry_at_ms: null,
+        });
+    });
+
+    it("promotes ignored_small candidates to new when later scans become eligible", async () => {
+        const repository = new InMemoryStateRepository();
+
+        await scanCandidates(
+            repository,
+            [
+                candidate("us7000promoted", {
+                    magnitude: 5.4,
+                    summary_mmi: null,
+                    alert: null,
+                    tsunami: false,
+                }),
+            ],
+            baseNow,
+        );
+        await scanCandidates(
+            repository,
+            [
+                candidate("us7000promoted", {
+                    magnitude: 5.5,
+                    summary_mmi: null,
+                    alert: null,
+                    tsunami: false,
+                }),
+            ],
+            baseNow + 1_000,
+        );
+
+        expect(await repository.get("us7000promoted")).toMatchObject({
+            status: "new",
+            error_code: null,
+            next_retry_at_ms: null,
         });
     });
 
@@ -248,6 +314,42 @@ describe("watcher state transitions", () => {
         expect(runner.requests).toHaveLength(0);
     });
 
+    it("does not pass ignored_small rows to the runner even if listed by a repository", async () => {
+        const row: EarthquakeEventRow = {
+            source_event_id: "us7000small",
+            event_uid: null,
+            status: "ignored_small",
+            retry_count: 0,
+            next_retry_at_ms: null,
+            finalization_deadline_at_ms: baseNow + FINALIZATION_WINDOW_MS,
+            latest_revision: 0,
+            last_seen_at_ms: baseNow,
+            source_updated_at_ms: baseNow,
+            error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            created_at_ms: baseNow,
+            updated_at_ms: baseNow,
+        };
+        const repository: StateRepository = {
+            upsertCandidate: async () => {},
+            get: async () => row,
+            listDue: async () => [row],
+            claimForProcessing: async () => {
+                throw new Error("ignored_small should not be claimed");
+            },
+            deferUntil: async () => {},
+            markRejected: async () => {},
+            markFailed: async () => {},
+            applyRunnerResult: async () => {},
+            recoverStaleProcessing: async () => 0,
+        };
+        const runner = new MockRunnerAdapter();
+
+        const summary = await processDueEvents(repository, runner, baseNow);
+
+        expect(summary.processed).toBe(0);
+        expect(runner.requests).toHaveLength(0);
+    });
+
     it("clamps pending runner retries to the finalization deadline", async () => {
         const repository = new InMemoryStateRepository();
         const runner: RunnerAdapter = {
@@ -388,6 +490,56 @@ describe("manual submit API", () => {
             event_uid: "us7000sonari",
         });
     });
+
+    it("manual submit bypasses auto-screening for an existing ignored_small candidate", async () => {
+        const repository = new InMemoryStateRepository();
+        const runner: RunnerAdapter = {
+            run: async (request) => ({
+                status: "finalized",
+                payload: {
+                    event_uid: request.source_event_id,
+                    event_revision: 1,
+                    source_updated_at_ms: baseNow - HOUR_MS,
+                },
+                payload_bcs_hex: "0x01",
+                signature: "0xsig",
+                public_key: "0xpub",
+            }),
+        };
+        const app = createWorkerApp({ now: () => baseNow, runner });
+
+        await scanCandidates(
+            repository,
+            [
+                candidate("us7000manual-small", {
+                    magnitude: null,
+                    summary_mmi: null,
+                    alert: null,
+                    tsunami: false,
+                }),
+            ],
+            baseNow - 1_000,
+        );
+
+        const response = await app.fetch(
+            new Request("https://watcher.test/manual/earthquakes", {
+                method: "POST",
+                headers: { authorization: "Bearer secret-token" },
+                body: JSON.stringify({
+                    source_event_id: "us7000manual-small",
+                    occurred_at_ms: baseNow - 25 * HOUR_MS,
+                    source_updated_at_ms: baseNow - HOUR_MS,
+                }),
+            }),
+            env(repository),
+        );
+
+        expect(response.status).toBe(202);
+        expect(await repository.get("us7000manual-small")).toMatchObject({
+            status: "finalized",
+            event_uid: "us7000manual-small",
+        });
+    });
 });
 
 describe("health endpoint", () => {
@@ -435,7 +587,17 @@ describe("runner boundary", () => {
         await processDueEvents(repository, runner, baseNow);
 
         expect(runner.requests).toEqual([buildWorkerToTeeRequest("us7000sonari")]);
-        for (const forbidden of ["payload", "signature", "affected_cells_root", "raw_data_hash"]) {
+        for (const forbidden of [
+            "payload",
+            "signature",
+            "hash",
+            "affected_cells_root",
+            "raw_data_hash",
+            "magnitude",
+            "summary_mmi",
+            "alert",
+            "tsunami",
+        ]) {
             expect(runner.requests[0]).not.toHaveProperty(forbidden);
         }
     });

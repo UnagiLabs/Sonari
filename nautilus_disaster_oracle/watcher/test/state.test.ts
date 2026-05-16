@@ -13,6 +13,10 @@ function candidate(
         source_event_id,
         occurred_at_ms: baseNow - 25 * 60 * 60 * 1_000,
         source_updated_at_ms: baseNow - 60 * 60 * 1_000,
+        magnitude: 6,
+        summary_mmi: null,
+        alert: null,
+        tsunami: false,
         ...patch,
     };
 }
@@ -56,6 +60,138 @@ describe("D1StateRepository", () => {
             source_updated_at_ms: baseNow - 60 * 60 * 1_000,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
+        });
+    });
+
+    it("stores below-threshold candidates as ignored_small without scheduling a retry", async () => {
+        const db = new FakeD1Database();
+        const repository = new D1StateRepository(db.binding);
+
+        await repository.upsertCandidate(
+            candidate("us7000small", {
+                magnitude: 5.4,
+                summary_mmi: null,
+                alert: "green",
+                tsunami: false,
+            }),
+            baseNow,
+        );
+
+        expect(db.rows.get("us7000small")).toMatchObject({
+            status: "ignored_small",
+            error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            next_retry_at_ms: null,
+        });
+    });
+
+    it("keeps ignored_small candidates ignored until the threshold is met", async () => {
+        const db = new FakeD1Database([
+            row({
+                source_event_id: "us7000small",
+                status: "ignored_small",
+                error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            }),
+        ]);
+        const repository = new D1StateRepository(db.binding);
+
+        await repository.upsertCandidate(
+            candidate("us7000small", {
+                magnitude: 5.4,
+                summary_mmi: null,
+                alert: "green",
+                tsunami: false,
+            }),
+            baseNow + 1_000,
+        );
+
+        expect(db.rows.get("us7000small")).toMatchObject({
+            status: "ignored_small",
+            error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            next_retry_at_ms: null,
+        });
+    });
+
+    it("promotes ignored_small candidates to new when later scans meet the threshold", async () => {
+        const db = new FakeD1Database([
+            row({
+                source_event_id: "us7000promoted",
+                status: "ignored_small",
+                error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+                next_retry_at_ms: baseNow + 10_000,
+            }),
+        ]);
+        const repository = new D1StateRepository(db.binding);
+
+        await repository.upsertCandidate(
+            candidate("us7000promoted", {
+                magnitude: 5.5,
+                summary_mmi: null,
+                alert: null,
+                tsunami: false,
+            }),
+            baseNow + 1_000,
+        );
+
+        expect(db.rows.get("us7000promoted")).toMatchObject({
+            status: "new",
+            error_code: null,
+            next_retry_at_ms: null,
+        });
+    });
+
+    it("does not downgrade runner-eligible rows when later scans are below threshold", async () => {
+        const db = new FakeD1Database([
+            row({
+                source_event_id: "us7000active",
+                status: "pending_mmi",
+                error_code: "MMI_NOT_AVAILABLE",
+                next_retry_at_ms: baseNow + 10_000,
+            }),
+        ]);
+        const repository = new D1StateRepository(db.binding);
+
+        await repository.upsertCandidate(
+            candidate("us7000active", {
+                magnitude: 5.4,
+                summary_mmi: null,
+                alert: null,
+                tsunami: false,
+            }),
+            baseNow + 1_000,
+        );
+
+        expect(db.rows.get("us7000active")).toMatchObject({
+            status: "pending_mmi",
+            error_code: "MMI_NOT_AVAILABLE",
+            next_retry_at_ms: baseNow + 10_000,
+        });
+    });
+
+    it("manual bypass promotes ignored_small candidates to new", async () => {
+        const db = new FakeD1Database([
+            row({
+                source_event_id: "us7000manual",
+                status: "ignored_small",
+                error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            }),
+        ]);
+        const repository = new D1StateRepository(db.binding);
+
+        await repository.upsertCandidate(
+            candidate("us7000manual", {
+                magnitude: null,
+                summary_mmi: null,
+                alert: null,
+                tsunami: false,
+            }),
+            baseNow + 1_000,
+            { bypassScreening: true },
+        );
+
+        expect(db.rows.get("us7000manual")).toMatchObject({
+            status: "new",
+            error_code: null,
+            next_retry_at_ms: null,
         });
     });
 
@@ -196,9 +332,11 @@ class FakeD1PreparedStatement {
     private runUpsert(): void {
         const [
             sourceEventId,
+            status,
             finalizationDeadlineAtMs,
             lastSeenAtMs,
             sourceUpdatedAtMs,
+            errorCode,
             createdAtMs,
             updatedAtMs,
         ] = this.bindings;
@@ -208,30 +346,47 @@ class FakeD1PreparedStatement {
             this.db.rows.set(id, {
                 source_event_id: id,
                 event_uid: null,
-                status: "new",
+                status: status as EarthquakeEventRow["status"],
                 retry_count: 0,
                 next_retry_at_ms: null,
                 finalization_deadline_at_ms: Number(finalizationDeadlineAtMs),
                 latest_revision: 0,
                 last_seen_at_ms: Number(lastSeenAtMs),
                 source_updated_at_ms: Number(sourceUpdatedAtMs),
-                error_code: null,
+                error_code: errorCode as EarthquakeEventRow["error_code"],
                 created_at_ms: Number(createdAtMs),
                 updated_at_ms: Number(updatedAtMs),
             });
             return;
         }
 
-        const nextSourceUpdatedAtMs =
+        const terminal =
             existing.status === "finalized" ||
             existing.status === "submitted" ||
-            existing.status === "rejected"
+            existing.status === "rejected";
+        const promotedFromIgnoredSmall = existing.status === "ignored_small" && status === "new";
+        const refreshedIgnoredSmall =
+            existing.status === "ignored_small" && status === "ignored_small";
+        const nextSourceUpdatedAtMs =
+            terminal
                 ? existing.source_updated_at_ms
                 : Math.max(existing.source_updated_at_ms ?? 0, Number(sourceUpdatedAtMs));
         this.db.rows.set(id, {
             ...existing,
+            status: promotedFromIgnoredSmall ? "new" : existing.status,
+            next_retry_at_ms:
+                promotedFromIgnoredSmall || refreshedIgnoredSmall
+                    ? null
+                    : existing.next_retry_at_ms,
             last_seen_at_ms: Number(lastSeenAtMs),
             source_updated_at_ms: nextSourceUpdatedAtMs,
+            error_code: terminal
+                ? existing.error_code
+                : promotedFromIgnoredSmall
+                  ? null
+                  : refreshedIgnoredSmall
+                    ? (errorCode as EarthquakeEventRow["error_code"])
+                    : existing.error_code,
             updated_at_ms: Number(updatedAtMs),
         });
     }

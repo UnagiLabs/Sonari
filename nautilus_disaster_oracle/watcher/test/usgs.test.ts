@@ -12,6 +12,10 @@ describe("USGS recent feed parser", () => {
                             time: 1_700_000_000_000,
                             updated: 1_700_000_010_000,
                             type: "earthquake",
+                            mag: 5.6,
+                            mmi: 6.2,
+                            alert: "orange",
+                            tsunami: 1,
                         },
                     },
                 ],
@@ -21,6 +25,62 @@ describe("USGS recent feed parser", () => {
                 source_event_id: "us7000sonari",
                 occurred_at_ms: 1_700_000_000_000,
                 source_updated_at_ms: 1_700_000_010_000,
+                magnitude: 5.6,
+                summary_mmi: 6.2,
+                alert: "orange",
+                tsunami: true,
+            },
+        ]);
+    });
+
+    it("normalizes optional summary fields without trusting invalid values", () => {
+        expect(
+            parseUsgsRecentFeed({
+                features: [
+                    {
+                        id: "us7000small",
+                        properties: {
+                            time: 1_700_000_000_000,
+                            updated: 1_700_000_010_000,
+                            type: "earthquake",
+                            mag: "5.6",
+                            mmi: Number.POSITIVE_INFINITY,
+                            alert: "blue",
+                            tsunami: 2,
+                        },
+                    },
+                    {
+                        id: "us7000green",
+                        properties: {
+                            time: 1_700_000_000_000,
+                            updated: 1_700_000_010_000,
+                            type: "earthquake",
+                            mag: Number.NaN,
+                            mmi: null,
+                            alert: "green",
+                            tsunami: 0,
+                        },
+                    },
+                ],
+            }),
+        ).toEqual([
+            {
+                source_event_id: "us7000small",
+                occurred_at_ms: 1_700_000_000_000,
+                source_updated_at_ms: 1_700_000_010_000,
+                magnitude: null,
+                summary_mmi: null,
+                alert: null,
+                tsunami: false,
+            },
+            {
+                source_event_id: "us7000green",
+                occurred_at_ms: 1_700_000_000_000,
+                source_updated_at_ms: 1_700_000_010_000,
+                magnitude: null,
+                summary_mmi: null,
+                alert: "green",
+                tsunami: false,
             },
         ]);
     });
