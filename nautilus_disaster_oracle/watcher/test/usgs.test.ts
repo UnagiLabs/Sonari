@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseUsgsRecentFeed, USGS_RECENT_FEED_URL } from "./usgs.js";
+import { parseUsgsRecentFeed, USGS_RECENT_FEED_URL } from "../src/usgs.js";
 
 describe("USGS recent feed parser", () => {
     it("extracts earthquake candidates with id, occurred time, and source update time", () => {

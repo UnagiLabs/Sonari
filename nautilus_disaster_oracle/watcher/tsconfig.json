@@ -2,9 +2,9 @@
     "extends": "../../tsconfig.base.json",
     "compilerOptions": {
         "composite": true,
-        "rootDir": "src",
+        "rootDir": ".",
         "outDir": "dist",
         "types": ["node", "@cloudflare/workers-types"]
     },
-    "include": ["src/**/*.ts"]
+    "include": ["src/**/*.ts", "test/**/*.ts"]
 }

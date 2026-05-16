@@ -4,7 +4,7 @@ import {
     validateWorkerToTeeRequest,
 } from "@sonari/oracle-shared";
 import { describe, expect, it } from "vitest";
-import type { RunnerAdapter, UsgsEarthquakeCandidate, WorkerEnv } from "./index.js";
+import type { RunnerAdapter, UsgsEarthquakeCandidate, WorkerEnv } from "../src/index.js";
 import {
     buildWorkerToTeeRequest,
     createWorkerApp,
@@ -17,8 +17,8 @@ import {
     PROCESSING_STALE_AFTER_MS,
     processDueEvents,
     scanCandidates,
-} from "./index.js";
-import type { EarthquakeEventRow, StateRepository } from "./state.js";
+} from "../src/index.js";
+import type { EarthquakeEventRow, StateRepository } from "../src/state.js";
 
 const baseNow = 1_800_000_000_000;
 

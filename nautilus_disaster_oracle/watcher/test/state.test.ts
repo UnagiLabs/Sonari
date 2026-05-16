@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { FINALIZATION_WINDOW_MS } from "./constants.js";
-import { D1StateRepository, type EarthquakeEventRow } from "./state.js";
-import type { UsgsEarthquakeCandidate } from "./usgs.js";
+import { FINALIZATION_WINDOW_MS } from "../src/constants.js";
+import { D1StateRepository, type EarthquakeEventRow } from "../src/state.js";
+import type { UsgsEarthquakeCandidate } from "../src/usgs.js";
 
 const baseNow = 1_800_000_000_000;
 
