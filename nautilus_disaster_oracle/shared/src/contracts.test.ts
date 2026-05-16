@@ -91,6 +91,7 @@ describe("oracle schema contracts", () => {
             "processing",
             "pending_source",
             "pending_mmi",
+            "ignored_small",
             "finalized",
             "submitted",
             "failed",
@@ -115,6 +116,7 @@ describe("oracle schema contracts", () => {
             "RELAYER_SUBMIT_FAILED",
             "MOVE_REJECTED",
             "REJECTED_AUTO_TRIGGER",
+            "WATCHER_BELOW_AUTO_THRESHOLD",
         ]);
     });
 });
@@ -152,6 +154,11 @@ describe("oracle boundary validators", () => {
             "affected_cells_root",
             "payload",
             "signature",
+            "hash",
+            "magnitude",
+            "summary_mmi",
+            "alert",
+            "tsunami",
         ]) {
             const result = validateWorkerToTeeRequest({
                 request_type: "DETECT_BY_EVENT_ID",
