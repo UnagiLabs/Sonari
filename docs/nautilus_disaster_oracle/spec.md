@@ -245,20 +245,25 @@ MVPでは、`pending_source` / `pending_mmi` / `rejected` / `ignored_small` はD
 
 速報性より判定の安定性を優先します。
 
-1. Workerは地震を検出したらD1へ保存する。
-2. Magnitudeは候補検出にのみ使う。
-3. TEEは発生から24時間未満の地震をfinalizeしない。
-4. 24時間後、TEEがUSGS detail GeoJSONとShakeMapを再取得する。
-5. `products.shakemap` のpreferred/latest productを確認する。
-6. `grid.xml.zip` を取得し、MMI gridを読む。
-7. H3 resolution 7へ `GRID_POINT_P90` で集約する。
-8. `cell_band >= 1` のセルが1つ以上あればfinalized候補にする。
-9. `map-status` が `REVIEWED` なら即finalizedにする。
-10. `map-status` が `RELEASED` の場合は、48時間まで再チェックできる。
-11. 48時間時点でも `RELEASED` のみであれば、その時点のlatest ShakeMapをSonari Finalized Revisionとして採用する。
-12. 72時間以内にShakeMap / MMIが取得できなければ、`status = rejected` + `error_code = REJECTED_AUTO_TRIGGER` に固定する。
-13. `map-status` が `CANCELLED` の場合はfinalize不可とし、`rejected` + `error_code = SHAKEMAP_CANCELLED` にする。
-14. Suiへ投稿するのは `finalized` Payloadのみ。
+1. WorkerはUSGS recent feedから `type === "earthquake"` のevent idをD1へ保存する。
+2. Workerはauto scan時にsummary fieldsで軽量screeningを行う。
+3. thresholdを満たす場合は `status = new` にする。
+4. threshold未満の場合は `status = ignored_small` + `error_code = WATCHER_BELOW_AUTO_THRESHOLD` にする。
+5. `ignored_small` はrunner / TEEに渡さず、Suiへ投稿しない。
+6. `new` のみ24時間後以降にrunner / TEE対象になる。
+7. Magnitude、summary MMI、alert、tsunamiはfinalize条件ではなく、TEE起動対象を絞るためだけに使う。
+8. TEEは発生から24時間未満の地震をfinalizeしない。
+9. 24時間後、TEEがUSGS detail GeoJSONとShakeMapを再取得する。
+10. `products.shakemap` のpreferred/latest productを確認する。
+11. `grid.xml.zip` を取得し、MMI gridを読む。
+12. H3 resolution 7へ `GRID_POINT_P90` で集約する。
+13. `cell_band >= 1` のセルが1つ以上あればfinalized候補にする。
+14. `map-status` が `REVIEWED` なら即finalizedにする。
+15. `map-status` が `RELEASED` の場合は、48時間まで再チェックできる。
+16. 48時間時点でも `RELEASED` のみであれば、その時点のlatest ShakeMapをSonari Finalized Revisionとして採用する。
+17. 72時間以内にShakeMap / MMIが取得できなければ、`status = rejected` + `error_code = REJECTED_AUTO_TRIGGER` に固定する。
+18. `map-status` が `CANCELLED` の場合はfinalize不可とし、`rejected` + `error_code = SHAKEMAP_CANCELLED` にする。
+19. Suiへ投稿するのは `finalized` Payloadのみ。
 
 USGSの完全な最終版を待つのではなく、Sonari独自のSonari Finalized Revisionとして確定します。manual reviewはFuture扱いであり、MVPのD1 statusにもMove Objectにも含めません。
 
