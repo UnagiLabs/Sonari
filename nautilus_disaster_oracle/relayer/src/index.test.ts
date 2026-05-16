@@ -1,3 +1,4 @@
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { describe, expect, it } from "vitest";
 import {
     buildRelayerRequestPreview,
@@ -9,7 +10,7 @@ import {
 const target = "0x123::disaster_oracle::submit_payload_v1";
 const registry = "0x456";
 const senderAddress = "0x789";
-const rpcUrl = "https://fullnode.testnet.sui.io:443";
+const grpcUrl = "https://fullnode.testnet.sui.io:443";
 
 const fixtureInput = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
 const fixturePayloadBytes = hexToBytes(
@@ -153,6 +154,7 @@ describe("relayer request preview", () => {
 
 describe("relayer submit execution", () => {
     it("maps dry-run and submit transaction failures to MOVE_REJECTED", async () => {
+        const signer = Ed25519Keypair.generate();
         const client = {
             simulateTransaction: async () => failedTransactionResponse(),
             signAndExecuteTransaction: async () => failedTransactionResponse(),
@@ -162,7 +164,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
-                rpcUrl,
+                grpcUrl,
                 senderAddress,
                 client,
                 transaction: makeFakeTransaction(),
@@ -173,20 +175,20 @@ describe("relayer submit execution", () => {
             submitRelayerPayload(fixtureInput, {
                 target,
                 registry,
-                rpcUrl,
-                signer: { toSuiAddress: () => senderAddress },
+                grpcUrl,
+                signer,
                 client,
                 transaction: makeFakeTransaction(),
             }),
         ).resolves.toMatchObject({ ok: false, error_code: "MOVE_REJECTED" });
     });
 
-    it("normalizes config, build, RPC, and network failures to RELAYER_SUBMIT_FAILED", async () => {
+    it("normalizes config, build, gRPC, and network failures to RELAYER_SUBMIT_FAILED", async () => {
         await expect(
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
-                rpcUrl,
+                grpcUrl,
                 senderAddress: "",
                 client: {
                     simulateTransaction: async () => successfulTransactionResponse(),
@@ -199,7 +201,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
-                rpcUrl,
+                grpcUrl,
                 senderAddress,
                 client: {
                     simulateTransaction: async () => successfulTransactionResponse(),
@@ -212,7 +214,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
-                rpcUrl,
+                grpcUrl,
                 senderAddress,
                 client: {
                     simulateTransaction: async () => {
@@ -227,7 +229,7 @@ describe("relayer submit execution", () => {
             submitRelayerPayload(fixtureInput, {
                 target,
                 registry,
-                rpcUrl,
+                grpcUrl,
                 client: {
                     signAndExecuteTransaction: async () => successfulTransactionResponse(),
                 },
@@ -249,7 +251,7 @@ describe("relayer submit execution", () => {
         const result = await dryRunRelayerSubmit(fixtureInput, {
             target,
             registry,
-            rpcUrl,
+            grpcUrl,
             senderAddress,
             client,
             transaction: makeFakeTransaction(transactionBytes),
@@ -279,13 +281,13 @@ describe("relayer submit execution", () => {
                 return successfulTransactionResponse(effects);
             },
         };
-        const signer = { toSuiAddress: () => senderAddress };
+        const signer = Ed25519Keypair.generate();
         const transaction = makeFakeTransaction();
 
         const result = await submitRelayerPayload(fixtureInput, {
             target,
             registry,
-            rpcUrl,
+            grpcUrl,
             signer,
             client,
             transaction,
@@ -325,7 +327,7 @@ describe("relayer submit execution", () => {
                 dryRunRelayerSubmit(fixtureInput, {
                     target,
                     registry,
-                    rpcUrl,
+                    grpcUrl,
                     senderAddress,
                     client: {
                         simulateTransaction: async () => response,

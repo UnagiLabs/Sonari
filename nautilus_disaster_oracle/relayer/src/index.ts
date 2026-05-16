@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { Signer } from "@mysten/sui/cryptography";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { type RelayerSubmitInput, validateRelayerSubmitInput } from "@sonari/oracle-shared";
@@ -20,22 +21,20 @@ export interface RelayerRequestConfig {
 }
 
 export interface RelayerDryRunConfig extends RelayerRequestConfig {
-    rpcUrl: string;
+    grpcUrl: string;
     senderAddress: string;
     client?: RelayerDryRunClient;
     transaction?: RelayerTransaction;
 }
 
 export interface RelayerSubmitConfig extends RelayerRequestConfig {
-    rpcUrl: string;
+    grpcUrl: string;
     signer?: RelayerSigner;
     client?: RelayerSubmitClient;
     transaction?: unknown;
 }
 
-export interface RelayerSigner {
-    toSuiAddress(): string;
-}
+export type RelayerSigner = Signer;
 
 export interface RelayerTransaction {
     build(input: { client: unknown }): Promise<Uint8Array>;
@@ -192,12 +191,12 @@ export async function dryRunRelayerSubmit(
         return preview;
     }
 
-    if (!isNonEmptyString(config.rpcUrl) || !isNonEmptyString(config.senderAddress)) {
-        return relayerSubmitFailed("Dry-run requires rpcUrl and senderAddress");
+    if (!isNonEmptyString(config.grpcUrl) || !isNonEmptyString(config.senderAddress)) {
+        return relayerSubmitFailed("Dry-run requires grpcUrl and senderAddress");
     }
 
     try {
-        const client = config.client ?? createSuiClient(config.rpcUrl);
+        const client = config.client ?? createSuiGrpcClient(config.grpcUrl);
         const transaction = (config.transaction ??
             createSuiSubmitTransaction(preview.value, {
                 senderAddress: config.senderAddress,
@@ -234,8 +233,8 @@ export async function submitRelayerPayload(
         return preview;
     }
 
-    if (!isNonEmptyString(config.rpcUrl) || config.signer === undefined) {
-        return relayerSubmitFailed("Submit requires explicit rpcUrl and signer");
+    if (!isNonEmptyString(config.grpcUrl) || config.signer === undefined) {
+        return relayerSubmitFailed("Submit requires explicit grpcUrl and signer");
     }
 
     const senderAddress = config.signer.toSuiAddress();
@@ -244,7 +243,7 @@ export async function submitRelayerPayload(
     }
 
     try {
-        const client = config.client ?? createSuiClient(config.rpcUrl);
+        const client = config.client ?? createSuiGrpcClient(config.grpcUrl);
         const transaction =
             config.transaction ?? createSuiSubmitTransaction(preview.value, { senderAddress });
         const response = await client.signAndExecuteTransaction({
@@ -340,23 +339,23 @@ function validateRequestConfig(config: RelayerRequestConfig): RelayerResult<Rela
     return { ok: true, value: { target: config.target, registry: config.registry } };
 }
 
-function createSuiClient(rpcUrl: string): RelayerDryRunClient & RelayerSubmitClient {
+function createSuiGrpcClient(grpcUrl: string): RelayerDryRunClient & RelayerSubmitClient {
     return new SuiGrpcClient({
-        network: inferSuiNetwork(rpcUrl),
-        baseUrl: rpcUrl,
+        network: inferSuiNetwork(grpcUrl),
+        baseUrl: grpcUrl,
     }) as unknown as RelayerDryRunClient & RelayerSubmitClient;
 }
 
-function inferSuiNetwork(rpcUrl: string): "mainnet" | "testnet" | "devnet" | "localnet" {
-    if (rpcUrl.includes("mainnet")) {
+function inferSuiNetwork(grpcUrl: string): "mainnet" | "testnet" | "devnet" | "localnet" {
+    if (grpcUrl.includes("mainnet")) {
         return "mainnet";
     }
 
-    if (rpcUrl.includes("devnet")) {
+    if (grpcUrl.includes("devnet")) {
         return "devnet";
     }
 
-    if (rpcUrl.includes("127.0.0.1") || rpcUrl.includes("localhost")) {
+    if (grpcUrl.includes("127.0.0.1") || grpcUrl.includes("localhost")) {
         return "localnet";
     }
 

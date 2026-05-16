@@ -14,7 +14,7 @@ interface CliOptions {
     command: Command;
     fixtureCase?: string;
     input?: string;
-    rpc?: string;
+    grpcUrl?: string;
     target?: string;
     registry?: string;
     signer?: string;
@@ -47,18 +47,18 @@ async function main(argv: string[]): Promise<number> {
         const result = await dryRunRelayerSubmit(input.value, {
             target: options.target ?? "",
             registry: options.registry ?? "",
-            rpcUrl: options.rpc ?? "",
+            grpcUrl: options.grpcUrl ?? "",
             senderAddress: options.sender ?? "",
         });
         printJson(result);
         return result.ok ? 0 : 1;
     }
 
-    if (!options.rpc || !options.target || !options.registry || !options.signer) {
+    if (!options.grpcUrl || !options.target || !options.registry || !options.signer) {
         printJson({
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
-            message: "submit requires --rpc, --target, --registry, and --signer",
+            message: "submit requires --grpc-url, --target, --registry, and --signer",
         });
         return 1;
     }
@@ -67,7 +67,7 @@ async function main(argv: string[]): Promise<number> {
     const result = await submitRelayerPayload(input.value, {
         target: options.target,
         registry: options.registry,
-        rpcUrl: options.rpc,
+        grpcUrl: options.grpcUrl,
         signer,
     });
     printJson(result);
@@ -96,8 +96,8 @@ function parseArgs(argv: string[]): CliOptions | undefined {
             case "--input":
                 options.input = value;
                 break;
-            case "--rpc":
-                options.rpc = value;
+            case "--grpc-url":
+                options.grpcUrl = value;
                 break;
             case "--target":
                 options.target = value;
@@ -151,8 +151,8 @@ function printUsage(): void {
         [
             "Usage:",
             "  pnpm relayer -- build-request --fixture-case usgs/finalized_minimal --target <target> --registry <registry>",
-            "  pnpm relayer -- dry-run --input <payload.json> --rpc <url> --target <target> --registry <registry> --sender <address>",
-            "  pnpm relayer -- submit --input <payload.json> --rpc <url> --target <target> --registry <registry> --signer <sui-private-key>",
+            "  pnpm relayer -- dry-run --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --sender <address>",
+            "  pnpm relayer -- submit --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --signer <sui-private-key>",
         ].join("\n"),
     );
 }
