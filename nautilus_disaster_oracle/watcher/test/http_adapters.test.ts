@@ -126,6 +126,59 @@ describe("HTTP sidecar adapters", () => {
         });
     });
 
+    it("rejects AWS runner start ok:false responses even when runner_id is present", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json({
+                    ok: false,
+                    runner_id: "runner-123",
+                    message: "start failed",
+                }),
+        });
+
+        await expect(adapter.start()).rejects.toThrow(/start failed/);
+    });
+
+    it("maps AWS runner process ok:false error responses to RunnerProcessError regardless of HTTP status", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json(
+                    {
+                        ok: false,
+                        error_code: "BCS_SERIALIZATION_FAILED",
+                        message: "bad bcs",
+                    },
+                    { status: 500 },
+                ),
+        });
+
+        const error = await adapter.process("runner-123", request).catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerProcessError);
+        expect(error).toMatchObject({
+            errorCode: "BCS_SERIALIZATION_FAILED",
+            message: "bad bcs",
+        });
+    });
+
+    it("rejects AWS runner stop ok:false responses", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json({
+                    ok: false,
+                    message: "stop failed",
+                }),
+        });
+
+        await expect(adapter.stop("runner-123")).rejects.toThrow(/stop failed/);
+    });
+
     it("rejects non-finalized relayer inputs before sending them to the sidecar", async () => {
         let calls = 0;
         const adapter = new HttpRelayerPreviewAdapter(

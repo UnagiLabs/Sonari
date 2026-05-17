@@ -54,6 +54,13 @@ export interface StateRepository {
         runnerJobId: string,
         nowMs: number,
     ): Promise<RunnerQueueJob | null>;
+    markQueueEnqueueFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+        nextRetryAtMs: number,
+        message: string,
+    ): Promise<void>;
     claimQueuedForProcessing(
         job: RunnerQueueJob,
         nowMs: number,
@@ -104,6 +111,11 @@ export interface StateRepository {
         nowMs: number,
     ): Promise<void>;
     recoverStaleProcessing(
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs: number,
+    ): Promise<number>;
+    recoverStaleQueued(
         staleBeforeMs: number,
         nowMs: number,
         nextRetryAtMs: number,
@@ -324,6 +336,28 @@ export class D1StateRepository implements StateRepository {
         return d1RowsChanged(result);
     }
 
+    async markQueueEnqueueFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+        nextRetryAtMs: number,
+        message: string,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET status = 'new',
+                     next_retry_at_ms = ?,
+                     runner_error_message = ?,
+                     updated_at_ms = ?
+                 WHERE source_event_id = ?
+                   AND status = 'queued'
+                   AND runner_job_id = ?`,
+            )
+            .bind(nextRetryAtMs, message, nowMs, sourceEventId, runnerJobId)
+            .run();
+    }
+
     async recordRunnerStarted(
         sourceEventId: string,
         runnerJobId: string,
@@ -517,6 +551,33 @@ export class D1StateRepository implements StateRepository {
         return staleRows.results.length;
     }
 
+    async recoverStaleQueued(
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs: number,
+    ): Promise<number> {
+        const staleRows = await this.db
+            .prepare(
+                `SELECT source_event_id, runner_job_id
+                 FROM earthquake_events
+                 WHERE status = 'queued' AND runner_queued_at_ms <= ?`,
+            )
+            .bind(staleBeforeMs)
+            .all<{ source_event_id: string; runner_job_id: string }>();
+
+        for (const row of staleRows.results) {
+            await this.markQueueEnqueueFailed(
+                row.source_event_id,
+                row.runner_job_id,
+                nowMs,
+                nextRetryAtMs,
+                "queued runner job was not processed before stale timeout",
+            );
+        }
+
+        return staleRows.results.length;
+    }
+
     async markRelayerPreviewSucceeded(
         sourceEventId: string,
         preview: RelayerRequestPreview,
@@ -705,6 +766,26 @@ export class InMemoryStateRepository implements StateRepository {
         return true;
     }
 
+    async markQueueEnqueueFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+        nextRetryAtMs: number,
+        message: string,
+    ): Promise<void> {
+        const row = this.require(sourceEventId);
+        if (row.status !== "queued" || row.runner_job_id !== runnerJobId) {
+            return;
+        }
+
+        this.patch(sourceEventId, {
+            status: "new",
+            next_retry_at_ms: nextRetryAtMs,
+            runner_error_message: message,
+            updated_at_ms: nowMs,
+        });
+    }
+
     async claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean> {
         const row = this.require(sourceEventId);
         const job = await this.enqueueRunnerJob(
@@ -857,6 +938,32 @@ export class InMemoryStateRepository implements StateRepository {
 
         for (const row of staleRows) {
             await this.markFailed(row.source_event_id, "AWS_RUNNER_TIMEOUT", nowMs, nextRetryAtMs);
+        }
+
+        return staleRows.length;
+    }
+
+    async recoverStaleQueued(
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs = nowMs + FAILED_RETRY_BACKOFF_MS,
+    ): Promise<number> {
+        const staleRows = Array.from(this.rows.values()).filter(
+            (row) =>
+                row.status === "queued" &&
+                row.runner_queued_at_ms !== null &&
+                row.runner_job_id !== null &&
+                row.runner_queued_at_ms <= staleBeforeMs,
+        );
+
+        for (const row of staleRows) {
+            await this.markQueueEnqueueFailed(
+                row.source_event_id,
+                row.runner_job_id ?? "",
+                nowMs,
+                nextRetryAtMs,
+                "queued runner job was not processed before stale timeout",
+            );
         }
 
         return staleRows.length;

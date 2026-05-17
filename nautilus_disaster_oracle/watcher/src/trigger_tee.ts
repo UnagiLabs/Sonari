@@ -85,10 +85,10 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
         if (isRecord(body) && body.ok === true && typeof body.runner_id === "string") {
             return { runner_id: body.runner_id };
         }
-        if (isRecord(body) && typeof body.runner_id === "string") {
-            return { runner_id: body.runner_id };
+        if (isRecord(body) && body.ok === false && typeof body.message === "string") {
+            throw new Error(body.message);
         }
-        throw new Error("AWS runner start response did not include runner_id");
+        throw new Error("AWS runner start response did not match the runner contract");
     }
 
     async process(
@@ -116,7 +116,14 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
     }
 
     async stop(runnerId: string): Promise<void> {
-        await this.postJson("/stop", { runner_id: runnerId });
+        const body = await this.postJson("/stop", { runner_id: runnerId });
+        if (isRecord(body) && body.ok === true) {
+            return;
+        }
+        if (isRecord(body) && body.ok === false && typeof body.message === "string") {
+            throw new Error(body.message);
+        }
+        throw new Error("AWS runner stop response did not match the runner contract");
     }
 
     private async postJson(
@@ -143,6 +150,9 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
         const response = await this.fetcher(new Request(`${this.baseUrl}${pathname}`, init));
         const json = await readJsonResponse(response);
         if (response.ok) {
+            return json;
+        }
+        if (pathname === "/process" && isRecord(json) && json.ok === false) {
             return json;
         }
         if (isRecord(json) && typeof json.message === "string") {

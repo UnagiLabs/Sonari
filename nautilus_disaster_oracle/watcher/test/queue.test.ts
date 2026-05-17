@@ -150,6 +150,83 @@ describe("runner queue enqueue", () => {
             runner_stopped_at_ms: null,
         });
     });
+
+    it("restores rows to new when queue send fails and retries only after backoff", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new FailingQueue(new Error("queue unavailable"));
+
+        await scanCandidates(repository, [candidate("us7000sendfail")], baseNow);
+        const summary = await enqueueDueEvents(repository, queue, baseNow);
+
+        expect(summary.enqueued).toBe(0);
+        expect(queue.calls).toBe(1);
+        expect(await repository.get("us7000sendfail")).toMatchObject({
+            status: "new",
+            retry_count: 0,
+            next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+            runner_error_message: "queue unavailable",
+        });
+
+        const beforeBackoffQueue = new RecordingQueue();
+        const beforeBackoffSummary = await enqueueDueEvents(
+            repository,
+            beforeBackoffQueue,
+            baseNow + FAILED_RETRY_BACKOFF_MS - 1,
+        );
+        expect(beforeBackoffSummary.enqueued).toBe(0);
+        expect(beforeBackoffQueue.messages).toHaveLength(0);
+
+        const retryQueue = new RecordingQueue();
+        const retrySummary = await enqueueDueEvents(
+            repository,
+            retryQueue,
+            baseNow + FAILED_RETRY_BACKOFF_MS,
+        );
+        expect(retrySummary.enqueued).toBe(1);
+        expect(retryQueue.messages).toEqual([
+            {
+                runner_job_id: "us7000sendfail:1",
+                source_event_id: "us7000sendfail",
+                attempt: 1,
+                enqueued_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+            },
+        ]);
+    });
+
+    it("recovers stale queued rows to retryable new rows", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new RecordingQueue();
+        const queuedAtMs = baseNow - PROCESSING_STALE_AFTER_MS - 1;
+
+        await scanCandidates(repository, [candidate("us7000stalequeued")], baseNow);
+        const staleJob = await repository.enqueueRunnerJob(
+            "us7000stalequeued",
+            1,
+            "us7000stalequeued:1",
+            queuedAtMs,
+        );
+        expect(staleJob).not.toBeNull();
+
+        const summary = await enqueueDueEvents(repository, queue, baseNow);
+
+        expect(summary.recovered).toBe(1);
+        expect(summary.enqueued).toBe(0);
+        expect(await repository.get("us7000stalequeued")).toMatchObject({
+            status: "new",
+            retry_count: 0,
+            next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+            runner_job_id: "us7000stalequeued:1",
+            runner_queued_at_ms: queuedAtMs,
+        });
+
+        const retryQueue = new RecordingQueue();
+        const retrySummary = await enqueueDueEvents(
+            repository,
+            retryQueue,
+            baseNow + FAILED_RETRY_BACKOFF_MS,
+        );
+        expect(retrySummary.enqueued).toBe(1);
+    });
 });
 
 describe("runner queue consumer", () => {
@@ -295,6 +372,17 @@ class RecordingQueue implements RunnerJobQueue {
 
     async send(message: RunnerQueueJob): Promise<void> {
         this.messages.push(structuredClone(message));
+    }
+}
+
+class FailingQueue implements RunnerJobQueue {
+    calls = 0;
+
+    constructor(private readonly error: Error) {}
+
+    async send(_message: RunnerQueueJob): Promise<void> {
+        this.calls += 1;
+        throw this.error;
     }
 }
 

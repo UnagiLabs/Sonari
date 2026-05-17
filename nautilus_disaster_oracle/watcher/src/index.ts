@@ -189,6 +189,11 @@ export async function enqueueDueEvents(
         nowMs,
         nowMs + FAILED_RETRY_BACKOFF_MS,
     );
+    summary.recovered += await repository.recoverStaleQueued(
+        nowMs - PROCESSING_STALE_AFTER_MS,
+        nowMs,
+        nowMs + FAILED_RETRY_BACKOFF_MS,
+    );
 
     const rows = await repository.listDue(nowMs, limit);
     for (const row of rows) {
@@ -198,7 +203,11 @@ export async function enqueueDueEvents(
     return summary;
 }
 
-export async function processDueEvents(
+/**
+ * Test/local compatibility helper that executes due runner jobs inline.
+ * Worker runtime paths enqueue jobs only; runner execution belongs to the Queue consumer.
+ */
+export async function processDueEventsInlineForTests(
     repository: StateRepository,
     runner: RunnerAdapter,
     nowMs: number,
@@ -394,8 +403,18 @@ async function enqueueSingleDueEvent(
         return;
     }
 
-    await queue.send(job);
-    summary.enqueued += 1;
+    try {
+        await queue.send(job);
+        summary.enqueued += 1;
+    } catch (error) {
+        await repository.markQueueEnqueueFailed(
+            row.source_event_id,
+            runnerJobId,
+            nowMs,
+            nowMs + FAILED_RETRY_BACKOFF_MS,
+            errorMessage(error),
+        );
+    }
 }
 
 async function handleRunnerQueueMessage(

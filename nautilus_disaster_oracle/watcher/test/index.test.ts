@@ -23,7 +23,7 @@ import {
     InMemoryStateRepository,
     MockRunnerAdapter,
     PROCESSING_STALE_AFTER_MS,
-    processDueEvents,
+    processDueEventsInlineForTests,
     scanCandidates,
 } from "../src/index.js";
 import type { EarthquakeEventRow, StateRepository } from "../src/state.js";
@@ -61,7 +61,7 @@ describe("watcher state transitions", () => {
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow + 1_000);
-        const summary = await processDueEvents(repository, runner, baseNow);
+        const summary = await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(summary.processed).toBe(1);
         expect(runner.requests).toHaveLength(1);
@@ -87,7 +87,7 @@ describe("watcher state transitions", () => {
             ],
             baseNow,
         );
-        const summary = await processDueEvents(repository, runner, baseNow);
+        const summary = await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(summary.processed).toBe(0);
         expect(runner.requests).toHaveLength(0);
@@ -143,7 +143,7 @@ describe("watcher state transitions", () => {
             [candidate("us7000sonari", { occurred_at_ms: occurredAt })],
             baseNow,
         );
-        const summary = await processDueEvents(repository, runner, baseNow);
+        const summary = await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(summary.deferred).toBe(1);
         expect(runner.requests).toHaveLength(0);
@@ -158,7 +158,7 @@ describe("watcher state transitions", () => {
         const runner = new MockRunnerAdapter();
 
         await scanCandidates(repository, [candidate("us7000pending-source")], baseNow);
-        await processDueEvents(repository, runner, baseNow);
+        await processDueEventsInlineForTests(repository, runner, baseNow);
 
         const row = await repository.get("us7000pending-source");
         expect(row).toMatchObject({
@@ -180,7 +180,7 @@ describe("watcher state transitions", () => {
             [candidate("us7000pending-mmi", { occurred_at_ms: occurredAt })],
             baseNow,
         );
-        await processDueEvents(repository, runner, baseNow);
+        await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(await repository.get("us7000pending-mmi")).toMatchObject({
             status: "rejected",
@@ -193,7 +193,7 @@ describe("watcher state transitions", () => {
         const repository = new InMemoryStateRepository();
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEvents(repository, new MockRunnerAdapter(), baseNow);
+        await processDueEventsInlineForTests(repository, new MockRunnerAdapter(), baseNow);
 
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "finalized",
@@ -210,7 +210,7 @@ describe("watcher state transitions", () => {
         const relayerPreview = new RecordingRelayerPreviewAdapter();
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        const summary = await processDueEvents(
+        const summary = await processDueEventsInlineForTests(
             repository,
             new MockRunnerAdapter(),
             baseNow,
@@ -241,7 +241,7 @@ describe("watcher state transitions", () => {
             const relayerPreview = new RecordingRelayerPreviewAdapter();
 
             await scanCandidates(repository, [candidate(sourceEventId)], baseNow);
-            await processDueEvents(
+            await processDueEventsInlineForTests(
                 repository,
                 new MockRunnerAdapter(),
                 baseNow,
@@ -269,7 +269,7 @@ describe("watcher state transitions", () => {
         });
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEvents(
+        await processDueEventsInlineForTests(
             repository,
             new MockRunnerAdapter(),
             baseNow,
@@ -297,7 +297,7 @@ describe("watcher state transitions", () => {
         const repository = new InMemoryStateRepository();
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEvents(repository, new MockRunnerAdapter(), baseNow);
+        await processDueEventsInlineForTests(repository, new MockRunnerAdapter(), baseNow);
         await scanCandidates(
             repository,
             [
@@ -322,7 +322,7 @@ describe("watcher state transitions", () => {
         const repository = new InMemoryStateRepository();
 
         await scanCandidates(repository, [candidate("us7000cancelled")], baseNow);
-        await processDueEvents(repository, new MockRunnerAdapter(), baseNow);
+        await processDueEventsInlineForTests(repository, new MockRunnerAdapter(), baseNow);
 
         expect(await repository.get("us7000cancelled")).toMatchObject({
             status: "rejected",
@@ -340,7 +340,7 @@ describe("watcher state transitions", () => {
         };
 
         await scanCandidates(repository, [candidate("us7000timeout")], baseNow);
-        await processDueEvents(repository, runner, baseNow);
+        await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(await repository.get("us7000timeout")).toMatchObject({
             status: "failed",
@@ -358,7 +358,7 @@ describe("watcher state transitions", () => {
             "us7000sonari",
             baseNow - PROCESSING_STALE_AFTER_MS - 1,
         );
-        const summary = await processDueEvents(repository, new MockRunnerAdapter(), baseNow);
+        const summary = await processDueEventsInlineForTests(repository, new MockRunnerAdapter(), baseNow);
 
         expect(summary.recovered).toBe(1);
         expect(await repository.get("us7000sonari")).toMatchObject({
@@ -418,14 +418,16 @@ describe("watcher state transitions", () => {
             deferUntil: async () => {},
             markRejected: async () => {},
             markFailed: async () => {},
+            markQueueEnqueueFailed: async () => {},
             applyRunnerResult: async () => {},
             markRelayerPreviewSucceeded: async () => {},
             markRelayerPreviewFailed: async () => {},
             recoverStaleProcessing: async () => 0,
+            recoverStaleQueued: async () => 0,
         };
         const runner = new MockRunnerAdapter();
 
-        const summary = await processDueEvents(repository, runner, baseNow);
+        const summary = await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(summary.processed).toBe(0);
         expect(runner.requests).toHaveLength(0);
@@ -474,14 +476,16 @@ describe("watcher state transitions", () => {
             deferUntil: async () => {},
             markRejected: async () => {},
             markFailed: async () => {},
+            markQueueEnqueueFailed: async () => {},
             applyRunnerResult: async () => {},
             markRelayerPreviewSucceeded: async () => {},
             markRelayerPreviewFailed: async () => {},
             recoverStaleProcessing: async () => 0,
+            recoverStaleQueued: async () => 0,
         };
         const runner = new MockRunnerAdapter();
 
-        const summary = await processDueEvents(repository, runner, baseNow);
+        const summary = await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(summary.processed).toBe(0);
         expect(runner.requests).toHaveLength(0);
@@ -503,7 +507,7 @@ describe("watcher state transitions", () => {
             [candidate("us7000pending-source", { occurred_at_ms: occurredAt })],
             baseNow,
         );
-        await processDueEvents(repository, runner, baseNow);
+        await processDueEventsInlineForTests(repository, runner, baseNow);
 
         const row = await repository.get("us7000pending-source");
         expect(row).toMatchObject({ status: "pending_source" });
@@ -528,7 +532,7 @@ describe("watcher state transitions", () => {
         };
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEvents(repository, runner, baseNow, undefined, relayerPreview);
+        await processDueEventsInlineForTests(repository, runner, baseNow, undefined, relayerPreview);
 
         expect(relayerPreview.inputs).toHaveLength(0);
         expect(await repository.get("us7000sonari")).toMatchObject({
@@ -761,7 +765,7 @@ describe("runner boundary", () => {
         const runner = new MockRunnerAdapter();
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEvents(repository, runner, baseNow);
+        await processDueEventsInlineForTests(repository, runner, baseNow);
 
         expect(runner.requests).toEqual([buildWorkerToTeeRequest("us7000sonari")]);
         for (const forbidden of [
