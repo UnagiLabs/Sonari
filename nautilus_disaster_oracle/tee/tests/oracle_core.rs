@@ -3,6 +3,7 @@ use std::cell::Cell;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::process::Command;
 use tee::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
@@ -250,6 +251,131 @@ fn rejects_grid_zip_path_traversal_and_missing_grid_xml() {
 }
 
 #[test]
+fn low_level_cli_normalizes_grid_zip_artifact_with_raw_grid_uri() {
+    let workspace = cli_test_workspace("zip-with-raw-uri");
+    let output_dir = workspace.join("output");
+    let grid_zip_path = workspace.join("usgs_grid.xml.zip");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        &grid_zip_path,
+        zip_with_entries(&[(
+            "grid.xml",
+            read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml")).as_slice(),
+        )]),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .args([
+            "--case-id",
+            "usgs/finalized_minimal_zip",
+            "--detail",
+            &format!("{FIXTURE_DIR}/input/usgs_detail.json"),
+            "--grid",
+        ])
+        .arg(&grid_zip_path)
+        .args([
+            "--raw-detail-uri",
+            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            "--raw-grid-uri",
+            "https://example.test/download/grid.xml.zip",
+            "--raw-data-uri",
+            "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
+            "--affected-cells-uri",
+            "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+            "--output-dir",
+        ])
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(output_dir.join("result.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["status"], "finalized");
+    let raw_data_manifest = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(output_dir.join("raw_data_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    let expected_raw_data_manifest = read_expected("raw_data_manifest.json");
+    assert_eq!(
+        raw_data_manifest["entries"][1]["uri"],
+        "https://example.test/download/grid.xml.zip"
+    );
+    assert_eq!(
+        raw_data_manifest["entries"][1]["content_hash"],
+        expected_raw_data_manifest["entries"][1]["content_hash"]
+    );
+
+    fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
+fn low_level_cli_infers_zip_grid_uri_from_file_path_when_raw_grid_uri_is_absent() {
+    let workspace = cli_test_workspace("zip-without-raw-uri");
+    let output_dir = workspace.join("output");
+    let grid_zip_path = workspace.join("usgs_grid.xml.zip");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        &grid_zip_path,
+        zip_with_entries(&[(
+            "grid.xml",
+            read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml")).as_slice(),
+        )]),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .args([
+            "--case-id",
+            "usgs/finalized_minimal_zip",
+            "--detail",
+            &format!("{FIXTURE_DIR}/input/usgs_detail.json"),
+            "--grid",
+        ])
+        .arg(&grid_zip_path)
+        .args([
+            "--raw-detail-uri",
+            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            "--raw-data-uri",
+            "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
+            "--affected-cells-uri",
+            "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+            "--output-dir",
+        ])
+        .arg(&output_dir)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(output_dir.join("result.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(result["status"], "finalized");
+    let raw_data_manifest = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(output_dir.join("raw_data_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        raw_data_manifest["entries"][1]["uri"],
+        grid_zip_path.to_string_lossy().as_ref()
+    );
+
+    fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
 fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
     let detail_json = br#"{
         "id": "us7000multi",
@@ -357,4 +483,11 @@ fn zip_with_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
         writer.finish().unwrap();
     }
     bytes
+}
+
+fn cli_test_workspace(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "sonari-tee-cli-{name}-{}",
+        std::process::id()
+    ))
 }
