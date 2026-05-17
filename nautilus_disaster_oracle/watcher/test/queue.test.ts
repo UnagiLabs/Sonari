@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
     RelayerPreviewAdapter,
     RelayerRequestPreview,
+    RunnerJobQueue,
     RunnerLifecycleAdapter,
     RunnerQueueJob,
     WorkerEnv,
@@ -289,24 +290,15 @@ describe("runner queue consumer", () => {
     });
 });
 
-class RecordingQueue implements Queue<RunnerQueueJob> {
+class RecordingQueue implements RunnerJobQueue {
     readonly messages: RunnerQueueJob[] = [];
 
     async send(message: RunnerQueueJob): Promise<void> {
         this.messages.push(structuredClone(message));
     }
-
-    async sendBatch(messages: Iterable<MessageSendRequest<RunnerQueueJob>>): Promise<void> {
-        for (const message of messages) {
-            this.messages.push(structuredClone(message.body));
-        }
-    }
 }
 
-class FakeQueueMessage implements Message<RunnerQueueJob> {
-    readonly id = "message-id";
-    readonly timestamp = new Date(baseNow);
-    readonly attempts = 1;
+class FakeQueueMessage {
     acked = false;
     retried = false;
 

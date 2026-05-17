@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import type {
     RelayerPreviewAdapter,
     RelayerRequestPreview,
+    RunnerJobQueue,
+    RunnerQueueJob,
     RunnerAdapter,
     UsgsEarthquakeCandidate,
     WorkerEnv,
@@ -47,6 +49,7 @@ function candidate(
 function env(repository = new InMemoryStateRepository()): WorkerEnv {
     return {
         EARTHQUAKE_EVENTS: repository,
+        RUNNER_JOBS: new TestRunnerQueue(),
         MANUAL_SUBMIT_TOKEN: "secret-token",
     };
 }
@@ -391,6 +394,15 @@ describe("watcher state transitions", () => {
             relayer_error_code: null,
             relayer_error_message: null,
             relayer_preview_updated_at_ms: null,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
+            runner_id: null,
+            runner_started_at_ms: null,
+            runner_stopped_at_ms: null,
+            runner_timeout_at_ms: null,
+            runner_error_message: null,
+            runner_stop_error: null,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
         };
@@ -398,7 +410,11 @@ describe("watcher state transitions", () => {
             upsertCandidate: async () => {},
             get: async () => row,
             listDue: async () => [row],
-            claimForProcessing: async () => false,
+            enqueueRunnerJob: async () => null,
+            claimQueuedForProcessing: async () => false,
+            recordRunnerStarted: async () => {},
+            recordRunnerStopped: async () => {},
+            recordRunnerStopFailed: async () => {},
             deferUntil: async () => {},
             markRejected: async () => {},
             markFailed: async () => {},
@@ -432,6 +448,15 @@ describe("watcher state transitions", () => {
             relayer_error_code: null,
             relayer_error_message: null,
             relayer_preview_updated_at_ms: null,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
+            runner_id: null,
+            runner_started_at_ms: null,
+            runner_stopped_at_ms: null,
+            runner_timeout_at_ms: null,
+            runner_error_message: null,
+            runner_stop_error: null,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
         };
@@ -439,9 +464,13 @@ describe("watcher state transitions", () => {
             upsertCandidate: async () => {},
             get: async () => row,
             listDue: async () => [row],
-            claimForProcessing: async () => {
+            enqueueRunnerJob: async () => {
                 throw new Error("ignored_small should not be claimed");
             },
+            claimQueuedForProcessing: async () => false,
+            recordRunnerStarted: async () => {},
+            recordRunnerStopped: async () => {},
+            recordRunnerStopFailed: async () => {},
             deferUntil: async () => {},
             markRejected: async () => {},
             markFailed: async () => {},
@@ -607,7 +636,7 @@ describe("manual submit API", () => {
         expect(emptyId.status).toBe(400);
     });
 
-    it("accepts a valid manual earthquake and processes only that event", async () => {
+    it("accepts a valid manual earthquake and queues only that event", async () => {
         const repository = new InMemoryStateRepository();
         const app = createWorkerApp({ now: () => baseNow });
         const response = await app.fetch(
@@ -628,41 +657,27 @@ describe("manual submit API", () => {
             accepted: true,
             source_event_id: "us7000sonari",
             summary: {
-                processed: 1,
+                enqueued: 1,
                 deferred: 0,
                 recovered: 0,
-                failed: 0,
                 rejected: 0,
             },
             event: {
                 source_event_id: "us7000sonari",
-                status: "finalized",
-                event_uid: "us7000sonari",
+                status: "queued",
+                runner_job_id: "us7000sonari:1",
             },
         });
         expect(await repository.get("us7000sonari")).toMatchObject({
             source_event_id: "us7000sonari",
-            status: "finalized",
-            event_uid: "us7000sonari",
+            status: "queued",
+            runner_job_id: "us7000sonari:1",
         });
     });
 
     it("manual submit bypasses auto-screening for an existing ignored_small candidate", async () => {
         const repository = new InMemoryStateRepository();
-        const runner: RunnerAdapter = {
-            run: async (request) => ({
-                status: "finalized",
-                payload: {
-                    event_uid: request.source_event_id,
-                    event_revision: 1,
-                    source_updated_at_ms: baseNow - HOUR_MS,
-                },
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
-            }),
-        };
-        const app = createWorkerApp({ now: () => baseNow, runner });
+        const app = createWorkerApp({ now: () => baseNow });
 
         await scanCandidates(
             repository,
@@ -692,11 +707,19 @@ describe("manual submit API", () => {
 
         expect(response.status).toBe(202);
         expect(await repository.get("us7000manual-small")).toMatchObject({
-            status: "finalized",
-            event_uid: "us7000manual-small",
+            status: "queued",
+            runner_job_id: "us7000manual-small:1",
         });
     });
 });
+
+class TestRunnerQueue implements RunnerJobQueue {
+    readonly messages: RunnerQueueJob[] = [];
+
+    async send(message: RunnerQueueJob): Promise<void> {
+        this.messages.push(structuredClone(message));
+    }
+}
 
 describe("health endpoint", () => {
     it("does not require the D1 binding", async () => {

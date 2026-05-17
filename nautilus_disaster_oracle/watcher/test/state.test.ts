@@ -22,7 +22,7 @@ function candidate(
 }
 
 function row(patch: Partial<EarthquakeEventRow> = {}): EarthquakeEventRow {
-    return {
+    const base: EarthquakeEventRow = {
         source_event_id: "us7000sonari",
         event_uid: null,
         status: "new",
@@ -38,10 +38,19 @@ function row(patch: Partial<EarthquakeEventRow> = {}): EarthquakeEventRow {
         relayer_error_code: null,
         relayer_error_message: null,
         relayer_preview_updated_at_ms: null,
+        runner_job_id: null,
+        runner_queued_at_ms: null,
+        runner_attempt: null,
+        runner_id: null,
+        runner_started_at_ms: null,
+        runner_stopped_at_ms: null,
+        runner_timeout_at_ms: null,
+        runner_error_message: null,
+        runner_stop_error: null,
         created_at_ms: baseNow - 1_000,
         updated_at_ms: baseNow - 1_000,
-        ...patch,
     };
+    return { ...base, ...patch };
 }
 
 describe("D1StateRepository", () => {
@@ -364,6 +373,15 @@ class FakeD1PreparedStatement {
                 relayer_error_code: null,
                 relayer_error_message: null,
                 relayer_preview_updated_at_ms: null,
+                runner_job_id: null,
+                runner_queued_at_ms: null,
+                runner_attempt: null,
+                runner_id: null,
+                runner_started_at_ms: null,
+                runner_stopped_at_ms: null,
+                runner_timeout_at_ms: null,
+                runner_error_message: null,
+                runner_stop_error: null,
                 created_at_ms: Number(createdAtMs),
                 updated_at_ms: Number(updatedAtMs),
             });
