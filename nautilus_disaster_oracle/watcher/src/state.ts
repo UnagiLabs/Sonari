@@ -20,8 +20,24 @@ export interface EarthquakeEventRow {
     relayer_error_code: RelayerPreviewErrorCode | null;
     relayer_error_message: string | null;
     relayer_preview_updated_at_ms: number | null;
+    runner_job_id: string | null;
+    runner_queued_at_ms: number | null;
+    runner_attempt: number | null;
+    runner_id: string | null;
+    runner_started_at_ms: number | null;
+    runner_stopped_at_ms: number | null;
+    runner_timeout_at_ms: number | null;
+    runner_error_message: string | null;
+    runner_stop_error: string | null;
     created_at_ms: number;
     updated_at_ms: number;
+}
+
+export interface RunnerQueueJob {
+    runner_job_id: string;
+    source_event_id: string;
+    attempt: number;
+    enqueued_at_ms: number;
 }
 
 export interface StateRepository {
@@ -32,7 +48,38 @@ export interface StateRepository {
     ): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
-    claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean>;
+    enqueueRunnerJob(
+        sourceEventId: string,
+        attempt: number,
+        runnerJobId: string,
+        nowMs: number,
+    ): Promise<RunnerQueueJob | null>;
+    markQueueEnqueueFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+        nextRetryAtMs: number,
+        message: string,
+    ): Promise<void>;
+    claimQueuedForProcessing(
+        job: RunnerQueueJob,
+        nowMs: number,
+        timeoutAtMs: number,
+    ): Promise<boolean>;
+    recordRunnerStarted(
+        sourceEventId: string,
+        runnerJobId: string,
+        runnerId: string,
+        nowMs: number,
+        timeoutAtMs: number,
+    ): Promise<void>;
+    recordRunnerStopped(sourceEventId: string, runnerJobId: string, nowMs: number): Promise<void>;
+    recordRunnerStopFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        message: string,
+        nowMs: number,
+    ): Promise<void>;
     deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void>;
     markRejected(
         sourceEventId: string,
@@ -41,9 +88,10 @@ export interface StateRepository {
     ): Promise<void>;
     markFailed(
         sourceEventId: string,
-        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT" | "BCS_SERIALIZATION_FAILED">,
+        errorCode: OracleErrorCode,
         nowMs: number,
         nextRetryAtMs: number,
+        runnerErrorMessage?: string,
     ): Promise<void>;
     applyRunnerResult(
         sourceEventId: string,
@@ -63,6 +111,11 @@ export interface StateRepository {
         nowMs: number,
     ): Promise<void>;
     recoverStaleProcessing(
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs: number,
+    ): Promise<number>;
+    recoverStaleQueued(
         staleBeforeMs: number,
         nowMs: number,
         nextRetryAtMs: number,
@@ -92,6 +145,15 @@ const SELECT_COLUMNS = `
   relayer_error_code,
   relayer_error_message,
   relayer_preview_updated_at_ms,
+  runner_job_id,
+  runner_queued_at_ms,
+  runner_attempt,
+  runner_id,
+  runner_started_at_ms,
+  runner_stopped_at_ms,
+  runner_timeout_at_ms,
+  runner_error_message,
+  runner_stop_error,
   created_at_ms,
   updated_at_ms
 `;
@@ -193,22 +255,164 @@ export class D1StateRepository implements StateRepository {
         return result.results.map(normalizeRow);
     }
 
-    async claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean> {
+    async enqueueRunnerJob(
+        sourceEventId: string,
+        attempt: number,
+        runnerJobId: string,
+        nowMs: number,
+    ): Promise<RunnerQueueJob | null> {
         const placeholders = DUE_STATUSES.map(() => "?").join(", ");
+        const result = await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET status = 'queued',
+                     next_retry_at_ms = NULL,
+                     error_code = NULL,
+                     runner_job_id = ?,
+                     runner_queued_at_ms = ?,
+                     runner_attempt = ?,
+                     runner_id = NULL,
+                     runner_started_at_ms = NULL,
+                     runner_stopped_at_ms = NULL,
+                     runner_timeout_at_ms = NULL,
+                     runner_error_message = NULL,
+                     runner_stop_error = NULL,
+                     updated_at_ms = ?
+                 WHERE source_event_id = ?
+                   AND status IN (${placeholders})
+                   AND retry_count = ?
+                   AND (next_retry_at_ms IS NULL OR next_retry_at_ms <= ?)`,
+            )
+            .bind(
+                runnerJobId,
+                nowMs,
+                attempt,
+                nowMs,
+                sourceEventId,
+                ...DUE_STATUSES,
+                attempt - 1,
+                nowMs,
+            )
+            .run();
+        if (!d1RowsChanged(result)) {
+            return null;
+        }
+        return {
+            runner_job_id: runnerJobId,
+            source_event_id: sourceEventId,
+            attempt,
+            enqueued_at_ms: nowMs,
+        };
+    }
+
+    async claimQueuedForProcessing(
+        job: RunnerQueueJob,
+        nowMs: number,
+        timeoutAtMs: number,
+    ): Promise<boolean> {
         const result = await this.db
             .prepare(
                 `UPDATE earthquake_events
                  SET status = 'processing',
                      next_retry_at_ms = NULL,
                      error_code = NULL,
+                     runner_timeout_at_ms = ?,
                      updated_at_ms = ?
                  WHERE source_event_id = ?
-                   AND status IN (${placeholders})
-                   AND (next_retry_at_ms IS NULL OR next_retry_at_ms <= ?)`,
+                   AND status = 'queued'
+                   AND runner_job_id = ?
+                   AND runner_attempt = ?
+                   AND retry_count = ?`,
             )
-            .bind(nowMs, sourceEventId, ...DUE_STATUSES, nowMs)
+            .bind(
+                timeoutAtMs,
+                nowMs,
+                job.source_event_id,
+                job.runner_job_id,
+                job.attempt,
+                job.attempt - 1,
+            )
             .run();
         return d1RowsChanged(result);
+    }
+
+    async markQueueEnqueueFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+        nextRetryAtMs: number,
+        message: string,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET status = 'new',
+                     next_retry_at_ms = ?,
+                     runner_job_id = NULL,
+                     runner_queued_at_ms = NULL,
+                     runner_attempt = NULL,
+                     runner_error_message = ?,
+                     updated_at_ms = ?
+                 WHERE source_event_id = ?
+                   AND status = 'queued'
+                   AND runner_job_id = ?`,
+            )
+            .bind(nextRetryAtMs, message, nowMs, sourceEventId, runnerJobId)
+            .run();
+    }
+
+    async recordRunnerStarted(
+        sourceEventId: string,
+        runnerJobId: string,
+        runnerId: string,
+        nowMs: number,
+        timeoutAtMs: number,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET runner_id = ?,
+                     runner_started_at_ms = ?,
+                     runner_timeout_at_ms = ?,
+                     updated_at_ms = ?
+                 WHERE source_event_id = ? AND runner_job_id = ?`,
+            )
+            .bind(runnerId, nowMs, timeoutAtMs, nowMs, sourceEventId, runnerJobId)
+            .run();
+    }
+
+    async recordRunnerStopped(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET runner_stopped_at_ms = ?,
+                     runner_stop_error = NULL,
+                     updated_at_ms = ?
+                 WHERE source_event_id = ? AND runner_job_id = ?`,
+            )
+            .bind(nowMs, nowMs, sourceEventId, runnerJobId)
+            .run();
+    }
+
+    async recordRunnerStopFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        message: string,
+        nowMs: number,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET runner_stop_error = ?,
+                     updated_at_ms = ?
+                 WHERE source_event_id = ? AND runner_job_id = ?`,
+            )
+            .bind(message, nowMs, sourceEventId, runnerJobId)
+            .run();
     }
 
     async deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void> {
@@ -244,9 +448,10 @@ export class D1StateRepository implements StateRepository {
 
     async markFailed(
         sourceEventId: string,
-        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT" | "BCS_SERIALIZATION_FAILED">,
+        errorCode: OracleErrorCode,
         nowMs: number,
         nextRetryAtMs: number,
+        runnerErrorMessage?: string,
     ): Promise<void> {
         await this.db
             .prepare(
@@ -255,10 +460,11 @@ export class D1StateRepository implements StateRepository {
                      retry_count = retry_count + 1,
                      next_retry_at_ms = ?,
                      error_code = ?,
+                     runner_error_message = ?,
                      updated_at_ms = ?
                  WHERE source_event_id = ?`,
             )
-            .bind(nextRetryAtMs, errorCode, nowMs, sourceEventId)
+            .bind(nextRetryAtMs, errorCode, runnerErrorMessage ?? null, nowMs, sourceEventId)
             .run();
     }
 
@@ -348,6 +554,33 @@ export class D1StateRepository implements StateRepository {
         return staleRows.results.length;
     }
 
+    async recoverStaleQueued(
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs: number,
+    ): Promise<number> {
+        const staleRows = await this.db
+            .prepare(
+                `SELECT source_event_id, runner_job_id
+                 FROM earthquake_events
+                 WHERE status = 'queued' AND runner_queued_at_ms <= ?`,
+            )
+            .bind(staleBeforeMs)
+            .all<{ source_event_id: string; runner_job_id: string }>();
+
+        for (const row of staleRows.results) {
+            await this.markQueueEnqueueFailed(
+                row.source_event_id,
+                row.runner_job_id,
+                nowMs,
+                nextRetryAtMs,
+                "queued runner job was not processed before stale timeout",
+            );
+        }
+
+        return staleRows.results.length;
+    }
+
     async markRelayerPreviewSucceeded(
         sourceEventId: string,
         preview: RelayerRequestPreview,
@@ -417,6 +650,15 @@ export class InMemoryStateRepository implements StateRepository {
                 relayer_error_code: null,
                 relayer_error_message: null,
                 relayer_preview_updated_at_ms: null,
+                runner_job_id: null,
+                runner_queued_at_ms: null,
+                runner_attempt: null,
+                runner_id: null,
+                runner_started_at_ms: null,
+                runner_stopped_at_ms: null,
+                runner_timeout_at_ms: null,
+                runner_error_message: null,
+                runner_stop_error: null,
                 created_at_ms: nowMs,
                 updated_at_ms: nowMs,
             });
@@ -464,22 +706,155 @@ export class InMemoryStateRepository implements StateRepository {
             .map(cloneRow);
     }
 
-    async claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean> {
+    async enqueueRunnerJob(
+        sourceEventId: string,
+        attempt: number,
+        runnerJobId: string,
+        nowMs: number,
+    ): Promise<RunnerQueueJob | null> {
         const row = this.require(sourceEventId);
         if (
             !DUE_STATUSES.includes(row.status) ||
-            (row.next_retry_at_ms !== null && row.next_retry_at_ms > nowMs)
+            (row.next_retry_at_ms !== null && row.next_retry_at_ms > nowMs) ||
+            row.retry_count !== attempt - 1
+        ) {
+            return null;
+        }
+
+        this.patch(sourceEventId, {
+            status: "queued",
+            next_retry_at_ms: null,
+            error_code: null,
+            runner_job_id: runnerJobId,
+            runner_queued_at_ms: nowMs,
+            runner_attempt: attempt,
+            runner_id: null,
+            runner_started_at_ms: null,
+            runner_stopped_at_ms: null,
+            runner_timeout_at_ms: null,
+            runner_error_message: null,
+            runner_stop_error: null,
+            updated_at_ms: nowMs,
+        });
+        return {
+            runner_job_id: runnerJobId,
+            source_event_id: sourceEventId,
+            attempt,
+            enqueued_at_ms: nowMs,
+        };
+    }
+
+    async claimQueuedForProcessing(
+        job: RunnerQueueJob,
+        nowMs: number,
+        timeoutAtMs: number,
+    ): Promise<boolean> {
+        const row = this.require(job.source_event_id);
+        if (
+            row.status !== "queued" ||
+            row.runner_job_id !== job.runner_job_id ||
+            row.runner_attempt !== job.attempt ||
+            row.retry_count !== job.attempt - 1
         ) {
             return false;
         }
 
-        this.patch(sourceEventId, {
+        this.patch(job.source_event_id, {
             status: "processing",
             next_retry_at_ms: null,
             error_code: null,
+            runner_timeout_at_ms: timeoutAtMs,
             updated_at_ms: nowMs,
         });
         return true;
+    }
+
+    async markQueueEnqueueFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+        nextRetryAtMs: number,
+        message: string,
+    ): Promise<void> {
+        const row = this.require(sourceEventId);
+        if (row.status !== "queued" || row.runner_job_id !== runnerJobId) {
+            return;
+        }
+
+        this.patch(sourceEventId, {
+            status: "new",
+            next_retry_at_ms: nextRetryAtMs,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
+            runner_error_message: message,
+            updated_at_ms: nowMs,
+        });
+    }
+
+    async claimForProcessing(sourceEventId: string, nowMs: number): Promise<boolean> {
+        const row = this.require(sourceEventId);
+        const job = await this.enqueueRunnerJob(
+            sourceEventId,
+            row.retry_count + 1,
+            `${sourceEventId}:${row.retry_count + 1}`,
+            nowMs,
+        );
+        if (job === null) {
+            return false;
+        }
+        return this.claimQueuedForProcessing(job, nowMs, nowMs + FAILED_RETRY_BACKOFF_MS);
+    }
+
+    async recordRunnerStarted(
+        sourceEventId: string,
+        runnerJobId: string,
+        runnerId: string,
+        nowMs: number,
+        timeoutAtMs: number,
+    ): Promise<void> {
+        const row = this.require(sourceEventId);
+        if (row.runner_job_id !== runnerJobId) {
+            return;
+        }
+        this.patch(sourceEventId, {
+            runner_id: runnerId,
+            runner_started_at_ms: nowMs,
+            runner_timeout_at_ms: timeoutAtMs,
+            updated_at_ms: nowMs,
+        });
+    }
+
+    async recordRunnerStopped(
+        sourceEventId: string,
+        runnerJobId: string,
+        nowMs: number,
+    ): Promise<void> {
+        const row = this.require(sourceEventId);
+        if (row.runner_job_id !== runnerJobId) {
+            return;
+        }
+        this.patch(sourceEventId, {
+            runner_stopped_at_ms: nowMs,
+            runner_stop_error: null,
+            updated_at_ms: nowMs,
+        });
+    }
+
+    async recordRunnerStopFailed(
+        sourceEventId: string,
+        runnerJobId: string,
+        message: string,
+        nowMs: number,
+    ): Promise<void> {
+        const row = this.require(sourceEventId);
+        if (row.runner_job_id !== runnerJobId) {
+            return;
+        }
+        this.patch(sourceEventId, {
+            runner_stop_error: message,
+            updated_at_ms: nowMs,
+        });
     }
 
     async deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void> {
@@ -505,9 +880,10 @@ export class InMemoryStateRepository implements StateRepository {
 
     async markFailed(
         sourceEventId: string,
-        errorCode: Extract<OracleErrorCode, "AWS_RUNNER_TIMEOUT" | "BCS_SERIALIZATION_FAILED">,
+        errorCode: OracleErrorCode,
         nowMs: number,
         nextRetryAtMs: number,
+        runnerErrorMessage?: string,
     ): Promise<void> {
         const row = this.require(sourceEventId);
         this.patch(sourceEventId, {
@@ -515,6 +891,7 @@ export class InMemoryStateRepository implements StateRepository {
             retry_count: row.retry_count + 1,
             next_retry_at_ms: nextRetryAtMs,
             error_code: errorCode,
+            runner_error_message: runnerErrorMessage ?? null,
             updated_at_ms: nowMs,
         });
     }
@@ -567,6 +944,32 @@ export class InMemoryStateRepository implements StateRepository {
 
         for (const row of staleRows) {
             await this.markFailed(row.source_event_id, "AWS_RUNNER_TIMEOUT", nowMs, nextRetryAtMs);
+        }
+
+        return staleRows.length;
+    }
+
+    async recoverStaleQueued(
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs = nowMs + FAILED_RETRY_BACKOFF_MS,
+    ): Promise<number> {
+        const staleRows = Array.from(this.rows.values()).filter(
+            (row) =>
+                row.status === "queued" &&
+                row.runner_queued_at_ms !== null &&
+                row.runner_job_id !== null &&
+                row.runner_queued_at_ms <= staleBeforeMs,
+        );
+
+        for (const row of staleRows) {
+            await this.markQueueEnqueueFailed(
+                row.source_event_id,
+                row.runner_job_id ?? "",
+                nowMs,
+                nextRetryAtMs,
+                "queued runner job was not processed before stale timeout",
+            );
         }
 
         return staleRows.length;
@@ -634,6 +1037,15 @@ interface RawEarthquakeEventRow extends Record<string, unknown> {
     relayer_error_code: string | null;
     relayer_error_message: string | null;
     relayer_preview_updated_at_ms: number | null;
+    runner_job_id: string | null;
+    runner_queued_at_ms: number | null;
+    runner_attempt: number | null;
+    runner_id: string | null;
+    runner_started_at_ms: number | null;
+    runner_stopped_at_ms: number | null;
+    runner_timeout_at_ms: number | null;
+    runner_error_message: string | null;
+    runner_stop_error: string | null;
     created_at_ms: number;
     updated_at_ms: number;
 }
@@ -655,6 +1067,15 @@ function normalizeRow(row: RawEarthquakeEventRow): EarthquakeEventRow {
         relayer_error_code: row.relayer_error_code as RelayerPreviewErrorCode | null,
         relayer_error_message: row.relayer_error_message,
         relayer_preview_updated_at_ms: row.relayer_preview_updated_at_ms,
+        runner_job_id: row.runner_job_id,
+        runner_queued_at_ms: row.runner_queued_at_ms,
+        runner_attempt: row.runner_attempt,
+        runner_id: row.runner_id,
+        runner_started_at_ms: row.runner_started_at_ms,
+        runner_stopped_at_ms: row.runner_stopped_at_ms,
+        runner_timeout_at_ms: row.runner_timeout_at_ms,
+        runner_error_message: row.runner_error_message,
+        runner_stop_error: row.runner_stop_error,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     };

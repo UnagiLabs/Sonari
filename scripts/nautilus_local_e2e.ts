@@ -20,7 +20,7 @@ import {
     HOUR_MS,
     InMemoryStateRepository,
     type ProcessSummary,
-    processDueEvents,
+    processDueEventsInlineForTests,
     scanCandidates,
     type UsgsEarthquakeCandidate,
 } from "../nautilus_disaster_oracle/watcher/src/index.js";
@@ -117,10 +117,10 @@ export async function runLocalOracleE2e(
     const runner = new LocalOracleCoreRunnerAdapter({ caseId, fixturesDir });
 
     await scanCandidates(repository, [candidate], nowMs);
-    const firstProcessSummary = await processDueEvents(repository, runner, nowMs);
+    const firstProcessSummary = await processDueEventsInlineForTests(repository, runner, nowMs);
 
     await scanCandidates(repository, [candidate], nowMs);
-    const secondProcessSummary = await processDueEvents(repository, runner, nowMs);
+    const secondProcessSummary = await processDueEventsInlineForTests(repository, runner, nowMs);
 
     const finalEvent = await repository.get(candidate.source_event_id);
     if (finalEvent === null) {

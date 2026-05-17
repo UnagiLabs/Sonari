@@ -88,6 +88,7 @@ describe("oracle schema contracts", () => {
     it("pins offchain status and error code contracts for D1 state", () => {
         expect(OFFCHAIN_STATUSES).toEqual([
             "new",
+            "queued",
             "processing",
             "pending_source",
             "pending_mmi",

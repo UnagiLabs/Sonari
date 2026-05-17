@@ -1,7 +1,9 @@
 import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
+    ERROR_CODES,
     type OffchainStatus,
+    type OracleErrorCode,
     type SignedFinalizedPayload,
     type TeeCoreResult,
     validateWorkerToTeeRequest,
@@ -19,10 +21,17 @@ import { HttpRelayerPreviewAdapter, type RelayerPreviewAdapter } from "./relayer
 import {
     D1StateRepository,
     type EarthquakeEventRow,
+    type RunnerQueueJob,
     type StateRepository,
     type UpsertCandidateOptions,
 } from "./state.js";
-import { HttpRunnerAdapter, MockRunnerAdapter, type RunnerAdapter } from "./trigger_tee.js";
+import {
+    AwsRunnerLifecycleAdapter,
+    MockRunnerLifecycleAdapter,
+    type RunnerAdapter,
+    type RunnerLifecycleAdapter,
+    RunnerProcessError,
+} from "./trigger_tee.js";
 import { fetchUsgsRecentCandidates, type UsgsEarthquakeCandidate } from "./usgs.js";
 
 export {
@@ -46,10 +55,21 @@ export {
     WATCHER_MIN_MAGNITUDE,
     WATCHER_MIN_SUMMARY_MMI,
 } from "./screening.js";
-export type { EarthquakeEventRow, StateRepository, UpsertCandidateOptions } from "./state.js";
+export type {
+    EarthquakeEventRow,
+    RunnerQueueJob,
+    StateRepository,
+    UpsertCandidateOptions,
+} from "./state.js";
 export { D1StateRepository, InMemoryStateRepository } from "./state.js";
-export type { RunnerAdapter } from "./trigger_tee.js";
-export { HttpRunnerAdapter, MockRunnerAdapter } from "./trigger_tee.js";
+export type { RunnerAdapter, RunnerLifecycleAdapter } from "./trigger_tee.js";
+export {
+    AwsRunnerLifecycleAdapter,
+    HttpRunnerAdapter,
+    MockRunnerAdapter,
+    MockRunnerLifecycleAdapter,
+    RunnerProcessError,
+} from "./trigger_tee.js";
 export type { UsgsEarthquakeCandidate } from "./usgs.js";
 export {
     fetchUsgsRecentCandidates,
@@ -66,10 +86,14 @@ const TERMINAL_STATUSES = new Set<OffchainStatus>([
 
 export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
+    RUNNER_JOBS?: RunnerJobQueue;
     MANUAL_SUBMIT_TOKEN?: string;
     ORACLE_SIDECAR_URL?: string;
     RELAYER_TARGET?: string;
     RELAYER_REGISTRY?: string;
+    AWS_RUNNER_BASE_URL?: string;
+    AWS_RUNNER_TOKEN?: string;
+    AWS_RUNNER_TIMEOUT_MS?: string;
 }
 
 export interface ExecutionContextLike {
@@ -78,9 +102,30 @@ export interface ExecutionContextLike {
 
 export interface WorkerAppOptions {
     now?: () => number;
-    runner?: RunnerAdapter;
+    runner?: RunnerLifecycleAdapter;
     relayerPreview?: RelayerPreviewAdapter;
     fetcher?: typeof fetch;
+}
+
+export interface RunnerJobQueue {
+    send(message: RunnerQueueJob): Promise<unknown>;
+}
+
+export interface RunnerJobMessage {
+    body: RunnerQueueJob;
+    ack(): void;
+    retry(): void;
+}
+
+export interface RunnerMessageBatch {
+    messages: RunnerJobMessage[];
+}
+
+export interface EnqueueSummary {
+    enqueued: number;
+    deferred: number;
+    recovered: number;
+    rejected: number;
 }
 
 export interface ProcessSummary {
@@ -126,18 +171,16 @@ export async function scanCandidates(
     return candidates.length;
 }
 
-export async function processDueEvents(
+export async function enqueueDueEvents(
     repository: StateRepository,
-    runner: RunnerAdapter,
+    queue: RunnerJobQueue,
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
-    relayerPreview?: RelayerPreviewAdapter,
-): Promise<ProcessSummary> {
-    const summary: ProcessSummary = {
-        processed: 0,
+): Promise<EnqueueSummary> {
+    const summary: EnqueueSummary = {
+        enqueued: 0,
         deferred: 0,
         recovered: 0,
-        failed: 0,
         rejected: 0,
     };
 
@@ -146,13 +189,62 @@ export async function processDueEvents(
         nowMs,
         nowMs + FAILED_RETRY_BACKOFF_MS,
     );
+    summary.recovered += await repository.recoverStaleQueued(
+        nowMs - PROCESSING_STALE_AFTER_MS,
+        nowMs,
+        nowMs + FAILED_RETRY_BACKOFF_MS,
+    );
 
     const rows = await repository.listDue(nowMs, limit);
     for (const row of rows) {
-        await processSingleDueEvent(repository, runner, row, nowMs, summary, relayerPreview);
+        await enqueueSingleDueEvent(repository, queue, row, nowMs, summary);
     }
 
     return summary;
+}
+
+/**
+ * Test/local compatibility helper that executes due runner jobs inline.
+ * Worker runtime paths enqueue jobs only; runner execution belongs to the Queue consumer.
+ */
+export async function processDueEventsInlineForTests(
+    repository: StateRepository,
+    runner: RunnerAdapter,
+    nowMs: number,
+    limit = DEFAULT_DUE_LIMIT,
+    relayerPreview?: RelayerPreviewAdapter,
+): Promise<ProcessSummary> {
+    const queue = new InlineQueue();
+    const enqueueSummary = await enqueueDueEvents(repository, queue, nowMs, limit);
+    const lifecycleRunner = new RunnerAdapterLifecycleBridge(runner);
+    let processed = 0;
+    let failed = 0;
+
+    for (const job of queue.messages) {
+        const before = await repository.get(job.source_event_id);
+        await handleRunnerQueueMessage(
+            repository,
+            lifecycleRunner,
+            new InlineMessage(job),
+            nowMs,
+            30_000,
+            relayerPreview,
+        );
+        const after = await repository.get(job.source_event_id);
+        if (before !== null && after?.status === "failed" && before.status !== "failed") {
+            failed += 1;
+        } else {
+            processed += 1;
+        }
+    }
+
+    return {
+        processed,
+        deferred: enqueueSummary.deferred,
+        recovered: enqueueSummary.recovered,
+        failed,
+        rejected: enqueueSummary.rejected,
+    };
 }
 
 export function createWorkerApp(options: WorkerAppOptions = {}) {
@@ -168,27 +260,17 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
             }
 
             const repository = repositoryFromEnv(env);
-            const runner = options.runner ?? runnerFromEnv(env, fetcher);
-            const relayerPreview = options.relayerPreview ?? relayerPreviewFromEnv(env, fetcher);
 
             if (request.method === "POST" && url.pathname === "/manual/earthquakes") {
-                return handleManualEarthquake(
-                    request,
-                    env,
-                    repository,
-                    runner,
-                    now(),
-                    relayerPreview,
-                );
+                return handleManualEarthquake(request, env, repository, now());
             }
 
             if (request.method === "POST" && url.pathname === "/tasks/process-due") {
-                const summary = await processDueEvents(
+                const summary = await enqueueDueEvents(
                     repository,
-                    runner,
+                    queueFromEnv(env),
                     now(),
                     DEFAULT_DUE_LIMIT,
-                    relayerPreview,
                 );
                 return json({ ok: true, summary });
             }
@@ -203,11 +285,26 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
         ): Promise<void> {
             const nowMs = now();
             const repository = repositoryFromEnv(env);
-            const runner = options.runner ?? runnerFromEnv(env, fetcher);
-            const relayerPreview = options.relayerPreview ?? relayerPreviewFromEnv(env, fetcher);
+            const queue = queueFromEnv(env);
             const candidates = await fetchUsgsRecentCandidates(fetcher);
             await scanCandidates(repository, candidates, nowMs);
-            await processDueEvents(repository, runner, nowMs, DEFAULT_DUE_LIMIT, relayerPreview);
+            await enqueueDueEvents(repository, queue, nowMs, DEFAULT_DUE_LIMIT);
+        },
+
+        async queue(batch: RunnerMessageBatch, env: WorkerEnv): Promise<void> {
+            const repository = repositoryFromEnv(env);
+            const runner = options.runner ?? runnerFromEnv(env, fetcher);
+            const relayerPreview = options.relayerPreview ?? relayerPreviewFromEnv(env, fetcher);
+            for (const message of batch.messages) {
+                await handleRunnerQueueMessage(
+                    repository,
+                    runner,
+                    message,
+                    now(),
+                    runnerTimeoutMsFromEnv(env),
+                    relayerPreview,
+                );
+            }
         },
     };
 }
@@ -216,9 +313,7 @@ async function handleManualEarthquake(
     request: Request,
     env: WorkerEnv,
     repository: StateRepository,
-    runner: RunnerAdapter,
     nowMs: number,
-    relayerPreview?: RelayerPreviewAdapter,
 ): Promise<Response> {
     if (env.MANUAL_SUBMIT_TOKEN === undefined || env.MANUAL_SUBMIT_TOKEN.length === 0) {
         return json({ ok: false, error: "manual_submit_token_not_configured" }, { status: 503 });
@@ -258,10 +353,10 @@ async function handleManualEarthquake(
         { bypassScreening: true },
     );
 
-    const summary = emptyProcessSummary();
+    const summary = emptyEnqueueSummary();
     const row = await repository.get(sourceEventId);
     if (row !== null) {
-        await processSingleDueEvent(repository, runner, row, nowMs, summary, relayerPreview);
+        await enqueueSingleDueEvent(repository, queueFromEnv(env), row, nowMs, summary);
     }
 
     return json(
@@ -275,13 +370,12 @@ async function handleManualEarthquake(
     );
 }
 
-async function processSingleDueEvent(
+async function enqueueSingleDueEvent(
     repository: StateRepository,
-    runner: RunnerAdapter,
+    queue: RunnerJobQueue,
     row: EarthquakeEventRow,
     nowMs: number,
-    summary: ProcessSummary,
-    relayerPreview?: RelayerPreviewAdapter,
+    summary: EnqueueSummary,
 ): Promise<void> {
     if (TERMINAL_STATUSES.has(row.status)) {
         return;
@@ -302,37 +396,106 @@ async function processSingleDueEvent(
         return;
     }
 
-    const claimed = await repository.claimForProcessing(row.source_event_id, nowMs);
-    if (!claimed) {
+    const attempt = row.retry_count + 1;
+    const runnerJobId = `${row.source_event_id}:${attempt}`;
+    const job = await repository.enqueueRunnerJob(row.source_event_id, attempt, runnerJobId, nowMs);
+    if (job === null) {
         return;
     }
 
     try {
-        const result = await runner.run(buildWorkerToTeeRequest(row.source_event_id));
-        const applied = await applyRunnerResult(repository, row.source_event_id, result, nowMs);
+        await queue.send(job);
+        summary.enqueued += 1;
+    } catch (error) {
+        await repository.markQueueEnqueueFailed(
+            row.source_event_id,
+            runnerJobId,
+            nowMs,
+            nowMs + FAILED_RETRY_BACKOFF_MS,
+            errorMessage(error),
+        );
+    }
+}
+
+async function handleRunnerQueueMessage(
+    repository: StateRepository,
+    runner: RunnerLifecycleAdapter,
+    message: RunnerJobMessage,
+    nowMs: number,
+    timeoutMs: number,
+    relayerPreview?: RelayerPreviewAdapter,
+): Promise<void> {
+    const job = message.body;
+    if (!isRunnerQueueJob(job)) {
+        message.ack();
+        return;
+    }
+
+    const row = await repository.get(job.source_event_id);
+    if (!shouldClaimQueueJob(row, job)) {
+        message.ack();
+        return;
+    }
+
+    const timeoutAtMs = nowMs + timeoutMs;
+    const claimed = await repository.claimQueuedForProcessing(job, nowMs, timeoutAtMs);
+    if (!claimed) {
+        message.ack();
+        return;
+    }
+
+    let runnerId: string | null = null;
+    try {
+        const started = await runner.start();
+        runnerId = started.runner_id;
+        await repository.recordRunnerStarted(
+            job.source_event_id,
+            job.runner_job_id,
+            runnerId,
+            nowMs,
+            timeoutAtMs,
+        );
+        const result = await processWithTimeout(
+            runner,
+            runnerId,
+            buildWorkerToTeeRequest(job.source_event_id),
+            timeoutMs,
+        );
+        const applied = await applyRunnerResult(repository, job.source_event_id, result, nowMs);
         if (applied.finalized) {
             await runRelayerPreview(
                 repository,
-                row.source_event_id,
+                job.source_event_id,
                 applied.result,
                 nowMs,
                 relayerPreview,
             );
         }
-        summary.processed += 1;
     } catch (error) {
-        console.error("Oracle runner failed", {
-            source_event_id: row.source_event_id,
-            message: errorMessage(error),
-        });
         await repository.markFailed(
-            row.source_event_id,
-            "AWS_RUNNER_TIMEOUT",
+            job.source_event_id,
+            mapRunnerErrorCode(error),
             nowMs,
             nowMs + FAILED_RETRY_BACKOFF_MS,
+            errorMessage(error),
         );
-        summary.failed += 1;
+    } finally {
+        if (runnerId !== null) {
+            try {
+                await runner.stop(runnerId);
+                await repository.recordRunnerStopped(job.source_event_id, job.runner_job_id, nowMs);
+            } catch (error) {
+                await repository.recordRunnerStopFailed(
+                    job.source_event_id,
+                    job.runner_job_id,
+                    errorMessage(error),
+                    nowMs,
+                );
+            }
+        }
     }
+
+    message.ack();
 }
 
 async function applyRunnerResult(
@@ -342,7 +505,7 @@ async function applyRunnerResult(
     nowMs: number,
 ): Promise<AppliedRunnerResult> {
     if (result.status === "finalized") {
-        if (!hasValidFinalizedMetadata(result.payload)) {
+        if (!hasValidFinalizedResult(result)) {
             await repository.markFailed(
                 sourceEventId,
                 "BCS_SERIALIZATION_FAILED",
@@ -427,11 +590,22 @@ function repositoryFromEnv(env: WorkerEnv): StateRepository {
     return new D1StateRepository(env.EARTHQUAKE_EVENTS);
 }
 
-function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerAdapter {
-    if (isNonEmptyString(env.ORACLE_SIDECAR_URL)) {
-        return new HttpRunnerAdapter(env.ORACLE_SIDECAR_URL, fetcher);
+function queueFromEnv(env: WorkerEnv): RunnerJobQueue {
+    if (env.RUNNER_JOBS === undefined) {
+        throw new Error("RUNNER_JOBS binding is required");
     }
-    return new MockRunnerAdapter();
+    return env.RUNNER_JOBS;
+}
+
+function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerLifecycleAdapter {
+    if (isNonEmptyString(env.AWS_RUNNER_BASE_URL) && isNonEmptyString(env.AWS_RUNNER_TOKEN)) {
+        return new AwsRunnerLifecycleAdapter({
+            baseUrl: env.AWS_RUNNER_BASE_URL,
+            token: env.AWS_RUNNER_TOKEN,
+            fetcher,
+        });
+    }
+    return new MockRunnerLifecycleAdapter();
 }
 
 function relayerPreviewFromEnv(
@@ -499,11 +673,8 @@ function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
-function hasValidFinalizedMetadata(payload: unknown): payload is {
-    event_uid: string;
-    event_revision: number;
-    source_updated_at_ms: number;
-} {
+function hasValidFinalizedResult(result: SignedFinalizedPayload): boolean {
+    const payload = result.payload;
     if (!isRecord(payload)) {
         return false;
     }
@@ -511,18 +682,120 @@ function hasValidFinalizedMetadata(payload: unknown): payload is {
         typeof payload.event_uid === "string" &&
         payload.event_uid.length > 0 &&
         Number.isSafeInteger(payload.event_revision) &&
-        Number.isSafeInteger(payload.source_updated_at_ms)
+        Number.isSafeInteger(payload.source_updated_at_ms) &&
+        isNonEmptyString(result.payload_bcs_hex) &&
+        isNonEmptyString(result.signature) &&
+        isNonEmptyString(result.public_key)
     );
 }
 
-function emptyProcessSummary(): ProcessSummary {
+function emptyEnqueueSummary(): EnqueueSummary {
     return {
-        processed: 0,
+        enqueued: 0,
         deferred: 0,
         recovered: 0,
-        failed: 0,
         rejected: 0,
     };
+}
+
+function shouldClaimQueueJob(row: EarthquakeEventRow | null, job: RunnerQueueJob): boolean {
+    return (
+        row !== null &&
+        row.status === "queued" &&
+        row.runner_job_id === job.runner_job_id &&
+        row.runner_attempt === job.attempt &&
+        row.retry_count === job.attempt - 1
+    );
+}
+
+function isRunnerQueueJob(input: unknown): input is RunnerQueueJob {
+    const attempt = isRecord(input) ? input.attempt : undefined;
+    return (
+        isRecord(input) &&
+        isNonEmptyString(input.runner_job_id) &&
+        isNonEmptyString(input.source_event_id) &&
+        Number.isSafeInteger(attempt) &&
+        Number(attempt) > 0 &&
+        Number.isSafeInteger(input.enqueued_at_ms)
+    );
+}
+
+async function processWithTimeout(
+    runner: RunnerLifecycleAdapter,
+    runnerId: string,
+    request: WorkerToTeeRequest,
+    timeoutMs: number,
+): Promise<TeeCoreResult> {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+        return await Promise.race([
+            runner.process(runnerId, request, controller.signal),
+            new Promise<TeeCoreResult>((_resolve, reject) => {
+                timeout = setTimeout(() => {
+                    controller.abort();
+                    reject(new Error(`AWS runner timed out after ${timeoutMs}ms`));
+                }, timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timeout !== undefined) {
+            clearTimeout(timeout);
+        }
+    }
+}
+
+function mapRunnerErrorCode(error: unknown): OracleErrorCode {
+    if (
+        error instanceof RunnerProcessError &&
+        error.errorCode !== undefined &&
+        (ERROR_CODES as readonly string[]).includes(error.errorCode)
+    ) {
+        return error.errorCode;
+    }
+    return "AWS_RUNNER_TIMEOUT";
+}
+
+function runnerTimeoutMsFromEnv(env: WorkerEnv): number {
+    if (env.AWS_RUNNER_TIMEOUT_MS === undefined) {
+        return 30_000;
+    }
+    const parsed = Number(env.AWS_RUNNER_TIMEOUT_MS);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 30_000;
+}
+
+class InlineQueue implements RunnerJobQueue {
+    readonly messages: RunnerQueueJob[] = [];
+
+    async send(message: RunnerQueueJob): Promise<void> {
+        this.messages.push(structuredClone(message));
+    }
+}
+
+class InlineMessage implements RunnerJobMessage {
+    constructor(readonly body: RunnerQueueJob) {}
+
+    ack(): void {}
+
+    retry(): void {}
+}
+
+class RunnerAdapterLifecycleBridge implements RunnerLifecycleAdapter {
+    constructor(private readonly runner: RunnerAdapter) {}
+
+    async start(): Promise<{ runner_id: string }> {
+        return { runner_id: "inline-runner" };
+    }
+
+    async process(
+        _runnerId: string,
+        request: WorkerToTeeRequest,
+        _signal?: AbortSignal,
+    ): Promise<TeeCoreResult> {
+        return this.runner.run(request);
+    }
+
+    async stop(_runnerId: string): Promise<void> {}
 }
 
 const app = createWorkerApp();

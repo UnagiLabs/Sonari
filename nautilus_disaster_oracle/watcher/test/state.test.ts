@@ -22,7 +22,7 @@ function candidate(
 }
 
 function row(patch: Partial<EarthquakeEventRow> = {}): EarthquakeEventRow {
-    return {
+    const base: EarthquakeEventRow = {
         source_event_id: "us7000sonari",
         event_uid: null,
         status: "new",
@@ -38,10 +38,19 @@ function row(patch: Partial<EarthquakeEventRow> = {}): EarthquakeEventRow {
         relayer_error_code: null,
         relayer_error_message: null,
         relayer_preview_updated_at_ms: null,
+        runner_job_id: null,
+        runner_queued_at_ms: null,
+        runner_attempt: null,
+        runner_id: null,
+        runner_started_at_ms: null,
+        runner_stopped_at_ms: null,
+        runner_timeout_at_ms: null,
+        runner_error_message: null,
+        runner_stop_error: null,
         created_at_ms: baseNow - 1_000,
         updated_at_ms: baseNow - 1_000,
-        ...patch,
     };
+    return { ...base, ...patch };
 }
 
 describe("D1StateRepository", () => {
@@ -253,6 +262,82 @@ describe("D1StateRepository", () => {
             updated_at_ms: baseNow + 10_000,
         });
     });
+
+    it("marks queue enqueue failures as retryable without incrementing retry_count", async () => {
+        const db = new FakeD1Database([
+            row({
+                source_event_id: "us7000queued",
+                status: "queued",
+                retry_count: 2,
+                runner_job_id: "us7000queued:3",
+                runner_queued_at_ms: baseNow - 10_000,
+                runner_attempt: 3,
+            }),
+        ]);
+        const repository = new D1StateRepository(db.binding);
+
+        await repository.markQueueEnqueueFailed(
+            "us7000queued",
+            "us7000queued:3",
+            baseNow,
+            baseNow + 60_000,
+            "queue unavailable",
+        );
+
+        expect(db.rows.get("us7000queued")).toMatchObject({
+            status: "new",
+            retry_count: 2,
+            next_retry_at_ms: baseNow + 60_000,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
+            runner_error_message: "queue unavailable",
+            updated_at_ms: baseNow,
+        });
+    });
+
+    it("recovers stale queued rows as retryable without incrementing retry_count", async () => {
+        const db = new FakeD1Database([
+            row({
+                source_event_id: "us7000fresh",
+                status: "queued",
+                retry_count: 0,
+                runner_job_id: "us7000fresh:1",
+                runner_queued_at_ms: baseNow - 1_000,
+                runner_attempt: 1,
+            }),
+            row({
+                source_event_id: "us7000stale",
+                status: "queued",
+                retry_count: 1,
+                runner_job_id: "us7000stale:2",
+                runner_queued_at_ms: baseNow - 10_000,
+                runner_attempt: 2,
+            }),
+        ]);
+        const repository = new D1StateRepository(db.binding);
+
+        const recovered = await repository.recoverStaleQueued(
+            baseNow - 5_000,
+            baseNow,
+            baseNow + 60_000,
+        );
+
+        expect(recovered).toBe(1);
+        expect(db.rows.get("us7000fresh")).toMatchObject({
+            status: "queued",
+            retry_count: 0,
+            next_retry_at_ms: null,
+        });
+        expect(db.rows.get("us7000stale")).toMatchObject({
+            status: "new",
+            retry_count: 1,
+            next_retry_at_ms: baseNow + 60_000,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
+        });
+    });
 });
 
 class FakeD1Database {
@@ -297,6 +382,26 @@ class FakeD1PreparedStatement {
     }
 
     async all<T>(): Promise<D1Result<T>> {
+        const normalizedSql = normalizeSql(this.sql);
+        if (
+            normalizedSql.startsWith(
+                "SELECT source_event_id, runner_job_id FROM earthquake_events WHERE status = 'queued'",
+            )
+        ) {
+            const [staleBeforeMs] = this.bindings;
+            const results = Array.from(this.db.rows.values())
+                .filter(
+                    (row) =>
+                        row.status === "queued" &&
+                        row.runner_queued_at_ms !== null &&
+                        row.runner_queued_at_ms <= Number(staleBeforeMs),
+                )
+                .map((row) => ({
+                    source_event_id: row.source_event_id,
+                    runner_job_id: row.runner_job_id,
+                }));
+            return { results, success: true, meta: {} } as unknown as D1Result<T>;
+        }
         return { results: [], success: true, meta: {} } as unknown as D1Result<T>;
     }
 
@@ -327,6 +432,32 @@ class FakeD1PreparedStatement {
             this.patch(String(sourceEventId), {
                 last_seen_at_ms: Number(lastSeenAtMs),
                 source_updated_at_ms: Number(sourceUpdatedAtMs),
+                updated_at_ms: Number(updatedAtMs),
+            });
+            return changed();
+        }
+        if (
+            normalizedSql.startsWith(
+                "UPDATE earthquake_events SET status = 'new', next_retry_at_ms = ?, runner_job_id = NULL, runner_queued_at_ms = NULL, runner_attempt = NULL, runner_error_message = ?, updated_at_ms = ?",
+            )
+        ) {
+            const [nextRetryAtMs, runnerErrorMessage, updatedAtMs, sourceEventId, runnerJobId] =
+                this.bindings;
+            const row = this.db.rows.get(String(sourceEventId));
+            if (
+                row === undefined ||
+                row.status !== "queued" ||
+                row.runner_job_id !== String(runnerJobId)
+            ) {
+                return unchanged();
+            }
+            this.patch(String(sourceEventId), {
+                status: "new",
+                next_retry_at_ms: Number(nextRetryAtMs),
+                runner_job_id: null,
+                runner_queued_at_ms: null,
+                runner_attempt: null,
+                runner_error_message: String(runnerErrorMessage),
                 updated_at_ms: Number(updatedAtMs),
             });
             return changed();
@@ -364,6 +495,15 @@ class FakeD1PreparedStatement {
                 relayer_error_code: null,
                 relayer_error_message: null,
                 relayer_preview_updated_at_ms: null,
+                runner_job_id: null,
+                runner_queued_at_ms: null,
+                runner_attempt: null,
+                runner_id: null,
+                runner_started_at_ms: null,
+                runner_stopped_at_ms: null,
+                runner_timeout_at_ms: null,
+                runner_error_message: null,
+                runner_stop_error: null,
                 created_at_ms: Number(createdAtMs),
                 updated_at_ms: Number(updatedAtMs),
             });
@@ -416,4 +556,8 @@ function normalizeSql(sql: string | undefined): string {
 
 function changed(): D1Result {
     return { meta: { changes: 1, rows_written: 1 } } as D1Result;
+}
+
+function unchanged(): D1Result {
+    return { meta: { changes: 0, rows_written: 0 } } as D1Result;
 }

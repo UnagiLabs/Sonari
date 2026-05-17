@@ -1,8 +1,10 @@
 import { BCS_ENUMS, DEFAULT_ORACLE_CONTRACT } from "@sonari/oracle-shared";
 import { describe, expect, it } from "vitest";
 import {
+    AwsRunnerLifecycleAdapter,
     HttpRelayerPreviewAdapter,
     HttpRunnerAdapter,
+    RunnerProcessError,
     type RelayerRequestPreview,
 } from "../src/index.js";
 
@@ -64,6 +66,117 @@ describe("HTTP sidecar adapters", () => {
         );
 
         await expect(adapter.run(request)).rejects.toThrow(/cargo failed/);
+    });
+
+    it("uses the AWS runner lifecycle start/process/stop contract", async () => {
+        const calls: Request[] = [];
+        const runnerAuth = "test-runner-auth";
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: runnerAuth,
+            fetcher: async (input) => {
+                const outbound = input instanceof Request ? input : new Request(input);
+                calls.push(outbound.clone());
+                if (outbound.url.endsWith("/start")) {
+                    return Response.json({ ok: true, runner_id: "runner-123" });
+                }
+                if (outbound.url.endsWith("/process")) {
+                    return Response.json({ ok: true, result: finalized });
+                }
+                return Response.json({ ok: true });
+            },
+        });
+
+        await expect(adapter.start()).resolves.toEqual({ runner_id: "runner-123" });
+        await expect(adapter.process("runner-123", request)).resolves.toEqual(finalized);
+        await expect(adapter.stop("runner-123")).resolves.toBeUndefined();
+
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+            "/start",
+            "/process",
+            "/stop",
+        ]);
+        expect(calls.map((call) => call.headers.get("authorization"))).toEqual([
+            `Bearer ${runnerAuth}`,
+            `Bearer ${runnerAuth}`,
+            `Bearer ${runnerAuth}`,
+        ]);
+        await expect(calls[1]?.json()).resolves.toEqual({ payload: request });
+        await expect(calls[2]?.json()).resolves.toEqual({ runner_id: "runner-123" });
+    });
+
+    it("maps AWS runner ok:false responses to RunnerProcessError with allowed error codes", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json({
+                    ok: false,
+                    error_code: "BCS_SERIALIZATION_FAILED",
+                    message: "bad bcs",
+                }),
+        });
+
+        const error = await adapter.process("runner-123", request).catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerProcessError);
+        expect(error).toMatchObject({
+            errorCode: "BCS_SERIALIZATION_FAILED",
+            message: "bad bcs",
+        });
+    });
+
+    it("rejects AWS runner start ok:false responses even when runner_id is present", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json({
+                    ok: false,
+                    runner_id: "runner-123",
+                    message: "start failed",
+                }),
+        });
+
+        await expect(adapter.start()).rejects.toThrow(/start failed/);
+    });
+
+    it("maps AWS runner process ok:false error responses to RunnerProcessError regardless of HTTP status", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json(
+                    {
+                        ok: false,
+                        error_code: "BCS_SERIALIZATION_FAILED",
+                        message: "bad bcs",
+                    },
+                    { status: 500 },
+                ),
+        });
+
+        const error = await adapter.process("runner-123", request).catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerProcessError);
+        expect(error).toMatchObject({
+            errorCode: "BCS_SERIALIZATION_FAILED",
+            message: "bad bcs",
+        });
+    });
+
+    it("rejects AWS runner stop ok:false responses", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json({
+                    ok: false,
+                    message: "stop failed",
+                }),
+        });
+
+        await expect(adapter.stop("runner-123")).rejects.toThrow(/stop failed/);
     });
 
     it("rejects non-finalized relayer inputs before sending them to the sidecar", async () => {

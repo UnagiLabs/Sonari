@@ -79,6 +79,7 @@ export const DEFAULT_ORACLE_CONTRACT = {
 
 export const OFFCHAIN_STATUSES = [
     "new",
+    "queued",
     "processing",
     "pending_source",
     "pending_mmi",
