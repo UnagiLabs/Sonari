@@ -386,6 +386,11 @@ describe("watcher state transitions", () => {
             last_seen_at_ms: baseNow,
             source_updated_at_ms: baseNow,
             error_code: null,
+            relayer_preview_status: null,
+            relayer_request_json: null,
+            relayer_error_code: null,
+            relayer_error_message: null,
+            relayer_preview_updated_at_ms: null,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
         };
@@ -398,6 +403,8 @@ describe("watcher state transitions", () => {
             markRejected: async () => {},
             markFailed: async () => {},
             applyRunnerResult: async () => {},
+            markRelayerPreviewSucceeded: async () => {},
+            markRelayerPreviewFailed: async () => {},
             recoverStaleProcessing: async () => 0,
         };
         const runner = new MockRunnerAdapter();
@@ -420,6 +427,11 @@ describe("watcher state transitions", () => {
             last_seen_at_ms: baseNow,
             source_updated_at_ms: baseNow,
             error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+            relayer_preview_status: null,
+            relayer_request_json: null,
+            relayer_error_code: null,
+            relayer_error_message: null,
+            relayer_preview_updated_at_ms: null,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
         };
@@ -434,6 +446,8 @@ describe("watcher state transitions", () => {
             markRejected: async () => {},
             markFailed: async () => {},
             applyRunnerResult: async () => {},
+            markRelayerPreviewSucceeded: async () => {},
+            markRelayerPreviewFailed: async () => {},
             recoverStaleProcessing: async () => 0,
         };
         const runner = new MockRunnerAdapter();

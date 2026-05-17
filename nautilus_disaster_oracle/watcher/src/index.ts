@@ -2,6 +2,7 @@ import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
     type OffchainStatus,
+    type SignedFinalizedPayload,
     type TeeCoreResult,
     validateWorkerToTeeRequest,
     type WorkerToTeeRequest,
@@ -13,13 +14,14 @@ import {
     FINALIZATION_WINDOW_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
+import { HttpRelayerPreviewAdapter, type RelayerPreviewAdapter } from "./relayer_preview.js";
 import {
     D1StateRepository,
     type EarthquakeEventRow,
     type StateRepository,
     type UpsertCandidateOptions,
 } from "./state.js";
-import { MockRunnerAdapter, type RunnerAdapter } from "./trigger_tee.js";
+import { HttpRunnerAdapter, MockRunnerAdapter, type RunnerAdapter } from "./trigger_tee.js";
 import { fetchUsgsRecentCandidates, type UsgsEarthquakeCandidate } from "./usgs.js";
 
 export {
@@ -30,6 +32,13 @@ export {
     HOUR_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
+export type {
+    RelayerPreviewAdapter,
+    RelayerPreviewErrorCode,
+    RelayerPreviewResult,
+    RelayerRequestPreview,
+} from "./relayer_preview.js";
+export { HttpRelayerPreviewAdapter } from "./relayer_preview.js";
 export {
     screenUsgsCandidate,
     WATCHER_ALERT_LEVELS,
@@ -39,7 +48,7 @@ export {
 export type { EarthquakeEventRow, StateRepository, UpsertCandidateOptions } from "./state.js";
 export { D1StateRepository, InMemoryStateRepository } from "./state.js";
 export type { RunnerAdapter, RunnerContext } from "./trigger_tee.js";
-export { MockRunnerAdapter } from "./trigger_tee.js";
+export { HttpRunnerAdapter, MockRunnerAdapter } from "./trigger_tee.js";
 export type { UsgsEarthquakeCandidate } from "./usgs.js";
 export {
     fetchUsgsRecentCandidates,
@@ -57,6 +66,9 @@ const TERMINAL_STATUSES = new Set<OffchainStatus>([
 export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
     MANUAL_SUBMIT_TOKEN?: string;
+    ORACLE_SIDECAR_URL?: string;
+    RELAYER_TARGET?: string;
+    RELAYER_REGISTRY?: string;
 }
 
 export interface ExecutionContextLike {
@@ -66,6 +78,7 @@ export interface ExecutionContextLike {
 export interface WorkerAppOptions {
     now?: () => number;
     runner?: RunnerAdapter;
+    relayerPreview?: RelayerPreviewAdapter;
     fetcher?: typeof fetch;
 }
 
@@ -114,6 +127,7 @@ export async function processDueEvents(
     runner: RunnerAdapter,
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
+    relayerPreview?: RelayerPreviewAdapter,
 ): Promise<ProcessSummary> {
     const summary: ProcessSummary = {
         processed: 0,
@@ -131,7 +145,7 @@ export async function processDueEvents(
 
     const rows = await repository.listDue(nowMs, limit);
     for (const row of rows) {
-        await processSingleDueEvent(repository, runner, row, nowMs, summary);
+        await processSingleDueEvent(repository, runner, row, nowMs, summary, relayerPreview);
     }
 
     return summary;
@@ -139,7 +153,6 @@ export async function processDueEvents(
 
 export function createWorkerApp(options: WorkerAppOptions = {}) {
     const now = options.now ?? Date.now;
-    const runner = options.runner ?? new MockRunnerAdapter();
     const fetcher = options.fetcher ?? fetch;
 
     return {
@@ -151,13 +164,28 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
             }
 
             const repository = repositoryFromEnv(env);
+            const runner = options.runner ?? runnerFromEnv(env, fetcher);
+            const relayerPreview = options.relayerPreview ?? relayerPreviewFromEnv(env, fetcher);
 
             if (request.method === "POST" && url.pathname === "/manual/earthquakes") {
-                return handleManualEarthquake(request, env, repository, runner, now());
+                return handleManualEarthquake(
+                    request,
+                    env,
+                    repository,
+                    runner,
+                    now(),
+                    relayerPreview,
+                );
             }
 
             if (request.method === "POST" && url.pathname === "/tasks/process-due") {
-                const summary = await processDueEvents(repository, runner, now());
+                const summary = await processDueEvents(
+                    repository,
+                    runner,
+                    now(),
+                    DEFAULT_DUE_LIMIT,
+                    relayerPreview,
+                );
                 return json({ ok: true, summary });
             }
 
@@ -171,9 +199,11 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
         ): Promise<void> {
             const nowMs = now();
             const repository = repositoryFromEnv(env);
+            const runner = options.runner ?? runnerFromEnv(env, fetcher);
+            const relayerPreview = options.relayerPreview ?? relayerPreviewFromEnv(env, fetcher);
             const candidates = await fetchUsgsRecentCandidates(fetcher);
             await scanCandidates(repository, candidates, nowMs);
-            await processDueEvents(repository, runner, nowMs);
+            await processDueEvents(repository, runner, nowMs, DEFAULT_DUE_LIMIT, relayerPreview);
         },
     };
 }
@@ -184,6 +214,7 @@ async function handleManualEarthquake(
     repository: StateRepository,
     runner: RunnerAdapter,
     nowMs: number,
+    relayerPreview?: RelayerPreviewAdapter,
 ): Promise<Response> {
     if (env.MANUAL_SUBMIT_TOKEN === undefined || env.MANUAL_SUBMIT_TOKEN.length === 0) {
         return json({ ok: false, error: "manual_submit_token_not_configured" }, { status: 503 });
@@ -226,7 +257,7 @@ async function handleManualEarthquake(
     const summary = emptyProcessSummary();
     const row = await repository.get(sourceEventId);
     if (row !== null) {
-        await processSingleDueEvent(repository, runner, row, nowMs, summary);
+        await processSingleDueEvent(repository, runner, row, nowMs, summary, relayerPreview);
     }
 
     return json(
@@ -246,6 +277,7 @@ async function processSingleDueEvent(
     row: EarthquakeEventRow,
     nowMs: number,
     summary: ProcessSummary,
+    relayerPreview?: RelayerPreviewAdapter,
 ): Promise<void> {
     if (TERMINAL_STATUSES.has(row.status)) {
         return;
@@ -277,6 +309,9 @@ async function processSingleDueEvent(
             finalizationDeadlineAtMs: row.finalization_deadline_at_ms,
         });
         await applyRunnerResult(repository, row.source_event_id, result, nowMs);
+        if (result.status === "finalized") {
+            await runRelayerPreview(repository, row.source_event_id, result, nowMs, relayerPreview);
+        }
         summary.processed += 1;
     } catch {
         await repository.markFailed(
@@ -333,6 +368,39 @@ async function applyRunnerResult(
     await repository.applyRunnerResult(sourceEventId, result, nowMs);
 }
 
+async function runRelayerPreview(
+    repository: StateRepository,
+    sourceEventId: string,
+    result: SignedFinalizedPayload,
+    nowMs: number,
+    relayerPreview?: RelayerPreviewAdapter,
+): Promise<void> {
+    if (relayerPreview === undefined) {
+        return;
+    }
+
+    try {
+        const previewResult = await relayerPreview.previewRelayerRequest(result);
+        if (previewResult.ok) {
+            await repository.markRelayerPreviewSucceeded(sourceEventId, previewResult.value, nowMs);
+            return;
+        }
+        await repository.markRelayerPreviewFailed(
+            sourceEventId,
+            previewResult.error_code,
+            previewResult.message,
+            nowMs,
+        );
+    } catch (error) {
+        await repository.markRelayerPreviewFailed(
+            sourceEventId,
+            "RELAYER_SUBMIT_FAILED",
+            errorMessage(error),
+            nowMs,
+        );
+    }
+}
+
 function isDeadlineExceededPending(
     status: OffchainStatus,
     nowMs: number,
@@ -351,8 +419,40 @@ function repositoryFromEnv(env: WorkerEnv): StateRepository {
     return new D1StateRepository(env.EARTHQUAKE_EVENTS);
 }
 
+function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerAdapter {
+    if (isNonEmptyString(env.ORACLE_SIDECAR_URL)) {
+        return new HttpRunnerAdapter(env.ORACLE_SIDECAR_URL, fetcher);
+    }
+    return new MockRunnerAdapter();
+}
+
+function relayerPreviewFromEnv(
+    env: WorkerEnv,
+    fetcher: typeof fetch,
+): RelayerPreviewAdapter | undefined {
+    if (
+        isNonEmptyString(env.ORACLE_SIDECAR_URL) &&
+        isNonEmptyString(env.RELAYER_TARGET) &&
+        isNonEmptyString(env.RELAYER_REGISTRY)
+    ) {
+        return new HttpRelayerPreviewAdapter(
+            {
+                sidecarUrl: env.ORACLE_SIDECAR_URL,
+                target: env.RELAYER_TARGET,
+                registry: env.RELAYER_REGISTRY,
+            },
+            fetcher,
+        );
+    }
+    return undefined;
+}
+
 function isStateRepository(input: StateRepository | D1Database): input is StateRepository {
     return typeof input === "object" && input !== null && "upsertCandidate" in input;
+}
+
+function isNonEmptyString(input: unknown): input is string {
+    return typeof input === "string" && input.length > 0;
 }
 
 function json(body: unknown, init: JsonResponseInit = {}): Response {
@@ -385,6 +485,10 @@ function readOptionalMs(value: unknown): number | null {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function hasValidFinalizedMetadata(payload: unknown): payload is {
