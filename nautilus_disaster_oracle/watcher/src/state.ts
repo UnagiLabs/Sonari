@@ -348,6 +348,9 @@ export class D1StateRepository implements StateRepository {
                 `UPDATE earthquake_events
                  SET status = 'new',
                      next_retry_at_ms = ?,
+                     runner_job_id = NULL,
+                     runner_queued_at_ms = NULL,
+                     runner_attempt = NULL,
                      runner_error_message = ?,
                      updated_at_ms = ?
                  WHERE source_event_id = ?
@@ -781,6 +784,9 @@ export class InMemoryStateRepository implements StateRepository {
         this.patch(sourceEventId, {
             status: "new",
             next_retry_at_ms: nextRetryAtMs,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
             runner_error_message: message,
             updated_at_ms: nowMs,
         });

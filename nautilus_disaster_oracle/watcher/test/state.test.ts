@@ -288,6 +288,9 @@ describe("D1StateRepository", () => {
             status: "new",
             retry_count: 2,
             next_retry_at_ms: baseNow + 60_000,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
             runner_error_message: "queue unavailable",
             updated_at_ms: baseNow,
         });
@@ -330,6 +333,9 @@ describe("D1StateRepository", () => {
             status: "new",
             retry_count: 1,
             next_retry_at_ms: baseNow + 60_000,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
         });
     });
 });
@@ -432,7 +438,7 @@ class FakeD1PreparedStatement {
         }
         if (
             normalizedSql.startsWith(
-                "UPDATE earthquake_events SET status = 'new', next_retry_at_ms = ?, runner_error_message = ?, updated_at_ms = ?",
+                "UPDATE earthquake_events SET status = 'new', next_retry_at_ms = ?, runner_job_id = NULL, runner_queued_at_ms = NULL, runner_attempt = NULL, runner_error_message = ?, updated_at_ms = ?",
             )
         ) {
             const [nextRetryAtMs, runnerErrorMessage, updatedAtMs, sourceEventId, runnerJobId] =
@@ -448,6 +454,9 @@ class FakeD1PreparedStatement {
             this.patch(String(sourceEventId), {
                 status: "new",
                 next_retry_at_ms: Number(nextRetryAtMs),
+                runner_job_id: null,
+                runner_queued_at_ms: null,
+                runner_attempt: null,
                 runner_error_message: String(runnerErrorMessage),
                 updated_at_ms: Number(updatedAtMs),
             });

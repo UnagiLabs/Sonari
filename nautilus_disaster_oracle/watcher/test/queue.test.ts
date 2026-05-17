@@ -164,6 +164,9 @@ describe("runner queue enqueue", () => {
             status: "new",
             retry_count: 0,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
             runner_error_message: "queue unavailable",
         });
 
@@ -215,8 +218,9 @@ describe("runner queue enqueue", () => {
             status: "new",
             retry_count: 0,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
-            runner_job_id: "us7000stalequeued:1",
-            runner_queued_at_ms: queuedAtMs,
+            runner_job_id: null,
+            runner_queued_at_ms: null,
+            runner_attempt: null,
         });
 
         const retryQueue = new RecordingQueue();
