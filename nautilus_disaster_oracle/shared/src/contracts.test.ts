@@ -125,19 +125,17 @@ describe("oracle boundary validators", () => {
     it("accepts only minimal Worker to TEE requests", () => {
         expect(
             validateWorkerToTeeRequest({
-                request_type: "DETECT_BY_EVENT_ID",
+                source_event_id: "us7000sonari",
                 hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
                 primary_source: BCS_ENUMS.primarySource.USGS,
-                source_event_id: "us7000sonari",
                 geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
             }),
         ).toEqual({
             ok: true,
             value: {
-                request_type: "DETECT_BY_EVENT_ID",
+                source_event_id: "us7000sonari",
                 hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
                 primary_source: BCS_ENUMS.primarySource.USGS,
-                source_event_id: "us7000sonari",
                 geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
             },
         });
@@ -145,15 +143,23 @@ describe("oracle boundary validators", () => {
 
     it("rejects Worker attempts to pass trusted TEE-derived values", () => {
         for (const forbiddenKey of [
+            "request_type",
+            "context",
+            "deadline",
+            "retry",
             "severity_band",
             "max_cell_band",
+            "cell_band",
             "cell_metric",
             "intensity_scale",
             "source_set_hash",
+            "root",
             "raw_data_hash",
             "affected_cells_root",
             "payload",
+            "payload_bcs_hex",
             "signature",
+            "public_key",
             "hash",
             "magnitude",
             "summary_mmi",
@@ -161,10 +167,9 @@ describe("oracle boundary validators", () => {
             "tsunami",
         ]) {
             const result = validateWorkerToTeeRequest({
-                request_type: "DETECT_BY_EVENT_ID",
+                source_event_id: "us7000sonari",
                 hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
                 primary_source: BCS_ENUMS.primarySource.USGS,
-                source_event_id: "us7000sonari",
                 geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
                 [forbiddenKey]: "untrusted",
             });

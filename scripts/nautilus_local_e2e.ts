@@ -25,10 +25,7 @@ import {
     type UsgsEarthquakeCandidate,
 } from "../nautilus_disaster_oracle/watcher/src/index.js";
 import type { EarthquakeEventRow } from "../nautilus_disaster_oracle/watcher/src/state.js";
-import type {
-    RunnerAdapter,
-    RunnerContext,
-} from "../nautilus_disaster_oracle/watcher/src/trigger_tee.js";
+import type { RunnerAdapter } from "../nautilus_disaster_oracle/watcher/src/trigger_tee.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +86,21 @@ interface RunnerResultSummary {
 interface UsgsDetailFixture {
     id: string;
     properties: Record<string, unknown>;
+}
+
+export interface SourceArtifacts {
+    case_id: string;
+    source_event_id: string;
+    raw_detail_path: string;
+    raw_detail_uri: string;
+    raw_grid_path: string | null;
+    raw_grid_uri: string | null;
+    raw_data_uri: string;
+    affected_cells_uri: string;
+}
+
+export interface SourceClient {
+    getSourceArtifacts(sourceEventId: string): Promise<SourceArtifacts>;
 }
 
 export async function runLocalOracleE2e(
@@ -155,6 +167,66 @@ export async function runLocalOracleE2e(
     };
 }
 
+export class FixtureSourceClient implements SourceClient {
+    private readonly caseId: string;
+    private readonly fixturesDir: string;
+
+    constructor(options: { caseId: string; fixturesDir: string }) {
+        this.caseId = options.caseId;
+        this.fixturesDir = resolveFromCwd(options.fixturesDir);
+    }
+
+    async getSourceArtifacts(sourceEventId: string): Promise<SourceArtifacts> {
+        const caseId = await this.resolveCaseId(sourceEventId);
+        const inputDir = path.join(this.fixturesDir, caseId, "input");
+        const detailPath = path.join(inputDir, "usgs_detail.json");
+        const gridPath = await this.resolveGridPath(inputDir);
+
+        return {
+            case_id: caseId,
+            source_event_id: sourceEventId,
+            raw_detail_path: detailPath,
+            raw_detail_uri: displayPath(detailPath),
+            raw_grid_path: gridPath,
+            raw_grid_uri: gridPath === null ? null : displayPath(gridPath),
+            raw_data_uri: `ipfs://sonari/examples/${sourceEventId}/raw_data_manifest.json`,
+            affected_cells_uri: `ipfs://sonari/examples/${sourceEventId}/affected_cells.json`,
+        };
+    }
+
+    private async resolveCaseId(sourceEventId: string): Promise<string> {
+        const preferredCandidate = await loadFixtureCandidateAsync(this.caseId, this.fixturesDir);
+        if (preferredCandidate.source_event_id === sourceEventId) {
+            return this.caseId;
+        }
+
+        for (const caseId of E2E_FIXTURE_CASES) {
+            const candidate = await loadFixtureCandidateAsync(caseId, this.fixturesDir);
+            if (candidate.source_event_id === sourceEventId) {
+                return caseId;
+            }
+        }
+
+        throw new Error(`No local E2E fixture case matches source_event_id ${sourceEventId}`);
+    }
+
+    private async resolveGridPath(inputDir: string): Promise<string | null> {
+        for (const name of ["usgs_grid.xml", "usgs_grid.xml.zip"]) {
+            const gridPath = path.join(inputDir, name);
+            if (await fileExists(gridPath)) {
+                return gridPath;
+            }
+        }
+        return null;
+    }
+}
+
+export class UsgsSourceClient implements SourceClient {
+    async getSourceArtifacts(_sourceEventId: string): Promise<SourceArtifacts> {
+        throw new Error("Live USGS source fetch is not implemented for Step 8 local sidecar");
+    }
+}
+
 export function loadFixtureCandidate(
     caseId = DEFAULT_CASE_ID,
     fixturesDir = resolveFromCwd(DEFAULT_FIXTURES_DIR),
@@ -167,23 +239,28 @@ export function loadFixtureCandidate(
 export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
     invocationCount = 0;
     lastResult: TeeCoreResult | null = null;
+    private readonly sourceClient: SourceClient;
 
     constructor(
-        private readonly options: {
-            caseId: string;
-            fixturesDir: string;
-        },
-    ) {}
+        options:
+            | {
+                  caseId: string;
+                  fixturesDir: string;
+              }
+            | { sourceClient: SourceClient },
+    ) {
+        this.sourceClient =
+            "sourceClient" in options ? options.sourceClient : new FixtureSourceClient(options);
+    }
 
-    async run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult> {
+    async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
         this.invocationCount += 1;
-        const caseId = await this.resolveCaseId(request.source_event_id);
+        const source = await this.sourceClient.getSourceArtifacts(request.source_event_id);
         const outputDir = await mkdtemp(path.join(tmpdir(), "sonari-nautilus-e2e-"));
 
         try {
             await runRustOracleCore({
-                caseId,
-                fixturesDir: this.options.fixturesDir,
+                source,
                 outputDir,
             });
 
@@ -193,45 +270,19 @@ export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
             const result =
                 summary.status === "finalized"
                     ? await readFinalizedResult(outputDir)
-                    : readNonFinalizedResult(summary, context);
+                    : readNonFinalizedResult(summary);
             this.lastResult = result;
             return result;
         } finally {
             await rm(outputDir, { recursive: true, force: true });
         }
     }
-
-    private async resolveCaseId(sourceEventId: string): Promise<string> {
-        const preferredCandidate = await loadFixtureCandidateAsync(
-            this.options.caseId,
-            this.options.fixturesDir,
-        );
-        if (preferredCandidate.source_event_id === sourceEventId) {
-            return this.options.caseId;
-        }
-
-        for (const caseId of E2E_FIXTURE_CASES) {
-            const candidate = await loadFixtureCandidateAsync(caseId, this.options.fixturesDir);
-            if (candidate.source_event_id === sourceEventId) {
-                return caseId;
-            }
-        }
-
-        throw new Error(`No local E2E fixture case matches source_event_id ${sourceEventId}`);
-    }
 }
 
 async function runRustOracleCore(options: {
-    caseId: string;
-    fixturesDir: string;
+    source: SourceArtifacts;
     outputDir: string;
 }): Promise<void> {
-    const caseDir = path.join(options.fixturesDir, options.caseId);
-    const inputDir = path.join(caseDir, "input");
-    const detailPath = path.join(inputDir, "usgs_detail.json");
-    const gridPath = path.join(inputDir, "usgs_grid.xml");
-    const sourceEventId = (await loadFixtureCandidateAsync(options.caseId, options.fixturesDir))
-        .source_event_id;
     const args = [
         "run",
         "--quiet",
@@ -239,21 +290,24 @@ async function runRustOracleCore(options: {
         path.join(resolveFromCwd("."), "nautilus_disaster_oracle/tee/Cargo.toml"),
         "--",
         "--case-id",
-        options.caseId,
+        options.source.case_id,
         "--detail",
-        detailPath,
+        options.source.raw_detail_path,
         "--raw-detail-uri",
-        displayPath(detailPath),
+        options.source.raw_detail_uri,
         "--raw-data-uri",
-        `ipfs://sonari/examples/${sourceEventId}/raw_data_manifest.json`,
+        options.source.raw_data_uri,
         "--affected-cells-uri",
-        `ipfs://sonari/examples/${sourceEventId}/affected_cells.json`,
+        options.source.affected_cells_uri,
         "--output-dir",
         options.outputDir,
     ];
 
-    if (await fileExists(gridPath)) {
-        args.push("--grid", gridPath, "--raw-grid-uri", displayPath(gridPath));
+    if (options.source.raw_grid_path !== null) {
+        args.push("--grid", options.source.raw_grid_path);
+        if (options.source.raw_grid_uri !== null) {
+            args.push("--raw-grid-uri", options.source.raw_grid_uri);
+        }
     }
 
     await execFileAsync("cargo", args, {
@@ -292,7 +346,6 @@ async function readFinalizedResult(outputDir: string): Promise<SignedFinalizedPa
 
 function readNonFinalizedResult(
     summary: RunnerResultSummary,
-    context: RunnerContext,
 ): Exclude<TeeCoreResult, SignedFinalizedPayload> {
     if (summary.error_code === null) {
         throw new Error(`Non-finalized result ${summary.status} requires error_code`);
@@ -308,7 +361,6 @@ function readNonFinalizedResult(
         return {
             status: "pending_source",
             source_event_id: summary.source_event_id,
-            next_retry_at_ms: Math.min(context.nowMs + HOUR_MS, context.finalizationDeadlineAtMs),
             error_code: summary.error_code,
         };
     }
@@ -320,7 +372,6 @@ function readNonFinalizedResult(
         return {
             status: "pending_mmi",
             source_event_id: summary.source_event_id,
-            next_retry_at_ms: Math.min(context.nowMs + HOUR_MS, context.finalizationDeadlineAtMs),
             error_code: summary.error_code,
         };
     }

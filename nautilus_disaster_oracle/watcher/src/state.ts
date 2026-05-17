@@ -45,7 +45,12 @@ export interface StateRepository {
         nowMs: number,
         nextRetryAtMs: number,
     ): Promise<void>;
-    applyRunnerResult(sourceEventId: string, result: TeeCoreResult, nowMs: number): Promise<void>;
+    applyRunnerResult(
+        sourceEventId: string,
+        result: TeeCoreResult,
+        nowMs: number,
+        pendingNextRetryAtMs?: number,
+    ): Promise<void>;
     markRelayerPreviewSucceeded(
         sourceEventId: string,
         preview: RelayerRequestPreview,
@@ -261,6 +266,7 @@ export class D1StateRepository implements StateRepository {
         sourceEventId: string,
         result: TeeCoreResult,
         nowMs: number,
+        pendingNextRetryAtMs?: number,
     ): Promise<void> {
         if (result.status === "finalized") {
             const payload = result.payload as Record<string, unknown>;
@@ -311,7 +317,13 @@ export class D1StateRepository implements StateRepository {
                      updated_at_ms = ?
                  WHERE source_event_id = ?`,
             )
-            .bind(result.status, result.next_retry_at_ms, result.error_code, nowMs, sourceEventId)
+            .bind(
+                result.status,
+                pendingNextRetryAtMs ?? null,
+                result.error_code,
+                nowMs,
+                sourceEventId,
+            )
             .run();
     }
 
@@ -511,6 +523,7 @@ export class InMemoryStateRepository implements StateRepository {
         sourceEventId: string,
         result: TeeCoreResult,
         nowMs: number,
+        pendingNextRetryAtMs?: number,
     ): Promise<void> {
         if (result.status === "finalized") {
             this.patch(sourceEventId, {
@@ -537,7 +550,7 @@ export class InMemoryStateRepository implements StateRepository {
 
         this.patch(sourceEventId, {
             status: result.status,
-            next_retry_at_ms: result.next_retry_at_ms,
+            next_retry_at_ms: pendingNextRetryAtMs ?? null,
             error_code: result.error_code,
             updated_at_ms: nowMs,
         });

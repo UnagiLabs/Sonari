@@ -7,16 +7,10 @@ import {
 } from "../src/index.js";
 
 const request = {
-    request_type: "DETECT_BY_EVENT_ID" as const,
+    source_event_id: "us7000sonari",
     hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
     primary_source: BCS_ENUMS.primarySource.USGS,
-    source_event_id: "us7000sonari",
     geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
-};
-
-const context = {
-    nowMs: 1_800_000_000_000,
-    finalizationDeadlineAtMs: 1_800_172_800_000,
 };
 
 const finalized = {
@@ -44,7 +38,7 @@ const preview: RelayerRequestPreview = {
 };
 
 describe("HTTP sidecar adapters", () => {
-    it("sends WorkerToTeeRequest unchanged to the oracle sidecar", async () => {
+    it("sends only the Nautilus payload wrapper to /process_data", async () => {
         const calls: Request[] = [];
         const adapter = new HttpRunnerAdapter("http://127.0.0.1:8789", async (input) => {
             const outbound = input instanceof Request ? input : new Request(input);
@@ -52,13 +46,12 @@ describe("HTTP sidecar adapters", () => {
             return Response.json({ ok: true, result: finalized });
         });
 
-        await expect(adapter.run(request, context)).resolves.toEqual(finalized);
+        await expect(adapter.run(request)).resolves.toEqual(finalized);
 
         expect(calls).toHaveLength(1);
-        expect(calls[0]?.url).toBe("http://127.0.0.1:8789/oracle/run");
+        expect(calls[0]?.url).toBe("http://127.0.0.1:8789/process_data");
         await expect(calls[0]?.json()).resolves.toEqual({
-            request,
-            context,
+            payload: request,
         });
     });
 
@@ -70,7 +63,7 @@ describe("HTTP sidecar adapters", () => {
             ),
         );
 
-        await expect(adapter.run(request, context)).rejects.toThrow(/cargo failed/);
+        await expect(adapter.run(request)).rejects.toThrow(/cargo failed/);
     });
 
     it("rejects non-finalized relayer inputs before sending them to the sidecar", async () => {
@@ -91,7 +84,6 @@ describe("HTTP sidecar adapters", () => {
             adapter.previewRelayerRequest({
                 status: "pending_mmi",
                 source_event_id: "us7000sonari",
-                next_retry_at_ms: context.nowMs,
                 error_code: "MMI_NOT_AVAILABLE",
             }),
         ).resolves.toMatchObject({

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { HOUR_MS } from "../nautilus_disaster_oracle/watcher/src/index.js";
 import {
     E2E_FIXTURE_CASES,
+    FixtureSourceClient,
+    LocalOracleCoreRunnerAdapter,
     loadFixtureCandidate,
     runLocalOracleE2e,
+    UsgsSourceClient,
 } from "./nautilus_local_e2e.js";
 
 const target = "0x123::disaster_oracle::submit_payload_v1";
@@ -116,6 +119,60 @@ describe("Nautilus local oracle E2E", () => {
         },
         LOCAL_E2E_TEST_TIMEOUT_MS,
     );
+
+    it("resolves raw fixture artifacts through FixtureSourceClient", async () => {
+        const sourceClient = new FixtureSourceClient({
+            caseId: "usgs/finalized_minimal",
+            fixturesDir: "nautilus_disaster_oracle/fixtures",
+        });
+
+        await expect(sourceClient.getSourceArtifacts("us7000sonari")).resolves.toEqual({
+            case_id: "usgs/finalized_minimal",
+            source_event_id: "us7000sonari",
+            raw_detail_path: expect.stringMatching(
+                /nautilus_disaster_oracle\/fixtures\/usgs\/finalized_minimal\/input\/usgs_detail\.json$/,
+            ),
+            raw_detail_uri:
+                "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            raw_grid_path: expect.stringMatching(
+                /nautilus_disaster_oracle\/fixtures\/usgs\/finalized_minimal\/input\/usgs_grid\.xml$/,
+            ),
+            raw_grid_uri:
+                "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
+            raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
+            affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+        });
+    });
+
+    it(
+        "routes LocalOracleCoreRunnerAdapter through the configured SourceClient",
+        async () => {
+            const sourceClient = new FixtureSourceClient({
+                caseId: "usgs/finalized_minimal",
+                fixturesDir: "nautilus_disaster_oracle/fixtures",
+            });
+            const runner = new LocalOracleCoreRunnerAdapter({ sourceClient });
+
+            await expect(
+                runner.run({
+                    source_event_id: "us7000sonari",
+                    hazard_type: 1,
+                    primary_source: 1,
+                    geo_resolution: 7,
+                }),
+            ).resolves.toMatchObject({ status: "finalized" });
+            expect(runner.invocationCount).toBe(1);
+        },
+        LOCAL_E2E_TEST_TIMEOUT_MS,
+    );
+
+    it("keeps live USGS fetching out of the local Step 8 source boundary", async () => {
+        const sourceClient = new UsgsSourceClient();
+
+        await expect(sourceClient.getSourceArtifacts("us7000sonari")).rejects.toThrow(
+            /Live USGS source fetch is not implemented/,
+        );
+    });
 
     it.each([
         ["usgs/finalized_minimal", "finalized", null],

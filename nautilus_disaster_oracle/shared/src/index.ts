@@ -146,10 +146,9 @@ export interface DisasterOraclePayloadV1 {
 }
 
 export interface WorkerToTeeRequest {
-    request_type: "DETECT_BY_EVENT_ID";
+    source_event_id: string;
     hazard_type: typeof BCS_ENUMS.hazardType.EARTHQUAKE;
     primary_source: typeof BCS_ENUMS.primarySource.USGS;
-    source_event_id: string;
     geo_resolution: typeof DEFAULT_ORACLE_CONTRACT.geo_resolution;
 }
 
@@ -165,7 +164,6 @@ export type TeeCoreResult =
     | {
           status: "pending_source";
           source_event_id: string;
-          next_retry_at_ms: number;
           error_code: Extract<
               OracleErrorCode,
               "SHAKEMAP_PRODUCT_MISSING" | "SHAKEMAP_GRID_UNAVAILABLE"
@@ -174,7 +172,6 @@ export type TeeCoreResult =
     | {
           status: "pending_mmi";
           source_event_id: string;
-          next_retry_at_ms: number;
           error_code: Extract<OracleErrorCode, "MMI_NOT_AVAILABLE">;
       }
     | {
@@ -191,10 +188,9 @@ type ValidationResult<T> =
     | { ok: false; error_code: string; message: string };
 
 const WORKER_TO_TEE_KEYS = [
-    "request_type",
+    "source_event_id",
     "hazard_type",
     "primary_source",
-    "source_event_id",
     "geo_resolution",
 ] as const;
 
@@ -232,7 +228,6 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
     }
 
     if (
-        input.request_type !== "DETECT_BY_EVENT_ID" ||
         input.hazard_type !== BCS_ENUMS.hazardType.EARTHQUAKE ||
         input.primary_source !== BCS_ENUMS.primarySource.USGS ||
         input.geo_resolution !== DEFAULT_ORACLE_CONTRACT.geo_resolution ||
@@ -248,10 +243,9 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
     return {
         ok: true,
         value: {
-            request_type: input.request_type,
+            source_event_id: input.source_event_id,
             hazard_type: input.hazard_type,
             primary_source: input.primary_source,
-            source_event_id: input.source_event_id,
             geo_resolution: input.geo_resolution,
         },
     };

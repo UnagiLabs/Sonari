@@ -5,7 +5,7 @@ use crate::core::artifacts::{
     RawSourceContentHash, SourceEntry, SourceManifest, UnsignedPayloadV1,
 };
 use crate::core::types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
-use crate::crypto::{LocalEd25519Signer, PayloadSigner, sha3_256_bytes, to_hex};
+use crate::crypto::{PayloadSigner, sha3_256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
 use crate::source::usgs::{UsgsDetail, UsgsShakeMapProduct, parse_detail, parse_grid_points};
@@ -28,7 +28,6 @@ pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError>
             primary_source: "USGS".to_owned(),
             geo_resolution: GEO_RESOLUTION,
             error_code: error_code.map(str::to_owned),
-            next_retry_at_ms: None,
             expected_payload: expected_payload.map(str::to_owned),
         };
 
@@ -37,7 +36,7 @@ pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError>
         .products
         .shakemap
         .as_ref()
-        .and_then(|products| products.first())
+        .and_then(|products| crate::source::usgs::select_preferred_shakemap_product(products))
     else {
         return Ok(status_only(base_result(
             OracleStatus::PendingSource,
@@ -161,8 +160,6 @@ pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError>
         freshness_deadline_ms: observed_at_ms + FRESHNESS_WINDOW_MS,
     };
     let unsigned_bcs_payload = payload_bcs_bytes(&unsigned_payload)?;
-    let signature =
-        LocalEd25519Signer::new(input.signing_key_seed).sign_payload(&unsigned_bcs_payload);
     let leaf_hashes_json = leaf_hashes
         .iter()
         .map(|(h3_index, hash)| LeafHash {
@@ -202,8 +199,19 @@ pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError>
         sample_proof,
         unsigned_payload: Some(unsigned_payload),
         unsigned_bcs_payload: Some(unsigned_bcs_payload),
-        signature: Some(signature),
+        signature: None,
     })
+}
+
+pub fn process_usgs_with_signer(
+    input: UsgsOracleInput,
+    signer: &impl PayloadSigner,
+) -> Result<OracleOutput, OracleError> {
+    let mut output = process_usgs(input)?;
+    if let Some(payload) = output.unsigned_bcs_payload.as_ref() {
+        output.signature = Some(signer.sign_payload(payload));
+    }
+    Ok(output)
 }
 
 fn status_only(result: ResultSummary) -> OracleOutput {
@@ -225,11 +233,7 @@ fn source_manifest(detail: &UsgsDetail, shakemap: &UsgsShakeMapProduct) -> Sourc
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
         detail.id
     );
-    let grid_url = shakemap
-        .contents
-        .get("download/grid.xml")
-        .map(|content| content.url.as_str())
-        .unwrap_or("");
+    let grid_url = crate::source::usgs::preferred_grid_uri(shakemap).unwrap_or("");
     let mut sources = vec![
         SourceEntry {
             name: "USGS".to_owned(),
@@ -280,6 +284,9 @@ fn raw_data_manifest(
     grid_uri: &str,
     grid_bytes: &[u8],
 ) -> RawDataManifest {
+    // `grid_uri` records the fetched artifact URI. When the artifact is grid.xml.zip,
+    // `grid_bytes` is the single decompressed grid.xml passed into the pure core; the
+    // current manifest schema has one hash slot, so it pins the exact core input bytes.
     let mut entries = vec![
         RawDataEntry {
             name: "USGS".to_owned(),

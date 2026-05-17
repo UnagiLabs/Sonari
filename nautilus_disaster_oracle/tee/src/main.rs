@@ -1,7 +1,10 @@
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tee::{OracleOutput, UsgsOracleInput, canonical_json_bytes, process_usgs};
+use tee::{
+    LocalEd25519Signer, OracleOutput, UsgsOracleInput, canonical_json_bytes,
+    grid_xml_from_artifact, process_usgs_with_signer,
+};
 
 const DEV_SIGNING_KEY_SEED: &str =
     "0x0707070707070707070707070707070707070707070707070707070707070707";
@@ -52,11 +55,12 @@ struct FixtureArgs {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let (input, output_dir) = match cli.command {
+    let (input, output_dir, signing_key_seed) = match cli.command {
         Some(Command::Fixture(args)) => fixture_input(args)?,
         None => low_level_input(cli)?,
     };
-    let output = process_usgs(input)?;
+    let signer = LocalEd25519Signer::new(signing_key_seed);
+    let output = process_usgs_with_signer(input, &signer)?;
 
     if let Some(output_dir) = output_dir {
         write_output(&output_dir, &output)?;
@@ -69,26 +73,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn low_level_input(
     cli: Cli,
-) -> Result<(UsgsOracleInput, Option<PathBuf>), Box<dyn std::error::Error>> {
+) -> Result<(UsgsOracleInput, Option<PathBuf>, [u8; 32]), Box<dyn std::error::Error>> {
     let signing_key_seed = signing_key_seed(false, cli.signing_key_seed)?;
+    let detail_path = required(cli.detail, "--detail")?;
+    let (grid_xml, raw_grid_uri) = grid_input(cli.grid, cli.raw_grid_uri)?;
     Ok((
         UsgsOracleInput {
             case_id: required(cli.case_id, "--case-id")?,
-            detail_json: fs::read(required(cli.detail, "--detail")?)?,
-            grid_xml: cli.grid.map(fs::read).transpose()?,
+            detail_json: fs::read(detail_path)?,
+            grid_xml,
             raw_detail_uri: required(cli.raw_detail_uri, "--raw-detail-uri")?,
-            raw_grid_uri: cli.raw_grid_uri,
+            raw_grid_uri,
             raw_data_uri: required(cli.raw_data_uri, "--raw-data-uri")?,
             affected_cells_uri: required(cli.affected_cells_uri, "--affected-cells-uri")?,
-            signing_key_seed,
         },
         cli.output_dir,
+        signing_key_seed,
     ))
 }
 
 fn fixture_input(
     args: FixtureArgs,
-) -> Result<(UsgsOracleInput, Option<PathBuf>), Box<dyn std::error::Error>> {
+) -> Result<(UsgsOracleInput, Option<PathBuf>, [u8; 32]), Box<dyn std::error::Error>> {
     let case_dir = args.fixtures_dir.join(&args.case);
     let input_dir = case_dir.join("input");
     let detail_path = input_dir.join("usgs_detail.json");
@@ -96,27 +102,43 @@ fn fixture_input(
     let source_event_id = source_event_id(&detail_path)?;
     let output_dir = args.write_expected.then(|| case_dir.join("expected"));
     let signing_key_seed = signing_key_seed(args.sign_dev, args.signing_key_seed)?;
+    let (grid_xml, raw_grid_uri) = if grid_path.exists() {
+        grid_input(Some(grid_path), None)?
+    } else {
+        (None, None)
+    };
 
     Ok((
         UsgsOracleInput {
             case_id: args.case,
             detail_json: fs::read(&detail_path)?,
-            grid_xml: grid_path
-                .exists()
-                .then(|| fs::read(&grid_path))
-                .transpose()?,
+            grid_xml,
             raw_detail_uri: display_path(&detail_path),
-            raw_grid_uri: grid_path.exists().then(|| display_path(&grid_path)),
+            raw_grid_uri,
             raw_data_uri: format!(
                 "ipfs://sonari/examples/{source_event_id}/raw_data_manifest.json"
             ),
             affected_cells_uri: format!(
                 "ipfs://sonari/examples/{source_event_id}/affected_cells.json"
             ),
-            signing_key_seed,
         },
         output_dir,
+        signing_key_seed,
     ))
+}
+
+fn grid_input(
+    grid_path: Option<PathBuf>,
+    raw_grid_uri: Option<String>,
+) -> Result<(Option<Vec<u8>>, Option<String>), Box<dyn std::error::Error>> {
+    let Some(grid_path) = grid_path else {
+        return Ok((None, None));
+    };
+
+    let raw_grid_uri = raw_grid_uri.unwrap_or_else(|| display_path(&grid_path));
+    let grid_bytes = fs::read(&grid_path)?;
+    let grid_xml = grid_xml_from_artifact(&raw_grid_uri, &grid_bytes)?;
+    Ok((Some(grid_xml), Some(raw_grid_uri)))
 }
 
 fn source_event_id(detail_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
