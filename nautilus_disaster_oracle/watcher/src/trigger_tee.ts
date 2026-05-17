@@ -22,7 +22,7 @@ export class HttpRunnerAdapter implements RunnerAdapter {
 
     constructor(
         sidecarUrl: string,
-        private readonly fetcher: Fetcher = fetch,
+        private readonly fetcher: Fetcher = (input, init) => fetch(input, init),
     ) {
         this.sidecarUrl = stripTrailingSlash(sidecarUrl);
     }

@@ -15,6 +15,8 @@ const execFileAsync = promisify(execFile);
 
 const ROOT_DIR = resolveFromCwd(".");
 const WATCHER_DIR = path.join(ROOT_DIR, "nautilus_disaster_oracle/watcher");
+const TSX_BIN = path.join(ROOT_DIR, "node_modules/.bin/tsx");
+const WRANGLER_BIN = path.join(WATCHER_DIR, "node_modules/.bin/wrangler");
 const SIDECAR_HOST = "127.0.0.1";
 const SIDECAR_PORT = 8789;
 const WRANGLER_HOST = "127.0.0.1";
@@ -30,7 +32,14 @@ const STARTUP_TIMEOUT_MS = 45_000;
 interface WranglerE2eOutput {
     case_id: string;
     source_event_id: string;
-    wrangler_event: Record<string, unknown>;
+    wrangler_event: {
+        status: unknown;
+        event_uid: unknown;
+        latest_revision: unknown;
+        source_updated_at_ms: unknown;
+        relayer_preview_status: unknown;
+        relayer_request_json_present: boolean;
+    };
     local_event: LocalOracleE2eOutput["final_event"];
     relayer_preview_argument_lengths: number[];
 }
@@ -43,9 +52,8 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
     try {
         await applyMigrations(persistDir);
 
-        sidecar = spawnProcess("pnpm", [
-            "oracle:sidecar:local",
-            "--",
+        sidecar = spawnProcess(TSX_BIN, [
+            "scripts/nautilus_sidecar.ts",
             "--host",
             SIDECAR_HOST,
             "--port",
@@ -56,10 +64,8 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
         await waitForHttp(`${SIDECAR_URL}/oracle/run`, "sidecar");
 
         wrangler = spawnProcess(
-            "pnpm",
+            WRANGLER_BIN,
             [
-                "exec",
-                "wrangler",
                 "dev",
                 "--local",
                 "--ip",
@@ -144,7 +150,15 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
         return {
             case_id: CASE_ID,
             source_event_id: candidate.source_event_id,
-            wrangler_event: wranglerEvent,
+            wrangler_event: {
+                status: wranglerEvent.status,
+                event_uid: wranglerEvent.event_uid,
+                latest_revision: wranglerEvent.latest_revision,
+                source_updated_at_ms: wranglerEvent.source_updated_at_ms,
+                relayer_preview_status: wranglerEvent.relayer_preview_status,
+                relayer_request_json_present:
+                    typeof wranglerEvent.relayer_request_json === "string",
+            },
             local_event: localOutput.final_event,
             relayer_preview_argument_lengths: relayerRequest.arguments
                 .slice(1)
@@ -159,10 +173,8 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
 
 async function applyMigrations(persistDir: string): Promise<void> {
     await execFileAsync(
-        "pnpm",
+        WRANGLER_BIN,
         [
-            "exec",
-            "wrangler",
             "d1",
             "migrations",
             "apply",
@@ -170,7 +182,6 @@ async function applyMigrations(persistDir: string): Promise<void> {
             "--local",
             "--persist-to",
             persistDir,
-            "--yes",
         ],
         { cwd: WATCHER_DIR, maxBuffer: 1024 * 1024 * 10 },
     );
@@ -181,10 +192,8 @@ async function readD1Event(
     persistDir: string,
 ): Promise<Record<string, unknown>> {
     const { stdout } = await execFileAsync(
-        "pnpm",
+        WRANGLER_BIN,
         [
-            "exec",
-            "wrangler",
             "d1",
             "execute",
             "sonari-oracle-watcher-local",
@@ -229,7 +238,7 @@ function readRelayerRequest(row: Record<string, unknown>): {
     arguments: [string, number[], number[], number[]];
 } {
     if (typeof row.relayer_request_json !== "string") {
-        throw new Error("D1 row is missing relayer_request_json");
+        throw new Error(`D1 row is missing relayer_request_json: ${JSON.stringify(row)}`);
     }
     const parsed = JSON.parse(row.relayer_request_json) as unknown;
     if (!isRecord(parsed) || !Array.isArray(parsed.arguments)) {
@@ -241,6 +250,7 @@ function readRelayerRequest(row: Record<string, unknown>): {
 function spawnProcess(command: string, args: string[], cwd = ROOT_DIR): ChildProcess {
     const child = spawn(command, args, {
         cwd,
+        detached: true,
         stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout?.on("data", (chunk) => process.stdout.write(chunk));
@@ -249,10 +259,14 @@ function spawnProcess(command: string, args: string[], cwd = ROOT_DIR): ChildPro
 }
 
 function stopProcess(child: ChildProcess | null): void {
-    if (child === null || child.killed) {
+    if (child === null || child.pid === undefined || child.killed) {
         return;
     }
-    child.kill("SIGTERM");
+    try {
+        process.kill(-child.pid, "SIGTERM");
+    } catch {
+        child.kill("SIGTERM");
+    }
 }
 
 async function waitForHttp(url: string, label: string): Promise<void> {

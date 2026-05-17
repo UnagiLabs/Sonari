@@ -42,7 +42,7 @@ export class HttpRelayerPreviewAdapter implements RelayerPreviewAdapter {
 
     constructor(
         config: HttpRelayerPreviewConfig,
-        private readonly fetcher: Fetcher = fetch,
+        private readonly fetcher: Fetcher = (input, init) => fetch(input, init),
     ) {
         this.sidecarUrl = stripTrailingSlash(config.sidecarUrl);
         this.target = config.target;

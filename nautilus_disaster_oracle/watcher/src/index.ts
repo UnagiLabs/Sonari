@@ -153,7 +153,7 @@ export async function processDueEvents(
 
 export function createWorkerApp(options: WorkerAppOptions = {}) {
     const now = options.now ?? Date.now;
-    const fetcher = options.fetcher ?? fetch;
+    const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
 
     return {
         async fetch(request: Request, env: WorkerEnv): Promise<Response> {
@@ -313,7 +313,11 @@ async function processSingleDueEvent(
             await runRelayerPreview(repository, row.source_event_id, result, nowMs, relayerPreview);
         }
         summary.processed += 1;
-    } catch {
+    } catch (error) {
+        console.error("Oracle runner failed", {
+            source_event_id: row.source_event_id,
+            message: errorMessage(error),
+        });
         await repository.markFailed(
             row.source_event_id,
             "AWS_RUNNER_TIMEOUT",
