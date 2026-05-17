@@ -486,8 +486,5 @@ fn zip_with_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 fn cli_test_workspace(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "sonari-tee-cli-{name}-{}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("sonari-tee-cli-{name}-{}", std::process::id()))
 }
