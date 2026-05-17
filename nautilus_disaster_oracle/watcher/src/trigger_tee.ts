@@ -15,6 +15,38 @@ export interface RunnerAdapter {
     run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult>;
 }
 
+type Fetcher = typeof fetch;
+
+export class HttpRunnerAdapter implements RunnerAdapter {
+    private readonly sidecarUrl: string;
+
+    constructor(
+        sidecarUrl: string,
+        private readonly fetcher: Fetcher = (input, init) => fetch(input, init),
+    ) {
+        this.sidecarUrl = stripTrailingSlash(sidecarUrl);
+    }
+
+    async run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult> {
+        const sidecarRequest = new Request(`${this.sidecarUrl}/oracle/run`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ request, context }),
+        });
+        const response = await this.fetcher(sidecarRequest);
+        const body = await readJsonResponse(response);
+        if (response.ok && isRecord(body) && body.ok === true && isRecord(body.result)) {
+            return body.result as unknown as TeeCoreResult;
+        }
+
+        if (isRecord(body) && typeof body.message === "string") {
+            throw new Error(body.message);
+        }
+
+        throw new Error(`Oracle sidecar request failed: ${response.status}`);
+    }
+}
+
 const finalizedPayload: DisasterOraclePayloadV1 = {
     intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
     oracle_version: 1,
@@ -103,4 +135,20 @@ export class MockRunnerAdapter implements RunnerAdapter {
                 };
         }
     }
+}
+
+async function readJsonResponse(response: Response): Promise<unknown> {
+    try {
+        return await response.json();
+    } catch {
+        return null;
+    }
+}
+
+function stripTrailingSlash(input: string): string {
+    return input.endsWith("/") ? input.slice(0, -1) : input;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
 }

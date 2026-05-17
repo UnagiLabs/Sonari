@@ -1,5 +1,6 @@
 import type { OffchainStatus, OracleErrorCode, TeeCoreResult } from "@sonari/oracle-shared";
 import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
+import type { RelayerPreviewErrorCode, RelayerRequestPreview } from "./relayer_preview.js";
 import { screenUsgsCandidate } from "./screening.js";
 import type { UsgsEarthquakeCandidate } from "./usgs.js";
 
@@ -14,6 +15,11 @@ export interface EarthquakeEventRow {
     last_seen_at_ms: number;
     source_updated_at_ms: number | null;
     error_code: OracleErrorCode | null;
+    relayer_preview_status: "succeeded" | "failed" | null;
+    relayer_request_json: string | null;
+    relayer_error_code: RelayerPreviewErrorCode | null;
+    relayer_error_message: string | null;
+    relayer_preview_updated_at_ms: number | null;
     created_at_ms: number;
     updated_at_ms: number;
 }
@@ -40,6 +46,17 @@ export interface StateRepository {
         nextRetryAtMs: number,
     ): Promise<void>;
     applyRunnerResult(sourceEventId: string, result: TeeCoreResult, nowMs: number): Promise<void>;
+    markRelayerPreviewSucceeded(
+        sourceEventId: string,
+        preview: RelayerRequestPreview,
+        nowMs: number,
+    ): Promise<void>;
+    markRelayerPreviewFailed(
+        sourceEventId: string,
+        errorCode: RelayerPreviewErrorCode,
+        message: string,
+        nowMs: number,
+    ): Promise<void>;
     recoverStaleProcessing(
         staleBeforeMs: number,
         nowMs: number,
@@ -65,6 +82,11 @@ const SELECT_COLUMNS = `
   last_seen_at_ms,
   source_updated_at_ms,
   error_code,
+  relayer_preview_status,
+  relayer_request_json,
+  relayer_error_code,
+  relayer_error_message,
+  relayer_preview_updated_at_ms,
   created_at_ms,
   updated_at_ms
 `;
@@ -313,6 +335,45 @@ export class D1StateRepository implements StateRepository {
 
         return staleRows.results.length;
     }
+
+    async markRelayerPreviewSucceeded(
+        sourceEventId: string,
+        preview: RelayerRequestPreview,
+        nowMs: number,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET relayer_preview_status = 'succeeded',
+                     relayer_request_json = ?,
+                     relayer_error_code = NULL,
+                     relayer_error_message = NULL,
+                     relayer_preview_updated_at_ms = ?
+                 WHERE source_event_id = ?`,
+            )
+            .bind(JSON.stringify(preview), nowMs, sourceEventId)
+            .run();
+    }
+
+    async markRelayerPreviewFailed(
+        sourceEventId: string,
+        errorCode: RelayerPreviewErrorCode,
+        message: string,
+        nowMs: number,
+    ): Promise<void> {
+        await this.db
+            .prepare(
+                `UPDATE earthquake_events
+                 SET relayer_preview_status = 'failed',
+                     relayer_request_json = NULL,
+                     relayer_error_code = ?,
+                     relayer_error_message = ?,
+                     relayer_preview_updated_at_ms = ?
+                 WHERE source_event_id = ?`,
+            )
+            .bind(errorCode, message, nowMs, sourceEventId)
+            .run();
+    }
 }
 
 export class InMemoryStateRepository implements StateRepository {
@@ -339,6 +400,11 @@ export class InMemoryStateRepository implements StateRepository {
                 last_seen_at_ms: nowMs,
                 source_updated_at_ms: candidate.source_updated_at_ms,
                 error_code: screening.error_code,
+                relayer_preview_status: null,
+                relayer_request_json: null,
+                relayer_error_code: null,
+                relayer_error_message: null,
+                relayer_preview_updated_at_ms: null,
                 created_at_ms: nowMs,
                 updated_at_ms: nowMs,
             });
@@ -493,6 +559,35 @@ export class InMemoryStateRepository implements StateRepository {
         return staleRows.length;
     }
 
+    async markRelayerPreviewSucceeded(
+        sourceEventId: string,
+        preview: RelayerRequestPreview,
+        nowMs: number,
+    ): Promise<void> {
+        this.patch(sourceEventId, {
+            relayer_preview_status: "succeeded",
+            relayer_request_json: JSON.stringify(preview),
+            relayer_error_code: null,
+            relayer_error_message: null,
+            relayer_preview_updated_at_ms: nowMs,
+        });
+    }
+
+    async markRelayerPreviewFailed(
+        sourceEventId: string,
+        errorCode: RelayerPreviewErrorCode,
+        message: string,
+        nowMs: number,
+    ): Promise<void> {
+        this.patch(sourceEventId, {
+            relayer_preview_status: "failed",
+            relayer_request_json: null,
+            relayer_error_code: errorCode,
+            relayer_error_message: message,
+            relayer_preview_updated_at_ms: nowMs,
+        });
+    }
+
     private patch(sourceEventId: string, patch: Partial<EarthquakeEventRow>): void {
         const row = this.require(sourceEventId);
         if (TERMINAL_STATUSES.has(row.status) && patch.status !== undefined) {
@@ -521,6 +616,11 @@ interface RawEarthquakeEventRow extends Record<string, unknown> {
     last_seen_at_ms: number;
     source_updated_at_ms: number | null;
     error_code: string | null;
+    relayer_preview_status: string | null;
+    relayer_request_json: string | null;
+    relayer_error_code: string | null;
+    relayer_error_message: string | null;
+    relayer_preview_updated_at_ms: number | null;
     created_at_ms: number;
     updated_at_ms: number;
 }
@@ -537,6 +637,11 @@ function normalizeRow(row: RawEarthquakeEventRow): EarthquakeEventRow {
         last_seen_at_ms: row.last_seen_at_ms,
         source_updated_at_ms: row.source_updated_at_ms,
         error_code: row.error_code as OracleErrorCode | null,
+        relayer_preview_status: row.relayer_preview_status as "succeeded" | "failed" | null,
+        relayer_request_json: row.relayer_request_json,
+        relayer_error_code: row.relayer_error_code as RelayerPreviewErrorCode | null,
+        relayer_error_message: row.relayer_error_message,
+        relayer_preview_updated_at_ms: row.relayer_preview_updated_at_ms,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     };

@@ -164,7 +164,7 @@ export function loadFixtureCandidate(
     return candidateFromDetail(detail, detailPath);
 }
 
-class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
+export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
     invocationCount = 0;
     lastResult: TeeCoreResult | null = null;
 
