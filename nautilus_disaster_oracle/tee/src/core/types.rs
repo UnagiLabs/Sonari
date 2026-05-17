@@ -21,6 +21,8 @@ pub enum OracleError {
     InvalidCoordinate,
     #[error("BCS serialization failed: {0}")]
     Bcs(#[from] bcs::Error),
+    #[error("invalid ShakeMap zip archive: {0}")]
+    Zip(String),
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +34,6 @@ pub struct UsgsOracleInput {
     pub raw_grid_uri: Option<String>,
     pub raw_data_uri: String,
     pub affected_cells_uri: String,
-    pub signing_key_seed: [u8; 32],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -53,8 +54,6 @@ pub struct ResultSummary {
     pub primary_source: String,
     pub geo_resolution: u8,
     pub error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_retry_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_payload: Option<String>,
 }

@@ -461,15 +461,19 @@ describe("watcher state transitions", () => {
     it("clamps pending runner retries to the finalization deadline", async () => {
         const repository = new InMemoryStateRepository();
         const runner: RunnerAdapter = {
-            run: async (_request, context) => ({
+            run: async () => ({
                 status: "pending_source",
                 source_event_id: "us7000pending-source",
-                next_retry_at_ms: context.finalizationDeadlineAtMs + HOUR_MS,
                 error_code: "SHAKEMAP_PRODUCT_MISSING",
             }),
         };
+        const occurredAt = baseNow - FINALIZATION_WINDOW_MS + HOUR_MS / 2;
 
-        await scanCandidates(repository, [candidate("us7000pending-source")], baseNow);
+        await scanCandidates(
+            repository,
+            [candidate("us7000pending-source", { occurred_at_ms: occurredAt })],
+            baseNow,
+        );
         await processDueEvents(repository, runner, baseNow);
 
         const row = await repository.get("us7000pending-source");
@@ -718,14 +722,12 @@ describe("runner boundary", () => {
             "geo_resolution",
             "hazard_type",
             "primary_source",
-            "request_type",
             "source_event_id",
         ]);
         expect(request).toEqual({
-            request_type: "DETECT_BY_EVENT_ID",
+            source_event_id: "us7000sonari",
             hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
             primary_source: BCS_ENUMS.primarySource.USGS,
-            source_event_id: "us7000sonari",
             geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
         });
         expect(validateWorkerToTeeRequest(request)).toEqual({ ok: true, value: request });
@@ -740,6 +742,10 @@ describe("runner boundary", () => {
 
         expect(runner.requests).toEqual([buildWorkerToTeeRequest("us7000sonari")]);
         for (const forbidden of [
+            "request_type",
+            "context",
+            "deadline",
+            "retry",
             "payload",
             "signature",
             "hash",

@@ -4,15 +4,9 @@ import {
     type TeeCoreResult,
     type WorkerToTeeRequest,
 } from "@sonari/oracle-shared";
-import { HOUR_MS } from "./constants.js";
-
-export interface RunnerContext {
-    nowMs: number;
-    finalizationDeadlineAtMs: number;
-}
 
 export interface RunnerAdapter {
-    run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult>;
+    run(request: WorkerToTeeRequest): Promise<TeeCoreResult>;
 }
 
 type Fetcher = typeof fetch;
@@ -27,11 +21,11 @@ export class HttpRunnerAdapter implements RunnerAdapter {
         this.sidecarUrl = stripTrailingSlash(sidecarUrl);
     }
 
-    async run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult> {
-        const sidecarRequest = new Request(`${this.sidecarUrl}/oracle/run`, {
+    async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
+        const sidecarRequest = new Request(`${this.sidecarUrl}/process_data`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ request, context }),
+            body: JSON.stringify({ payload: request }),
         });
         const response = await this.fetcher(sidecarRequest);
         const body = await readJsonResponse(response);
@@ -79,7 +73,7 @@ const finalizedPayload: DisasterOraclePayloadV1 = {
 export class MockRunnerAdapter implements RunnerAdapter {
     readonly requests: WorkerToTeeRequest[] = [];
 
-    async run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult> {
+    async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
         this.requests.push(structuredClone(request));
 
         switch (request.source_event_id) {
@@ -95,20 +89,12 @@ export class MockRunnerAdapter implements RunnerAdapter {
                 return {
                     status: "pending_source",
                     source_event_id: request.source_event_id,
-                    next_retry_at_ms: Math.min(
-                        context.nowMs + HOUR_MS,
-                        context.finalizationDeadlineAtMs,
-                    ),
                     error_code: "SHAKEMAP_PRODUCT_MISSING",
                 };
             case "us7000pending-mmi":
                 return {
                     status: "pending_mmi",
                     source_event_id: request.source_event_id,
-                    next_retry_at_ms: Math.min(
-                        context.nowMs + HOUR_MS,
-                        context.finalizationDeadlineAtMs,
-                    ),
                     error_code: "MMI_NOT_AVAILABLE",
                 };
             case "us7000cancelled":
@@ -127,10 +113,6 @@ export class MockRunnerAdapter implements RunnerAdapter {
                 return {
                     status: "pending_source",
                     source_event_id: request.source_event_id,
-                    next_retry_at_ms: Math.min(
-                        context.nowMs + HOUR_MS,
-                        context.finalizationDeadlineAtMs,
-                    ),
                     error_code: "SHAKEMAP_PRODUCT_MISSING",
                 };
         }

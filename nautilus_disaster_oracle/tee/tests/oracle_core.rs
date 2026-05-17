@@ -1,13 +1,16 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use std::cell::Cell;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use tee::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
-    MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus, PRIMARY_SOURCE_USGS,
-    UsgsOracleInput, cell_band, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
-    process_usgs, sha3_256_bytes,
+    LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
+    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, UsgsOracleInput, cell_band,
+    grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
+    process_usgs, process_usgs_with_signer, sha3_256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
@@ -31,7 +34,6 @@ fn finalized_input() -> UsgsOracleInput {
         ),
         raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
         affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json".to_owned(),
-        signing_key_seed: SIGNING_KEY_SEED,
     }
 }
 
@@ -99,13 +101,13 @@ fn computes_p90_band_and_merkle_with_odd_leaf_promotion() {
 }
 
 #[test]
-fn finalized_fixture_matches_expected_hashes_payload_and_signature() {
+fn finalized_fixture_core_matches_expected_hashes_without_signing() {
     let output = process_usgs(finalized_input()).expect("fixture should finalize");
 
     assert_eq!(output.result.status, OracleStatus::Finalized);
     assert_eq!(output.result.error_code, None);
     assert!(output.unsigned_bcs_payload.is_some());
-    assert!(output.signature.is_some());
+    assert!(output.signature.is_none());
 
     assert_eq!(
         serde_json::to_value(output.raw_data_manifest).unwrap(),
@@ -123,7 +125,15 @@ fn finalized_fixture_matches_expected_hashes_payload_and_signature() {
         serde_json::to_value(output.expected_hashes).unwrap(),
         read_expected("expected_hashes.json")
     );
+}
 
+#[test]
+fn finalized_entrypoint_signs_core_payload_with_injected_signer() {
+    let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
+    let output =
+        process_usgs_with_signer(finalized_input(), &signer).expect("fixture should finalize");
+
+    assert_eq!(output.result.status, OracleStatus::Finalized);
     let signature_artifact = output.signature.expect("signature should exist");
     let public_key: [u8; 32] = hex::decode(signature_artifact.public_key.trim_start_matches("0x"))
         .unwrap()
@@ -140,6 +150,26 @@ fn finalized_fixture_matches_expected_hashes_payload_and_signature() {
             &Signature::from_bytes(&signature),
         )
         .unwrap();
+}
+
+#[test]
+fn entrypoint_calls_signer_only_for_finalized_results() {
+    let signer = CountingSigner::default();
+
+    let finalized = process_usgs_with_signer(finalized_input(), &signer).unwrap();
+    assert_eq!(finalized.result.status, OracleStatus::Finalized);
+    assert_eq!(signer.calls.get(), 1);
+
+    for case_id in [
+        "usgs/pending_source_no_shakemap",
+        "usgs/pending_mmi_empty_grid",
+        "usgs/rejected_cancelled_shakemap",
+    ] {
+        let output = process_usgs_with_signer(non_finalized_input(case_id), &signer).unwrap();
+        assert_ne!(output.result.status, OracleStatus::Finalized);
+        assert!(output.signature.is_none());
+    }
+    assert_eq!(signer.calls.get(), 1);
 }
 
 #[test]
@@ -182,17 +212,149 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
             }),
             raw_data_uri: String::new(),
             affected_cells_uri: String::new(),
-            signing_key_seed: SIGNING_KEY_SEED,
         })
         .expect("non-finalized cases should return status output");
 
         assert_eq!(output.result.status, expected_status);
         assert_eq!(output.result.error_code.as_deref(), expected_error);
-        assert_eq!(output.result.next_retry_at_ms, None);
         assert!(output.unsigned_payload.is_none());
         assert!(output.unsigned_bcs_payload.is_none());
         assert!(output.signature.is_none());
         assert!(output.raw_data_manifest.is_none());
         assert!(output.affected_cells.is_none());
     }
+}
+
+#[test]
+fn extracts_only_safe_grid_xml_from_zip_artifacts() {
+    let xml = b"<shakemap_grid><grid_data>139.7000 35.6000 7.23</grid_data></shakemap_grid>";
+    let zip_bytes = zip_with_entries(&[("grid.xml", xml.as_slice())]);
+
+    let extracted =
+        grid_xml_from_artifact("https://example.test/download/grid.xml.zip", &zip_bytes).unwrap();
+
+    assert_eq!(extracted, xml);
+    assert_eq!(
+        grid_xml_from_artifact("https://example.test/download/grid.xml", xml).unwrap(),
+        xml
+    );
+}
+
+#[test]
+fn rejects_grid_zip_path_traversal_and_missing_grid_xml() {
+    let traversal = zip_with_entries(&[("../grid.xml", b"bad".as_slice())]);
+    assert!(grid_xml_from_artifact("grid.xml.zip", &traversal).is_err());
+
+    let missing = zip_with_entries(&[("not_grid.xml", b"bad".as_slice())]);
+    assert!(grid_xml_from_artifact("grid.xml.zip", &missing).is_err());
+}
+
+#[test]
+fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
+    let detail_json = br#"{
+        "id": "us7000multi",
+        "properties": {
+            "time": 1704067200000,
+            "updated": 1704151200000,
+            "products": {
+                "shakemap": [
+                    {
+                        "code": "older",
+                        "source": "us",
+                        "status": "UPDATE",
+                        "preferredWeight": 10,
+                        "updateTime": 1704151100000,
+                        "properties": { "map-status": "REVIEWED", "version": "3" },
+                        "contents": {
+                            "download/grid.xml": { "url": "https://example.test/older/grid.xml" }
+                        }
+                    },
+                    {
+                        "code": "newer",
+                        "source": "us",
+                        "status": "UPDATE",
+                        "preferredWeight": 10,
+                        "updateTime": 1704151200000,
+                        "properties": { "map-status": "REVIEWED", "version": "4" },
+                        "contents": {
+                            "download/grid.xml": { "url": "https://example.test/newer/grid.xml" }
+                        }
+                    }
+                ]
+            }
+        }
+    }"#;
+    let input = UsgsOracleInput {
+        case_id: "usgs/multi".to_owned(),
+        detail_json: detail_json.to_vec(),
+        grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        raw_detail_uri: "detail.json".to_owned(),
+        raw_grid_uri: Some("grid.xml".to_owned()),
+        raw_data_uri: "raw.json".to_owned(),
+        affected_cells_uri: "cells.json".to_owned(),
+    };
+
+    let output = process_usgs(input).expect("multi product fixture should finalize");
+    let source_manifest = output
+        .source_manifest
+        .expect("source manifest should exist");
+    let grid_source = source_manifest
+        .sources
+        .iter()
+        .find(|source| source.product == "shakemap_grid_xml")
+        .expect("grid source should exist");
+
+    assert_eq!(grid_source.product_version, "4");
+}
+
+#[derive(Default)]
+struct CountingSigner {
+    calls: Cell<usize>,
+}
+
+impl PayloadSigner for CountingSigner {
+    fn sign_payload(&self, _payload: &[u8]) -> SignatureArtifact {
+        self.calls.set(self.calls.get() + 1);
+        SignatureArtifact {
+            algorithm: "test".to_owned(),
+            public_key: "0x01".to_owned(),
+            signature: "0x02".to_owned(),
+        }
+    }
+}
+
+fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
+    let dir = format!("../fixtures/{case_id}");
+    let grid_path = format!("{dir}/input/usgs_grid.xml");
+    UsgsOracleInput {
+        case_id: case_id.to_owned(),
+        detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
+        grid_xml: Path::new(&grid_path)
+            .exists()
+            .then(|| read_fixture(&grid_path)),
+        raw_detail_uri: format!(
+            "nautilus_disaster_oracle/fixtures/{case_id}/input/usgs_detail.json"
+        ),
+        raw_grid_uri: Path::new(&grid_path)
+            .exists()
+            .then(|| format!("nautilus_disaster_oracle/fixtures/{case_id}/input/usgs_grid.xml")),
+        raw_data_uri: String::new(),
+        affected_cells_uri: String::new(),
+    }
+}
+
+fn zip_with_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let cursor = std::io::Cursor::new(&mut bytes);
+        let mut writer = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, content) in entries {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(content).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    bytes
 }

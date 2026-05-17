@@ -61,7 +61,7 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
             "--case",
             CASE_ID,
         ]);
-        await waitForHttp(`${SIDECAR_URL}/oracle/run`, "sidecar");
+        await waitForHttp(`${SIDECAR_URL}/process_data`, "sidecar");
 
         wrangler = spawnProcess(
             WRANGLER_BIN,

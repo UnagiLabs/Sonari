@@ -12,6 +12,7 @@ import {
     DEFAULT_DUE_LIMIT,
     FAILED_RETRY_BACKOFF_MS,
     FINALIZATION_WINDOW_MS,
+    HOUR_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
 import { HttpRelayerPreviewAdapter, type RelayerPreviewAdapter } from "./relayer_preview.js";
@@ -47,7 +48,7 @@ export {
 } from "./screening.js";
 export type { EarthquakeEventRow, StateRepository, UpsertCandidateOptions } from "./state.js";
 export { D1StateRepository, InMemoryStateRepository } from "./state.js";
-export type { RunnerAdapter, RunnerContext } from "./trigger_tee.js";
+export type { RunnerAdapter } from "./trigger_tee.js";
 export { HttpRunnerAdapter, MockRunnerAdapter } from "./trigger_tee.js";
 export type { UsgsEarthquakeCandidate } from "./usgs.js";
 export {
@@ -100,10 +101,9 @@ type AppliedRunnerResult =
 
 export function buildWorkerToTeeRequest(source_event_id: string): WorkerToTeeRequest {
     const validation = validateWorkerToTeeRequest({
-        request_type: "DETECT_BY_EVENT_ID",
+        source_event_id,
         hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
         primary_source: BCS_ENUMS.primarySource.USGS,
-        source_event_id,
         geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
     });
 
@@ -308,10 +308,7 @@ async function processSingleDueEvent(
     }
 
     try {
-        const result = await runner.run(buildWorkerToTeeRequest(row.source_event_id), {
-            nowMs,
-            finalizationDeadlineAtMs: row.finalization_deadline_at_ms,
-        });
+        const result = await runner.run(buildWorkerToTeeRequest(row.source_event_id));
         const applied = await applyRunnerResult(repository, row.source_event_id, result, nowMs);
         if (applied.finalized) {
             await runRelayerPreview(
@@ -369,17 +366,8 @@ async function applyRunnerResult(
             return { finalized: false };
         }
         if (row !== null) {
-            await repository.applyRunnerResult(
-                sourceEventId,
-                {
-                    ...result,
-                    next_retry_at_ms: Math.min(
-                        result.next_retry_at_ms,
-                        row.finalization_deadline_at_ms,
-                    ),
-                },
-                nowMs,
-            );
+            const nextRetryAtMs = Math.min(nowMs + HOUR_MS, row.finalization_deadline_at_ms);
+            await repository.applyRunnerResult(sourceEventId, result, nowMs, nextRetryAtMs);
             return { finalized: false };
         }
     }

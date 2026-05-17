@@ -25,10 +25,7 @@ import {
     type UsgsEarthquakeCandidate,
 } from "../nautilus_disaster_oracle/watcher/src/index.js";
 import type { EarthquakeEventRow } from "../nautilus_disaster_oracle/watcher/src/state.js";
-import type {
-    RunnerAdapter,
-    RunnerContext,
-} from "../nautilus_disaster_oracle/watcher/src/trigger_tee.js";
+import type { RunnerAdapter } from "../nautilus_disaster_oracle/watcher/src/trigger_tee.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -175,7 +172,7 @@ export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
         },
     ) {}
 
-    async run(request: WorkerToTeeRequest, context: RunnerContext): Promise<TeeCoreResult> {
+    async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
         this.invocationCount += 1;
         const caseId = await this.resolveCaseId(request.source_event_id);
         const outputDir = await mkdtemp(path.join(tmpdir(), "sonari-nautilus-e2e-"));
@@ -193,7 +190,7 @@ export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
             const result =
                 summary.status === "finalized"
                     ? await readFinalizedResult(outputDir)
-                    : readNonFinalizedResult(summary, context);
+                    : readNonFinalizedResult(summary);
             this.lastResult = result;
             return result;
         } finally {
@@ -292,7 +289,6 @@ async function readFinalizedResult(outputDir: string): Promise<SignedFinalizedPa
 
 function readNonFinalizedResult(
     summary: RunnerResultSummary,
-    context: RunnerContext,
 ): Exclude<TeeCoreResult, SignedFinalizedPayload> {
     if (summary.error_code === null) {
         throw new Error(`Non-finalized result ${summary.status} requires error_code`);
@@ -308,7 +304,6 @@ function readNonFinalizedResult(
         return {
             status: "pending_source",
             source_event_id: summary.source_event_id,
-            next_retry_at_ms: Math.min(context.nowMs + HOUR_MS, context.finalizationDeadlineAtMs),
             error_code: summary.error_code,
         };
     }
@@ -320,7 +315,6 @@ function readNonFinalizedResult(
         return {
             status: "pending_mmi",
             source_event_id: summary.source_event_id,
-            next_retry_at_ms: Math.min(context.nowMs + HOUR_MS, context.finalizationDeadlineAtMs),
             error_code: summary.error_code,
         };
     }

@@ -33,8 +33,8 @@ export function createNautilusSidecarServer(options: NautilusSidecarOptions = {}
                 return;
             }
 
-            if (request.url === "/oracle/run") {
-                await handleOracleRun(request, response, runner);
+            if (request.url === "/process_data") {
+                await handleProcessData(request, response, runner);
                 return;
             }
 
@@ -54,41 +54,32 @@ export function createNautilusSidecarServer(options: NautilusSidecarOptions = {}
     });
 }
 
-async function handleOracleRun(
+async function handleProcessData(
     request: IncomingMessage,
     response: ServerResponse,
     runner: LocalOracleCoreRunnerAdapter,
 ): Promise<void> {
     const body = await readJsonBody(request);
-    if (!isRecord(body) || firstUnexpectedKey(body, ["request", "context"]) !== undefined) {
+    if (!isRecord(body) || firstUnexpectedKey(body, ["payload"]) !== undefined) {
         writeJson(response, 400, {
             ok: false,
-            error_code: "INVALID_ORACLE_RUN_REQUEST",
-            message: "Oracle sidecar accepts only request and context",
+            error_code: "INVALID_PROCESS_DATA_REQUEST",
+            message: "Nautilus sidecar accepts only payload",
         });
         return;
     }
 
-    const requestValidation = validateWorkerToTeeRequest(body.request);
-    const contextValidation = validateRunnerContext(body.context);
+    const requestValidation = validateWorkerToTeeRequest(body.payload);
     if (!requestValidation.ok) {
         writeJson(response, 400, {
             ok: false,
-            error_code: "INVALID_ORACLE_RUN_REQUEST",
+            error_code: "INVALID_PROCESS_DATA_REQUEST",
             message: requestValidation.message,
         });
         return;
     }
-    if (!contextValidation.ok) {
-        writeJson(response, 400, {
-            ok: false,
-            error_code: "INVALID_ORACLE_RUN_REQUEST",
-            message: contextValidation.message,
-        });
-        return;
-    }
 
-    const result = await runner.run(requestValidation.value, contextValidation.value);
+    const result = await runner.run(requestValidation.value);
     writeJson(response, 200, { ok: true, result });
 }
 
@@ -124,29 +115,6 @@ async function handleRelayerPreview(
         registry: typeof body.registry === "string" ? body.registry : "",
     });
     writeJson(response, result.ok ? 200 : 400, result);
-}
-
-function validateRunnerContext(
-    input: unknown,
-):
-    | { ok: true; value: { nowMs: number; finalizationDeadlineAtMs: number } }
-    | { ok: false; message: string } {
-    if (!isRecord(input)) {
-        return { ok: false, message: "Runner context must be an object" };
-    }
-    if (firstUnexpectedKey(input, ["nowMs", "finalizationDeadlineAtMs"]) !== undefined) {
-        return { ok: false, message: "Runner context contains unexpected fields" };
-    }
-    if (!isUnixMs(input.nowMs) || !isUnixMs(input.finalizationDeadlineAtMs)) {
-        return { ok: false, message: "Runner context requires safe integer timestamps" };
-    }
-    return {
-        ok: true,
-        value: {
-            nowMs: input.nowMs,
-            finalizationDeadlineAtMs: input.finalizationDeadlineAtMs,
-        },
-    };
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -225,10 +193,6 @@ function firstUnexpectedKey(
     allowedKeys: readonly string[],
 ): string | undefined {
     return Object.keys(input).find((key) => !allowedKeys.includes(key));
-}
-
-function isUnixMs(input: unknown): input is number {
-    return typeof input === "number" && Number.isSafeInteger(input) && input >= 0;
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

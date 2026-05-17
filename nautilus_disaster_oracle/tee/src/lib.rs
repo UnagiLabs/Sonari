@@ -11,10 +11,11 @@ pub use core::artifacts::{
     RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact, SourceEntry,
     SourceManifest, UnsignedPayloadV1,
 };
-pub use core::processing::process_usgs;
+pub use core::processing::{process_usgs, process_usgs_with_signer};
 pub use core::types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
 pub use crypto::{LocalEd25519Signer, PayloadSigner, sha3_256_bytes};
 pub use encoding::json::canonical_json_bytes;
+pub use source::usgs::grid_xml_from_artifact;
 
 pub const INTENT_SONARI_EARTHQUAKE_ORACLE: u8 = 1;
 pub const HAZARD_TYPE_EARTHQUAKE: u8 = 1;
