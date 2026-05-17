@@ -3,7 +3,6 @@
 .codex/*
 !.codex/config.toml
 !.codex/hooks.json
-.agents/
 node_modules/
 dist/
 target/

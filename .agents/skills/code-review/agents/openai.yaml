@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Review"
+  short_description: "Review local changes or a PR with the ECC review rubric"
+  default_prompt: "Use $code-review to review these changes with the Everything Claude Code review rubric. Prioritize findings by severity, cite files and lines, and include validation results."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue Implement"
+  short_description: "Implement an issue with Codex-only plan review and final review"
+  default_prompt: "Use $gh-issue-implement to implement this GitHub issue end to end with Codex only. Have Codex review the plan first, then use a fresh-context reviewer that explicitly applies $code-review before opening the PR."
