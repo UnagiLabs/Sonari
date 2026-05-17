@@ -2,12 +2,6 @@ name = "sonari-oracle-watcher"
 main = "src/worker.ts"
 compatibility_date = "2026-05-16"
 
-[vars]
-MANUAL_SUBMIT_TOKEN = "local-dev-token"
-ORACLE_SIDECAR_URL = "http://127.0.0.1:8789"
-RELAYER_TARGET = "0x123::disaster_oracle::submit_payload_v1"
-RELAYER_REGISTRY = "0x456"
-
 [triggers]
 crons = ["*/5 * * * *"]
 

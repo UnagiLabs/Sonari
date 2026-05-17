@@ -479,6 +479,7 @@ describe("watcher state transitions", () => {
 
     it("fails malformed finalized payload metadata without storing finalized metadata", async () => {
         const repository = new InMemoryStateRepository();
+        const relayerPreview = new RecordingRelayerPreviewAdapter();
         const runner: RunnerAdapter = {
             run: async () => ({
                 status: "finalized",
@@ -494,8 +495,9 @@ describe("watcher state transitions", () => {
         };
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEvents(repository, runner, baseNow);
+        await processDueEvents(repository, runner, baseNow, undefined, relayerPreview);
 
+        expect(relayerPreview.inputs).toHaveLength(0);
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "failed",
             error_code: "BCS_SERIALIZATION_FAILED",
@@ -503,6 +505,11 @@ describe("watcher state transitions", () => {
             latest_revision: 0,
             source_updated_at_ms: baseNow - HOUR_MS,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+            relayer_preview_status: null,
+            relayer_request_json: null,
+            relayer_error_code: null,
+            relayer_error_message: null,
+            relayer_preview_updated_at_ms: null,
         });
     });
 });

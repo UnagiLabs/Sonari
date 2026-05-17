@@ -94,6 +94,10 @@ interface JsonResponseInit {
     status?: number;
 }
 
+type AppliedRunnerResult =
+    | { finalized: false }
+    | { finalized: true; result: SignedFinalizedPayload };
+
 export function buildWorkerToTeeRequest(source_event_id: string): WorkerToTeeRequest {
     const validation = validateWorkerToTeeRequest({
         request_type: "DETECT_BY_EVENT_ID",
@@ -308,9 +312,15 @@ async function processSingleDueEvent(
             nowMs,
             finalizationDeadlineAtMs: row.finalization_deadline_at_ms,
         });
-        await applyRunnerResult(repository, row.source_event_id, result, nowMs);
-        if (result.status === "finalized") {
-            await runRelayerPreview(repository, row.source_event_id, result, nowMs, relayerPreview);
+        const applied = await applyRunnerResult(repository, row.source_event_id, result, nowMs);
+        if (applied.finalized) {
+            await runRelayerPreview(
+                repository,
+                row.source_event_id,
+                applied.result,
+                nowMs,
+                relayerPreview,
+            );
         }
         summary.processed += 1;
     } catch (error) {
@@ -333,15 +343,20 @@ async function applyRunnerResult(
     sourceEventId: string,
     result: TeeCoreResult,
     nowMs: number,
-): Promise<void> {
-    if (result.status === "finalized" && !hasValidFinalizedMetadata(result.payload)) {
-        await repository.markFailed(
-            sourceEventId,
-            "BCS_SERIALIZATION_FAILED",
-            nowMs,
-            nowMs + FAILED_RETRY_BACKOFF_MS,
-        );
-        return;
+): Promise<AppliedRunnerResult> {
+    if (result.status === "finalized") {
+        if (!hasValidFinalizedMetadata(result.payload)) {
+            await repository.markFailed(
+                sourceEventId,
+                "BCS_SERIALIZATION_FAILED",
+                nowMs,
+                nowMs + FAILED_RETRY_BACKOFF_MS,
+            );
+            return { finalized: false };
+        }
+
+        await repository.applyRunnerResult(sourceEventId, result, nowMs);
+        return { finalized: true, result };
     }
 
     if (result.status === "pending_source" || result.status === "pending_mmi") {
@@ -351,7 +366,7 @@ async function applyRunnerResult(
             isDeadlineExceededPending(result.status, nowMs, row.finalization_deadline_at_ms)
         ) {
             await repository.markRejected(sourceEventId, "REJECTED_AUTO_TRIGGER", nowMs);
-            return;
+            return { finalized: false };
         }
         if (row !== null) {
             await repository.applyRunnerResult(
@@ -365,11 +380,12 @@ async function applyRunnerResult(
                 },
                 nowMs,
             );
-            return;
+            return { finalized: false };
         }
     }
 
     await repository.applyRunnerResult(sourceEventId, result, nowMs);
+    return { finalized: false };
 }
 
 async function runRelayerPreview(
