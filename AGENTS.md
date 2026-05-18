@@ -1,76 +1,125 @@
 # Repository Guidelines
 
-## プロジェクト構成とモジュール
+## 基本方針
 
-Sonari は Sui Overflow 2026 提出用のハッカソンプロジェクトです。このリポジトリには企画・仕様ドキュメントに加えて、Nautilus Earthquake Oracle の TypeScript / Rust 実装、検証用 schema、ローカル実行 script、CI 設定を配置します。
+作業を始める前に、必ず現在のリポジトリの状態を確認してください。古い前提や記憶に頼らず、実際のコード、テスト、設定ファイル、ドキュメントを根拠に判断します。
 
-- `docs/sonari_overview.html` - Sonari の概要ページ。
-- `docs/defi_payments_problem_statement.md` - DeFi / Payments 課題文の bilingual 文書。
-- `docs/nautilus_disaster_oracle/spec.md` - Nautilus Earthquake Oracle の要件定義ページ。
-- `docs/tech_stack.md` と `docs/business_logic.md` - 今後の技術構成、事業ロジック整理用。
-- `nautilus/verifiers/disaster/` - Oracle の watcher、relayer、shared TypeScript package と Rust TEE crate。
-- `nautilus/verifiers/membership/` - residence / student verifier の placeholder。現時点では共有型と README のみ。
-- `schemas/` - Oracle 入出力、manifest、proof の JSON schema、説明文書、golden vector。
-- `scripts/` - Nautilus Oracle の local / Wrangler E2E、sidecar、Vitest 用 script。
-- `.github/workflows/ci.yml` - pnpm / Rust の CI 検証 workflow。
+このファイルには、コードベースを見れば分かるフォルダ構成やコマンド一覧を詳しく書かず、Codex が判断を誤りやすいプロジェクト固有のルール、設計方針、レビュー基準を中心に記載します。詳細は `docs`、`schemas`、`package.json`、`Move.toml`、`Cargo.toml`、`tsconfig`、Biome 設定などを確認してください。
 
-`.codex/` と `.agents/` は Codex / agent 設定です。`.codex/config.toml` と `.codex/hooks.json` は project-local Codex hook の共有設定として track します。`.agents/skills/` は repository 共有の skill として track します。個人用設定、生成物、認証情報を含む `.codex/` / `.agents/` 配下の追加ファイルは、共有する明確な意図がある場合を除きコミットしないでください。
+Sonari は現在 MVP 開発段階です。初期開発では後方互換性を優先せず、明確な責務分離、シンプルな設計、実装品質を優先してください。必要であれば破壊的変更、ファイル構成の変更、仕様整理を行って構いません。ただし、変更理由と影響範囲は PR や作業メモで明確に説明してください。
 
-## ビルド・テスト・開発コマンド
+## 作業前の確認
 
-root `package.json` は pnpm workspace の集約コマンドを提供します。作業時は以下のコマンドを使います。
+実装前に、対象領域に関係する `package.json`、`Cargo.toml`、`Move.toml`、`tsconfig`、Biome 設定、schemas、docs、既存テスト、README、近い実装パターンを確認してください。
 
-- `pnpm install` - TypeScript workspace 依存関係を解決します。
-- `pnpm format` - Biome で TypeScript / JSON 設定を整形し、Rust TEE crate に `cargo fmt` を実行します。
-- `pnpm check` - Biome check と Rust `cargo fmt --check` / `cargo check` を実行します。
-- `pnpm check:ts` - Biome による TypeScript / JSON 設定の format / lint 検証を実行します。
-- `pnpm check:rust` - Rust TEE crate の `cargo fmt --check` と `cargo check` を実行します。
-- `pnpm typecheck` - workspace package の TypeScript 型検証を実行します。
-- `pnpm test` - TypeScript の unit test を実行します。
-- `pnpm test:oracle` - Nautilus Oracle の TypeScript test と Rust TEE crate test をまとめて実行します。
-- `cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml` - TEE crate 単体の Rust test を実行します。
-- `python3 -m http.server 8000` - ルートから HTML を配信し、`http://localhost:8000/docs/...` で確認します。
-- `git diff --check` - 末尾空白やパッチ形式の問題を検出します。
-- `find docs -maxdepth 2 -type f` - 現在のドキュメント一覧を確認します。
+フォルダ名やファイル名だけで責務を推測せず、実装内容とテストを確認してから変更してください。設定や script は更新される可能性があるため、検証コマンドも記憶ではなく現在の設定から選んでください。
 
-今後 dApp や contracts のビルドシステムを追加した場合は、dev / build / deploy の正確なコマンドをこの節に追記してください。
+## 信頼境界
 
-## コーディングスタイルと命名規則
+Oracle / verifier / relayer / contract の責務を混ぜないでください。
 
-説明文書は Markdown、見栄えを含む仕様ページは単体 HTML/CSS を使います。HTML と CSS は既存ファイルに合わせて 2 スペースインデントを基本にしてください。ファイル名は小文字とアンダースコアを使い、例として `defi_payments_problem_statement.md` の形式に揃えます。
+- Worker / watcher は、候補検出、キュー投入、状態管理、外部実行の起動を担当します。
+- TEE / verifier は、外部 source の再取得、検証、正規化、Merkle root、BCS payload、署名を担当します。
+- Relayer は、finalized payload を配送するだけです。payload の意味を変更してはいけません。
+- Move contract は、worker、relayer、UI、外部 API を信頼してはいけません。署名済み finalized payload など、contract 側で検証可能なデータのみを信頼します。
 
-既存文書の多くは日本語と英語の併記です。bilingual 文書を編集する場合は、明示的な理由がない限り片方の言語だけを削除しないでください。
+この境界をまたぐ変更は、明示的に設計変更として扱い、理由と影響範囲を説明してください。
 
-## テスト方針
+## Cross-language Contract
 
-TypeScript / Rust 変更では `pnpm check`、`pnpm typecheck`、`pnpm test` を基本の検証コマンドにします。Nautilus Oracle の横断確認では `pnpm test:oracle` または `cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml` を実行してください。ドキュメント変更では、対象 HTML をブラウザで開き、デスクトップ幅とモバイル幅の表示を確認してください。Markdown は見出し、箇条書き、日英併記の改行が意図通り表示されるか確認します。提出前に `git diff --check` を実行してください。
+schemas、BCS payload、field order、enum 値、signature bytes、Merkle root、golden vector は Rust / TypeScript / Move をまたぐ契約です。
 
-## Project-local Codex hook
+これらを安易に変更しないでください。変更する場合は、必ず変更理由を明記し、schema または docs、fixture / golden vector、影響する Rust / TypeScript / Move のテストを更新してください。PR には互換性への影響を書いてください。
 
-`.codex/config.toml` で `[features] hooks = true` を有効化し、`.codex/hooks.json` の `PostToolUse` hook が file edit tool (`apply_patch` / `Edit` / `Write`) の後に `pnpm check` を直接実行します。Codex CLI では `/hooks` で `/home/manji/github/Sonari/.codex` の hook を review/trust してから使ってください。
+既存の `oracle_version` に紐づく payload の field order と binary encoding は、明示的に新 version を定義する場合を除き immutable contract として扱ってください。
 
-## MVP 開発方針
+## TypeScript 実装ルール
 
-現在は MVP 作成段階であり、初期開発のため後方互換性は一切考慮不要です。Sonari の提出物として最適な設計、明確な責務分離、実装品質を最優先してください。必要であれば破壊的変更、ファイル構成の変更、仕様整理を積極的に行ってかまいません。ただし、変更理由と影響範囲は PR や作業メモで明確に説明してください。
+TypeScript は untyped JavaScript として書かず、境界での検証と型安全性を重視してください。
 
-## Move 可視性方針
+- `any` は原則使わない。外部入力には `unknown` を使い、明示的に parse / validate する。
+- HTTP request、environment variable、D1 row、queue message、fixture JSON、外部 API response は境界で検証する。
+- parse / normalize / business logic を分離する。
+- 決定的な変換処理は、小さな pure function に分ける。
+- 隠れた global state を避け、依存関係は可能な限り明示的に渡す。
+- 重要な env 不備や不正値は fail-closed にする。安全でない fallback をしない。
+- success path だけでなく、malformed input、retry、failure path、boundary condition をテストする。
+- 型チェックや lint を通すために設定を弱めない。
+- 新しい runtime dependency は必要性を説明できる場合のみ追加する。
 
-Move 2024 の可視性は最小権限を原則とします。`public(friend)` は使わず、`fun` / `public(package)` / `public` / `entry` を次の基準で選んでください。
+package の挙動を変えた場合は、package-local test と影響する root-level check を更新してください。
 
-- まず `fun` で始めます。同一モジュール内だけで使う純ヘルパー、検証関数、ループ補助は private に閉じます。
-- パッケージ内共有ロジックは `public(package)` を使います。イベント emit、mint ヘルパー、registry の内部更新、生成処理など、複数モジュールから使うが外部公開したくない関数が対象です。
-- `public` / `entry` は公開 API モジュールに集約します。外部から触る関数は `accessors.move` や `admin.move` のような専用モジュールへ寄せ、内部実装モジュールに分散させないでください。
-- `entry` は薄い入口にします。PTB から直接叩く関数は、引数受け取り、権限確認、イベント発火、返り値制約の吸収に留め、コア状態遷移は `public(package)` または private 関数へ委譲します。
-- PTB から呼びたいが外部モジュール公開は不要な場合は `public(package) entry` を検討します。Sponsored Transaction の入口や管理者操作の薄いラッパに使えます。
-- 返り値制約で `entry` にできない場合だけ `public fun` を使います。`Coin` など `drop` を持たない値を返す、PTB 内で他処理と合成したい、といった理由をコード上で説明できる状態にしてください。
-- `#[test_only]` は本番 API と分けてよいです。テスト専用 accessor や生成関数は `#[test_only] public` / `#[test_only] public(package)` を使ってよいですが、本番コードから使う前提で設計しないでください。
+## Rust 実装ルール
 
-## コミットと Pull Request
+Rust は verifier / TEE などの決定的で監査しやすい処理に使う前提で実装してください。
 
-コミットメッセージを作成する場合は `.agents/skills/draft-commit-message` を使用し、現在の diff と直近履歴に基づく日本語メッセージを作成してください。実コミットはユーザーの明示がある場合のみ行います。
+- production logic では `unwrap` / `expect` / unchecked indexing を避ける。
+- 失敗可能な処理は明示的な error として扱う。
+- parse、validation、verification、serialization の段階を分離する。
+- hash、Merkle root、BCS bytes、signature に影響する処理では、必ず決定的な順序を保つ。
+- consensus や contract-facing data に影響する値では、float の曖昧さに注意する。必要に応じて正規化・整数化して扱う。
+- serde struct は schemas / golden vector と整合させる。
+- public API は小さく保ち、TypeScript 連携や test に必要なものだけを公開する。
+- edge case、不正入力、golden vector compatibility のテストを追加する。
+- 巧妙な抽象化より、レビューしやすい明快な実装を優先する。
 
-Pull Request を準備または作成する場合は `.agents/skills/prepare-pr` を使用してください。PR には変更概要、主な変更ファイル、表示に影響する HTML 変更のスクリーンショットを含めます。関連 issue やハッカソンタスクがあればリンクし、手動確認したブラウザチェックも記載します。
+Rust 変更後は、対象 crate の format / check / test を実行してください。
 
-## セキュリティと設定
+## Move 実装ルール
 
-secret、API key、ローカル MCP 認証情報、個人用 Codex 設定はコミットしないでください。生成物やマシン固有の設定は、共有する明確な意図がある場合を除き、バージョン管理の外に置きます。
+Move は最小権限を原則にしてください。
+
+- まず private `fun` で実装する。
+- package 内部で共有する処理には `public(package)` を使う。
+- `public` / `entry` は、外部 API として意図した関数に限定する。
+- `public(friend)` は使わない。
+- `entry` は薄い入口にする。引数検証、権限確認、イベント発火、返り値制約の吸収に留め、コア状態遷移は private または `public(package)` に委譲する。
+- 外部公開 API を内部実装モジュールに分散させない。
+- accessors、admin、user entry など、外部から触る入口は専用モジュールへ寄せる。
+- off-chain data は、contract 側で署名、status、version、payload constraints を検証できる場合のみ信頼する。
+- object ownership、capability、admin authority は明示的に扱う。
+- `#[test_only]` helper は使ってよいが、production API を test convenience に合わせて歪めない。
+
+contract-visible behavior を変更する場合は、Move test を追加するか、追加できない理由を明記してください。
+
+## ドキュメント方針
+
+挙動、信頼境界、public API、schema semantics、environment variable、開発 workflow が変わる場合は docs を更新してください。
+
+単に現在のフォルダ構成を説明するだけの docs 更新は避けてください。ドキュメントには、判断理由、設計意図、守るべき不変条件、運用上の前提を残してください。
+
+bilingual 文書を編集する場合は、明示的な理由がない限り片方の言語だけを削除しないでください。
+
+## テストと検証
+
+検証コマンドは、root `package.json` と対象 package / crate / Move package の設定を確認して選んでください。
+
+コード変更時は、まず対象範囲の狭いテストを実行し、その後に影響範囲を覆う check / typecheck / test を実行してください。
+
+完了報告には、実行したコマンド、成功 / 失敗、実行していない重要な検証、既知の制限、follow-up が必要な項目を含めてください。実際に実行していない検証を「通った」と書かないでください。
+
+## Git / PR ルール
+
+明示的に依頼されていない限り、commit、push、branch 作成、PR 作成は行わないでください。
+
+commit message や PR body を作成する場合は、何を変更したか、なぜ変更したか、影響範囲、実行した検証、残るリスクや follow-up を簡潔にまとめてください。
+
+PR はできるだけ focused にしてください。必要のない refactor を混ぜないでください。
+
+## セキュリティとローカル設定
+
+secret、API key、private credential、local MCP auth、個人用 Codex 設定、ローカルマシン固有の path、不要な生成物はコミットしないでください。
+
+project-shared な Codex / agent 設定は、repository workflow として共有する意図が明確な場合のみコミットしてください。個人用 override は untracked のままにしてください。
+
+## 依存関係
+
+新しい dependency はデフォルトでは追加しないでください。まず standard library と既存 dependency で実装できないか検討してください。
+
+dependency を追加する場合は、既存実装では不十分な理由、security / maintenance risk、package size や build への影響、runtime dependency か dev dependency かを説明してください。
+
+## 失敗時の扱い
+
+verifier、relayer、signing、submission、environment configuration では fail-closed を優先してください。
+
+retry、queue、status transition は明示的に設計し、テストしてください。作業が永久に stuck する状態を作らないでください。
