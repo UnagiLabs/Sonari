@@ -1,3 +1,6 @@
+import { mkdtemp, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { HOUR_MS } from "../nautilus_disaster_oracle/watcher/src/index.js";
 import {
@@ -141,6 +144,7 @@ describe("Nautilus local oracle E2E", () => {
                 "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
             raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
             affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+            temporary_dir: null,
         });
     });
 
@@ -166,13 +170,219 @@ describe("Nautilus local oracle E2E", () => {
         LOCAL_E2E_TEST_TIMEOUT_MS,
     );
 
-    it("keeps live USGS fetching out of the local Step 8 source boundary", async () => {
-        const sourceClient = new UsgsSourceClient();
+    it("fetches live USGS detail from the recent feed detail URL and prefers grid.xml.zip", async () => {
+        const requests: string[] = [];
+        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+            const url = String(input);
+            requests.push(url);
+            if (url.endsWith("/all_hour.geojson")) {
+                return Response.json({
+                    features: [
+                        {
+                            id: "us7000sonari",
+                            properties: {
+                                type: "earthquake",
+                                time: 1_700_000_000_000,
+                                updated: 1_700_000_010_000,
+                                detail: "https://example.test/detail/us7000sonari.geojson",
+                            },
+                        },
+                    ],
+                });
+            }
+            if (url === "https://example.test/detail/us7000sonari.geojson") {
+                return Response.json(
+                    detailWithContents("us7000sonari", {
+                        "download/grid.xml": { url: "https://example.test/grid.xml" },
+                        "download/grid.xml.zip": { url: "https://example.test/grid.xml.zip" },
+                    }),
+                );
+            }
+            if (url === "https://example.test/grid.xml.zip") {
+                return new Response("zip-bytes");
+            }
+            return new Response("unexpected", { status: 404 });
+        };
+        const sourceClient = new UsgsSourceClient({
+            fetcher,
+            recentFeedUrl: "https://example.test/all_hour.geojson",
+        });
 
-        await expect(sourceClient.getSourceArtifacts("us7000sonari")).rejects.toThrow(
-            /Live USGS source fetch is not implemented/,
-        );
+        const artifacts = await sourceClient.getSourceArtifacts("us7000sonari");
+
+        expect(requests).toEqual([
+            "https://example.test/all_hour.geojson",
+            "https://example.test/detail/us7000sonari.geojson",
+            "https://example.test/grid.xml.zip",
+        ]);
+        expect(artifacts).toMatchObject({
+            case_id: "usgs-live/us7000sonari",
+            source_event_id: "us7000sonari",
+            raw_detail_uri: "https://example.test/detail/us7000sonari.geojson",
+            raw_grid_uri: "https://example.test/grid.xml.zip",
+            raw_data_uri: "ipfs://sonari/live/us7000sonari/raw_data_manifest.json",
+            affected_cells_uri: "ipfs://sonari/live/us7000sonari/affected_cells.json",
+            temporary_dir: expect.any(String),
+        });
+        expect(artifacts.raw_detail_path).toMatch(/usgs_detail\.json$/);
+        expect(artifacts.raw_grid_path).toMatch(/usgs_grid\.xml\.zip$/);
     });
+
+    it("falls back to the deterministic USGS detail URL for manual event ids", async () => {
+        const requests: string[] = [];
+        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+            const url = String(input);
+            requests.push(url);
+            if (url.endsWith("/all_hour.geojson")) {
+                return Response.json({ features: [] });
+            }
+            if (
+                url ===
+                "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000manual.geojson"
+            ) {
+                return Response.json(
+                    detailWithContents("us7000manual", {
+                        "download/grid.xml": { url: "https://example.test/grid.xml" },
+                    }),
+                );
+            }
+            if (url === "https://example.test/grid.xml") {
+                return new Response("<grid />");
+            }
+            return new Response("unexpected", { status: 404 });
+        };
+
+        const artifacts = await new UsgsSourceClient({
+            fetcher,
+            recentFeedUrl: "https://example.test/all_hour.geojson",
+        }).getSourceArtifacts("us7000manual");
+
+        expect(requests).toContain(
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000manual.geojson",
+        );
+        expect(artifacts.raw_grid_path).toMatch(/usgs_grid\.xml$/);
+        expect(artifacts.raw_grid_uri).toBe("https://example.test/grid.xml");
+    });
+
+    it.each([
+        ["detail 404", new Response("missing", { status: 404 })],
+        ["invalid detail JSON", new Response("{not json", { status: 200 })],
+        ["id mismatch", Response.json(detailWithContents("other-event", {}))],
+    ] as const)("maps %s to pending_source USGS_DETAIL_UNAVAILABLE", async (_name, response) => {
+        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+            const url = String(input);
+            if (url.endsWith("/all_hour.geojson")) {
+                return Response.json({ features: [] });
+            }
+            return response;
+        };
+        const runner = new LocalOracleCoreRunnerAdapter({
+            sourceClient: new UsgsSourceClient({
+                fetcher,
+                recentFeedUrl: "https://example.test/all_hour.geojson",
+            }),
+        });
+
+        await expect(
+            runner.run({
+                source_event_id: "us7000sonari",
+                hazard_type: 1,
+                primary_source: 1,
+                geo_resolution: 7,
+            }),
+        ).resolves.toEqual({
+            status: "pending_source",
+            source_event_id: "us7000sonari",
+            error_code: "USGS_DETAIL_UNAVAILABLE",
+        });
+    });
+
+    it("maps missing ShakeMap grid contents to pending_source SHAKEMAP_GRID_UNAVAILABLE", async () => {
+        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+            const url = String(input);
+            if (url.endsWith("/all_hour.geojson")) {
+                return Response.json({ features: [] });
+            }
+            return Response.json(detailWithContents("us7000sonari", {}));
+        };
+        const runner = new LocalOracleCoreRunnerAdapter({
+            sourceClient: new UsgsSourceClient({
+                fetcher,
+                recentFeedUrl: "https://example.test/all_hour.geojson",
+            }),
+        });
+
+        await expect(
+            runner.run({
+                source_event_id: "us7000sonari",
+                hazard_type: 1,
+                primary_source: 1,
+                geo_resolution: 7,
+            }),
+        ).resolves.toEqual({
+            status: "pending_source",
+            source_event_id: "us7000sonari",
+            error_code: "SHAKEMAP_GRID_UNAVAILABLE",
+        });
+    });
+
+    it(
+        "removes live source temporary files after the local runner finishes",
+        async () => {
+            const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-source-test-"));
+            const sourceClient = new FixtureSourceClient({
+                caseId: "usgs/finalized_minimal",
+                fixturesDir: "nautilus_disaster_oracle/fixtures",
+            });
+            const runner = new LocalOracleCoreRunnerAdapter({
+                sourceClient: {
+                    async getSourceArtifacts(sourceEventId) {
+                        return {
+                            ...(await sourceClient.getSourceArtifacts(sourceEventId)),
+                            temporary_dir: tempDir,
+                        };
+                    },
+                },
+            });
+
+            await runner.run({
+                source_event_id: "us7000sonari",
+                hazard_type: 1,
+                primary_source: 1,
+                geo_resolution: 7,
+            });
+
+            await expect(stat(tempDir)).rejects.toThrow();
+        },
+        LOCAL_E2E_TEST_TIMEOUT_MS,
+    );
+
+    function detailWithContents(
+        id: string,
+        contents: Record<string, { url: string }>,
+    ): Record<string, unknown> {
+        return {
+            id,
+            properties: {
+                time: 1_700_000_000_000,
+                updated: 1_700_000_010_000,
+                products: {
+                    shakemap: [
+                        {
+                            status: "UPDATE",
+                            preferredWeight: 1,
+                            updateTime: 1_700_000_010_000,
+                            properties: {
+                                "map-status": "RELEASED",
+                                version: "1",
+                            },
+                            contents,
+                        },
+                    ],
+                },
+            },
+        };
+    }
 
     it.each([
         ["usgs/finalized_minimal", "finalized", null],

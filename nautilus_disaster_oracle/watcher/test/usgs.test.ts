@@ -8,14 +8,15 @@ describe("USGS recent feed parser", () => {
                 features: [
                     {
                         id: "us7000sonari",
-                        properties: {
-                            time: 1_700_000_000_000,
-                            updated: 1_700_000_010_000,
-                            type: "earthquake",
-                            mag: 5.6,
-                            mmi: 6.2,
-                            alert: "orange",
-                            tsunami: 1,
+                properties: {
+                    time: 1_700_000_000_000,
+                    updated: 1_700_000_010_000,
+                    type: "earthquake",
+                    detail: "https://earthquake.usgs.gov/detail/us7000sonari.geojson",
+                    mag: 5.6,
+                    mmi: 6.2,
+                    alert: "orange",
+                    tsunami: 1,
                         },
                     },
                 ],
@@ -29,6 +30,7 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: 6.2,
                 alert: "orange",
                 tsunami: true,
+                detail_url: "https://earthquake.usgs.gov/detail/us7000sonari.geojson",
             },
         ]);
     });
@@ -72,6 +74,7 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: null,
                 alert: null,
                 tsunami: false,
+                detail_url: undefined,
             },
             {
                 source_event_id: "us7000green",
@@ -81,6 +84,7 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: null,
                 alert: "green",
                 tsunami: false,
+                detail_url: undefined,
             },
         ]);
     });
