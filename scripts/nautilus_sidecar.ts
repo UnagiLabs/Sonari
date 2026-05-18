@@ -1,12 +1,15 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildRelayerRequestPreview } from "../nautilus_disaster_oracle/relayer/src/index.js";
+import {
+    buildRelayerRequestPreview,
+    dryRunRelayerSubmit,
+} from "../nautilus_disaster_oracle/relayer/src/index.js";
 import {
     validateRelayerSubmitInput,
     validateWorkerToTeeRequest,
 } from "../nautilus_disaster_oracle/shared/src/index.js";
-import { LocalOracleCoreRunnerAdapter } from "./nautilus_local_e2e.js";
+import { LocalOracleCoreRunnerAdapter, UsgsSourceClient } from "./nautilus_local_e2e.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8789;
@@ -17,6 +20,7 @@ const MAX_BODY_BYTES = 1024 * 1024;
 export interface NautilusSidecarOptions {
     host?: string;
     port?: number;
+    source?: "fixture" | "usgs-live";
     caseId?: string;
     fixturesDir?: string;
 }
@@ -24,7 +28,11 @@ export interface NautilusSidecarOptions {
 export function createNautilusSidecarServer(options: NautilusSidecarOptions = {}): Server {
     const caseId = options.caseId ?? DEFAULT_CASE_ID;
     const fixturesDir = resolveFromCwd(options.fixturesDir ?? DEFAULT_FIXTURES_DIR);
-    const runner = new LocalOracleCoreRunnerAdapter({ caseId, fixturesDir });
+    const source = options.source ?? "fixture";
+    const runner =
+        source === "usgs-live"
+            ? new LocalOracleCoreRunnerAdapter({ sourceClient: new UsgsSourceClient() })
+            : new LocalOracleCoreRunnerAdapter({ caseId, fixturesDir });
 
     return createServer(async (request, response) => {
         try {
@@ -39,7 +47,17 @@ export function createNautilusSidecarServer(options: NautilusSidecarOptions = {}
             }
 
             if (request.url === "/relayer/preview") {
-                await handleRelayerPreview(request, response);
+                await handleRelayer(request, response, "preview");
+                return;
+            }
+
+            if (request.url === "/relayer/dry_run") {
+                await handleRelayer(request, response, "dry_run");
+                return;
+            }
+
+            if (request.url === "/relayer/submit") {
+                await handleRelayer(request, response, "submit");
                 return;
             }
 
@@ -83,19 +101,21 @@ async function handleProcessData(
     writeJson(response, 200, { ok: true, result });
 }
 
-async function handleRelayerPreview(
+async function handleRelayer(
     request: IncomingMessage,
     response: ServerResponse,
+    mode: "preview" | "dry_run" | "submit",
 ): Promise<void> {
     const body = await readJsonBody(request);
     if (
         !isRecord(body) ||
-        firstUnexpectedKey(body, ["input", "target", "registry"]) !== undefined
+        firstUnexpectedKey(body, ["input", "target", "registry", "grpcUrl", "senderAddress"]) !==
+            undefined
     ) {
         writeJson(response, 400, {
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
-            message: "Relayer preview accepts only input, target, and registry",
+            message: "Relayer accepts only input, target, registry, grpcUrl, and senderAddress",
         });
         return;
     }
@@ -110,11 +130,32 @@ async function handleRelayerPreview(
         return;
     }
 
-    const result = buildRelayerRequestPreview(inputValidation.value, {
+    const config = {
         target: typeof body.target === "string" ? body.target : "",
         registry: typeof body.registry === "string" ? body.registry : "",
+    };
+
+    if (mode === "preview") {
+        const result = buildRelayerRequestPreview(inputValidation.value, config);
+        writeJson(response, result.ok ? 200 : 400, result);
+        return;
+    }
+
+    if (mode === "dry_run") {
+        const result = await dryRunRelayerSubmit(inputValidation.value, {
+            ...config,
+            grpcUrl: typeof body.grpcUrl === "string" ? body.grpcUrl : "",
+            senderAddress: typeof body.senderAddress === "string" ? body.senderAddress : "",
+        });
+        writeJson(response, result.ok ? 200 : 400, result);
+        return;
+    }
+
+    writeJson(response, 400, {
+        ok: false,
+        error_code: "RELAYER_SUBMIT_FAILED",
+        message: "submit signer is not configured in the local sidecar",
     });
-    writeJson(response, result.ok ? 200 : 400, result);
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -141,6 +182,7 @@ function parseCliArgs(argv: readonly string[]): Required<NautilusSidecarOptions>
     const options: Required<NautilusSidecarOptions> = {
         host: DEFAULT_HOST,
         port: DEFAULT_PORT,
+        source: "fixture",
         caseId: DEFAULT_CASE_ID,
         fixturesDir: DEFAULT_FIXTURES_DIR,
     };
@@ -161,6 +203,15 @@ function parseCliArgs(argv: readonly string[]): Required<NautilusSidecarOptions>
                 options.caseId = requireCliValue(arg, value);
                 index += 1;
                 break;
+            case "--source": {
+                const source = requireCliValue(arg, value);
+                if (source !== "fixture" && source !== "usgs-live") {
+                    throw new Error("--source must be fixture or usgs-live");
+                }
+                options.source = source;
+                index += 1;
+                break;
+            }
             case "--fixtures-dir":
                 options.fixturesDir = requireCliValue(arg, value);
                 index += 1;

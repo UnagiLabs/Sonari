@@ -6,6 +6,7 @@ export interface UsgsEarthquakeCandidate {
     summary_mmi: number | null;
     alert: UsgsAlertLevel | null;
     tsunami: boolean;
+    detail_url?: string;
 }
 
 export type UsgsAlertLevel = "green" | "yellow" | "orange" | "red";
@@ -53,7 +54,7 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         return null;
     }
 
-    return {
+    const candidate: UsgsEarthquakeCandidate = {
         source_event_id: feature.id,
         occurred_at_ms: occurredAtMs,
         source_updated_at_ms: sourceUpdatedAtMs,
@@ -62,6 +63,15 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         alert: readAlert(feature.properties.alert),
         tsunami: feature.properties.tsunami === 1,
     };
+    const detailUrl = readNonEmptyString(feature.properties.detail);
+    if (detailUrl !== undefined) {
+        candidate.detail_url = detailUrl;
+    }
+    return candidate;
+}
+
+function readNonEmptyString(input: unknown): string | undefined {
+    return typeof input === "string" && input.length > 0 ? input : undefined;
 }
 
 function readFiniteNumber(input: unknown): number | null {
