@@ -1,10 +1,13 @@
 # Sonari Nautilus Disaster Oracle 開発フロー
 
-この文書は `nautilus/verifiers/disaster/` 配下だけの開発順序を定義します。`contracts/`、`dapp/`、`packages/` の実装は対象外です。ただし、Payload、Merkle leaf、source manifest は root `schemas/` を外部契約として参照します。
+この文書は `nautilus/verifiers/disaster/` 配下だけの開発順序を定義する。`contracts/`、`dapp/`、`packages/` の実装は対象外である。ただし、Payload、Merkle leaf、source manifest は root `schemas/` を外部契約として参照する。
+
+Disaster verifier の責務は、災害イベントと対象セル root の作成に限定する。Membership Pass、residence verifier、student verifier、個人の受取資格判定は対象外であり、`nautilus/verifiers/membership/` と contracts の generic claim flow で扱う。
 
 ## 開発方針
 
 - root `schemas/` を Step 0 として最初に固定し、Oracle 側はその契約に合わせて実装する。
+- BCS Payload field order、enum 値、integer encoding、`AffectedCellLeaf` hash 順序は変更しない。
 - 先に pure な Oracle core を作り、Cloudflare、AWS、Nautilus / TEE は後から接続する。
 - Worker は候補検出と状態管理だけを担当し、finalize 判定、H3 生成、hash、BCS、署名は行わない。
 - Fixture は人間が期待値を確認できる最小 grid から始める。
@@ -12,6 +15,7 @@
 - TEE 化の前に、通常の Rust CLI と Node script E2E で同じ出力を再現できる状態にする。
 - `finalized` Payload だけを Relayer に渡す。`pending_source`、`pending_mmi`、`rejected`、`ignored_small` は D1 状態として扱う。
 - 外部サービス接続は adapter 境界に閉じ、core logic は fixture と unit test で検証できるようにする。
+- 個人の residence / student metadata update、Pass migration、EligibilityResult 生成はこの devflow に含めない。
 
 ## 推奨順序
 
@@ -31,15 +35,13 @@
 - BCS Payload の field order、enum 値、integer encoding を固定する。
 - Affected cell leaf の hash 対象 field と sort rule を固定する。
 - `source_manifest`、`raw_data_manifest`、`affected_cells` の canonical JSON ルールを固定する。
-- `event_uid`、`source_set_hash`、`raw_data_hash`、`affected_cells_data_hash`、Merkle root のhash仕様を固定する。
-- golden vectorでcanonical JSON、hash、Merkle proof、unsigned BCS Payload bytesを検証可能にする。
-- Rust、TypeScript、Relayer、Move entry argument が参照する共通契約として扱う。
+- `event_uid`、`source_set_hash`、`raw_data_hash`、`affected_cells_data_hash`、Merkle root の hash 仕様を固定する。
+- golden vector で canonical JSON、hash、Merkle proof、unsigned BCS Payload bytes を検証可能にする。
 
 完了条件:
 
-- Oracle 実装中に field order、enum 値、hash 対象 field を変更しなくてよい状態になっている。
-- `oracle_version = 1` のPayload field orderはimmutable contractとして扱い、field追加、順序変更、型変更が必要な場合は `oracle_version` bumpと新schema追加を必須にする。
-- 変更が必要な場合は、まず `schemas/` とgolden vectorを更新してから Oracle 実装へ反映する方針が明確になっている。
+- Oracle 実装中に field order、enum 値、hash 対象 field を変更しなくてよい。
+- `oracle_version = 1` の Payload field order は immutable contract として扱う。
 
 ### 1. ディレクトリと共有型を用意する
 
@@ -55,20 +57,15 @@
 
 - status、error code、source、cell metric、generation method などの定数を定義する。
 - status に `ignored_small`、error code に `WATCHER_BELOW_AUTO_THRESHOLD` を追加する設計にする。
-- `ignored_small` は Watcher auto-screening で小さい地震として runner / TEE 起動を skip した offchain status として定義し、`rejected` とは分ける。
-- `NO_AFFECTED_CELLS` は TEE/Core 検証後に対象セルがない場合、`WATCHER_BELOW_AUTO_THRESHOLD` は TEE/Core を呼ぶ前に Watcher が skip した場合、`REJECTED_AUTO_TRIGGER` は 72h finalization deadline 超過として整理する。
 - Worker、TEE core、Relayer の入出力型を分ける。
 - root `schemas/` の enum 値、field order、hash 仕様を実装側の型へ写す。
-- root に `pnpm@10.27.0` workspace を用意し、`nautilus/verifiers/disaster/shared`、`watcher`、`relayer` を workspace package として初期化する。
-- `watcher` / `relayer` は `@sonari/oracle-shared` を `workspace:*` で参照し、Step 1 では shared の型契約だけを境界として固定する。
-- `nautilus/verifiers/disaster/tee` は Nautilus / network / signature / H3 依存を入れず、Rust crate の共有定数から始める。
+- `watcher` / `relayer` は `@sonari/oracle-shared` を `workspace:*` で参照する。
 
 完了条件:
 
 - 各コンポーネントの責務と入出力型が決まっている。
 - Worker から core logic へ信頼済み値を渡さない設計になっている。
 - `ignored_small` と `WATCHER_BELOW_AUTO_THRESHOLD` の意味が shared 型・D1 状態・runner 対象判定で一貫している。
-- `pnpm test`、`pnpm typecheck`、`cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml` で Step 1 の型契約を検証できる。
 
 ### 2. Fixture と golden output を作る
 
@@ -86,8 +83,7 @@
 完了条件:
 
 - 同じ fixture から同じ hash、Merkle root、affected cells が再現できる。
-- 最小 grid の期待値を、実装者が手計算または表で確認できる。
-- `pending_source`、`pending_mmi`、`rejected`、`finalized` の代表ケースを fixture で確認できる。
+- pending / rejected / finalized の代表ケースを fixture で確認できる。
 
 ### 3. TEE ではない Rust Oracle Core を作る
 
@@ -109,9 +105,7 @@
 
 - fixture 入力から署名なし finalized payload を生成できる。
 - hash / root / BCS bytes が golden output と一致する。
-- その後、同じ payload bytes に対して local signature を生成できる。
 - pending / rejected ケースでは payload と signature を生成しない。
-- golden output と hash / root / payload field が一致する。
 
 ### 4. Relayer を dry-run から実装する
 
@@ -130,7 +124,6 @@
 
 - finalized payload だけが投稿対象になる。
 - dry-run 出力で Move entry 関数に渡す argument 形式を確認できる。
-- Relayer 起因の失敗を `RELAYER_SUBMIT_FAILED`、Move 拒否を `MOVE_REJECTED` として扱える。
 - 再試行しても payload 内容が変わらない。
 
 ### 5. Watcher を local / mock runner で実装する
@@ -145,22 +138,14 @@
 - Cron で USGS recent earthquakes API を取得する。
 - 過去 60 分の `type === "earthquake"` event id を重複スキャンし、`source_event_id` の冪等管理を実装する。
 - USGS recent feed summary fields の `mag`、`mmi`、`alert`、`tsunami` を parser / D1 upsert 境界で保持する。
-- D1 upsert 時に summary auto-screening を実行し、`mag >= 5.5 OR mmi >= 6.0 OR alert IN ("yellow", "orange", "red") OR tsunami == 1` を満たすeventは `new`、満たさないeventは `ignored_small` + `WATCHER_BELOW_AUTO_THRESHOLD` にする。
-- null / 不正値の summary field は条件不一致として扱う。
-- `ignored_small` は `next_retry_at_ms = NULL`、`finalization_deadline_at_ms = occurred_at_ms + 72h` とし、due query、runner、TEE 起動対象から除外する。
-- 後続 USGS summary update で auto-screening 条件を満たした場合のみ `ignored_small -> new` に昇格する。
-- D1 status と `next_retry_at_ms` を管理する。
-- 手動投入 API を実装し、summary auto-screening を bypass して任意の `source_event_id` を runner 対象にできるようにする。
-- 最初は AWS / TEE ではなく mock runner または local runner adapter を呼ぶ。
+- D1 upsert 時に summary auto-screening を実行し、`new` / `ignored_small` を分ける。
+- `ignored_small` は due query、runner、TEE 起動対象から除外する。
+- 後続 summary update で条件を満たした `ignored_small` event だけを `new` へ昇格する。
+- 手動投入 API は summary auto-screening を bypass して runner 対象にできる。
 
 完了条件:
 
 - `new`、`processing`、`pending_source`、`pending_mmi`、`finalized`、`submitted`、`failed`、`rejected`、`ignored_small` の遷移を D1 で追跡できる。
-- USGS recent feed の `type === "earthquake"` event id が、auto-screening 結果にかかわらず D1 に upsert される。
-- threshold 未満のeventは `ignored_small` として残るが、mock runner / local runner adapter には渡らない。
-- 後続 summary update で条件を満たした `ignored_small` event だけが `new` へ昇格する。
-- manual submit は summary auto-screening を bypass して runner 対象にできる。
-- 24h / 48h / 72h の finalization rule を状態遷移として表現できる。
 - Worker は finalize 判定や Payload 生成をしていない。
 
 ### 6. Node script で Local end-to-end を通す
@@ -174,7 +159,6 @@
 
 やること:
 
-- 最初は Wrangler local ではなく、Node script から local vertical slice を通す。
 - Fixture event id から Watcher 相当の orchestration を起動する。
 - Node script が local Oracle Core を呼ぶ。
 - Oracle Core が finalized payload または pending / rejected status を返す。
@@ -184,7 +168,6 @@
 完了条件:
 
 - Node script だけで Watcher orchestration -> Oracle Core -> Relayer dry-run まで通る。
-- 最終 status、error_code、retry_count、source_updated_at_ms の更新内容を確認できる。
 - 同じ `source_event_id` を再投入しても二重処理にならない。
 
 ### 7. Wrangler local へ接続する
@@ -206,7 +189,6 @@
 
 - Cloudflare local 環境で Watcher -> Oracle Core -> Relayer dry-run まで通る。
 - D1 local に処理履歴と失敗理由が残る。
-- Node script E2E と Wrangler local E2E の出力が一致する。
 
 ### 8. Nautilus / TEE 境界へ移す
 
@@ -247,29 +229,6 @@
 - timeout / retry 上限 / failed status が運用上追える。
 - runner 停止漏れを検出できる。
 
-#### Pre-deploy quality gate
-
-この段階では AWS / Cloudflare production deployment、実 AWS runner、実 Sui submit は行わない。submit mode は signer 未接続のため fail-closed のままにする。
-
-完了条件:
-
-- AWS runner adapter は `/start`、`/process`、`/stop` の contract を検証し、`AWS_RUNNER_START_FAILED`、`AWS_RUNNER_PROCESS_FAILED`、`AWS_RUNNER_TIMEOUT`、`AWS_RUNNER_CONTRACT_INVALID` を D1 の主エラーとして分類できる。
-- runner stop failure は主 `error_code` を上書きせず、`runner_stop_error` に `AWS_RUNNER_STOP_FAILED` 相当の停止失敗として残す。
-- Worker の runner 設定は `AWS_RUNNER_BASE_URL` + `AWS_RUNNER_TOKEN` を最優先し、local runner sidecar は `RUNNER_SIDECAR_URL` で明示した場合だけ `/process_data` を使う。`ORACLE_SIDECAR_URL` は relayer sidecar 専用として扱う。
-- Worker から TEE/core へ渡す入力は `source_event_id`、`hazard_type`、`primary_source`、`geo_resolution` のみに制限し、hash / root / Band / Payload / signature は Worker 入力として受け付けない。
-- Relayer は `preview` / `dry_run` / `submit` / invalid mode を fail-closed に扱い、`submit` は `RELAYER_ALLOW_SUBMIT=true` でも signer 未接続なら送信しない。
-- `pnpm oracle:doctor` で `RELAYER_MODE`、`RELAYER_ALLOW_SUBMIT`、`RELAYER_GRPC_URL`、`RELAYER_SENDER_ADDRESS`、`AWS_RUNNER_BASE_URL`、`AWS_RUNNER_TOKEN`、`MANUAL_SUBMIT_TOKEN`、local D1 migration/sqlite の状態を確認できる。migration が揃っていても local sqlite が未作成なら warn とする。
-- `pnpm oracle:e2e:fake-binding` は queue injection / stale recovery / deadline exceeded の制御ケースを Wrangler なしで検証する。
-- Vitest queue / runner tests は runner start / process / timeout / stop failure を検証する。
-- `pnpm oracle:e2e:wrangler` は local Worker / D1 / Queue / `RUNNER_SIDECAR_URL` + `ORACLE_SIDECAR_URL` の sidecar fixture 経路を検証する。
-
-Follow-up:
-
-- 実 Nautilus / TEE 実行環境の attestation と sealed key 管理を追加する。
-- 実 AWS runner 呼び出し、AWS runner の本番 API 認証、runner lifecycle 監視、停止失敗アラートを追加する。
-- Cloudflare production deploy を追加する。
-- Sui signer を安全に注入してから `submit` mode の実送信を有効化する。
-
 ### 10. Live source で検証する
 
 対象:
@@ -293,6 +252,11 @@ Follow-up:
 
 ## 後回しにするもの
 
+- residence verifier。
+- student verifier。
+- Pass metadata update。
+- Pass migration。
+- generic EligibilityResult generation。
 - JMA 本番 parser。
 - 複数 AWS Region / 複数 Enclave fallback。
 - manual review status。
@@ -302,7 +266,7 @@ Follow-up:
 
 ## Implementation follow-up TODO
 
-次PRでは docs-only ではなく実装として以下を反映する。
+次 PR では docs-only ではなく実装として以下を反映する。
 
 - shared status / error code に `ignored_small` と `WATCHER_BELOW_AUTO_THRESHOLD` を追加する。
 - watcher parser で `mag`、`mmi`、`alert`、`tsunami` を保持する。
@@ -314,7 +278,7 @@ Follow-up:
 
 ## 最初のゴール
 
-最初の実装ゴールは、以下の local vertical slice です。
+最初の実装ゴールは、以下の local vertical slice である。
 
 ```txt
 USGS fixture
@@ -329,4 +293,4 @@ USGS fixture
   -> mock status update
 ```
 
-この流れを Node script で安定させてから、Wrangler local、Nautilus / TEE、AWS runner、Cloudflare Queue、live source を順番に接続します。
+この流れを Node script で安定させてから、Wrangler local、Nautilus / TEE、AWS runner、Cloudflare Queue、live source を順番に接続する。
