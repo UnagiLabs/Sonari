@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sonari | Make Every Donation Visible</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    :root {
+      color: #1d2622;
+      background: #ffffff;
+      font-family: "Noto Sans JP", "Segoe UI", Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.75;
+      --ink: #1d2622;
+      --muted: #66736d;
+      --line: #dfe8e1;
+      --soft: #f7faf7;
+      --sage: #6f9277;
+      --sage-dark: #3e634b;
+      --accent: #9fbd90;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #ffffff;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(12px);
+    }
+
+    .nav,
+    .section-inner,
+    .hero-inner,
+    .footer-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px 24px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--ink);
+      font-size: 1.04rem;
+      font-weight: 800;
+    }
+
+    .brand img {
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    .nav-links {
+      display: none;
+      align-items: center;
+      gap: 24px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .nav-links a:hover {
+      color: var(--sage-dark);
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 20px;
+      border-radius: 999px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .button-primary {
+      border: 1px solid var(--sage-dark);
+      color: #ffffff;
+      background: var(--sage-dark);
+    }
+
+    .button-primary:hover {
+      background: #2f533d;
+    }
+
+    .button-secondary {
+      border: 1px solid var(--line);
+      color: var(--ink);
+      background: #ffffff;
+    }
+
+    .hero {
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .hero-showcase {
+      overflow: hidden;
+      width: 100%;
+      background: #eef4ee;
+    }
+
+    .hero-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 44px;
+      padding: 56px 24px 64px;
+    }
+
+    .hero-copy {
+      max-width: 760px;
+    }
+
+    .photo-showcase {
+      overflow: hidden;
+      width: 100%;
+      background: #eef4ee;
+    }
+
+    .slide-track {
+      display: flex;
+      width: 300%;
+      animation: slideShow 15s infinite;
+    }
+
+    .slide {
+      position: relative;
+      width: calc(100% / 3);
+      min-height: clamp(360px, 54vw, 680px);
+      overflow: hidden;
+      background: #eef4ee;
+    }
+
+    .slide img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: clamp(360px, 54vw, 680px);
+      object-fit: cover;
+    }
+
+    .slide::after {
+      position: absolute;
+      inset: 0;
+      background: rgba(18, 34, 27, 0.18);
+      content: "";
+    }
+
+    .slide-label {
+      position: absolute;
+      left: clamp(22px, 6vw, 84px);
+      bottom: clamp(24px, 5vw, 70px);
+      z-index: 1;
+      color: #ffffff;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(3rem, 9vw, 8.5rem);
+      font-style: italic;
+      font-weight: 700;
+      line-height: 0.95;
+      letter-spacing: 0;
+      text-shadow: 0 3px 18px rgba(0, 0, 0, 0.36);
+    }
+
+    @keyframes slideShow {
+      0%,
+      27% {
+        transform: translateX(0);
+      }
+
+      33%,
+      60% {
+        transform: translateX(-33.3333%);
+      }
+
+      66%,
+      93% {
+        transform: translateX(-66.6666%);
+      }
+
+      100% {
+        transform: translateX(0);
+      }
+    }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--sage-dark);
+      font-size: 0.78rem;
+      font-weight: 900;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(2.45rem, 5.8vw, 5rem);
+      line-height: 1.06;
+      letter-spacing: 0;
+    }
+
+    .hero-lead {
+      margin: 24px 0 0;
+      max-width: 680px;
+      color: #4e5d56;
+      font-size: clamp(1.04rem, 2vw, 1.25rem);
+      font-weight: 650;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 30px;
+    }
+
+    .hero-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.92rem;
+      font-weight: 650;
+    }
+
+    .hero-visual {
+      align-self: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .logo-stage {
+      display: grid;
+      min-height: 320px;
+      place-items: center;
+      padding: 42px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .logo-stage img {
+      width: min(72%, 250px);
+      height: auto;
+      display: block;
+    }
+
+    .status-list {
+      display: grid;
+      gap: 0;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .status-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 16px 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.94rem;
+      font-weight: 700;
+    }
+
+    .status-list li:first-child {
+      border-top: 0;
+    }
+
+    .status-list strong {
+      color: var(--ink);
+      text-align: right;
+    }
+
+    .metrics {
+      border-bottom: 1px solid var(--line);
+      background: var(--soft);
+    }
+
+    .metrics-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      max-width: 1120px;
+      margin: 0 auto;
+      border-left: 1px solid var(--line);
+    }
+
+    .metric {
+      padding: 26px 24px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--sage-dark);
+      font-size: 2rem;
+      line-height: 1.1;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .section {
+      padding: 74px 24px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .section-alt {
+      background: var(--soft);
+    }
+
+    .section-heading {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 18px;
+      margin-bottom: 36px;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(1.9rem, 3.5vw, 3rem);
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.02rem;
+      font-weight: 650;
+    }
+
+    .program-list {
+      display: grid;
+      border-top: 1px solid var(--line);
+    }
+
+    .program-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      padding: 24px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .program-number {
+      color: var(--sage);
+      font-size: 0.82rem;
+      font-weight: 900;
+    }
+
+    .program-row h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.28rem;
+      line-height: 1.35;
+    }
+
+    .program-row p {
+      margin: 0;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .program-status {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 30px;
+      padding: 2px 10px;
+      border: 1px solid #c8dcc9;
+      border-radius: 999px;
+      color: var(--sage-dark);
+      background: #ffffff;
+      font-size: 0.8rem;
+      font-weight: 900;
+    }
+
+    .flow-table {
+      width: 100%;
+      border-collapse: collapse;
+      border-top: 1px solid var(--line);
+    }
+
+    .flow-table th,
+    .flow-table td {
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .flow-table th {
+      width: 28%;
+      color: var(--sage-dark);
+      font-size: 0.88rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .flow-table td {
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .flow-table strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 1.08rem;
+    }
+
+    .trust-columns {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 34px;
+      border-top: 1px solid var(--line);
+      padding-top: 32px;
+    }
+
+    .trust-column h3 {
+      margin: 0 0 10px;
+      color: var(--ink);
+      font-size: 1.16rem;
+    }
+
+    .trust-column p {
+      margin: 0;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .report-list {
+      display: grid;
+      border-top: 1px solid var(--line);
+    }
+
+    .report-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      padding: 22px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .report-date {
+      color: var(--sage-dark);
+      font-size: 0.86rem;
+      font-weight: 900;
+    }
+
+    .report-item h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 1.12rem;
+    }
+
+    .report-item p {
+      margin: 0;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .final-cta {
+      padding: 70px 24px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .final-cta-inner {
+      display: grid;
+      gap: 24px;
+      align-items: center;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 34px 0 0;
+      border-top: 2px solid var(--sage-dark);
+    }
+
+    .final-cta h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(1.9rem, 3.8vw, 3.2rem);
+      line-height: 1.16;
+    }
+
+    .final-cta p {
+      margin: 14px 0 0;
+      max-width: 660px;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    footer {
+      padding: 28px 24px;
+      background: var(--soft);
+      color: var(--muted);
+    }
+
+    .footer-inner {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 14px;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    @media (min-width: 760px) {
+      .nav-links {
+        display: flex;
+      }
+
+      .hero-inner {
+        grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.72fr);
+        grid-template-areas: "copy visual";
+        padding-top: 72px;
+        padding-bottom: 78px;
+      }
+
+      .hero-copy {
+        grid-area: copy;
+      }
+
+      .hero-visual {
+        grid-area: visual;
+      }
+
+      .metrics-inner {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .metric {
+        border-bottom: 0;
+      }
+
+      .section-heading {
+        grid-template-columns: minmax(0, 0.9fr) minmax(320px, 0.7fr);
+        align-items: end;
+      }
+
+      .program-row {
+        grid-template-columns: 90px minmax(0, 1.05fr) minmax(280px, 0.9fr) 140px;
+        align-items: start;
+      }
+
+      .trust-columns {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .report-item {
+        grid-template-columns: 150px minmax(0, 0.72fr) minmax(280px, 1fr);
+        align-items: start;
+      }
+
+      .final-cta-inner {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .nav {
+        padding: 12px 18px;
+      }
+
+      .brand span {
+        font-size: 0.98rem;
+      }
+
+      .nav .button {
+        min-height: 40px;
+        padding: 0 14px;
+        font-size: 0.9rem;
+      }
+
+      .hero-inner {
+        padding: 42px 18px 42px;
+      }
+
+      .slide,
+      .slide img {
+        min-height: 300px;
+      }
+
+      .slide-label {
+        left: 18px;
+        bottom: 16px;
+      }
+
+      .hero-actions .button {
+        width: 100%;
+      }
+
+      .logo-stage {
+        min-height: 230px;
+      }
+
+      .section,
+      .final-cta {
+        padding: 54px 18px;
+      }
+
+      .flow-table,
+      .flow-table tbody,
+      .flow-table tr,
+      .flow-table th,
+      .flow-table td {
+        display: block;
+        width: 100%;
+      }
+
+      .flow-table th {
+        padding-bottom: 4px;
+        border-bottom: 0;
+      }
+
+      .flow-table td {
+        padding-top: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Sonari">
+        <img src="assets/sonari_logo.png" alt="" />
+        <span>Sonari</span>
+      </a>
+      <div class="nav-links" aria-label="Page navigation">
+        <a href="#problem">Problem</a>
+        <a href="#promise">Promise</a>
+        <a href="#use">How it works</a>
+      </div>
+      <a class="button button-primary" href="sonari_overview.html">Start donating</a>
+    </nav>
+  </header>
+
+  <section id="top" class="hero">
+    <div class="hero-showcase">
+      <div class="photo-showcase" aria-label="Donation areas">
+        <div class="slide-track">
+          <figure class="slide">
+            <img src="assets/donation_earthquake.png" alt="Earthquake relief" />
+            <figcaption class="slide-label">earthquake</figcaption>
+          </figure>
+          <figure class="slide">
+            <img src="assets/donation_flood.webp" alt="Flood relief" />
+            <figcaption class="slide-label">flood</figcaption>
+          </figure>
+          <figure class="slide">
+            <img src="assets/donation_student.png" alt="Student support" />
+            <figcaption class="slide-label">students</figcaption>
+          </figure>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow">Donation you can trust</p>
+        <h1>Make every donation visible.</h1>
+        <p class="hero-lead">
+          Sonari helps donations move beyond good intentions. It shows what each donation is for, who it is meant to support, and how it turns into real aid.
+        </p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="sonari_overview.html">Start donating</a>
+          <a class="button button-secondary" href="#problem">See the problem</a>
+        </div>
+        <p class="hero-note">For donors, recipients, and communities, Sonari makes support easier to trust.</p>
+      </div>
+
+      <aside class="hero-visual" aria-label="Sonari message">
+        <div class="logo-stage">
+          <img src="assets/sonari_logo.png" alt="Sonari logo" />
+        </div>
+        <ul class="status-list">
+          <li><span>For donors</span><strong>See where aid goes</strong></li>
+          <li><span>For recipients</span><strong>Receive support faster</strong></li>
+          <li><span>For communities</span><strong>Share impact clearly</strong></li>
+        </ul>
+      </aside>
+    </div>
+  </section>
+
+  <section class="metrics" aria-label="Sonari principles">
+    <div class="metrics-inner">
+      <div class="metric">
+        <strong>Clear</strong>
+        <span>Show what each donation is for</span>
+      </div>
+      <div class="metric">
+        <strong>Fast</strong>
+        <span>Help aid move when timing matters</span>
+      </div>
+      <div class="metric">
+        <strong>Visible</strong>
+        <span>Make outcomes easy to follow</span>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <section id="problem" class="section">
+      <div class="section-inner">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Problem</p>
+            <h2>Giving should not feel like sending money into the dark.</h2>
+          </div>
+          <p>People want to help. But when the path from donation to impact is unclear, trust becomes the hardest part.</p>
+        </div>
+
+        <div class="program-list">
+          <article class="program-row">
+            <span class="program-number">01</span>
+            <h3>Donors cannot see where money goes</h3>
+            <p>When reporting is vague, people cannot feel whether their support reached anyone.</p>
+            <span class="program-status">Clarity</span>
+          </article>
+          <article class="program-row">
+            <span class="program-number">02</span>
+            <h3>Aid can move too slowly</h3>
+            <p>In disasters and emergencies, timing matters. Support needs a clearer path to action.</p>
+            <span class="program-status">Speed</span>
+          </article>
+          <article class="program-row">
+            <span class="program-number">03</span>
+            <h3>The reason for support is often unclear</h3>
+            <p>Trust grows when communities can explain why aid was sent and what changed afterward.</p>
+            <span class="program-status">Trust</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="promise" class="section section-alt">
+      <div class="section-inner">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Promise</p>
+            <h2>A donation experience built for confidence.</h2>
+          </div>
+          <p>Sonari keeps the story simple: what you support, why it matters, and what your donation helped make possible.</p>
+        </div>
+
+        <table class="flow-table">
+          <tbody>
+            <tr>
+              <th>Purpose</th>
+              <td>
+                <strong>Know what you are supporting</strong>
+                Choose a clear cause such as earthquake relief, flood recovery, or student support.
+              </td>
+            </tr>
+            <tr>
+              <th>Delivery</th>
+              <td>
+                <strong>Help aid move faster</strong>
+                Make donated funds easier to route when people need help most.
+              </td>
+            </tr>
+            <tr>
+              <th>Reason</th>
+              <td>
+                <strong>Understand why support was sent</strong>
+                Keep the reason for each support action understandable and easy to share.
+              </td>
+            </tr>
+            <tr>
+              <th>Report</th>
+              <td>
+                <strong>Follow what happened afterward</strong>
+                Turn donations into updates that donors and communities can actually read.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="trust" class="section">
+      <div class="section-inner">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Why Sonari</p>
+            <h2>Give people a reason to keep giving.</h2>
+          </div>
+          <p>Sonari turns the desire to help into an experience that feels clear, accountable, and worth returning to.</p>
+        </div>
+
+        <div class="trust-columns">
+          <section class="trust-column">
+            <h3>Choose with confidence</h3>
+            <p>Donors can see the purpose of each cause before they decide to give.</p>
+          </section>
+          <section class="trust-column">
+            <h3>Move when it matters</h3>
+            <p>Communities can organize support around urgent moments instead of waiting for slow processes.</p>
+          </section>
+          <section class="trust-column">
+            <h3>Feel the impact</h3>
+            <p>Visible outcomes help donors understand what their support made possible.</p>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section id="use" class="section section-alt">
+      <div class="section-inner">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">How it feels</p>
+            <h2>Simple from the first click.</h2>
+          </div>
+          <p>No technical knowledge required. Pick a cause, donate, and follow the result.</p>
+        </div>
+
+        <div class="report-list">
+          <article class="report-item">
+            <span class="report-date">Step 1</span>
+            <h3>Choose a cause</h3>
+            <p>Select the kind of support you care about, from disaster relief to education.</p>
+          </article>
+          <article class="report-item">
+            <span class="report-date">Step 2</span>
+            <h3>Donate</h3>
+            <p>Your donation is tied to a clear support purpose from the start.</p>
+          </article>
+          <article class="report-item">
+            <span class="report-date">Step 3</span>
+            <h3>See the result</h3>
+            <p>Follow the updates that show what your support helped make possible.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section class="final-cta">
+    <div class="final-cta-inner">
+      <div>
+        <h2>Make giving feel clear, human, and trustworthy.</h2>
+        <p>Sonari helps support move from good intentions to visible outcomes.</p>
+      </div>
+      <a class="button button-primary" href="sonari_overview.html">Start donating</a>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <span>Sonari</span>
+      <span>Transparent donation infrastructure for verified aid.</span>
+    </div>
+  </footer>
+</body>
+</html>
