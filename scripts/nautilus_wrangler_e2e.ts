@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { HOUR_MS } from "../nautilus_disaster_oracle/watcher/src/index.js";
+import { HOUR_MS } from "../nautilus/verifiers/disaster/watcher/src/index.js";
 import {
     type LocalOracleE2eOutput,
     loadFixtureCandidate,
@@ -14,7 +14,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 const ROOT_DIR = resolveFromCwd(".");
-const WATCHER_DIR = path.join(ROOT_DIR, "nautilus_disaster_oracle/watcher");
+const WATCHER_DIR = path.join(ROOT_DIR, "nautilus/verifiers/disaster/watcher");
 const TSX_BIN = path.join(ROOT_DIR, "node_modules/.bin/tsx");
 const WRANGLER_BIN = path.join(WATCHER_DIR, "node_modules/.bin/wrangler");
 const SIDECAR_HOST = "127.0.0.1";

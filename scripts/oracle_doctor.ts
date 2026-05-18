@@ -22,7 +22,7 @@ export interface OracleDoctorResult {
     checks: DoctorCheck[];
 }
 
-const DEFAULT_MIGRATIONS_DIR = "nautilus_disaster_oracle/watcher/migrations";
+const DEFAULT_MIGRATIONS_DIR = "nautilus/verifiers/disaster/watcher/migrations";
 const DEFAULT_SCHEMA_SQL_PATH = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/**/db.sqlite";
 const RELAYER_MODES = new Set(["preview", "dry_run", "submit"]);
 const REQUIRED_D1_COLUMNS = [

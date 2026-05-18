@@ -9,15 +9,18 @@
             "tsconfig.base.json",
             "biome.json",
             "scripts/**/*.ts",
-            "nautilus_disaster_oracle/shared/package.json",
-            "nautilus_disaster_oracle/shared/tsconfig.json",
-            "nautilus_disaster_oracle/shared/src/**/*.ts",
-            "nautilus_disaster_oracle/watcher/package.json",
-            "nautilus_disaster_oracle/watcher/tsconfig.json",
-            "nautilus_disaster_oracle/watcher/src/**/*.ts",
-            "nautilus_disaster_oracle/relayer/package.json",
-            "nautilus_disaster_oracle/relayer/tsconfig.json",
-            "nautilus_disaster_oracle/relayer/src/**/*.ts"
+            "nautilus/verifiers/disaster/shared/package.json",
+            "nautilus/verifiers/disaster/shared/tsconfig.json",
+            "nautilus/verifiers/disaster/shared/src/**/*.ts",
+            "nautilus/verifiers/disaster/watcher/package.json",
+            "nautilus/verifiers/disaster/watcher/tsconfig.json",
+            "nautilus/verifiers/disaster/watcher/src/**/*.ts",
+            "nautilus/verifiers/disaster/relayer/package.json",
+            "nautilus/verifiers/disaster/relayer/tsconfig.json",
+            "nautilus/verifiers/disaster/relayer/src/**/*.ts",
+            "nautilus/verifiers/membership/shared/package.json",
+            "nautilus/verifiers/membership/shared/tsconfig.json",
+            "nautilus/verifiers/membership/shared/src/**/*.ts"
         ]
     },
     "formatter": {

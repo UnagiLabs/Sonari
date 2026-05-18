@@ -3,8 +3,8 @@ import {
     buildRelayerRequestPreview,
     dryRunRelayerSubmit,
     type RelayerRequestPreview,
-} from "../nautilus_disaster_oracle/relayer/src/index.js";
-import type { TeeCoreResult } from "../nautilus_disaster_oracle/shared/src/index.js";
+} from "../nautilus/verifiers/disaster/relayer/src/index.js";
+import type { TeeCoreResult } from "../nautilus/verifiers/disaster/shared/src/index.js";
 import {
     fetchUsgsRecentCandidates,
     HOUR_MS,
@@ -12,12 +12,12 @@ import {
     processDueEventsInlineForTests,
     scanCandidates,
     type UsgsEarthquakeCandidate,
-} from "../nautilus_disaster_oracle/watcher/src/index.js";
+} from "../nautilus/verifiers/disaster/watcher/src/index.js";
 import type {
     RelayerAdapter,
     RelayerMode,
     RelayerRunResult,
-} from "../nautilus_disaster_oracle/watcher/src/relayer_preview.js";
+} from "../nautilus/verifiers/disaster/watcher/src/relayer_preview.js";
 import { LocalOracleCoreRunnerAdapter, UsgsSourceClient } from "./nautilus_local_e2e.js";
 
 type ExpectedStatus =

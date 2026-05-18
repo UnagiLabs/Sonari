@@ -1,8 +1,9 @@
 {
     "files": [],
     "references": [
-        { "path": "./nautilus_disaster_oracle/shared" },
-        { "path": "./nautilus_disaster_oracle/watcher" },
-        { "path": "./nautilus_disaster_oracle/relayer" }
+        { "path": "./nautilus/verifiers/disaster/shared" },
+        { "path": "./nautilus/verifiers/disaster/watcher" },
+        { "path": "./nautilus/verifiers/disaster/relayer" },
+        { "path": "./nautilus/verifiers/membership/shared" }
     ]
 }

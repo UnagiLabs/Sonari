@@ -7,10 +7,10 @@
     "scripts": {
         "format": "pnpm format:ts && pnpm format:rust",
         "format:ts": "biome check --write .",
-        "format:rust": "cargo fmt --manifest-path nautilus_disaster_oracle/tee/Cargo.toml",
+        "format:rust": "cargo fmt --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml",
         "check": "pnpm check:ts && pnpm check:rust",
         "check:ts": "biome check .",
-        "check:rust": "cargo fmt --manifest-path nautilus_disaster_oracle/tee/Cargo.toml --check && cargo check --manifest-path nautilus_disaster_oracle/tee/Cargo.toml",
+        "check:rust": "cargo fmt --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml --check && cargo check --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml",
         "lint": "pnpm check",
         "typecheck": "pnpm -r typecheck && pnpm typecheck:scripts",
         "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
@@ -24,7 +24,7 @@
         "oracle:e2e:fake-binding": "tsx scripts/nautilus_fake_binding_e2e.ts",
         "oracle:e2e:live": "tsx scripts/nautilus_live_e2e.ts",
         "oracle:e2e:wrangler": "tsx scripts/nautilus_wrangler_e2e.ts",
-        "test:oracle": "pnpm --filter './nautilus_disaster_oracle/**' test && cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml"
+        "test:oracle": "pnpm --filter './nautilus/verifiers/disaster/**' test && cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml"
     },
     "devDependencies": {
         "@biomejs/biome": "^2.4.15",
