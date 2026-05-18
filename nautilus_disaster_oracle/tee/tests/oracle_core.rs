@@ -9,9 +9,9 @@ use tee::{
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
     LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
-    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, UsgsOracleInput, cell_band,
-    grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
-    process_usgs, process_usgs_with_signer, sha3_256_bytes,
+    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, UsgsOracleInput, WorkerToTeeRequest,
+    cell_band, grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
+    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer, sha3_256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
@@ -126,6 +126,41 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
         serde_json::to_value(output.expected_hashes).unwrap(),
         read_expected("expected_hashes.json")
     );
+}
+
+#[test]
+fn pre_tee_worker_scaffold_matches_pure_core_output_for_fixture_sources() {
+    let request = WorkerToTeeRequest {
+        source_event_id: "us7000sonari".to_owned(),
+        hazard_type: HAZARD_TYPE_EARTHQUAKE,
+        primary_source: PRIMARY_SOURCE_USGS,
+        geo_resolution: GEO_RESOLUTION,
+    };
+
+    let worker_output =
+        process_usgs_from_worker_request(request, finalized_input()).expect("request should run");
+    let pure_output = process_usgs(finalized_input()).expect("fixture should finalize");
+
+    assert_eq!(worker_output.result, pure_output.result);
+    assert_eq!(worker_output.unsigned_payload, pure_output.unsigned_payload);
+    assert_eq!(worker_output.expected_hashes, pure_output.expected_hashes);
+}
+
+#[test]
+fn pre_tee_worker_scaffold_rejects_untrusted_contract_fields() {
+    let mut request = serde_json::json!({
+        "source_event_id": "us7000sonari",
+        "hazard_type": HAZARD_TYPE_EARTHQUAKE,
+        "primary_source": PRIMARY_SOURCE_USGS,
+        "geo_resolution": GEO_RESOLUTION,
+        "affected_cells_root": "0xdeadbeef"
+    });
+
+    let parsed = WorkerToTeeRequest::from_json_value(request.clone());
+    assert!(parsed.is_err());
+
+    request.as_object_mut().unwrap().remove("affected_cells_root");
+    assert!(WorkerToTeeRequest::from_json_value(request).is_ok());
 }
 
 #[test]

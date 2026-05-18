@@ -18,6 +18,7 @@ import {
     PROCESSING_STALE_AFTER_MS,
     scanCandidates,
     createWorkerApp,
+    RunnerProcessError,
 } from "../src/index.js";
 import type { EarthquakeEventRow, StateRepository } from "../src/state.js";
 import type { UsgsEarthquakeCandidate } from "../src/usgs.js";
@@ -286,6 +287,35 @@ describe("runner queue consumer", () => {
         expect(runner.starts).toBe(0);
     });
 
+    it("maps AWS start failures to failed rows without trying to stop a missing runner", async () => {
+        const repository = new InMemoryStateRepository();
+        const runner = new RecordingRunnerLifecycleAdapter({
+            startError: new Error("start failed"),
+        });
+        const app = createWorkerApp({ now: () => baseNow, runner });
+
+        await scanCandidates(repository, [candidate("us7000startfail")], baseNow);
+        const job = await repository.enqueueRunnerJob(
+            "us7000startfail",
+            1,
+            "us7000startfail:1",
+            baseNow,
+        );
+
+        const message = new FakeQueueMessage(job as RunnerQueueJob);
+        await app.queue({ messages: [message] }, env(repository));
+
+        expect(message.acked).toBe(true);
+        expect(runner.stops).toEqual([]);
+        expect(await repository.get("us7000startfail")).toMatchObject({
+            status: "failed",
+            error_code: "AWS_RUNNER_START_FAILED",
+            runner_error_message: "start failed",
+            retry_count: 1,
+            next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+        });
+    });
+
     it("maps AWS process failures to failed rows and still stops the runner", async () => {
         const repository = new InMemoryStateRepository();
         const runner = new RecordingRunnerLifecycleAdapter({
@@ -303,10 +333,30 @@ describe("runner queue consumer", () => {
         expect(runner.stops).toEqual(["runner-1"]);
         expect(await repository.get("us7000timeout")).toMatchObject({
             status: "failed",
-            error_code: "AWS_RUNNER_TIMEOUT",
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
             runner_error_message: "HTTP 503 from runner",
             retry_count: 1,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
+        });
+    });
+
+    it("preserves shared AWS process error codes returned by the runner", async () => {
+        const repository = new InMemoryStateRepository();
+        const runner = new RecordingRunnerLifecycleAdapter({
+            processError: new RunnerProcessError("bad bcs", "BCS_SERIALIZATION_FAILED"),
+        });
+        const app = createWorkerApp({ now: () => baseNow, runner });
+
+        await scanCandidates(repository, [candidate("us7000badbcs")], baseNow);
+        const job = await repository.enqueueRunnerJob("us7000badbcs", 1, "us7000badbcs:1", baseNow);
+
+        const message = new FakeQueueMessage(job as RunnerQueueJob);
+        await app.queue({ messages: [message] }, env(repository));
+
+        expect(await repository.get("us7000badbcs")).toMatchObject({
+            status: "failed",
+            error_code: "BCS_SERIALIZATION_FAILED",
+            runner_error_message: "bad bcs",
         });
     });
 
@@ -413,12 +463,16 @@ class RecordingRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
     constructor(
         private readonly options: {
             result?: TeeCoreResult;
+            startError?: Error;
             processError?: Error;
             stopError?: Error;
         } = {},
     ) {}
 
     async start(): Promise<{ runner_id: string }> {
+        if (this.options.startError !== undefined) {
+            throw this.options.startError;
+        }
         this.starts += 1;
         return { runner_id: `runner-${this.starts}` };
     }
