@@ -3,7 +3,7 @@ import {
     DEFAULT_ORACLE_CONTRACT,
     validateWorkerToTeeRequest,
 } from "@sonari/oracle-shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
     RelayerAdapter,
     RelayerRequestPreview,
@@ -237,7 +237,7 @@ describe("watcher state transitions", () => {
         });
     });
 
-    it("marks rows submitted only when submit mode succeeds", async () => {
+    it("marks rows submitted only when a fake submit adapter succeeds", async () => {
         const repository = new InMemoryStateRepository();
         const relayer = new RecordingRelayerAdapter({ mode: "submit", digest: "7Zsubmit" });
 
@@ -824,3 +824,101 @@ describe("runner boundary", () => {
         }
     });
 });
+
+describe("relayer environment mode validation", () => {
+    it("fails closed for invalid RELAYER_MODE without calling the sidecar", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const fetcher = vi.fn(async () => Response.json({ ok: true }));
+        const app = createWorkerApp({ now: () => baseNow, fetcher });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            RELAYER_MODE: "invalid",
+            ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
+            RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
+            RELAYER_REGISTRY: "0x456",
+        });
+
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            relayer_mode: "preview",
+            relayer_status: "failed",
+            relayer_error_code: "RELAYER_SUBMIT_FAILED",
+        });
+    });
+
+    it("keeps submit mode fail-closed even when RELAYER_ALLOW_SUBMIT is true", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const fetcher = vi.fn(async () =>
+            Response.json({
+                ok: true,
+                value: {
+                    request: {
+                        target: "0x123::disaster_oracle::submit_payload_v1",
+                        registry: "0x456",
+                        arguments: ["0x456", [1], [2], [3]],
+                        submitRequest: {
+                            target: "0x123::disaster_oracle::submit_payload_v1",
+                            registry: "0x456",
+                            arguments: ["0x456", [1], [2], [3]],
+                        },
+                    },
+                    digest: "7Zunexpected",
+                },
+            }),
+        );
+        const app = createWorkerApp({ now: () => baseNow, fetcher });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            RELAYER_MODE: "submit",
+            RELAYER_ALLOW_SUBMIT: "true",
+            ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
+            RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
+            RELAYER_REGISTRY: "0x456",
+        });
+
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            relayer_mode: "submit",
+            relayer_status: "failed",
+            relayer_digest: null,
+            relayer_error_code: "RELAYER_SUBMIT_FAILED",
+        });
+    });
+});
+
+async function processQueuedEvent(
+    app: ReturnType<typeof createWorkerApp>,
+    repository: InMemoryStateRepository,
+    queue: TestRunnerQueue,
+    envPatch: Partial<WorkerEnv>,
+): Promise<void> {
+    await app.fetch(new Request("https://watcher.test/tasks/process-due", { method: "POST" }), {
+        ...env(repository),
+        RUNNER_JOBS: queue,
+        ...envPatch,
+    });
+
+    expect(queue.messages).toHaveLength(1);
+    await app.queue(
+        {
+            messages: [
+                {
+                    body: queue.messages[0] as RunnerQueueJob,
+                    ack: () => {},
+                    retry: () => {},
+                },
+            ],
+        },
+        {
+            ...env(repository),
+            RUNNER_JOBS: queue,
+            ...envPatch,
+        },
+    );
+}

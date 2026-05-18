@@ -614,6 +614,14 @@ function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerLifecycleAd
 }
 
 function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter | undefined {
+    if (env.RELAYER_MODE !== undefined && !isRelayerMode(env.RELAYER_MODE)) {
+        return new StaticFailingRelayerAdapter(
+            "preview",
+            "RELAYER_SUBMIT_FAILED",
+            `Unsupported RELAYER_MODE: ${env.RELAYER_MODE}`,
+        );
+    }
+
     const mode = relayerModeFromEnv(env);
     if (
         mode === "preview" &&
@@ -621,6 +629,21 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         !isNonEmptyString(env.ORACLE_SIDECAR_URL)
     ) {
         return undefined;
+    }
+
+    if (mode === "submit") {
+        if (env.RELAYER_ALLOW_SUBMIT !== "true") {
+            return new StaticFailingRelayerAdapter(
+                mode,
+                "RELAYER_SUBMIT_FAILED",
+                "submit relayer requires RELAYER_ALLOW_SUBMIT=true",
+            );
+        }
+        return new StaticFailingRelayerAdapter(
+            mode,
+            "RELAYER_SUBMIT_FAILED",
+            "submit signer is not configured in the worker relayer",
+        );
     }
 
     if (
@@ -646,14 +669,6 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         );
     }
 
-    if (mode === "submit" && env.RELAYER_ALLOW_SUBMIT !== "true") {
-        return new StaticFailingRelayerAdapter(
-            mode,
-            "RELAYER_SUBMIT_FAILED",
-            "submit relayer requires RELAYER_ALLOW_SUBMIT=true",
-        );
-    }
-
     const config = {
         sidecarUrl: env.ORACLE_SIDECAR_URL,
         target: env.RELAYER_TARGET,
@@ -674,15 +689,17 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
 }
 
 function relayerModeFromEnv(env: WorkerEnv): RelayerMode {
-    if (
-        env.RELAYER_MODE === undefined ||
-        env.RELAYER_MODE === "preview" ||
-        env.RELAYER_MODE === "dry_run" ||
-        env.RELAYER_MODE === "submit"
-    ) {
-        return env.RELAYER_MODE ?? "preview";
+    if (env.RELAYER_MODE === undefined) {
+        return "preview";
     }
-    return "preview";
+    if (isRelayerMode(env.RELAYER_MODE)) {
+        return env.RELAYER_MODE;
+    }
+    throw new Error(`Unsupported RELAYER_MODE: ${env.RELAYER_MODE}`);
+}
+
+function isRelayerMode(input: string): input is RelayerMode {
+    return input === "preview" || input === "dry_run" || input === "submit";
 }
 
 function isStateRepository(input: StateRepository | D1Database): input is StateRepository {

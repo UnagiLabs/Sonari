@@ -154,7 +154,7 @@ async function handleRelayer(
     writeJson(response, 400, {
         ok: false,
         error_code: "RELAYER_SUBMIT_FAILED",
-        message: "Submit mode requires an explicit signer and is not enabled in the local sidecar",
+        message: "submit signer is not configured in the local sidecar",
     });
 }
 

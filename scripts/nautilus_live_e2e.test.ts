@@ -4,6 +4,7 @@ import { runLiveE2e } from "./nautilus_live_e2e.js";
 describe("Nautilus live oracle E2E harness", () => {
     afterEach(() => {
         vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
     });
 
     it("runs a manual live event through the runner boundary with mocked USGS HTTP", async () => {
@@ -44,5 +45,32 @@ describe("Nautilus live oracle E2E harness", () => {
                 argument_lengths: [],
             },
         });
+    });
+
+    it("rejects invalid RELAYER_MODE before running the harness", async () => {
+        vi.stubEnv("RELAYER_MODE", "invalid");
+        vi.stubGlobal("fetch", async () => new Response("missing", { status: 404 }));
+
+        await expect(
+            runLiveE2e({
+                manualEventId: "us7000manual",
+                scanLive: false,
+                nowMs: 1_800_000_000_000,
+            }),
+        ).rejects.toThrow("Unsupported RELAYER_MODE: invalid");
+    });
+
+    it("validates submitted expectation against RELAYER_MODE before row status comparison", async () => {
+        vi.stubEnv("RELAYER_MODE", "preview");
+        vi.stubGlobal("fetch", async () => new Response("missing", { status: 404 }));
+
+        await expect(
+            runLiveE2e({
+                manualEventId: "us7000manual",
+                scanLive: false,
+                expect: "submitted",
+                nowMs: 1_800_000_000_000,
+            }),
+        ).rejects.toThrow("submitted expectation requires RELAYER_MODE=submit");
     });
 });

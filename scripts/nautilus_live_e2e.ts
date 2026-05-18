@@ -44,6 +44,9 @@ export async function runLiveE2e(options: LiveE2eOptions): Promise<Record<string
     const sourceClient = new UsgsSourceClient();
     const runner = new LocalOracleCoreRunnerAdapter({ sourceClient });
     const relayer = relayerFromEnv();
+    if (options.expect === "submitted" && relayer.mode !== "submit") {
+        throw new Error("submitted expectation requires RELAYER_MODE=submit");
+    }
 
     let candidates: UsgsEarthquakeCandidate[] = [];
     if (options.scanLive) {
@@ -77,9 +80,6 @@ export async function runLiveE2e(options: LiveE2eOptions): Promise<Record<string
 
     if (options.expect !== undefined && row?.status !== options.expect) {
         throw new Error(`Expected ${options.expect}, got ${row?.status ?? "none"}`);
-    }
-    if (options.expect === "submitted" && relayer.mode !== "submit") {
-        throw new Error("submitted expectation requires RELAYER_MODE=submit");
     }
 
     return {
@@ -157,9 +157,13 @@ class LocalRelayerAdapter implements RelayerAdapter {
 
 function relayerFromEnv(): LocalRelayerAdapter {
     const mode = process.env.RELAYER_MODE;
-    return new LocalRelayerAdapter(
-        mode === "dry_run" || mode === "submit" || mode === "preview" ? mode : "preview",
-    );
+    if (mode === undefined) {
+        return new LocalRelayerAdapter("preview");
+    }
+    if (mode === "dry_run" || mode === "submit" || mode === "preview") {
+        return new LocalRelayerAdapter(mode);
+    }
+    throw new Error(`Unsupported RELAYER_MODE: ${mode}`);
 }
 
 function summarizeRunnerResult(result: TeeCoreResult | null): Record<string, unknown> | null {
