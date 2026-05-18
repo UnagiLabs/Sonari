@@ -97,6 +97,7 @@ export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
     RUNNER_JOBS?: RunnerJobQueue;
     MANUAL_SUBMIT_TOKEN?: string;
+    RUNNER_SIDECAR_URL?: string;
     ORACLE_SIDECAR_URL?: string;
     RELAYER_MODE?: string;
     RELAYER_TARGET?: string;
@@ -614,9 +615,9 @@ function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerLifecycleAd
             fetcher,
         });
     }
-    if (isNonEmptyString(env.ORACLE_SIDECAR_URL)) {
+    if (isNonEmptyString(env.RUNNER_SIDECAR_URL)) {
         return new RunnerAdapterLifecycleBridge(
-            new HttpRunnerAdapter(env.ORACLE_SIDECAR_URL, fetcher),
+            new HttpRunnerAdapter(env.RUNNER_SIDECAR_URL, fetcher),
         );
     }
     return new MockRunnerLifecycleAdapter();

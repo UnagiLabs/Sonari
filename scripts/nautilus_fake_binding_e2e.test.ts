@@ -5,6 +5,9 @@ describe("Nautilus fake-binding oracle E2E", () => {
     it("covers controlled queue and stale recovery paths without Wrangler", async () => {
         const output = await runFakeBindingOracleE2e();
 
+        expect(output).toMatchObject({
+            scope: "fake-binding queue injection, stale recovery, and deadline exceeded",
+        });
         expect(output.cases).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ name: "ignored_small", status: "ignored_small" }),

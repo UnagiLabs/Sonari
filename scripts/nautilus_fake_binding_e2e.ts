@@ -21,11 +21,13 @@ export interface FakeBindingCaseOutput {
 }
 
 export interface FakeBindingE2eOutput {
+    scope: string;
     cases: FakeBindingCaseOutput[];
 }
 
 export async function runFakeBindingOracleE2e(): Promise<FakeBindingE2eOutput> {
     return {
+        scope: "fake-binding queue injection, stale recovery, and deadline exceeded",
         cases: [
             await ignoredSmall(),
             await ignoredSmallToNew(),

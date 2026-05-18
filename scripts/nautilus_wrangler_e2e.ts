@@ -91,6 +91,8 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
                 "--var",
                 `MANUAL_SUBMIT_TOKEN:${MANUAL_SUBMIT_TOKEN}`,
                 "--var",
+                `RUNNER_SIDECAR_URL:${SIDECAR_URL}`,
+                "--var",
                 `ORACLE_SIDECAR_URL:${SIDECAR_URL}`,
                 "--var",
                 `RELAYER_TARGET:${TARGET}`,

@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,7 +23,7 @@ export interface OracleDoctorResult {
 }
 
 const DEFAULT_MIGRATIONS_DIR = "nautilus_disaster_oracle/watcher/migrations";
-const DEFAULT_SCHEMA_SQL_PATH = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/*/db.sqlite";
+const DEFAULT_SCHEMA_SQL_PATH = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/**/db.sqlite";
 const RELAYER_MODES = new Set(["preview", "dry_run", "submit"]);
 const REQUIRED_D1_COLUMNS = [
     "runner_job_id",
@@ -129,13 +130,13 @@ async function checkD1Consistency(
             };
         }
 
-        const schemaExists = await fileExists(schemaSqlPath);
+        const schemaExists = await localD1SqliteExists(schemaSqlPath);
         return {
             name: "D1_MIGRATIONS",
             status: schemaExists ? "ok" : "warn",
             message: schemaExists
-                ? "migrations and local schema path are present"
-                : "migrations are present; local schema path was not found",
+                ? "migrations and local D1 sqlite are present"
+                : "migrations are present; local D1 sqlite was not found",
         };
     } catch (error) {
         return {
@@ -164,6 +165,40 @@ async function fileExists(filePath: string): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+async function localD1SqliteExists(schemaSqlPath: string): Promise<boolean> {
+    if (await fileExists(schemaSqlPath)) {
+        return true;
+    }
+    const wildcardIndex = schemaSqlPath.indexOf("*");
+    if (wildcardIndex === -1) {
+        return false;
+    }
+
+    const searchRoot = schemaSqlPath.slice(0, wildcardIndex).replace(/[\\/]+$/, "");
+    const targetName = path.basename(schemaSqlPath);
+    return fileNamedExists(searchRoot.length === 0 ? "." : searchRoot, targetName);
+}
+
+async function fileNamedExists(directory: string, targetName: string): Promise<boolean> {
+    let entries: Dirent[];
+    try {
+        entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+        return false;
+    }
+
+    for (const entry of entries) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isFile() && entry.name === targetName) {
+            return true;
+        }
+        if (entry.isDirectory() && (await fileNamedExists(entryPath, targetName))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 async function main(): Promise<void> {

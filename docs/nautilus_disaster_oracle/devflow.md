@@ -255,16 +255,19 @@
 
 - AWS runner adapter は `/start`、`/process`、`/stop` の contract を検証し、`AWS_RUNNER_START_FAILED`、`AWS_RUNNER_PROCESS_FAILED`、`AWS_RUNNER_TIMEOUT`、`AWS_RUNNER_CONTRACT_INVALID` を D1 の主エラーとして分類できる。
 - runner stop failure は主 `error_code` を上書きせず、`runner_stop_error` に `AWS_RUNNER_STOP_FAILED` 相当の停止失敗として残す。
+- Worker の runner 設定は `AWS_RUNNER_BASE_URL` + `AWS_RUNNER_TOKEN` を最優先し、local runner sidecar は `RUNNER_SIDECAR_URL` で明示した場合だけ `/process_data` を使う。`ORACLE_SIDECAR_URL` は relayer sidecar 専用として扱う。
 - Worker から TEE/core へ渡す入力は `source_event_id`、`hazard_type`、`primary_source`、`geo_resolution` のみに制限し、hash / root / Band / Payload / signature は Worker 入力として受け付けない。
 - Relayer は `preview` / `dry_run` / `submit` / invalid mode を fail-closed に扱い、`submit` は `RELAYER_ALLOW_SUBMIT=true` でも signer 未接続なら送信しない。
-- `pnpm oracle:doctor` で `RELAYER_MODE`、`RELAYER_ALLOW_SUBMIT`、`RELAYER_GRPC_URL`、`RELAYER_SENDER_ADDRESS`、`AWS_RUNNER_BASE_URL`、`AWS_RUNNER_TOKEN`、`MANUAL_SUBMIT_TOKEN`、local D1 migration/schema の状態を確認できる。
-- `pnpm oracle:e2e:fake-binding` は injection / stale recovery / deadline exceeded の制御ケースを Wrangler なしで検証する。
-- `pnpm oracle:e2e:wrangler` は local Worker / D1 / Queue / sidecar の実経路を fixture で検証する。
+- `pnpm oracle:doctor` で `RELAYER_MODE`、`RELAYER_ALLOW_SUBMIT`、`RELAYER_GRPC_URL`、`RELAYER_SENDER_ADDRESS`、`AWS_RUNNER_BASE_URL`、`AWS_RUNNER_TOKEN`、`MANUAL_SUBMIT_TOKEN`、local D1 migration/sqlite の状態を確認できる。migration が揃っていても local sqlite が未作成なら warn とする。
+- `pnpm oracle:e2e:fake-binding` は queue injection / stale recovery / deadline exceeded の制御ケースを Wrangler なしで検証する。
+- Vitest queue / runner tests は runner start / process / timeout / stop failure を検証する。
+- `pnpm oracle:e2e:wrangler` は local Worker / D1 / Queue / `RUNNER_SIDECAR_URL` + `ORACLE_SIDECAR_URL` の sidecar fixture 経路を検証する。
 
 Follow-up:
 
 - 実 Nautilus / TEE 実行環境の attestation と sealed key 管理を追加する。
-- AWS runner の本番 API 認証、runner lifecycle 監視、停止失敗アラートを追加する。
+- 実 AWS runner 呼び出し、AWS runner の本番 API 認証、runner lifecycle 監視、停止失敗アラートを追加する。
+- Cloudflare production deploy を追加する。
 - Sui signer を安全に注入してから `submit` mode の実送信を有効化する。
 
 ### 10. Live source で検証する
