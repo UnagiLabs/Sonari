@@ -24,10 +24,28 @@ export interface RunnerLifecycleAdapter {
 export class RunnerProcessError extends Error {
     constructor(
         message: string,
-        readonly errorCode?: OracleErrorCode,
+        readonly errorCode: OracleErrorCode = "AWS_RUNNER_PROCESS_FAILED",
     ) {
         super(message);
         this.name = "RunnerProcessError";
+    }
+}
+
+export class RunnerStartError extends Error {
+    readonly errorCode = "AWS_RUNNER_START_FAILED" satisfies OracleErrorCode;
+
+    constructor(message: string) {
+        super(message);
+        this.name = "RunnerStartError";
+    }
+}
+
+export class RunnerContractError extends Error {
+    readonly errorCode = "AWS_RUNNER_CONTRACT_INVALID" satisfies OracleErrorCode;
+
+    constructor(message: string) {
+        super(message);
+        this.name = "RunnerContractError";
     }
 }
 
@@ -86,9 +104,11 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
             return { runner_id: body.runner_id };
         }
         if (isRecord(body) && body.ok === false && typeof body.message === "string") {
-            throw new Error(body.message);
+            throw new RunnerStartError(body.message);
         }
-        throw new Error("AWS runner start response did not match the runner contract");
+        throw new RunnerContractError(
+            "AWS runner start response did not match the runner contract",
+        );
     }
 
     async process(
@@ -105,14 +125,16 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
             const errorCode =
                 typeof body.error_code === "string" && isOracleErrorCode(body.error_code)
                     ? body.error_code
-                    : undefined;
+                    : "AWS_RUNNER_PROCESS_FAILED";
             throw new RunnerProcessError(
                 typeof body.message === "string" ? body.message : "AWS runner process failed",
                 errorCode,
             );
         }
 
-        throw new Error("AWS runner process response did not match the runner contract");
+        throw new RunnerContractError(
+            "AWS runner process response did not match the runner contract",
+        );
     }
 
     async stop(runnerId: string): Promise<void> {
@@ -123,7 +145,9 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
         if (isRecord(body) && body.ok === false && typeof body.message === "string") {
             throw new Error(body.message);
         }
-        throw new Error("AWS runner stop response did not match the runner contract");
+        throw new Error(
+            "AWS_RUNNER_STOP_FAILED: AWS runner stop response did not match the runner contract",
+        );
     }
 
     private async postJson(
@@ -152,7 +176,7 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
         if (response.ok) {
             return json;
         }
-        if (pathname === "/process" && isRecord(json) && json.ok === false) {
+        if (isRecord(json) && json.ok === false) {
             return json;
         }
         if (isRecord(json) && typeof json.message === "string") {

@@ -4,7 +4,9 @@ use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest,
     RawSourceContentHash, SourceEntry, SourceManifest, UnsignedPayloadV1,
 };
-use crate::core::types::{OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput};
+use crate::core::types::{
+    OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,
+};
 use crate::crypto::{PayloadSigner, sha3_256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
@@ -201,6 +203,30 @@ pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError>
         unsigned_bcs_payload: Some(unsigned_bcs_payload),
         signature: None,
     })
+}
+
+pub fn process_usgs_from_worker_request(
+    request: WorkerToTeeRequest,
+    input: UsgsOracleInput,
+) -> Result<OracleOutput, OracleError> {
+    if request.hazard_type != HAZARD_TYPE_EARTHQUAKE
+        || request.primary_source != PRIMARY_SOURCE_USGS
+        || request.geo_resolution != GEO_RESOLUTION
+    {
+        return Err(OracleError::WorkerRequest(
+            "request does not match the MVP oracle input contract".to_owned(),
+        ));
+    }
+
+    let detail = parse_detail(&input.detail_json)?;
+    if detail.id != request.source_event_id {
+        return Err(OracleError::WorkerRequest(format!(
+            "source_event_id {} does not match fetched USGS detail id {}",
+            request.source_event_id, detail.id
+        )));
+    }
+
+    process_usgs(input)
 }
 
 pub fn process_usgs_with_signer(

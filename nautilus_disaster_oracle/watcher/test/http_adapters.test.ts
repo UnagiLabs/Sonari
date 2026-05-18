@@ -4,7 +4,9 @@ import {
     AwsRunnerLifecycleAdapter,
     HttpRelayerAdapter,
     HttpRunnerAdapter,
+    RunnerContractError,
     RunnerProcessError,
+    RunnerStartError,
     type RelayerRequestPreview,
 } from "../src/index.js";
 
@@ -135,10 +137,31 @@ describe("HTTP sidecar adapters", () => {
                     ok: false,
                     runner_id: "runner-123",
                     message: "start failed",
-                }),
+            }),
         });
 
-        await expect(adapter.start()).rejects.toThrow(/start failed/);
+        const error = await adapter.start().catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerStartError);
+        expect(error).toMatchObject({
+            errorCode: "AWS_RUNNER_START_FAILED",
+            message: "start failed",
+        });
+    });
+
+    it("rejects AWS runner start responses that omit runner_id", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () => Response.json({ ok: true }),
+        });
+
+        const error = await adapter.start().catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerContractError);
+        expect(error).toMatchObject({
+            errorCode: "AWS_RUNNER_CONTRACT_INVALID",
+        });
     });
 
     it("maps AWS runner process ok:false error responses to RunnerProcessError regardless of HTTP status", async () => {
@@ -162,6 +185,42 @@ describe("HTTP sidecar adapters", () => {
         expect(error).toMatchObject({
             errorCode: "BCS_SERIALIZATION_FAILED",
             message: "bad bcs",
+        });
+    });
+
+    it("maps AWS runner process ok:false invalid error_code to process failure", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () =>
+                Response.json({
+                    ok: false,
+                    error_code: "NOT_A_SHARED_CODE",
+                    message: "bad code",
+                }),
+        });
+
+        const error = await adapter.process("runner-123", request).catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerProcessError);
+        expect(error).toMatchObject({
+            errorCode: "AWS_RUNNER_PROCESS_FAILED",
+            message: "bad code",
+        });
+    });
+
+    it("classifies invalid AWS runner process response shapes as contract invalid", async () => {
+        const adapter = new AwsRunnerLifecycleAdapter({
+            baseUrl: "https://runner.example",
+            ["token"]: "test-runner-auth",
+            fetcher: async () => Response.json({ ok: true, result: "not-an-object" }),
+        });
+
+        const error = await adapter.process("runner-123", request).catch((caught) => caught);
+
+        expect(error).toBeInstanceOf(RunnerContractError);
+        expect(error).toMatchObject({
+            errorCode: "AWS_RUNNER_CONTRACT_INVALID",
         });
     });
 

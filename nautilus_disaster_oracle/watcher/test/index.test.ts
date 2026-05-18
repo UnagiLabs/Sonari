@@ -22,6 +22,7 @@ import {
     HOUR_MS,
     InMemoryStateRepository,
     MockRunnerAdapter,
+    MockRunnerLifecycleAdapter,
     PROCESSING_STALE_AFTER_MS,
     processDueEventsInlineForTests,
     scanCandidates,
@@ -359,7 +360,7 @@ describe("watcher state transitions", () => {
         });
     });
 
-    it("maps runner timeouts to failed rows with retry backoff", async () => {
+    it("maps generic runner failures to process failed rows with retry backoff", async () => {
         const repository = new InMemoryStateRepository();
         const runner: RunnerAdapter = {
             run: async () => {
@@ -372,7 +373,7 @@ describe("watcher state transitions", () => {
 
         expect(await repository.get("us7000timeout")).toMatchObject({
             status: "failed",
-            error_code: "AWS_RUNNER_TIMEOUT",
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
             retry_count: 1,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
         });
@@ -826,11 +827,192 @@ describe("runner boundary", () => {
 });
 
 describe("relayer environment mode validation", () => {
+    it("runs preview mode through the relayer sidecar when explicitly configured", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const calls: Request[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+            const request = input instanceof Request ? input : new Request(input);
+            calls.push(request.clone());
+            return Response.json({ ok: true, value: relayerSidecarPreview() });
+        });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+            runner: new MockRunnerLifecycleAdapter(),
+        });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            RELAYER_MODE: "preview",
+            ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
+            RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
+            RELAYER_REGISTRY: "0x456",
+        });
+
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/relayer/preview"]);
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            relayer_mode: "preview",
+            relayer_status: "succeeded",
+        });
+    });
+
+    it("keeps ORACLE_SIDECAR_URL scoped to the relayer and uses the mock runner by default", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const calls: Request[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+            const request = input instanceof Request ? input : new Request(input);
+            calls.push(request.clone());
+            if (request.url.endsWith("/process_data")) {
+                const runner = new MockRunnerAdapter();
+                return Response.json({
+                    ok: true,
+                    result: await runner.run(buildWorkerToTeeRequest("us7000sonari")),
+                });
+            }
+            return Response.json({ ok: true, value: relayerSidecarPreview() });
+        });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+        });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            RELAYER_MODE: "preview",
+            ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
+            RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
+            RELAYER_REGISTRY: "0x456",
+        });
+
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/relayer/preview"]);
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            relayer_status: "succeeded",
+        });
+    });
+
+    it("uses RUNNER_SIDECAR_URL for the runner sidecar path", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const calls: Request[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+            const request = input instanceof Request ? input : new Request(input);
+            calls.push(request.clone());
+            const runner = new MockRunnerAdapter();
+            return Response.json({
+                ok: true,
+                result: await runner.run(buildWorkerToTeeRequest("us7000sonari")),
+            });
+        });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+        });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            RUNNER_SIDECAR_URL: "http://127.0.0.1:8789",
+        });
+
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/process_data"]);
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            relayer_status: null,
+        });
+    });
+
+    it("prefers AWS runner credentials over RUNNER_SIDECAR_URL", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const calls: Request[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+            const request = input instanceof Request ? input : new Request(input);
+            calls.push(request.clone());
+            if (request.url.endsWith("/start")) {
+                return Response.json({ ok: true, runner_id: "runner-123" });
+            }
+            if (request.url.endsWith("/process")) {
+                const runner = new MockRunnerAdapter();
+                return Response.json({
+                    ok: true,
+                    result: await runner.run(buildWorkerToTeeRequest("us7000sonari")),
+                });
+            }
+            return Response.json({ ok: true });
+        });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+        });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            AWS_RUNNER_BASE_URL: "https://runner.example",
+            AWS_RUNNER_TOKEN: "runner-token",
+            RUNNER_SIDECAR_URL: "http://127.0.0.1:8789",
+        });
+
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+            "/start",
+            "/process",
+            "/stop",
+        ]);
+        expect(calls.map((call) => call.headers.get("authorization"))).toEqual([
+            "Bearer runner-token",
+            "Bearer runner-token",
+            "Bearer runner-token",
+        ]);
+    });
+
+    it("passes dry_run mode gRPC settings to the relayer sidecar", async () => {
+        const repository = new InMemoryStateRepository();
+        const queue = new TestRunnerQueue();
+        const calls: Request[] = [];
+        const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+            const request = input instanceof Request ? input : new Request(input);
+            calls.push(request.clone());
+            return Response.json({ ok: true, value: relayerSidecarPreview() });
+        });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+            runner: new MockRunnerLifecycleAdapter(),
+        });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processQueuedEvent(app, repository, queue, {
+            RELAYER_MODE: "dry_run",
+            ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
+            RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
+            RELAYER_REGISTRY: "0x456",
+            RELAYER_GRPC_URL: "https://fullnode.testnet.sui.io:443",
+            RELAYER_SENDER_ADDRESS: "0xabc",
+        });
+
+        expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/relayer/dry_run"]);
+        await expect(calls[0]?.json()).resolves.toMatchObject({
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            senderAddress: "0xabc",
+        });
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            relayer_mode: "dry_run",
+            relayer_status: "succeeded",
+        });
+    });
+
     it("fails closed for invalid RELAYER_MODE without calling the sidecar", async () => {
         const repository = new InMemoryStateRepository();
         const queue = new TestRunnerQueue();
         const fetcher = vi.fn(async () => Response.json({ ok: true }));
-        const app = createWorkerApp({ now: () => baseNow, fetcher });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+            runner: new MockRunnerLifecycleAdapter(),
+        });
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         await processQueuedEvent(app, repository, queue, {
@@ -870,7 +1052,11 @@ describe("relayer environment mode validation", () => {
                 },
             }),
         );
-        const app = createWorkerApp({ now: () => baseNow, fetcher });
+        const app = createWorkerApp({
+            now: () => baseNow,
+            fetcher,
+            runner: new MockRunnerLifecycleAdapter(),
+        });
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         await processQueuedEvent(app, repository, queue, {
@@ -891,6 +1077,19 @@ describe("relayer environment mode validation", () => {
         });
     });
 });
+
+function relayerSidecarPreview(): RelayerRequestPreview {
+    return {
+        target: "0x123::disaster_oracle::submit_payload_v1",
+        registry: "0x456",
+        arguments: ["0x456", [1], [2], [3]],
+        submitRequest: {
+            target: "0x123::disaster_oracle::submit_payload_v1",
+            registry: "0x456",
+            arguments: ["0x456", [1], [2], [3]],
+        },
+    };
+}
 
 async function processQueuedEvent(
     app: ReturnType<typeof createWorkerApp>,

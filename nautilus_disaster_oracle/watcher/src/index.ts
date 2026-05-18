@@ -32,10 +32,12 @@ import {
 } from "./state.js";
 import {
     AwsRunnerLifecycleAdapter,
+    HttpRunnerAdapter,
     MockRunnerLifecycleAdapter,
     type RunnerAdapter,
     type RunnerLifecycleAdapter,
     RunnerProcessError,
+    RunnerStartError,
 } from "./trigger_tee.js";
 import { fetchUsgsRecentCandidates, type UsgsEarthquakeCandidate } from "./usgs.js";
 
@@ -73,7 +75,9 @@ export {
     HttpRunnerAdapter,
     MockRunnerAdapter,
     MockRunnerLifecycleAdapter,
+    RunnerContractError,
     RunnerProcessError,
+    RunnerStartError,
 } from "./trigger_tee.js";
 export type { UsgsEarthquakeCandidate } from "./usgs.js";
 export {
@@ -93,6 +97,7 @@ export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
     RUNNER_JOBS?: RunnerJobQueue;
     MANUAL_SUBMIT_TOKEN?: string;
+    RUNNER_SIDECAR_URL?: string;
     ORACLE_SIDECAR_URL?: string;
     RELAYER_MODE?: string;
     RELAYER_TARGET?: string;
@@ -455,7 +460,7 @@ async function handleRunnerQueueMessage(
 
     let runnerId: string | null = null;
     try {
-        const started = await runner.start();
+        const started = await startRunner(runner);
         runnerId = started.runner_id;
         await repository.recordRunnerStarted(
             job.source_event_id,
@@ -609,6 +614,11 @@ function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerLifecycleAd
             token: env.AWS_RUNNER_TOKEN,
             fetcher,
         });
+    }
+    if (isNonEmptyString(env.RUNNER_SIDECAR_URL)) {
+        return new RunnerAdapterLifecycleBridge(
+            new HttpRunnerAdapter(env.RUNNER_SIDECAR_URL, fetcher),
+        );
     }
     return new MockRunnerLifecycleAdapter();
 }
@@ -807,7 +817,7 @@ async function processWithTimeout(
             new Promise<TeeCoreResult>((_resolve, reject) => {
                 timeout = setTimeout(() => {
                     controller.abort();
-                    reject(new Error(`AWS runner timed out after ${timeoutMs}ms`));
+                    reject(new RunnerTimeoutError(`AWS runner timed out after ${timeoutMs}ms`));
                 }, timeoutMs);
             }),
         ]);
@@ -818,15 +828,42 @@ async function processWithTimeout(
     }
 }
 
+async function startRunner(runner: RunnerLifecycleAdapter): Promise<{ runner_id: string }> {
+    try {
+        return await runner.start();
+    } catch (error) {
+        if (hasRunnerErrorCode(error)) {
+            throw error;
+        }
+        throw new RunnerStartError(errorMessage(error));
+    }
+}
+
 function mapRunnerErrorCode(error: unknown): OracleErrorCode {
-    if (
-        error instanceof RunnerProcessError &&
-        error.errorCode !== undefined &&
-        (ERROR_CODES as readonly string[]).includes(error.errorCode)
-    ) {
+    if (hasRunnerErrorCode(error)) {
         return error.errorCode;
     }
-    return "AWS_RUNNER_TIMEOUT";
+    if (error instanceof RunnerProcessError) {
+        return error.errorCode;
+    }
+    return "AWS_RUNNER_PROCESS_FAILED";
+}
+
+function hasRunnerErrorCode(error: unknown): error is { errorCode: OracleErrorCode } {
+    return (
+        isRecord(error) &&
+        typeof error.errorCode === "string" &&
+        (ERROR_CODES as readonly string[]).includes(error.errorCode)
+    );
+}
+
+class RunnerTimeoutError extends Error {
+    readonly errorCode = "AWS_RUNNER_TIMEOUT" satisfies OracleErrorCode;
+
+    constructor(message: string) {
+        super(message);
+        this.name = "RunnerTimeoutError";
+    }
 }
 
 function runnerTimeoutMsFromEnv(env: WorkerEnv): number {
