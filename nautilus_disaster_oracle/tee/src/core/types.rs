@@ -23,6 +23,8 @@ pub enum OracleError {
     Bcs(#[from] bcs::Error),
     #[error("invalid ShakeMap zip archive: {0}")]
     Zip(String),
+    #[error("invalid Worker to TEE request: {0}")]
+    WorkerRequest(String),
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +36,63 @@ pub struct UsgsOracleInput {
     pub raw_grid_uri: Option<String>,
     pub raw_data_uri: String,
     pub affected_cells_uri: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerToTeeRequest {
+    pub source_event_id: String,
+    pub hazard_type: u8,
+    pub primary_source: u8,
+    pub geo_resolution: u8,
+}
+
+impl WorkerToTeeRequest {
+    pub fn from_json_value(value: serde_json::Value) -> Result<Self, OracleError> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| OracleError::WorkerRequest("request must be an object".to_owned()))?;
+        let allowed = [
+            "source_event_id",
+            "hazard_type",
+            "primary_source",
+            "geo_resolution",
+        ];
+        if let Some(unexpected) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+            return Err(OracleError::WorkerRequest(format!(
+                "unexpected Worker to TEE field: {unexpected}"
+            )));
+        }
+
+        let source_event_id = object
+            .get("source_event_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                OracleError::WorkerRequest("source_event_id must be a non-empty string".to_owned())
+            })?;
+        let hazard_type = read_u8_field(object, "hazard_type")?;
+        let primary_source = read_u8_field(object, "primary_source")?;
+        let geo_resolution = read_u8_field(object, "geo_resolution")?;
+
+        Ok(Self {
+            source_event_id: source_event_id.to_owned(),
+            hazard_type,
+            primary_source,
+            geo_resolution,
+        })
+    }
+}
+
+fn read_u8_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> Result<u8, OracleError> {
+    let value = object
+        .get(name)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| OracleError::WorkerRequest(format!("{name} must be an integer")))?;
+    u8::try_from(value)
+        .map_err(|_| OracleError::WorkerRequest(format!("{name} is outside u8 range")))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -19,7 +19,9 @@
         "test:relayer": "pnpm --filter @sonari/oracle-relayer test",
         "relayer": "pnpm --filter @sonari/oracle-relayer cli",
         "oracle:sidecar:local": "tsx scripts/nautilus_sidecar.ts",
+        "oracle:doctor": "tsx scripts/oracle_doctor.ts",
         "oracle:e2e:local": "tsx scripts/nautilus_local_e2e.ts",
+        "oracle:e2e:fake-binding": "tsx scripts/nautilus_fake_binding_e2e.ts",
         "oracle:e2e:live": "tsx scripts/nautilus_live_e2e.ts",
         "oracle:e2e:wrangler": "tsx scripts/nautilus_wrangler_e2e.ts",
         "test:oracle": "pnpm --filter './nautilus_disaster_oracle/**' test && cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml"

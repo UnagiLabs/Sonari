@@ -247,6 +247,26 @@
 - timeout / retry 上限 / failed status が運用上追える。
 - runner 停止漏れを検出できる。
 
+#### Pre-deploy quality gate
+
+この段階では AWS / Cloudflare production deployment、実 AWS runner、実 Sui submit は行わない。submit mode は signer 未接続のため fail-closed のままにする。
+
+完了条件:
+
+- AWS runner adapter は `/start`、`/process`、`/stop` の contract を検証し、`AWS_RUNNER_START_FAILED`、`AWS_RUNNER_PROCESS_FAILED`、`AWS_RUNNER_TIMEOUT`、`AWS_RUNNER_CONTRACT_INVALID` を D1 の主エラーとして分類できる。
+- runner stop failure は主 `error_code` を上書きせず、`runner_stop_error` に `AWS_RUNNER_STOP_FAILED` 相当の停止失敗として残す。
+- Worker から TEE/core へ渡す入力は `source_event_id`、`hazard_type`、`primary_source`、`geo_resolution` のみに制限し、hash / root / Band / Payload / signature は Worker 入力として受け付けない。
+- Relayer は `preview` / `dry_run` / `submit` / invalid mode を fail-closed に扱い、`submit` は `RELAYER_ALLOW_SUBMIT=true` でも signer 未接続なら送信しない。
+- `pnpm oracle:doctor` で `RELAYER_MODE`、`RELAYER_ALLOW_SUBMIT`、`RELAYER_GRPC_URL`、`RELAYER_SENDER_ADDRESS`、`AWS_RUNNER_BASE_URL`、`AWS_RUNNER_TOKEN`、`MANUAL_SUBMIT_TOKEN`、local D1 migration/schema の状態を確認できる。
+- `pnpm oracle:e2e:fake-binding` は injection / stale recovery / deadline exceeded の制御ケースを Wrangler なしで検証する。
+- `pnpm oracle:e2e:wrangler` は local Worker / D1 / Queue / sidecar の実経路を fixture で検証する。
+
+Follow-up:
+
+- 実 Nautilus / TEE 実行環境の attestation と sealed key 管理を追加する。
+- AWS runner の本番 API 認証、runner lifecycle 監視、停止失敗アラートを追加する。
+- Sui signer を安全に注入してから `submit` mode の実送信を有効化する。
+
 ### 10. Live source で検証する
 
 対象:

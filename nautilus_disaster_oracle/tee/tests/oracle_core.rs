@@ -159,7 +159,10 @@ fn pre_tee_worker_scaffold_rejects_untrusted_contract_fields() {
     let parsed = WorkerToTeeRequest::from_json_value(request.clone());
     assert!(parsed.is_err());
 
-    request.as_object_mut().unwrap().remove("affected_cells_root");
+    request
+        .as_object_mut()
+        .unwrap()
+        .remove("affected_cells_root");
     assert!(WorkerToTeeRequest::from_json_value(request).is_ok());
 }
 

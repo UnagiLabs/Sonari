@@ -26,10 +26,25 @@ const WRANGLER_URL = `http://${WRANGLER_HOST}:${WRANGLER_PORT}`;
 const TARGET = "0x123::disaster_oracle::submit_payload_v1";
 const REGISTRY = "0x456";
 const MANUAL_SUBMIT_TOKEN = "local-dev-token";
-const CASE_ID = "usgs/finalized_minimal";
+const CASE_IDS = [
+    "usgs/finalized_minimal",
+    "usgs/pending_source_no_shakemap",
+    "usgs/pending_mmi_empty_grid",
+    "usgs/rejected_cancelled_shakemap",
+    "usgs/rejected_no_affected_cells",
+] as const;
 const STARTUP_TIMEOUT_MS = 45_000;
 
 interface WranglerE2eOutput {
+    cases: WranglerCaseOutput[];
+    manual_submit_bypass: {
+        source_event_id: string;
+        queued_status: unknown;
+        runner_job_id_present: boolean;
+    };
+}
+
+interface WranglerCaseOutput {
     case_id: string;
     source_event_id: string;
     wrangler_event: {
@@ -37,11 +52,12 @@ interface WranglerE2eOutput {
         event_uid: unknown;
         latest_revision: unknown;
         source_updated_at_ms: unknown;
+        error_code: unknown;
         relayer_status: unknown;
         relayer_request_json_present: boolean;
     };
     local_event: LocalOracleE2eOutput["final_event"];
-    relayer_preview_argument_lengths: number[];
+    relayer_preview_argument_lengths?: number[];
 }
 
 export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
@@ -58,8 +74,6 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
             SIDECAR_HOST,
             "--port",
             String(SIDECAR_PORT),
-            "--case",
-            CASE_ID,
         ]);
         await waitForHttp(`${SIDECAR_URL}/process_data`, "sidecar");
 
@@ -90,93 +104,155 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
         );
         await waitForHttp(`${WRANGLER_URL}/health`, "wrangler");
 
-        const candidate = loadFixtureCandidate(CASE_ID);
-        const nowMs = candidate.occurred_at_ms + 25 * HOUR_MS;
-        const localOutput = await runLocalOracleE2e({
-            caseId: CASE_ID,
-            target: TARGET,
-            registry: REGISTRY,
-            nowMs,
-        });
-        const relayer = localOutput.relayer_preview;
-        if (
-            localOutput.runner_result.status !== "finalized" ||
-            relayer === undefined ||
-            !relayer.ok
-        ) {
-            throw new Error("Wrangler E2E expects the canonical fixture to finalize locally");
-        }
+        const cases: WranglerCaseOutput[] = [];
+        let manualSubmitBypass: WranglerE2eOutput["manual_submit_bypass"] | null = null;
 
-        const response = await fetch(`${WRANGLER_URL}/manual/earthquakes`, {
-            method: "POST",
-            headers: {
-                authorization: `Bearer ${MANUAL_SUBMIT_TOKEN}`,
-                "content-type": "application/json",
-            },
-            body: JSON.stringify({
+        for (const caseId of CASE_IDS) {
+            const candidate = loadFixtureCandidate(caseId);
+            const submittedOccurredAtMs = Date.now() - 25 * HOUR_MS;
+            const nowMs = candidate.occurred_at_ms + 25 * HOUR_MS;
+            const localOutput = await runLocalOracleE2e({
+                caseId,
+                target: TARGET,
+                registry: REGISTRY,
+                nowMs,
+            });
+            const response = await fetch(`${WRANGLER_URL}/manual/earthquakes`, {
+                method: "POST",
+                headers: {
+                    authorization: `Bearer ${MANUAL_SUBMIT_TOKEN}`,
+                    "content-type": "application/json",
+                },
+                body: JSON.stringify({
+                    source_event_id: candidate.source_event_id,
+                    occurred_at_ms: submittedOccurredAtMs,
+                    source_updated_at_ms: candidate.source_updated_at_ms,
+                }),
+            });
+            if (response.status !== 202) {
+                throw new Error(
+                    `Manual submit failed: ${response.status} ${await response.text()}`,
+                );
+            }
+            const manualBody = (await response.json()) as Record<string, unknown>;
+            if (manualSubmitBypass === null && isRecord(manualBody.event)) {
+                manualSubmitBypass = {
+                    source_event_id: candidate.source_event_id,
+                    queued_status: manualBody.event.status,
+                    runner_job_id_present: typeof manualBody.event.runner_job_id === "string",
+                };
+            }
+
+            const expectedStatus = localOutput.runner_result.status;
+            const expectedErrorCode =
+                localOutput.runner_result.status === "finalized"
+                    ? null
+                    : localOutput.runner_result.error_code;
+            const wranglerEvent = await waitForD1EventStatus(
+                candidate.source_event_id,
+                expectedStatus,
+                persistDir,
+            );
+            assertEqual(wranglerEvent.status, expectedStatus, `${caseId} status`);
+            assertEqual(
+                wranglerEvent.error_code ?? null,
+                expectedErrorCode,
+                `${caseId} error_code`,
+            );
+
+            const caseOutput: WranglerCaseOutput = {
+                case_id: caseId,
                 source_event_id: candidate.source_event_id,
-                occurred_at_ms: candidate.occurred_at_ms,
-                source_updated_at_ms: candidate.source_updated_at_ms,
-            }),
-        });
-        if (response.status !== 202) {
-            throw new Error(`Manual submit failed: ${response.status} ${await response.text()}`);
+                wrangler_event: {
+                    status: wranglerEvent.status,
+                    event_uid: wranglerEvent.event_uid,
+                    latest_revision: wranglerEvent.latest_revision,
+                    source_updated_at_ms: wranglerEvent.source_updated_at_ms,
+                    error_code: wranglerEvent.error_code ?? null,
+                    relayer_status: wranglerEvent.relayer_status,
+                    relayer_request_json_present:
+                        typeof wranglerEvent.relayer_request_json === "string",
+                },
+                local_event: localOutput.final_event,
+            };
+
+            if (localOutput.runner_result.status === "finalized") {
+                const relayer = localOutput.relayer_preview;
+                if (relayer === undefined || !relayer.ok) {
+                    throw new Error(`${caseId} should have a relayer preview`);
+                }
+                const relayerRequest = readRelayerRequest(wranglerEvent);
+                assertEqual(
+                    wranglerEvent.event_uid,
+                    localOutput.final_event.event_uid,
+                    "event_uid",
+                );
+                assertEqual(
+                    Number(wranglerEvent.latest_revision),
+                    localOutput.final_event.latest_revision,
+                    "latest_revision",
+                );
+                assertEqual(
+                    Number(wranglerEvent.source_updated_at_ms),
+                    localOutput.final_event.source_updated_at_ms,
+                    "source_updated_at_ms",
+                );
+                assertEqual(wranglerEvent.relayer_status, "succeeded", "relayer_status");
+                assertEqual(
+                    relayerRequest.arguments[1].join(","),
+                    relayer.value.arguments[1].join(","),
+                    "payload_bcs_hex bytes",
+                );
+                assertEqual(
+                    relayerRequest.arguments[2].join(","),
+                    relayer.value.arguments[2].join(","),
+                    "signature bytes",
+                );
+                assertEqual(
+                    relayerRequest.arguments[3].join(","),
+                    relayer.value.arguments[3].join(","),
+                    "public key bytes",
+                );
+                caseOutput.relayer_preview_argument_lengths = relayerRequest.arguments
+                    .slice(1)
+                    .map((argument) => argument.length);
+            }
+
+            cases.push(caseOutput);
         }
 
-        const wranglerEvent = await readD1Event(candidate.source_event_id, persistDir);
-        const relayerRequest = readRelayerRequest(wranglerEvent);
-
-        assertEqual(wranglerEvent.status, localOutput.final_event.status, "status");
-        assertEqual(wranglerEvent.event_uid, localOutput.final_event.event_uid, "event_uid");
-        assertEqual(
-            Number(wranglerEvent.latest_revision),
-            localOutput.final_event.latest_revision,
-            "latest_revision",
-        );
-        assertEqual(
-            Number(wranglerEvent.source_updated_at_ms),
-            localOutput.final_event.source_updated_at_ms,
-            "source_updated_at_ms",
-        );
-        assertEqual(wranglerEvent.relayer_status, "succeeded", "relayer_status");
-        assertEqual(
-            relayerRequest.arguments[1].join(","),
-            relayer.value.arguments[1].join(","),
-            "payload_bcs_hex bytes",
-        );
-        assertEqual(
-            relayerRequest.arguments[2].join(","),
-            relayer.value.arguments[2].join(","),
-            "signature bytes",
-        );
-        assertEqual(
-            relayerRequest.arguments[3].join(","),
-            relayer.value.arguments[3].join(","),
-            "public key bytes",
-        );
+        if (manualSubmitBypass === null) {
+            throw new Error("Manual submit bypass evidence was not captured");
+        }
 
         return {
-            case_id: CASE_ID,
-            source_event_id: candidate.source_event_id,
-            wrangler_event: {
-                status: wranglerEvent.status,
-                event_uid: wranglerEvent.event_uid,
-                latest_revision: wranglerEvent.latest_revision,
-                source_updated_at_ms: wranglerEvent.source_updated_at_ms,
-                relayer_status: wranglerEvent.relayer_status,
-                relayer_request_json_present:
-                    typeof wranglerEvent.relayer_request_json === "string",
-            },
-            local_event: localOutput.final_event,
-            relayer_preview_argument_lengths: relayerRequest.arguments
-                .slice(1)
-                .map((argument) => argument.length),
+            cases,
+            manual_submit_bypass: manualSubmitBypass,
         };
     } finally {
         stopProcess(wrangler);
         stopProcess(sidecar);
         await rm(persistDir, { recursive: true, force: true });
     }
+}
+
+async function waitForD1EventStatus(
+    sourceEventId: string,
+    expectedStatus: string,
+    persistDir: string,
+): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    let latest: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+        latest = await readD1Event(sourceEventId, persistDir);
+        if (latest.status === expectedStatus) {
+            return latest;
+        }
+        await sleep(500);
+    }
+    throw new Error(
+        `Timed out waiting for ${sourceEventId} to reach ${expectedStatus}; latest=${JSON.stringify(latest)}`,
+    );
 }
 
 async function applyMigrations(persistDir: string): Promise<void> {
