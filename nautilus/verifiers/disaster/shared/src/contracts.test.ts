@@ -13,7 +13,7 @@ import {
 
 const unsignedPayload = JSON.parse(
     readFileSync(
-        new URL("../../../schemas/examples/unsigned_payload_v1.json", import.meta.url),
+        new URL("../../../../../schemas/examples/unsigned_payload_v1.json", import.meta.url),
         "utf8",
     ),
 ) as Record<string, unknown>;

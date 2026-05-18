@@ -1,4 +1,5 @@
 packages:
   - "dapp/*"
   - "packages/*"
-  - "nautilus_disaster_oracle/*"
+  - "nautilus/*"
+  - "nautilus/verifiers/*/*"

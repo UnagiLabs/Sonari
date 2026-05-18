@@ -4,17 +4,17 @@ import { pathToFileURL } from "node:url";
 import {
     buildRelayerRequestPreview,
     dryRunRelayerSubmit,
-} from "../nautilus_disaster_oracle/relayer/src/index.js";
+} from "../nautilus/verifiers/disaster/relayer/src/index.js";
 import {
     validateRelayerSubmitInput,
     validateWorkerToTeeRequest,
-} from "../nautilus_disaster_oracle/shared/src/index.js";
+} from "../nautilus/verifiers/disaster/shared/src/index.js";
 import { LocalOracleCoreRunnerAdapter, UsgsSourceClient } from "./nautilus_local_e2e.js";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8789;
 const DEFAULT_CASE_ID = "usgs/finalized_minimal";
-const DEFAULT_FIXTURES_DIR = "nautilus_disaster_oracle/fixtures";
+const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/disaster/fixtures";
 const MAX_BODY_BYTES = 1024 * 1024;
 
 export interface NautilusSidecarOptions {

@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
-ROOT = Path(__file__).resolve().parents[2]
-FIXTURES = ROOT / "nautilus_disaster_oracle" / "fixtures"
+ROOT = Path(__file__).resolve().parents[4]
+FIXTURES = ROOT / "nautilus" / "verifiers" / "disaster" / "fixtures"
 
 CASES = {
     "usgs/finalized_minimal": {
