@@ -1,6 +1,6 @@
 # Sonari Nautilus Disaster Oracle 開発フロー
 
-この文書は `nautilus_disaster_oracle/` 配下だけの開発順序を定義します。`contracts/`、`dapp/`、`packages/` の実装は対象外です。ただし、Payload、Merkle leaf、source manifest は root `schemas/` を外部契約として参照します。
+この文書は `nautilus/verifiers/disaster/` 配下だけの開発順序を定義します。`contracts/`、`dapp/`、`packages/` の実装は対象外です。ただし、Payload、Merkle leaf、source manifest は root `schemas/` を外部契約として参照します。
 
 ## 開発方針
 
@@ -45,11 +45,11 @@
 
 対象:
 
-- `nautilus_disaster_oracle/shared/`
-- `nautilus_disaster_oracle/fixtures/`
-- `nautilus_disaster_oracle/tee/`
-- `nautilus_disaster_oracle/watcher/`
-- `nautilus_disaster_oracle/relayer/`
+- `nautilus/verifiers/disaster/shared/`
+- `nautilus/verifiers/disaster/fixtures/`
+- `nautilus/verifiers/disaster/tee/`
+- `nautilus/verifiers/disaster/watcher/`
+- `nautilus/verifiers/disaster/relayer/`
 
 やること:
 
@@ -59,22 +59,22 @@
 - `NO_AFFECTED_CELLS` は TEE/Core 検証後に対象セルがない場合、`WATCHER_BELOW_AUTO_THRESHOLD` は TEE/Core を呼ぶ前に Watcher が skip した場合、`REJECTED_AUTO_TRIGGER` は 72h finalization deadline 超過として整理する。
 - Worker、TEE core、Relayer の入出力型を分ける。
 - root `schemas/` の enum 値、field order、hash 仕様を実装側の型へ写す。
-- root に `pnpm@10.27.0` workspace を用意し、`nautilus_disaster_oracle/shared`、`watcher`、`relayer` を workspace package として初期化する。
+- root に `pnpm@10.27.0` workspace を用意し、`nautilus/verifiers/disaster/shared`、`watcher`、`relayer` を workspace package として初期化する。
 - `watcher` / `relayer` は `@sonari/oracle-shared` を `workspace:*` で参照し、Step 1 では shared の型契約だけを境界として固定する。
-- `nautilus_disaster_oracle/tee` は Nautilus / network / signature / H3 依存を入れず、Rust crate の共有定数から始める。
+- `nautilus/verifiers/disaster/tee` は Nautilus / network / signature / H3 依存を入れず、Rust crate の共有定数から始める。
 
 完了条件:
 
 - 各コンポーネントの責務と入出力型が決まっている。
 - Worker から core logic へ信頼済み値を渡さない設計になっている。
 - `ignored_small` と `WATCHER_BELOW_AUTO_THRESHOLD` の意味が shared 型・D1 状態・runner 対象判定で一貫している。
-- `pnpm test`、`pnpm typecheck`、`cargo test --manifest-path nautilus_disaster_oracle/tee/Cargo.toml` で Step 1 の型契約を検証できる。
+- `pnpm test`、`pnpm typecheck`、`cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml` で Step 1 の型契約を検証できる。
 
 ### 2. Fixture と golden output を作る
 
 対象:
 
-- `nautilus_disaster_oracle/fixtures/`
+- `nautilus/verifiers/disaster/fixtures/`
 
 やること:
 
@@ -93,7 +93,7 @@
 
 対象:
 
-- `nautilus_disaster_oracle/tee/`
+- `nautilus/verifiers/disaster/tee/`
 
 やること:
 
@@ -117,7 +117,7 @@
 
 対象:
 
-- `nautilus_disaster_oracle/relayer/`
+- `nautilus/verifiers/disaster/relayer/`
 
 やること:
 
@@ -137,7 +137,7 @@
 
 対象:
 
-- `nautilus_disaster_oracle/watcher/`
+- `nautilus/verifiers/disaster/watcher/`
 
 やること:
 
@@ -212,7 +212,7 @@
 
 対象:
 
-- `nautilus_disaster_oracle/tee/`
+- `nautilus/verifiers/disaster/tee/`
 
 やること:
 
