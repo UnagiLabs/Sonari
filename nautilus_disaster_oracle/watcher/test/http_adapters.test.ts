@@ -2,7 +2,7 @@ import { BCS_ENUMS, DEFAULT_ORACLE_CONTRACT } from "@sonari/oracle-shared";
 import { describe, expect, it } from "vitest";
 import {
     AwsRunnerLifecycleAdapter,
-    HttpRelayerPreviewAdapter,
+    HttpRelayerAdapter,
     HttpRunnerAdapter,
     RunnerProcessError,
     type RelayerRequestPreview,
@@ -181,7 +181,7 @@ describe("HTTP sidecar adapters", () => {
 
     it("rejects non-finalized relayer inputs before sending them to the sidecar", async () => {
         let calls = 0;
-        const adapter = new HttpRelayerPreviewAdapter(
+        const adapter = new HttpRelayerAdapter(
             {
                 sidecarUrl: "http://127.0.0.1:8789",
                 target: preview.target,
@@ -194,7 +194,7 @@ describe("HTTP sidecar adapters", () => {
         );
 
         await expect(
-            adapter.previewRelayerRequest({
+            adapter.relay({
                 status: "pending_mmi",
                 source_event_id: "us7000sonari",
                 error_code: "MMI_NOT_AVAILABLE",
@@ -208,22 +208,25 @@ describe("HTTP sidecar adapters", () => {
 
     it("sends finalized payloads to the relayer preview sidecar", async () => {
         const calls: Request[] = [];
-        const adapter = new HttpRelayerPreviewAdapter(
+        const adapter = new HttpRelayerAdapter(
             {
                 sidecarUrl: "http://127.0.0.1:8789",
                 target: preview.target,
                 registry: preview.registry,
             },
-            async (input) => {
+            async (input: RequestInfo | URL) => {
                 const outbound = input instanceof Request ? input : new Request(input);
                 calls.push(outbound.clone());
                 return Response.json({ ok: true, value: preview });
             },
         );
 
-        await expect(adapter.previewRelayerRequest(finalized)).resolves.toEqual({
+        await expect(adapter.relay(finalized)).resolves.toEqual({
             ok: true,
-            value: preview,
+            value: {
+                mode: "preview",
+                request: preview,
+            },
         });
         await expect(calls[0]?.json()).resolves.toEqual({
             input: finalized,

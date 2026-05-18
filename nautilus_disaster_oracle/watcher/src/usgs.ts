@@ -54,7 +54,7 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         return null;
     }
 
-    return {
+    const candidate: UsgsEarthquakeCandidate = {
         source_event_id: feature.id,
         occurred_at_ms: occurredAtMs,
         source_updated_at_ms: sourceUpdatedAtMs,
@@ -62,8 +62,12 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         summary_mmi: readFiniteNumber(feature.properties.mmi),
         alert: readAlert(feature.properties.alert),
         tsunami: feature.properties.tsunami === 1,
-        detail_url: readNonEmptyString(feature.properties.detail),
     };
+    const detailUrl = readNonEmptyString(feature.properties.detail);
+    if (detailUrl !== undefined) {
+        candidate.detail_url = detailUrl;
+    }
+    return candidate;
 }
 
 function readNonEmptyString(input: unknown): string | undefined {

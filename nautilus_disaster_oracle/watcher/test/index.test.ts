@@ -5,7 +5,7 @@ import {
 } from "@sonari/oracle-shared";
 import { describe, expect, it } from "vitest";
 import type {
-    RelayerPreviewAdapter,
+    RelayerAdapter,
     RelayerRequestPreview,
     RunnerJobQueue,
     RunnerQueueJob,
@@ -207,7 +207,7 @@ describe("watcher state transitions", () => {
 
     it("runs relayer preview once for finalized runner results", async () => {
         const repository = new InMemoryStateRepository();
-        const relayerPreview = new RecordingRelayerPreviewAdapter();
+        const relayer = new RecordingRelayerAdapter();
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         const summary = await processDueEventsInlineForTests(
@@ -215,22 +215,47 @@ describe("watcher state transitions", () => {
             new MockRunnerAdapter(),
             baseNow,
             undefined,
-            relayerPreview,
+            relayer,
         );
 
         expect(summary.processed).toBe(1);
-        expect(relayerPreview.inputs).toHaveLength(1);
-        expect(relayerPreview.inputs[0]).toMatchObject({
+        expect(relayer.inputs).toHaveLength(1);
+        expect(relayer.inputs[0]).toMatchObject({
             status: "finalized",
             payload: { event_uid: "us7000sonari" },
         });
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "finalized",
-            relayer_preview_status: "succeeded",
-            relayer_request_json: JSON.stringify(relayerPreview.preview),
+            relayer_mode: "preview",
+            relayer_status: "succeeded",
+            relayer_request_json: JSON.stringify(relayer.preview),
+            relayer_digest: null,
             relayer_error_code: null,
             relayer_error_message: null,
-            relayer_preview_updated_at_ms: baseNow,
+            relayer_updated_at_ms: baseNow,
+            relayer_submitted_at_ms: null,
+        });
+    });
+
+    it("marks rows submitted only when submit mode succeeds", async () => {
+        const repository = new InMemoryStateRepository();
+        const relayer = new RecordingRelayerAdapter({ mode: "submit", digest: "7Zsubmit" });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        await processDueEventsInlineForTests(
+            repository,
+            new MockRunnerAdapter(),
+            baseNow,
+            undefined,
+            relayer,
+        );
+
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "submitted",
+            relayer_mode: "submit",
+            relayer_status: "succeeded",
+            relayer_digest: "7Zsubmit",
+            relayer_submitted_at_ms: baseNow,
         });
     });
 
@@ -238,7 +263,7 @@ describe("watcher state transitions", () => {
         "does not run relayer preview for non-finalized result %s",
         async (sourceEventId) => {
             const repository = new InMemoryStateRepository();
-            const relayerPreview = new RecordingRelayerPreviewAdapter();
+            const relayer = new RecordingRelayerAdapter();
 
             await scanCandidates(repository, [candidate(sourceEventId)], baseNow);
             await processDueEventsInlineForTests(
@@ -246,23 +271,23 @@ describe("watcher state transitions", () => {
                 new MockRunnerAdapter(),
                 baseNow,
                 undefined,
-                relayerPreview,
+                relayer,
             );
 
-            expect(relayerPreview.inputs).toHaveLength(0);
+            expect(relayer.inputs).toHaveLength(0);
             expect(await repository.get(sourceEventId)).toMatchObject({
-                relayer_preview_status: null,
+                relayer_status: null,
                 relayer_request_json: null,
                 relayer_error_code: null,
                 relayer_error_message: null,
-                relayer_preview_updated_at_ms: null,
+                relayer_updated_at_ms: null,
             });
         },
     );
 
     it("records relayer preview failure without making finalized rows due again", async () => {
         const repository = new InMemoryStateRepository();
-        const relayerPreview = new RecordingRelayerPreviewAdapter({
+        const relayer = new RecordingRelayerAdapter({
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
             message: "preview unavailable",
@@ -274,7 +299,7 @@ describe("watcher state transitions", () => {
             new MockRunnerAdapter(),
             baseNow,
             undefined,
-            relayerPreview,
+            relayer,
         );
 
         expect(await repository.get("us7000sonari")).toMatchObject({
@@ -282,11 +307,14 @@ describe("watcher state transitions", () => {
             retry_count: 0,
             next_retry_at_ms: null,
             error_code: null,
-            relayer_preview_status: "failed",
+            relayer_mode: "preview",
+            relayer_status: "failed",
             relayer_request_json: null,
+            relayer_digest: null,
             relayer_error_code: "RELAYER_SUBMIT_FAILED",
             relayer_error_message: "preview unavailable",
-            relayer_preview_updated_at_ms: baseNow,
+            relayer_updated_at_ms: baseNow,
+            relayer_submitted_at_ms: null,
         });
         await expect(repository.listDue(baseNow + FAILED_RETRY_BACKOFF_MS, 10)).resolves.toEqual(
             [],
@@ -389,11 +417,14 @@ describe("watcher state transitions", () => {
             last_seen_at_ms: baseNow,
             source_updated_at_ms: baseNow,
             error_code: null,
-            relayer_preview_status: null,
+            relayer_mode: null,
+            relayer_status: null,
             relayer_request_json: null,
+            relayer_digest: null,
             relayer_error_code: null,
             relayer_error_message: null,
-            relayer_preview_updated_at_ms: null,
+            relayer_updated_at_ms: null,
+            relayer_submitted_at_ms: null,
             runner_job_id: null,
             runner_queued_at_ms: null,
             runner_attempt: null,
@@ -420,8 +451,8 @@ describe("watcher state transitions", () => {
             markFailed: async () => {},
             markQueueEnqueueFailed: async () => {},
             applyRunnerResult: async () => {},
-            markRelayerPreviewSucceeded: async () => {},
-            markRelayerPreviewFailed: async () => {},
+            markRelayerSucceeded: async () => {},
+            markRelayerFailed: async () => {},
             recoverStaleProcessing: async () => 0,
             recoverStaleQueued: async () => 0,
         };
@@ -445,11 +476,14 @@ describe("watcher state transitions", () => {
             last_seen_at_ms: baseNow,
             source_updated_at_ms: baseNow,
             error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
-            relayer_preview_status: null,
+            relayer_mode: null,
+            relayer_status: null,
             relayer_request_json: null,
+            relayer_digest: null,
             relayer_error_code: null,
             relayer_error_message: null,
-            relayer_preview_updated_at_ms: null,
+            relayer_updated_at_ms: null,
+            relayer_submitted_at_ms: null,
             runner_job_id: null,
             runner_queued_at_ms: null,
             runner_attempt: null,
@@ -478,8 +512,8 @@ describe("watcher state transitions", () => {
             markFailed: async () => {},
             markQueueEnqueueFailed: async () => {},
             applyRunnerResult: async () => {},
-            markRelayerPreviewSucceeded: async () => {},
-            markRelayerPreviewFailed: async () => {},
+            markRelayerSucceeded: async () => {},
+            markRelayerFailed: async () => {},
             recoverStaleProcessing: async () => 0,
             recoverStaleQueued: async () => 0,
         };
@@ -516,7 +550,7 @@ describe("watcher state transitions", () => {
 
     it("fails malformed finalized payload metadata without storing finalized metadata", async () => {
         const repository = new InMemoryStateRepository();
-        const relayerPreview = new RecordingRelayerPreviewAdapter();
+        const relayer = new RecordingRelayerAdapter();
         const runner: RunnerAdapter = {
             run: async () => ({
                 status: "finalized",
@@ -532,9 +566,9 @@ describe("watcher state transitions", () => {
         };
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
-        await processDueEventsInlineForTests(repository, runner, baseNow, undefined, relayerPreview);
+        await processDueEventsInlineForTests(repository, runner, baseNow, undefined, relayer);
 
-        expect(relayerPreview.inputs).toHaveLength(0);
+        expect(relayer.inputs).toHaveLength(0);
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "failed",
             error_code: "BCS_SERIALIZATION_FAILED",
@@ -542,16 +576,17 @@ describe("watcher state transitions", () => {
             latest_revision: 0,
             source_updated_at_ms: baseNow - HOUR_MS,
             next_retry_at_ms: baseNow + FAILED_RETRY_BACKOFF_MS,
-            relayer_preview_status: null,
+            relayer_status: null,
             relayer_request_json: null,
             relayer_error_code: null,
             relayer_error_message: null,
-            relayer_preview_updated_at_ms: null,
+            relayer_updated_at_ms: null,
         });
     });
 });
 
-class RecordingRelayerPreviewAdapter implements RelayerPreviewAdapter {
+class RecordingRelayerAdapter implements RelayerAdapter {
+    readonly mode: "preview" | "dry_run" | "submit";
     readonly inputs: unknown[] = [];
     readonly preview: RelayerRequestPreview = {
         target: "0x123::disaster_oracle::submit_payload_v1",
@@ -565,26 +600,28 @@ class RecordingRelayerPreviewAdapter implements RelayerPreviewAdapter {
     };
 
     constructor(
-        private readonly result:
-            | { ok: true; value: RelayerRequestPreview }
-            | { ok: false; error_code: "RELAYER_SUBMIT_FAILED" | "MOVE_REJECTED"; message: string } = {
-            ok: true,
-            value: {
-                target: "0x123::disaster_oracle::submit_payload_v1",
-                registry: "0x456",
-                arguments: ["0x456", [1], [2], [3]],
-                submitRequest: {
-                    target: "0x123::disaster_oracle::submit_payload_v1",
-                    registry: "0x456",
-                    arguments: ["0x456", [1], [2], [3]],
-                },
-            },
-        },
-    ) {}
+        private readonly options:
+            | { ok: false; error_code: "RELAYER_SUBMIT_FAILED" | "MOVE_REJECTED"; message: string }
+            | { ok?: true; mode?: "preview" | "dry_run" | "submit"; digest?: string } = {},
+    ) {
+        this.mode = "mode" in options && options.mode !== undefined ? options.mode : "preview";
+    }
 
-    async previewRelayerRequest(input: unknown) {
+    async relay(input: unknown) {
         this.inputs.push(structuredClone(input));
-        return this.result;
+        if ("ok" in this.options && this.options.ok === false) {
+            return this.options;
+        }
+        return {
+            ok: true as const,
+            value: {
+                mode: this.mode,
+                request: this.preview,
+                ...("digest" in this.options && this.options.digest !== undefined
+                    ? { digest: this.options.digest }
+                    : {}),
+            },
+        };
     }
 }
 

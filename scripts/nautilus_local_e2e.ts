@@ -20,9 +20,9 @@ import {
     HOUR_MS,
     InMemoryStateRepository,
     type ProcessSummary,
+    parseUsgsRecentFeed,
     processDueEventsInlineForTests,
     scanCandidates,
-    parseUsgsRecentFeed,
     USGS_RECENT_FEED_URL,
     type UsgsEarthquakeCandidate,
 } from "../nautilus_disaster_oracle/watcher/src/index.js";
@@ -570,7 +570,7 @@ function candidateFromDetail(input: unknown, detailPath: string): UsgsEarthquake
         throw new Error(`${detailPath} has invalid USGS time metadata`);
     }
 
-    return {
+    const candidate: UsgsEarthquakeCandidate = {
         source_event_id: detail.id,
         occurred_at_ms: occurredAtMs,
         source_updated_at_ms: sourceUpdatedAtMs,
@@ -578,11 +578,11 @@ function candidateFromDetail(input: unknown, detailPath: string): UsgsEarthquake
         summary_mmi: readFiniteNumber(detail.properties.mmi),
         alert: readAlert(detail.properties.alert),
         tsunami: detail.properties.tsunami === 1,
-        detail_url:
-            typeof detail.properties.detail === "string" && detail.properties.detail.length > 0
-                ? detail.properties.detail
-                : undefined,
     };
+    if (typeof detail.properties.detail === "string" && detail.properties.detail.length > 0) {
+        candidate.detail_url = detail.properties.detail;
+    }
+    return candidate;
 }
 
 function selectPreferredShakeMapProduct(

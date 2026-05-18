@@ -37,7 +37,7 @@ interface WranglerE2eOutput {
         event_uid: unknown;
         latest_revision: unknown;
         source_updated_at_ms: unknown;
-        relayer_preview_status: unknown;
+        relayer_status: unknown;
         relayer_request_json_present: boolean;
     };
     local_event: LocalOracleE2eOutput["final_event"];
@@ -98,11 +98,11 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
             registry: REGISTRY,
             nowMs,
         });
-        const relayerPreview = localOutput.relayer_preview;
+        const relayer = localOutput.relayer_preview;
         if (
             localOutput.runner_result.status !== "finalized" ||
-            relayerPreview === undefined ||
-            !relayerPreview.ok
+            relayer === undefined ||
+            !relayer.ok
         ) {
             throw new Error("Wrangler E2E expects the canonical fixture to finalize locally");
         }
@@ -138,20 +138,20 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
             localOutput.final_event.source_updated_at_ms,
             "source_updated_at_ms",
         );
-        assertEqual(wranglerEvent.relayer_preview_status, "succeeded", "relayer_preview_status");
+        assertEqual(wranglerEvent.relayer_status, "succeeded", "relayer_status");
         assertEqual(
             relayerRequest.arguments[1].join(","),
-            relayerPreview.value.arguments[1].join(","),
+            relayer.value.arguments[1].join(","),
             "payload_bcs_hex bytes",
         );
         assertEqual(
             relayerRequest.arguments[2].join(","),
-            relayerPreview.value.arguments[2].join(","),
+            relayer.value.arguments[2].join(","),
             "signature bytes",
         );
         assertEqual(
             relayerRequest.arguments[3].join(","),
-            relayerPreview.value.arguments[3].join(","),
+            relayer.value.arguments[3].join(","),
             "public key bytes",
         );
 
@@ -163,7 +163,7 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
                 event_uid: wranglerEvent.event_uid,
                 latest_revision: wranglerEvent.latest_revision,
                 source_updated_at_ms: wranglerEvent.source_updated_at_ms,
-                relayer_preview_status: wranglerEvent.relayer_preview_status,
+                relayer_status: wranglerEvent.relayer_status,
                 relayer_request_json_present:
                     typeof wranglerEvent.relayer_request_json === "string",
             },

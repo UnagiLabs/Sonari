@@ -17,7 +17,12 @@ import {
     HOUR_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
-import { HttpRelayerPreviewAdapter, type RelayerPreviewAdapter } from "./relayer_preview.js";
+import {
+    HttpRelayerAdapter,
+    type RelayerAdapter,
+    type RelayerMode,
+    StaticFailingRelayerAdapter,
+} from "./relayer_preview.js";
 import {
     D1StateRepository,
     type EarthquakeEventRow,
@@ -43,12 +48,12 @@ export {
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
 export type {
-    RelayerPreviewAdapter,
-    RelayerPreviewErrorCode,
-    RelayerPreviewResult,
+    RelayerAdapter,
+    RelayerErrorCode,
     RelayerRequestPreview,
+    RelayerRunResult,
 } from "./relayer_preview.js";
-export { HttpRelayerPreviewAdapter } from "./relayer_preview.js";
+export { HttpRelayerAdapter } from "./relayer_preview.js";
 export {
     screenUsgsCandidate,
     WATCHER_ALERT_LEVELS,
@@ -89,8 +94,12 @@ export interface WorkerEnv {
     RUNNER_JOBS?: RunnerJobQueue;
     MANUAL_SUBMIT_TOKEN?: string;
     ORACLE_SIDECAR_URL?: string;
+    RELAYER_MODE?: string;
     RELAYER_TARGET?: string;
     RELAYER_REGISTRY?: string;
+    RELAYER_GRPC_URL?: string;
+    RELAYER_SENDER_ADDRESS?: string;
+    RELAYER_ALLOW_SUBMIT?: string;
     AWS_RUNNER_BASE_URL?: string;
     AWS_RUNNER_TOKEN?: string;
     AWS_RUNNER_TIMEOUT_MS?: string;
@@ -103,7 +112,7 @@ export interface ExecutionContextLike {
 export interface WorkerAppOptions {
     now?: () => number;
     runner?: RunnerLifecycleAdapter;
-    relayerPreview?: RelayerPreviewAdapter;
+    relayer?: RelayerAdapter;
     fetcher?: typeof fetch;
 }
 
@@ -212,7 +221,7 @@ export async function processDueEventsInlineForTests(
     runner: RunnerAdapter,
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
-    relayerPreview?: RelayerPreviewAdapter,
+    relayer?: RelayerAdapter,
 ): Promise<ProcessSummary> {
     const queue = new InlineQueue();
     const enqueueSummary = await enqueueDueEvents(repository, queue, nowMs, limit);
@@ -228,7 +237,7 @@ export async function processDueEventsInlineForTests(
             new InlineMessage(job),
             nowMs,
             30_000,
-            relayerPreview,
+            relayer,
         );
         const after = await repository.get(job.source_event_id);
         if (before !== null && after?.status === "failed" && before.status !== "failed") {
@@ -294,7 +303,7 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
         async queue(batch: RunnerMessageBatch, env: WorkerEnv): Promise<void> {
             const repository = repositoryFromEnv(env);
             const runner = options.runner ?? runnerFromEnv(env, fetcher);
-            const relayerPreview = options.relayerPreview ?? relayerPreviewFromEnv(env, fetcher);
+            const relayer = options.relayer ?? relayerFromEnv(env, fetcher);
             for (const message of batch.messages) {
                 await handleRunnerQueueMessage(
                     repository,
@@ -302,7 +311,7 @@ export function createWorkerApp(options: WorkerAppOptions = {}) {
                     message,
                     now(),
                     runnerTimeoutMsFromEnv(env),
-                    relayerPreview,
+                    relayer,
                 );
             }
         },
@@ -423,7 +432,7 @@ async function handleRunnerQueueMessage(
     message: RunnerJobMessage,
     nowMs: number,
     timeoutMs: number,
-    relayerPreview?: RelayerPreviewAdapter,
+    relayer?: RelayerAdapter,
 ): Promise<void> {
     const job = message.body;
     if (!isRunnerQueueJob(job)) {
@@ -463,13 +472,7 @@ async function handleRunnerQueueMessage(
         );
         const applied = await applyRunnerResult(repository, job.source_event_id, result, nowMs);
         if (applied.finalized) {
-            await runRelayerPreview(
-                repository,
-                job.source_event_id,
-                applied.result,
-                nowMs,
-                relayerPreview,
-            );
+            await runRelayer(repository, job.source_event_id, applied.result, nowMs, relayer);
         }
     } catch (error) {
         await repository.markFailed(
@@ -539,32 +542,34 @@ async function applyRunnerResult(
     return { finalized: false };
 }
 
-async function runRelayerPreview(
+async function runRelayer(
     repository: StateRepository,
     sourceEventId: string,
     result: SignedFinalizedPayload,
     nowMs: number,
-    relayerPreview?: RelayerPreviewAdapter,
+    relayer?: RelayerAdapter,
 ): Promise<void> {
-    if (relayerPreview === undefined) {
+    if (relayer === undefined) {
         return;
     }
 
     try {
-        const previewResult = await relayerPreview.previewRelayerRequest(result);
+        const previewResult = await relayer.relay(result);
         if (previewResult.ok) {
-            await repository.markRelayerPreviewSucceeded(sourceEventId, previewResult.value, nowMs);
+            await repository.markRelayerSucceeded(sourceEventId, previewResult.value, nowMs);
             return;
         }
-        await repository.markRelayerPreviewFailed(
+        await repository.markRelayerFailed(
             sourceEventId,
+            relayer.mode,
             previewResult.error_code,
             previewResult.message,
             nowMs,
         );
     } catch (error) {
-        await repository.markRelayerPreviewFailed(
+        await repository.markRelayerFailed(
             sourceEventId,
+            relayer.mode,
             "RELAYER_SUBMIT_FAILED",
             errorMessage(error),
             nowMs,
@@ -608,25 +613,76 @@ function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerLifecycleAd
     return new MockRunnerLifecycleAdapter();
 }
 
-function relayerPreviewFromEnv(
-    env: WorkerEnv,
-    fetcher: typeof fetch,
-): RelayerPreviewAdapter | undefined {
+function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter | undefined {
+    const mode = relayerModeFromEnv(env);
     if (
-        isNonEmptyString(env.ORACLE_SIDECAR_URL) &&
-        isNonEmptyString(env.RELAYER_TARGET) &&
-        isNonEmptyString(env.RELAYER_REGISTRY)
+        mode === "preview" &&
+        env.RELAYER_MODE === undefined &&
+        !isNonEmptyString(env.ORACLE_SIDECAR_URL)
     ) {
-        return new HttpRelayerPreviewAdapter(
+        return undefined;
+    }
+
+    if (
+        !isNonEmptyString(env.ORACLE_SIDECAR_URL) ||
+        !isNonEmptyString(env.RELAYER_TARGET) ||
+        !isNonEmptyString(env.RELAYER_REGISTRY)
+    ) {
+        return new StaticFailingRelayerAdapter(
+            mode,
+            "RELAYER_SUBMIT_FAILED",
+            `${mode} relayer requires ORACLE_SIDECAR_URL, RELAYER_TARGET, and RELAYER_REGISTRY`,
+        );
+    }
+
+    if (
+        mode === "dry_run" &&
+        (!isNonEmptyString(env.RELAYER_GRPC_URL) || !isNonEmptyString(env.RELAYER_SENDER_ADDRESS))
+    ) {
+        return new StaticFailingRelayerAdapter(
+            mode,
+            "RELAYER_SUBMIT_FAILED",
+            "dry_run relayer requires RELAYER_GRPC_URL and RELAYER_SENDER_ADDRESS",
+        );
+    }
+
+    if (mode === "submit" && env.RELAYER_ALLOW_SUBMIT !== "true") {
+        return new StaticFailingRelayerAdapter(
+            mode,
+            "RELAYER_SUBMIT_FAILED",
+            "submit relayer requires RELAYER_ALLOW_SUBMIT=true",
+        );
+    }
+
+    const config = {
+        sidecarUrl: env.ORACLE_SIDECAR_URL,
+        target: env.RELAYER_TARGET,
+        registry: env.RELAYER_REGISTRY,
+        mode,
+    };
+    if (mode === "dry_run") {
+        return new HttpRelayerAdapter(
             {
-                sidecarUrl: env.ORACLE_SIDECAR_URL,
-                target: env.RELAYER_TARGET,
-                registry: env.RELAYER_REGISTRY,
+                ...config,
+                grpcUrl: env.RELAYER_GRPC_URL as string,
+                senderAddress: env.RELAYER_SENDER_ADDRESS as string,
             },
             fetcher,
         );
     }
-    return undefined;
+    return new HttpRelayerAdapter(config, fetcher);
+}
+
+function relayerModeFromEnv(env: WorkerEnv): RelayerMode {
+    if (
+        env.RELAYER_MODE === undefined ||
+        env.RELAYER_MODE === "preview" ||
+        env.RELAYER_MODE === "dry_run" ||
+        env.RELAYER_MODE === "submit"
+    ) {
+        return env.RELAYER_MODE ?? "preview";
+    }
+    return "preview";
 }
 
 function isStateRepository(input: StateRepository | D1Database): input is StateRepository {

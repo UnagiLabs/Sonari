@@ -1,7 +1,7 @@
 import type { SignedFinalizedPayload, TeeCoreResult, WorkerToTeeRequest } from "@sonari/oracle-shared";
 import { describe, expect, it } from "vitest";
 import type {
-    RelayerPreviewAdapter,
+    RelayerAdapter,
     RelayerRequestPreview,
     RunnerJobQueue,
     RunnerLifecycleAdapter,
@@ -237,8 +237,8 @@ describe("runner queue consumer", () => {
     it("claims queued jobs before invoking AWS runner lifecycle", async () => {
         const repository = new InMemoryStateRepository();
         const runner = new RecordingRunnerLifecycleAdapter();
-        const relayerPreview = new RecordingRelayerPreviewAdapter();
-        const app = createWorkerApp({ now: () => baseNow, runner, relayerPreview });
+        const relayer = new RecordingRelayerAdapter();
+        const app = createWorkerApp({ now: () => baseNow, runner, relayer });
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         const job = await repository.enqueueRunnerJob("us7000sonari", 1, "us7000sonari:1", baseNow);
@@ -258,14 +258,14 @@ describe("runner queue consumer", () => {
             },
         ]);
         expect(runner.stops).toEqual(["runner-1"]);
-        expect(relayerPreview.inputs).toHaveLength(1);
+        expect(relayer.inputs).toHaveLength(1);
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "finalized",
             event_uid: "us7000sonari",
             runner_id: "runner-1",
             runner_started_at_ms: baseNow,
             runner_stopped_at_ms: baseNow,
-            relayer_preview_status: "succeeded",
+            relayer_status: "succeeded",
         });
     });
 
@@ -339,7 +339,7 @@ describe("runner queue consumer", () => {
 
     it("fails malformed finalized results before relayer preview", async () => {
         const repository = new InMemoryStateRepository();
-        const relayerPreview = new RecordingRelayerPreviewAdapter();
+        const relayer = new RecordingRelayerAdapter();
         const runner = new RecordingRunnerLifecycleAdapter({
             result: {
                 status: "finalized",
@@ -353,7 +353,7 @@ describe("runner queue consumer", () => {
                 public_key: "0xpub",
             },
         });
-        const app = createWorkerApp({ now: () => baseNow, runner, relayerPreview });
+        const app = createWorkerApp({ now: () => baseNow, runner, relayer });
 
         await scanCandidates(repository, [candidate("us7000bad")], baseNow);
         const job = await repository.enqueueRunnerJob("us7000bad", 1, "us7000bad:1", baseNow);
@@ -361,7 +361,7 @@ describe("runner queue consumer", () => {
         const message = new FakeQueueMessage(job as RunnerQueueJob);
         await app.queue({ messages: [message] }, env(repository));
 
-        expect(relayerPreview.inputs).toHaveLength(0);
+        expect(relayer.inputs).toHaveLength(0);
         expect(await repository.get("us7000bad")).toMatchObject({
             status: "failed",
             error_code: "BCS_SERIALIZATION_FAILED",
@@ -455,7 +455,8 @@ class RecordingRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
     }
 }
 
-class RecordingRelayerPreviewAdapter implements RelayerPreviewAdapter {
+class RecordingRelayerAdapter implements RelayerAdapter {
+    readonly mode = "preview" as const;
     readonly inputs: SignedFinalizedPayload[] = [];
     readonly preview: RelayerRequestPreview = {
         target: "0x123::disaster_oracle::submit_payload_v1",
@@ -468,8 +469,8 @@ class RecordingRelayerPreviewAdapter implements RelayerPreviewAdapter {
         },
     };
 
-    async previewRelayerRequest(input: SignedFinalizedPayload) {
+    async relay(input: SignedFinalizedPayload) {
         this.inputs.push(structuredClone(input));
-        return { ok: true as const, value: this.preview };
+        return { ok: true as const, value: { mode: "preview" as const, request: this.preview } };
     }
 }

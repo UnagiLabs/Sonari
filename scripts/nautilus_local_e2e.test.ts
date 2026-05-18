@@ -172,7 +172,7 @@ describe("Nautilus local oracle E2E", () => {
 
     it("fetches live USGS detail from the recent feed detail URL and prefers grid.xml.zip", async () => {
         const requests: string[] = [];
-        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+        const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
             const url = String(input);
             requests.push(url);
             if (url.endsWith("/all_hour.geojson")) {
@@ -230,7 +230,7 @@ describe("Nautilus local oracle E2E", () => {
 
     it("falls back to the deterministic USGS detail URL for manual event ids", async () => {
         const requests: string[] = [];
-        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+        const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
             const url = String(input);
             requests.push(url);
             if (url.endsWith("/all_hour.geojson")) {
@@ -269,7 +269,7 @@ describe("Nautilus local oracle E2E", () => {
         ["invalid detail JSON", new Response("{not json", { status: 200 })],
         ["id mismatch", Response.json(detailWithContents("other-event", {}))],
     ] as const)("maps %s to pending_source USGS_DETAIL_UNAVAILABLE", async (_name, response) => {
-        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+        const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
             const url = String(input);
             if (url.endsWith("/all_hour.geojson")) {
                 return Response.json({ features: [] });
@@ -298,7 +298,7 @@ describe("Nautilus local oracle E2E", () => {
     });
 
     it("maps missing ShakeMap grid contents to pending_source SHAKEMAP_GRID_UNAVAILABLE", async () => {
-        const fetcher = async (input: RequestInfo | URL): Promise<Response> => {
+        const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
             const url = String(input);
             if (url.endsWith("/all_hour.geojson")) {
                 return Response.json({ features: [] });
