@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,6 +22,8 @@ import {
     type ProcessSummary,
     processDueEventsInlineForTests,
     scanCandidates,
+    parseUsgsRecentFeed,
+    USGS_RECENT_FEED_URL,
     type UsgsEarthquakeCandidate,
 } from "../nautilus_disaster_oracle/watcher/src/index.js";
 import type { EarthquakeEventRow } from "../nautilus_disaster_oracle/watcher/src/state.js";
@@ -97,6 +99,7 @@ export interface SourceArtifacts {
     raw_grid_uri: string | null;
     raw_data_uri: string;
     affected_cells_uri: string;
+    temporary_dir: string | null;
 }
 
 export interface SourceClient {
@@ -191,6 +194,7 @@ export class FixtureSourceClient implements SourceClient {
             raw_grid_uri: gridPath === null ? null : displayPath(gridPath),
             raw_data_uri: `ipfs://sonari/examples/${sourceEventId}/raw_data_manifest.json`,
             affected_cells_uri: `ipfs://sonari/examples/${sourceEventId}/affected_cells.json`,
+            temporary_dir: null,
         };
     }
 
@@ -222,8 +226,139 @@ export class FixtureSourceClient implements SourceClient {
 }
 
 export class UsgsSourceClient implements SourceClient {
-    async getSourceArtifacts(_sourceEventId: string): Promise<SourceArtifacts> {
-        throw new Error("Live USGS source fetch is not implemented for Step 8 local sidecar");
+    private readonly fetcher: typeof fetch;
+    private readonly recentFeedUrl: string;
+
+    constructor(options: { fetcher?: typeof fetch; recentFeedUrl?: string } = {}) {
+        this.fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
+        this.recentFeedUrl = options.recentFeedUrl ?? USGS_RECENT_FEED_URL;
+    }
+
+    async getSourceArtifacts(sourceEventId: string): Promise<SourceArtifacts> {
+        let temporaryDir: string | null = null;
+        try {
+            const detailUrl = await this.resolveDetailUrl(sourceEventId);
+            const detail = await this.fetchDetail(sourceEventId, detailUrl);
+            temporaryDir = await mkdtemp(path.join(tmpdir(), "sonari-usgs-live-"));
+            const detailPath = path.join(temporaryDir, "usgs_detail.json");
+            await writeFile(detailPath, `${JSON.stringify(detail)}\n`);
+
+            const grid = await this.fetchPreferredGrid(sourceEventId, detail, temporaryDir);
+            return {
+                case_id: `usgs-live/${sourceEventId}`,
+                source_event_id: sourceEventId,
+                raw_detail_path: detailPath,
+                raw_detail_uri: detailUrl,
+                raw_grid_path: grid?.path ?? null,
+                raw_grid_uri: grid?.uri ?? null,
+                raw_data_uri: `ipfs://sonari/live/${sourceEventId}/raw_data_manifest.json`,
+                affected_cells_uri: `ipfs://sonari/live/${sourceEventId}/affected_cells.json`,
+                temporary_dir: temporaryDir,
+            };
+        } catch (error) {
+            if (temporaryDir !== null) {
+                await rm(temporaryDir, { recursive: true, force: true });
+            }
+            throw error;
+        }
+    }
+
+    private async resolveDetailUrl(sourceEventId: string): Promise<string> {
+        try {
+            const response = await this.fetcher(this.recentFeedUrl);
+            if (response.ok) {
+                const candidates = parseUsgsRecentFeed(await response.json());
+                const candidate = candidates.find((item) => item.source_event_id === sourceEventId);
+                if (candidate?.detail_url !== undefined) {
+                    return candidate.detail_url;
+                }
+            }
+        } catch {
+            // Fall back to USGS' deterministic detail URL. Manual submissions often only have an id.
+        }
+        return `https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/${sourceEventId}.geojson`;
+    }
+
+    private async fetchDetail(
+        sourceEventId: string,
+        detailUrl: string,
+    ): Promise<Record<string, unknown>> {
+        let response: Response;
+        try {
+            response = await this.fetcher(detailUrl);
+        } catch {
+            throw new SourcePendingError(sourceEventId, "USGS_DETAIL_UNAVAILABLE");
+        }
+        if (!response.ok) {
+            throw new SourcePendingError(sourceEventId, "USGS_DETAIL_UNAVAILABLE");
+        }
+        let detail: unknown;
+        try {
+            detail = await response.json();
+        } catch {
+            throw new SourcePendingError(sourceEventId, "USGS_DETAIL_UNAVAILABLE");
+        }
+        if (!isRecord(detail) || detail.id !== sourceEventId) {
+            throw new SourcePendingError(sourceEventId, "USGS_DETAIL_UNAVAILABLE");
+        }
+        return detail;
+    }
+
+    private async fetchPreferredGrid(
+        sourceEventId: string,
+        detail: Record<string, unknown>,
+        temporaryDir: string,
+    ): Promise<{ path: string; uri: string } | null> {
+        const product = selectPreferredShakeMapProduct(detail);
+        if (product === null) {
+            return null;
+        }
+
+        const properties = isRecord(product.properties) ? product.properties : {};
+        if (properties["map-status"] === "CANCELLED") {
+            return null;
+        }
+
+        const contents = isRecord(product.contents) ? product.contents : {};
+        const zipUrl = readContentUrl(contents["download/grid.xml.zip"]);
+        const xmlUrl = readContentUrl(contents["download/grid.xml"]);
+        const uri = zipUrl ?? xmlUrl;
+        if (uri === undefined) {
+            throw new SourcePendingError(sourceEventId, "SHAKEMAP_GRID_UNAVAILABLE");
+        }
+
+        let response: Response;
+        try {
+            response = await this.fetcher(uri);
+        } catch {
+            throw new SourcePendingError(sourceEventId, "SHAKEMAP_GRID_UNAVAILABLE");
+        }
+        if (!response.ok) {
+            throw new SourcePendingError(sourceEventId, "SHAKEMAP_GRID_UNAVAILABLE");
+        }
+        let bytes: ArrayBuffer;
+        try {
+            bytes = await response.arrayBuffer();
+        } catch {
+            throw new SourcePendingError(sourceEventId, "SHAKEMAP_GRID_UNAVAILABLE");
+        }
+
+        const fileName = uri === zipUrl ? "usgs_grid.xml.zip" : "usgs_grid.xml";
+        const gridPath = path.join(temporaryDir, fileName);
+        await writeFile(gridPath, Buffer.from(bytes));
+        return { path: gridPath, uri };
+    }
+}
+
+class SourcePendingError extends Error {
+    constructor(
+        readonly sourceEventId: string,
+        readonly errorCode: Extract<
+            OracleErrorCode,
+            "USGS_DETAIL_UNAVAILABLE" | "SHAKEMAP_GRID_UNAVAILABLE"
+        >,
+    ) {
+        super(errorCode);
     }
 }
 
@@ -255,10 +390,12 @@ export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
 
     async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
         this.invocationCount += 1;
-        const source = await this.sourceClient.getSourceArtifacts(request.source_event_id);
-        const outputDir = await mkdtemp(path.join(tmpdir(), "sonari-nautilus-e2e-"));
+        let source: SourceArtifacts | null = null;
+        let outputDir: string | null = null;
 
         try {
+            source = await this.sourceClient.getSourceArtifacts(request.source_event_id);
+            outputDir = await mkdtemp(path.join(tmpdir(), "sonari-nautilus-e2e-"));
             await runRustOracleCore({
                 source,
                 outputDir,
@@ -273,8 +410,24 @@ export class LocalOracleCoreRunnerAdapter implements RunnerAdapter {
                     : readNonFinalizedResult(summary);
             this.lastResult = result;
             return result;
+        } catch (error) {
+            if (error instanceof SourcePendingError) {
+                const result = {
+                    status: "pending_source",
+                    source_event_id: error.sourceEventId,
+                    error_code: error.errorCode,
+                } satisfies TeeCoreResult;
+                this.lastResult = result;
+                return result;
+            }
+            throw error;
         } finally {
-            await rm(outputDir, { recursive: true, force: true });
+            if (outputDir !== null) {
+                await rm(outputDir, { recursive: true, force: true });
+            }
+            if (source?.temporary_dir !== null && source?.temporary_dir !== undefined) {
+                await rm(source.temporary_dir, { recursive: true, force: true });
+            }
         }
     }
 }
@@ -353,6 +506,7 @@ function readNonFinalizedResult(
 
     if (summary.status === "pending_source") {
         if (
+            summary.error_code !== "USGS_DETAIL_UNAVAILABLE" &&
             summary.error_code !== "SHAKEMAP_PRODUCT_MISSING" &&
             summary.error_code !== "SHAKEMAP_GRID_UNAVAILABLE"
         ) {
@@ -424,7 +578,82 @@ function candidateFromDetail(input: unknown, detailPath: string): UsgsEarthquake
         summary_mmi: readFiniteNumber(detail.properties.mmi),
         alert: readAlert(detail.properties.alert),
         tsunami: detail.properties.tsunami === 1,
+        detail_url:
+            typeof detail.properties.detail === "string" && detail.properties.detail.length > 0
+                ? detail.properties.detail
+                : undefined,
     };
+}
+
+function selectPreferredShakeMapProduct(
+    detail: Record<string, unknown>,
+): Record<string, unknown> | null {
+    const properties = isRecord(detail.properties) ? detail.properties : {};
+    const products = isRecord(properties.products) ? properties.products : {};
+    const shakemap = products.shakemap;
+    if (!Array.isArray(shakemap) || shakemap.length === 0) {
+        return null;
+    }
+
+    return shakemap.filter(isRecord).sort(compareShakeMapProducts).at(-1) ?? null;
+}
+
+function compareShakeMapProducts(
+    left: Record<string, unknown>,
+    right: Record<string, unknown>,
+): number {
+    return compareProductSortKey(productSortKey(left), productSortKey(right));
+}
+
+function productSortKey(
+    product: Record<string, unknown>,
+): [number, number, number, string, string, string] {
+    const properties = isRecord(product.properties) ? product.properties : {};
+    return [
+        readFiniteSortNumber(product.preferredWeight),
+        readVersion(properties.version),
+        readFiniteSortNumber(product.updateTime),
+        typeof product.source === "string" ? product.source : "",
+        typeof product.code === "string" ? product.code : "",
+        typeof product.status === "string" ? product.status : "",
+    ];
+}
+
+function compareProductSortKey(
+    left: [number, number, number, string, string, string],
+    right: [number, number, number, string, string, string],
+): number {
+    for (let index = 0; index < left.length; index += 1) {
+        const leftValue = left[index];
+        const rightValue = right[index];
+        if (leftValue === rightValue) {
+            continue;
+        }
+        if (typeof leftValue === "number" && typeof rightValue === "number") {
+            return leftValue - rightValue;
+        }
+        return String(leftValue).localeCompare(String(rightValue));
+    }
+    return 0;
+}
+
+function readContentUrl(input: unknown): string | undefined {
+    if (!isRecord(input) || typeof input.url !== "string" || input.url.length === 0) {
+        return undefined;
+    }
+    return input.url;
+}
+
+function readFiniteSortNumber(input: unknown): number {
+    return typeof input === "number" && Number.isFinite(input) ? input : 0;
+}
+
+function readVersion(input: unknown): number {
+    if (typeof input !== "string") {
+        return 0;
+    }
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function parseCliArgs(argv: readonly string[]): LocalOracleE2eOptions {

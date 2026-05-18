@@ -6,6 +6,7 @@ export interface UsgsEarthquakeCandidate {
     summary_mmi: number | null;
     alert: UsgsAlertLevel | null;
     tsunami: boolean;
+    detail_url?: string;
 }
 
 export type UsgsAlertLevel = "green" | "yellow" | "orange" | "red";
@@ -61,7 +62,12 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         summary_mmi: readFiniteNumber(feature.properties.mmi),
         alert: readAlert(feature.properties.alert),
         tsunami: feature.properties.tsunami === 1,
+        detail_url: readNonEmptyString(feature.properties.detail),
     };
+}
+
+function readNonEmptyString(input: unknown): string | undefined {
+    return typeof input === "string" && input.length > 0 ? input : undefined;
 }
 
 function readFiniteNumber(input: unknown): number | null {

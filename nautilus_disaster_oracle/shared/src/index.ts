@@ -167,7 +167,7 @@ export type TeeCoreResult =
           source_event_id: string;
           error_code: Extract<
               OracleErrorCode,
-              "SHAKEMAP_PRODUCT_MISSING" | "SHAKEMAP_GRID_UNAVAILABLE"
+              "USGS_DETAIL_UNAVAILABLE" | "SHAKEMAP_PRODUCT_MISSING" | "SHAKEMAP_GRID_UNAVAILABLE"
           >;
       }
     | {
