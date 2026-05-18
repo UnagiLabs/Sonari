@@ -276,7 +276,7 @@ Operations Poolは、被災者支援のRelief Poolと分離する。ただし、
 
 ## 7. 会員登録費 / One-time Verification Fee
 
-ユーザーは、平時に地域、電話番号、GPSなどによる位置情報を登録し、少額の会員登録費を一度だけ支払って検証済み会員になる。オンチェーン上では、受取者はMembershipPassを持つ。
+ユーザーは、平時にcoarse regionと受取ウォレットを登録し、必要に応じて低侵襲なresidence evidenceをNautilus verifierへ提出する。少額の会員登録費は一度だけ支払う。オンチェーン上では、受取者はMembershipPassを持つ。
 
 電話番号、GPS履歴、端末情報、住所、学籍番号などの生データは、Nautilus内またはoffchain evidenceとして扱い、オンチェーンにはbucket、hash、confidence、risk tierなどの最小情報だけを出す。
 
@@ -314,7 +314,7 @@ EligibilityProof
 
 #### 2. 対象地域の人かを判断するため
 
-地域、電話番号、GPS、チェックイン、滞在履歴などの情報がなければ、その人が本当に対象地域の住民または滞在者か判断できない。
+coarse region、check-in consistency、account age、Pass age、地域変更履歴などのsignalがなければ、その人が対象地域に関係するかを十分に判断できない。
 
 災害後に登録された情報だけでは信頼性が低いため、平時から地域登録と滞在証明を蓄積する。
 
@@ -336,13 +336,13 @@ max_amount
 
 少額の一度きりVerification Feeは、複数アカウント作成への経済的ハードルになる。
 
-さらに、以下の情報を組み合わせてNautilus内でリスク評価する。
+さらに、以下のようなsignalをNautilus内で正規化し、hashまたはbucketとしてリスク評価する。
 
-- 電話番号
-- 端末情報
-- チェックイン履歴
-- IP帯
-- 会員登録費の支払い手段
+- duplicate contact hash signal
+- passkey / browser consistency signal
+- coarse check-in distribution hash
+- IP / VPN / ASN risk bucket
+- 会員登録費の支払い手段 hash
 - 地域変更履歴
 
 オンチェーンには個別情報を出さず、`risk_tier` や `proof_hash` のみを出す。Student AidのようなProgramでも、学籍番号や学校メールなどの生データは出さず、Nautilus署名済みのStudent metadataだけを使う。
@@ -354,10 +354,9 @@ max_amount
 ```text
 User Registration
   -> wallet address
-  -> phone verification
-  -> region_id
-  -> GPS / check-in proof
-  -> device signal
+  -> coarse region declaration
+  -> residence evidence snapshot hash
+  -> risk signal hashes / buckets
   -> one-time verification fee
   -> MembershipPass
   -> Nautilus signed metadata update
@@ -368,8 +367,8 @@ User Registration
 ```text
 MembershipPass {
   pass_lineage_id
-  wallet_address
-  region_id or region_id_hash
+  owner
+  payout_address
   verified_residence_cell
   member_since
   last_region_change
@@ -566,7 +565,7 @@ payout = 150 * 0.5 * 1.0 = $75
 
 ### 11.3 不正リスク係数
 
-Nautilus Membership VerifierまたはEligibility Claim層で、電話番号、端末、チェックイン履歴、IP帯、会員登録費の支払い手段などを評価し、支援ティアまたはrisk multiplierを出す。
+Nautilus Membership VerifierまたはEligibility Claim層で、duplicate contact hash、passkey / browser consistency、coarse check-in distribution hash、IP / VPN / ASN risk bucket、会員登録費の支払い手段 hashなどを評価し、支援ティアまたはrisk multiplierを出す。
 
 MVP係数:
 
