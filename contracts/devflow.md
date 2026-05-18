@@ -7,14 +7,14 @@
 実装の順序は、災害専用 object から始めるのではなく、次の依存関係を優先する。
 
 ```text
-Program / Pool / Membership
+Program / Pool / Donation / DonorPass / Membership
   -> generic Nautilus verifier result
   -> generic claim / payout
   -> disaster verifier 接続
   -> residence / student verifier 拡張
 ```
 
-Disaster Relief は最初の Program であり、`DisasterEvent` はその Program 固有 object である。contracts の中心は `Program / Campaign`、`Pool`、`MembershipPass`、`Nautilus Verifier Result`、`EligibilityResult`、`Claim / Payout` に置く。
+Disaster Relief は最初の Program であり、`DisasterEvent` はその Program 固有 object である。contracts の中心は `Program / Campaign`、`Pool`、`MembershipPass`、`DonorPass`、`DonationRecord`、`Nautilus Verifier Result`、`EligibilityResult`、`Claim / Payout` に置く。
 
 ## 2. 開発方針
 
@@ -23,8 +23,12 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - 実装 PR では schema、BCS field order、`AffectedCellLeaf` canonical order を必要なく変更しない。
 - Pool、Program、Membership、Verifier Result、Claim、Admin の責務を分ける。
 - MembershipPass は全受取者必須にする。
-- Pass は準 SBT とし、Nautilus 署名付き migration result がある場合だけ移行を許可する。
-- Pass metadata は Nautilus 署名済み update のみ支払い判定に使う。
+- DonorPass は寄付者向け準 SBT とし、初回寄付時に自動発行する。
+- DonationRecord は DonorPass に紐づく寄付履歴とし、2 回目以降の寄付も既存 DonorPass に追加する。
+- DonorPass / DonationRecord は貢献証明と dapp 表示用であり、Claim / Payout 権利や支払い保証を与えない。
+- DonorPass の wallet migration は follow-up とし、MVP では通常 transfer を拒否する。
+- MembershipPass は準 SBT とし、Nautilus 署名付き migration result がある場合だけ移行を許可する。
+- MembershipPass metadata は Nautilus 署名済み update のみ支払い判定に使う。
 - raw email、phone、GPS 履歴、端末情報、住所、学籍番号などはオンチェーンに出さない。
 - Verification Fee は Operations Pool へ入れ、支払い保証や Relief payout 原資として扱わない。
 - Main Pool、Designated / Campaign Pool、Operations Pool を分離する。
@@ -50,8 +54,9 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 内容:
 
 - Sonari を汎用寄付プラットフォームとして再定義する。
-- `Program / Campaign`、`Pool`、`MembershipPass`、`NautilusVerifierResult`、`EligibilityResult`、`Claim / Payout` を docs 上の中心概念にする。
+- `Program / Campaign`、`Pool`、`MembershipPass`、`DonorPass`、`DonationRecord`、`NautilusVerifierResult`、`EligibilityResult`、`Claim / Payout` を docs 上の中心概念にする。
 - `DisasterEvent` は Disaster Relief Program 固有 object として位置づける。
+- DonorPass、DonationRecord、初回寄付時の自動発行、寄付履歴、donor tier、donor events を定義する。
 - Membership Pass、Residence / Student metadata、Web MVP residence confidence scoring、Student Aid model を定義する。
 - Disaster Oracle は災害対象セル root 作成に集中し、個人 residence 判定は membership verifier に分離する。
 
@@ -59,6 +64,7 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 
 - docs-only 差分である。
 - existing Disaster Oracle v1 payload、schema、BCS field order、`AffectedCellLeaf` 仕様を変更していない。
+- 既存の Pool split、MembershipPass、Claim / Payout、golden vector を変更していない。
 - 汎用 Program 基盤から disaster / student へ自然に拡張できる。
 
 ### PR 2. Program / Admin / Pause scaffold
@@ -84,7 +90,7 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - paused Program / Campaign の claim を拒否できる。
 - Move tests が通る。
 
-### PR 3. Pool / Donation 基盤
+### PR 3. Pool / Donation / DonorPass 基盤
 
 対象:
 
@@ -100,11 +106,19 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - General Donation 100% Main Pool
 - Designated Donation 50% Designated / Campaign Pool、50% Main Pool
 - Operations Donation 100% Operations Pool
+- 初回寄付時の DonorPass 自動発行
+- 2 回目以降の DonationRecord dynamic field 追加
+- donor 集計更新: total donated、donation count、first / last donated timestamp、tier
 - Pool / Donation events
+- Donor events: `DonationRecorded`、`DonorPassIssued`、`DonorTierUpdated`
 
 完了条件:
 
 - Pool ごとに残高と累計を追跡できる。
+- 初回寄付で DonorPass を発行し、2 回目以降の寄付を既存 DonorPass の履歴として記録できる。
+- DonorPass の集計情報と tier を更新できる。
+- DonorPass は通常 transfer できない。
+- DonorPass / DonationRecord が Claim / Payout 権利を与えない。
 - paused donation を拒否できる。
 - Verification Fee 以外の Operations donation も扱える。
 
@@ -126,6 +140,7 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 
 完了条件:
 
+- MembershipPass は受取者向け Pass であり、寄付者向け DonorPass と責務を混同しない。
 - Claim 対象者は Pass 必須にできる。
 - Pass lineage で二重 Claim 防止 key を作れる。
 - 通常 transfer はできない。
@@ -316,11 +331,12 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 内容:
 
 - Dashboard に必要な event / object field を整理する。
-- Program / Campaign / Pool / Pass / ClaimReceipt を dapp が読める形にする。
+- Program / Campaign / Pool / MembershipPass / DonorPass / DonationRecord / ClaimReceipt を dapp が読める形にする。
+- DonorPass、donation history、total donated、donor tier、donor events を dapp read model に含める。
 
 完了条件:
 
-- dapp から Donation、Pass、Program、Campaign、Claim history を表示できる。
+- dapp から Donation、MembershipPass、DonorPass、donation history、Program、Campaign、Claim history を表示できる。
 
 ### PR 14. Mainnet deployment scripts
 
@@ -352,6 +368,7 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 内容:
 
 - donate
+- DonorPass issued / donation history 表示確認
 - register pass
 - submit residence metadata update
 - submit disaster payload
@@ -390,5 +407,16 @@ docs-only PR では以下を確認する。
 - Mermaid fence の基本構文
 - docs-only 差分であること
 - `DisasterEvent` が唯一の Claim 基盤に見える表現が残っていないこと
+- DonorPass が Claim / Payout 権利や支払い保証に見える表現が残っていないこと
+- MembershipPass が受取者向け、DonorPass が寄付者向けとして分離されていること
+- General 100% Main、Designated 50/50、Operations 100% Operations の既存 donation split が維持されていること
 - raw 個人情報をオンチェーンに出す表現が残っていないこと
 - 保険料、掛け金、支払い保証に見える表現が残っていないこと
+
+実装 PR では以下も確認する。
+
+- 初回寄付で `DonorPassIssued` と `DonationRecorded` が emit されること
+- すべての寄付で `DonationRecorded` が emit されること
+- tier 変更時のみ `DonorTierUpdated` が emit されること
+- DonorPass の通常 transfer を拒否すること
+- DonationRecord に raw 個人情報を保存しないこと

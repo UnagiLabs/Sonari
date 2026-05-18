@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Sonari は、Nautilus で受取対象を検証できる汎用寄付プラットフォームである。災害支援は最初のユースケースだが、contracts の中心は災害専用 object ではなく、`Program / Campaign`、`Pool`、`Membership Pass`、`Nautilus Verifier Result`、`Eligibility Root / Result`、`Claim / Payout` の汎用基盤に置く。
+Sonari は、Nautilus で受取対象を検証できる汎用寄付プラットフォームである。災害支援は最初のユースケースだが、contracts の中心は災害専用 object ではなく、`Program / Campaign`、`Pool`、`Membership Pass`、`DonorPass`、`Nautilus Verifier Result`、`Eligibility Root / Result`、`Claim / Payout` の汎用基盤に置く。
 
 Sonari は保険商品ではない。支払い保証をしない。Verification Fee は支援金の購入や継続的な掛け金ではなく、検証、Sybil 対策、運営費を支える一度きりの費用であり、Operations Pool に入る。
 
@@ -13,7 +13,9 @@ Sonari は保険商品ではない。支払い保証をしない。Verification 
 | `Program` | 寄付の目的、検証要件、対象者種別、Pool 方針、Claim 方針を束ねる上位単位。例: Disaster Relief Program、Student Aid Program。 |
 | `Campaign` | Program 配下の期間・スポンサー・地域・災害種別などで区切った実行単位。 |
 | `Pool` | Main Pool、Designated Relief Pool、Operations Pool、Campaign Pool などの資金管理単位。 |
-| `MembershipPass` | 全受取者が必ず持つ準 SBT。Pass metadata は Nautilus 署名済み update だけを信頼する。 |
+| `MembershipPass` | 全受取者が必ず持つ準 SBT。受取者の eligibility / Claim 用であり、Pass metadata は Nautilus 署名済み update だけを信頼する。 |
+| `DonorPass` | 寄付者が持つ準 SBT。初回寄付時に自動 mint し、寄付者の貢献証明と dapp 表示に使う。Claim 権利や支払い保証は与えない。 |
+| `DonationRecord` | `DonorPass` に dynamic field として紐づく寄付履歴。各寄付の最小情報だけを保持し、`DonorPass` 本体は集計情報だけを保持する。 |
 | `NautilusVerifierResult` | Nautilus / TEE が生成する署名済み検証結果。Disaster、Residence、Student など verifier family ごとに作る。 |
 | `EligibilityRoot` / `EligibilityResult` | Program / Campaign が Claim に使う対象者集合または個別対象判定の抽象化。 |
 | `Claim` / `Payout` | Pass、Verifier Result、Pool、PayoutPolicy を検証して支払いを実行し、二重 Claim を防ぐ。 |
@@ -28,6 +30,9 @@ Sonari は保険商品ではない。支払い保証をしない。Verification 
 | Program | Disaster Relief Program と Earthquake Campaign / Pool を作成できる |
 | Pool | Main Pool、Designated Relief Pool、Operations Pool を分離して管理できる |
 | Donation | General Donation、Designated Donation、Operations Donation を入金できる |
+| Donation | 初回寄付時に寄付者へ DonorPass を自動発行できる |
+| Donation | 2 回目以降の寄付を既存 DonorPass の DonationRecord として追加できる |
+| Donation | DonorPass の集計情報と tier を dapp から読める |
 | Membership | 受取者に MembershipPass を発行できる |
 | Membership | Pass metadata update は Nautilus 署名済み result のみ受理する |
 | Disaster | Nautilus Disaster Oracle の finalized payload から DisasterEvent を作成できる |
@@ -44,6 +49,7 @@ Sonari は保険商品ではない。支払い保証をしない。Verification 
 - Operations Pool と Relief / Campaign Pool を混同しない
 - Designated Pool 同士を無断流用しない
 - Main Pool は 1 Campaign / 1 Event で使い切らない
+- DonorPass / DonationRecord を Claim 権利や支払い保証として扱わない
 - raw email、phone、GPS 履歴、端末情報、住所、学籍番号、本人確認詳細をオンチェーンに出さない
 - dapp、Relayer、Worker、offchain DB を信用しない
 - emergency pause を実装する
@@ -74,7 +80,42 @@ Operations Donation
   -> 100% Operations Pool
 ```
 
-### 2.2 Program / Campaign
+### 2.2 Donation / DonorPass
+
+Donation flow は Pool への入金と寄付者向け記録を同じ transaction 境界で扱う。Pool split は既存方針を維持し、`DonorPass` / `DonationRecord` はその結果を寄付者側に記録するための object である。
+
+初回寄付時は、寄付者 wallet に `DonorPass` を自動 mint する。2 回目以降の寄付では、既存 `DonorPass` に dynamic field として `DonationRecord` を追加し、`DonorPass` 本体の集計情報を更新する。`DonorPass` は原則 transfer 不可の準 SBT とし、wallet migration は follow-up で扱う。
+
+`DonorPass` 本体は集計情報だけを保持する。
+
+| Field | 意味 |
+| --- | --- |
+| `owner` | DonorPass owner wallet |
+| `donor_lineage_id` | 将来の wallet migration 後も寄付者系譜を追うための ID |
+| `total_donated` | 累計寄付額 |
+| `donation_count` | 累計寄付回数 |
+| `first_donated_at_ms` | 初回寄付時刻 |
+| `last_donated_at_ms` | 直近寄付時刻 |
+| `tier` | 累計寄付額または寄付回数に基づく donor tier |
+
+`DonationRecord` は各寄付の最小情報だけを保持する。
+
+| Field | 意味 |
+| --- | --- |
+| `donation_index` | DonorPass 内の寄付連番 |
+| `donation_type` | General / Designated / Operations などの寄付種別 |
+| `program_id` | Program 指定寄付の場合の optional ID |
+| `campaign_id` | Campaign 指定寄付の場合の optional ID |
+| `pool_id` | 寄付が対象とした Pool |
+| `amount` | 寄付額 |
+| `coin_type` | 寄付 asset type |
+| `donated_at_ms` | 寄付時刻 |
+
+毎回 `DonationRecorded` event を emit する。初回寄付で `DonorPass` を mint した場合は `DonorPassIssued` event も emit する。累計寄付額または寄付回数により `tier` が変わった場合は `DonorTierUpdated` event を emit する。
+
+`DonorPass` / `DonationRecord` は寄付者の貢献証明と dapp 表示用であり、支払い保証、Claim 権利、Pool 優先権、Payout 権利を与えない。raw email、phone、住所、本人確認詳細などの個人情報は保持しない。
+
+### 2.3 Program / Campaign
 
 `Program` は、誰に、どの検証で、どの Pool から、どの上限で支払うかを定義する。
 
@@ -90,7 +131,7 @@ Operations Donation
 
 `Campaign` は Program 配下の具体的な実行単位である。Disaster Relief では地震イベントやスポンサー単位、Student Aid では学期・学校・スポンサー単位にできる。
 
-### 2.3 Membership Pass
+### 2.4 Membership Pass
 
 Membership Pass は全受取者に必須の準 SBT である。Pass は通常 transfer できない。wallet 紛失や recovery のための移行は、Nautilus 署名付き migration result を contracts が検証した場合だけ許可する。
 
@@ -112,7 +153,7 @@ Pass status:
 
 `pass_lineage_id` は wallet 移行後も同一人物の Pass 系譜を追うための ID であり、二重 Claim 防止 key に含める。
 
-### 2.4 Nautilus Metadata Update
+### 2.5 Nautilus Metadata Update
 
 contracts は verifier family ごとの署名済み result を検証し、Pass metadata を更新する。
 
@@ -145,7 +186,7 @@ StudentMetadataUpdate {
 
 raw email、phone、GPS 履歴、端末情報、住所、学籍番号、在学証明書の原文はオンチェーンに出さない。オンチェーンには bucket、hash、有効期限、署名検証に必要な最小情報だけを残す。
 
-### 2.5 Web MVP Residence Confidence Scoring
+### 2.6 Web MVP Residence Confidence Scoring
 
 MVP の residence verifier は、ユーザーが Web で提出する複数の低侵襲 signal から confidence score を作る。
 
@@ -160,7 +201,7 @@ MVP の residence verifier は、ユーザーが Web で提出する複数の低
 
 Web MVP は raw GPS や詳細住所をオンチェーンに出さない。Nautilus は evidence snapshot を秘匿して検証し、`verified_residence_cell`、`confidence`、`risk_bucket`、`evidence_snapshot_hash` だけを署名する。
 
-### 2.6 Student Aid Model
+### 2.7 Student Aid Model
 
 Student Aid Program は災害以外の汎用寄付ユースケースである。
 
@@ -304,7 +345,8 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `admin` | AdminCap、pause / unpause、emergency controls |
 | `program` | Program / Campaign registry、status、required metadata |
 | `pools` | Main Pool、Designated / Campaign Pool、Operations Pool、reserve rule |
-| `donation` | General / Designated / Operations Donation と split |
+| `donation` | General / Designated / Operations Donation と split、DonorPass 発行、DonationRecord 追加、donor 集計 / tier 更新 |
+| `donor` (optional) | `donation` から分離する場合の DonorPass / DonationRecord 管理。MVP では donation module 内責務として扱ってよい |
 | `membership` | MembershipPass、Pass status、semi-SBT migration |
 | `metadata_verifier` | Nautilus verifier key、Residence / Student metadata update 検証 |
 | `disaster_event` | Disaster Relief Program 固有の DisasterEvent 保存 |
@@ -321,6 +363,8 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `Program` | program type、required metadata、default policy / pool、active |
 | `Campaign` | program id、campaign metadata、pool id、claim window、active |
 | `MembershipPass` | owner、payout address、`pass_lineage_id`、status、metadata buckets |
+| `DonorPass` | owner、`donor_lineage_id`、total donated、donation count、first / last donated timestamp、tier |
+| `DonationRecord` | DonorPass dynamic field。donation index、donation type、optional program / campaign、pool、amount、coin type、timestamp |
 | `VerifierRegistry` | Nautilus verifier public key、verifier family、disabled flag |
 | `MainPool` | balance、liquid reserve、future reserve、total received / paid |
 | `ProgramPool` / `DesignatedPool` | program / campaign / hazard / sponsor 別 balance |
@@ -337,9 +381,9 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `initialize` | AdminCap、registries、default pools / policies を作成 |
 | `create_program` / `create_campaign` | Program / Campaign を作成 |
 | `create_pool` | Main / Designated / Campaign / Operations Pool を作成 |
-| `donate_general` | 100% Main Pool に入金 |
-| `donate_designated` | Designated / Campaign Pool と Main Pool に 50/50 split |
-| `donate_operations` | 100% Operations Pool に入金 |
+| `donate_general` | 100% Main Pool に入金し、初回寄付なら DonorPass を発行、以降は DonationRecord と donor 集計を更新 |
+| `donate_designated` | Designated / Campaign Pool と Main Pool に 50/50 split し、DonorPass / DonationRecord / donor 集計を更新 |
+| `donate_operations` | 100% Operations Pool に入金し、DonorPass / DonationRecord / donor 集計を更新 |
 | `register_member` | Verification Fee を Operations Pool に入れ、MembershipPass を発行 |
 | `submit_pass_metadata_update` | Nautilus 署名済み Residence / Student metadata update を検証して Pass 更新 |
 | `request_pass_migration` | Nautilus 署名済み migration result により Pass owner / payout address を移行 |
@@ -355,7 +399,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | Program | `ProgramCreated`、`CampaignCreated`、`CampaignBudgetOpened` |
 | Membership | `MembershipPassIssued`、`PassMetadataUpdated`、`PassMigrated`、`PassStatusUpdated` |
 | Verifier | `VerifierKeyAdded`、`VerifierKeyDisabled` |
-| Pool / Donation | `PoolCreated`、`GeneralDonationReceived`、`DesignatedDonationReceived`、`OperationsDonationReceived` |
+| Pool / Donation | `PoolCreated`、`GeneralDonationReceived`、`DesignatedDonationReceived`、`OperationsDonationReceived`、`DonationRecorded`、`DonorPassIssued`、`DonorTierUpdated` |
 | Disaster | `DisasterEventCreated` |
 | Claim | `ClaimPaid`、`ClaimRejected` optional、`ClaimReceiptCreated` |
 | Admin | `Paused`、`Unpaused`、`PolicyUpdated` |
@@ -410,9 +454,12 @@ Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order
 | must | Verification Fee を payout 原資にしない |
 | must | Pass metadata は Nautilus 署名済み update のみ信頼する |
 | must | `pass_lineage_id` で二重 Claim を拒否する |
+| must | Donation ごとに `DonationRecorded` を emit する |
+| must | DonorPass は通常 transfer を拒否する |
 | must | invalid signature / expired result / disabled verifier を拒否する |
 | must | paused 中の donation / claim / verifier update を拒否する |
 | must not | 支払い保証を示唆する |
+| must not | DonorPass / DonationRecord を Claim / Payout 権利として扱う |
 | must not | raw personal data をオンチェーンに出す |
 | must not | Relayer / dapp / Worker input を信用する |
 
@@ -423,7 +470,7 @@ Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order
 | 分類 | 要件 |
 | --- | --- |
 | User | Wallet connect、Membership registration、Pass status view、metadata refresh、Donation、Claim、Claim history |
-| Sponsor | General / Designated / Campaign Donation、sponsor contribution view |
+| Donor / Sponsor | General / Designated / Campaign Donation、DonorPass view、donation history、total donated、donor tier、sponsor contribution view |
 | Admin | Program / Campaign / Pool / Verifier key / PayoutPolicy / pause 管理 |
 | Dashboard | Main Pool、Designated / Campaign Pool、Operations Pool、budget、claim count、paid amount、sponsor impact |
 
@@ -435,6 +482,9 @@ Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order
 | Membership | issue pass、semi-SBT transfer reject、signed migration accepted、duplicate migration reject |
 | Metadata | valid residence / student update、invalid signature reject、expired update reject、disabled verifier reject |
 | Donation | General 100% Main、Designated 50/50、Operations 100% Operations、zero amount reject |
+| DonorPass | first donation mints DonorPass、second and later donations append DonationRecord、aggregate fields update、semi-SBT transfer reject |
+| Donor events | DonationRecorded every donation、DonorPassIssued first donation only、DonorTierUpdated only when tier changes |
+| Donor safety | DonorPass / DonationRecord do not grant Claim / Payout rights、raw personal data is not stored |
 | Pool / Budget | designated priority、main backstop、future reserve protected、budget cap |
 | Disaster | valid payload submit、invalid signature reject、duplicate event reject、AffectedCell proof |
 | Claim | valid generic claim、valid disaster claim composition、stale metadata reject、duplicate claim reject、high risk reject |
@@ -442,4 +492,4 @@ Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order
 
 ### 6.3 Docs-only 境界
 
-この更新は docs-only の設計更新であり、実コード API、schema、package、Move type、BCS field order、`AffectedCellLeaf` canonical order、golden vector は変更しない。実装 PR では、まず contracts の Program / Pool / Membership / Verifier Result 基盤を作り、その後 Disaster verifier と Student / Residence verifier を接続する。
+この更新は docs-only の設計更新であり、実コード API、schema、package、Move type、BCS field order、`AffectedCellLeaf` canonical order、golden vector は変更しない。既存の Pool split 方針、MembershipPass、Claim / Payout、Disaster Oracle v1 schema も変更しない。実装 PR では、まず contracts の Program / Pool / Membership / DonorPass / Verifier Result 基盤を作り、その後 Disaster verifier と Student / Residence verifier を接続する。
