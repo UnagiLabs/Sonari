@@ -88,7 +88,7 @@ PR3 で実装する Pool はすべて USDC 専用である。`MainPool`、`Desig
 
 Donation flow は Pool への入金と寄付者向け記録を同じ transaction 境界で扱う。Pool split は既存方針を維持し、`DonorPass` / `DonationRecord` はその結果を寄付者側に記録するための object である。
 
-Donation entry は USDC 専用の `donate_general_usdc`、`donate_designated_usdc`、`donate_operations_usdc` として提供する。既存 `DonorPass` を更新する entry も `Coin<mock_usdc::USDC>` 固定とし、任意の `Coin<T>` generic donation は提供しない。zero amount は fail-closed で abort する。donation 前に global pause と対象 Pool pause を検証する。
+Donation entry は USDC 専用の `donate_general_usdc`、`donate_designated_usdc`、`donate_operations_usdc` として提供する。既存 `DonorPass` を更新する entry は `donate_general_usdc_with_pass`、`donate_designated_usdc_with_pass`、`donate_operations_usdc_with_pass` とし、いずれも `Coin<mock_usdc::USDC>` 固定である。任意の `Coin<T>` generic donation は提供しない。zero amount は fail-closed で abort する。donation 前に global pause と対象 Pool pause を検証する。
 
 初回寄付時は、寄付者 wallet に `DonorPass` を自動 mint する。2 回目以降の寄付では、既存 `DonorPass` に dynamic field として `DonationRecord` を追加し、`DonorPass` 本体の集計情報を更新する。`DonorPass` は原則 transfer 不可の準 SBT とし、wallet migration は follow-up で扱う。
 
@@ -399,10 +399,12 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `pause_global` / `unpause_global` | emergency pause を全体に適用 / 解除 |
 | `pause_target` / `unpause_target` | Program / Campaign などの target object に emergency pause を適用 / 解除 |
 | `create_pool` | Main / Designated / Campaign / Operations Pool を作成 |
-| `donate_general_usdc` | `Coin<mock_usdc::USDC>` を 100% Main Pool に入金し、初回寄付なら DonorPass を発行する |
-| `donate_general_usdc_with_pass` | 既存 DonorPass を registry と照合し、USDC DonationRecord と donor 集計を更新する |
-| `donate_designated_usdc` | `Coin<mock_usdc::USDC>` を Designated / Campaign Pool と Main Pool に 50/50 split し、初回 DonorPass / DonationRecord / donor 集計を更新する |
-| `donate_operations_usdc` | `Coin<mock_usdc::USDC>` を 100% Operations Pool に入金し、初回 DonorPass / DonationRecord / donor 集計を更新する |
+| `donate_general_usdc` | `Coin<mock_usdc::USDC>` を 100% Main Pool に入金し、初回寄付として DonorPass / DonationRecord / donor 集計を作成する |
+| `donate_general_usdc_with_pass` | 既存 DonorPass を registry と照合し、General USDC DonationRecord と donor 集計を更新する |
+| `donate_designated_usdc` | `Coin<mock_usdc::USDC>` を Designated / Campaign Pool と Main Pool に 50/50 split し、初回 DonorPass / DonationRecord / donor 集計を作成する |
+| `donate_designated_usdc_with_pass` | 既存 DonorPass を registry と照合し、Designated USDC DonationRecord と donor 集計を更新する |
+| `donate_operations_usdc` | `Coin<mock_usdc::USDC>` を 100% Operations Pool に入金し、初回 DonorPass / DonationRecord / donor 集計を作成する |
+| `donate_operations_usdc_with_pass` | 既存 DonorPass を registry と照合し、Operations USDC DonationRecord と donor 集計を更新する |
 | `register_member` | Verification Fee を Operations Pool に入れ、MembershipPass を発行 |
 | `submit_pass_metadata_update` | Nautilus 署名済み Residence / Student metadata update を検証して Pass 更新 |
 | `request_pass_migration` | Nautilus 署名済み migration result により Pass owner / payout address を移行 |

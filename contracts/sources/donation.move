@@ -231,6 +231,53 @@ public entry fun donate_designated_usdc(
     transfer::transfer(pass, ctx.sender());
 }
 
+public entry fun donate_designated_usdc_with_pass(
+    pause_state: &PauseState,
+    registry: &DonorRegistry,
+    main_pool: &mut MainPool,
+    designated_pool: &mut DesignatedPool,
+    pass: &mut DonorPass,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
+    assert!(pass.owner == ctx.sender(), EDonorPassOwnerMismatch);
+    assert_registered_pass(registry, pass, ctx.sender());
+
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let main_amount = amount / 2;
+    let designated_amount = amount - main_amount;
+    let mut main_coin = coin;
+    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let designated_pool_id = pools::designated_pool_id(designated_pool);
+
+    pools::deposit_main_usdc(main_pool, main_coin);
+    pools::deposit_designated_usdc(designated_pool, designated_coin);
+    event::emit(DesignatedDonationReceived {
+        main_pool_id,
+        designated_pool_id,
+        amount,
+        main_amount,
+        designated_amount,
+        actor: ctx.sender(),
+    });
+
+    record_donation(
+        pass,
+        DONATION_TYPE_DESIGNATED,
+        option::none(),
+        option::none(),
+        designated_pool_id,
+        amount,
+        ctx,
+    );
+}
+
 public entry fun donate_operations_usdc(
     pause_state: &PauseState,
     registry: &mut DonorRegistry,
@@ -263,6 +310,41 @@ public entry fun donate_operations_usdc(
         ctx,
     );
     transfer::transfer(pass, ctx.sender());
+}
+
+public entry fun donate_operations_usdc_with_pass(
+    pause_state: &PauseState,
+    registry: &DonorRegistry,
+    operations_pool: &mut OperationsPool,
+    pass: &mut DonorPass,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
+    assert!(pass.owner == ctx.sender(), EDonorPassOwnerMismatch);
+    assert_registered_pass(registry, pass, ctx.sender());
+
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let pool_id = pools::operations_pool_id(operations_pool);
+    pools::deposit_operations_usdc(operations_pool, coin);
+    event::emit(OperationsDonationReceived {
+        pool_id,
+        amount,
+        actor: ctx.sender(),
+    });
+
+    record_donation(
+        pass,
+        DONATION_TYPE_OPERATIONS,
+        option::none(),
+        option::none(),
+        pool_id,
+        amount,
+        ctx,
+    );
 }
 
 fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass {
