@@ -126,28 +126,14 @@ public entry fun donate_general_usdc(
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
 
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::main_pool_id(main_pool);
-    pools::deposit_main_usdc(main_pool, coin);
-    event::emit(GeneralDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    let mut pass = new_donor_pass(registry, ctx);
-    record_donation(
-        &mut pass,
+    let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
+    process_first_donation(
+        registry,
         DONATION_TYPE_GENERAL,
-        option::none(),
-        option::none(),
         pool_id,
         amount,
         ctx,
     );
-    transfer::transfer(pass, ctx.sender());
 }
 
 public entry fun donate_general_usdc_with_pass(
@@ -160,25 +146,12 @@ public entry fun donate_general_usdc_with_pass(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    assert!(pass.owner == ctx.sender(), EDonorPassOwnerMismatch);
-    assert_registered_pass(registry, pass, ctx.sender());
+    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
 
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::main_pool_id(main_pool);
-    pools::deposit_main_usdc(main_pool, coin);
-    event::emit(GeneralDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    record_donation(
+    let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
+    process_with_pass_donation(
         pass,
         DONATION_TYPE_GENERAL,
-        option::none(),
-        option::none(),
         pool_id,
         amount,
         ctx,
@@ -197,38 +170,15 @@ public entry fun donate_designated_usdc(
     admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
     admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
 
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let main_amount = amount / 2;
-    let designated_amount = amount - main_amount;
-    let mut main_coin = coin;
-    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let designated_pool_id = pools::designated_pool_id(designated_pool);
-
-    pools::deposit_main_usdc(main_pool, main_coin);
-    pools::deposit_designated_usdc(designated_pool, designated_coin);
-    event::emit(DesignatedDonationReceived {
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor: ctx.sender(),
-    });
-
-    let mut pass = new_donor_pass(registry, ctx);
-    record_donation(
-        &mut pass,
+    let (designated_pool_id, amount) =
+        deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
+    process_first_donation(
+        registry,
         DONATION_TYPE_DESIGNATED,
-        option::none(),
-        option::none(),
         designated_pool_id,
         amount,
         ctx,
     );
-    transfer::transfer(pass, ctx.sender());
 }
 
 public entry fun donate_designated_usdc_with_pass(
@@ -243,35 +193,13 @@ public entry fun donate_designated_usdc_with_pass(
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
     admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
-    assert!(pass.owner == ctx.sender(), EDonorPassOwnerMismatch);
-    assert_registered_pass(registry, pass, ctx.sender());
+    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
 
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let main_amount = amount / 2;
-    let designated_amount = amount - main_amount;
-    let mut main_coin = coin;
-    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let designated_pool_id = pools::designated_pool_id(designated_pool);
-
-    pools::deposit_main_usdc(main_pool, main_coin);
-    pools::deposit_designated_usdc(designated_pool, designated_coin);
-    event::emit(DesignatedDonationReceived {
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor: ctx.sender(),
-    });
-
-    record_donation(
+    let (designated_pool_id, amount) =
+        deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
+    process_with_pass_donation(
         pass,
         DONATION_TYPE_DESIGNATED,
-        option::none(),
-        option::none(),
         designated_pool_id,
         amount,
         ctx,
@@ -288,28 +216,14 @@ public entry fun donate_operations_usdc(
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
 
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::operations_pool_id(operations_pool);
-    pools::deposit_operations_usdc(operations_pool, coin);
-    event::emit(OperationsDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    let mut pass = new_donor_pass(registry, ctx);
-    record_donation(
-        &mut pass,
+    let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
+    process_first_donation(
+        registry,
         DONATION_TYPE_OPERATIONS,
-        option::none(),
-        option::none(),
         pool_id,
         amount,
         ctx,
     );
-    transfer::transfer(pass, ctx.sender());
 }
 
 public entry fun donate_operations_usdc_with_pass(
@@ -322,9 +236,83 @@ public entry fun donate_operations_usdc_with_pass(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
-    assert!(pass.owner == ctx.sender(), EDonorPassOwnerMismatch);
-    assert_registered_pass(registry, pass, ctx.sender());
+    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
 
+    let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
+    process_with_pass_donation(
+        pass,
+        DONATION_TYPE_OPERATIONS,
+        pool_id,
+        amount,
+        ctx,
+    );
+}
+
+fun deposit_general_usdc_and_emit(
+    main_pool: &mut MainPool,
+    coin: Coin<USDC>,
+    ctx: &TxContext,
+): (ID, u64) {
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let pool_id = pools::main_pool_id(main_pool);
+    pools::deposit_main_usdc(main_pool, coin);
+    event::emit(GeneralDonationReceived {
+        pool_id,
+        amount,
+        actor: ctx.sender(),
+    });
+
+    (pool_id, amount)
+}
+
+fun deposit_designated_usdc_and_emit(
+    main_pool: &mut MainPool,
+    designated_pool: &mut DesignatedPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+): (ID, u64) {
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let (main_coin, designated_coin, main_amount, designated_amount) =
+        split_designated_usdc(coin, amount, ctx);
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let designated_pool_id = pools::designated_pool_id(designated_pool);
+
+    pools::deposit_main_usdc(main_pool, main_coin);
+    pools::deposit_designated_usdc(designated_pool, designated_coin);
+    event::emit(DesignatedDonationReceived {
+        main_pool_id,
+        designated_pool_id,
+        amount,
+        main_amount,
+        designated_amount,
+        actor: ctx.sender(),
+    });
+
+    (designated_pool_id, amount)
+}
+
+fun split_designated_usdc(
+    coin: Coin<USDC>,
+    amount: u64,
+    ctx: &mut TxContext,
+): (Coin<USDC>, Coin<USDC>, u64, u64) {
+    let main_amount = amount / 2;
+    let designated_amount = amount - main_amount;
+    let mut main_coin = coin;
+    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
+
+    (main_coin, designated_coin, main_amount, designated_amount)
+}
+
+fun deposit_operations_usdc_and_emit(
+    operations_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &TxContext,
+): (ID, u64) {
     let amount = coin::value(&coin);
     assert!(amount > 0, EZeroDonation);
 
@@ -336,9 +324,39 @@ public entry fun donate_operations_usdc_with_pass(
         actor: ctx.sender(),
     });
 
+    (pool_id, amount)
+}
+
+fun process_first_donation(
+    registry: &mut DonorRegistry,
+    donation_type: u8,
+    pool_id: ID,
+    amount: u64,
+    ctx: &mut TxContext,
+) {
+    let mut pass = new_donor_pass(registry, ctx);
+    record_donation(
+        &mut pass,
+        donation_type,
+        option::none(),
+        option::none(),
+        pool_id,
+        amount,
+        ctx,
+    );
+    transfer::transfer(pass, ctx.sender());
+}
+
+fun process_with_pass_donation(
+    pass: &mut DonorPass,
+    donation_type: u8,
+    pool_id: ID,
+    amount: u64,
+    ctx: &mut TxContext,
+) {
     record_donation(
         pass,
-        DONATION_TYPE_OPERATIONS,
+        donation_type,
         option::none(),
         option::none(),
         pool_id,
@@ -381,6 +399,15 @@ fun assert_registered_pass(registry: &DonorRegistry, pass: &DonorPass, donor: ad
     assert!(dynamic_field::exists_with_type<address, ID>(&registry.id, donor), EDonorPassNotIssued);
     let donor_pass_id = dynamic_field::borrow<address, ID>(&registry.id, donor);
     assert!(*donor_pass_id == object::id(pass), EDonorPassMismatch);
+}
+
+fun assert_valid_registered_pass_owner(
+    registry: &DonorRegistry,
+    pass: &DonorPass,
+    donor: address,
+) {
+    assert!(pass.owner == donor, EDonorPassOwnerMismatch);
+    assert_registered_pass(registry, pass, donor);
 }
 
 fun record_donation(

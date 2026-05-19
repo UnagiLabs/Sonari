@@ -88,7 +88,9 @@ PR3 で実装する Pool はすべて USDC 専用である。`MainPool`、`Desig
 
 Donation flow は Pool への入金と寄付者向け記録を同じ transaction 境界で扱う。Pool split は既存方針を維持し、`DonorPass` / `DonationRecord` はその結果を寄付者側に記録するための object である。
 
-Donation entry は USDC 専用の `donate_general_usdc`、`donate_designated_usdc`、`donate_operations_usdc` として提供する。既存 `DonorPass` を更新する entry は `donate_general_usdc_with_pass`、`donate_designated_usdc_with_pass`、`donate_operations_usdc_with_pass` とし、いずれも `Coin<mock_usdc::USDC>` 固定である。任意の `Coin<T>` generic donation は提供しない。zero amount は fail-closed で abort する。donation 前に global pause と対象 Pool pause を検証する。
+Donation entry は USDC 専用の `donate_general_usdc`、`donate_designated_usdc`、`donate_operations_usdc` として提供する。既存 `DonorPass` を更新する entry は `donate_general_usdc_with_pass`、`donate_designated_usdc_with_pass`、`donate_operations_usdc_with_pass` とし、いずれも `Coin<mock_usdc::USDC>` 固定である。この 6 つの `public entry` は user-facing donation API として意図的に公開する。任意の `Coin<T>` generic donation は提供しない。zero amount は fail-closed で abort する。donation 前に global pause と対象 Pool pause を検証する。
+
+Donation の `public entry` は薄い入口とし、Pool deposit / event emit、Designated split、first donation の `DonorPass` 発行、with-pass の owner / registry 検証と `DonationRecord` 追加は `donation` module 内の private helper に委譲する。Pool 作成は admin-only の `public(package) entry`、USDC deposit helper は `public(package)` に留め、test convenience のために production API surface を広げない。
 
 初回寄付時は、寄付者 wallet に `DonorPass` を自動 mint する。2 回目以降の寄付では、既存 `DonorPass` に dynamic field として `DonationRecord` を追加し、`DonorPass` 本体の集計情報を更新する。`DonorPass` は原則 transfer 不可の準 SBT とし、wallet migration は follow-up で扱う。
 
@@ -502,7 +504,7 @@ Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order
 | Program | create program / campaign、inactive reject |
 | Membership | issue pass、semi-SBT transfer reject、signed migration accepted、duplicate migration reject |
 | Metadata | valid residence / student update、invalid signature reject、expired update reject、disabled verifier reject |
-| Donation | USDC only、General 100% Main、Designated 50/50、odd remainder to Designated、Operations 100% Operations、zero amount reject、generic `Coin<T>` donation surface なし |
+| Donation | 6 public donation entries only、USDC only、General 100% Main、Designated 50/50、odd remainder to Designated、Operations 100% Operations、zero amount reject、generic `Coin<T>` donation surface なし |
 | DonorPass | first donation mints DonorPass、second and later donations append DonationRecord、aggregate fields update、duplicate first-donation mint reject、semi-SBT transfer reject |
 | Donor events | DonationRecorded every donation、DonorPassIssued first donation only、DonorTierUpdated only when tier changes |
 | Donor safety | DonorPass / DonationRecord do not grant Claim / Payout rights、raw personal data is not stored |
