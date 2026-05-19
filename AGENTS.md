@@ -82,7 +82,7 @@ Move は最小権限を原則にしてください。
 
 contract-visible behavior を変更する場合は、Move test を追加するか、追加できない理由を明記してください。
 
-Move ファイル、`contracts/Move.toml`、`contracts/Move.lock` を変更した場合は、`pnpm check:contracts` を実行し、`sui move build` と move-analyzer の warning / error を修正対象として扱ってください。Codex hooks は contracts 変更時にこの検証を自動実行します。move-analyzer は repo-local `.cache/move-analyzer/<rev>/` に自動 install されます。既存 binary を使う場合は `MOVE_ANALYZER_BIN` に `move-analyzer` の path を指定してください。
+Move ファイル、`contracts/Move.toml`、`contracts/Move.lock` を変更した場合は、`pnpm check:move` を実行し、`sui move build` の warning / error を修正対象として扱ってください。Codex hooks は contracts 変更時にこの検証を自動実行します。
 
 ## ドキュメント方針
 
