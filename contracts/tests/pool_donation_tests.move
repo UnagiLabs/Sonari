@@ -2,6 +2,7 @@
 module contracts::pool_donation_tests;
 
 use contracts::admin;
+use contracts::accessor;
 use contracts::donation;
 use contracts::mock_usdc;
 use contracts::pools;
@@ -88,7 +89,7 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1_000_000, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -96,8 +97,9 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
             scenario.ctx(),
         );
 
-        assert!(pools::main_pool_balance_usdc(&main_pool) == 1_000_000);
-        assert!(pools::main_pool_total_received_usdc(&main_pool) == 1_000_000);
+        let (_, balance, total_received, _) = accessor::main_pool_summary(&main_pool);
+        assert!(balance == 1_000_000);
+        assert!(total_received == 1_000_000);
 
         let donation_events = event::events_by_type<donation::GeneralDonationReceived>();
         assert!(donation_events.length() == 1);
@@ -137,10 +139,12 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
     scenario.next_tx(DONOR);
     {
         let pass = scenario.take_from_sender<donation::DonorPass>();
-        assert!(donation::donor_pass_owner(&pass) == DONOR);
-        assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
-        assert!(donation::donor_pass_donation_count(&pass) == 1);
-        assert!(donation::donor_pass_tier(&pass) == donation::tier_silver());
+        let (owner, _, total_donated, donation_count, _, _, tier) =
+            accessor::donor_pass_summary(&pass);
+        assert!(owner == DONOR);
+        assert!(total_donated == 1_000_000);
+        assert!(donation_count == 1);
+        assert!(tier == donation::tier_silver());
         scenario.return_to_sender(pass);
     };
 
@@ -159,7 +163,7 @@ fun designated_donation_splits_usdc_and_sends_odd_remainder_to_designated_pool()
         let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let coin = mock_usdc::mint_for_testing(5, scenario.ctx());
 
-        donation::donate_designated_usdc(
+        accessor::donate_designated_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -168,10 +172,13 @@ fun designated_donation_splits_usdc_and_sends_odd_remainder_to_designated_pool()
             scenario.ctx(),
         );
 
-        assert!(pools::main_pool_balance_usdc(&main_pool) == 2);
-        assert!(pools::main_pool_total_received_usdc(&main_pool) == 2);
-        assert!(pools::designated_pool_balance_usdc(&designated_pool) == 3);
-        assert!(pools::designated_pool_total_received_usdc(&designated_pool) == 3);
+        let (_, main_balance, main_total_received, _) = accessor::main_pool_summary(&main_pool);
+        let (_, designated_balance, designated_total_received, _, _) =
+            accessor::designated_pool_summary(&designated_pool);
+        assert!(main_balance == 2);
+        assert!(main_total_received == 2);
+        assert!(designated_balance == 3);
+        assert!(designated_total_received == 3);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
@@ -202,7 +209,7 @@ fun operations_donation_moves_all_usdc_to_operations_pool() {
         let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
         let coin = mock_usdc::mint_for_testing(250_000, scenario.ctx());
 
-        donation::donate_operations_usdc(
+        accessor::donate_operations_usdc(
             &pause_state,
             &mut registry,
             &mut operations_pool,
@@ -210,8 +217,9 @@ fun operations_donation_moves_all_usdc_to_operations_pool() {
             scenario.ctx(),
         );
 
-        assert!(pools::operations_pool_balance_usdc(&operations_pool) == 250_000);
-        assert!(pools::operations_pool_total_received_usdc(&operations_pool) == 250_000);
+        let (_, balance, total_received, _) = accessor::operations_pool_summary(&operations_pool);
+        assert!(balance == 250_000);
+        assert!(total_received == 250_000);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
@@ -239,7 +247,7 @@ fun zero_amount_donation_is_rejected() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(0, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -275,7 +283,7 @@ fun global_pause_blocks_donation() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -318,7 +326,7 @@ fun target_pause_blocks_pool_donation() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -345,7 +353,7 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -369,7 +377,7 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
         let coin = mock_usdc::mint_for_testing(999_999, scenario.ctx());
 
-        donation::donate_general_usdc_with_pass(
+        accessor::donate_general_usdc_with_pass(
             &pause_state,
             &registry,
             &mut main_pool,
@@ -378,12 +386,14 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
             scenario.ctx(),
         );
 
-        assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
-        assert!(donation::donor_pass_donation_count(&pass) == 2);
-        assert!(donation::donor_pass_tier(&pass) == donation::tier_silver());
+        let (_, _, total_donated, donation_count, _, _, tier) =
+            accessor::donor_pass_summary(&pass);
+        assert!(total_donated == 1_000_000);
+        assert!(donation_count == 2);
+        assert!(tier == donation::tier_silver());
 
-        let (donation_index, donation_type, _, _, amount, coin_type, _) =
-            donation::donation_record_fields_for_testing(&pass, 1);
+        let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
+            accessor::donation_record_summary(&pass, 1);
         assert!(donation_index == 1);
         assert!(donation_type == donation::donation_type_general());
         assert!(amount == 999_999);
@@ -416,7 +426,7 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -438,7 +448,7 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
         let coin = mock_usdc::mint_for_testing(5, scenario.ctx());
 
-        donation::donate_designated_usdc_with_pass(
+        accessor::donate_designated_usdc_with_pass(
             &pause_state,
             &registry,
             &mut main_pool,
@@ -448,15 +458,20 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
             scenario.ctx(),
         );
 
-        assert!(pools::main_pool_balance_usdc(&main_pool) == 3);
-        assert!(pools::main_pool_total_received_usdc(&main_pool) == 3);
-        assert!(pools::designated_pool_balance_usdc(&designated_pool) == 3);
-        assert!(pools::designated_pool_total_received_usdc(&designated_pool) == 3);
-        assert!(donation::donor_pass_total_donated_usdc(&pass) == 6);
-        assert!(donation::donor_pass_donation_count(&pass) == 2);
+        let (_, main_balance, main_total_received, _) = accessor::main_pool_summary(&main_pool);
+        let (_, designated_balance, designated_total_received, _, _) =
+            accessor::designated_pool_summary(&designated_pool);
+        let (_, _, total_donated, donation_count, _, _, _) =
+            accessor::donor_pass_summary(&pass);
+        assert!(main_balance == 3);
+        assert!(main_total_received == 3);
+        assert!(designated_balance == 3);
+        assert!(designated_total_received == 3);
+        assert!(total_donated == 6);
+        assert!(donation_count == 2);
 
-        let (donation_index, donation_type, _, _, amount, coin_type, _) =
-            donation::donation_record_fields_for_testing(&pass, 1);
+        let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
+            accessor::donation_record_summary(&pass, 1);
         assert!(donation_index == 1);
         assert!(donation_type == donation::donation_type_designated());
         assert!(amount == 5);
@@ -499,7 +514,7 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -520,7 +535,7 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
         let coin = mock_usdc::mint_for_testing(7, scenario.ctx());
 
-        donation::donate_operations_usdc_with_pass(
+        accessor::donate_operations_usdc_with_pass(
             &pause_state,
             &registry,
             &mut operations_pool,
@@ -529,13 +544,16 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
             scenario.ctx(),
         );
 
-        assert!(pools::operations_pool_balance_usdc(&operations_pool) == 7);
-        assert!(pools::operations_pool_total_received_usdc(&operations_pool) == 7);
-        assert!(donation::donor_pass_total_donated_usdc(&pass) == 8);
-        assert!(donation::donor_pass_donation_count(&pass) == 2);
+        let (_, balance, total_received, _) = accessor::operations_pool_summary(&operations_pool);
+        let (_, _, total_donated, donation_count, _, _, _) =
+            accessor::donor_pass_summary(&pass);
+        assert!(balance == 7);
+        assert!(total_received == 7);
+        assert!(total_donated == 8);
+        assert!(donation_count == 2);
 
-        let (donation_index, donation_type, _, _, amount, coin_type, _) =
-            donation::donation_record_fields_for_testing(&pass, 1);
+        let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
+            accessor::donation_record_summary(&pass, 1);
         assert!(donation_index == 1);
         assert!(donation_type == donation::donation_type_operations());
         assert!(amount == 7);
@@ -575,7 +593,7 @@ fun designated_with_pass_rejects_owner_mismatch() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -597,7 +615,7 @@ fun designated_with_pass_rejects_owner_mismatch() {
         let mut pass = test_scenario::take_from_address<donation::DonorPass>(&scenario, DONOR);
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_designated_usdc_with_pass(
+        accessor::donate_designated_usdc_with_pass(
             &pause_state,
             &registry,
             &mut main_pool,
@@ -628,7 +646,7 @@ fun operations_with_pass_rejects_owner_mismatch() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -649,7 +667,7 @@ fun operations_with_pass_rejects_owner_mismatch() {
         let mut pass = test_scenario::take_from_address<donation::DonorPass>(&scenario, DONOR);
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_operations_usdc_with_pass(
+        accessor::donate_operations_usdc_with_pass(
             &pause_state,
             &registry,
             &mut operations_pool,
@@ -686,7 +704,7 @@ fun designated_with_pass_rejects_registry_mismatch() {
             scenario.take_from_sender_by_id<donation::DonorPass>(mismatched_pass_id);
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_designated_usdc_with_pass(
+        accessor::donate_designated_usdc_with_pass(
             &pause_state,
             &registry,
             &mut main_pool,
@@ -724,7 +742,7 @@ fun operations_with_pass_rejects_registry_mismatch() {
             scenario.take_from_sender_by_id<donation::DonorPass>(mismatched_pass_id);
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_operations_usdc_with_pass(
+        accessor::donate_operations_usdc_with_pass(
             &pause_state,
             &registry,
             &mut operations_pool,
@@ -753,7 +771,7 @@ fun donor_cannot_mint_second_pass_by_reusing_first_donation_entry() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -773,7 +791,7 @@ fun donor_cannot_mint_second_pass_by_reusing_first_donation_entry() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -800,7 +818,7 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,
@@ -821,7 +839,7 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
         let coin = mock_usdc::mint_for_testing(99, scenario.ctx());
 
-        donation::donate_general_usdc_with_pass(
+        accessor::donate_general_usdc_with_pass(
             &pause_state,
             &registry,
             &mut main_pool,
@@ -830,7 +848,8 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
             scenario.ctx(),
         );
 
-        assert!(donation::donor_pass_tier(&pass) == donation::tier_bronze());
+        let (_, _, _, _, _, _, tier) = accessor::donor_pass_summary(&pass);
+        assert!(tier == donation::tier_bronze());
 
         let tier_events = event::events_by_type<donation::DonorTierUpdated>();
         assert!(tier_events.length() == 0);
@@ -885,7 +904,7 @@ fun mint_pass_with_registry(
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
 
-        donation::donate_general_usdc(
+        accessor::donate_general_usdc(
             &pause_state,
             &mut registry,
             &mut main_pool,

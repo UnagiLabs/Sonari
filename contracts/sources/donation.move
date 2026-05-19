@@ -1,4 +1,3 @@
-#[allow(lint(public_entry))]
 module contracts::donation;
 
 use contracts::admin::{Self, PauseState};
@@ -109,14 +108,14 @@ public struct DonorTierUpdated has copy, drop {
     actor: address,
 }
 
-public(package) entry fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
     transfer::share_object(DonorRegistry {
         id: object::new(ctx),
         issued_count: 0,
     });
 }
 
-public entry fun donate_general_usdc(
+public(package) fun donate_general_usdc(
     pause_state: &PauseState,
     registry: &mut DonorRegistry,
     main_pool: &mut MainPool,
@@ -136,7 +135,7 @@ public entry fun donate_general_usdc(
     );
 }
 
-public entry fun donate_general_usdc_with_pass(
+public(package) fun donate_general_usdc_with_pass(
     pause_state: &PauseState,
     registry: &DonorRegistry,
     main_pool: &mut MainPool,
@@ -158,7 +157,7 @@ public entry fun donate_general_usdc_with_pass(
     );
 }
 
-public entry fun donate_designated_usdc(
+public(package) fun donate_designated_usdc(
     pause_state: &PauseState,
     registry: &mut DonorRegistry,
     main_pool: &mut MainPool,
@@ -181,7 +180,7 @@ public entry fun donate_designated_usdc(
     );
 }
 
-public entry fun donate_designated_usdc_with_pass(
+public(package) fun donate_designated_usdc_with_pass(
     pause_state: &PauseState,
     registry: &DonorRegistry,
     main_pool: &mut MainPool,
@@ -206,7 +205,7 @@ public entry fun donate_designated_usdc_with_pass(
     );
 }
 
-public entry fun donate_operations_usdc(
+public(package) fun donate_operations_usdc(
     pause_state: &PauseState,
     registry: &mut DonorRegistry,
     operations_pool: &mut OperationsPool,
@@ -226,7 +225,7 @@ public entry fun donate_operations_usdc(
     );
 }
 
-public entry fun donate_operations_usdc_with_pass(
+public(package) fun donate_operations_usdc_with_pass(
     pause_state: &PauseState,
     registry: &DonorRegistry,
     operations_pool: &mut OperationsPool,
@@ -478,63 +477,94 @@ fun tier_for_total(total_donated_usdc: u64): u8 {
     }
 }
 
-public fun donor_pass_owner(pass: &DonorPass): address {
+public(package) fun donor_pass_summary(
+    pass: &DonorPass,
+): (address, ID, u64, u64, u64, u64, u8) {
+    (
+        pass.owner,
+        pass.donor_lineage_id,
+        pass.total_donated_usdc,
+        pass.donation_count,
+        pass.first_donated_at_ms,
+        pass.last_donated_at_ms,
+        pass.tier,
+    )
+}
+
+public(package) fun donation_record_summary(
+    pass: &DonorPass,
+    donation_index: u64,
+): (u64, u8, Option<ID>, Option<ID>, ID, u64, vector<u8>, u64) {
+    let record = dynamic_object_field::borrow<u64, DonationRecord>(&pass.id, donation_index);
+    (
+        record.donation_index,
+        record.donation_type,
+        record.program_id,
+        record.campaign_id,
+        record.pool_id,
+        record.amount,
+        record.coin_type,
+        record.donated_at_ms,
+    )
+}
+
+public(package) fun donor_pass_owner(pass: &DonorPass): address {
     pass.owner
 }
 
-public fun donor_pass_total_donated_usdc(pass: &DonorPass): u64 {
+public(package) fun donor_pass_total_donated_usdc(pass: &DonorPass): u64 {
     pass.total_donated_usdc
 }
 
-public fun donor_pass_donation_count(pass: &DonorPass): u64 {
+public(package) fun donor_pass_donation_count(pass: &DonorPass): u64 {
     pass.donation_count
 }
 
-public fun donor_pass_tier(pass: &DonorPass): u8 {
+public(package) fun donor_pass_tier(pass: &DonorPass): u8 {
     pass.tier
 }
 
-public fun donation_type_general(): u8 {
+public(package) fun donation_type_general(): u8 {
     DONATION_TYPE_GENERAL
 }
 
-public fun donation_type_designated(): u8 {
+public(package) fun donation_type_designated(): u8 {
     DONATION_TYPE_DESIGNATED
 }
 
-public fun donation_type_operations(): u8 {
+public(package) fun donation_type_operations(): u8 {
     DONATION_TYPE_OPERATIONS
 }
 
-public fun tier_none(): u8 {
+public(package) fun tier_none(): u8 {
     TIER_NONE
 }
 
-public fun tier_bronze(): u8 {
+public(package) fun tier_bronze(): u8 {
     TIER_BRONZE
 }
 
-public fun tier_silver(): u8 {
+public(package) fun tier_silver(): u8 {
     TIER_SILVER
 }
 
-public fun tier_gold(): u8 {
+public(package) fun tier_gold(): u8 {
     TIER_GOLD
 }
 
-public fun bronze_threshold_usdc(): u64 {
+public(package) fun bronze_threshold_usdc(): u64 {
     BRONZE_THRESHOLD_USDC
 }
 
-public fun silver_threshold_usdc(): u64 {
+public(package) fun silver_threshold_usdc(): u64 {
     SILVER_THRESHOLD_USDC
 }
 
-public fun gold_threshold_usdc(): u64 {
+public(package) fun gold_threshold_usdc(): u64 {
     GOLD_THRESHOLD_USDC
 }
 
-public fun coin_type_usdc(): vector<u8> {
+public(package) fun coin_type_usdc(): vector<u8> {
     COIN_TYPE_USDC
 }
 

@@ -48,7 +48,7 @@ public struct PoolCreated has copy, drop {
     actor: address,
 }
 
-public(package) entry fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
     let pool = MainPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -68,7 +68,7 @@ public(package) entry fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
     transfer::share_object(pool);
 }
 
-public(package) entry fun create_designated_pool(
+public(package) fun create_designated_pool(
     _: &AdminCap,
     related_id: Option<ID>,
     ctx: &mut TxContext,
@@ -93,7 +93,7 @@ public(package) entry fun create_designated_pool(
     transfer::share_object(pool);
 }
 
-public(package) entry fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
     let pool = OperationsPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -140,63 +140,93 @@ public(package) fun deposit_operations_usdc(
     amount
 }
 
-public fun main_pool_id(pool: &MainPool): ID {
+public(package) fun main_pool_summary(pool: &MainPool): (ID, u64, u64, u64) {
+    (
+        object::id(pool),
+        pool.balance.value(),
+        pool.total_received_usdc,
+        pool.created_at_ms,
+    )
+}
+
+public(package) fun designated_pool_summary(
+    pool: &DesignatedPool,
+): (ID, u64, u64, Option<ID>, u64) {
+    (
+        object::id(pool),
+        pool.balance.value(),
+        pool.total_received_usdc,
+        pool.related_id,
+        pool.created_at_ms,
+    )
+}
+
+public(package) fun operations_pool_summary(pool: &OperationsPool): (ID, u64, u64, u64) {
+    (
+        object::id(pool),
+        pool.balance.value(),
+        pool.total_received_usdc,
+        pool.created_at_ms,
+    )
+}
+
+public(package) fun main_pool_id(pool: &MainPool): ID {
     object::id(pool)
 }
 
-public fun designated_pool_id(pool: &DesignatedPool): ID {
+public(package) fun designated_pool_id(pool: &DesignatedPool): ID {
     object::id(pool)
 }
 
-public fun operations_pool_id(pool: &OperationsPool): ID {
+public(package) fun operations_pool_id(pool: &OperationsPool): ID {
     object::id(pool)
 }
 
-public fun main_pool_balance_usdc(pool: &MainPool): u64 {
+public(package) fun main_pool_balance_usdc(pool: &MainPool): u64 {
     pool.balance.value()
 }
 
-public fun main_pool_total_received_usdc(pool: &MainPool): u64 {
+public(package) fun main_pool_total_received_usdc(pool: &MainPool): u64 {
     pool.total_received_usdc
 }
 
-public fun designated_pool_balance_usdc(pool: &DesignatedPool): u64 {
+public(package) fun designated_pool_balance_usdc(pool: &DesignatedPool): u64 {
     pool.balance.value()
 }
 
-public fun designated_pool_total_received_usdc(pool: &DesignatedPool): u64 {
+public(package) fun designated_pool_total_received_usdc(pool: &DesignatedPool): u64 {
     pool.total_received_usdc
 }
 
-public fun operations_pool_balance_usdc(pool: &OperationsPool): u64 {
+public(package) fun operations_pool_balance_usdc(pool: &OperationsPool): u64 {
     pool.balance.value()
 }
 
-public fun operations_pool_total_received_usdc(pool: &OperationsPool): u64 {
+public(package) fun operations_pool_total_received_usdc(pool: &OperationsPool): u64 {
     pool.total_received_usdc
 }
 
-public fun pool_kind_main(): u8 {
+public(package) fun pool_kind_main(): u8 {
     POOL_KIND_MAIN
 }
 
-public fun pool_kind_designated(): u8 {
+public(package) fun pool_kind_designated(): u8 {
     POOL_KIND_DESIGNATED
 }
 
-public fun pool_kind_operations(): u8 {
+public(package) fun pool_kind_operations(): u8 {
     POOL_KIND_OPERATIONS
 }
 
-public fun target_kind_main_pool(): u8 {
+public(package) fun target_kind_main_pool(): u8 {
     TARGET_KIND_MAIN_POOL
 }
 
-public fun target_kind_designated_pool(): u8 {
+public(package) fun target_kind_designated_pool(): u8 {
     TARGET_KIND_DESIGNATED_POOL
 }
 
-public fun target_kind_operations_pool(): u8 {
+public(package) fun target_kind_operations_pool(): u8 {
     TARGET_KIND_OPERATIONS_POOL
 }
 
