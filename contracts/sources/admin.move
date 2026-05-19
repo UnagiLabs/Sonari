@@ -79,7 +79,7 @@ public fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
 public fun pause_global(
     _: &AdminCap,
     pause_state: &mut PauseState,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     pause_state.global_paused = true;
     event::emit(Paused {
@@ -93,7 +93,7 @@ public fun pause_global(
 public fun unpause_global(
     _: &AdminCap,
     pause_state: &mut PauseState,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     pause_state.global_paused = false;
     event::emit(Unpaused {
@@ -109,7 +109,7 @@ public fun pause_target(
     pause_state: &mut PauseState,
     target_kind: u8,
     target_id: ID,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     if (!pause_state.paused_targets.contains(&target_id)) {
         pause_state.paused_targets.insert(target_id);
@@ -127,7 +127,7 @@ public fun unpause_target(
     pause_state: &mut PauseState,
     target_kind: u8,
     target_id: ID,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     if (pause_state.paused_targets.contains(&target_id)) {
         pause_state.paused_targets.remove(&target_id);
