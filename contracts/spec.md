@@ -127,7 +127,10 @@ Donation flow は Pool への入金と寄付者向け記録を同じ transaction
 | `required_verifier_family` | `disaster`、`residence`、`student` など |
 | `payout_policy_id` | 支払額計算ルール |
 | `default_pool_id` | 基本 Pool |
-| `active` | pause / close 状態 |
+| `status` | `active`、`inactive`、`closed`。business state を表す |
+
+emergency pause は Program / Campaign の `status` とは分離する。
+`status` は business lifecycle、`PauseState` は緊急停止として扱い、claim precheck は `status == active`、global pause なし、Program / Campaign target pause なしをすべて満たす場合だけ通す。
 
 `Campaign` は Program 配下の具体的な実行単位である。Disaster Relief では地震イベントやスポンサー単位、Student Aid では学期・学校・スポンサー単位にできる。
 
@@ -360,8 +363,9 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | Object | 保持する情報 / 用途 |
 | --- | --- |
 | `AdminCap` | 管理者権限 |
-| `Program` | program type、required metadata、default policy / pool、active |
-| `Campaign` | program id、campaign metadata、pool id、claim window、active |
+| `PauseState` | global pause と target pause 対象の集合。business status とは独立した emergency control |
+| `Program` | program type、required metadata、default policy / pool、status |
+| `Campaign` | program id、campaign metadata、pool id、claim window、status |
 | `MembershipPass` | owner、payout address、`pass_lineage_id`、status、metadata buckets |
 | `DonorPass` | owner、`donor_lineage_id`、total donated、donation count、first / last donated timestamp、tier |
 | `DonationRecord` | DonorPass dynamic field。donation index、donation type、optional program / campaign、pool、amount、coin type、timestamp |
@@ -380,6 +384,8 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | --- | --- |
 | `initialize` | AdminCap、registries、default pools / policies を作成 |
 | `create_program` / `create_campaign` | Program / Campaign を作成 |
+| `pause_global` / `unpause_global` | emergency pause を全体に適用 / 解除 |
+| `pause_target` / `unpause_target` | Program / Campaign などの target object に emergency pause を適用 / 解除 |
 | `create_pool` | Main / Designated / Campaign / Operations Pool を作成 |
 | `donate_general` | 100% Main Pool に入金し、初回寄付なら DonorPass を発行、以降は DonationRecord と donor 集計を更新 |
 | `donate_designated` | Designated / Campaign Pool と Main Pool に 50/50 split し、DonorPass / DonationRecord / donor 集計を更新 |
