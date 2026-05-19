@@ -48,18 +48,51 @@ fun non_admin_cannot_take_admin_cap() {
 #[test]
 fun admin_can_create_program_and_campaign_and_emit_events() {
     let mut scenario = initialized();
-    let (program_id, campaign_id) = create_program_and_campaign(&mut scenario);
+
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    program::create_program(
+        &cap,
+        7,
+        0xFF,
+        3,
+        option::none(),
+        option::none(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
 
     let program_events = event::events_by_type<program::ProgramCreated>();
     assert!(program_events.length() == 1);
-    let (event_program_id, program_type, pass_metadata, verifier_family, created_at_ms, actor) =
-        program::program_created_event_fields(*program_events.borrow(0));
-    assert!(event_program_id == program_id);
+    let (
+        program_id_from_event,
+        program_type,
+        pass_metadata,
+        verifier_family,
+        created_at_ms,
+        actor,
+    ) = program::program_created_event_fields(*program_events.borrow(0));
     assert!(program_type == 7);
     assert!(pass_metadata == 0xFF);
     assert!(verifier_family == 3);
     assert!(created_at_ms == 0);
     assert!(actor == ADMIN);
+
+    scenario.next_tx(ADMIN);
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let program = scenario.take_shared<program::Program>();
+    assert!(program::id(&program) == program_id_from_event);
+    program::create_campaign(
+        &cap,
+        &program,
+        9,
+        b"metadata-hash",
+        option::none(),
+        100,
+        200,
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+    test_scenario::return_shared(program);
 
     let campaign_events = event::events_by_type<program::CampaignCreated>();
     assert!(campaign_events.length() == 1);
@@ -73,14 +106,18 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
         created_at_ms,
         actor,
     ) = program::campaign_created_event_fields(*campaign_events.borrow(0));
-    assert!(event_campaign_id == campaign_id);
-    assert!(event_program_id == program_id);
+    assert!(event_program_id == program_id_from_event);
     assert!(campaign_type == 9);
     assert!(metadata_hash == b"metadata-hash");
     assert!(claim_start_ms == 100);
     assert!(claim_end_ms == 200);
     assert!(created_at_ms == 0);
     assert!(actor == ADMIN);
+
+    scenario.next_tx(ADMIN);
+    let campaign = scenario.take_shared<program::Campaign>();
+    assert!(program::campaign_id(&campaign) == event_campaign_id);
+    test_scenario::return_shared(campaign);
 
     scenario.end();
 }
@@ -176,7 +213,13 @@ fun unpause_target_allows_claim_precheck_again() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut pause_state = scenario.take_shared<admin::PauseState>();
-        admin::unpause_target(&cap, &mut pause_state, program::target_kind_campaign(), campaign_id, scenario.ctx());
+        admin::unpause_target(
+            &cap,
+            &mut pause_state,
+            program::target_kind_campaign(),
+            campaign_id,
+            scenario.ctx(),
+        );
         scenario.return_to_sender(cap);
         test_scenario::return_shared(pause_state);
     };
@@ -196,8 +239,20 @@ fun pause_events_include_scope_target_and_actor() {
         let mut pause_state = scenario.take_shared<admin::PauseState>();
         admin::pause_global(&cap, &mut pause_state, scenario.ctx());
         admin::unpause_global(&cap, &mut pause_state, scenario.ctx());
-        admin::pause_target(&cap, &mut pause_state, program::target_kind_program(), program_id, scenario.ctx());
-        admin::unpause_target(&cap, &mut pause_state, program::target_kind_program(), program_id, scenario.ctx());
+        admin::pause_target(
+            &cap,
+            &mut pause_state,
+            program::target_kind_program(),
+            program_id,
+            scenario.ctx(),
+        );
+        admin::unpause_target(
+            &cap,
+            &mut pause_state,
+            program::target_kind_program(),
+            program_id,
+            scenario.ctx(),
+        );
         scenario.return_to_sender(cap);
         test_scenario::return_shared(pause_state);
     };
@@ -380,6 +435,7 @@ fun create_program_and_campaign(
 ): (object::ID, object::ID) {
     let program_id = create_program(scenario, 7);
 
+    scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
     program::create_campaign(
