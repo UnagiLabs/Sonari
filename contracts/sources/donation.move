@@ -1,0 +1,523 @@
+#[allow(lint(public_entry))]
+module contracts::donation;
+
+use contracts::admin::{Self, PauseState};
+use contracts::mock_usdc::USDC;
+use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
+use contracts::admin::AdminCap;
+use std::option::{Self, Option};
+use sui::coin::{Self, Coin};
+use sui::dynamic_field;
+use sui::dynamic_object_field;
+use sui::event;
+use sui::object::{Self, ID, UID};
+use sui::transfer;
+use sui::tx_context::TxContext;
+
+const DONATION_TYPE_GENERAL: u8 = 1;
+const DONATION_TYPE_DESIGNATED: u8 = 2;
+const DONATION_TYPE_OPERATIONS: u8 = 3;
+
+const TIER_NONE: u8 = 0;
+const TIER_BRONZE: u8 = 1;
+const TIER_SILVER: u8 = 2;
+const TIER_GOLD: u8 = 3;
+
+const BRONZE_THRESHOLD_USDC: u64 = 1;
+const SILVER_THRESHOLD_USDC: u64 = 1_000_000;
+const GOLD_THRESHOLD_USDC: u64 = 10_000_000;
+
+const COIN_TYPE_USDC: vector<u8> = b"USDC";
+
+const EZeroDonation: u64 = 0;
+const EDonorPassOwnerMismatch: u64 = 1;
+const EDonorPassAlreadyIssued: u64 = 2;
+const EDonorPassNotIssued: u64 = 3;
+const EDonorPassMismatch: u64 = 4;
+
+public struct DonorRegistry has key {
+    id: UID,
+    issued_count: u64,
+}
+
+public struct DonorPass has key {
+    id: UID,
+    owner: address,
+    donor_lineage_id: ID,
+    total_donated_usdc: u64,
+    donation_count: u64,
+    first_donated_at_ms: u64,
+    last_donated_at_ms: u64,
+    tier: u8,
+}
+
+public struct DonationRecord has key, store {
+    id: UID,
+    donation_index: u64,
+    donation_type: u8,
+    program_id: Option<ID>,
+    campaign_id: Option<ID>,
+    pool_id: ID,
+    amount: u64,
+    coin_type: vector<u8>,
+    donated_at_ms: u64,
+}
+
+public struct GeneralDonationReceived has copy, drop {
+    pool_id: ID,
+    amount: u64,
+    actor: address,
+}
+
+public struct DesignatedDonationReceived has copy, drop {
+    main_pool_id: ID,
+    designated_pool_id: ID,
+    amount: u64,
+    main_amount: u64,
+    designated_amount: u64,
+    actor: address,
+}
+
+public struct OperationsDonationReceived has copy, drop {
+    pool_id: ID,
+    amount: u64,
+    actor: address,
+}
+
+public struct DonorPassIssued has copy, drop {
+    donor_pass_id: ID,
+    owner: address,
+    donor_lineage_id: ID,
+    issued_at_ms: u64,
+}
+
+public struct DonationRecorded has copy, drop {
+    donor_pass_id: ID,
+    donation_index: u64,
+    donation_type: u8,
+    pool_id: ID,
+    amount: u64,
+    coin_type: vector<u8>,
+    actor: address,
+}
+
+public struct DonorTierUpdated has copy, drop {
+    donor_pass_id: ID,
+    old_tier: u8,
+    new_tier: u8,
+    total_donated_usdc: u64,
+    actor: address,
+}
+
+public(package) entry fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
+    transfer::share_object(DonorRegistry {
+        id: object::new(ctx),
+        issued_count: 0,
+    });
+}
+
+public entry fun donate_general_usdc(
+    pause_state: &PauseState,
+    registry: &mut DonorRegistry,
+    main_pool: &mut MainPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let pool_id = pools::main_pool_id(main_pool);
+    pools::deposit_main_usdc(main_pool, coin);
+    event::emit(GeneralDonationReceived {
+        pool_id,
+        amount,
+        actor: ctx.sender(),
+    });
+
+    let mut pass = new_donor_pass(registry, ctx);
+    record_donation(
+        &mut pass,
+        DONATION_TYPE_GENERAL,
+        option::none(),
+        option::none(),
+        pool_id,
+        amount,
+        ctx,
+    );
+    transfer::transfer(pass, ctx.sender());
+}
+
+public entry fun donate_general_usdc_with_pass(
+    pause_state: &PauseState,
+    registry: &DonorRegistry,
+    main_pool: &mut MainPool,
+    pass: &mut DonorPass,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    assert!(pass.owner == ctx.sender(), EDonorPassOwnerMismatch);
+    assert_registered_pass(registry, pass, ctx.sender());
+
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let pool_id = pools::main_pool_id(main_pool);
+    pools::deposit_main_usdc(main_pool, coin);
+    event::emit(GeneralDonationReceived {
+        pool_id,
+        amount,
+        actor: ctx.sender(),
+    });
+
+    record_donation(
+        pass,
+        DONATION_TYPE_GENERAL,
+        option::none(),
+        option::none(),
+        pool_id,
+        amount,
+        ctx,
+    );
+}
+
+public entry fun donate_designated_usdc(
+    pause_state: &PauseState,
+    registry: &mut DonorRegistry,
+    main_pool: &mut MainPool,
+    designated_pool: &mut DesignatedPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
+
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let main_amount = amount / 2;
+    let designated_amount = amount - main_amount;
+    let mut main_coin = coin;
+    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let designated_pool_id = pools::designated_pool_id(designated_pool);
+
+    pools::deposit_main_usdc(main_pool, main_coin);
+    pools::deposit_designated_usdc(designated_pool, designated_coin);
+    event::emit(DesignatedDonationReceived {
+        main_pool_id,
+        designated_pool_id,
+        amount,
+        main_amount,
+        designated_amount,
+        actor: ctx.sender(),
+    });
+
+    let mut pass = new_donor_pass(registry, ctx);
+    record_donation(
+        &mut pass,
+        DONATION_TYPE_DESIGNATED,
+        option::none(),
+        option::none(),
+        designated_pool_id,
+        amount,
+        ctx,
+    );
+    transfer::transfer(pass, ctx.sender());
+}
+
+public entry fun donate_operations_usdc(
+    pause_state: &PauseState,
+    registry: &mut DonorRegistry,
+    operations_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
+
+    let amount = coin::value(&coin);
+    assert!(amount > 0, EZeroDonation);
+
+    let pool_id = pools::operations_pool_id(operations_pool);
+    pools::deposit_operations_usdc(operations_pool, coin);
+    event::emit(OperationsDonationReceived {
+        pool_id,
+        amount,
+        actor: ctx.sender(),
+    });
+
+    let mut pass = new_donor_pass(registry, ctx);
+    record_donation(
+        &mut pass,
+        DONATION_TYPE_OPERATIONS,
+        option::none(),
+        option::none(),
+        pool_id,
+        amount,
+        ctx,
+    );
+    transfer::transfer(pass, ctx.sender());
+}
+
+fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass {
+    let donor = ctx.sender();
+    assert!(!dynamic_field::exists_with_type<address, ID>(&registry.id, donor), EDonorPassAlreadyIssued);
+
+    let id = object::new(ctx);
+    let donor_lineage_id = id.to_inner();
+    let pass = DonorPass {
+        id,
+        owner: donor,
+        donor_lineage_id,
+        total_donated_usdc: 0,
+        donation_count: 0,
+        first_donated_at_ms: ctx.epoch_timestamp_ms(),
+        last_donated_at_ms: ctx.epoch_timestamp_ms(),
+        tier: TIER_NONE,
+    };
+    let donor_pass_id = object::id(&pass);
+    dynamic_field::add(&mut registry.id, donor, donor_pass_id);
+    registry.issued_count = registry.issued_count + 1;
+
+    event::emit(DonorPassIssued {
+        donor_pass_id,
+        owner: donor,
+        donor_lineage_id,
+        issued_at_ms: ctx.epoch_timestamp_ms(),
+    });
+
+    pass
+}
+
+fun assert_registered_pass(registry: &DonorRegistry, pass: &DonorPass, donor: address) {
+    assert!(dynamic_field::exists_with_type<address, ID>(&registry.id, donor), EDonorPassNotIssued);
+    let donor_pass_id = dynamic_field::borrow<address, ID>(&registry.id, donor);
+    assert!(*donor_pass_id == object::id(pass), EDonorPassMismatch);
+}
+
+fun record_donation(
+    pass: &mut DonorPass,
+    donation_type: u8,
+    program_id: Option<ID>,
+    campaign_id: Option<ID>,
+    pool_id: ID,
+    amount: u64,
+    ctx: &mut TxContext,
+) {
+    let donation_index = pass.donation_count;
+    let donated_at_ms = ctx.epoch_timestamp_ms();
+    let record = DonationRecord {
+        id: object::new(ctx),
+        donation_index,
+        donation_type,
+        program_id,
+        campaign_id,
+        pool_id,
+        amount,
+        coin_type: COIN_TYPE_USDC,
+        donated_at_ms,
+    };
+    dynamic_object_field::add(&mut pass.id, donation_index, record);
+
+    if (pass.donation_count == 0) {
+        pass.first_donated_at_ms = donated_at_ms;
+    };
+
+    pass.donation_count = pass.donation_count + 1;
+    pass.total_donated_usdc = pass.total_donated_usdc + amount;
+    pass.last_donated_at_ms = donated_at_ms;
+
+    event::emit(DonationRecorded {
+        donor_pass_id: object::id(pass),
+        donation_index,
+        donation_type,
+        pool_id,
+        amount,
+        coin_type: COIN_TYPE_USDC,
+        actor: ctx.sender(),
+    });
+
+    let old_tier = pass.tier;
+    let new_tier = tier_for_total(pass.total_donated_usdc);
+    if (old_tier != new_tier) {
+        pass.tier = new_tier;
+        event::emit(DonorTierUpdated {
+            donor_pass_id: object::id(pass),
+            old_tier,
+            new_tier,
+            total_donated_usdc: pass.total_donated_usdc,
+            actor: ctx.sender(),
+        });
+    };
+}
+
+fun tier_for_total(total_donated_usdc: u64): u8 {
+    if (total_donated_usdc >= GOLD_THRESHOLD_USDC) {
+        TIER_GOLD
+    } else if (total_donated_usdc >= SILVER_THRESHOLD_USDC) {
+        TIER_SILVER
+    } else if (total_donated_usdc >= BRONZE_THRESHOLD_USDC) {
+        TIER_BRONZE
+    } else {
+        TIER_NONE
+    }
+}
+
+public fun donor_pass_owner(pass: &DonorPass): address {
+    pass.owner
+}
+
+public fun donor_pass_total_donated_usdc(pass: &DonorPass): u64 {
+    pass.total_donated_usdc
+}
+
+public fun donor_pass_donation_count(pass: &DonorPass): u64 {
+    pass.donation_count
+}
+
+public fun donor_pass_tier(pass: &DonorPass): u8 {
+    pass.tier
+}
+
+public fun donation_type_general(): u8 {
+    DONATION_TYPE_GENERAL
+}
+
+public fun donation_type_designated(): u8 {
+    DONATION_TYPE_DESIGNATED
+}
+
+public fun donation_type_operations(): u8 {
+    DONATION_TYPE_OPERATIONS
+}
+
+public fun tier_none(): u8 {
+    TIER_NONE
+}
+
+public fun tier_bronze(): u8 {
+    TIER_BRONZE
+}
+
+public fun tier_silver(): u8 {
+    TIER_SILVER
+}
+
+public fun tier_gold(): u8 {
+    TIER_GOLD
+}
+
+public fun bronze_threshold_usdc(): u64 {
+    BRONZE_THRESHOLD_USDC
+}
+
+public fun silver_threshold_usdc(): u64 {
+    SILVER_THRESHOLD_USDC
+}
+
+public fun gold_threshold_usdc(): u64 {
+    GOLD_THRESHOLD_USDC
+}
+
+public fun coin_type_usdc(): vector<u8> {
+    COIN_TYPE_USDC
+}
+
+#[test_only]
+public fun general_donation_received_event_fields(
+    event: GeneralDonationReceived,
+): (ID, u64, address) {
+    let GeneralDonationReceived { pool_id, amount, actor } = event;
+    (pool_id, amount, actor)
+}
+
+#[test_only]
+public fun designated_donation_received_event_fields(
+    event: DesignatedDonationReceived,
+): (ID, ID, u64, u64, u64, address) {
+    let DesignatedDonationReceived {
+        main_pool_id,
+        designated_pool_id,
+        amount,
+        main_amount,
+        designated_amount,
+        actor,
+    } = event;
+    (
+        main_pool_id,
+        designated_pool_id,
+        amount,
+        main_amount,
+        designated_amount,
+        actor,
+    )
+}
+
+#[test_only]
+public fun operations_donation_received_event_fields(
+    event: OperationsDonationReceived,
+): (ID, u64, address) {
+    let OperationsDonationReceived { pool_id, amount, actor } = event;
+    (pool_id, amount, actor)
+}
+
+#[test_only]
+public fun donation_recorded_event_fields(
+    event: DonationRecorded,
+): (ID, u64, u8, ID, u64, vector<u8>, address) {
+    let DonationRecorded {
+        donor_pass_id,
+        donation_index,
+        donation_type,
+        pool_id,
+        amount,
+        coin_type,
+        actor,
+    } = event;
+    (
+        donor_pass_id,
+        donation_index,
+        donation_type,
+        pool_id,
+        amount,
+        coin_type,
+        actor,
+    )
+}
+
+#[test_only]
+public fun donor_tier_updated_event_fields(
+    event: DonorTierUpdated,
+): (ID, u8, u8, u64, address) {
+    let DonorTierUpdated {
+        donor_pass_id,
+        old_tier,
+        new_tier,
+        total_donated_usdc,
+        actor,
+    } = event;
+    (donor_pass_id, old_tier, new_tier, total_donated_usdc, actor)
+}
+
+#[test_only]
+public fun donation_record_fields_for_testing(
+    pass: &DonorPass,
+    donation_index: u64,
+): (u64, u8, Option<ID>, Option<ID>, u64, vector<u8>, u64) {
+    let record = dynamic_object_field::borrow<u64, DonationRecord>(&pass.id, donation_index);
+    (
+        record.donation_index,
+        record.donation_type,
+        record.program_id,
+        record.campaign_id,
+        record.amount,
+        record.coin_type,
+        record.donated_at_ms,
+    )
+}
