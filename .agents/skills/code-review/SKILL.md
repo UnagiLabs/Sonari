@@ -89,7 +89,7 @@ pnpm run build
 Move パッケージが対象なら:
 
 ```bash
-sui move build
+sui move build --lint
 sui move test
 ```
 
