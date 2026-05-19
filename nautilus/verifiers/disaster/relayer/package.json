@@ -9,7 +9,7 @@
     "types": "./src/index.ts",
     "scripts": {
         "cli": "tsx src/cli.ts",
-        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "typecheck": "tsc -b --noEmit",
         "test": "vitest run"
     },
     "dependencies": {
