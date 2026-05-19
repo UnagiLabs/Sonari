@@ -1,6 +1,5 @@
 module contracts::pools;
 
-use contracts::mock_usdc::USDC;
 use std::option::Option;
 use sui::balance::{Self, Balance};
 use sui::coin::{Self, Coin};
@@ -8,6 +7,7 @@ use sui::event;
 use sui::object::{Self, ID, UID};
 use sui::transfer;
 use sui::tx_context::TxContext;
+use usdc::usdc::USDC;
 
 const POOL_KIND_MAIN: u8 = 1;
 const POOL_KIND_DESIGNATED: u8 = 2;

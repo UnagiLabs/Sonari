@@ -4,12 +4,13 @@ module contracts::pool_donation_tests;
 use contracts::admin;
 use contracts::accessor;
 use contracts::donation;
-use contracts::mock_usdc;
 use contracts::pools;
 use std::option;
+use sui::coin;
 use sui::event;
 use sui::object;
 use sui::test_scenario;
+use usdc::usdc::USDC;
 
 const ADMIN: address = @0xA11CE;
 const DONOR: address = @0xD0A0;
@@ -87,7 +88,7 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1_000_000, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1_000_000, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -164,7 +165,7 @@ fun designated_donation_splits_usdc_and_sends_odd_remainder_to_designated_pool()
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
-        let coin = mock_usdc::mint_for_testing(5, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(5, scenario.ctx());
 
         accessor::donate_designated_usdc(
             &pause_state,
@@ -212,7 +213,7 @@ fun operations_donation_moves_all_usdc_to_operations_pool() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let coin = mock_usdc::mint_for_testing(250_000, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(250_000, scenario.ctx());
 
         accessor::donate_operations_usdc(
             &pause_state,
@@ -251,7 +252,7 @@ fun zero_amount_donation_is_rejected() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(0, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(0, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -287,7 +288,7 @@ fun global_pause_blocks_donation() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -330,7 +331,7 @@ fun target_pause_blocks_pool_donation() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -357,7 +358,7 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -381,7 +382,7 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         let registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = mock_usdc::mint_for_testing(999_999, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(999_999, scenario.ctx());
 
         accessor::donate_general_usdc_with_pass(
             &pause_state,
@@ -431,7 +432,7 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -453,7 +454,7 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = mock_usdc::mint_for_testing(5, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(5, scenario.ctx());
 
         accessor::donate_designated_usdc_with_pass(
             &pause_state,
@@ -521,7 +522,7 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -542,7 +543,7 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
         let registry = scenario.take_shared<donation::DonorRegistry>();
         let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = mock_usdc::mint_for_testing(7, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(7, scenario.ctx());
 
         accessor::donate_operations_usdc_with_pass(
             &pause_state,
@@ -601,7 +602,7 @@ fun designated_with_pass_rejects_owner_mismatch() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -623,7 +624,7 @@ fun designated_with_pass_rejects_owner_mismatch() {
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let mut pass = test_scenario::take_from_address<donation::DonorPass>(&scenario, DONOR);
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_designated_usdc_with_pass(
             &pause_state,
@@ -654,7 +655,7 @@ fun operations_with_pass_rejects_owner_mismatch() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -675,7 +676,7 @@ fun operations_with_pass_rejects_owner_mismatch() {
         let registry = scenario.take_shared<donation::DonorRegistry>();
         let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
         let mut pass = test_scenario::take_from_address<donation::DonorPass>(&scenario, DONOR);
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_operations_usdc_with_pass(
             &pause_state,
@@ -712,7 +713,7 @@ fun designated_with_pass_rejects_registry_mismatch() {
         let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let mut pass =
             scenario.take_from_sender_by_id<donation::DonorPass>(mismatched_pass_id);
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_designated_usdc_with_pass(
             &pause_state,
@@ -750,7 +751,7 @@ fun operations_with_pass_rejects_registry_mismatch() {
         let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
         let mut pass =
             scenario.take_from_sender_by_id<donation::DonorPass>(mismatched_pass_id);
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_operations_usdc_with_pass(
             &pause_state,
@@ -779,7 +780,7 @@ fun donor_cannot_mint_second_pass_by_reusing_first_donation_entry() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -799,7 +800,7 @@ fun donor_cannot_mint_second_pass_by_reusing_first_donation_entry() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -826,7 +827,7 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
@@ -847,7 +848,7 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
         let registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
         let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = mock_usdc::mint_for_testing(99, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(99, scenario.ctx());
 
         accessor::donate_general_usdc_with_pass(
             &pause_state,
@@ -912,7 +913,7 @@ fun mint_pass_with_registry(
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared_by_id<donation::DonorRegistry>(registry_id);
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = mock_usdc::mint_for_testing(1, scenario.ctx());
+        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
         accessor::donate_general_usdc(
             &pause_state,
