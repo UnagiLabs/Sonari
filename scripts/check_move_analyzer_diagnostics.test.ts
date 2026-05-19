@@ -23,6 +23,15 @@ describe("move analyzer diagnostics checker", () => {
                     code: "W02021",
                     message: "Unnecessary alias 'Option'",
                 },
+                {
+                    range: {
+                        start: { line: 6, character: 17 },
+                        end: { line: 6, character: 23 },
+                    },
+                    severity: 2,
+                    code: "W02021",
+                    message: "Unnecessary alias 'Option'",
+                },
             ],
         });
 

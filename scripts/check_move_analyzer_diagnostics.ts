@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const DIAGNOSTICS_IDLE_MS = 1_000;
 const SUI_GIT_URL = "https://github.com/MystenLabs/sui.git";
 
 type Env = Record<string, string | undefined>;
@@ -83,12 +84,33 @@ export async function runMoveAnalyzerDiagnostics(options: RunOptions): Promise<D
             stdio: ["pipe", "pipe", "pipe"],
         });
         const findings: DiagnosticFinding[] = [];
-        const openedUris = new Set(moveFiles.map((file) => pathToFileURL(file).toString()));
-        const receivedUris = new Set<string>();
+        const seenFindingKeys = new Set<string>();
         let settled = false;
         let readBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
         let nextId = 1;
         let idleTimer: NodeJS.Timeout | undefined;
+
+        const stopChild = () => {
+            if (!child.killed && child.exitCode === null && child.signalCode === null) {
+                if (!child.stdin.destroyed) {
+                    sendMessage(child.stdin, {
+                        id: nextId++,
+                        jsonrpc: "2.0",
+                        method: "shutdown",
+                        params: null,
+                    });
+                    sendMessage(child.stdin, {
+                        jsonrpc: "2.0",
+                        method: "exit",
+                        params: null,
+                    });
+                    child.stdin.end();
+                }
+                child.kill();
+            }
+            child.stdout.destroy();
+            child.stderr.destroy();
+        };
 
         const finish = (result: DiagnosticsResult) => {
             if (settled) {
@@ -99,20 +121,7 @@ export async function runMoveAnalyzerDiagnostics(options: RunOptions): Promise<D
             if (idleTimer !== undefined) {
                 clearTimeout(idleTimer);
             }
-            if (!child.killed) {
-                sendMessage(child.stdin, {
-                    id: nextId++,
-                    jsonrpc: "2.0",
-                    method: "shutdown",
-                    params: null,
-                });
-                sendMessage(child.stdin, {
-                    jsonrpc: "2.0",
-                    method: "exit",
-                    params: null,
-                });
-                child.stdin.end();
-            }
+            stopChild();
             resolve(result);
         };
 
@@ -125,7 +134,7 @@ export async function runMoveAnalyzerDiagnostics(options: RunOptions): Promise<D
             if (idleTimer !== undefined) {
                 clearTimeout(idleTimer);
             }
-            child.kill();
+            stopChild();
             reject(error);
         };
 
@@ -135,7 +144,7 @@ export async function runMoveAnalyzerDiagnostics(options: RunOptions): Promise<D
             }
             idleTimer = setTimeout(() => {
                 finish({ findings, ok: findings.length === 0 });
-            }, 500);
+            }, DIAGNOSTICS_IDLE_MS);
         };
 
         const timeoutTimer = setTimeout(() => {
@@ -169,6 +178,9 @@ export async function runMoveAnalyzerDiagnostics(options: RunOptions): Promise<D
             method: "initialize",
             params: {
                 capabilities: {},
+                initializationOptions: {
+                    lintLevel: "all",
+                },
                 processId: process.pid,
                 rootPath: packagePath,
                 rootUri: pathToFileURL(packagePath).toString(),
@@ -199,16 +211,15 @@ export async function runMoveAnalyzerDiagnostics(options: RunOptions): Promise<D
             if (params === undefined) {
                 return;
             }
-            receivedUris.add(params.uri);
             for (const diagnostic of params.diagnostics) {
                 const finding = toFinding(params.uri, diagnostic);
                 if (finding !== undefined) {
-                    findings.push(finding);
+                    const key = formatFinding(finding);
+                    if (!seenFindingKeys.has(key)) {
+                        seenFindingKeys.add(key);
+                        findings.push(finding);
+                    }
                 }
-            }
-            if (allUrisReceived(openedUris, receivedUris)) {
-                finish({ findings, ok: findings.length === 0 });
-                return;
             }
             scheduleIdleFinish();
         }
@@ -505,15 +516,6 @@ function fileURLToPathname(uri: string): string {
         return uri;
     }
     return new URL(uri).pathname;
-}
-
-function allUrisReceived(openedUris: Set<string>, receivedUris: Set<string>): boolean {
-    for (const uri of openedUris) {
-        if (!receivedUris.has(uri)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 function findRepoRoot(startDir: string): string {
