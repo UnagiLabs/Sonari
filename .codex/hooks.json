@@ -8,6 +8,11 @@
             "type": "command",
             "command": "bash -lc 'cd \"$(git rev-parse --show-toplevel)\" && pnpm check || { status=$?; echo \"Sonari quality gate failed: pnpm check exited $status\" >&2; exit 2; }'",
             "statusMessage": "Running Sonari quality gate"
+          },
+          {
+            "type": "command",
+            "command": "bash -lc 'cd \"$(git rev-parse --show-toplevel)\" && if git diff --name-only HEAD -- \":(glob)contracts/**/*.move\" contracts/Move.toml contracts/Move.lock | grep -q .; then pnpm check:contracts || { status=$?; echo \"Sonari contracts quality gate failed: pnpm check:contracts exited $status\" >&2; exit 2; }; else echo \"No contracts changes detected; skipping contracts quality gate\"; fi'",
+            "statusMessage": "Running Sonari contracts quality gate"
           }
         ]
       }
