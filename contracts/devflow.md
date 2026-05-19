@@ -27,8 +27,9 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - ただし、全体の test plan、acceptance matrix、PR ごとの検証観点は先に作成してよい。
 - 実装 PR では schema、BCS field order、`AffectedCellLeaf` canonical order を必要なく変更しない。
 - Pool、Program、Membership、Verifier Result、Claim、Admin の責務を分ける。
-- Move の外部公開 callable API は `accessor.move` に集約する。dapp、relayer、script、他 package から直接呼ばせる必要がある関数は、原則として `contracts::accessor` の `public fun` または `entry fun` として定義する。
-- `accessor.move` は薄い入口に留める。検証、状態遷移、accounting、event emit などの実ロジックは、責務を持つ各 module の private または `public(package)` helper に定義し、内部 module から外部公開 API を分散させない。
+- User-facing callable API は `accessor.move` に集約する。PR3 の `accessor.move` は donation 実行と必要最小限の donation record read helper の薄い入口に留める。
+- `admin.move` は `AdminCap` gated な admin-facing API を集約する。Pool 作成、DonorRegistry 作成、emergency pause 操作は `admin.move` に置き、実ロジックは責務を持つ各 module の private または `public(package)` helper に委譲する。
+- `accessor.move` / `admin.move` 以外の責務 module は、検証、状態遷移、accounting、event emit などの実ロジックを private または `public(package)` helper に定義し、外部公開 API として分散させない。
 - MembershipPass は全受取者必須にする。
 - DonorPass は寄付者向け準 SBT とし、初回寄付時に自動発行する。
 - DonationRecord は DonorPass に紐づく寄付履歴とし、2 回目以降の寄付も既存 DonorPass に追加する。

@@ -1,9 +1,7 @@
 module contracts::donation;
 
-use contracts::admin::{Self, PauseState};
 use contracts::mock_usdc::USDC;
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
-use contracts::admin::AdminCap;
 use std::option::{Self, Option};
 use sui::coin::{Self, Coin};
 use sui::dynamic_field;
@@ -108,7 +106,7 @@ public struct DonorTierUpdated has copy, drop {
     actor: address,
 }
 
-public(package) fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_donor_registry(ctx: &mut TxContext) {
     transfer::share_object(DonorRegistry {
         id: object::new(ctx),
         issued_count: 0,
@@ -116,15 +114,11 @@ public(package) fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
 }
 
 public(package) fun donate_general_usdc(
-    pause_state: &PauseState,
     registry: &mut DonorRegistry,
     main_pool: &mut MainPool,
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-
     let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
     process_first_donation(
         registry,
@@ -136,15 +130,12 @@ public(package) fun donate_general_usdc(
 }
 
 public(package) fun donate_general_usdc_with_pass(
-    pause_state: &PauseState,
     registry: &DonorRegistry,
     main_pool: &mut MainPool,
     pass: &mut DonorPass,
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
     assert_valid_registered_pass_owner(registry, pass, ctx.sender());
 
     let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
@@ -158,17 +149,12 @@ public(package) fun donate_general_usdc_with_pass(
 }
 
 public(package) fun donate_designated_usdc(
-    pause_state: &PauseState,
     registry: &mut DonorRegistry,
     main_pool: &mut MainPool,
     designated_pool: &mut DesignatedPool,
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
-
     let (designated_pool_id, amount) =
         deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
     process_first_donation(
@@ -181,7 +167,6 @@ public(package) fun donate_designated_usdc(
 }
 
 public(package) fun donate_designated_usdc_with_pass(
-    pause_state: &PauseState,
     registry: &DonorRegistry,
     main_pool: &mut MainPool,
     designated_pool: &mut DesignatedPool,
@@ -189,9 +174,6 @@ public(package) fun donate_designated_usdc_with_pass(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
     assert_valid_registered_pass_owner(registry, pass, ctx.sender());
 
     let (designated_pool_id, amount) =
@@ -206,15 +188,11 @@ public(package) fun donate_designated_usdc_with_pass(
 }
 
 public(package) fun donate_operations_usdc(
-    pause_state: &PauseState,
     registry: &mut DonorRegistry,
     operations_pool: &mut OperationsPool,
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
-
     let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
     process_first_donation(
         registry,
@@ -226,15 +204,12 @@ public(package) fun donate_operations_usdc(
 }
 
 public(package) fun donate_operations_usdc_with_pass(
-    pause_state: &PauseState,
     registry: &DonorRegistry,
     operations_pool: &mut OperationsPool,
     pass: &mut DonorPass,
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
     assert_valid_registered_pass_owner(registry, pass, ctx.sender());
 
     let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
@@ -475,20 +450,6 @@ fun tier_for_total(total_donated_usdc: u64): u8 {
     } else {
         TIER_NONE
     }
-}
-
-public(package) fun donor_pass_summary(
-    pass: &DonorPass,
-): (address, ID, u64, u64, u64, u64, u8) {
-    (
-        pass.owner,
-        pass.donor_lineage_id,
-        pass.total_donated_usdc,
-        pass.donation_count,
-        pass.first_donated_at_ms,
-        pass.last_donated_at_ms,
-        pass.tier,
-    )
 }
 
 public(package) fun donation_record_summary(

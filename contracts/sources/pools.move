@@ -1,6 +1,5 @@
 module contracts::pools;
 
-use contracts::admin::AdminCap;
 use contracts::mock_usdc::USDC;
 use std::option::Option;
 use sui::balance::{Self, Balance};
@@ -48,7 +47,7 @@ public struct PoolCreated has copy, drop {
     actor: address,
 }
 
-public(package) fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_main_pool(ctx: &mut TxContext) {
     let pool = MainPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -69,7 +68,6 @@ public(package) fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
 }
 
 public(package) fun create_designated_pool(
-    _: &AdminCap,
     related_id: Option<ID>,
     ctx: &mut TxContext,
 ) {
@@ -93,7 +91,7 @@ public(package) fun create_designated_pool(
     transfer::share_object(pool);
 }
 
-public(package) fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_operations_pool(ctx: &mut TxContext) {
     let pool = OperationsPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -138,36 +136,6 @@ public(package) fun deposit_operations_usdc(
     pool.balance.join(coin::into_balance(coin));
     pool.total_received_usdc = pool.total_received_usdc + amount;
     amount
-}
-
-public(package) fun main_pool_summary(pool: &MainPool): (ID, u64, u64, u64) {
-    (
-        object::id(pool),
-        pool.balance.value(),
-        pool.total_received_usdc,
-        pool.created_at_ms,
-    )
-}
-
-public(package) fun designated_pool_summary(
-    pool: &DesignatedPool,
-): (ID, u64, u64, Option<ID>, u64) {
-    (
-        object::id(pool),
-        pool.balance.value(),
-        pool.total_received_usdc,
-        pool.related_id,
-        pool.created_at_ms,
-    )
-}
-
-public(package) fun operations_pool_summary(pool: &OperationsPool): (ID, u64, u64, u64) {
-    (
-        object::id(pool),
-        pool.balance.value(),
-        pool.total_received_usdc,
-        pool.created_at_ms,
-    )
 }
 
 public(package) fun main_pool_id(pool: &MainPool): ID {

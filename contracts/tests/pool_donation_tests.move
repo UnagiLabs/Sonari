@@ -20,7 +20,7 @@ fun admin_can_create_usdc_pools() {
     let mut scenario = initialized();
 
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    pools::create_main_pool(&cap, scenario.ctx());
+    admin::create_main_pool(&cap, scenario.ctx());
     scenario.return_to_sender(cap);
     let pool_events = event::events_by_type<pools::PoolCreated>();
     assert!(pool_events.length() == 1);
@@ -39,7 +39,7 @@ fun admin_can_create_usdc_pools() {
 
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    pools::create_designated_pool(&cap, option::some(main_pool_id), scenario.ctx());
+    admin::create_designated_pool(&cap, option::some(main_pool_id), scenario.ctx());
     scenario.return_to_sender(cap);
     let pool_events = event::events_by_type<pools::PoolCreated>();
     assert!(pool_events.length() == 1);
@@ -58,7 +58,7 @@ fun admin_can_create_usdc_pools() {
 
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    pools::create_operations_pool(&cap, scenario.ctx());
+    admin::create_operations_pool(&cap, scenario.ctx());
     scenario.return_to_sender(cap);
     let pool_events = event::events_by_type<pools::PoolCreated>();
     assert!(pool_events.length() == 1);
@@ -97,7 +97,8 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
             scenario.ctx(),
         );
 
-        let (_, balance, total_received, _) = accessor::main_pool_summary(&main_pool);
+        let balance = pools::main_pool_balance_usdc(&main_pool);
+        let total_received = pools::main_pool_total_received_usdc(&main_pool);
         assert!(balance == 1_000_000);
         assert!(total_received == 1_000_000);
 
@@ -139,8 +140,10 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
     scenario.next_tx(DONOR);
     {
         let pass = scenario.take_from_sender<donation::DonorPass>();
-        let (owner, _, total_donated, donation_count, _, _, tier) =
-            accessor::donor_pass_summary(&pass);
+        let owner = donation::donor_pass_owner(&pass);
+        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
+        let donation_count = donation::donor_pass_donation_count(&pass);
+        let tier = donation::donor_pass_tier(&pass);
         assert!(owner == DONOR);
         assert!(total_donated == 1_000_000);
         assert!(donation_count == 1);
@@ -172,9 +175,11 @@ fun designated_donation_splits_usdc_and_sends_odd_remainder_to_designated_pool()
             scenario.ctx(),
         );
 
-        let (_, main_balance, main_total_received, _) = accessor::main_pool_summary(&main_pool);
-        let (_, designated_balance, designated_total_received, _, _) =
-            accessor::designated_pool_summary(&designated_pool);
+        let main_balance = pools::main_pool_balance_usdc(&main_pool);
+        let main_total_received = pools::main_pool_total_received_usdc(&main_pool);
+        let designated_balance = pools::designated_pool_balance_usdc(&designated_pool);
+        let designated_total_received =
+            pools::designated_pool_total_received_usdc(&designated_pool);
         assert!(main_balance == 2);
         assert!(main_total_received == 2);
         assert!(designated_balance == 3);
@@ -217,7 +222,8 @@ fun operations_donation_moves_all_usdc_to_operations_pool() {
             scenario.ctx(),
         );
 
-        let (_, balance, total_received, _) = accessor::operations_pool_summary(&operations_pool);
+        let balance = pools::operations_pool_balance_usdc(&operations_pool);
+        let total_received = pools::operations_pool_total_received_usdc(&operations_pool);
         assert!(balance == 250_000);
         assert!(total_received == 250_000);
 
@@ -386,8 +392,9 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
             scenario.ctx(),
         );
 
-        let (_, _, total_donated, donation_count, _, _, tier) =
-            accessor::donor_pass_summary(&pass);
+        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
+        let donation_count = donation::donor_pass_donation_count(&pass);
+        let tier = donation::donor_pass_tier(&pass);
         assert!(total_donated == 1_000_000);
         assert!(donation_count == 2);
         assert!(tier == donation::tier_silver());
@@ -458,11 +465,13 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
             scenario.ctx(),
         );
 
-        let (_, main_balance, main_total_received, _) = accessor::main_pool_summary(&main_pool);
-        let (_, designated_balance, designated_total_received, _, _) =
-            accessor::designated_pool_summary(&designated_pool);
-        let (_, _, total_donated, donation_count, _, _, _) =
-            accessor::donor_pass_summary(&pass);
+        let main_balance = pools::main_pool_balance_usdc(&main_pool);
+        let main_total_received = pools::main_pool_total_received_usdc(&main_pool);
+        let designated_balance = pools::designated_pool_balance_usdc(&designated_pool);
+        let designated_total_received =
+            pools::designated_pool_total_received_usdc(&designated_pool);
+        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
+        let donation_count = donation::donor_pass_donation_count(&pass);
         assert!(main_balance == 3);
         assert!(main_total_received == 3);
         assert!(designated_balance == 3);
@@ -544,9 +553,10 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
             scenario.ctx(),
         );
 
-        let (_, balance, total_received, _) = accessor::operations_pool_summary(&operations_pool);
-        let (_, _, total_donated, donation_count, _, _, _) =
-            accessor::donor_pass_summary(&pass);
+        let balance = pools::operations_pool_balance_usdc(&operations_pool);
+        let total_received = pools::operations_pool_total_received_usdc(&operations_pool);
+        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
+        let donation_count = donation::donor_pass_donation_count(&pass);
         assert!(balance == 7);
         assert!(total_received == 7);
         assert!(total_donated == 8);
@@ -848,7 +858,7 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
             scenario.ctx(),
         );
 
-        let (_, _, _, _, _, _, tier) = accessor::donor_pass_summary(&pass);
+        let tier = donation::donor_pass_tier(&pass);
         assert!(tier == donation::tier_bronze());
 
         let tier_events = event::events_by_type<donation::DonorTierUpdated>();
@@ -879,7 +889,7 @@ fun initialized_with_pools(): test_scenario::Scenario {
 
 fun create_donor_registry(scenario: &mut test_scenario::Scenario) {
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    donation::create_donor_registry(&cap, scenario.ctx());
+    admin::create_donor_registry(&cap, scenario.ctx());
     scenario.return_to_sender(cap);
 
     scenario.next_tx(ADMIN);
@@ -928,7 +938,7 @@ fun create_all_pools(
     scenario: &mut test_scenario::Scenario,
 ): (object::ID, object::ID, object::ID) {
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    pools::create_main_pool(&cap, scenario.ctx());
+    admin::create_main_pool(&cap, scenario.ctx());
     scenario.return_to_sender(cap);
 
     scenario.next_tx(ADMIN);
@@ -938,7 +948,7 @@ fun create_all_pools(
 
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    pools::create_designated_pool(&cap, option::some(main_pool_id), scenario.ctx());
+    admin::create_designated_pool(&cap, option::some(main_pool_id), scenario.ctx());
     scenario.return_to_sender(cap);
 
     scenario.next_tx(ADMIN);
@@ -948,7 +958,7 @@ fun create_all_pools(
 
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    pools::create_operations_pool(&cap, scenario.ctx());
+    admin::create_operations_pool(&cap, scenario.ctx());
     scenario.return_to_sender(cap);
 
     scenario.next_tx(ADMIN);

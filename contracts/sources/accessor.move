@@ -1,6 +1,6 @@
 module contracts::accessor;
 
-use contracts::admin::PauseState;
+use contracts::admin::{Self, PauseState};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::mock_usdc::USDC;
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
@@ -16,7 +16,9 @@ public fun donate_general_usdc(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    donation::donate_general_usdc(pause_state, registry, main_pool, coin, ctx);
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    donation::donate_general_usdc(registry, main_pool, coin, ctx);
 }
 
 public fun donate_general_usdc_with_pass(
@@ -27,8 +29,9 @@ public fun donate_general_usdc_with_pass(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
     donation::donate_general_usdc_with_pass(
-        pause_state,
         registry,
         main_pool,
         pass,
@@ -45,8 +48,10 @@ public fun donate_designated_usdc(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
     donation::donate_designated_usdc(
-        pause_state,
         registry,
         main_pool,
         designated_pool,
@@ -64,8 +69,10 @@ public fun donate_designated_usdc_with_pass(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
     donation::donate_designated_usdc_with_pass(
-        pause_state,
         registry,
         main_pool,
         designated_pool,
@@ -82,7 +89,9 @@ public fun donate_operations_usdc(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
-    donation::donate_operations_usdc(pause_state, registry, operations_pool, coin, ctx);
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
+    donation::donate_operations_usdc(registry, operations_pool, coin, ctx);
 }
 
 public fun donate_operations_usdc_with_pass(
@@ -93,8 +102,9 @@ public fun donate_operations_usdc_with_pass(
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
     donation::donate_operations_usdc_with_pass(
-        pause_state,
         registry,
         operations_pool,
         pass,
@@ -103,25 +113,9 @@ public fun donate_operations_usdc_with_pass(
     );
 }
 
-public fun donor_pass_summary(pass: &DonorPass): (address, ID, u64, u64, u64, u64, u8) {
-    donation::donor_pass_summary(pass)
-}
-
 public fun donation_record_summary(
     pass: &DonorPass,
     donation_index: u64,
 ): (u64, u8, Option<ID>, Option<ID>, ID, u64, vector<u8>, u64) {
     donation::donation_record_summary(pass, donation_index)
-}
-
-public fun main_pool_summary(pool: &MainPool): (ID, u64, u64, u64) {
-    pools::main_pool_summary(pool)
-}
-
-public fun designated_pool_summary(pool: &DesignatedPool): (ID, u64, u64, Option<ID>, u64) {
-    pools::designated_pool_summary(pool)
-}
-
-public fun operations_pool_summary(pool: &OperationsPool): (ID, u64, u64, u64) {
-    pools::operations_pool_summary(pool)
 }
