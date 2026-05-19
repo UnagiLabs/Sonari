@@ -1,11 +1,7 @@
 module contracts::program;
 
 use contracts::admin::{Self, AdminCap, PauseState};
-use std::option::Option;
 use sui::event;
-use sui::object::{Self, ID, UID};
-use sui::transfer;
-use sui::tx_context::TxContext;
 
 const STATUS_ACTIVE: u8 = 1;
 const STATUS_INACTIVE: u8 = 2;

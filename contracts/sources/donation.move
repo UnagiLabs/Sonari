@@ -1,14 +1,10 @@
 module contracts::donation;
 
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
-use std::option::{Self, Option};
 use sui::coin::{Self, Coin};
 use sui::dynamic_field;
 use sui::dynamic_object_field;
 use sui::event;
-use sui::object::{Self, ID, UID};
-use sui::transfer;
-use sui::tx_context::TxContext;
 use usdc::usdc::USDC;
 
 const DONATION_TYPE_GENERAL: u8 = 1;

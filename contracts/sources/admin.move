@@ -2,11 +2,7 @@ module contracts::admin;
 
 use contracts::donation;
 use contracts::pools;
-use std::option::{Self, Option};
 use sui::event;
-use sui::object::{Self, ID, UID};
-use sui::transfer;
-use sui::tx_context::TxContext;
 use sui::vec_set::{Self, VecSet};
 
 const SCOPE_GLOBAL: u8 = 1;

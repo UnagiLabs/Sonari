@@ -3,10 +3,7 @@ module contracts::accessor;
 use contracts::admin::{Self, PauseState};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
-use std::option::Option;
 use sui::coin::Coin;
-use sui::object::ID;
-use sui::tx_context::TxContext;
 use usdc::usdc::USDC;
 
 public fun donate_general_usdc(
