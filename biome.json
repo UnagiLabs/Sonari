@@ -4,6 +4,10 @@
     "files": {
         "includes": [
             "package.json",
+            "site/package.json",
+            "site/next.config.ts",
+            "site/tsconfig.json",
+            "site/app/**/*.tsx",
             "tsconfig.json",
             "tsconfig.scripts.json",
             "tsconfig.base.json",
