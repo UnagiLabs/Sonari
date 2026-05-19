@@ -1,5 +1,7 @@
 module contracts::admin;
 
+use contracts::donation;
+use contracts::pools;
 use std::option::{Self, Option};
 use sui::event;
 use sui::object::{Self, ID, UID};
@@ -54,10 +56,30 @@ fun initialize(ctx: &mut TxContext) {
     transfer::share_object(pause_state);
 }
 
-public(package) entry fun pause_global(
+public fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
+    donation::create_donor_registry(ctx);
+}
+
+public fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
+    pools::create_main_pool(ctx);
+}
+
+public fun create_designated_pool(
+    _: &AdminCap,
+    related_id: Option<ID>,
+    ctx: &mut TxContext,
+) {
+    pools::create_designated_pool(related_id, ctx);
+}
+
+public fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
+    pools::create_operations_pool(ctx);
+}
+
+public fun pause_global(
     _: &AdminCap,
     pause_state: &mut PauseState,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     pause_state.global_paused = true;
     event::emit(Paused {
@@ -68,10 +90,10 @@ public(package) entry fun pause_global(
     });
 }
 
-public(package) entry fun unpause_global(
+public fun unpause_global(
     _: &AdminCap,
     pause_state: &mut PauseState,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     pause_state.global_paused = false;
     event::emit(Unpaused {
@@ -82,12 +104,12 @@ public(package) entry fun unpause_global(
     });
 }
 
-public(package) entry fun pause_target(
+public fun pause_target(
     _: &AdminCap,
     pause_state: &mut PauseState,
     target_kind: u8,
     target_id: ID,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     if (!pause_state.paused_targets.contains(&target_id)) {
         pause_state.paused_targets.insert(target_id);
@@ -100,12 +122,12 @@ public(package) entry fun pause_target(
     });
 }
 
-public(package) entry fun unpause_target(
+public fun unpause_target(
     _: &AdminCap,
     pause_state: &mut PauseState,
     target_kind: u8,
     target_id: ID,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
     if (pause_state.paused_targets.contains(&target_id)) {
         pause_state.paused_targets.remove(&target_id);
