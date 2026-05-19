@@ -35,7 +35,10 @@ fun init_creates_admin_cap_and_pause_state() {
 }
 
 #[test]
-fun non_admin_cannot_take_admin_cap() {
+fun non_admin_cannot_access_admin_cap_required_for_admin_entries() {
+    // create_program / create_campaign / pause_* all require &AdminCap.
+    // Direct calls without &AdminCap are rejected at compile time, so this
+    // fixes the runtime boundary that NON_ADMIN cannot obtain ADMIN's cap.
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
 

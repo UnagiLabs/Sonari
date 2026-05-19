@@ -148,6 +148,12 @@ PR 2 以降の実装は、以下の cycle を機能単位で繰り返す。
 - paused Program / Campaign の claim を拒否できる。
 - Move tests が通る。
 
+PR 2 の scaffold 範囲では、Campaign の claim window validation はまだ実装しない。
+`claim_start_ms < claim_end_ms` の検証は Claim / Campaign 本実装 PR で追加し、その PR で invalid window の reject test も固定する。
+
+Program / Campaign status 更新 entry も PR 2 では公開しない。
+PR 2 では `#[test_only]` helper で status を切り替え、claim precheck が inactive / closed を拒否する contract-visible behavior だけを検証する。
+
 ### PR 3. Pool / Donation / DonorPass 基盤
 
 対象:
