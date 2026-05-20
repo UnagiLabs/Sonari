@@ -21,6 +21,7 @@ const SILVER_THRESHOLD_USDC: u64 = 1_000_000;
 const GOLD_THRESHOLD_USDC: u64 = 10_000_000;
 
 const COIN_TYPE_USDC: vector<u8> = b"USDC";
+const REGISTRY_KIND_DONOR: u8 = 1;
 
 const EZeroDonation: u64 = 0;
 const EDonorPassOwnerMismatch: u64 = 1;
@@ -31,6 +32,13 @@ const EDonorPassMismatch: u64 = 4;
 public struct DonorRegistry has key {
     id: UID,
     issued_count: u64,
+}
+
+public struct RegistryCreated has copy, drop {
+    registry_id: ID,
+    registry_kind: u8,
+    created_at_ms: u64,
+    actor: address,
 }
 
 public struct DonorPass has key {
@@ -102,11 +110,22 @@ public struct DonorTierUpdated has copy, drop {
     actor: address,
 }
 
-public(package) fun create_donor_registry(ctx: &mut TxContext) {
-    transfer::share_object(DonorRegistry {
+public(package) fun create_donor_registry(ctx: &mut TxContext): ID {
+    let registry = DonorRegistry {
         id: object::new(ctx),
         issued_count: 0,
+    };
+    let registry_id = object::id(&registry);
+
+    event::emit(RegistryCreated {
+        registry_id,
+        registry_kind: REGISTRY_KIND_DONOR,
+        created_at_ms: ctx.epoch_timestamp_ms(),
+        actor: ctx.sender(),
     });
+
+    transfer::share_object(registry);
+    registry_id
 }
 
 public(package) fun donate_general_usdc(
@@ -525,6 +544,14 @@ public(package) fun coin_type_usdc(): vector<u8> {
     COIN_TYPE_USDC
 }
 
+public fun registry_id(registry: &DonorRegistry): ID {
+    object::id(registry)
+}
+
+public fun registry_kind_donor(): u8 {
+    REGISTRY_KIND_DONOR
+}
+
 #[test_only]
 public fun general_donation_received_event_fields(
     event: GeneralDonationReceived,
@@ -599,6 +626,19 @@ public fun donor_tier_updated_event_fields(
         actor,
     } = event;
     (donor_pass_id, old_tier, new_tier, total_donated_usdc, actor)
+}
+
+#[test_only]
+public fun registry_created_event_fields(
+    event: RegistryCreated,
+): (ID, u8, u64, address) {
+    let RegistryCreated {
+        registry_id,
+        registry_kind,
+        created_at_ms,
+        actor,
+    } = event;
+    (registry_id, registry_kind, created_at_ms, actor)
 }
 
 #[test_only]

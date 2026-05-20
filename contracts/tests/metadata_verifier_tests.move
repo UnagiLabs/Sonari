@@ -17,7 +17,6 @@ const OTHER: address = @0xC0FFEE;
 #[test]
 fun verifier_registry_adds_and_disables_key_with_events() {
     let mut scenario = initialized();
-    create_shared_registry(&mut scenario);
 
     scenario.next_tx(ADMIN);
     {
@@ -553,7 +552,6 @@ fun owner_mismatch_is_rejected() {
 #[test, expected_failure(abort_code = admin::EGlobalPaused)]
 fun global_pause_blocks_metadata_update_accessor() {
     let mut scenario = initialized();
-    create_shared_registry(&mut scenario);
     let clock = clock::create_for_testing(scenario.ctx());
 
     scenario.next_tx(ADMIN);
@@ -593,7 +591,6 @@ fun global_pause_blocks_metadata_update_accessor() {
 #[test, expected_failure(abort_code = admin::ETargetPaused)]
 fun registry_target_pause_blocks_metadata_update_accessor() {
     let mut scenario = initialized();
-    create_shared_registry(&mut scenario);
     let registry_id = shared_registry_id(&mut scenario);
     let clock = clock::create_for_testing(scenario.ctx());
 
@@ -642,12 +639,6 @@ fun initialized(): test_scenario::Scenario {
     admin::init_for_testing(scenario.ctx());
     scenario.next_tx(ADMIN);
     scenario
-}
-
-fun create_shared_registry(scenario: &mut test_scenario::Scenario) {
-    let cap = scenario.take_from_sender<admin::AdminCap>();
-    admin::create_verifier_registry(&cap, scenario.ctx());
-    scenario.return_to_sender(cap);
 }
 
 fun shared_registry_id(scenario: &mut test_scenario::Scenario): object::ID {
