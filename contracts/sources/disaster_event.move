@@ -112,6 +112,14 @@ public fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
     disaster_event.affected_cells_root
 }
 
+public fun event_uid(disaster_event: &DisasterEvent): vector<u8> {
+    disaster_event.event_uid
+}
+
+public fun event_revision(disaster_event: &DisasterEvent): u32 {
+    disaster_event.event_revision
+}
+
 public fun min_claim_band(disaster_event: &DisasterEvent): u8 {
     disaster_event.min_claim_band
 }

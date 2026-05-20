@@ -1,7 +1,9 @@
 module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
+use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
 use contracts::claim::{Self, ClaimIndex, EligibilityResult};
+use contracts::disaster_event::DisasterEvent;
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::membership;
 use contracts::metadata_verifier::{
@@ -205,6 +207,42 @@ public fun claim_usdc(
         pass,
         main_pool,
         eligibility,
+        ctx,
+    );
+}
+
+public fun claim_disaster_usdc(
+    pause_state: &PauseState,
+    index: &mut ClaimIndex,
+    registry: &membership::MembershipRegistry,
+    program: &Program,
+    campaign: &Campaign,
+    policy: &PayoutPolicy,
+    budget: &mut CampaignBudget,
+    disaster_event: &DisasterEvent,
+    pass: &membership::MembershipPass,
+    leaf: AffectedCellLeaf,
+    proof: vector<ProofStep>,
+    designated_pool: &mut DesignatedPool,
+    main_pool: &mut MainPool,
+    user_max_amount_usdc: u64,
+    ctx: &mut TxContext,
+) {
+    claim::claim_disaster_usdc(
+        pause_state,
+        index,
+        registry,
+        program,
+        campaign,
+        policy,
+        budget,
+        disaster_event,
+        pass,
+        leaf,
+        proof,
+        designated_pool,
+        main_pool,
+        user_max_amount_usdc,
         ctx,
     );
 }

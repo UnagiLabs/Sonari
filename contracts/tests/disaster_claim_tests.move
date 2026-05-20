@@ -208,7 +208,8 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
 }
 
 fun apply_residence_metadata(scenario: &mut test_scenario::Scenario) {
-    apply_residence_metadata_cell(scenario, bcs::to_bytes(&H3_INDEX));
+    let h3_index = H3_INDEX;
+    apply_residence_metadata_cell(scenario, bcs::to_bytes(&h3_index));
 }
 
 fun apply_wrong_residence_metadata(scenario: &mut test_scenario::Scenario) {

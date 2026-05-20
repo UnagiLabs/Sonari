@@ -1,10 +1,15 @@
 module contracts::claim;
 
 use contracts::admin::{AdminCap, PauseState};
+use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
+use contracts::disaster_event::DisasterEvent;
+use contracts::disaster_event;
 use contracts::membership::{Self, MembershipPass, MembershipRegistry};
 use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
-use contracts::pools::{Self, MainPool};
+use contracts::pools::{Self, DesignatedPool, MainPool};
 use contracts::program::{Self, Campaign, Program};
+use sui::bcs;
+use sui::coin;
 use sui::dynamic_field;
 use sui::event;
 
@@ -15,6 +20,11 @@ const EEligibilityCampaignMismatch: u64 = 3;
 const EEligibilityPassMismatch: u64 = 4;
 const EEligibilityExpired: u64 = 5;
 const EEligibilityInvalidTimeRange: u64 = 6;
+const EInvalidAffectedCellProof: u64 = 7;
+const EDisasterEventMismatch: u64 = 8;
+const EClaimBandTooLow: u64 = 9;
+const EResidenceCellMismatch: u64 = 10;
+const EResidenceMetadataExpired: u64 = 11;
 
 public struct ClaimIndex has key {
     id: UID,
@@ -211,6 +221,91 @@ public(package) fun claim_usdc(
     transfer::transfer(receipt, ctx.sender());
 }
 
+public(package) fun claim_disaster_usdc(
+    pause_state: &PauseState,
+    index: &mut ClaimIndex,
+    registry: &MembershipRegistry,
+    program: &Program,
+    campaign: &Campaign,
+    policy: &PayoutPolicy,
+    budget: &mut CampaignBudget,
+    disaster_event: &DisasterEvent,
+    pass: &MembershipPass,
+    leaf: AffectedCellLeaf,
+    proof: vector<ProofStep>,
+    designated_pool: &mut DesignatedPool,
+    main_pool: &mut MainPool,
+    user_max_amount_usdc: u64,
+    ctx: &mut TxContext,
+) {
+    let now_ms = ctx.epoch_timestamp_ms();
+    program::assert_claim_precheck(pause_state, program, campaign);
+    program::assert_claim_window(campaign, now_ms);
+    payout_policy::assert_budget_matches(budget, program, campaign);
+    membership::assert_current_pass_precheck(registry, pass, ctx.sender());
+    assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof, now_ms);
+
+    let duplicate_key = ClaimKey {
+        pass_lineage_id: membership::membership_pass_lineage_id(pass),
+        campaign_id: program::campaign_id(campaign),
+    };
+    assert!(
+        !dynamic_field::exists_with_type<ClaimKey, bool>(&index.id, duplicate_key),
+        EDuplicateClaim,
+    );
+
+    let designated_available = min_u64(
+        pools::designated_pool_balance_usdc(designated_pool),
+        payout_policy::designated_remaining_usdc(budget),
+    );
+    let main_available = min_u64(
+        pools::main_pool_balance_usdc(main_pool),
+        payout_policy::main_remaining_usdc(budget),
+    );
+    let total_available = designated_available + main_available;
+    let (_, _, confidence, risk_bucket, _, _, _, _) =
+        membership::residence_metadata_summary(pass);
+    let amount = payout_policy::quote_usdc(
+        policy,
+        affected_cell::cell_band(&leaf),
+        membership::membership_pass_issued_at_ms(pass),
+        confidence,
+        risk_bucket,
+        user_max_amount_usdc,
+        payout_policy::campaign_budget_remaining_usdc(budget),
+        total_available,
+        now_ms,
+    );
+    assert!(amount > 0, ENoPayableAmount);
+
+    let designated_amount = min_u64(amount, designated_available);
+    let main_amount = amount - designated_amount;
+    assert!(main_amount <= main_available, ENoPayableAmount);
+
+    dynamic_field::add(&mut index.id, duplicate_key, true);
+    index.claim_count = index.claim_count + 1;
+    payout_policy::record_claim(budget, main_amount, designated_amount);
+
+    let recipient = membership::membership_pass_payout_address(pass);
+    let mut payout_coin = pools::withdraw_designated_usdc(designated_pool, designated_amount, ctx);
+    let main_coin = pools::withdraw_main_usdc(main_pool, main_amount, ctx);
+    coin::join(&mut payout_coin, main_coin);
+    transfer::public_transfer(payout_coin, recipient);
+
+    create_receipt_and_emit(
+        program,
+        campaign,
+        pass,
+        affected_cell::cell_band(&leaf),
+        amount,
+        main_amount,
+        designated_amount,
+        recipient,
+        now_ms,
+        ctx,
+    );
+}
+
 fun assert_valid_eligibility(
     program: &Program,
     campaign: &Campaign,
@@ -229,6 +324,99 @@ fun assert_valid_eligibility(
     );
     assert!(eligibility.expires_at_ms > eligibility.issued_at_ms, EEligibilityInvalidTimeRange);
     assert!(eligibility.expires_at_ms > now_ms, EEligibilityExpired);
+}
+
+fun assert_valid_disaster_eligibility(
+    disaster_event: &DisasterEvent,
+    pass: &MembershipPass,
+    leaf: &AffectedCellLeaf,
+    proof: vector<ProofStep>,
+    now_ms: u64,
+) {
+    assert!(
+        affected_cell::event_uid(leaf) == disaster_event::event_uid(disaster_event)
+            && affected_cell::event_revision(leaf) == disaster_event::event_revision(disaster_event),
+        EDisasterEventMismatch,
+    );
+    assert!(
+        affected_cell::verify_proof(
+            leaf,
+            proof,
+            disaster_event::affected_cells_root(disaster_event),
+        ),
+        EInvalidAffectedCellProof,
+    );
+    assert!(
+        affected_cell::cell_band(leaf) >= disaster_event::min_claim_band(disaster_event),
+        EClaimBandTooLow,
+    );
+
+    let (
+        _update_id,
+        residence_cell,
+        _confidence,
+        _risk_bucket,
+        _evidence_hash,
+        _issued_at_ms,
+        expires_at_ms,
+        _verifier_version,
+    ) = membership::residence_metadata_summary(pass);
+    assert!(expires_at_ms > now_ms, EResidenceMetadataExpired);
+    assert!(
+        residence_cell == bcs::to_bytes(&affected_cell::h3_index(leaf)),
+        EResidenceCellMismatch,
+    );
+}
+
+fun create_receipt_and_emit(
+    program: &Program,
+    campaign: &Campaign,
+    pass: &MembershipPass,
+    eligibility_tier: u8,
+    amount: u64,
+    main_amount: u64,
+    designated_amount: u64,
+    recipient: address,
+    claimed_at_ms: u64,
+    ctx: &mut TxContext,
+) {
+    let receipt = ClaimReceipt {
+        id: object::new(ctx),
+        program_id: program::id(program),
+        campaign_id: program::campaign_id(campaign),
+        pass_lineage_id: membership::membership_pass_lineage_id(pass),
+        eligibility_tier,
+        amount_usdc: amount,
+        main_paid_usdc: main_amount,
+        designated_paid_usdc: designated_amount,
+        claimant: ctx.sender(),
+        recipient,
+        claimed_at_ms,
+    };
+    let receipt_id = object::id(&receipt);
+
+    event::emit(ClaimPaid {
+        receipt_id,
+        program_id: receipt.program_id,
+        campaign_id: receipt.campaign_id,
+        amount_usdc: amount,
+        main_paid_usdc: main_amount,
+        designated_paid_usdc: designated_amount,
+        recipient,
+        actor: ctx.sender(),
+    });
+    event::emit(ClaimReceiptCreated {
+        receipt_id,
+        program_id: receipt.program_id,
+        campaign_id: receipt.campaign_id,
+        pass_lineage_id: receipt.pass_lineage_id,
+        amount_usdc: amount,
+        claimant: ctx.sender(),
+        recipient,
+        actor: ctx.sender(),
+    });
+
+    transfer::transfer(receipt, ctx.sender());
 }
 
 public fun claim_index_claim_count(index: &ClaimIndex): u64 {
