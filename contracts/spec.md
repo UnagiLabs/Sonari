@@ -208,9 +208,11 @@ StudentMetadataUpdateMessage {
 
 署名対象は上記 field order の Move struct に対する `sui::bcs::to_bytes(&message)` の bytes で固定する。Residence の `intent` は `SONARI_RESIDENCE_METADATA_UPDATE_V1`、Student の `intent` は `SONARI_STUDENT_METADATA_UPDATE_V1` とし、`verifier_version` は v1 では `1` である。`payout_address` は PR5 の署名対象に含めず、Claim / Payout PR 側で使用可否を検証する。
 
-`VerifierRegistry` は AdminCap gated に作成し、Ed25519 public key、verifier family、version、enabled / disabled 状態を保持する。metadata update は registry に登録済みで enabled な key の Ed25519 signature だけを受理する。public key bytes は 32 bytes、signature bytes は 64 bytes でない場合 fail-closed で拒否する。
+`VerifierRegistry` は AdminCap gated に作成し、Ed25519 public key、verifier family、version、enabled / disabled 状態を保持する。key registration は family `RESIDENCE` / `STUDENT`、version `V1` のみ許可し、unknown family / version は fail-closed で拒否する。metadata update は registry に登録済みで enabled な key の Ed25519 signature だけを受理する。public key bytes は 32 bytes、signature bytes は 64 bytes でない場合 fail-closed で拒否する。
 
-freshness は `Clock` の `timestamp_ms` で検証する。`expires_at_ms <= now_ms`、`expires_at_ms <= issued_at_ms`、`issued_at_ms > now_ms + 300_000` は拒否する。replay prevention は `pass_lineage_id × verifier_family` 単位で `update_id` を monotonic に扱い、Residence と Student の update_id は別系列として進める。
+metadata update の user-facing API は global pause または VerifierRegistry target pause 中に拒否する。一方、AdminCap gated な verifier key add / disable は pause 中も許可する。disable は emergency revoke 用の操作であり、pause 中でも実行できる必要がある。すでに disabled な key の再 disable は拒否し、`VerifierKeyDisabled` event の重複 emit を防ぐ。
+
+freshness は `Clock` の `timestamp_ms` で検証する。`expires_at_ms <= now_ms`、`expires_at_ms <= issued_at_ms`、`issued_at_ms` が `now_ms` より 300,000 ms を超えて未来の場合は拒否する。replay prevention は `pass_lineage_id × verifier_family` 単位で `update_id` を monotonic に扱い、Residence と Student の update_id は別系列として進める。
 
 raw email、phone、GPS 履歴、端末情報、住所、学籍番号、在学証明書の原文はオンチェーンに出さない。オンチェーンには bucket、hash、有効期限、署名検証に必要な最小情報だけを残す。
 

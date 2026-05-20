@@ -36,6 +36,7 @@ const EFutureIssuedAt: u64 = 11;
 const ERegistryMismatch: u64 = 12;
 const EPassLineageMismatch: u64 = 13;
 const EOwnerMismatch: u64 = 14;
+const EVerifierKeyAlreadyDisabled: u64 = 15;
 
 public struct VerifierRegistry has key {
     id: UID,
@@ -326,6 +327,8 @@ fun add_verifier_key_internal(
     ctx: &TxContext,
 ) {
     assert_public_key_length(&public_key);
+    assert_allowed_verifier_family(verifier_family);
+    assert_allowed_verifier_version(verifier_version);
     assert!(!registry.keys.contains(&public_key), EVerifierKeyAlreadyRegistered);
 
     registry.keys.insert(
@@ -358,6 +361,7 @@ fun disable_verifier_key_internal(
     assert!(registry.keys.contains(&public_key), EVerifierKeyNotRegistered);
 
     let key = registry.keys.get_mut(&public_key);
+    assert!(key.enabled, EVerifierKeyAlreadyDisabled);
     key.enabled = false;
     key.disabled_at_ms = option::some(ctx.epoch_timestamp_ms());
     event::emit(VerifierKeyDisabled {
@@ -484,7 +488,7 @@ fun assert_common_metadata_update(
     assert!(owner == membership::membership_pass_owner(pass), EOwnerMismatch);
     assert!(expires_at_ms > issued_at_ms, EInvalidTimeRange);
     assert!(expires_at_ms > now_ms, EExpiredUpdate);
-    assert!(issued_at_ms <= now_ms + ALLOWED_CLOCK_SKEW_MS, EFutureIssuedAt);
+    assert_issued_at_not_too_far_in_future(issued_at_ms, now_ms);
     membership::assert_metadata_update_precheck(pass);
 
     assert!(registry.keys.contains(public_key), EVerifierKeyNotRegistered);
@@ -504,6 +508,23 @@ fun assert_public_key_length(public_key: &vector<u8>) {
 
 fun assert_signature_length(signature: &vector<u8>) {
     assert!(signature.length() == ED25519_SIGNATURE_LENGTH, EInvalidSignatureLength);
+}
+
+fun assert_allowed_verifier_family(verifier_family: u8) {
+    assert!(
+        verifier_family == VERIFIER_FAMILY_RESIDENCE || verifier_family == VERIFIER_FAMILY_STUDENT,
+        EVerifierFamilyMismatch,
+    );
+}
+
+fun assert_allowed_verifier_version(verifier_version: u64) {
+    assert!(verifier_version == VERIFIER_VERSION_V1, EVerifierVersionMismatch);
+}
+
+fun assert_issued_at_not_too_far_in_future(issued_at_ms: u64, now_ms: u64) {
+    if (issued_at_ms > now_ms) {
+        assert!(issued_at_ms - now_ms <= ALLOWED_CLOCK_SKEW_MS, EFutureIssuedAt);
+    };
 }
 
 #[test_only]

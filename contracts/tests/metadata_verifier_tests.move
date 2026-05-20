@@ -61,6 +61,47 @@ fun verifier_registry_adds_and_disables_key_with_events() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierKeyAlreadyDisabled)]
+fun disabling_already_disabled_key_is_rejected() {
+    let (mut registry, pass, clock, mut ctx) = direct_initialized();
+    metadata_verifier::add_verifier_key_for_testing(
+        &mut registry,
+        metadata_verifier::verifier_family_residence(),
+        metadata_verifier::verifier_version_v1(),
+        valid_public_key(),
+        &mut ctx,
+    );
+    metadata_verifier::disable_verifier_key_for_testing(&mut registry, valid_public_key(), &mut ctx);
+    metadata_verifier::disable_verifier_key_for_testing(&mut registry, valid_public_key(), &mut ctx);
+    cleanup_direct(registry, pass, clock);
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierFamilyMismatch)]
+fun unknown_verifier_family_registration_is_rejected() {
+    let (mut registry, pass, clock, mut ctx) = direct_initialized();
+    metadata_verifier::add_verifier_key_for_testing(
+        &mut registry,
+        99,
+        metadata_verifier::verifier_version_v1(),
+        valid_public_key(),
+        &mut ctx,
+    );
+    cleanup_direct(registry, pass, clock);
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierVersionMismatch)]
+fun unknown_verifier_version_registration_is_rejected() {
+    let (mut registry, pass, clock, mut ctx) = direct_initialized();
+    metadata_verifier::add_verifier_key_for_testing(
+        &mut registry,
+        metadata_verifier::verifier_family_residence(),
+        99,
+        valid_public_key(),
+        &mut ctx,
+    );
+    cleanup_direct(registry, pass, clock);
+}
+
 #[test]
 fun valid_residence_update_only_updates_residence_metadata() {
     let (mut registry, mut pass, clock, mut ctx) = direct_initialized();
@@ -102,7 +143,7 @@ fun valid_residence_update_only_updates_residence_metadata() {
     assert!(residence_expires_at_ms == 2_000);
     assert!(residence_version == metadata_verifier::verifier_version_v1());
 
-    let (student_update_id, _, _, _, _, _, _, _) = membership::student_metadata_summary(&pass);
+    let (student_update_id, _, _, _, _, _, _, _, _) = membership::student_metadata_summary(&pass);
     assert!(student_update_id == 0);
 
     let events = event::events_by_type<membership::PassMetadataUpdated>();
@@ -155,6 +196,7 @@ fun valid_student_update_only_updates_student_metadata() {
         student_evidence_hash,
         student_issued_at_ms,
         student_expires_at_ms,
+        student_version,
     ) = membership::student_metadata_summary(&pass);
     assert!(student_update_id == 1);
     assert!(school_region_hash == b"school-region-hash");
@@ -164,6 +206,7 @@ fun valid_student_update_only_updates_student_metadata() {
     assert!(student_evidence_hash == b"student-evidence-hash");
     assert!(student_issued_at_ms == 900);
     assert!(student_expires_at_ms == 2_000);
+    assert!(student_version == metadata_verifier::verifier_version_v1());
 
     cleanup_direct(registry, pass, clock);
 }
@@ -209,7 +252,7 @@ fun residence_and_student_update_ids_are_separate_series() {
     );
 
     let (residence_update_id, _, _, _, _, _, _, _) = membership::residence_metadata_summary(&pass);
-    let (student_update_id, _, _, _, _, _, _, _) = membership::student_metadata_summary(&pass);
+    let (student_update_id, _, _, _, _, _, _, _, _) = membership::student_metadata_summary(&pass);
     assert!(residence_update_id == 1);
     assert!(student_update_id == 1);
 
@@ -419,11 +462,11 @@ fun wrong_version_is_rejected() {
     metadata_verifier::add_verifier_key_for_testing(
         &mut registry,
         metadata_verifier::verifier_family_residence(),
-        99,
+        metadata_verifier::verifier_version_v1(),
         valid_public_key(),
         &mut ctx,
     );
-    let message = valid_residence_message(&registry, &pass, 1);
+    let message = residence_message_with_version(&registry, &pass, 99);
     metadata_verifier::verify_and_update_residence_metadata(
         &registry,
         &mut pass,
@@ -684,6 +727,28 @@ fun residence_message_with_time(
         1,
         issued_at_ms,
         expires_at_ms,
+    )
+}
+
+fun residence_message_with_version(
+    registry: &metadata_verifier::VerifierRegistry,
+    pass: &membership::MembershipPass,
+    verifier_version: u64,
+): metadata_verifier::ResidenceMetadataUpdateMessage {
+    metadata_verifier::new_residence_metadata_update_message(
+        b"SONARI_RESIDENCE_METADATA_UPDATE_V1",
+        metadata_verifier::verifier_family_residence(),
+        verifier_version,
+        metadata_verifier::registry_id(registry),
+        membership::membership_pass_lineage_id(pass),
+        MEMBER,
+        1,
+        900,
+        2_000,
+        b"9q8yy",
+        9300,
+        2,
+        b"residence-evidence-hash",
     )
 }
 

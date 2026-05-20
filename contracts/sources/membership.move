@@ -194,7 +194,7 @@ public fun residence_metadata_summary(
 
 public fun student_metadata_summary(
     pass: &MembershipPass,
-): (u64, vector<u8>, u8, u64, u8, vector<u8>, u64, u64) {
+): (u64, vector<u8>, u8, u64, u8, vector<u8>, u64, u64, u64) {
     (
         pass.student_last_update_id,
         pass.school_region_hash,
@@ -204,6 +204,7 @@ public fun student_metadata_summary(
         pass.student_evidence_snapshot_hash,
         pass.student_issued_at_ms,
         pass.student_expires_at_ms,
+        pass.student_verifier_version,
     )
 }
 

@@ -280,7 +280,7 @@ PR4 の実装範囲:
 内容:
 
 - Nautilus verifier public key registry
-- verifier family / version
+- verifier family / version は key registration 時点で `RESIDENCE` / `STUDENT` と `V1` のみに制限する
 - ResidenceMetadataUpdate verification
 - StudentMetadataUpdate verification
 - freshness / expiry / replay prevention
@@ -293,7 +293,7 @@ PR4 の実装範囲:
 - registered verifier の valid ResidenceMetadataUpdate だけが `MembershipPass` の residence metadata を更新できる。
 - valid StudentMetadataUpdate だけが student metadata を更新できる。
 - invalid signature、expired update、replayed update、wrong verifier family、disabled key は reject される。
-- signature bytes / public key bytes 長不正、wrong verifier version、wrong intent、future issued_at は reject される。
+- signature bytes / public key bytes 長不正、unknown verifier family / version registration、wrong verifier version、wrong intent、future issued_at は reject される。
 - paused verifier update / metadata update は reject される。
 - `pass_lineage_id` / owner binding mismatch は reject される。
 - raw email、phone、GPS 履歴、住所、学籍番号、学校メール raw value を保存する field がない。
@@ -316,6 +316,7 @@ PR4 の実装範囲:
 - Residence / Student metadata は別系列の `update_id` として replay prevention できる。
 - 署名対象 struct の BCS bytes は fixture test で固定されている。
 - raw personal data を保存しない。
+- metadata update は global pause / VerifierRegistry target pause で拒否する。AdminCap gated な verifier key add / disable は pause 中も許可し、disable は emergency revoke として使える。二重 disable は拒否して disabled event の重複 emit を防ぐ。
 
 ### PR 6. Pass migration
 
