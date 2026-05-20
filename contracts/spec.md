@@ -152,12 +152,6 @@ Membership Pass は全受取者に必須の準 SBT である。Pass は通常 tr
 
 Pass は個人情報を直接保持しない。支払い判定に使う metadata は Nautilus 署名済み update のみ信頼する。
 
-PR4 の実装範囲では、`MembershipPass` は `has key` のみを持つ owned object として発行する。`store` ability と通常 transfer 用 API は提供しない。user-facing callable API は `accessor::register_member_usdc` に集約し、global pause と `OperationsPool` target pause を検証したうえで、USDC Verification Fee を Operations Pool の balance / total received に入金する。Verification Fee は Main Pool / Designated Pool / Campaign Pool に入れず、Relief payout 原資として扱わない。
-
-PR4 の `MembershipPass` 本体は、owner、payout address、`pass_lineage_id`、status、issued timestamp、metadata update timestamp だけを保持する。`pass_lineage_id` は発行された pass の object id に固定し、duplicate claim prevention key は `(pass_lineage_id, campaign_id)` とする。`DonorPass` の `total_donated`、`donation_count`、tier、`DonationRecord` に相当する寄付集計・寄付履歴 surface は持たない。
-
-PR4 では `MembershipRegistry` や同一 wallet の重複発行防止は追加しない。重複発行防止、任意 owner 発行、migration、metadata update は後続 PR で扱う。
-
 | Metadata | 例 |
 | --- | --- |
 | Core | `pass_lineage_id`、owner、payout address、status、issued_at_ms、last_metadata_update_ms |
