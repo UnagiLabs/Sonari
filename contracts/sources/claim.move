@@ -2,7 +2,7 @@ module contracts::claim;
 
 use contracts::admin::{AdminCap, PauseState};
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
-use contracts::disaster_event::DisasterEvent;
+use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::disaster_event;
 use contracts::membership::{Self, MembershipPass, MembershipRegistry};
 use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
@@ -15,22 +15,19 @@ use sui::event;
 
 const EDuplicateClaim: u64 = 0;
 const ENoPayableAmount: u64 = 1;
-const EEligibilityProgramMismatch: u64 = 2;
-const EEligibilityCampaignMismatch: u64 = 3;
-const EEligibilityPassMismatch: u64 = 4;
-const EEligibilityExpired: u64 = 5;
-const EEligibilityInvalidTimeRange: u64 = 6;
 const EInvalidAffectedCellProof: u64 = 7;
 const EDisasterEventMismatch: u64 = 8;
 const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
 const EResidenceMetadataExpired: u64 = 11;
+const EGenericClaimDisabled: u64 = 12;
 
 public struct ClaimIndex has key {
     id: UID,
     claim_count: u64,
 }
 
+#[allow(unused_field)]
 public struct EligibilityResult has copy, drop, store {
     program_id: ID,
     campaign_id: ID,
@@ -104,6 +101,7 @@ public(package) fun create_claim_index(_: &AdminCap, ctx: &mut TxContext) {
     transfer::share_object(index);
 }
 
+#[test_only]
 public fun new_eligibility_result(
     program_id: ID,
     campaign_id: ID,
@@ -129,96 +127,19 @@ public fun new_eligibility_result(
 }
 
 public(package) fun claim_usdc(
-    pause_state: &PauseState,
-    index: &mut ClaimIndex,
-    registry: &MembershipRegistry,
-    program: &Program,
-    campaign: &Campaign,
-    policy: &PayoutPolicy,
-    budget: &mut CampaignBudget,
-    pass: &MembershipPass,
-    main_pool: &mut MainPool,
-    eligibility: EligibilityResult,
-    ctx: &mut TxContext,
+    _pause_state: &PauseState,
+    _index: &mut ClaimIndex,
+    _registry: &MembershipRegistry,
+    _program: &Program,
+    _campaign: &Campaign,
+    _policy: &PayoutPolicy,
+    _budget: &mut CampaignBudget,
+    _pass: &MembershipPass,
+    _main_pool: &mut MainPool,
+    _eligibility: EligibilityResult,
+    _ctx: &mut TxContext,
 ) {
-    let now_ms = ctx.epoch_timestamp_ms();
-    program::assert_claim_precheck(pause_state, program, campaign);
-    program::assert_claim_window(campaign, now_ms);
-    payout_policy::assert_budget_matches(budget, program, campaign);
-    membership::assert_current_pass_precheck(registry, pass, ctx.sender());
-
-    assert_valid_eligibility(program, campaign, pass, &eligibility, now_ms);
-    let duplicate_key = ClaimKey {
-        pass_lineage_id: membership::membership_pass_lineage_id(pass),
-        campaign_id: program::campaign_id(campaign),
-    };
-    assert!(
-        !dynamic_field::exists_with_type<ClaimKey, bool>(&index.id, duplicate_key),
-        EDuplicateClaim,
-    );
-
-    let pool_available = min_u64(
-        pools::main_pool_balance_usdc(main_pool),
-        payout_policy::main_remaining_usdc(budget),
-    );
-    let amount = payout_policy::quote_usdc(
-        policy,
-        eligibility.eligibility_tier,
-        membership::membership_pass_issued_at_ms(pass),
-        0,
-        0,
-        eligibility.max_amount,
-        payout_policy::campaign_budget_remaining_usdc(budget),
-        pool_available,
-        now_ms,
-    );
-    assert!(amount > 0, ENoPayableAmount);
-
-    dynamic_field::add(&mut index.id, duplicate_key, true);
-    index.claim_count = index.claim_count + 1;
-    payout_policy::record_claim(budget, amount, 0);
-
-    let recipient = membership::membership_pass_payout_address(pass);
-    let payout_coin = pools::withdraw_main_usdc(main_pool, amount, ctx);
-    transfer::public_transfer(payout_coin, recipient);
-
-    let receipt = ClaimReceipt {
-        id: object::new(ctx),
-        program_id: program::id(program),
-        campaign_id: program::campaign_id(campaign),
-        pass_lineage_id: membership::membership_pass_lineage_id(pass),
-        eligibility_tier: eligibility.eligibility_tier,
-        amount_usdc: amount,
-        main_paid_usdc: amount,
-        designated_paid_usdc: 0,
-        claimant: ctx.sender(),
-        recipient,
-        claimed_at_ms: now_ms,
-    };
-    let receipt_id = object::id(&receipt);
-
-    event::emit(ClaimPaid {
-        receipt_id,
-        program_id: receipt.program_id,
-        campaign_id: receipt.campaign_id,
-        amount_usdc: amount,
-        main_paid_usdc: amount,
-        designated_paid_usdc: 0,
-        recipient,
-        actor: ctx.sender(),
-    });
-    event::emit(ClaimReceiptCreated {
-        receipt_id,
-        program_id: receipt.program_id,
-        campaign_id: receipt.campaign_id,
-        pass_lineage_id: receipt.pass_lineage_id,
-        amount_usdc: amount,
-        claimant: ctx.sender(),
-        recipient,
-        actor: ctx.sender(),
-    });
-
-    transfer::transfer(receipt, ctx.sender());
+    abort EGenericClaimDisabled
 }
 
 public(package) fun claim_disaster_usdc(
@@ -229,6 +150,7 @@ public(package) fun claim_disaster_usdc(
     campaign: &Campaign,
     policy: &PayoutPolicy,
     budget: &mut CampaignBudget,
+    binding: &DisasterCampaignBinding,
     disaster_event: &DisasterEvent,
     pass: &MembershipPass,
     leaf: AffectedCellLeaf,
@@ -242,6 +164,8 @@ public(package) fun claim_disaster_usdc(
     program::assert_claim_precheck(pause_state, program, campaign);
     program::assert_claim_window(campaign, now_ms);
     payout_policy::assert_budget_matches(budget, program, campaign);
+    payout_policy::assert_designated_pool_matches(budget, designated_pool);
+    disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
     assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof, now_ms);
 
@@ -304,26 +228,6 @@ public(package) fun claim_disaster_usdc(
         now_ms,
         ctx,
     );
-}
-
-fun assert_valid_eligibility(
-    program: &Program,
-    campaign: &Campaign,
-    pass: &MembershipPass,
-    eligibility: &EligibilityResult,
-    now_ms: u64,
-) {
-    assert!(eligibility.program_id == program::id(program), EEligibilityProgramMismatch);
-    assert!(
-        eligibility.campaign_id == program::campaign_id(campaign),
-        EEligibilityCampaignMismatch,
-    );
-    assert!(
-        eligibility.pass_lineage_id == membership::membership_pass_lineage_id(pass),
-        EEligibilityPassMismatch,
-    );
-    assert!(eligibility.expires_at_ms > eligibility.issued_at_ms, EEligibilityInvalidTimeRange);
-    assert!(eligibility.expires_at_ms > now_ms, EEligibilityExpired);
 }
 
 fun assert_valid_disaster_eligibility(

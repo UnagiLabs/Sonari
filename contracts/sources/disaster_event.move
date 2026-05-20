@@ -1,11 +1,14 @@
 module contracts::disaster_event;
 
 use contracts::admin::AdminCap;
+use contracts::metadata_verifier::{Self, VerifierRegistry};
 use contracts::payload_v1::{Self, Payload};
+use contracts::program::{Self, Campaign};
 use sui::dynamic_field;
 use sui::event;
 
 const EDuplicateDisasterEvent: u64 = 0;
+const EDisasterCampaignBindingMismatch: u64 = 1;
 
 public struct DisasterRegistry has key {
     id: UID,
@@ -22,6 +25,15 @@ public struct DisasterEvent has key {
     affected_cells_data_hash: vector<u8>,
     affected_cell_count: u64,
     min_claim_band: u8,
+    created_at_ms: u64,
+}
+
+public struct DisasterCampaignBinding has key {
+    id: UID,
+    campaign_id: ID,
+    disaster_event_id: ID,
+    event_uid: vector<u8>,
+    event_revision: u32,
     created_at_ms: u64,
 }
 
@@ -48,6 +60,16 @@ public struct DisasterEventCreated has copy, drop {
     actor: address,
 }
 
+public struct DisasterCampaignBound has copy, drop {
+    binding_id: ID,
+    campaign_id: ID,
+    disaster_event_id: ID,
+    event_uid: vector<u8>,
+    event_revision: u32,
+    created_at_ms: u64,
+    actor: address,
+}
+
 public(package) fun create_disaster_registry(_: &AdminCap, ctx: &mut TxContext) {
     let registry = DisasterRegistry {
         id: object::new(ctx),
@@ -62,8 +84,67 @@ public(package) fun create_disaster_registry(_: &AdminCap, ctx: &mut TxContext) 
     transfer::share_object(registry);
 }
 
-public(package) fun create_from_payload(
+public(package) fun create_from_signed_payload(
     _: &AdminCap,
+    registry: &mut DisasterRegistry,
+    verifier_registry: &VerifierRegistry,
+    payload_bcs: vector<u8>,
+    signature: vector<u8>,
+    public_key: vector<u8>,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::assert_signed_bytes(
+        verifier_registry,
+        metadata_verifier::verifier_family_disaster_oracle(),
+        metadata_verifier::verifier_version_v1(),
+        &payload_bcs,
+        &signature,
+        &public_key,
+    );
+    let payload = payload_v1::decode_finalized(payload_bcs, now_ms);
+    create_from_verified_payload(registry, payload, ctx);
+}
+
+public(package) fun bind_campaign(
+    _: &AdminCap,
+    campaign: &Campaign,
+    disaster_event: &DisasterEvent,
+    ctx: &mut TxContext,
+) {
+    let binding = DisasterCampaignBinding {
+        id: object::new(ctx),
+        campaign_id: program::campaign_id(campaign),
+        disaster_event_id: object::id(disaster_event),
+        event_uid: disaster_event.event_uid,
+        event_revision: disaster_event.event_revision,
+        created_at_ms: ctx.epoch_timestamp_ms(),
+    };
+    let binding_id = object::id(&binding);
+    event::emit(DisasterCampaignBound {
+        binding_id,
+        campaign_id: binding.campaign_id,
+        disaster_event_id: binding.disaster_event_id,
+        event_uid: binding.event_uid,
+        event_revision: binding.event_revision,
+        created_at_ms: binding.created_at_ms,
+        actor: ctx.sender(),
+    });
+    transfer::share_object(binding);
+}
+
+public fun assert_campaign_binding(
+    binding: &DisasterCampaignBinding,
+    campaign: &Campaign,
+    disaster_event: &DisasterEvent,
+) {
+    assert!(binding.campaign_id == program::campaign_id(campaign), EDisasterCampaignBindingMismatch);
+    assert!(binding.disaster_event_id == object::id(disaster_event), EDisasterCampaignBindingMismatch);
+    assert!(binding.event_uid == disaster_event.event_uid, EDisasterCampaignBindingMismatch);
+    assert!(binding.event_revision == disaster_event.event_revision, EDisasterCampaignBindingMismatch);
+}
+
+fun create_from_verified_payload(
     registry: &mut DisasterRegistry,
     payload: Payload,
     ctx: &mut TxContext,
@@ -108,6 +189,16 @@ public(package) fun create_from_payload(
     transfer::share_object(disaster_event);
 }
 
+#[test_only]
+public fun create_from_payload_for_testing(
+    _: &AdminCap,
+    registry: &mut DisasterRegistry,
+    payload: Payload,
+    ctx: &mut TxContext,
+) {
+    create_from_verified_payload(registry, payload, ctx);
+}
+
 public fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
     disaster_event.affected_cells_root
 }
@@ -126,6 +217,10 @@ public fun min_claim_band(disaster_event: &DisasterEvent): u8 {
 
 public fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
     registry.event_count
+}
+
+public fun disaster_event_id(disaster_event: &DisasterEvent): ID {
+    object::id(disaster_event)
 }
 
 #[test_only]

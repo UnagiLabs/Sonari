@@ -26,6 +26,8 @@ const EInvalidEligibilityTier: u64 = 0;
 const EBudgetProgramMismatch: u64 = 1;
 const EBudgetCampaignMismatch: u64 = 2;
 const EBudgetExceeded: u64 = 3;
+const EDesignatedPoolMismatch: u64 = 4;
+const EMainOnlyBudgetCannotUseDesignatedPool: u64 = 5;
 
 public struct PayoutPolicy has key {
     id: UID,
@@ -175,6 +177,20 @@ public(package) fun assert_budget_matches(
 ) {
     assert!(budget.program_id == program::id(program), EBudgetProgramMismatch);
     assert!(budget.campaign_id == program::campaign_id(campaign), EBudgetCampaignMismatch);
+}
+
+public(package) fun assert_designated_pool_matches(
+    budget: &CampaignBudget,
+    designated_pool: &DesignatedPool,
+) {
+    assert!(
+        option::is_some(&budget.designated_pool_id),
+        EMainOnlyBudgetCannotUseDesignatedPool,
+    );
+    assert!(
+        *option::borrow(&budget.designated_pool_id) == pools::designated_pool_id(designated_pool),
+        EDesignatedPoolMismatch,
+    );
 }
 
 public(package) fun record_claim(

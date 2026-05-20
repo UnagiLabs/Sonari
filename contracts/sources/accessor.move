@@ -3,7 +3,7 @@ module contracts::accessor;
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
 use contracts::claim::{Self, ClaimIndex, EligibilityResult};
-use contracts::disaster_event::DisasterEvent;
+use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::membership;
 use contracts::metadata_verifier::{
@@ -219,6 +219,7 @@ public fun claim_disaster_usdc(
     campaign: &Campaign,
     policy: &PayoutPolicy,
     budget: &mut CampaignBudget,
+    binding: &DisasterCampaignBinding,
     disaster_event: &DisasterEvent,
     pass: &membership::MembershipPass,
     leaf: AffectedCellLeaf,
@@ -236,6 +237,7 @@ public fun claim_disaster_usdc(
         campaign,
         policy,
         budget,
+        binding,
         disaster_event,
         pass,
         leaf,

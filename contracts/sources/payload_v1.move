@@ -17,6 +17,8 @@ const ENoAffectedCells: u64 = 5;
 const EInvalidMinClaimBand: u64 = 6;
 const ETrailingBytes: u64 = 7;
 const EInvalidHashLength: u64 = 8;
+const EUnsupportedHazardType: u64 = 9;
+const EUnsupportedGeoResolution: u64 = 10;
 
 public struct Payload has copy, drop, store {
     intent: u8,
@@ -85,11 +87,13 @@ public fun decode_finalized(bytes: vector<u8>, now_ms: u64): Payload {
 fun assert_finalized(payload: &Payload, now_ms: u64) {
     assert!(payload.intent == INTENT_DISASTER_ORACLE_PAYLOAD_V1, EInvalidIntent);
     assert!(payload.oracle_version == ORACLE_VERSION_V1, EUnsupportedVersion);
+    assert!(payload.hazard_type == HAZARD_TYPE_EARTHQUAKE, EUnsupportedHazardType);
     assert!(payload.status == STATUS_FINALIZED, ENonFinalizedStatus);
     assert!(payload.freshness_deadline_ms > now_ms, EExpiredFreshness);
     assert!(payload.affected_cells_uri.length() > 0, EEmptyAffectedCellsUri);
     assert!(payload.affected_cell_count > 0, ENoAffectedCells);
     assert!(payload.min_claim_band == MIN_CLAIM_BAND_V1, EInvalidMinClaimBand);
+    assert!(payload.geo_resolution == 7, EUnsupportedGeoResolution);
     assert_32_bytes(&payload.event_uid);
     assert_32_bytes(&payload.source_set_hash);
     assert_32_bytes(&payload.raw_data_hash);

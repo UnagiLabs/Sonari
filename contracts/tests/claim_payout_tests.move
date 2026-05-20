@@ -10,7 +10,6 @@ use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
 use sui::coin;
-use sui::event;
 use sui::test_scenario;
 use usdc::usdc::USDC;
 
@@ -22,8 +21,8 @@ const PAYOUT: address = @0xB0B;
 const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
 
-#[test]
-fun generic_claim_pays_current_member_payout_address_and_mints_receipt() {
+#[test, expected_failure(abort_code = claim::EGenericClaimDisabled)]
+fun generic_claim_rejects_self_created_eligibility() {
     let mut scenario = initialized();
     fund_main_pool(&mut scenario, 1_000_000_000);
     register_member(&mut scenario);
@@ -57,10 +56,6 @@ fun generic_claim_pays_current_member_payout_address_and_mints_receipt() {
             scenario.ctx(),
         );
 
-        assert!(pools::main_pool_balance_usdc(&main_pool) == 950_000_000);
-        assert!(payout_policy::campaign_budget_claimed_usdc(&budget) == 50_000_000);
-        assert!(claim::claim_index_claim_count(&index) == 1);
-
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(index);
         test_scenario::return_shared(registry);
@@ -72,41 +67,11 @@ fun generic_claim_pays_current_member_payout_address_and_mints_receipt() {
         scenario.return_to_sender(pass);
     };
 
-    let paid_events = event::events_by_type<claim::ClaimPaid>();
-    assert!(paid_events.length() == 1);
-    let (_, _, _, paid_amount, main_paid, designated_paid, recipient, actor) =
-        claim::claim_paid_event_fields(*paid_events.borrow(0));
-    assert!(paid_amount == 50_000_000);
-    assert!(main_paid == 50_000_000);
-    assert!(designated_paid == 0);
-    assert!(recipient == PAYOUT);
-    assert!(actor == MEMBER);
-
-    scenario.next_tx(PAYOUT);
-    {
-        let payout_coin = scenario.take_from_sender<coin::Coin<USDC>>();
-        assert!(coin::value(&payout_coin) == 50_000_000);
-        transfer::public_transfer(payout_coin, PAYOUT);
-    };
-
-    scenario.next_tx(MEMBER);
-    {
-        let receipt = scenario.take_from_sender<claim::ClaimReceipt>();
-        let (_, _, _, amount, main_paid, designated_paid, claimant, recipient) =
-            claim::claim_receipt_summary(&receipt);
-        assert!(amount == 50_000_000);
-        assert!(main_paid == 50_000_000);
-        assert!(designated_paid == 0);
-        assert!(claimant == MEMBER);
-        assert!(recipient == PAYOUT);
-        scenario.return_to_sender(receipt);
-    };
-
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = claim::EDuplicateClaim)]
-fun duplicate_claim_for_same_lineage_and_campaign_is_rejected() {
+#[test, expected_failure(abort_code = claim::EGenericClaimDisabled)]
+fun duplicate_generic_claim_path_is_disabled_before_index_mutation() {
     let mut scenario = initialized();
     fund_main_pool(&mut scenario, 1_000_000_000);
     register_member(&mut scenario);
@@ -117,8 +82,8 @@ fun duplicate_claim_for_same_lineage_and_campaign_is_rejected() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = claim::ENoPayableAmount)]
-fun operations_pool_funds_are_not_used_for_claim_payout() {
+#[test, expected_failure(abort_code = claim::EGenericClaimDisabled)]
+fun operations_pool_funds_are_not_used_by_disabled_generic_claim_path() {
     let mut scenario = initialized();
     fund_operations_pool(&mut scenario, 1_000_000_000);
     register_member(&mut scenario);

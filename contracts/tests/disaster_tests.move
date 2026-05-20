@@ -4,6 +4,7 @@ module contracts::disaster_tests;
 use contracts::admin;
 use contracts::affected_cell;
 use contracts::disaster_event;
+use contracts::metadata_verifier;
 use contracts::payload_v1;
 use sui::event;
 use sui::test_scenario;
@@ -90,9 +91,28 @@ fun finalized_disaster_payload_decodes_and_creates_disaster_event() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        disaster_event::create_from_payload(&cap, &mut registry, payload, scenario.ctx());
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::add_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            metadata_verifier::verifier_family_disaster_oracle(),
+            metadata_verifier::verifier_version_v1(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut registry,
+            &verifier_registry,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
         scenario.return_to_sender(cap);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(verifier_registry);
     };
 
     let events = event::events_by_type<disaster_event::DisasterEventCreated>();
@@ -116,16 +136,28 @@ fun expired_disaster_payload_is_rejected() {
     );
 }
 
+#[test, expected_failure(abort_code = payload_v1::EUnsupportedHazardType)]
+fun non_earthquake_disaster_payload_is_rejected() {
+    let mut bytes = finalized_payload_bcs();
+    *bytes.borrow_mut(41) = 2;
+    payload_v1::decode_finalized(
+        bytes,
+        NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+    );
+}
+
+#[test, expected_failure(abort_code = payload_v1::EUnsupportedGeoResolution)]
+fun wrong_geo_resolution_disaster_payload_is_rejected() {
+    let mut bytes = finalized_payload_bcs();
+    *bytes.borrow_mut(316) = 6;
+    payload_v1::decode_finalized(
+        bytes,
+        NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+    );
+}
+
 #[test, expected_failure(abort_code = disaster_event::EDuplicateDisasterEvent)]
 fun duplicate_disaster_event_uid_and_revision_is_rejected() {
-    let payload = payload_v1::decode_finalized(
-        finalized_payload_bcs(),
-        NOW_BEFORE_FRESHNESS_DEADLINE_MS,
-    );
-    let duplicate = payload_v1::decode_finalized(
-        finalized_payload_bcs(),
-        NOW_BEFORE_FRESHNESS_DEADLINE_MS,
-    );
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
 
@@ -140,12 +172,204 @@ fun duplicate_disaster_event_uid_and_revision_is_rejected() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        disaster_event::create_from_payload(&cap, &mut registry, payload, scenario.ctx());
-        disaster_event::create_from_payload(&cap, &mut registry, duplicate, scenario.ctx());
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::add_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            metadata_verifier::verifier_family_disaster_oracle(),
+            metadata_verifier::verifier_version_v1(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut registry,
+            &verifier_registry,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut registry,
+            &verifier_registry,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
         scenario.return_to_sender(cap);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(verifier_registry);
     };
 
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierKeyDisabled)]
+fun disabled_disaster_oracle_key_is_rejected() {
+    let mut scenario = initialized_disaster_registry();
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::add_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            metadata_verifier::verifier_family_disaster_oracle(),
+            metadata_verifier::verifier_version_v1(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        admin::disable_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut disaster_registry,
+            &verifier_registry,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierFamilyMismatch)]
+fun wrong_disaster_oracle_key_family_is_rejected() {
+    let mut scenario = initialized_disaster_registry();
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::add_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            metadata_verifier::verifier_family_residence(),
+            metadata_verifier::verifier_version_v1(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut disaster_registry,
+            &verifier_registry,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierVersionMismatch)]
+fun wrong_disaster_oracle_key_version_is_rejected() {
+    let mut scenario = initialized_disaster_registry();
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        metadata_verifier::add_verifier_key_unchecked_for_testing(
+            &mut verifier_registry,
+            metadata_verifier::verifier_family_disaster_oracle(),
+            2,
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut disaster_registry,
+            &verifier_registry,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EInvalidSignature)]
+fun tampered_disaster_payload_is_rejected() {
+    let mut payload = finalized_payload_bcs();
+    *payload.borrow_mut(41) = 2;
+    create_signed_event_with_payload(payload, oracle_signature());
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EInvalidSignature)]
+fun invalid_disaster_payload_signature_is_rejected() {
+    let mut signature = oracle_signature();
+    *signature.borrow_mut(0) = 0;
+    create_signed_event_with_payload(finalized_payload_bcs(), signature);
+}
+
+fun initialized_disaster_registry(): test_scenario::Scenario {
+    let mut scenario = test_scenario::begin(ADMIN);
+    admin::init_for_testing(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        disaster_event::create_disaster_registry(&cap, scenario.ctx());
+        scenario.return_to_sender(cap);
+    };
+
+    scenario
+}
+
+fun create_signed_event_with_payload(payload_bcs: vector<u8>, signature: vector<u8>) {
+    let mut scenario = initialized_disaster_registry();
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::add_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            metadata_verifier::verifier_family_disaster_oracle(),
+            metadata_verifier::verifier_version_v1(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        disaster_event::create_from_signed_payload(
+            &cap,
+            &mut disaster_registry,
+            &verifier_registry,
+            payload_bcs,
+            signature,
+            oracle_public_key(),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
     scenario.end();
 }
 
@@ -155,6 +379,14 @@ fun event_uid(): vector<u8> {
 
 fun affected_cells_root(): vector<u8> {
     x"56e5b1020cb655fa99cec324da2fbf79e03dcfe84d3eee72e163111d3b01f6af"
+}
+
+fun oracle_public_key(): vector<u8> {
+    x"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+}
+
+fun oracle_signature(): vector<u8> {
+    x"a47b87352d3ea2cc69ddc833ce951e8115404bd48e9874fa982dcf74bd7037cb9909b71e4581eb6ed966942159a1a5beea5b8b3dffa03f2dea61ba2a940e1c03"
 }
 
 fun finalized_payload_bcs(): vector<u8> {
