@@ -43,7 +43,7 @@ public struct PoolCreated has copy, drop {
     actor: address,
 }
 
-public(package) fun create_main_pool(ctx: &mut TxContext) {
+public(package) fun create_main_pool(ctx: &mut TxContext): ID {
     let pool = MainPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -61,12 +61,13 @@ public(package) fun create_main_pool(ctx: &mut TxContext) {
     });
 
     transfer::share_object(pool);
+    pool_id
 }
 
 public(package) fun create_designated_pool(
     related_id: Option<ID>,
     ctx: &mut TxContext,
-) {
+): ID {
     let pool = DesignatedPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -85,9 +86,10 @@ public(package) fun create_designated_pool(
     });
 
     transfer::share_object(pool);
+    pool_id
 }
 
-public(package) fun create_operations_pool(ctx: &mut TxContext) {
+public(package) fun create_operations_pool(ctx: &mut TxContext): ID {
     let pool = OperationsPool {
         id: object::new(ctx),
         balance: balance::zero(),
@@ -105,6 +107,7 @@ public(package) fun create_operations_pool(ctx: &mut TxContext) {
     });
 
     transfer::share_object(pool);
+    pool_id
 }
 
 public(package) fun deposit_main_usdc(pool: &mut MainPool, coin: Coin<USDC>): u64 {

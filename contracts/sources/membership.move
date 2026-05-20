@@ -2,6 +2,7 @@ module contracts::membership;
 
 use contracts::pools::{Self, OperationsPool};
 use sui::coin::{Self, Coin};
+use sui::dynamic_field;
 use sui::event;
 use usdc::usdc::USDC;
 
@@ -9,15 +10,38 @@ const STATUS_ACTIVE: u8 = 1;
 const STATUS_SUSPENDED: u8 = 2;
 const STATUS_REVOKED: u8 = 3;
 const STATUS_MIGRATED: u8 = 4;
+const REGISTRY_KIND_MEMBERSHIP: u8 = 2;
+const TARGET_KIND_MEMBERSHIP_REGISTRY: u8 = 7;
 
 const EZeroVerificationFee: u64 = 0;
 const EInvalidPayoutAddress: u64 = 1;
 const EMembershipPassNotActive: u64 = 2;
 const EClaimantNotAuthorized: u64 = 3;
 const EStaleMetadataUpdate: u64 = 4;
+const EMembershipPassAlreadyIssued: u64 = 5;
+const ERegistryRecordNotFound: u64 = 6;
+const ERegistryPassMismatch: u64 = 7;
+const ERegistryOwnerMismatch: u64 = 8;
+const ERegistryPayoutMismatch: u64 = 9;
+const ERegistryRecordNotActive: u64 = 10;
 
 const METADATA_KIND_RESIDENCE: u8 = 1;
 const METADATA_KIND_STUDENT: u8 = 2;
+
+public struct MembershipRegistry has key {
+    id: UID,
+    issued_count: u64,
+}
+
+public struct MembershipRecord has copy, drop, store {
+    pass_lineage_id: ID,
+    current_pass_id: ID,
+    current_owner: address,
+    current_payout_address: address,
+    status: u8,
+    issued_at_ms: u64,
+    updated_at_ms: u64,
+}
 
 public struct MembershipPass has key {
     id: UID,
@@ -47,6 +71,7 @@ public struct MembershipPass has key {
 }
 
 public struct MembershipPassIssued has copy, drop {
+    registry_id: ID,
     pass_id: ID,
     owner: address,
     payout_address: address,
@@ -54,6 +79,13 @@ public struct MembershipPassIssued has copy, drop {
     operations_pool_id: ID,
     fee_amount: u64,
     issued_at_ms: u64,
+    actor: address,
+}
+
+public struct RegistryCreated has copy, drop {
+    registry_id: ID,
+    registry_kind: u8,
+    created_at_ms: u64,
     actor: address,
 }
 
@@ -72,6 +104,7 @@ public struct PassMetadataUpdated has copy, drop {
 }
 
 public(package) fun register_member_usdc(
+    registry: &mut MembershipRegistry,
     operations_pool: &mut OperationsPool,
     fee: Coin<USDC>,
     payout_address: address,
@@ -80,6 +113,10 @@ public(package) fun register_member_usdc(
     let fee_amount = coin::value(&fee);
     assert!(fee_amount > 0, EZeroVerificationFee);
     assert!(payout_address != @0x0, EInvalidPayoutAddress);
+    assert!(
+        !dynamic_field::exists_with_type<address, ID>(&registry.id, ctx.sender()),
+        EMembershipPassAlreadyIssued,
+    );
 
     let id = object::new(ctx);
     let pass_lineage_id = id.to_inner();
@@ -111,10 +148,25 @@ public(package) fun register_member_usdc(
         student_verifier_version: 0,
     };
     let pass_id = object::id(&pass);
+    let registry_id = object::id(registry);
     let operations_pool_id = pools::operations_pool_id(operations_pool);
+    let record = MembershipRecord {
+        pass_lineage_id,
+        current_pass_id: pass_id,
+        current_owner: pass.owner,
+        current_payout_address: payout_address,
+        status: STATUS_ACTIVE,
+        issued_at_ms,
+        updated_at_ms: issued_at_ms,
+    };
 
     pools::deposit_operations_usdc(operations_pool, fee);
+    dynamic_field::add(&mut registry.id, ctx.sender(), pass_lineage_id);
+    dynamic_field::add(&mut registry.id, pass_lineage_id, record);
+    registry.issued_count = registry.issued_count + 1;
+
     event::emit(MembershipPassIssued {
+        registry_id,
         pass_id,
         owner: pass.owner,
         payout_address,
@@ -128,6 +180,22 @@ public(package) fun register_member_usdc(
     transfer::transfer(pass, ctx.sender());
 }
 
+public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
+    let registry = MembershipRegistry {
+        id: object::new(ctx),
+        issued_count: 0,
+    };
+    let registry_id = object::id(&registry);
+    event::emit(RegistryCreated {
+        registry_id,
+        registry_kind: REGISTRY_KIND_MEMBERSHIP,
+        created_at_ms: ctx.epoch_timestamp_ms(),
+        actor: ctx.sender(),
+    });
+    transfer::share_object(registry);
+    registry_id
+}
+
 // Caller must pass a trusted claimant, typically ctx.sender(), not an unchecked user-supplied address.
 public fun assert_claim_precheck(pass: &MembershipPass, claimant: address) {
     assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
@@ -137,12 +205,82 @@ public fun assert_claim_precheck(pass: &MembershipPass, claimant: address) {
     );
 }
 
+public fun assert_current_pass_precheck(
+    registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    claimant: address,
+) {
+    assert_claim_precheck(pass, claimant);
+    let record = current_record(registry, pass.pass_lineage_id);
+    assert!(record.status == STATUS_ACTIVE, ERegistryRecordNotActive);
+    assert!(record.current_pass_id == object::id(pass), ERegistryPassMismatch);
+    assert!(record.current_owner == pass.owner, ERegistryOwnerMismatch);
+    assert!(
+        record.current_payout_address == pass.payout_address,
+        ERegistryPayoutMismatch,
+    );
+}
+
 public fun assert_metadata_update_precheck(pass: &MembershipPass) {
     assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
 }
 
 public fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID): (ID, ID) {
     (pass.pass_lineage_id, campaign_id)
+}
+
+public fun registry_id(registry: &MembershipRegistry): ID {
+    object::id(registry)
+}
+
+public fun registry_kind_membership(): u8 {
+    REGISTRY_KIND_MEMBERSHIP
+}
+
+public fun target_kind_membership_registry(): u8 {
+    TARGET_KIND_MEMBERSHIP_REGISTRY
+}
+
+public fun membership_registry_issued_count(registry: &MembershipRegistry): u64 {
+    registry.issued_count
+}
+
+public fun membership_owner_lineage_id(
+    registry: &MembershipRegistry,
+    owner: address,
+): ID {
+    assert!(
+        dynamic_field::exists_with_type<address, ID>(&registry.id, owner),
+        ERegistryRecordNotFound,
+    );
+    *dynamic_field::borrow<address, ID>(&registry.id, owner)
+}
+
+public fun membership_record_summary(
+    registry: &MembershipRegistry,
+    pass_lineage_id: ID,
+): (ID, ID, address, address, u8, u64, u64) {
+    let record = current_record(registry, pass_lineage_id);
+    (
+        record.pass_lineage_id,
+        record.current_pass_id,
+        record.current_owner,
+        record.current_payout_address,
+        record.status,
+        record.issued_at_ms,
+        record.updated_at_ms,
+    )
+}
+
+fun current_record(
+    registry: &MembershipRegistry,
+    pass_lineage_id: ID,
+): &MembershipRecord {
+    assert!(
+        dynamic_field::exists_with_type<ID, MembershipRecord>(&registry.id, pass_lineage_id),
+        ERegistryRecordNotFound,
+    );
+    dynamic_field::borrow<ID, MembershipRecord>(&registry.id, pass_lineage_id)
 }
 
 public fun membership_pass_owner(pass: &MembershipPass): address {
@@ -316,6 +454,66 @@ public fun set_status_for_testing(pass: &mut MembershipPass, status: u8) {
 }
 
 #[test_only]
+public fun remove_membership_record_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+) {
+    let _ = dynamic_field::remove<ID, MembershipRecord>(&mut registry.id, pass_lineage_id);
+}
+
+#[test_only]
+public fun set_current_pass_id_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    current_pass_id: ID,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.current_pass_id = current_pass_id;
+}
+
+#[test_only]
+public fun set_current_owner_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    current_owner: address,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.current_owner = current_owner;
+}
+
+#[test_only]
+public fun set_current_payout_address_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    current_payout_address: address,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.current_payout_address = current_payout_address;
+}
+
+#[test_only]
+public fun set_membership_record_status_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    status: u8,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.status = status;
+}
+
+#[test_only]
+fun current_record_mut(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+): &mut MembershipRecord {
+    assert!(
+        dynamic_field::exists_with_type<ID, MembershipRecord>(&registry.id, pass_lineage_id),
+        ERegistryRecordNotFound,
+    );
+    dynamic_field::borrow_mut<ID, MembershipRecord>(&mut registry.id, pass_lineage_id)
+}
+
+#[test_only]
 public fun create_pass_for_testing(
     owner: address,
     payout_address: address,
@@ -386,8 +584,9 @@ public fun destroy_pass_for_testing(pass: MembershipPass) {
 #[test_only]
 public fun membership_pass_issued_event_fields(
     event: MembershipPassIssued,
-): (ID, address, address, ID, ID, u64, u64, address) {
+): (ID, ID, address, address, ID, ID, u64, u64, address) {
     let MembershipPassIssued {
+        registry_id,
         pass_id,
         owner,
         payout_address,
@@ -398,6 +597,7 @@ public fun membership_pass_issued_event_fields(
         actor,
     } = event;
     (
+        registry_id,
         pass_id,
         owner,
         payout_address,
@@ -407,6 +607,19 @@ public fun membership_pass_issued_event_fields(
         issued_at_ms,
         actor,
     )
+}
+
+#[test_only]
+public fun registry_created_event_fields(
+    event: RegistryCreated,
+): (ID, u8, u64, address) {
+    let RegistryCreated {
+        registry_id,
+        registry_kind,
+        created_at_ms,
+        actor,
+    } = event;
+    (registry_id, registry_kind, created_at_ms, actor)
 }
 
 #[test_only]

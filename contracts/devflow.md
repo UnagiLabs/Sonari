@@ -28,7 +28,9 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - 実装 PR では schema、BCS field order、`AffectedCellLeaf` canonical order を必要なく変更しない。
 - Pool、Program、Membership、Verifier Result、Claim、Admin の責務を分ける。
 - User-facing callable API は `accessor.move` に集約する。PR3 の `accessor.move` は donation 実行と必要最小限の donation record read helper の薄い入口に留める。
-- `admin.move` は `AdminCap` gated な admin-facing API を集約する。Pool 作成、DonorRegistry 作成、emergency pause 操作は `admin.move` に置き、実ロジックは責務を持つ各 module の private または `public(package)` helper に委譲する。
+- `admin.move` は `AdminCap` gated な admin-facing API を集約する。MVP でグローバルに 1 個だけ存在する `MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry` は package init の genesis object として作成し、admin create API は持たせない。複数存在しうる `DesignatedPool`、Program / Campaign 作成、verifier key 管理、emergency pause 操作は `admin.move` に置き、実ロジックは責務を持つ各 module の private または `public(package)` helper に委譲する。
+- `GenesisObjectCreated` は package init で作成された singleton object 一覧の追跡用 event である。`PoolCreated` / `RegistryCreated` は各 module 固有の作成 event であり、init で作成される singleton Pool / Registry では両方が emit される。
+- `PauseState` の pause 判定は `target_id` ベースで行う。`target_kind` は `Paused` / `Unpaused` event と dapp / script の readability 用分類であり、認可や判定の source of truth にしない。
 - `accessor.move` / `admin.move` 以外の責務 module は、検証、状態遷移、accounting、event emit などの実ロジックを private または `public(package)` helper に定義し、外部公開 API として分散させない。
 - MembershipPass は全受取者必須にする。
 - DonorPass は寄付者向け owned object / has key only の SBT とし、初回寄付時に自動発行する。
@@ -248,7 +250,7 @@ PR4 の実装範囲:
 - `pass_lineage_id` は発行された pass の object id に固定し、duplicate claim prevention key は `(pass_lineage_id, campaign_id)` とする。
 - `DonorPass` の `total_donated`、`donation_count`、tier、`DonationRecord` に相当する寄付集計・寄付履歴 surface は持たない。
 - PR4 では `MembershipRegistry` や同一 wallet の重複発行防止は追加しない。Registry による重複発行防止と current pass index は PR6 で追補し、migration / recovery は MVP 外の follow-up とする。
-- 後続の Claim 実装では、`membership::assert_claim_precheck` に未検証のユーザー引数を渡さず、通常は `ctx.sender()` などの信頼済み claimant を渡す。
+- 後続の Claim / Payout 実装では `membership::assert_current_pass_precheck` を必ず使い、Registry current pass と MembershipPass の id / owner / payout address / status 整合性を検証する。`membership::assert_claim_precheck` は Pass 単体の基本 precheck であり、Payout 実行時に単独使用しない。未検証のユーザー引数を claimant として渡さず、通常は `ctx.sender()` などの信頼済み claimant を渡す。
 
 最初に定義する test:
 
@@ -344,7 +346,7 @@ PR4 の実装範囲:
 - `MembershipRegistry` shared object
 - `MembershipRecord`
 - owner address -> `pass_lineage_id` index
-- AdminCap gated registry creation
+- package init による genesis `MembershipRegistry` 作成
 - `accessor::register_member_usdc` に `MembershipRegistry` 引数を追加し、global pause / OperationsPool pause / Registry pause を維持して membership module の registry-aware helper に委譲する
 - registration 時の record 作成
 - duplicate owner registration reject
@@ -353,7 +355,7 @@ PR4 の実装範囲:
 
 最初に定義する test:
 
-- `MembershipRegistry` を AdminCap gated API で作成できる。
+- package init / `init_for_testing` が `MembershipRegistry` を genesis object として作成する。
 - registry-aware `register_member_usdc` で MembershipPass が発行され、Registry に record が作成される。
 - record の `pass_lineage_id`、`current_pass_id`、`current_owner`、`current_payout_address`、`status` が Pass と一致する。
 - `owner_index` から owner -> `pass_lineage_id` を引ける。
@@ -366,7 +368,7 @@ PR4 の実装範囲:
 
 実装順:
 
-1. `MembershipRegistry` / `MembershipRecord` と AdminCap gated creation を実装する。
+1. `MembershipRegistry` / `MembershipRecord` と package init での genesis creation を実装する。
 2. owner duplicate guard と owner index accessor を実装する。
 3. `register_member_usdc` を registry-aware にし、既存 pause check と Verification Fee 入金を維持する。
 4. registration 時に MembershipPass と Registry record を同一 transaction で作成する。
@@ -438,7 +440,7 @@ PR4 の実装範囲:
 内容:
 
 - Program / Campaign active validation
-- MembershipRegistry + MembershipPass current pass validation
+- `membership::assert_current_pass_precheck` による MembershipRegistry + MembershipPass current pass validation
 - required metadata validation
 - `EligibilityResult` validation
 - duplicate claim prevention by `pass_lineage_id + campaign_id`
@@ -461,7 +463,7 @@ PR4 の実装範囲:
 実装順:
 
 1. Program / Campaign active validation を接続する。
-2. MembershipRegistry + MembershipPass current pass validation と required metadata validation を接続する。
+2. `membership::assert_current_pass_precheck` で MembershipRegistry + MembershipPass current pass validation を接続し、required metadata validation と組み合わせる。
 3. claimant と Registry current owner / Pass payout address の一致を検証する。
 4. `EligibilityResult` validation を実装する。
 5. duplicate claim prevention key を実装する。

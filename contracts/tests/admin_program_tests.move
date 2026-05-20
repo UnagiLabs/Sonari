@@ -2,6 +2,10 @@
 module contracts::admin_program_tests;
 
 use contracts::admin;
+use contracts::donation;
+use contracts::membership;
+use contracts::metadata_verifier;
+use contracts::pools;
 use contracts::program;
 use sui::event;
 use sui::test_scenario;
@@ -10,23 +14,76 @@ const ADMIN: address = @0xA11CE;
 const NON_ADMIN: address = @0xB0B;
 
 #[test]
-fun init_creates_admin_cap_and_pause_state() {
+fun init_creates_genesis_objects_and_tracking_events() {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
+
+    let pool_events = event::events_by_type<pools::PoolCreated>();
+    assert!(pool_events.length() == 2);
+    let (main_pool_id_from_event, main_pool_kind, _, _, _) =
+        pools::pool_created_event_fields(*pool_events.borrow(0));
+    let (operations_pool_id_from_event, operations_pool_kind, _, _, _) =
+        pools::pool_created_event_fields(*pool_events.borrow(1));
+    assert!(main_pool_kind == pools::pool_kind_main());
+    assert!(operations_pool_kind == pools::pool_kind_operations());
+
+    let donor_events = event::events_by_type<donation::RegistryCreated>();
+    assert!(donor_events.length() == 1);
+    let (donor_registry_id_from_event, donor_registry_kind, _, _) =
+        donation::registry_created_event_fields(*donor_events.borrow(0));
+    assert!(donor_registry_kind == donation::registry_kind_donor());
+
+    let membership_events = event::events_by_type<membership::RegistryCreated>();
+    assert!(membership_events.length() == 1);
+    let (membership_registry_id_from_event, membership_registry_kind, _, _) =
+        membership::registry_created_event_fields(*membership_events.borrow(0));
+    assert!(membership_registry_kind == membership::registry_kind_membership());
+
+    let verifier_events = event::events_by_type<metadata_verifier::RegistryCreated>();
+    assert!(verifier_events.length() == 1);
+    let (verifier_registry_id_from_event, verifier_registry_kind, _, _) =
+        metadata_verifier::registry_created_event_fields(*verifier_events.borrow(0));
+    assert!(verifier_registry_kind == metadata_verifier::registry_kind_verifier());
+
+    let genesis_events = event::events_by_type<admin::GenesisObjectCreated>();
+    assert!(genesis_events.length() == 7);
 
     scenario.next_tx(ADMIN);
     {
         assert!(scenario.has_most_recent_for_sender<admin::AdminCap>());
         assert!(test_scenario::has_most_recent_shared<admin::PauseState>());
+        assert!(test_scenario::has_most_recent_shared<pools::MainPool>());
+        assert!(test_scenario::has_most_recent_shared<pools::OperationsPool>());
+        assert!(test_scenario::has_most_recent_shared<donation::DonorRegistry>());
+        assert!(test_scenario::has_most_recent_shared<membership::MembershipRegistry>());
+        assert!(test_scenario::has_most_recent_shared<metadata_verifier::VerifierRegistry>());
 
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let pause_state = scenario.take_shared<admin::PauseState>();
+        let main_pool = scenario.take_shared<pools::MainPool>();
+        let operations_pool = scenario.take_shared<pools::OperationsPool>();
+        let donor_registry = scenario.take_shared<donation::DonorRegistry>();
+        let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
+        let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
 
         assert!(!admin::is_global_paused(&pause_state));
         assert!(admin::paused_target_count(&pause_state) == 0);
 
+        assert!(main_pool_id_from_event == pools::main_pool_id(&main_pool));
+        assert!(operations_pool_id_from_event == pools::operations_pool_id(&operations_pool));
+        assert!(donor_registry_id_from_event == donation::registry_id(&donor_registry));
+        assert!(membership_registry_id_from_event == membership::registry_id(&membership_registry));
+        assert!(
+            verifier_registry_id_from_event == metadata_verifier::registry_id(&verifier_registry),
+        );
+
         scenario.return_to_sender(cap);
         test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(operations_pool);
+        test_scenario::return_shared(donor_registry);
+        test_scenario::return_shared(membership_registry);
+        test_scenario::return_shared(verifier_registry);
     };
 
     scenario.end();

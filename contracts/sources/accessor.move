@@ -120,6 +120,7 @@ public fun donate_operations_usdc_with_pass(
 
 public fun register_member_usdc(
     pause_state: &PauseState,
+    registry: &mut membership::MembershipRegistry,
     operations_pool: &mut OperationsPool,
     fee: Coin<USDC>,
     payout_address: address,
@@ -127,7 +128,8 @@ public fun register_member_usdc(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
-    membership::register_member_usdc(operations_pool, fee, payout_address, ctx);
+    admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
+    membership::register_member_usdc(registry, operations_pool, fee, payout_address, ctx);
 }
 
 public fun update_residence_metadata(

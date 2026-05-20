@@ -11,6 +11,7 @@ const VERIFIER_FAMILY_RESIDENCE: u8 = 1;
 const VERIFIER_FAMILY_STUDENT: u8 = 2;
 const VERIFIER_VERSION_V1: u64 = 1;
 const TARGET_KIND_VERIFIER_REGISTRY: u8 = 6;
+const REGISTRY_KIND_VERIFIER: u8 = 3;
 
 const INTENT_RESIDENCE_METADATA_UPDATE_V1: vector<u8> =
     b"SONARI_RESIDENCE_METADATA_UPDATE_V1";
@@ -100,8 +101,24 @@ public struct VerifierKeyDisabled has copy, drop {
     actor: address,
 }
 
-public(package) fun create_verifier_registry(ctx: &mut TxContext) {
-    transfer::share_object(new_registry(ctx));
+public struct RegistryCreated has copy, drop {
+    registry_id: ID,
+    registry_kind: u8,
+    created_at_ms: u64,
+    actor: address,
+}
+
+public(package) fun create_verifier_registry(ctx: &mut TxContext): ID {
+    let registry = new_registry(ctx);
+    let registry_id = object::id(&registry);
+    event::emit(RegistryCreated {
+        registry_id,
+        registry_kind: REGISTRY_KIND_VERIFIER,
+        created_at_ms: ctx.epoch_timestamp_ms(),
+        actor: ctx.sender(),
+    });
+    transfer::share_object(registry);
+    registry_id
 }
 
 public(package) fun add_verifier_key(
@@ -290,6 +307,10 @@ public fun student_update_message_bcs(message: &StudentMetadataUpdateMessage): v
 
 public fun registry_id(registry: &VerifierRegistry): ID {
     object::id(registry)
+}
+
+public fun registry_kind_verifier(): u8 {
+    REGISTRY_KIND_VERIFIER
 }
 
 public fun verifier_family_residence(): u8 {
@@ -592,4 +613,17 @@ public fun verifier_key_disabled_event_fields(
         actor,
     } = event;
     (registry_id, public_key, actor)
+}
+
+#[test_only]
+public fun registry_created_event_fields(
+    event: RegistryCreated,
+): (ID, u8, u64, address) {
+    let RegistryCreated {
+        registry_id,
+        registry_kind,
+        created_at_ms,
+        actor,
+    } = event;
+    (registry_id, registry_kind, created_at_ms, actor)
 }

@@ -1,6 +1,7 @@
 module contracts::admin;
 
 use contracts::donation;
+use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::pools;
 use sui::event;
@@ -9,6 +10,13 @@ use sui::vec_set::{Self, VecSet};
 const SCOPE_GLOBAL: u8 = 1;
 const SCOPE_TARGET: u8 = 2;
 const TARGET_KIND_NONE: u8 = 0;
+const GENESIS_KIND_ADMIN_CAP: u8 = 1;
+const GENESIS_KIND_PAUSE_STATE: u8 = 2;
+const GENESIS_KIND_MAIN_POOL: u8 = 3;
+const GENESIS_KIND_OPERATIONS_POOL: u8 = 4;
+const GENESIS_KIND_DONOR_REGISTRY: u8 = 5;
+const GENESIS_KIND_MEMBERSHIP_REGISTRY: u8 = 6;
+const GENESIS_KIND_VERIFIER_REGISTRY: u8 = 7;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
@@ -37,12 +45,21 @@ public struct Unpaused has copy, drop {
     actor: address,
 }
 
+public struct GenesisObjectCreated has copy, drop {
+    object_id: ID,
+    object_kind: u8,
+    shared: bool,
+    created_at_ms: u64,
+    actor: address,
+}
+
 fun init(ctx: &mut TxContext) {
     initialize(ctx);
 }
 
 fun initialize(ctx: &mut TxContext) {
     let admin_cap = AdminCap { id: object::new(ctx) };
+    emit_genesis_object(object::id(&admin_cap), GENESIS_KIND_ADMIN_CAP, false, ctx);
     transfer::transfer(admin_cap, ctx.sender());
 
     let pause_state = PauseState {
@@ -50,15 +67,23 @@ fun initialize(ctx: &mut TxContext) {
         global_paused: false,
         paused_targets: vec_set::empty(),
     };
+    emit_genesis_object(object::id(&pause_state), GENESIS_KIND_PAUSE_STATE, true, ctx);
     transfer::share_object(pause_state);
-}
 
-public fun create_donor_registry(_: &AdminCap, ctx: &mut TxContext) {
-    donation::create_donor_registry(ctx);
-}
+    let main_pool_id = pools::create_main_pool(ctx);
+    emit_genesis_object(main_pool_id, GENESIS_KIND_MAIN_POOL, true, ctx);
 
-public fun create_main_pool(_: &AdminCap, ctx: &mut TxContext) {
-    pools::create_main_pool(ctx);
+    let operations_pool_id = pools::create_operations_pool(ctx);
+    emit_genesis_object(operations_pool_id, GENESIS_KIND_OPERATIONS_POOL, true, ctx);
+
+    let donor_registry_id = donation::create_donor_registry(ctx);
+    emit_genesis_object(donor_registry_id, GENESIS_KIND_DONOR_REGISTRY, true, ctx);
+
+    let membership_registry_id = membership::create_membership_registry(ctx);
+    emit_genesis_object(membership_registry_id, GENESIS_KIND_MEMBERSHIP_REGISTRY, true, ctx);
+
+    let verifier_registry_id = metadata_verifier::create_verifier_registry(ctx);
+    emit_genesis_object(verifier_registry_id, GENESIS_KIND_VERIFIER_REGISTRY, true, ctx);
 }
 
 public fun create_designated_pool(
@@ -67,14 +92,6 @@ public fun create_designated_pool(
     ctx: &mut TxContext,
 ) {
     pools::create_designated_pool(related_id, ctx);
-}
-
-public fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
-    pools::create_operations_pool(ctx);
-}
-
-public fun create_verifier_registry(_: &AdminCap, ctx: &mut TxContext) {
-    metadata_verifier::create_verifier_registry(ctx);
 }
 
 public fun add_verifier_key(
@@ -199,6 +216,44 @@ public fun target_kind_none(): u8 {
     TARGET_KIND_NONE
 }
 
+public fun genesis_kind_admin_cap(): u8 {
+    GENESIS_KIND_ADMIN_CAP
+}
+
+public fun genesis_kind_pause_state(): u8 {
+    GENESIS_KIND_PAUSE_STATE
+}
+
+public fun genesis_kind_main_pool(): u8 {
+    GENESIS_KIND_MAIN_POOL
+}
+
+public fun genesis_kind_operations_pool(): u8 {
+    GENESIS_KIND_OPERATIONS_POOL
+}
+
+public fun genesis_kind_donor_registry(): u8 {
+    GENESIS_KIND_DONOR_REGISTRY
+}
+
+public fun genesis_kind_membership_registry(): u8 {
+    GENESIS_KIND_MEMBERSHIP_REGISTRY
+}
+
+public fun genesis_kind_verifier_registry(): u8 {
+    GENESIS_KIND_VERIFIER_REGISTRY
+}
+
+fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxContext) {
+    event::emit(GenesisObjectCreated {
+        object_id,
+        object_kind,
+        shared,
+        created_at_ms: ctx.epoch_timestamp_ms(),
+        actor: ctx.sender(),
+    });
+}
+
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     initialize(ctx);
@@ -224,4 +279,18 @@ public fun unpaused_event_fields(event: Unpaused): (u8, u8, Option<ID>, address)
         actor,
     } = event;
     (scope, target_kind, target_id, actor)
+}
+
+#[test_only]
+public fun genesis_object_created_event_fields(
+    event: GenesisObjectCreated,
+): (ID, u8, bool, u64, address) {
+    let GenesisObjectCreated {
+        object_id,
+        object_kind,
+        shared,
+        created_at_ms,
+        actor,
+    } = event;
+    (object_id, object_kind, shared, created_at_ms, actor)
 }
