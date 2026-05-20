@@ -7,7 +7,6 @@ use contracts::membership;
 use contracts::pools;
 use sui::coin;
 use sui::event;
-use sui::object;
 use sui::test_scenario;
 use usdc::usdc::USDC;
 
