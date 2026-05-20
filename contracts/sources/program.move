@@ -13,6 +13,7 @@ const TARGET_KIND_CAMPAIGN: u8 = 2;
 const EProgramNotActive: u64 = 0;
 const ECampaignNotActive: u64 = 1;
 const ECampaignProgramMismatch: u64 = 2;
+const EClaimWindowNotOpen: u64 = 3;
 
 public struct Program has key {
     id: UID,
@@ -147,12 +148,35 @@ public fun assert_claim_precheck(
     admin::assert_target_not_paused(pause_state, object::id(campaign));
 }
 
+public fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
+    assert!(
+        campaign.claim_start_ms <= now_ms && now_ms < campaign.claim_end_ms,
+        EClaimWindowNotOpen,
+    );
+}
+
 public fun id(program: &Program): ID {
     object::id(program)
 }
 
 public fun campaign_id(campaign: &Campaign): ID {
     object::id(campaign)
+}
+
+public fun required_pass_metadata(program: &Program): u64 {
+    program.required_pass_metadata
+}
+
+public fun required_verifier_family(program: &Program): u8 {
+    program.required_verifier_family
+}
+
+public fun campaign_claim_start_ms(campaign: &Campaign): u64 {
+    campaign.claim_start_ms
+}
+
+public fun campaign_claim_end_ms(campaign: &Campaign): u64 {
+    campaign.claim_end_ms
 }
 
 public fun status_active(): u8 {

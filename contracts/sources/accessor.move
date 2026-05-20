@@ -1,6 +1,7 @@
 module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
+use contracts::claim::{Self, ClaimIndex, EligibilityResult};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::membership;
 use contracts::metadata_verifier::{
@@ -10,6 +11,8 @@ use contracts::metadata_verifier::{
     VerifierRegistry,
 };
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
+use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
+use contracts::program::{Campaign, Program};
 use sui::clock::Clock;
 use sui::coin::Coin;
 use usdc::usdc::USDC;
@@ -174,6 +177,34 @@ public fun update_student_metadata(
         message,
         signature,
         public_key,
+        ctx,
+    );
+}
+
+public fun claim_usdc(
+    pause_state: &PauseState,
+    index: &mut ClaimIndex,
+    registry: &membership::MembershipRegistry,
+    program: &Program,
+    campaign: &Campaign,
+    policy: &PayoutPolicy,
+    budget: &mut CampaignBudget,
+    pass: &membership::MembershipPass,
+    main_pool: &mut MainPool,
+    eligibility: EligibilityResult,
+    ctx: &mut TxContext,
+) {
+    claim::claim_usdc(
+        pause_state,
+        index,
+        registry,
+        program,
+        campaign,
+        policy,
+        budget,
+        pass,
+        main_pool,
+        eligibility,
         ctx,
     );
 }
