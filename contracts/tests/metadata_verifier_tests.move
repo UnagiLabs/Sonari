@@ -80,7 +80,7 @@ fun valid_residence_update_only_updates_residence_metadata() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
 
     let (
@@ -140,7 +140,7 @@ fun valid_student_update_only_updates_student_metadata() {
         message,
         valid_student_signature(),
         valid_student_public_key(),
-        &mut ctx,
+        &ctx,
     );
 
     let (residence_update_id, _, _, _, _, _, _, _) = membership::residence_metadata_summary(&pass);
@@ -195,7 +195,7 @@ fun residence_and_student_update_ids_are_separate_series() {
         residence_message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     let student_message = valid_student_message(&registry, &pass, 1);
     metadata_verifier::verify_and_update_student_metadata(
@@ -205,7 +205,7 @@ fun residence_and_student_update_ids_are_separate_series() {
         student_message,
         valid_student_signature(),
         valid_student_public_key(),
-        &mut ctx,
+        &ctx,
     );
 
     let (residence_update_id, _, _, _, _, _, _, _) = membership::residence_metadata_summary(&pass);
@@ -252,7 +252,7 @@ fun invalid_signature_is_rejected() {
         message,
         invalid_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
@@ -275,14 +275,14 @@ fun invalid_signature_length_is_rejected() {
         message,
         x"01",
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
 
 #[test, expected_failure(abort_code = metadata_verifier::EInvalidPublicKeyLength)]
 fun invalid_public_key_length_is_rejected() {
-    let (registry, mut pass, clock, mut ctx) = direct_initialized();
+    let (registry, mut pass, clock, ctx) = direct_initialized();
     let message = valid_residence_message(&registry, &pass, 1);
     metadata_verifier::verify_and_update_residence_metadata(
         &registry,
@@ -291,7 +291,7 @@ fun invalid_public_key_length_is_rejected() {
         message,
         valid_residence_signature(),
         x"01",
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
@@ -314,14 +314,14 @@ fun expired_update_is_rejected() {
         message,
         expired_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
 
 #[test, expected_failure(abort_code = metadata_verifier::EInvalidTimeRange)]
 fun expires_not_after_issued_is_rejected() {
-    let (registry, mut pass, clock, mut ctx) = direct_initialized();
+    let (registry, mut pass, clock, ctx) = direct_initialized();
     let message = residence_message_with_time(&registry, &pass, 1_000, 1_000);
     metadata_verifier::verify_and_update_residence_metadata(
         &registry,
@@ -330,14 +330,14 @@ fun expires_not_after_issued_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
 
 #[test, expected_failure(abort_code = metadata_verifier::EFutureIssuedAt)]
 fun issued_at_beyond_allowed_clock_skew_is_rejected() {
-    let (registry, mut pass, clock, mut ctx) = direct_initialized();
+    let (registry, mut pass, clock, ctx) = direct_initialized();
     assert!(metadata_verifier::allowed_clock_skew_ms() == 300_000);
     let message = residence_message_with_time(
         &registry,
@@ -352,7 +352,7 @@ fun issued_at_beyond_allowed_clock_skew_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
@@ -375,7 +375,7 @@ fun replayed_update_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     let replay_message = valid_residence_message(&registry, &pass, 1);
     metadata_verifier::verify_and_update_residence_metadata(
@@ -385,7 +385,7 @@ fun replayed_update_is_rejected() {
         replay_message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
@@ -408,7 +408,7 @@ fun wrong_family_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
@@ -431,14 +431,14 @@ fun wrong_version_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
 
 #[test, expected_failure(abort_code = metadata_verifier::EInvalidIntent)]
 fun wrong_intent_is_rejected() {
-    let (registry, mut pass, clock, mut ctx) = direct_initialized();
+    let (registry, mut pass, clock, ctx) = direct_initialized();
     let message = wrong_intent_residence_message(&registry, &pass);
     metadata_verifier::verify_and_update_residence_metadata(
         &registry,
@@ -447,7 +447,7 @@ fun wrong_intent_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
@@ -471,14 +471,14 @@ fun disabled_key_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
 
 #[test, expected_failure(abort_code = metadata_verifier::EPassLineageMismatch)]
 fun pass_lineage_mismatch_is_rejected() {
-    let (registry, mut pass, clock, mut ctx) = direct_initialized();
+    let (registry, mut pass, clock, ctx) = direct_initialized();
     metadata_verifier::verify_and_update_residence_metadata(
         &registry,
         &mut pass,
@@ -486,14 +486,14 @@ fun pass_lineage_mismatch_is_rejected() {
         wrong_lineage_residence_message(&registry),
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
 
 #[test, expected_failure(abort_code = metadata_verifier::EOwnerMismatch)]
 fun owner_mismatch_is_rejected() {
-    let (registry, mut pass, clock, mut ctx) = direct_initialized();
+    let (registry, mut pass, clock, ctx) = direct_initialized();
     let message = owner_mismatch_residence_message(&registry, &pass);
     metadata_verifier::verify_and_update_residence_metadata(
         &registry,
@@ -502,7 +502,7 @@ fun owner_mismatch_is_rejected() {
         message,
         valid_residence_signature(),
         valid_public_key(),
-        &mut ctx,
+        &ctx,
     );
     cleanup_direct(registry, pass, clock);
 }
