@@ -1,6 +1,7 @@
 module contracts::admin;
 
 use contracts::donation;
+use contracts::metadata_verifier;
 use contracts::pools;
 use sui::event;
 use sui::vec_set::{Self, VecSet};
@@ -70,6 +71,36 @@ public fun create_designated_pool(
 
 public fun create_operations_pool(_: &AdminCap, ctx: &mut TxContext) {
     pools::create_operations_pool(ctx);
+}
+
+public fun create_verifier_registry(_: &AdminCap, ctx: &mut TxContext) {
+    metadata_verifier::create_verifier_registry(ctx);
+}
+
+public fun add_verifier_key(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    verifier_family: u8,
+    verifier_version: u64,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::add_verifier_key(
+        registry,
+        verifier_family,
+        verifier_version,
+        public_key,
+        ctx,
+    );
+}
+
+public fun disable_verifier_key(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::disable_verifier_key(registry, public_key, ctx);
 }
 
 public fun pause_global(
