@@ -9,7 +9,7 @@
         "format:ts": "biome check --write .",
         "format:rust": "cargo fmt --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml",
         "check": "pnpm check:ts && pnpm check:rust",
-        "check:move": "sui move build -p contracts --force --lint --warnings-are-errors",
+        "check:move": "sui move build -p contracts --force --lint --warnings-are-errors && sui move test -p contracts",
         "check:ts": "biome check . && pnpm typecheck",
         "check:rust": "cargo fmt --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml --check && cargo check --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml",
         "lint": "pnpm check",

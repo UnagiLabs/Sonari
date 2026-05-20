@@ -5,10 +5,8 @@ use contracts::admin;
 use contracts::accessor;
 use contracts::donation;
 use contracts::pools;
-use std::option;
 use sui::coin;
 use sui::event;
-use sui::object;
 use sui::test_scenario;
 use usdc::usdc::USDC;
 

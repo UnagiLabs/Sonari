@@ -2,6 +2,7 @@ module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
+use contracts::membership;
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
 use sui::coin::Coin;
 use usdc::usdc::USDC;
@@ -108,6 +109,18 @@ public fun donate_operations_usdc_with_pass(
         coin,
         ctx,
     );
+}
+
+public fun register_member_usdc(
+    pause_state: &PauseState,
+    operations_pool: &mut OperationsPool,
+    fee: Coin<USDC>,
+    payout_address: address,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
+    membership::register_member_usdc(operations_pool, fee, payout_address, ctx);
 }
 
 public fun donation_record_summary(

@@ -3,9 +3,7 @@ module contracts::admin_program_tests;
 
 use contracts::admin;
 use contracts::program;
-use std::option;
 use sui::event;
-use sui::object;
 use sui::test_scenario;
 
 const ADMIN: address = @0xA11CE;
