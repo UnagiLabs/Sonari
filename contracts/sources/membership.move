@@ -454,6 +454,66 @@ public fun set_status_for_testing(pass: &mut MembershipPass, status: u8) {
 }
 
 #[test_only]
+public fun remove_membership_record_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+) {
+    let _ = dynamic_field::remove<ID, MembershipRecord>(&mut registry.id, pass_lineage_id);
+}
+
+#[test_only]
+public fun set_current_pass_id_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    current_pass_id: ID,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.current_pass_id = current_pass_id;
+}
+
+#[test_only]
+public fun set_current_owner_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    current_owner: address,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.current_owner = current_owner;
+}
+
+#[test_only]
+public fun set_current_payout_address_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    current_payout_address: address,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.current_payout_address = current_payout_address;
+}
+
+#[test_only]
+public fun set_membership_record_status_for_testing(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+    status: u8,
+) {
+    let record = current_record_mut(registry, pass_lineage_id);
+    record.status = status;
+}
+
+#[test_only]
+fun current_record_mut(
+    registry: &mut MembershipRegistry,
+    pass_lineage_id: ID,
+): &mut MembershipRecord {
+    assert!(
+        dynamic_field::exists_with_type<ID, MembershipRecord>(&registry.id, pass_lineage_id),
+        ERegistryRecordNotFound,
+    );
+    dynamic_field::borrow_mut<ID, MembershipRecord>(&mut registry.id, pass_lineage_id)
+}
+
+#[test_only]
 public fun create_pass_for_testing(
     owner: address,
     payout_address: address,

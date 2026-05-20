@@ -208,7 +208,7 @@ MembershipRecord {
 
 MVP では `owner_index` は登録時のみ作成し、更新・削除 API は提供しない。将来 recovery 導入時は、old owner index 削除と new owner index 追加を同じ transaction で行う。
 
-MVP では Registry の current fields や status を更新する migration / recovery API は実装しない。Claim / Payout は `MembershipRecord.status == active` かつ `MembershipPass.status == active` の両方を要求し、どちらか一方でも inactive / suspended / revoked / migrated 相当なら拒否する。MVP では Registry status を変更する公開 API も提供しない。
+MVP では Registry の current fields や status を更新する migration / recovery API は実装しない。Claim / Payout は `membership::assert_current_pass_precheck` を必ず使い、`MembershipRecord.status == active` かつ `MembershipPass.status == active` の両方を要求する。どちらか一方でも inactive / suspended / revoked / migrated 相当なら拒否する。`membership::assert_claim_precheck` は Pass 単体の基本 precheck であり、Payout 実行時に単独では使わない。MVP では Registry status を変更する公開 API も提供しない。
 
 `register_member_usdc` は `MembershipRegistry` を `&mut` で受け取り、global pause / OperationsPool pause / Registry pause を検証したうえで、Verification Fee 入金、MembershipPass 発行、record 作成、owner index 登録を同一 transaction で行う。同じ owner address がすでに `owner_index` に存在する場合は reject する。`pass_lineage_id` と `current_pass_id` は発行された MembershipPass object id、`current_owner` は `ctx.sender()`、`current_payout_address` は指定された payout address、Registry status は `active` とする。`MembershipPassIssued` event には `registry_id` を含める。
 
@@ -322,7 +322,7 @@ Generic Claim は以下を検証する。
 | Eligibility | Program 固有の `EligibilityResult` または root proof が Program 条件に一致。 |
 | Payout | `PayoutPolicy`、`eligibility_tier`、risk bucket、CampaignBudget、Pool 残高を超えない。 |
 
-Claim precheck は少なくとも以下を要求する。
+Claim / Payout precheck は `membership::assert_current_pass_precheck` を通じ、少なくとも以下を要求する。
 
 - `pass.status == active`
 - `registry record.status == active`
@@ -331,7 +331,7 @@ Claim precheck は少なくとも以下を要求する。
 - `registry.current_payout_address == pass.payout_address`
 - claimant が `registry.current_owner` または `pass.payout_address`
 
-Registry record が存在しない、wrong `current_pass_id`、wrong owner、payout address mismatch、inactive registry status、suspended / revoked / migrated pass はすべて reject する。duplicate claim prevention key は引き続き `pass_lineage_id + campaign_id/event_uid` を使う。migration 未実装でも、Registry current pass 確認と `pass_lineage_id` により MVP の Claim / Payout を進められる。
+Registry record が存在しない、wrong `current_pass_id`、wrong owner、payout address mismatch、inactive registry status、suspended / revoked / migrated pass はすべて reject する。duplicate claim prevention key は引き続き `pass_lineage_id + campaign_id/event_uid` を使う。migration 未実装でも、Registry current pass 確認と `pass_lineage_id` により MVP の Claim / Payout を進められる。Pass 単体だけを見る `membership::assert_claim_precheck` は metadata update や内部 precheck の一部として使えるが、Claim / Payout の支払い判定では Registry current pass 確認を省略してはならない。
 
 ### 3.2 Disaster Claim Composition
 
@@ -476,7 +476,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `initialize` | `AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、空の `VerifierRegistry` を genesis object として作成する。`DesignatedPool`、`Program`、`Campaign`、`PayoutPolicy`、`CampaignBudget` は作成しない |
 | `create_program` / `create_campaign` | Program / Campaign を作成 |
 | `admin::pause_global` / `admin::unpause_global` | `AdminCap` で emergency pause を全体に適用 / 解除 |
-| `admin::pause_target` / `admin::unpause_target` | `AdminCap` で Program / Campaign / Pool などの target object に emergency pause を適用 / 解除 |
+| `admin::pause_target` / `admin::unpause_target` | `AdminCap` で Program / Campaign / Pool などの target object に emergency pause を適用 / 解除。pause 判定は `target_id` ベースで行い、`target_kind` は event / readability 用の分類として扱う |
 | `admin::create_designated_pool` | `AdminCap` で複数存在しうる Designated / Campaign Pool を作成 |
 | `accessor::donate_general_usdc` | `Coin<usdc::usdc::USDC>` を 100% Main Pool に入金し、初回寄付として DonorPass / DonationRecord / donor 集計を作成する |
 | `accessor::donate_general_usdc_with_pass` | 既存 DonorPass を registry と照合し、General USDC DonationRecord と donor 集計を更新する |
@@ -504,7 +504,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | Claim | `ClaimPaid`、`ClaimRejected` optional、`ClaimReceiptCreated` |
 | Admin | `GenesisObjectCreated`、`Paused`、`Unpaused`、`PolicyUpdated` |
 
-`PoolCreated`、各 module の `RegistryCreated`、`GenesisObjectCreated` は package init で作成された object id を dapp / scripts が追跡するための source of truth として使う。`GenesisObjectCreated` は `AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry` の id と kind を emit する。
+`GenesisObjectCreated` は package init で作成された singleton object 一覧を dapp / scripts が追跡するための event である。`AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry` の id と kind を emit する。`PoolCreated` と各 module の `RegistryCreated` は module 固有の作成 event であり、init で作成される Pool / Registry でも emit する。singleton について `GenesisObjectCreated` と module 固有 event の両方が emit されることは意図した挙動である。
 
 ## 5. Validation & Security
 
@@ -555,7 +555,7 @@ Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order
 | must | Main Pool reserve を侵さない |
 | must | Verification Fee を payout 原資にしない |
 | must | Pass metadata は Nautilus 署名済み update のみ信頼する |
-| must | Claim / Payout は MembershipRegistry current pass と MembershipPass の整合性を検証する |
+| must | Claim / Payout は `membership::assert_current_pass_precheck` で MembershipRegistry current pass と MembershipPass の整合性を検証する |
 | must | `pass_lineage_id` で二重 Claim を拒否する |
 | must | Donation ごとに `DonationRecorded` を emit する |
 | must | DonorPass は通常 transfer を拒否する |

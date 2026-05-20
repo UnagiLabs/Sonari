@@ -291,6 +291,124 @@ fun registry_current_pass_precheck_matches_pass_and_owner_index() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = membership::ERegistryRecordNotFound)]
+fun current_pass_precheck_rejects_missing_registry_record() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario, 1);
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        membership::remove_membership_record_for_testing(&mut registry, pass_lineage_id);
+
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+
+        test_scenario::return_shared(registry);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = membership::ERegistryPassMismatch)]
+fun current_pass_precheck_rejects_wrong_current_pass_id() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario, 1);
+    let wrong_pass_id = operations_pool_id(&mut scenario);
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_current_pass_id_for_testing(
+            &mut registry,
+            membership::membership_pass_lineage_id(&pass),
+            wrong_pass_id,
+        );
+
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+
+        test_scenario::return_shared(registry);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = membership::ERegistryOwnerMismatch)]
+fun current_pass_precheck_rejects_wrong_current_owner() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario, 1);
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_current_owner_for_testing(
+            &mut registry,
+            membership::membership_pass_lineage_id(&pass),
+            OTHER,
+        );
+
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+
+        test_scenario::return_shared(registry);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = membership::ERegistryPayoutMismatch)]
+fun current_pass_precheck_rejects_wrong_current_payout_address() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario, 1);
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_current_payout_address_for_testing(
+            &mut registry,
+            membership::membership_pass_lineage_id(&pass),
+            OTHER,
+        );
+
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+
+        test_scenario::return_shared(registry);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = membership::ERegistryRecordNotActive)]
+fun current_pass_precheck_rejects_inactive_registry_record_status() {
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario, 1);
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_membership_record_status_for_testing(
+            &mut registry,
+            membership::membership_pass_lineage_id(&pass),
+            membership::status_suspended(),
+        );
+
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+
+        test_scenario::return_shared(registry);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
 #[test]
 fun claim_precheck_allows_active_pass_owner_and_payout_address() {
     let mut scenario = initialized_with_pools();
