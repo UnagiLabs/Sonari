@@ -156,6 +156,8 @@ PR4 の実装範囲では、`MembershipPass` は `has key` のみを持つ owned
 
 PR4 の `MembershipPass` 本体は、owner、payout address、`pass_lineage_id`、status、issued timestamp、metadata update timestamp だけを保持する。`pass_lineage_id` は発行された pass の object id に固定し、duplicate claim prevention key は `(pass_lineage_id, campaign_id)` とする。`DonorPass` の `total_donated`、`donation_count`、tier、`DonationRecord` に相当する寄付集計・寄付履歴 surface は持たない。
 
+PR4 では `MembershipRegistry` や同一 wallet の重複発行防止は追加しない。重複発行防止、任意 owner 発行、migration、metadata update は後続 PR で扱う。
+
 | Metadata | 例 |
 | --- | --- |
 | Core | `pass_lineage_id`、owner、payout address、status、issued_at_ms、last_metadata_update_ms |

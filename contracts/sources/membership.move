@@ -76,6 +76,7 @@ public(package) fun register_member_usdc(
     transfer::transfer(pass, ctx.sender());
 }
 
+// Caller must pass a trusted claimant, typically ctx.sender(), not an unchecked user-supplied address.
 public fun assert_claim_precheck(pass: &MembershipPass, claimant: address) {
     assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
     assert!(
