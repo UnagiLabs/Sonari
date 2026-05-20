@@ -17,7 +17,7 @@ This smoke sequence is the deploy-time dry run for the current contracts MVP. It
 4. Create the default disaster `PayoutPolicy` with `payout_policy::create_default_disaster_policy`.
 5. Create a `ClaimIndex` with `claim::create_claim_index`.
 6. Create a `DisasterRegistry` with `disaster_event::create_disaster_registry`.
-7. Add Residence verifier keys through `admin::add_verifier_key`.
+7. Add Residence and Disaster Oracle verifier keys through `admin::add_verifier_key`.
 8. Open `CampaignBudget` after pool funding with `payout_policy::open_campaign_budget_from_designated_and_main`.
 
 ## Happy Path
@@ -28,9 +28,11 @@ This smoke sequence is the deploy-time dry run for the current contracts MVP. It
    - Expected: `MembershipPassIssued`; verification fee only increases `OperationsPool`.
 3. Residence verifier submits `accessor::update_residence_metadata`.
    - Expected: `PassMetadataUpdated` with Residence metadata only.
-4. Relayer submits Disaster Oracle v1 BCS bytes through `payload_v1::decode_finalized` and `disaster_event::create_from_payload`.
+4. Relayer submits Disaster Oracle v1 BCS bytes, signature, and public key through `disaster_event::create_from_signed_payload`.
    - Expected: `DisasterEventCreated`; duplicate `(event_uid, event_revision)` is rejected.
-5. Recipient submits `accessor::claim_disaster_usdc` with `AffectedCellLeaf` and Merkle proof.
+5. Admin binds the campaign to the created DisasterEvent with `disaster_event::bind_campaign`.
+   - Expected: `DisasterCampaignBound`; unrelated campaigns or events cannot claim against this binding.
+6. Recipient submits `accessor::claim_disaster_usdc` with the binding, `AffectedCellLeaf`, and Merkle proof.
    - Expected: `ClaimPaid`, `ClaimReceiptCreated`, owned `ClaimReceipt`, payout to `MembershipPass.payout_address`.
    - Expected funding order: Designated Pool budget first, Main Pool backstop second.
 
