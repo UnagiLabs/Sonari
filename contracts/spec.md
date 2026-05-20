@@ -155,9 +155,8 @@ Pass は個人情報を直接保持しない。支払い判定に使う metadata
 | Metadata | 例 |
 | --- | --- |
 | Core | `pass_lineage_id`、owner、payout address、status、issued_at_ms、last_metadata_update_ms |
-| Residence | `verified_residence_cell`、`residence_confidence`、`residence_verified_at_ms`、`residence_expires_at_ms` |
-| Student | `student_status`、`school_region_hash`、`student_confidence`、`student_verified_at_ms`、`student_expires_at_ms` |
-| Risk | `risk_bucket`、`verification_level`、`proof_hash` |
+| Residence | `verified_residence_cell`、`residence_confidence`、`residence_risk_bucket`、`residence_evidence_snapshot_hash`、`residence_issued_at_ms`、`residence_expires_at_ms`、`residence_last_update_id` |
+| Student | `school_region_hash`、`student_status`、`student_confidence`、`student_risk_bucket`、`student_evidence_snapshot_hash`、`student_issued_at_ms`、`student_expires_at_ms`、`student_last_update_id` |
 
 Pass status:
 
@@ -173,31 +172,45 @@ Pass status:
 contracts は verifier family ごとの署名済み result を検証し、Pass metadata を更新する。
 
 ```text
-ResidenceMetadataUpdate {
+ResidenceMetadataUpdateMessage {
+  intent
+  verifier_family
+  verifier_version
+  registry_id
   pass_lineage_id
   owner
+  update_id
+  issued_at_ms
+  expires_at_ms
   verified_residence_cell
   residence_confidence
   risk_bucket
   evidence_snapshot_hash
-  issued_at_ms
-  expires_at_ms
-  verifier_version
 }
 
-StudentMetadataUpdate {
+StudentMetadataUpdateMessage {
+  intent
+  verifier_family
+  verifier_version
+  registry_id
   pass_lineage_id
   owner
+  update_id
+  issued_at_ms
+  expires_at_ms
   school_region_hash
   student_status
   student_confidence
   risk_bucket
   evidence_snapshot_hash
-  issued_at_ms
-  expires_at_ms
-  verifier_version
 }
 ```
+
+署名対象は上記 field order の Move struct に対する `sui::bcs::to_bytes(&message)` の bytes で固定する。Residence の `intent` は `SONARI_RESIDENCE_METADATA_UPDATE_V1`、Student の `intent` は `SONARI_STUDENT_METADATA_UPDATE_V1` とし、`verifier_version` は v1 では `1` である。`payout_address` は PR5 の署名対象に含めず、Claim / Payout PR 側で使用可否を検証する。
+
+`VerifierRegistry` は AdminCap gated に作成し、Ed25519 public key、verifier family、version、enabled / disabled 状態を保持する。metadata update は registry に登録済みで enabled な key の Ed25519 signature だけを受理する。public key bytes は 32 bytes、signature bytes は 64 bytes でない場合 fail-closed で拒否する。
+
+freshness は `Clock` の `timestamp_ms` で検証する。`expires_at_ms <= now_ms`、`expires_at_ms <= issued_at_ms`、`issued_at_ms > now_ms + 300_000` は拒否する。replay prevention は `pass_lineage_id × verifier_family` 単位で `update_id` を monotonic に扱い、Residence と Student の update_id は別系列として進める。
 
 raw email、phone、GPS 履歴、端末情報、住所、学籍番号、在学証明書の原文はオンチェーンに出さない。オンチェーンには bucket、hash、有効期限、署名検証に必要な最小情報だけを残す。
 

@@ -285,12 +285,15 @@ PR4 の実装範囲:
 - StudentMetadataUpdate verification
 - freshness / expiry / replay prevention
 - disabled verifier reject
+- `sui::bcs::to_bytes(&message)` を Ed25519 署名対象として固定
+- `pass_lineage_id × verifier_family` 単位の monotonic `update_id`
 
 最初に定義する test:
 
 - registered verifier の valid ResidenceMetadataUpdate だけが `MembershipPass` の residence metadata を更新できる。
 - valid StudentMetadataUpdate だけが student metadata を更新できる。
 - invalid signature、expired update、replayed update、wrong verifier family、disabled key は reject される。
+- signature bytes / public key bytes 長不正、wrong verifier version、wrong intent、future issued_at は reject される。
 - paused verifier update / metadata update は reject される。
 - `pass_lineage_id` / owner binding mismatch は reject される。
 - raw email、phone、GPS 履歴、住所、学籍番号、学校メール raw value を保存する field がない。
@@ -310,6 +313,8 @@ PR4 の実装範囲:
 
 - Pass metadata は署名済み update だけで更新できる。
 - expired / replay / wrong family / disabled key を拒否する。
+- Residence / Student metadata は別系列の `update_id` として replay prevention できる。
+- 署名対象 struct の BCS bytes は fixture test で固定されている。
 - raw personal data を保存しない。
 
 ### PR 6. Pass migration
