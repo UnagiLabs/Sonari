@@ -2,7 +2,7 @@ module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
-use contracts::claim::{Self, ClaimIndex, EligibilityResult};
+use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::membership;
@@ -179,34 +179,6 @@ public fun update_student_metadata(
         message,
         signature,
         public_key,
-        ctx,
-    );
-}
-
-public fun claim_usdc(
-    pause_state: &PauseState,
-    index: &mut ClaimIndex,
-    registry: &membership::MembershipRegistry,
-    program: &Program,
-    campaign: &Campaign,
-    policy: &PayoutPolicy,
-    budget: &mut CampaignBudget,
-    pass: &membership::MembershipPass,
-    main_pool: &mut MainPool,
-    eligibility: EligibilityResult,
-    ctx: &mut TxContext,
-) {
-    claim::claim_usdc(
-        pause_state,
-        index,
-        registry,
-        program,
-        campaign,
-        policy,
-        budget,
-        pass,
-        main_pool,
-        eligibility,
         ctx,
     );
 }

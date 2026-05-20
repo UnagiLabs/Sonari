@@ -42,7 +42,7 @@ fun generic_claim_rejects_self_created_eligibility() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         let eligibility = eligibility(&program, &campaign, &pass, 1, 50_000_000);
 
-        accessor::claim_usdc(
+        claim::claim_usdc(
             &pause_state,
             &mut index,
             &registry,
@@ -91,6 +91,16 @@ fun operations_pool_funds_are_not_used_by_disabled_generic_claim_path() {
     create_claim_objects(&mut scenario);
     execute_claim(&mut scenario);
     scenario.end();
+}
+
+#[test]
+fun available_usdc_saturates_at_u64_max() {
+    assert!(
+        claim::available_usdc_for_testing(
+            18_446_744_073_709_551_614,
+            2,
+        ) == 18_446_744_073_709_551_615,
+    );
 }
 
 fun initialized(): test_scenario::Scenario {
@@ -170,7 +180,7 @@ fun execute_claim(scenario: &mut test_scenario::Scenario) {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         let eligibility = eligibility(&program, &campaign, &pass, 1, 50_000_000);
 
-        accessor::claim_usdc(
+        claim::claim_usdc(
             &pause_state,
             &mut index,
             &registry,

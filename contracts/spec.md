@@ -445,7 +445,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `payload_v1` | Disaster Oracle Payload v1 BCS decode / validation |
 | `affected_cell` | AffectedCellLeaf、Merkle proof verification |
 | `payout_policy` | eligibility tier、risk、confidence、budget rule |
-| `claim` | Generic Claim verification、payout execution、receipt、duplicate prevention |
+| `claim` | MVP では Disaster Claim verification、payout execution、receipt、duplicate prevention。Generic Claim は signed eligibility payload 導入まで package 内 disabled stub として扱う |
 
 ### 4.2 Object 設計
 
@@ -467,7 +467,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `PayoutPolicy` | tier amount、multipliers、caps、reserve ratios |
 | `CampaignBudget` | designated budget、main backstop budget、claimed、remaining |
 | `DisasterEvent` | event uid、revision、hazard type、`affected_cells_root`、data hash、min claim band |
-| `DisasterCampaignBinding` | campaign と DisasterEvent の明示的な対応。claim 時に campaign id、event object id、event uid / revision を検証する |
+| `DisasterCampaignBinding` | campaign と DisasterEvent の明示的な対応。`DisasterRegistry` の campaign binding index により 1 campaign = 1 DisasterEvent binding を強制し、claim 時に campaign id、event object id、event uid / revision を検証する |
 | `ClaimReceipt` | claimant、pass lineage、program / campaign、amount、paid_from、claimed_at |
 
 ### 4.3 外部 API 関数
@@ -490,7 +490,9 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `submit_pass_metadata_update` | Nautilus 署名済み Residence / Student metadata update を検証して Pass 更新 |
 | `submit_finalized_disaster_payload_v1` | Disaster Oracle v1 payload を検証して DisasterEvent を作成 |
 | `open_campaign_budget` | Program / Campaign / Pool に基づき budget cap を作成 |
-| `claim` | Generic Claim。Program 条件、Pass、metadata、eligibility、budget、Pool を検証して支払う |
+| `accessor::claim_disaster_usdc` | Disaster Claim。campaign binding、DisasterEvent、Pass residence metadata、AffectedCellLeaf / Merkle proof、budget、Designated Pool、Main Pool を検証して支払う |
+
+Generic `accessor::claim_usdc` は MVP の public API から公開しない。`claim::claim_usdc` は package 内の disabled stub として残し、signed eligibility payload と verifier semantics が定義されるまでは常に `EGenericClaimDisabled` で abort する。
 | `pause` / `unpause` | admin-only emergency control |
 
 ### 4.4 Events

@@ -243,6 +243,34 @@ fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = disaster_event::EDuplicateDisasterCampaignBinding)]
+fun bind_campaign_rejects_duplicate_campaign_binding() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    create_disaster_claim_objects(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let campaign = scenario.take_shared<program::Campaign>();
+        let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
+        disaster_event::bind_campaign(
+            &cap,
+            &mut disaster_registry,
+            &campaign,
+            &disaster_event,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(campaign);
+        test_scenario::return_shared(disaster_event);
+    };
+
+    scenario.end();
+}
+
 fun initialized(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
@@ -470,8 +498,16 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
         let program = scenario.take_shared<program::Program>();
         let campaign = scenario.take_shared<program::Campaign>();
         let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
-        disaster_event::bind_campaign(&cap, &campaign, &disaster_event, scenario.ctx());
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        disaster_event::bind_campaign(
+            &cap,
+            &mut disaster_registry,
+            &campaign,
+            &disaster_event,
+            scenario.ctx(),
+        );
         scenario.return_to_sender(cap);
+        test_scenario::return_shared(disaster_registry);
         test_scenario::return_shared(program);
         test_scenario::return_shared(campaign);
         test_scenario::return_shared(disaster_event);

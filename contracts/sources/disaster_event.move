@@ -9,6 +9,7 @@ use sui::event;
 
 const EDuplicateDisasterEvent: u64 = 0;
 const EDisasterCampaignBindingMismatch: u64 = 1;
+const EDuplicateDisasterCampaignBinding: u64 = 2;
 
 public struct DisasterRegistry has key {
     id: UID,
@@ -40,6 +41,10 @@ public struct DisasterCampaignBinding has key {
 public struct DisasterEventKey has copy, drop, store {
     event_uid: vector<u8>,
     event_revision: u32,
+}
+
+public struct DisasterCampaignBindingKey has copy, drop, store {
+    campaign_id: ID,
 }
 
 public struct DisasterRegistryCreated has copy, drop {
@@ -108,13 +113,22 @@ public(package) fun create_from_signed_payload(
 
 public(package) fun bind_campaign(
     _: &AdminCap,
+    registry: &mut DisasterRegistry,
     campaign: &Campaign,
     disaster_event: &DisasterEvent,
     ctx: &mut TxContext,
 ) {
+    let campaign_id = program::campaign_id(campaign);
+    let key = DisasterCampaignBindingKey { campaign_id };
+    assert!(
+        !dynamic_field::exists_with_type<DisasterCampaignBindingKey, bool>(&registry.id, key),
+        EDuplicateDisasterCampaignBinding,
+    );
+    dynamic_field::add(&mut registry.id, key, true);
+
     let binding = DisasterCampaignBinding {
         id: object::new(ctx),
-        campaign_id: program::campaign_id(campaign),
+        campaign_id,
         disaster_event_id: object::id(disaster_event),
         event_uid: disaster_event.event_uid,
         event_revision: disaster_event.event_revision,

@@ -21,6 +21,8 @@ const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
 const EResidenceMetadataExpired: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
+const U64_MAX: u64 = 18_446_744_073_709_551_615;
+const U64_MAX_AS_U128: u128 = 18_446_744_073_709_551_615;
 
 public struct ClaimIndex has key {
     id: UID,
@@ -186,7 +188,7 @@ public(package) fun claim_disaster_usdc(
         pools::main_pool_balance_usdc(main_pool),
         payout_policy::main_remaining_usdc(budget),
     );
-    let total_available = designated_available + main_available;
+    let total_available = available_usdc(designated_available, main_available);
     let (_, _, confidence, risk_bucket, _, _, _, _) =
         membership::residence_metadata_summary(pass);
     let amount = payout_policy::quote_usdc(
@@ -344,6 +346,20 @@ public fun claim_receipt_summary(
 
 fun min_u64(a: u64, b: u64): u64 {
     if (a < b) { a } else { b }
+}
+
+fun available_usdc(designated_available: u64, main_available: u64): u64 {
+    let total = (designated_available as u128) + (main_available as u128);
+    if (total > U64_MAX_AS_U128) {
+        U64_MAX
+    } else {
+        (total as u64)
+    }
+}
+
+#[test_only]
+public fun available_usdc_for_testing(designated_available: u64, main_available: u64): u64 {
+    available_usdc(designated_available, main_available)
 }
 
 #[test_only]

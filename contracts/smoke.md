@@ -30,8 +30,8 @@ This smoke sequence is the deploy-time dry run for the current contracts MVP. It
    - Expected: `PassMetadataUpdated` with Residence metadata only.
 4. Relayer submits Disaster Oracle v1 BCS bytes, signature, and public key through `disaster_event::create_from_signed_payload`.
    - Expected: `DisasterEventCreated`; duplicate `(event_uid, event_revision)` is rejected.
-5. Admin binds the campaign to the created DisasterEvent with `disaster_event::bind_campaign`.
-   - Expected: `DisasterCampaignBound`; unrelated campaigns or events cannot claim against this binding.
+5. Admin binds the campaign to the created DisasterEvent with `disaster_event::bind_campaign`, passing the `DisasterRegistry` so the campaign binding index is updated.
+   - Expected: `DisasterCampaignBound`; unrelated campaigns or events cannot claim against this binding, and a second binding for the same campaign is rejected.
 6. Recipient submits `accessor::claim_disaster_usdc` with the binding, `AffectedCellLeaf`, and Merkle proof.
    - Expected: `ClaimPaid`, `ClaimReceiptCreated`, owned `ClaimReceipt`, payout to `MembershipPass.payout_address`.
    - Expected funding order: Designated Pool budget first, Main Pool backstop second.
