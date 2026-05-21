@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="site/public/assets/sonari_logo.png" alt="Sonari logo" width="260" />
+  <img src="dapp/public/assets/sonari_logo.png" alt="Sonari logo" width="260" />
 </p>
 
 # Sonari

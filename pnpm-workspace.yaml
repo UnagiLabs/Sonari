@@ -1,6 +1,6 @@
 packages:
+  - "dapp"
   - "dapp/*"
   - "packages/*"
-  - "site"
   - "nautilus/*"
   - "nautilus/verifiers/*/*"
