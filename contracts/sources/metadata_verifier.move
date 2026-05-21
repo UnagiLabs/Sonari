@@ -9,6 +9,7 @@ use sui::vec_map::{Self, VecMap};
 
 const VERIFIER_FAMILY_RESIDENCE: u8 = 1;
 const VERIFIER_FAMILY_STUDENT: u8 = 2;
+const VERIFIER_FAMILY_DISASTER_ORACLE: u8 = 3;
 const VERIFIER_VERSION_V1: u64 = 1;
 const TARGET_KIND_VERIFIER_REGISTRY: u8 = 6;
 const REGISTRY_KIND_VERIFIER: u8 = 3;
@@ -137,6 +138,30 @@ public(package) fun disable_verifier_key(
     ctx: &TxContext,
 ) {
     disable_verifier_key_internal(registry, public_key, ctx);
+}
+
+public(package) fun assert_signed_bytes(
+    registry: &VerifierRegistry,
+    expected_family: u8,
+    expected_version: u64,
+    signed_bytes: &vector<u8>,
+    signature: &vector<u8>,
+    public_key: &vector<u8>,
+) {
+    assert_public_key_length(public_key);
+    assert_signature_length(signature);
+    assert_allowed_verifier_family(expected_family);
+    assert_allowed_verifier_version(expected_version);
+    assert!(registry.keys.contains(public_key), EVerifierKeyNotRegistered);
+
+    let key = registry.keys.get(public_key);
+    assert!(key.enabled, EVerifierKeyDisabled);
+    assert!(key.verifier_family == expected_family, EVerifierFamilyMismatch);
+    assert!(key.verifier_version == expected_version, EVerifierVersionMismatch);
+    assert!(
+        ed25519::ed25519_verify(signature, public_key, signed_bytes),
+        EInvalidSignature,
+    );
 }
 
 public(package) fun verify_and_update_residence_metadata(
@@ -319,6 +344,10 @@ public fun verifier_family_residence(): u8 {
 
 public fun verifier_family_student(): u8 {
     VERIFIER_FAMILY_STUDENT
+}
+
+public fun verifier_family_disaster_oracle(): u8 {
+    VERIFIER_FAMILY_DISASTER_ORACLE
 }
 
 public fun verifier_version_v1(): u64 {
@@ -533,7 +562,9 @@ fun assert_signature_length(signature: &vector<u8>) {
 
 fun assert_allowed_verifier_family(verifier_family: u8) {
     assert!(
-        verifier_family == VERIFIER_FAMILY_RESIDENCE || verifier_family == VERIFIER_FAMILY_STUDENT,
+        verifier_family == VERIFIER_FAMILY_RESIDENCE
+            || verifier_family == VERIFIER_FAMILY_STUDENT
+            || verifier_family == VERIFIER_FAMILY_DISASTER_ORACLE,
         EVerifierFamilyMismatch,
     );
 }
@@ -577,6 +608,29 @@ public fun add_verifier_key_for_testing(
     ctx: &mut TxContext,
 ) {
     add_verifier_key_internal(registry, verifier_family, verifier_version, public_key, ctx);
+}
+
+#[test_only]
+public fun add_verifier_key_unchecked_for_testing(
+    registry: &mut VerifierRegistry,
+    verifier_family: u8,
+    verifier_version: u64,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    assert_public_key_length(&public_key);
+    assert!(!registry.keys.contains(&public_key), EVerifierKeyAlreadyRegistered);
+    registry.keys.insert(
+        public_key,
+        VerifierKey {
+            verifier_family,
+            verifier_version,
+            public_key,
+            enabled: true,
+            added_at_ms: ctx.epoch_timestamp_ms(),
+            disabled_at_ms: option::none(),
+        },
+    );
 }
 
 #[test_only]

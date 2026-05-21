@@ -25,6 +25,7 @@ const SIDECAR_URL = `http://${SIDECAR_HOST}:${SIDECAR_PORT}`;
 const WRANGLER_URL = `http://${WRANGLER_HOST}:${WRANGLER_PORT}`;
 const TARGET = "0x123::disaster_oracle::submit_payload_v1";
 const REGISTRY = "0x456";
+const VERIFIER_REGISTRY = "0x654";
 const MANUAL_SUBMIT_TOKEN = "local-dev-token";
 const CASE_IDS = [
     "usgs/finalized_minimal",
@@ -98,6 +99,8 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
                 `RELAYER_TARGET:${TARGET}`,
                 "--var",
                 `RELAYER_REGISTRY:${REGISTRY}`,
+                "--var",
+                `RELAYER_VERIFIER_REGISTRY:${VERIFIER_REGISTRY}`,
                 "--log-level",
                 "error",
                 "--show-interactive-dev-session=false",
@@ -117,6 +120,7 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
                 caseId,
                 target: TARGET,
                 registry: REGISTRY,
+                verifierRegistry: VERIFIER_REGISTRY,
                 nowMs,
             });
             const response = await fetch(`${WRANGLER_URL}/manual/earthquakes`, {
@@ -201,22 +205,22 @@ export async function runWranglerOracleE2e(): Promise<WranglerE2eOutput> {
                 );
                 assertEqual(wranglerEvent.relayer_status, "succeeded", "relayer_status");
                 assertEqual(
-                    relayerRequest.arguments[1].join(","),
-                    relayer.value.arguments[1].join(","),
+                    relayerRequest.arguments[3].join(","),
+                    relayer.value.arguments[3].join(","),
                     "payload_bcs_hex bytes",
                 );
                 assertEqual(
-                    relayerRequest.arguments[2].join(","),
-                    relayer.value.arguments[2].join(","),
+                    relayerRequest.arguments[4].join(","),
+                    relayer.value.arguments[4].join(","),
                     "signature bytes",
                 );
                 assertEqual(
-                    relayerRequest.arguments[3].join(","),
-                    relayer.value.arguments[3].join(","),
+                    relayerRequest.arguments[5].join(","),
+                    relayer.value.arguments[5].join(","),
                     "public key bytes",
                 );
                 caseOutput.relayer_preview_argument_lengths = relayerRequest.arguments
-                    .slice(1)
+                    .slice(3)
                     .map((argument) => argument.length);
             }
 
@@ -321,7 +325,7 @@ function extractFirstD1Row(input: unknown): Record<string, unknown> | null {
 }
 
 function readRelayerRequest(row: Record<string, unknown>): {
-    arguments: [string, number[], number[], number[]];
+    arguments: [string, string, string, number[], number[], number[]];
 } {
     if (typeof row.relayer_request_json !== "string") {
         throw new Error(`D1 row is missing relayer_request_json: ${JSON.stringify(row)}`);
@@ -330,7 +334,7 @@ function readRelayerRequest(row: Record<string, unknown>): {
     if (!isRecord(parsed) || !Array.isArray(parsed.arguments)) {
         throw new Error("relayer_request_json is malformed");
     }
-    return parsed as { arguments: [string, number[], number[], number[]] };
+    return parsed as { arguments: [string, string, string, number[], number[], number[]] };
 }
 
 function spawnProcess(command: string, args: string[], cwd = ROOT_DIR): ChildProcess {

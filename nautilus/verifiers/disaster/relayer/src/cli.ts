@@ -17,6 +17,7 @@ interface CliOptions {
     grpcUrl?: string;
     target?: string;
     registry?: string;
+    verifierRegistry?: string;
     signer?: string;
     sender?: string;
 }
@@ -38,6 +39,7 @@ async function main(argv: string[]): Promise<number> {
         const result = buildRelayerRequestPreview(input.value, {
             target: options.target ?? "",
             registry: options.registry ?? "",
+            verifierRegistry: options.verifierRegistry ?? "",
         });
         printJson(result);
         return result.ok ? 0 : 1;
@@ -47,6 +49,7 @@ async function main(argv: string[]): Promise<number> {
         const result = await dryRunRelayerSubmit(input.value, {
             target: options.target ?? "",
             registry: options.registry ?? "",
+            verifierRegistry: options.verifierRegistry ?? "",
             grpcUrl: options.grpcUrl ?? "",
             senderAddress: options.sender ?? "",
         });
@@ -54,11 +57,18 @@ async function main(argv: string[]): Promise<number> {
         return result.ok ? 0 : 1;
     }
 
-    if (!options.grpcUrl || !options.target || !options.registry || !options.signer) {
+    if (
+        !options.grpcUrl ||
+        !options.target ||
+        !options.registry ||
+        !options.verifierRegistry ||
+        !options.signer
+    ) {
         printJson({
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
-            message: "submit requires --grpc-url, --target, --registry, and --signer",
+            message:
+                "submit requires --grpc-url, --target, --registry, --verifier-registry, and --signer",
         });
         return 1;
     }
@@ -67,6 +77,7 @@ async function main(argv: string[]): Promise<number> {
     const result = await submitRelayerPayload(input.value, {
         target: options.target,
         registry: options.registry,
+        verifierRegistry: options.verifierRegistry,
         grpcUrl: options.grpcUrl,
         signer,
     });
@@ -104,6 +115,9 @@ function parseArgs(argv: string[]): CliOptions | undefined {
                 break;
             case "--registry":
                 options.registry = value;
+                break;
+            case "--verifier-registry":
+                options.verifierRegistry = value;
                 break;
             case "--signer":
                 options.signer = value;
@@ -150,9 +164,9 @@ function printUsage(): void {
     process.stderr.write(
         [
             "Usage:",
-            "  pnpm relayer -- build-request --fixture-case usgs/finalized_minimal --target <target> --registry <registry>",
-            "  pnpm relayer -- dry-run --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --sender <address>",
-            "  pnpm relayer -- submit --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --signer <sui-private-key>",
+            "  pnpm relayer -- build-request --fixture-case usgs/finalized_minimal --target <target> --registry <registry> --verifier-registry <registry>",
+            "  pnpm relayer -- dry-run --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --sender <address>",
+            "  pnpm relayer -- submit --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --signer <sui-private-key>",
         ].join("\n"),
     );
 }

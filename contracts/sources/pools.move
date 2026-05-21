@@ -13,6 +13,8 @@ const TARGET_KIND_MAIN_POOL: u8 = 11;
 const TARGET_KIND_DESIGNATED_POOL: u8 = 12;
 const TARGET_KIND_OPERATIONS_POOL: u8 = 13;
 
+const EInsufficientPayoutBalance: u64 = 0;
+
 public struct MainPool has key {
     id: UID,
     balance: Balance<USDC>,
@@ -135,6 +137,24 @@ public(package) fun deposit_operations_usdc(
     pool.balance.join(coin::into_balance(coin));
     pool.total_received_usdc = pool.total_received_usdc + amount;
     amount
+}
+
+public(package) fun withdraw_main_usdc(
+    pool: &mut MainPool,
+    amount: u64,
+    ctx: &mut TxContext,
+): Coin<USDC> {
+    assert!(pool.balance.value() >= amount, EInsufficientPayoutBalance);
+    coin::from_balance(pool.balance.split(amount), ctx)
+}
+
+public(package) fun withdraw_designated_usdc(
+    pool: &mut DesignatedPool,
+    amount: u64,
+    ctx: &mut TxContext,
+): Coin<USDC> {
+    assert!(pool.balance.value() >= amount, EInsufficientPayoutBalance);
+    coin::from_balance(pool.balance.split(amount), ctx)
 }
 
 public(package) fun main_pool_id(pool: &MainPool): ID {

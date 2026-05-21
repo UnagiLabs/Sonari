@@ -8,11 +8,15 @@ import {
 export interface RelayerRequestPreview {
     target: string;
     registry: string;
-    arguments: [string, number[], number[], number[]];
+    verifierRegistry: string;
+    clock: string;
+    arguments: [string, string, string, number[], number[], number[]];
     submitRequest: {
         target: string;
         registry: string;
-        arguments: [string, number[], number[], number[]];
+        verifierRegistry: string;
+        clock: string;
+        arguments: [string, string, string, number[], number[], number[]];
     };
 }
 
@@ -40,6 +44,7 @@ export interface HttpRelayerPreviewConfig {
     sidecarUrl: string;
     target: string;
     registry: string;
+    verifierRegistry: string;
     mode?: RelayerMode;
     grpcUrl?: string;
     senderAddress?: string;
@@ -57,6 +62,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
         this.sidecarUrl = stripTrailingSlash(config.sidecarUrl);
         this.target = config.target;
         this.registry = config.registry;
+        this.verifierRegistry = config.verifierRegistry;
         this.mode = config.mode ?? "preview";
         this.grpcUrl = config.grpcUrl;
         this.senderAddress = config.senderAddress;
@@ -64,6 +70,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
 
     private readonly target: string;
     private readonly registry: string;
+    private readonly verifierRegistry: string;
     readonly mode: RelayerMode;
     private readonly grpcUrl: string | undefined;
     private readonly senderAddress: string | undefined;
@@ -86,6 +93,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
                     input: validation.value satisfies SignedFinalizedPayload,
                     target: this.target,
                     registry: this.registry,
+                    verifierRegistry: this.verifierRegistry,
                     grpcUrl: this.grpcUrl,
                     senderAddress: this.senderAddress,
                 }),

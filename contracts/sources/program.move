@@ -1,6 +1,5 @@
 module contracts::program;
 
-use contracts::admin::{Self, AdminCap, PauseState};
 use sui::event;
 
 const STATUS_ACTIVE: u8 = 1;
@@ -13,6 +12,11 @@ const TARGET_KIND_CAMPAIGN: u8 = 2;
 const EProgramNotActive: u64 = 0;
 const ECampaignNotActive: u64 = 1;
 const ECampaignProgramMismatch: u64 = 2;
+const EClaimWindowNotOpen: u64 = 3;
+const ECampaignBudgetAlreadyOpened: u64 = 4;
+const ECampaignDesignatedPoolRequired: u64 = 5;
+const ECampaignPoolMismatch: u64 = 6;
+const ECampaignDesignatedPoolNotConfigured: u64 = 7;
 
 public struct Program has key {
     id: UID,
@@ -34,6 +38,7 @@ public struct Campaign has key {
     claim_start_ms: u64,
     claim_end_ms: u64,
     status: u8,
+    budget_opened: bool,
     created_at_ms: u64,
 }
 
@@ -60,8 +65,7 @@ public struct CampaignCreated has copy, drop {
     actor: address,
 }
 
-public(package) entry fun create_program(
-    _: &AdminCap,
+public(package) fun create_program(
     program_type: u8,
     required_pass_metadata: u64,
     required_verifier_family: u8,
@@ -95,8 +99,7 @@ public(package) entry fun create_program(
     transfer::share_object(program);
 }
 
-public(package) entry fun create_campaign(
-    _: &AdminCap,
+public(package) fun create_campaign(
     program: &Program,
     campaign_type: u8,
     metadata_hash: vector<u8>,
@@ -115,6 +118,7 @@ public(package) entry fun create_campaign(
         claim_start_ms,
         claim_end_ms,
         status: STATUS_ACTIVE,
+        budget_opened: false,
         created_at_ms: ctx.epoch_timestamp_ms(),
     };
     let campaign_id = object::id(&campaign);
@@ -135,16 +139,58 @@ public(package) entry fun create_campaign(
 }
 
 public fun assert_claim_precheck(
-    pause_state: &PauseState,
     program: &Program,
     campaign: &Campaign,
 ) {
-    admin::assert_not_globally_paused(pause_state);
     assert!(program.status == STATUS_ACTIVE, EProgramNotActive);
     assert!(campaign.status == STATUS_ACTIVE, ECampaignNotActive);
     assert!(campaign.program_id == object::id(program), ECampaignProgramMismatch);
-    admin::assert_target_not_paused(pause_state, object::id(program));
-    admin::assert_target_not_paused(pause_state, object::id(campaign));
+}
+
+public fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
+    assert!(
+        campaign.claim_start_ms <= now_ms && now_ms < campaign.claim_end_ms,
+        EClaimWindowNotOpen,
+    );
+}
+
+public(package) fun assert_budget_not_opened_and_mark(campaign: &mut Campaign) {
+    assert!(!campaign.budget_opened, ECampaignBudgetAlreadyOpened);
+    campaign.budget_opened = true;
+}
+
+public(package) fun assert_campaign_program_match(
+    program: &Program,
+    campaign: &Campaign,
+) {
+    assert!(campaign.program_id == object::id(program), ECampaignProgramMismatch);
+}
+
+public(package) fun assert_no_effective_designated_pool(
+    program: &Program,
+    campaign: &Campaign,
+) {
+    assert!(
+        !option::is_some(&campaign.pool_id) && !option::is_some(&program.default_pool_id),
+        ECampaignDesignatedPoolRequired,
+    );
+}
+
+public(package) fun assert_effective_designated_pool_matches(
+    program: &Program,
+    campaign: &Campaign,
+    designated_pool_id: ID,
+) {
+    if (option::is_some(&campaign.pool_id)) {
+        assert!(*option::borrow(&campaign.pool_id) == designated_pool_id, ECampaignPoolMismatch);
+    } else if (option::is_some(&program.default_pool_id)) {
+        assert!(
+            *option::borrow(&program.default_pool_id) == designated_pool_id,
+            ECampaignPoolMismatch,
+        );
+    } else {
+        abort ECampaignDesignatedPoolNotConfigured
+    }
 }
 
 public fun id(program: &Program): ID {
@@ -153,6 +199,22 @@ public fun id(program: &Program): ID {
 
 public fun campaign_id(campaign: &Campaign): ID {
     object::id(campaign)
+}
+
+public fun required_pass_metadata(program: &Program): u64 {
+    program.required_pass_metadata
+}
+
+public fun required_verifier_family(program: &Program): u8 {
+    program.required_verifier_family
+}
+
+public fun campaign_claim_start_ms(campaign: &Campaign): u64 {
+    campaign.claim_start_ms
+}
+
+public fun campaign_claim_end_ms(campaign: &Campaign): u64 {
+    campaign.claim_end_ms
 }
 
 public fun status_active(): u8 {
