@@ -109,6 +109,7 @@ public(package) fun open_campaign_budget_from_main(
     main_pool: &MainPool,
     ctx: &mut TxContext,
 ) {
+    program::assert_campaign_program_match(program, campaign);
     program::assert_no_effective_designated_pool(program, campaign);
     program::assert_budget_not_opened_and_mark(campaign);
     let budget = CampaignBudget {
@@ -135,6 +136,7 @@ public(package) fun open_campaign_budget_from_designated_and_main(
     main_pool: &MainPool,
     ctx: &mut TxContext,
 ) {
+    program::assert_campaign_program_match(program, campaign);
     program::assert_effective_designated_pool_matches(
         program,
         campaign,

@@ -434,7 +434,7 @@ campaign_budget = designated_budget + main_backstop_budget
 
 `CampaignBudget` は campaign-wide cap の source of truth として扱い、1 つの `Campaign` につき 1 個のみ作成できる。Budget open 時は `Campaign` を mutable に受け取り、`budget_opened` marker を立てる。すでに marker が立っている Campaign に対する追加の budget open は拒否し、main-only path と designated+main path は同じ marker を共有する。
 
-Budget open で使える Designated Pool は、`Campaign.pool_id` が設定されていればそれを優先し、未設定なら `Program.default_pool_id` に従う。effective designated pool がある Campaign は main-only budget open を拒否し、designated+main budget open では渡された `DesignatedPool` の ID が effective pool と一致しなければならない。effective pool が未設定の Campaign は MVP 互換として任意の Designated Pool で designated+main budget を開ける。
+Budget open で使える Designated Pool は、`Campaign.pool_id` が設定されていればそれを優先し、未設定なら `Program.default_pool_id` に従う。effective designated pool がある Campaign は main-only budget open を拒否し、designated+main budget open では渡された `DesignatedPool` の ID が effective pool と一致しなければならない。effective pool が未設定の Campaign は main-only budget open のみ許可し、designated+main budget open は拒否する。
 
 MVP では全対象者 target amount 合計に基づく完全な pro-rata は Future 扱いにする。CampaignBudget 上限内で Claim ごとに支払い、budget 不足時は remaining budget 内へ cap、または支払い不可にする。
 

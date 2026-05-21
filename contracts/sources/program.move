@@ -16,6 +16,7 @@ const EClaimWindowNotOpen: u64 = 3;
 const ECampaignBudgetAlreadyOpened: u64 = 4;
 const ECampaignDesignatedPoolRequired: u64 = 5;
 const ECampaignPoolMismatch: u64 = 6;
+const ECampaignDesignatedPoolNotConfigured: u64 = 7;
 
 public struct Program has key {
     id: UID,
@@ -158,6 +159,13 @@ public(package) fun assert_budget_not_opened_and_mark(campaign: &mut Campaign) {
     campaign.budget_opened = true;
 }
 
+public(package) fun assert_campaign_program_match(
+    program: &Program,
+    campaign: &Campaign,
+) {
+    assert!(campaign.program_id == object::id(program), ECampaignProgramMismatch);
+}
+
 public(package) fun assert_no_effective_designated_pool(
     program: &Program,
     campaign: &Campaign,
@@ -180,6 +188,8 @@ public(package) fun assert_effective_designated_pool_matches(
             *option::borrow(&program.default_pool_id) == designated_pool_id,
             ECampaignPoolMismatch,
         );
+    } else {
+        abort ECampaignDesignatedPoolNotConfigured
     }
 }
 

@@ -605,11 +605,22 @@ fun execute_disaster_claim_with_objects(
 }
 
 fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
-    create_disaster_claim_objects_without_budget(scenario);
+    let designated_pool_id = designated_pool_id(scenario);
+    create_disaster_claim_objects_without_budget_with_pool(
+        scenario,
+        option::some(designated_pool_id),
+    );
     open_designated_campaign_budget(scenario);
 }
 
 fun create_disaster_claim_objects_without_budget(scenario: &mut test_scenario::Scenario) {
+    create_disaster_claim_objects_without_budget_with_pool(scenario, option::none());
+}
+
+fun create_disaster_claim_objects_without_budget_with_pool(
+    scenario: &mut test_scenario::Scenario,
+    campaign_pool_id: Option<object::ID>,
+) {
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
@@ -634,7 +645,7 @@ fun create_disaster_claim_objects_without_budget(scenario: &mut test_scenario::S
             &program,
             1,
             b"disaster-claim",
-            option::none(),
+            campaign_pool_id,
             0,
             CLAIM_WINDOW_END_MS,
             scenario.ctx(),

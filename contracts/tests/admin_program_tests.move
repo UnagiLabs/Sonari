@@ -133,6 +133,10 @@ fun admin_wrappers_create_transaction_reachable_setup_objects() {
         admin::create_disaster_registry(&cap, scenario.ctx());
         scenario.return_to_sender(cap);
     };
+    let pool_events = event::events_by_type<pools::PoolCreated>();
+    let (designated_pool_id, designated_pool_kind, _, _, _) =
+        pools::pool_created_event_fields(*pool_events.borrow(pool_events.length() - 1));
+    assert!(designated_pool_kind == pools::pool_kind_designated());
 
     scenario.next_tx(ADMIN);
     {
@@ -143,7 +147,7 @@ fun admin_wrappers_create_transaction_reachable_setup_objects() {
             &program,
             9,
             b"metadata-hash",
-            option::none(),
+            option::some(designated_pool_id),
             100,
             200,
             scenario.ctx(),
@@ -236,9 +240,9 @@ fun campaign_budget_cannot_be_opened_twice_from_designated_and_main() {
 }
 
 #[test, expected_failure(abort_code = program::ECampaignBudgetAlreadyOpened)]
-fun main_and_designated_budget_paths_share_campaign_marker() {
+fun main_only_campaign_budget_cannot_be_opened_twice() {
     let mut scenario = initialized();
-    create_program_campaign_and_designated_pool(&mut scenario);
+    create_program_and_campaign(&mut scenario);
 
     scenario.next_tx(ADMIN);
     {
@@ -261,18 +265,15 @@ fun main_and_designated_budget_paths_share_campaign_marker() {
         let program = scenario.take_shared<program::Program>();
         let mut campaign = scenario.take_shared<program::Campaign>();
         let main_pool = scenario.take_shared<pools::MainPool>();
-        let designated_pool = scenario.take_shared<pools::DesignatedPool>();
-        payout_policy::open_campaign_budget_from_designated_and_main(
+        payout_policy::open_campaign_budget_from_main(
             &program,
             &mut campaign,
-            &designated_pool,
             &main_pool,
             scenario.ctx(),
         );
         test_scenario::return_shared(program);
         test_scenario::return_shared(campaign);
         test_scenario::return_shared(main_pool);
-        test_scenario::return_shared(designated_pool);
     };
 
     scenario.end();
@@ -303,6 +304,71 @@ fun campaign_budget_rejects_wrong_program_default_pool() {
     );
 
     open_designated_budget_with_pool(&mut scenario, wrong_pool_id);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = program::ECampaignDesignatedPoolNotConfigured)]
+fun campaign_budget_rejects_unconfigured_designated_pool() {
+    let mut scenario = initialized();
+    create_program_and_campaign(&mut scenario);
+    let designated_pool_id = create_designated_pool_id(&mut scenario);
+
+    open_designated_budget_with_pool(&mut scenario, designated_pool_id);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = program::ECampaignProgramMismatch)]
+fun main_budget_rejects_campaign_from_other_program() {
+    let mut scenario = initialized();
+    create_program_and_campaign(&mut scenario);
+    let other_program_id = create_program(&mut scenario, 8);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut campaign = scenario.take_shared<program::Campaign>();
+        let other_program = scenario.take_shared_by_id<program::Program>(other_program_id);
+        let main_pool = scenario.take_shared<pools::MainPool>();
+        payout_policy::open_campaign_budget_from_main(
+            &other_program,
+            &mut campaign,
+            &main_pool,
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(campaign);
+        test_scenario::return_shared(other_program);
+        test_scenario::return_shared(main_pool);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = program::ECampaignProgramMismatch)]
+fun designated_budget_rejects_campaign_from_other_program() {
+    let mut scenario = initialized();
+    create_program_and_campaign(&mut scenario);
+    let other_program_id = create_program(&mut scenario, 8);
+    let designated_pool_id = create_designated_pool_id(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut campaign = scenario.take_shared<program::Campaign>();
+        let other_program = scenario.take_shared_by_id<program::Program>(other_program_id);
+        let main_pool = scenario.take_shared<pools::MainPool>();
+        let designated_pool =
+            scenario.take_shared_by_id<pools::DesignatedPool>(designated_pool_id);
+        payout_policy::open_campaign_budget_from_designated_and_main(
+            &other_program,
+            &mut campaign,
+            &designated_pool,
+            &main_pool,
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(campaign);
+        test_scenario::return_shared(other_program);
+        test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(designated_pool);
+    };
+
     scenario.end();
 }
 
@@ -777,14 +843,12 @@ fun create_program_and_campaign_with_pools(
 }
 
 fun create_program_campaign_and_designated_pool(scenario: &mut test_scenario::Scenario) {
-    create_program_and_campaign(scenario);
-
-    scenario.next_tx(ADMIN);
-    {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
-        admin::create_designated_pool(&cap, option::none(), scenario.ctx());
-        scenario.return_to_sender(cap);
-    };
+    let designated_pool_id = create_designated_pool_id(scenario);
+    create_program_and_campaign_with_pools(
+        scenario,
+        option::none(),
+        option::some(designated_pool_id),
+    );
 }
 
 fun create_designated_pool_id(scenario: &mut test_scenario::Scenario): object::ID {
