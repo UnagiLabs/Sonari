@@ -82,6 +82,8 @@ Move は最小権限を原則にしてください。
 
 contract-visible behavior を変更する場合は、Move test を追加するか、追加できない理由を明記してください。
 
+Move ファイル、`contracts/Move.toml`、`contracts/Move.lock` を変更した場合は、`pnpm check:move` を実行し、`sui move build` の warning / error を修正対象として扱ってください。Codex hooks は contracts 変更時にこの検証を自動実行します。
+
 ## ドキュメント方針
 
 挙動、信頼境界、public API、schema semantics、environment variable、開発 workflow が変わる場合は docs を更新してください。
