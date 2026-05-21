@@ -564,7 +564,6 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
             scenario.ctx(),
         );
         payout_policy::create_default_disaster_policy(scenario.ctx());
-        claim::create_claim_index(scenario.ctx());
         disaster_event::create_disaster_registry(scenario.ctx());
         scenario.return_to_sender(cap);
     };

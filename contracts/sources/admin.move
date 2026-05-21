@@ -21,6 +21,7 @@ const GENESIS_KIND_OPERATIONS_POOL: u8 = 4;
 const GENESIS_KIND_DONOR_REGISTRY: u8 = 5;
 const GENESIS_KIND_MEMBERSHIP_REGISTRY: u8 = 6;
 const GENESIS_KIND_VERIFIER_REGISTRY: u8 = 7;
+const GENESIS_KIND_CLAIM_INDEX: u8 = 8;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
@@ -88,6 +89,9 @@ fun initialize(ctx: &mut TxContext) {
 
     let verifier_registry_id = metadata_verifier::create_verifier_registry(ctx);
     emit_genesis_object(verifier_registry_id, GENESIS_KIND_VERIFIER_REGISTRY, true, ctx);
+
+    let claim_index_id = claim::create_claim_index(ctx);
+    emit_genesis_object(claim_index_id, GENESIS_KIND_CLAIM_INDEX, true, ctx);
 }
 
 public fun create_designated_pool(
@@ -141,11 +145,6 @@ public fun create_campaign(
 public fun create_default_disaster_policy(cap: &AdminCap, ctx: &mut TxContext) {
     let _ = cap;
     payout_policy::create_default_disaster_policy(ctx);
-}
-
-public fun create_claim_index(cap: &AdminCap, ctx: &mut TxContext) {
-    let _ = cap;
-    claim::create_claim_index(ctx);
 }
 
 public fun create_disaster_registry(cap: &AdminCap, ctx: &mut TxContext) {
@@ -352,6 +351,10 @@ public fun genesis_kind_membership_registry(): u8 {
 
 public fun genesis_kind_verifier_registry(): u8 {
     GENESIS_KIND_VERIFIER_REGISTRY
+}
+
+public fun genesis_kind_claim_index(): u8 {
+    GENESIS_KIND_CLAIM_INDEX
 }
 
 fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxContext) {

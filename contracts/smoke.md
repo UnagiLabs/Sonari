@@ -4,7 +4,7 @@
 
 ## 前提条件
 
-- package publish により genesis `AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry` が作成済みである。
+- package publish により genesis `AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry`、`ClaimIndex` が作成済みである。
 - admin wallet が `AdminCap` を保持している。
 - verifier public key は環境別の secret storage から取得し、committed config には置かない。
 - donor、member verification fee、pool funding transaction 用の USDC coin が利用可能である。
@@ -15,7 +15,7 @@
 2. Disaster Relief `Program` を `admin::create_program` で作成する。
 3. その Program 配下の `Campaign` を、明示的な claim window 付きで `admin::create_campaign` で作成する。
 4. default disaster `PayoutPolicy` を `admin::create_default_disaster_policy` で作成する。
-5. `ClaimIndex` を `admin::create_claim_index` で作成する。
+5. package publish で作成済みの genesis `ClaimIndex` を claim execution に使う。
 6. `DisasterRegistry` を `admin::create_disaster_registry` で作成する。
 7. Residence verifier key と Disaster Oracle verifier key を `admin::add_verifier_key` で登録する。
 8. pool funding 後に `CampaignBudget` を `admin::open_campaign_budget_from_designated_and_main` で開く。

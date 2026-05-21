@@ -94,7 +94,7 @@ Donation flow は Pool への入金と寄付者向け記録を同じ transaction
 
 Donation API は `contracts::accessor` に集約し、USDC 専用の `public fun` として `donate_general_usdc`、`donate_designated_usdc`、`donate_operations_usdc` を提供する。既存 `DonorPass` を更新する API は `donate_general_usdc_with_pass`、`donate_designated_usdc_with_pass`、`donate_operations_usdc_with_pass` とし、いずれも `Coin<usdc::usdc::USDC>` 固定である。この 6 つの user-facing donation API は `public entry` ではなく `accessor.move` の `public fun` として公開する。任意の `Coin<T>` generic donation は提供しない。zero amount は fail-closed で abort する。donation 前に global pause と対象 Pool pause を検証する。
 
-Donation の user-facing callable API は `accessor.move` の薄い入口に限定し、pause check を行ったうえで Pool deposit / event emit、Designated split、first donation の `DonorPass` 発行、with-pass の owner / registry 検証と `DonationRecord` 追加を `donation` module 内の private / `public(package)` helper に委譲する。`MainPool`、`OperationsPool`、`DonorRegistry` は MVP では package init で 1 個だけ作成する genesis object とし、AdminCap gated create API は提供しない。`admin.move` は `AdminCap` gated な admin-facing API として `DesignatedPool` 作成、verifier key 管理、emergency pause 操作を担当する。`donation` / `pools` の実装関数と singleton 作成 helper は `public(package)` に留め、test convenience のために production API surface を広げない。generic `Coin<T>` donation surface と Claim / Payout 権利 API は追加しない。
+Donation の user-facing callable API は `accessor.move` の薄い入口に限定し、pause check を行ったうえで Pool deposit / event emit、Designated split、first donation の `DonorPass` 発行、with-pass の owner / registry 検証と `DonationRecord` 追加を `donation` module 内の private / `public(package)` helper に委譲する。`MainPool`、`OperationsPool`、`DonorRegistry`、`ClaimIndex` は MVP では package init で 1 個だけ作成する genesis object とし、AdminCap gated create API は提供しない。`admin.move` は `AdminCap` gated な admin-facing API として `DesignatedPool` 作成、verifier key 管理、emergency pause 操作を担当する。`donation` / `pools` / `claim` の実装関数と singleton 作成 helper は `public(package)` に留め、test convenience のために production API surface を広げない。generic `Coin<T>` donation surface と Claim / Payout 権利 API は追加しない。
 
 初回寄付時は、寄付者 wallet に `DonorPass` を自動 mint する。2 回目以降の寄付では、既存 `DonorPass` に dynamic field として `DonationRecord` を追加し、`DonorPass` 本体の集計情報を更新する。`DonorPass` は寄付者向け owned object / has key only の SBT とし、通常 transfer API は提供しない。
 
@@ -466,6 +466,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `DonationRecord` | DonorPass dynamic field。donation index、donation type、optional program / campaign、pool、amount、coin type、timestamp |
 | `VerifierRegistry` | package init で 1 個だけ作成する shared object。Nautilus verifier public key、verifier family、disabled flag |
 | `MainPool` | package init で 1 個だけ作成する shared object。USDC balance、USDC total received、将来の reserve / paid 集計 |
+| `ClaimIndex` | package init で 1 個だけ作成する shared object。pass lineage と campaign の duplicate claim state を保持する |
 | `ProgramPool` / `DesignatedPool` | program / campaign / hazard / sponsor 別 USDC balance |
 | `OperationsPool` | package init で 1 個だけ作成する shared object。verification fee と operations donation の USDC 残高 |
 | `PayoutPolicy` | tier amount、multipliers、caps、reserve ratios |
@@ -479,12 +480,12 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 
 | API | 処理概要 |
 | --- | --- |
-| `initialize` | `AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、空の `VerifierRegistry` を genesis object として作成する。`DesignatedPool`、`Program`、`Campaign`、`PayoutPolicy`、`CampaignBudget` は作成しない |
+| `initialize` | `AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、空の `VerifierRegistry`、`ClaimIndex` を genesis object として作成する。`DesignatedPool`、`Program`、`Campaign`、`PayoutPolicy`、`CampaignBudget` は作成しない |
 | `admin::pause_global` / `admin::unpause_global` | `AdminCap` で emergency pause を全体に適用 / 解除 |
 | `admin::pause_target` / `admin::unpause_target` | `AdminCap` で Program / Campaign / Pool などの target object に emergency pause を適用 / 解除。pause 判定は `target_id` ベースで行い、`target_kind` は event / readability 用の分類として扱う |
 | `admin::create_designated_pool` | `AdminCap` で複数存在しうる Designated / Campaign Pool を作成 |
 | `admin::create_program` / `admin::create_campaign` | `AdminCap` で Program / Campaign を作成。domain module の lifecycle helper は package 内に留め、transaction-callable admin setup API は `admin` に集約する |
-| `admin::create_default_disaster_policy` / `admin::create_claim_index` / `admin::create_disaster_registry` | `AdminCap` で MVP setup object を作成 |
+| `admin::create_default_disaster_policy` / `admin::create_disaster_registry` | `AdminCap` で MVP setup object を作成。`ClaimIndex` は genesis singleton であり、追加作成 API は提供しない |
 | `admin::open_campaign_budget_from_main` / `admin::open_campaign_budget_from_designated_and_main` | `AdminCap` で Program / Campaign / Pool に基づく budget cap を作成 |
 | `admin::bind_disaster_campaign` | `AdminCap` で Campaign と DisasterEvent を binding し、DisasterRegistry の campaign binding index を更新 |
 | `accessor::donate_general_usdc` | `Coin<usdc::usdc::USDC>` を 100% Main Pool に入金し、初回寄付として DonorPass / DonationRecord / donor 集計を作成する |
@@ -511,10 +512,10 @@ Generic `accessor::claim_usdc` は MVP の public API から公開しない。`c
 | Verifier | `RegistryCreated`、`VerifierKeyAdded`、`VerifierKeyDisabled` |
 | Pool / Donation | `PoolCreated`、`RegistryCreated`、`GeneralDonationReceived`、`DesignatedDonationReceived`、`OperationsDonationReceived`、`DonationRecorded`、`DonorPassIssued`、`DonorTierUpdated` |
 | Disaster | `DisasterEventCreated` |
-| Claim | `ClaimPaid`、`ClaimRejected` optional、`ClaimReceiptCreated` |
+| Claim | `ClaimIndexCreated`、`ClaimPaid`、`ClaimRejected` optional、`ClaimReceiptCreated` |
 | Admin | `GenesisObjectCreated`、`Paused`、`Unpaused`、`PolicyUpdated` |
 
-`GenesisObjectCreated` は package init で作成された singleton object 一覧を dapp / scripts が追跡するための event である。`AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry` の id と kind を emit する。`PoolCreated` と各 module の `RegistryCreated` は module 固有の作成 event であり、init で作成される Pool / Registry でも emit する。singleton について `GenesisObjectCreated` と module 固有 event の両方が emit されることは意図した挙動である。
+`GenesisObjectCreated` は package init で作成された singleton object 一覧を dapp / scripts が追跡するための event である。`AdminCap`、`PauseState`、`MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry`、`ClaimIndex` の id と kind を emit する。`PoolCreated`、各 module の `RegistryCreated`、`ClaimIndexCreated` は module 固有の作成 event であり、init で作成される Pool / Registry / ClaimIndex でも emit する。singleton について `GenesisObjectCreated` と module 固有 event の両方が emit されることは意図した挙動である。
 
 ## 5. Validation & Security
 

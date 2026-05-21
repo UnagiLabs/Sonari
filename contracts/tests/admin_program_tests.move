@@ -49,7 +49,11 @@ fun init_creates_genesis_objects_and_tracking_events() {
     assert!(verifier_registry_kind == metadata_verifier::registry_kind_verifier());
 
     let genesis_events = event::events_by_type<admin::GenesisObjectCreated>();
-    assert!(genesis_events.length() == 7);
+    assert!(genesis_events.length() == 8);
+    let (_, claim_index_kind, claim_index_shared, _, _) =
+        admin::genesis_object_created_event_fields(*genesis_events.borrow(7));
+    assert!(claim_index_kind == admin::genesis_kind_claim_index());
+    assert!(claim_index_shared);
 
     scenario.next_tx(ADMIN);
     {
@@ -60,6 +64,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(test_scenario::has_most_recent_shared<donation::DonorRegistry>());
         assert!(test_scenario::has_most_recent_shared<membership::MembershipRegistry>());
         assert!(test_scenario::has_most_recent_shared<metadata_verifier::VerifierRegistry>());
+        assert!(test_scenario::has_most_recent_shared<claim::ClaimIndex>());
 
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let pause_state = scenario.take_shared<admin::PauseState>();
@@ -68,6 +73,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         let donor_registry = scenario.take_shared<donation::DonorRegistry>();
         let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        let claim_index = scenario.take_shared<claim::ClaimIndex>();
 
         assert!(!admin::is_global_paused(&pause_state));
         assert!(admin::paused_target_count(&pause_state) == 0);
@@ -87,6 +93,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         test_scenario::return_shared(donor_registry);
         test_scenario::return_shared(membership_registry);
         test_scenario::return_shared(verifier_registry);
+        test_scenario::return_shared(claim_index);
     };
 
     scenario.end();
@@ -123,7 +130,6 @@ fun admin_wrappers_create_transaction_reachable_setup_objects() {
             scenario.ctx(),
         );
         admin::create_default_disaster_policy(&cap, scenario.ctx());
-        admin::create_claim_index(&cap, scenario.ctx());
         admin::create_disaster_registry(&cap, scenario.ctx());
         scenario.return_to_sender(cap);
     };

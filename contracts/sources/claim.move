@@ -89,7 +89,7 @@ public struct ClaimReceiptCreated has copy, drop {
     actor: address,
 }
 
-public(package) fun create_claim_index(ctx: &mut TxContext) {
+public(package) fun create_claim_index(ctx: &mut TxContext): ID {
     let index = ClaimIndex {
         id: object::new(ctx),
         claim_count: 0,
@@ -101,6 +101,7 @@ public(package) fun create_claim_index(ctx: &mut TxContext) {
         actor: ctx.sender(),
     });
     transfer::share_object(index);
+    claim_index_id
 }
 
 #[test_only]
