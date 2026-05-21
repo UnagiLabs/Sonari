@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
     title: "Sonari — Donations you can actually follow",
     description:
-        "Sonari turns good intentions into traceable impact. Choose a cause, give, and follow your support from contribution to outcome.",
+        "Sonari helps donors send support directly to the right people, with transparent pools and proof they can follow.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

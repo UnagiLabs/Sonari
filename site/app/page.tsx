@@ -134,9 +134,8 @@ export default function LandingPage() {
                             Donations you can <em>actually follow.</em>
                         </h1>
                         <p className="hero-lead">
-                            Sonari keeps disaster-relief pools funded before crisis strikes.
-                            Contribute to a flood or earthquake pool, and your support is ready to
-                            deploy the moment it's needed.
+                            Choose a cause you believe in. Sonari helps your support reach the right
+                            person it was meant for — and lets you see the story after you give.
                         </p>
                         <div className="hero-actions">
                             <a className="btn btn-primary" href="/sonari_overview.html">
@@ -150,8 +149,8 @@ export default function LandingPage() {
                             </a>
                         </div>
                         <p className="hero-note">
-                            Every contribution is verified on-chain — no black boxes, no guesswork
-                            about where your money went.
+                            No black boxes, no vague handoffs. Your donation moves through clear
+                            rules toward a real person.
                         </p>
                     </div>
 
@@ -159,17 +158,17 @@ export default function LandingPage() {
                         <figure className="hero-slide active">
                             <Image
                                 src="/assets/donation_flood.webp"
-                                alt="Flood relief pool"
+                                alt="Community recovery pool"
                                 fill
                                 priority
                                 sizes="(min-width: 900px) 45vw, 100vw"
                             />
                             <figcaption className="hero-caption">
-                                <div className="label">Standing relief pool</div>
-                                <div className="name">Flood relief fund</div>
+                                <div className="label">Designated support pool</div>
+                                <div className="name">Community recovery fund</div>
                                 <div className="pool-status">
                                     <span className="dot" aria-hidden="true"></span>
-                                    Funded &amp; ready — deploys when a flood is verified
+                                    Active — support goes to people who qualify
                                 </div>
                                 <div className="figures">
                                     <span>¥3,640,000 in the pool</span>
@@ -180,16 +179,16 @@ export default function LandingPage() {
                         <figure className="hero-slide">
                             <Image
                                 src="/assets/donation_earthquake.png"
-                                alt="Earthquake relief pool"
+                                alt="Regional aid pool"
                                 fill
                                 sizes="(min-width: 900px) 45vw, 100vw"
                             />
                             <figcaption className="hero-caption">
-                                <div className="label">Standing relief pool</div>
-                                <div className="name">Earthquake relief fund</div>
+                                <div className="label">General support pool</div>
+                                <div className="name">Regional aid fund</div>
                                 <div className="pool-status">
                                     <span className="dot" aria-hidden="true"></span>
-                                    Funded &amp; ready — deploys when an earthquake is verified
+                                    Flexible — ready for the next place that needs help
                                 </div>
                                 <div className="figures">
                                     <span>¥5,210,000 in the pool</span>
@@ -205,11 +204,11 @@ export default function LandingPage() {
                                 sizes="(min-width: 900px) 45vw, 100vw"
                             />
                             <figcaption className="hero-caption">
-                                <div className="label">Upcoming relief pool</div>
+                                <div className="label">Program pool</div>
                                 <div className="name">Student support fund</div>
                                 <div className="pool-status soon">
                                     <span className="dot" aria-hidden="true"></span>
-                                    Opening soon — pool now in design
+                                    In design — helping students stay on track
                                 </div>
                                 <div className="figures">
                                     <span>Launching 2026</span>
@@ -217,13 +216,13 @@ export default function LandingPage() {
                                 </div>
                             </figcaption>
                         </figure>
-                        <fieldset className="hero-dots" aria-label="Relief pools">
+                        <fieldset className="hero-dots" aria-label="Support pools">
                             <button
                                 type="button"
                                 className="active"
-                                aria-label="Show flood relief fund"
+                                aria-label="Show community recovery fund"
                             ></button>
-                            <button type="button" aria-label="Show earthquake relief fund"></button>
+                            <button type="button" aria-label="Show regional aid fund"></button>
                             <button type="button" aria-label="Show student support fund"></button>
                         </fieldset>
                     </div>
@@ -235,18 +234,18 @@ export default function LandingPage() {
                 <div className="wrap principles-grid">
                     <div className="principle reveal">
                         <div className="word">Clear</div>
-                        <p>You always know which relief pool your contribution backs.</p>
+                        <p>You choose the pool your heart wants to back.</p>
                     </div>
                     <div className="principle reveal">
-                        <div className="word">Fast</div>
+                        <div className="word">Fair</div>
                         <p>
-                            Pools are funded in advance, so support deploys the instant disaster
-                            strikes.
+                            Support goes to people who match the program, not whoever shouts the
+                            loudest.
                         </p>
                     </div>
                     <div className="principle reveal">
                         <div className="word">Visible</div>
-                        <p>Follow the outcome — from your contribution to a real result.</p>
+                        <p>Follow your gift from a good intention to the person it reaches.</p>
                     </div>
                 </div>
             </section>
@@ -266,17 +265,17 @@ export default function LandingPage() {
                     <div className="problem-grid">
                         <div className="problem-list reveal">
                             <article className="problem-item">
-                                <h3>You can't see where it goes</h3>
+                                <h3>You can't see who it reached</h3>
                                 <p>
-                                    Vague reporting leaves donors unsure whether their support ever
-                                    reached a real person.
+                                    Too many donations disappear behind reports, intermediaries, and
+                                    delayed updates.
                                 </p>
                             </article>
                             <article className="problem-item">
-                                <h3>Aid arrives too slowly</h3>
+                                <h3>The path has too many handoffs</h3>
                                 <p>
-                                    In disasters and emergencies every hour counts — yet funds often
-                                    crawl through slow, opaque processes.
+                                    When support passes through many organizations, it becomes hard
+                                    to know when it arrived or what it was used for.
                                 </p>
                             </article>
                             <article className="problem-item">
@@ -290,8 +289,8 @@ export default function LandingPage() {
 
                         <aside className="problem-aside reveal">
                             <p className="quote">
-                                “I gave because I wanted to help. I just never found out if I
-                                actually did.”
+                                “I didn't just want to give. I wanted to know someone actually
+                                received it.”
                             </p>
                             <p className="by">— The gap Sonari was built to close</p>
                         </aside>
@@ -304,36 +303,37 @@ export default function LandingPage() {
                 <div className="wrap">
                     <div className="head reveal">
                         <span className="kicker">How it works</span>
-                        <h2>Support that's ready before disaster strikes.</h2>
+                        <h2>Give to a cause. Let Sonari help it reach the right hands.</h2>
                         <p>
-                            Instead of scrambling to raise money after a crisis, Sonari keeps relief
-                            pools funded in advance — so help can move the moment it's needed.
+                            A donation should feel less like sending money away and more like
+                            standing beside someone directly. Sonari keeps the path simple, visible,
+                            and fair.
                         </p>
                     </div>
 
                     <div className="flow">
                         <article className="flow-step reveal">
                             <div className="stage">Contribute</div>
-                            <h3>Fund a relief pool</h3>
+                            <h3>Choose where your care goes</h3>
                             <p>
-                                Choose a disaster pool — flood, earthquake, and more — and add your
-                                contribution. It waits there, ready.
+                                Give to a general pool, a local campaign, a student program, or an
+                                emergency fund with a purpose you understand.
                             </p>
                         </article>
                         <article className="flow-step reveal">
-                            <div className="stage">Verify</div>
-                            <h3>A disaster triggers it</h3>
+                            <div className="stage">Register</div>
+                            <h3>People prepare once</h3>
                             <p>
-                                When a flood or earthquake hits and is confirmed on-chain, the
-                                matching pool activates — no slow approvals.
+                                Recipients register the basics ahead of time, so support can be sent
+                                without messy paperwork when it matters.
                             </p>
                         </article>
                         <article className="flow-step reveal">
-                            <div className="stage">Deliver</div>
-                            <h3>Support reaches people</h3>
+                            <div className="stage">Distribute</div>
+                            <h3>Support reaches the right people</h3>
                             <p>
-                                The pool releases aid to verified recipients in the affected area —
-                                and you can follow exactly where it went.
+                                Sonari checks who qualifies for each program, sends support to
+                                individuals under clear rules, and leaves a trail donors can follow.
                             </p>
                         </article>
                     </div>
@@ -345,10 +345,10 @@ export default function LandingPage() {
                 <div className="wrap">
                     <div className="head reveal">
                         <span className="kicker">Where you can help</span>
-                        <h2>Relief pools, ready before disaster strikes.</h2>
+                        <h2>One platform for many kinds of care.</h2>
                         <p>
-                            Contribute to a standing pool today — Sonari is built to grow into more
-                            disaster types and community programs.
+                            Whether it is a neighborhood, a student, a family, or a campaign, Sonari
+                            gives every pool a clear purpose and every recipient a visible reason.
                         </p>
                     </div>
 
@@ -357,36 +357,36 @@ export default function LandingPage() {
                             <figure>
                                 <Image
                                     src="/assets/donation_earthquake.png"
-                                    alt="Earthquake relief pool"
+                                    alt="General support pool"
                                     fill
                                     sizes="(min-width: 720px) 33vw, 100vw"
                                 />
                             </figure>
                             <div className="cause-head">
-                                <h3>Earthquake pool</h3>
-                                <span className="status">Funded &amp; ready</span>
+                                <h3>General support pool</h3>
+                                <span className="status">Open</span>
                             </div>
                             <p>
-                                Standing support that deploys to displaced families the moment an
-                                earthquake is verified.
+                                A shared pool for moments when help is needed most and one campaign
+                                cannot carry it alone.
                             </p>
                         </article>
                         <article className="cause reveal">
                             <figure>
                                 <Image
                                     src="/assets/donation_flood.webp"
-                                    alt="Flood relief pool"
+                                    alt="Regional campaign pool"
                                     fill
                                     sizes="(min-width: 720px) 33vw, 100vw"
                                 />
                             </figure>
                             <div className="cause-head">
-                                <h3>Flood pool</h3>
-                                <span className="status">Funded &amp; ready</span>
+                                <h3>Regional campaign pool</h3>
+                                <span className="status">Designated</span>
                             </div>
                             <p>
-                                Shelter, clean water, and rebuilding — released the moment a flood
-                                is verified.
+                                Support for a place, community, or campaign that donors want to
+                                stand behind.
                             </p>
                         </article>
                         <article className="cause reveal">
@@ -403,8 +403,8 @@ export default function LandingPage() {
                                 <span className="status soon">Coming soon</span>
                             </div>
                             <p>
-                                A future pool to help students keep learning through hardship and
-                                disruption.
+                                A future pool for students facing hardship, built to keep learning
+                                within reach.
                             </p>
                         </article>
                     </div>
@@ -418,8 +418,8 @@ export default function LandingPage() {
                         <span className="kicker">Why Sonari</span>
                         <h2>Built to earn trust — not just ask for it.</h2>
                         <p>
-                            Every part of Sonari is designed around one promise: you always know
-                            what your money did.
+                            Every part of Sonari is designed around one promise: people should feel
+                            the trust behind every gift.
                         </p>
                     </div>
 
@@ -428,22 +428,22 @@ export default function LandingPage() {
                             <article className="trust-point">
                                 <h3>Verified, not assumed</h3>
                                 <p>
-                                    Eligibility and delivery are confirmed on-chain, so support
-                                    reaches the right people.
+                                    Recipients carry a Membership Pass SBT, so programs can check
+                                    eligibility before funds move.
                                 </p>
                             </article>
                             <article className="trust-point">
                                 <h3>Transparent by default</h3>
                                 <p>
-                                    Fund flows and operating ratios are open on a live dashboard —
-                                    anyone can check.
+                                    Donors can see pool balances, program rules, and when support
+                                    reaches recipients.
                                 </p>
                             </article>
                             <article className="trust-point">
                                 <h3>Privacy you can rely on</h3>
                                 <p>
-                                    Personal data stays off-chain. Only what's needed to verify
-                                    support is ever used.
+                                    Sensitive details stay private. Sonari uses only the proof each
+                                    program needs.
                                 </p>
                             </article>
                         </div>
@@ -455,7 +455,7 @@ export default function LandingPage() {
                             </div>
                             <div className="trust-stat">
                                 <strong>On-chain</strong>
-                                <span>Verified eligibility and delivery</span>
+                                <span>Rules and receipts donors can follow</span>
                             </div>
                             <div className="trust-stat">
                                 <strong>Real time</strong>
@@ -463,7 +463,7 @@ export default function LandingPage() {
                             </div>
                             <div className="trust-stat">
                                 <strong>Zero</strong>
-                                <span>Personal data stored on-chain</span>
+                                <span>Raw personal details stored on-chain</span>
                             </div>
                             <p className="trust-disclaimer">
                                 Sonari is donation infrastructure — it does not promise payouts.
@@ -480,7 +480,8 @@ export default function LandingPage() {
                     <span className="kicker">Start today</span>
                     <h2>Make giving feel clear, human, and worth trusting.</h2>
                     <p>
-                        Join Sonari and help support move from good intentions to visible outcomes.
+                        Join Sonari and help every act of generosity become something people can
+                        trust, feel, and follow.
                     </p>
                     <div className="hero-actions">
                         <a className="btn btn-primary" href="/sonari_overview.html">
