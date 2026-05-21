@@ -103,10 +103,11 @@ public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
 
 public(package) fun open_campaign_budget_from_main(
     program: &Program,
-    campaign: &Campaign,
+    campaign: &mut Campaign,
     main_pool: &MainPool,
     ctx: &mut TxContext,
 ) {
+    program::assert_budget_not_opened_and_mark(campaign);
     let budget = CampaignBudget {
         id: object::new(ctx),
         program_id: program::id(program),
@@ -126,11 +127,12 @@ public(package) fun open_campaign_budget_from_main(
 
 public(package) fun open_campaign_budget_from_designated_and_main(
     program: &Program,
-    campaign: &Campaign,
+    campaign: &mut Campaign,
     designated_pool: &DesignatedPool,
     main_pool: &MainPool,
     ctx: &mut TxContext,
 ) {
+    program::assert_budget_not_opened_and_mark(campaign);
     let budget = CampaignBudget {
         id: object::new(ctx),
         program_id: program::id(program),
@@ -291,11 +293,7 @@ fun membership_age_multiplier_bps(issued_at_ms: u64, now_ms: u64): u64 {
 }
 
 fun confidence_multiplier_bps(confidence: u64): u64 {
-    if (confidence == 0) {
-        BPS_DENOMINATOR
-    } else {
-        min_u64(confidence, BPS_DENOMINATOR)
-    }
+    min_u64(confidence, BPS_DENOMINATOR)
 }
 
 fun risk_multiplier_bps(risk_bucket: u8): u64 {

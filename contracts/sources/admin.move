@@ -166,7 +166,7 @@ public fun bind_disaster_campaign(
 public fun open_campaign_budget_from_main(
     cap: &AdminCap,
     program: &program::Program,
-    campaign: &program::Campaign,
+    campaign: &mut program::Campaign,
     main_pool: &pools::MainPool,
     ctx: &mut TxContext,
 ) {
@@ -177,7 +177,7 @@ public fun open_campaign_budget_from_main(
 public fun open_campaign_budget_from_designated_and_main(
     cap: &AdminCap,
     program: &program::Program,
-    campaign: &program::Campaign,
+    campaign: &mut program::Campaign,
     designated_pool: &pools::DesignatedPool,
     main_pool: &pools::MainPool,
     ctx: &mut TxContext,

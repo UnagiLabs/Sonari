@@ -430,6 +430,8 @@ designated_budget = matching_designated_pool_balance * 80%
 campaign_budget = designated_budget + main_backstop_budget
 ```
 
+`CampaignBudget` は campaign-wide cap の source of truth として扱い、1 つの `Campaign` につき 1 個のみ作成できる。Budget open 時は `Campaign` を mutable に受け取り、`budget_opened` marker を立てる。すでに marker が立っている Campaign に対する追加の budget open は拒否し、main-only path と designated+main path は同じ marker を共有する。
+
 MVP では全対象者 target amount 合計に基づく完全な pro-rata は Future 扱いにする。CampaignBudget 上限内で Claim ごとに支払い、budget 不足時は remaining budget 内へ cap、または支払い不可にする。
 
 ## 4. On-chain Design
@@ -486,7 +488,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `admin::create_designated_pool` | `AdminCap` で複数存在しうる Designated / Campaign Pool を作成 |
 | `admin::create_program` / `admin::create_campaign` | `AdminCap` で Program / Campaign を作成。domain module の lifecycle helper は package 内に留め、transaction-callable admin setup API は `admin` に集約する |
 | `admin::create_default_disaster_policy` / `admin::create_disaster_registry` | `AdminCap` で MVP setup object を作成。`ClaimIndex` は genesis singleton であり、追加作成 API は提供しない |
-| `admin::open_campaign_budget_from_main` / `admin::open_campaign_budget_from_designated_and_main` | `AdminCap` で Program / Campaign / Pool に基づく budget cap を作成 |
+| `admin::open_campaign_budget_from_main` / `admin::open_campaign_budget_from_designated_and_main` | `AdminCap` で Program / mutable Campaign / Pool に基づく budget cap を一度だけ作成し、Campaign を mark して duplicate budget open を拒否する |
 | `admin::bind_disaster_campaign` | `AdminCap` で Campaign と DisasterEvent を binding し、DisasterRegistry の campaign binding index を更新 |
 | `accessor::donate_general_usdc` | `Coin<usdc::usdc::USDC>` を 100% Main Pool に入金し、初回寄付として DonorPass / DonationRecord / donor 集計を作成する |
 | `accessor::donate_general_usdc_with_pass` | 既存 DonorPass を registry と照合し、General USDC DonationRecord と donor 集計を更新する |

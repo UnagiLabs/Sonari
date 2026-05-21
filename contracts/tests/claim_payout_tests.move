@@ -102,6 +102,58 @@ fun available_usdc_saturates_at_u64_max() {
     );
 }
 
+#[test]
+fun quote_confidence_zero_pays_zero_and_full_confidence_is_capped() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    payout_policy::create_default_disaster_policy(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        let zero_confidence = payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            0,
+            1,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+        let full_confidence = payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            10_000,
+            1,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+        let clamped_confidence = payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            20_000,
+            1,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+
+        assert!(zero_confidence == 0);
+        assert!(full_confidence == 50_000_000);
+        assert!(clamped_confidence == 50_000_000);
+
+        test_scenario::return_shared(policy);
+    };
+
+    scenario.end();
+}
+
 fun initialized(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
@@ -146,11 +198,11 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
-        let campaign = scenario.take_shared<program::Campaign>();
+        let mut campaign = scenario.take_shared<program::Campaign>();
         let main_pool = scenario.take_shared<pools::MainPool>();
         payout_policy::open_campaign_budget_from_main(
             &program,
-            &campaign,
+            &mut campaign,
             &main_pool,
             scenario.ctx(),
         );

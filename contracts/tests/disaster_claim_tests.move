@@ -230,17 +230,17 @@ fun disaster_claim_rejects_main_only_budget() {
     register_member(&mut scenario);
     apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
-    create_disaster_claim_objects(&mut scenario);
+    create_disaster_claim_objects_without_budget(&mut scenario);
 
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
-        let campaign = scenario.take_shared<program::Campaign>();
+        let mut campaign = scenario.take_shared<program::Campaign>();
         let main_pool = scenario.take_shared<pools::MainPool>();
         payout_policy::open_campaign_budget_from_main(
             &program,
-            &campaign,
+            &mut campaign,
             &main_pool,
             scenario.ctx(),
         );
@@ -552,6 +552,11 @@ fun execute_disaster_claim_with_objects(
 }
 
 fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
+    create_disaster_claim_objects_without_budget(scenario);
+    open_designated_campaign_budget(scenario);
+}
+
+fun create_disaster_claim_objects_without_budget(scenario: &mut test_scenario::Scenario) {
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
@@ -621,17 +626,19 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
         test_scenario::return_shared(campaign);
         test_scenario::return_shared(disaster_event);
     };
+}
 
+fun open_designated_campaign_budget(scenario: &mut test_scenario::Scenario) {
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
-        let campaign = scenario.take_shared<program::Campaign>();
+        let mut campaign = scenario.take_shared<program::Campaign>();
         let main_pool = scenario.take_shared<pools::MainPool>();
         let designated_pool = scenario.take_shared<pools::DesignatedPool>();
         payout_policy::open_campaign_budget_from_designated_and_main(
             &program,
-            &campaign,
+            &mut campaign,
             &designated_pool,
             &main_pool,
             scenario.ctx(),

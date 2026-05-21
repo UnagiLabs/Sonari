@@ -13,6 +13,7 @@ const EProgramNotActive: u64 = 0;
 const ECampaignNotActive: u64 = 1;
 const ECampaignProgramMismatch: u64 = 2;
 const EClaimWindowNotOpen: u64 = 3;
+const ECampaignBudgetAlreadyOpened: u64 = 4;
 
 public struct Program has key {
     id: UID,
@@ -34,6 +35,7 @@ public struct Campaign has key {
     claim_start_ms: u64,
     claim_end_ms: u64,
     status: u8,
+    budget_opened: bool,
     created_at_ms: u64,
 }
 
@@ -113,6 +115,7 @@ public(package) fun create_campaign(
         claim_start_ms,
         claim_end_ms,
         status: STATUS_ACTIVE,
+        budget_opened: false,
         created_at_ms: ctx.epoch_timestamp_ms(),
     };
     let campaign_id = object::id(&campaign);
@@ -146,6 +149,11 @@ public fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
         campaign.claim_start_ms <= now_ms && now_ms < campaign.claim_end_ms,
         EClaimWindowNotOpen,
     );
+}
+
+public(package) fun assert_budget_not_opened_and_mark(campaign: &mut Campaign) {
+    assert!(!campaign.budget_opened, ECampaignBudgetAlreadyOpened);
+    campaign.budget_opened = true;
 }
 
 public fun id(program: &Program): ID {
