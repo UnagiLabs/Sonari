@@ -4,6 +4,10 @@
     "files": {
         "includes": [
             "package.json",
+            "dapp/package.json",
+            "dapp/next.config.ts",
+            "dapp/tsconfig.json",
+            "dapp/app/**/*.tsx",
             "tsconfig.json",
             "tsconfig.scripts.json",
             "tsconfig.base.json",

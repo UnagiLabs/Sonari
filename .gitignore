@@ -6,6 +6,9 @@
 .cache/
 node_modules/
 dist/
+site/.next/
+site/next-env.d.ts
+site/out/
 target/
 .wrangler/
 *.tsbuildinfo

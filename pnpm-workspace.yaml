@@ -1,4 +1,5 @@
 packages:
+  - "dapp"
   - "dapp/*"
   - "packages/*"
   - "nautilus/*"
