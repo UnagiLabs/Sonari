@@ -415,6 +415,8 @@ MVP Disaster Relief の既存値:
 | Medium risk | multiplier = 0.5 |
 | High risk | multiplier = 0 |
 
+On-chain の `risk_bucket` numeric contract は `1 = Low`、`2 = Medium`、`3 = High` で固定する。`0` や `4` 以上など未知の bucket は支払い前に `payout_policy::EInvalidRiskBucket` で拒否し、High risk の `0` payout へ丸めない。
+
 ### 3.5 ProgramBudget / CampaignBudget
 
 `EventBudget` は Disaster Relief Program 固有名に見えるため、汎用設計では `ProgramBudget` / `CampaignBudget` を使う。Disaster Event の場合は CampaignBudget が EventBudget の役割を持つ。

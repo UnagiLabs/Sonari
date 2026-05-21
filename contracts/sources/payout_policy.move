@@ -17,6 +17,7 @@ const LIQUID_RESERVE_TARGET_BPS: u64 = 7_000;
 const MAIN_BACKSTOP_OF_LIQUID_BPS: u64 = 2_000;
 const DESIGNATED_BUDGET_BPS: u64 = 8_000;
 
+const RISK_BUCKET_LOW: u8 = 1;
 const RISK_BUCKET_MEDIUM: u8 = 2;
 const RISK_BUCKET_HIGH: u8 = 3;
 
@@ -26,6 +27,7 @@ const EBudgetCampaignMismatch: u64 = 2;
 const EBudgetExceeded: u64 = 3;
 const EDesignatedPoolMismatch: u64 = 4;
 const EMainOnlyBudgetCannotUseDesignatedPool: u64 = 5;
+const EInvalidRiskBucket: u64 = 6;
 
 public struct PayoutPolicy has key {
     id: UID,
@@ -297,12 +299,14 @@ fun confidence_multiplier_bps(confidence: u64): u64 {
 }
 
 fun risk_multiplier_bps(risk_bucket: u8): u64 {
-    if (risk_bucket >= RISK_BUCKET_HIGH) {
-        0
+    if (risk_bucket == RISK_BUCKET_LOW) {
+        BPS_DENOMINATOR
     } else if (risk_bucket == RISK_BUCKET_MEDIUM) {
         5_000
+    } else if (risk_bucket == RISK_BUCKET_HIGH) {
+        0
     } else {
-        BPS_DENOMINATOR
+        abort EInvalidRiskBucket
     }
 }
 

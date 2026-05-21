@@ -154,6 +154,110 @@ fun quote_confidence_zero_pays_zero_and_full_confidence_is_capped() {
     scenario.end();
 }
 
+#[test]
+fun quote_risk_bucket_valid_values_are_applied() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    payout_policy::create_default_disaster_policy(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        let low_risk = payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            10_000,
+            1,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+        let medium_risk = payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            10_000,
+            2,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+        let high_risk = payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            10_000,
+            3,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+
+        assert!(low_risk == 50_000_000);
+        assert!(medium_risk == 25_000_000);
+        assert!(high_risk == 0);
+
+        test_scenario::return_shared(policy);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = payout_policy::EInvalidRiskBucket)]
+fun quote_rejects_zero_risk_bucket() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    payout_policy::create_default_disaster_policy(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            10_000,
+            0,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+
+        test_scenario::return_shared(policy);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = payout_policy::EInvalidRiskBucket)]
+fun quote_rejects_unknown_risk_bucket() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    payout_policy::create_default_disaster_policy(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        payout_policy::quote_usdc(
+            &policy,
+            1,
+            0,
+            10_000,
+            4,
+            50_000_000,
+            50_000_000,
+            50_000_000,
+            NINETY_ONE_DAYS_MS,
+        );
+
+        test_scenario::return_shared(policy);
+    };
+
+    scenario.end();
+}
+
 fun initialized(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
