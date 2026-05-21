@@ -109,13 +109,20 @@ async function handleRelayer(
     const body = await readJsonBody(request);
     if (
         !isRecord(body) ||
-        firstUnexpectedKey(body, ["input", "target", "registry", "grpcUrl", "senderAddress"]) !==
-            undefined
+        firstUnexpectedKey(body, [
+            "input",
+            "target",
+            "registry",
+            "verifierRegistry",
+            "grpcUrl",
+            "senderAddress",
+        ]) !== undefined
     ) {
         writeJson(response, 400, {
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
-            message: "Relayer accepts only input, target, registry, grpcUrl, and senderAddress",
+            message:
+                "Relayer accepts only input, target, registry, verifierRegistry, grpcUrl, and senderAddress",
         });
         return;
     }
@@ -133,6 +140,7 @@ async function handleRelayer(
     const config = {
         target: typeof body.target === "string" ? body.target : "",
         registry: typeof body.registry === "string" ? body.registry : "",
+        verifierRegistry: typeof body.verifierRegistry === "string" ? body.verifierRegistry : "",
     };
 
     if (mode === "preview") {

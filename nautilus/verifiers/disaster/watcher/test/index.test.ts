@@ -592,11 +592,29 @@ class RecordingRelayerAdapter implements RelayerAdapter {
     readonly preview: RelayerRequestPreview = {
         target: "0x123::disaster_oracle::submit_payload_v1",
         registry: "0x456",
-        arguments: ["0x456", [1], [2], [3]],
+        verifierRegistry: "0x654",
+        clock: "0x0000000000000000000000000000000000000000000000000000000000000006",
+        arguments: [
+            "0x456",
+            "0x654",
+            "0x0000000000000000000000000000000000000000000000000000000000000006",
+            [1],
+            [2],
+            [3],
+        ],
         submitRequest: {
             target: "0x123::disaster_oracle::submit_payload_v1",
             registry: "0x456",
-            arguments: ["0x456", [1], [2], [3]],
+            verifierRegistry: "0x654",
+            clock: "0x0000000000000000000000000000000000000000000000000000000000000006",
+            arguments: [
+                "0x456",
+                "0x654",
+                "0x0000000000000000000000000000000000000000000000000000000000000006",
+                [1],
+                [2],
+                [3],
+            ],
         },
     };
 
@@ -848,6 +866,7 @@ describe("relayer environment mode validation", () => {
             ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
             RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
             RELAYER_REGISTRY: "0x456",
+            RELAYER_VERIFIER_REGISTRY: "0x654",
         });
 
         expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/relayer/preview"]);
@@ -885,6 +904,7 @@ describe("relayer environment mode validation", () => {
             ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
             RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
             RELAYER_REGISTRY: "0x456",
+            RELAYER_VERIFIER_REGISTRY: "0x654",
         });
 
         expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/relayer/preview"]);
@@ -988,6 +1008,7 @@ describe("relayer environment mode validation", () => {
             ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
             RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
             RELAYER_REGISTRY: "0x456",
+            RELAYER_VERIFIER_REGISTRY: "0x654",
             RELAYER_GRPC_URL: "https://fullnode.testnet.sui.io:443",
             RELAYER_SENDER_ADDRESS: "0xabc",
         });
@@ -1020,6 +1041,7 @@ describe("relayer environment mode validation", () => {
             ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
             RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
             RELAYER_REGISTRY: "0x456",
+            RELAYER_VERIFIER_REGISTRY: "0x654",
         });
 
         expect(fetcher).not.toHaveBeenCalled();
@@ -1039,14 +1061,34 @@ describe("relayer environment mode validation", () => {
                 ok: true,
                 value: {
                     request: {
-                        target: "0x123::disaster_oracle::submit_payload_v1",
-                        registry: "0x456",
-                        arguments: ["0x456", [1], [2], [3]],
-                        submitRequest: {
                             target: "0x123::disaster_oracle::submit_payload_v1",
                             registry: "0x456",
-                            arguments: ["0x456", [1], [2], [3]],
-                        },
+                            verifierRegistry: "0x654",
+                            clock:
+                                "0x0000000000000000000000000000000000000000000000000000000000000006",
+                            arguments: [
+                                "0x456",
+                                "0x654",
+                                "0x0000000000000000000000000000000000000000000000000000000000000006",
+                                [1],
+                                [2],
+                                [3],
+                            ],
+                            submitRequest: {
+                                target: "0x123::disaster_oracle::submit_payload_v1",
+                                registry: "0x456",
+                                verifierRegistry: "0x654",
+                                clock:
+                                    "0x0000000000000000000000000000000000000000000000000000000000000006",
+                                arguments: [
+                                    "0x456",
+                                    "0x654",
+                                    "0x0000000000000000000000000000000000000000000000000000000000000006",
+                                    [1],
+                                    [2],
+                                    [3],
+                                ],
+                            },
                     },
                     digest: "7Zunexpected",
                 },
@@ -1065,6 +1107,7 @@ describe("relayer environment mode validation", () => {
             ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
             RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
             RELAYER_REGISTRY: "0x456",
+            RELAYER_VERIFIER_REGISTRY: "0x654",
         });
 
         expect(fetcher).not.toHaveBeenCalled();
@@ -1082,11 +1125,29 @@ function relayerSidecarPreview(): RelayerRequestPreview {
     return {
         target: "0x123::disaster_oracle::submit_payload_v1",
         registry: "0x456",
-        arguments: ["0x456", [1], [2], [3]],
+        verifierRegistry: "0x654",
+        clock: "0x0000000000000000000000000000000000000000000000000000000000000006",
+        arguments: [
+            "0x456",
+            "0x654",
+            "0x0000000000000000000000000000000000000000000000000000000000000006",
+            [1],
+            [2],
+            [3],
+        ],
         submitRequest: {
             target: "0x123::disaster_oracle::submit_payload_v1",
             registry: "0x456",
-            arguments: ["0x456", [1], [2], [3]],
+            verifierRegistry: "0x654",
+            clock: "0x0000000000000000000000000000000000000000000000000000000000000006",
+            arguments: [
+                "0x456",
+                "0x654",
+                "0x0000000000000000000000000000000000000000000000000000000000000006",
+                [1],
+                [2],
+                [3],
+            ],
         },
     };
 }

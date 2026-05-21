@@ -43,7 +43,6 @@ fun generic_claim_rejects_self_created_eligibility() {
         let eligibility = eligibility(&program, &campaign, &pass, 1, 50_000_000);
 
         claim::claim_usdc(
-            &pause_state,
             &mut index,
             &registry,
             &program,
@@ -115,7 +114,6 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         program::create_program(
-            &cap,
             1,
             0,
             0,
@@ -123,8 +121,8 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
             option::none(),
             scenario.ctx(),
         );
-        payout_policy::create_default_disaster_policy(&cap, scenario.ctx());
-        claim::create_claim_index(&cap, scenario.ctx());
+        payout_policy::create_default_disaster_policy(scenario.ctx());
+        claim::create_claim_index(scenario.ctx());
         scenario.return_to_sender(cap);
     };
 
@@ -133,7 +131,6 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
         program::create_campaign(
-            &cap,
             &program,
             1,
             b"generic-claim",
@@ -153,7 +150,6 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
         let campaign = scenario.take_shared<program::Campaign>();
         let main_pool = scenario.take_shared<pools::MainPool>();
         payout_policy::open_campaign_budget_from_main(
-            &cap,
             &program,
             &campaign,
             &main_pool,
@@ -181,7 +177,6 @@ fun execute_claim(scenario: &mut test_scenario::Scenario) {
         let eligibility = eligibility(&program, &campaign, &pass, 1, 50_000_000);
 
         claim::claim_usdc(
-            &pause_state,
             &mut index,
             &registry,
             &program,

@@ -14,7 +14,7 @@ use contracts::metadata_verifier::{
 };
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
 use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
-use contracts::program::{Campaign, Program};
+use contracts::program::{Self, Campaign, Program};
 use sui::clock::Clock;
 use sui::coin::Coin;
 use usdc::usdc::USDC;
@@ -201,8 +201,12 @@ public fun claim_disaster_usdc(
     user_max_amount_usdc: u64,
     ctx: &mut TxContext,
 ) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, program::id(program));
+    admin::assert_target_not_paused(pause_state, program::campaign_id(campaign));
+    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
     claim::claim_disaster_usdc(
-        pause_state,
         index,
         registry,
         program,

@@ -37,6 +37,7 @@ interface LiveE2eOptions {
 
 const DEFAULT_TARGET = "0x123::disaster_oracle::submit_payload_v1";
 const DEFAULT_REGISTRY = "0x456";
+const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
 export async function runLiveE2e(options: LiveE2eOptions): Promise<Record<string, unknown>> {
     const nowMs = options.nowMs ?? Date.now();
@@ -118,6 +119,7 @@ class LocalRelayerAdapter implements RelayerAdapter {
         const config = {
             target: process.env.RELAYER_TARGET ?? DEFAULT_TARGET,
             registry: process.env.RELAYER_REGISTRY ?? DEFAULT_REGISTRY,
+            verifierRegistry: process.env.RELAYER_VERIFIER_REGISTRY ?? DEFAULT_VERIFIER_REGISTRY,
         };
         if (this.mode === "preview") {
             const result = buildRelayerRequestPreview(input, config);

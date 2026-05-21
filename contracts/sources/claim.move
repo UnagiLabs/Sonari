@@ -1,6 +1,4 @@
 module contracts::claim;
-
-use contracts::admin::{AdminCap, PauseState};
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::disaster_event;
@@ -89,7 +87,7 @@ public struct ClaimReceiptCreated has copy, drop {
     actor: address,
 }
 
-public(package) fun create_claim_index(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_claim_index(ctx: &mut TxContext) {
     let index = ClaimIndex {
         id: object::new(ctx),
         claim_count: 0,
@@ -129,7 +127,6 @@ public fun new_eligibility_result(
 }
 
 public(package) fun claim_usdc(
-    _pause_state: &PauseState,
     _index: &mut ClaimIndex,
     _registry: &MembershipRegistry,
     _program: &Program,
@@ -145,7 +142,6 @@ public(package) fun claim_usdc(
 }
 
 public(package) fun claim_disaster_usdc(
-    pause_state: &PauseState,
     index: &mut ClaimIndex,
     registry: &MembershipRegistry,
     program: &Program,
@@ -163,7 +159,7 @@ public(package) fun claim_disaster_usdc(
     ctx: &mut TxContext,
 ) {
     let now_ms = ctx.epoch_timestamp_ms();
-    program::assert_claim_precheck(pause_state, program, campaign);
+    program::assert_claim_precheck(program, campaign);
     program::assert_claim_window(campaign, now_ms);
     payout_policy::assert_budget_matches(budget, program, campaign);
     payout_policy::assert_designated_pool_matches(budget, designated_pool);

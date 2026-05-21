@@ -36,6 +36,7 @@ const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/disaster/fixtures";
 const LEGACY_FIXTURES_URI_DIR = "nautilus_disaster_oracle/fixtures";
 const DEFAULT_TARGET = "0x123::disaster_oracle::submit_payload_v1";
 const DEFAULT_REGISTRY = "0x456";
+const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
 export const E2E_FIXTURE_CASES = [
     "usgs/finalized_minimal",
@@ -52,6 +53,7 @@ export interface LocalOracleE2eOptions {
     fixturesDir?: string;
     target?: string;
     registry?: string;
+    verifierRegistry?: string;
     nowMs?: number;
 }
 
@@ -114,6 +116,7 @@ export async function runLocalOracleE2e(
     const fixturesDir = resolveFromCwd(options.fixturesDir ?? DEFAULT_FIXTURES_DIR);
     const target = options.target ?? DEFAULT_TARGET;
     const registry = options.registry ?? DEFAULT_REGISTRY;
+    const verifierRegistry = options.verifierRegistry ?? DEFAULT_VERIFIER_REGISTRY;
     const candidate = await loadFixtureCandidateAsync(caseId, fixturesDir);
     const nowMs = options.nowMs ?? candidate.occurred_at_ms + 25 * HOUR_MS;
 
@@ -146,7 +149,11 @@ export async function runLocalOracleE2e(
     };
 
     if (runnerResult.status === "finalized") {
-        const relayerPreview = buildRelayerRequestPreview(runnerResult, { target, registry });
+        const relayerPreview = buildRelayerRequestPreview(runnerResult, {
+            target,
+            registry,
+            verifierRegistry,
+        });
         if (!relayerPreview.ok) {
             throw new Error(
                 `Local E2E relayer preview failed: ${relayerPreview.error_code}: ${relayerPreview.message}`,
@@ -681,6 +688,10 @@ function parseCliArgs(argv: readonly string[]): LocalOracleE2eOptions {
                 break;
             case "--registry":
                 options.registry = requireCliValue(arg, value);
+                index += 1;
+                break;
+            case "--verifier-registry":
+                options.verifierRegistry = requireCliValue(arg, value);
                 index += 1;
                 break;
             case "--now-ms":

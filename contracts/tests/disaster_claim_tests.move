@@ -7,7 +7,6 @@ use contracts::affected_cell::{Self, AffectedCellLeaf};
 use contracts::claim;
 use contracts::disaster_event;
 use contracts::membership;
-use contracts::metadata_verifier;
 use contracts::payload_v1;
 use contracts::payout_policy;
 use contracts::pools;
@@ -50,7 +49,6 @@ fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-
         accessor::claim_disaster_usdc(
             &pause_state,
             &mut index,
@@ -196,7 +194,6 @@ fun disaster_claim_rejects_main_only_budget() {
         let campaign = scenario.take_shared<program::Campaign>();
         let main_pool = scenario.take_shared<pools::MainPool>();
         payout_policy::open_campaign_budget_from_main(
-            &cap,
             &program,
             &campaign,
             &main_pool,
@@ -207,6 +204,38 @@ fun disaster_claim_rejects_main_only_budget() {
         test_scenario::return_shared(campaign);
         test_scenario::return_shared(main_pool);
     };
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = admin::ETargetPaused)]
+fun disaster_claim_rejects_paused_designated_pool_before_payout() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    apply_residence_metadata(&mut scenario);
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let designated_pool_id = designated_pool_id(&mut scenario);
+
+    pause_target(&mut scenario, pools::target_kind_designated_pool(), designated_pool_id);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = admin::ETargetPaused)]
+fun disaster_claim_rejects_paused_main_pool_before_payout() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    apply_residence_metadata(&mut scenario);
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let main_pool_id = main_pool_id(&mut scenario);
+
+    pause_target(&mut scenario, pools::target_kind_main_pool(), main_pool_id);
 
     execute_disaster_claim(&mut scenario);
     scenario.end();
@@ -230,7 +259,6 @@ fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );
         disaster_event::create_from_payload_for_testing(
-            &cap,
             &mut disaster_registry,
             other_payload,
             scenario.ctx(),
@@ -256,7 +284,6 @@ fun bind_campaign_rejects_duplicate_campaign_binding() {
         let campaign = scenario.take_shared<program::Campaign>();
         let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
         disaster_event::bind_campaign(
-            &cap,
             &mut disaster_registry,
             &campaign,
             &disaster_event,
@@ -378,6 +405,37 @@ fun execute_disaster_claim(scenario: &mut test_scenario::Scenario) {
     };
 }
 
+fun main_pool_id(scenario: &mut test_scenario::Scenario): object::ID {
+    scenario.next_tx(ADMIN);
+    let main_pool = scenario.take_shared<pools::MainPool>();
+    let id = pools::main_pool_id(&main_pool);
+    test_scenario::return_shared(main_pool);
+    id
+}
+
+fun designated_pool_id(scenario: &mut test_scenario::Scenario): object::ID {
+    scenario.next_tx(ADMIN);
+    let designated_pool = scenario.take_shared<pools::DesignatedPool>();
+    let id = pools::designated_pool_id(&designated_pool);
+    test_scenario::return_shared(designated_pool);
+    id
+}
+
+fun pause_target(
+    scenario: &mut test_scenario::Scenario,
+    target_kind: u8,
+    target_id: object::ID,
+) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut pause_state = scenario.take_shared<admin::PauseState>();
+        admin::pause_target(&cap, &mut pause_state, target_kind, target_id, scenario.ctx());
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(pause_state);
+    };
+}
+
 fun execute_disaster_claim_with_objects(
     scenario: &mut test_scenario::Scenario,
     pause_state: admin::PauseState,
@@ -432,7 +490,6 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         program::create_program(
-            &cap,
             1,
             1,
             1,
@@ -440,9 +497,9 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
             option::none(),
             scenario.ctx(),
         );
-        payout_policy::create_default_disaster_policy(&cap, scenario.ctx());
-        claim::create_claim_index(&cap, scenario.ctx());
-        disaster_event::create_disaster_registry(&cap, scenario.ctx());
+        payout_policy::create_default_disaster_policy(scenario.ctx());
+        claim::create_claim_index(scenario.ctx());
+        disaster_event::create_disaster_registry(scenario.ctx());
         scenario.return_to_sender(cap);
     };
 
@@ -451,7 +508,6 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
         program::create_campaign(
-            &cap,
             &program,
             1,
             b"disaster-claim",
@@ -468,28 +524,17 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
-            &cap,
-            &mut verifier_registry,
-            metadata_verifier::verifier_family_disaster_oracle(),
-            metadata_verifier::verifier_version_v1(),
-            oracle_public_key(),
-            scenario.ctx(),
-        );
-        disaster_event::create_from_signed_payload(
-            &cap,
-            &mut disaster_registry,
-            &verifier_registry,
+        let payload = payload_v1::decode_finalized(
             finalized_payload_bcs(),
-            oracle_signature(),
-            oracle_public_key(),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+        );
+        disaster_event::create_from_payload_for_testing(
+            &mut disaster_registry,
+            payload,
             scenario.ctx(),
         );
         scenario.return_to_sender(cap);
         test_scenario::return_shared(disaster_registry);
-        test_scenario::return_shared(verifier_registry);
     };
 
     scenario.next_tx(ADMIN);
@@ -500,7 +545,6 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
         let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         disaster_event::bind_campaign(
-            &cap,
             &mut disaster_registry,
             &campaign,
             &disaster_event,
@@ -521,7 +565,6 @@ fun create_disaster_claim_objects(scenario: &mut test_scenario::Scenario) {
         let main_pool = scenario.take_shared<pools::MainPool>();
         let designated_pool = scenario.take_shared<pools::DesignatedPool>();
         payout_policy::open_campaign_budget_from_designated_and_main(
-            &cap,
             &program,
             &campaign,
             &designated_pool,
@@ -561,14 +604,6 @@ fun proof(): vector<affected_cell::ProofStep> {
 
 fun event_uid(): vector<u8> {
     x"eef4db66cd5fb2f612f5295553d192ed3b9754ed75ec58fec0f814a85a13437f"
-}
-
-fun oracle_public_key(): vector<u8> {
-    x"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
-}
-
-fun oracle_signature(): vector<u8> {
-    x"a47b87352d3ea2cc69ddc833ce951e8115404bd48e9874fa982dcf74bd7037cb9909b71e4581eb6ed966942159a1a5beea5b8b3dffa03f2dea61ba2a940e1c03"
 }
 
 fun finalized_payload_bcs(): vector<u8> {

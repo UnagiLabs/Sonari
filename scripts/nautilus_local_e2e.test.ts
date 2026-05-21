@@ -14,6 +14,7 @@ import {
 
 const target = "0x123::disaster_oracle::submit_payload_v1";
 const registry = "0x456";
+const verifierRegistry = "0x654";
 const LOCAL_E2E_TEST_TIMEOUT_MS = 30_000;
 
 describe("Nautilus local oracle E2E", () => {
@@ -24,6 +25,7 @@ describe("Nautilus local oracle E2E", () => {
                 caseId: "usgs/finalized_minimal",
                 target,
                 registry,
+                verifierRegistry,
             });
 
             expect(output.case_id).toBe("usgs/finalized_minimal");
@@ -55,7 +57,15 @@ describe("Nautilus local oracle E2E", () => {
                 value: {
                     target,
                     registry,
-                    arguments: [registry, expect.any(Array), expect.any(Array), expect.any(Array)],
+                    verifierRegistry,
+                    arguments: [
+                        registry,
+                        verifierRegistry,
+                        expect.any(String),
+                        expect.any(Array),
+                        expect.any(Array),
+                        expect.any(Array),
+                    ],
                 },
             });
             expect(output).not.toHaveProperty("relayer_skipped");
@@ -71,8 +81,9 @@ describe("Nautilus local oracle E2E", () => {
                     caseId: "usgs/finalized_minimal",
                     target: "",
                     registry,
+                    verifierRegistry,
                 }),
-            ).rejects.toThrow(/Local E2E relayer preview failed: .*target and registry/);
+            ).rejects.toThrow(/Local E2E relayer preview failed: .*target, registry/);
         },
         LOCAL_E2E_TEST_TIMEOUT_MS,
     );
@@ -85,7 +96,7 @@ describe("Nautilus local oracle E2E", () => {
     ] as const)(
         "skips relayer preview for non-finalized case %s",
         async (caseId, status, errorCode) => {
-            const output = await runLocalOracleE2e({ caseId, target, registry });
+            const output = await runLocalOracleE2e({ caseId, target, registry, verifierRegistry });
 
             expect(output.first_process_summary.processed).toBe(1);
             expect(output.second_process_summary.processed).toBe(0);
@@ -114,7 +125,12 @@ describe("Nautilus local oracle E2E", () => {
         "keeps every Step 6 fixture eligible under normal watcher screening",
         async () => {
             for (const caseId of E2E_FIXTURE_CASES) {
-                const output = await runLocalOracleE2e({ caseId, target, registry });
+                const output = await runLocalOracleE2e({
+                    caseId,
+                    target,
+                    registry,
+                    verifierRegistry,
+                });
 
                 expect(output.first_process_summary.processed).toBe(1);
                 expect(output.final_event.status).not.toBe("ignored_small");
@@ -396,6 +412,7 @@ describe("Nautilus local oracle E2E", () => {
                 nowMs: candidate.occurred_at_ms + 25 * HOUR_MS,
                 target,
                 registry,
+                verifierRegistry,
             });
 
             expect(output.runner_invocation_count).toBe(1);

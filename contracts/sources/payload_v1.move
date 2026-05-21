@@ -7,6 +7,11 @@ const ORACLE_VERSION_V1: u64 = 1;
 const HAZARD_TYPE_EARTHQUAKE: u8 = 1;
 const STATUS_FINALIZED: u8 = 3;
 const MIN_CLAIM_BAND_V1: u8 = 1;
+const PRIMARY_SOURCE_USGS: u8 = 1;
+const CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1: u8 = 1;
+const CELL_METRIC_USGS_MMI: u8 = 1;
+const CELL_AGGREGATION_GRID_POINT_P90: u8 = 1;
+const INTENSITY_SCALE_MMI_X100: u8 = 1;
 
 const EInvalidIntent: u64 = 0;
 const EUnsupportedVersion: u64 = 1;
@@ -19,6 +24,13 @@ const ETrailingBytes: u64 = 7;
 const EInvalidHashLength: u64 = 8;
 const EUnsupportedHazardType: u64 = 9;
 const EUnsupportedGeoResolution: u64 = 10;
+const EUnsupportedPrimarySource: u64 = 11;
+const EInvalidSeverityBand: u64 = 12;
+const EUnsupportedCellsGenerationMethod: u64 = 13;
+const EUnsupportedCellMetric: u64 = 14;
+const EUnsupportedCellAggregation: u64 = 15;
+const EUnsupportedIntensityScale: u64 = 16;
+const ESeverityBandMismatch: u64 = 17;
 
 public struct Payload has copy, drop, store {
     intent: u8,
@@ -89,6 +101,17 @@ fun assert_finalized(payload: &Payload, now_ms: u64) {
     assert!(payload.oracle_version == ORACLE_VERSION_V1, EUnsupportedVersion);
     assert!(payload.hazard_type == HAZARD_TYPE_EARTHQUAKE, EUnsupportedHazardType);
     assert!(payload.status == STATUS_FINALIZED, ENonFinalizedStatus);
+    assert!(payload.primary_source == PRIMARY_SOURCE_USGS, EUnsupportedPrimarySource);
+    assert!(1 <= payload.severity_band && payload.severity_band <= 3, EInvalidSeverityBand);
+    assert!(
+        payload.cells_generation_method ==
+            CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
+        EUnsupportedCellsGenerationMethod,
+    );
+    assert!(payload.cell_metric == CELL_METRIC_USGS_MMI, EUnsupportedCellMetric);
+    assert!(payload.cell_aggregation == CELL_AGGREGATION_GRID_POINT_P90, EUnsupportedCellAggregation);
+    assert!(payload.intensity_scale == INTENSITY_SCALE_MMI_X100, EUnsupportedIntensityScale);
+    assert!(payload.max_cell_band == payload.severity_band, ESeverityBandMismatch);
     assert!(payload.freshness_deadline_ms > now_ms, EExpiredFreshness);
     assert!(payload.affected_cells_uri.length() > 0, EEmptyAffectedCellsUri);
     assert!(payload.affected_cell_count > 0, ENoAffectedCells);

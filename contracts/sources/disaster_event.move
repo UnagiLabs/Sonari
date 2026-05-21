@@ -1,9 +1,9 @@
 module contracts::disaster_event;
 
-use contracts::admin::AdminCap;
 use contracts::metadata_verifier::{Self, VerifierRegistry};
 use contracts::payload_v1::{Self, Payload};
 use contracts::program::{Self, Campaign};
+use sui::clock::{Self, Clock};
 use sui::dynamic_field;
 use sui::event;
 
@@ -75,7 +75,7 @@ public struct DisasterCampaignBound has copy, drop {
     actor: address,
 }
 
-public(package) fun create_disaster_registry(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_disaster_registry(ctx: &mut TxContext) {
     let registry = DisasterRegistry {
         id: object::new(ctx),
         event_count: 0,
@@ -89,14 +89,13 @@ public(package) fun create_disaster_registry(_: &AdminCap, ctx: &mut TxContext) 
     transfer::share_object(registry);
 }
 
-public(package) fun create_from_signed_payload(
-    _: &AdminCap,
+public fun create_from_signed_payload(
     registry: &mut DisasterRegistry,
     verifier_registry: &VerifierRegistry,
+    clock: &Clock,
     payload_bcs: vector<u8>,
     signature: vector<u8>,
     public_key: vector<u8>,
-    now_ms: u64,
     ctx: &mut TxContext,
 ) {
     metadata_verifier::assert_signed_bytes(
@@ -107,12 +106,11 @@ public(package) fun create_from_signed_payload(
         &signature,
         &public_key,
     );
-    let payload = payload_v1::decode_finalized(payload_bcs, now_ms);
+    let payload = payload_v1::decode_finalized(payload_bcs, clock::timestamp_ms(clock));
     create_from_verified_payload(registry, payload, ctx);
 }
 
 public(package) fun bind_campaign(
-    _: &AdminCap,
     registry: &mut DisasterRegistry,
     campaign: &Campaign,
     disaster_event: &DisasterEvent,
@@ -205,7 +203,6 @@ fun create_from_verified_payload(
 
 #[test_only]
 public fun create_from_payload_for_testing(
-    _: &AdminCap,
     registry: &mut DisasterRegistry,
     payload: Payload,
     ctx: &mut TxContext,

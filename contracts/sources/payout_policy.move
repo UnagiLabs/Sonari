@@ -1,6 +1,4 @@
 module contracts::payout_policy;
-
-use contracts::admin::AdminCap;
 use contracts::pools::{Self, DesignatedPool, MainPool};
 use contracts::program::{Self, Campaign, Program};
 use sui::event;
@@ -75,7 +73,7 @@ public struct CampaignBudgetOpened has copy, drop {
     actor: address,
 }
 
-public(package) fun create_default_disaster_policy(_: &AdminCap, ctx: &mut TxContext) {
+public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
     let policy = PayoutPolicy {
         id: object::new(ctx),
         tier1_amount_usdc: DEFAULT_BAND_1_USDC,
@@ -104,7 +102,6 @@ public(package) fun create_default_disaster_policy(_: &AdminCap, ctx: &mut TxCon
 }
 
 public(package) fun open_campaign_budget_from_main(
-    _: &AdminCap,
     program: &Program,
     campaign: &Campaign,
     main_pool: &MainPool,
@@ -128,7 +125,6 @@ public(package) fun open_campaign_budget_from_main(
 }
 
 public(package) fun open_campaign_budget_from_designated_and_main(
-    _: &AdminCap,
     program: &Program,
     campaign: &Campaign,
     designated_pool: &DesignatedPool,

@@ -2,9 +2,12 @@
 module contracts::admin_program_tests;
 
 use contracts::admin;
+use contracts::claim;
+use contracts::disaster_event;
 use contracts::donation;
 use contracts::membership;
 use contracts::metadata_verifier;
+use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
 use sui::event;
@@ -104,12 +107,88 @@ fun non_admin_cannot_access_admin_cap_required_for_admin_entries() {
 }
 
 #[test]
+fun admin_wrappers_create_transaction_reachable_setup_objects() {
+    let mut scenario = initialized();
+
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_designated_pool(&cap, option::none(), scenario.ctx());
+        admin::create_program(
+            &cap,
+            7,
+            0xFF,
+            3,
+            option::none(),
+            option::none(),
+            scenario.ctx(),
+        );
+        admin::create_default_disaster_policy(&cap, scenario.ctx());
+        admin::create_claim_index(&cap, scenario.ctx());
+        admin::create_disaster_registry(&cap, scenario.ctx());
+        scenario.return_to_sender(cap);
+    };
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let program = scenario.take_shared<program::Program>();
+        admin::create_campaign(
+            &cap,
+            &program,
+            9,
+            b"metadata-hash",
+            option::none(),
+            100,
+            200,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(program);
+    };
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let program = scenario.take_shared<program::Program>();
+        let campaign = scenario.take_shared<program::Campaign>();
+        let main_pool = scenario.take_shared<pools::MainPool>();
+        let designated_pool = scenario.take_shared<pools::DesignatedPool>();
+        admin::open_campaign_budget_from_designated_and_main(
+            &cap,
+            &program,
+            &campaign,
+            &designated_pool,
+            &main_pool,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(program);
+        test_scenario::return_shared(campaign);
+        test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(designated_pool);
+    };
+
+    scenario.next_tx(ADMIN);
+    {
+        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        let index = scenario.take_shared<claim::ClaimIndex>();
+        let registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let budget = scenario.take_shared<payout_policy::CampaignBudget>();
+        test_scenario::return_shared(policy);
+        test_scenario::return_shared(index);
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(budget);
+    };
+
+    scenario.end();
+}
+
+#[test]
 fun admin_can_create_program_and_campaign_and_emit_events() {
     let mut scenario = initialized();
 
     let cap = scenario.take_from_sender<admin::AdminCap>();
     program::create_program(
-        &cap,
         7,
         0xFF,
         3,
@@ -140,7 +219,6 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
     let program = scenario.take_shared<program::Program>();
     assert!(program::id(&program) == program_id_from_event);
     program::create_campaign(
-        &cap,
         &program,
         9,
         b"metadata-hash",
@@ -191,7 +269,7 @@ fun active_claim_precheck_passes() {
         let program = scenario.take_shared<program::Program>();
         let campaign = scenario.take_shared<program::Campaign>();
 
-        program::assert_claim_precheck(&pause_state, &program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(program);
@@ -362,7 +440,7 @@ fun campaign_from_other_program_fails_precheck() {
         let campaign = scenario.take_shared<program::Campaign>();
         let other_program = scenario.take_shared_by_id<program::Program>(other_program_id);
 
-        program::assert_claim_precheck(&pause_state, &other_program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &other_program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(campaign);
@@ -384,7 +462,7 @@ fun inactive_program_fails_precheck() {
         let campaign = scenario.take_shared<program::Campaign>();
         program::set_program_status_for_testing(&mut program, program::status_inactive());
 
-        program::assert_claim_precheck(&pause_state, &program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(program);
@@ -406,7 +484,7 @@ fun closed_program_fails_precheck() {
         let campaign = scenario.take_shared<program::Campaign>();
         program::set_program_status_for_testing(&mut program, program::status_closed());
 
-        program::assert_claim_precheck(&pause_state, &program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(program);
@@ -428,7 +506,7 @@ fun inactive_campaign_fails_precheck() {
         let mut campaign = scenario.take_shared<program::Campaign>();
         program::set_campaign_status_for_testing(&mut campaign, program::status_inactive());
 
-        program::assert_claim_precheck(&pause_state, &program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(program);
@@ -450,7 +528,7 @@ fun closed_campaign_fails_precheck() {
         let mut campaign = scenario.take_shared<program::Campaign>();
         program::set_campaign_status_for_testing(&mut campaign, program::status_closed());
 
-        program::assert_claim_precheck(&pause_state, &program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(program);
@@ -470,7 +548,6 @@ fun initialized(): test_scenario::Scenario {
 fun create_program(scenario: &mut test_scenario::Scenario, program_type: u8): object::ID {
     let cap = scenario.take_from_sender<admin::AdminCap>();
     program::create_program(
-        &cap,
         program_type,
         0xFF,
         3,
@@ -497,7 +574,6 @@ fun create_program_and_campaign(
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
     program::create_campaign(
-        &cap,
         &program,
         9,
         b"metadata-hash",
@@ -539,7 +615,7 @@ fun run_precheck(scenario: &mut test_scenario::Scenario) {
         let program = scenario.take_shared<program::Program>();
         let campaign = scenario.take_shared<program::Campaign>();
 
-        program::assert_claim_precheck(&pause_state, &program, &campaign);
+        admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(program);

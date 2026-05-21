@@ -1,6 +1,5 @@
 module contracts::program;
 
-use contracts::admin::{Self, AdminCap, PauseState};
 use sui::event;
 
 const STATUS_ACTIVE: u8 = 1;
@@ -61,8 +60,7 @@ public struct CampaignCreated has copy, drop {
     actor: address,
 }
 
-public(package) entry fun create_program(
-    _: &AdminCap,
+public(package) fun create_program(
     program_type: u8,
     required_pass_metadata: u64,
     required_verifier_family: u8,
@@ -96,8 +94,7 @@ public(package) entry fun create_program(
     transfer::share_object(program);
 }
 
-public(package) entry fun create_campaign(
-    _: &AdminCap,
+public(package) fun create_campaign(
     program: &Program,
     campaign_type: u8,
     metadata_hash: vector<u8>,
@@ -136,16 +133,12 @@ public(package) entry fun create_campaign(
 }
 
 public fun assert_claim_precheck(
-    pause_state: &PauseState,
     program: &Program,
     campaign: &Campaign,
 ) {
-    admin::assert_not_globally_paused(pause_state);
     assert!(program.status == STATUS_ACTIVE, EProgramNotActive);
     assert!(campaign.status == STATUS_ACTIVE, ECampaignNotActive);
     assert!(campaign.program_id == object::id(program), ECampaignProgramMismatch);
-    admin::assert_target_not_paused(pause_state, object::id(program));
-    admin::assert_target_not_paused(pause_state, object::id(campaign));
 }
 
 public fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
