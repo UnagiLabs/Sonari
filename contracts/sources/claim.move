@@ -20,6 +20,7 @@ const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
 const EResidenceMetadataExpired: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
+const EResidenceMetadataAfterDisaster: u64 = 13;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
 const U64_MAX_AS_U128: u128 = 18_446_744_073_709_551_615;
 
@@ -263,10 +264,14 @@ fun assert_valid_disaster_eligibility(
         _confidence,
         _risk_bucket,
         _evidence_hash,
-        _issued_at_ms,
+        residence_issued_at_ms,
         expires_at_ms,
         _verifier_version,
     ) = membership::residence_metadata_summary(pass);
+    assert!(
+        residence_issued_at_ms <= disaster_event::occurred_at_ms(disaster_event),
+        EResidenceMetadataAfterDisaster,
+    );
     assert!(expires_at_ms > now_ms, EResidenceMetadataExpired);
     assert!(
         residence_cell == bcs::to_bytes(&affected_cell::h3_index(leaf)),

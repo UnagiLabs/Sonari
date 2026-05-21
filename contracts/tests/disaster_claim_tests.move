@@ -168,6 +168,32 @@ fun disaster_claim_rejects_pass_residence_cell_mismatch() {
     clock.destroy_for_testing();
 }
 
+#[test, expected_failure(abort_code = claim::EResidenceMetadataAfterDisaster)]
+fun disaster_claim_rejects_residence_metadata_issued_after_disaster() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    apply_residence_metadata_issued_at(&mut scenario, 1_704_067_200_001);
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test]
+fun disaster_claim_accepts_residence_metadata_issued_at_disaster_time() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    apply_residence_metadata_issued_at(&mut scenario, 1_704_067_200_000);
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
 #[test, expected_failure(abort_code = program::EClaimWindowNotOpen)]
 fun disaster_claim_window_uses_clock_timestamp() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
@@ -402,6 +428,19 @@ fun apply_residence_metadata(scenario: &mut test_scenario::Scenario) {
     apply_residence_metadata_cell(scenario, bcs::to_bytes(&h3_index));
 }
 
+fun apply_residence_metadata_issued_at(
+    scenario: &mut test_scenario::Scenario,
+    issued_at_ms: u64,
+) {
+    let h3_index = H3_INDEX;
+    apply_residence_metadata_cell_with_issue_and_expiry(
+        scenario,
+        bcs::to_bytes(&h3_index),
+        issued_at_ms,
+        CLAIM_WINDOW_END_MS,
+    );
+}
+
 fun apply_wrong_residence_metadata(scenario: &mut test_scenario::Scenario) {
     apply_residence_metadata_cell(scenario, bcs::to_bytes(&0u64));
 }
@@ -418,6 +457,20 @@ fun apply_residence_metadata_cell_with_expiry(
     residence_cell: vector<u8>,
     expires_at_ms: u64,
 ) {
+    apply_residence_metadata_cell_with_issue_and_expiry(
+        scenario,
+        residence_cell,
+        0,
+        expires_at_ms,
+    );
+}
+
+fun apply_residence_metadata_cell_with_issue_and_expiry(
+    scenario: &mut test_scenario::Scenario,
+    residence_cell: vector<u8>,
+    issued_at_ms: u64,
+    expires_at_ms: u64,
+) {
     scenario.next_tx(MEMBER);
     {
         let mut pass = scenario.take_from_sender<membership::MembershipPass>();
@@ -428,7 +481,7 @@ fun apply_residence_metadata_cell_with_expiry(
             10_000,
             1,
             b"evidence",
-            0,
+            issued_at_ms,
             expires_at_ms,
             1,
             1,

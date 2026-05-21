@@ -14,6 +14,8 @@ const ECampaignNotActive: u64 = 1;
 const ECampaignProgramMismatch: u64 = 2;
 const EClaimWindowNotOpen: u64 = 3;
 const ECampaignBudgetAlreadyOpened: u64 = 4;
+const ECampaignDesignatedPoolRequired: u64 = 5;
+const ECampaignPoolMismatch: u64 = 6;
 
 public struct Program has key {
     id: UID,
@@ -154,6 +156,31 @@ public fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
 public(package) fun assert_budget_not_opened_and_mark(campaign: &mut Campaign) {
     assert!(!campaign.budget_opened, ECampaignBudgetAlreadyOpened);
     campaign.budget_opened = true;
+}
+
+public(package) fun assert_no_effective_designated_pool(
+    program: &Program,
+    campaign: &Campaign,
+) {
+    assert!(
+        !option::is_some(&campaign.pool_id) && !option::is_some(&program.default_pool_id),
+        ECampaignDesignatedPoolRequired,
+    );
+}
+
+public(package) fun assert_effective_designated_pool_matches(
+    program: &Program,
+    campaign: &Campaign,
+    designated_pool_id: ID,
+) {
+    if (option::is_some(&campaign.pool_id)) {
+        assert!(*option::borrow(&campaign.pool_id) == designated_pool_id, ECampaignPoolMismatch);
+    } else if (option::is_some(&program.default_pool_id)) {
+        assert!(
+            *option::borrow(&program.default_pool_id) == designated_pool_id,
+            ECampaignPoolMismatch,
+        );
+    }
 }
 
 public fun id(program: &Program): ID {

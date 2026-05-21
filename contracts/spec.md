@@ -356,7 +356,7 @@ flowchart LR
 - `AffectedCellLeaf` と Merkle proof が `affected_cells_root` に一致する
 - `leaf.h3_index == MembershipPass.verified_residence_cell`
 - `leaf.cell_band >= DisasterEvent.min_claim_band`
-- Pass の residence metadata が災害発生時点または Claim window の要件を満たす
+- Pass の residence metadata は `DisasterEvent.occurred_at_ms` 以前に発行済みであり、Claim 時点で expiry を過ぎていない
 - MembershipRegistry current pass と MembershipPass の id / owner / payout address が一致する
 - `pass_lineage_id + campaign_id/event_uid` で二重 Claim を拒否する
 
@@ -434,6 +434,8 @@ campaign_budget = designated_budget + main_backstop_budget
 
 `CampaignBudget` は campaign-wide cap の source of truth として扱い、1 つの `Campaign` につき 1 個のみ作成できる。Budget open 時は `Campaign` を mutable に受け取り、`budget_opened` marker を立てる。すでに marker が立っている Campaign に対する追加の budget open は拒否し、main-only path と designated+main path は同じ marker を共有する。
 
+Budget open で使える Designated Pool は、`Campaign.pool_id` が設定されていればそれを優先し、未設定なら `Program.default_pool_id` に従う。effective designated pool がある Campaign は main-only budget open を拒否し、designated+main budget open では渡された `DesignatedPool` の ID が effective pool と一致しなければならない。effective pool が未設定の Campaign は MVP 互換として任意の Designated Pool で designated+main budget を開ける。
+
 MVP では全対象者 target amount 合計に基づく完全な pro-rata は Future 扱いにする。CampaignBudget 上限内で Claim ごとに支払い、budget 不足時は remaining budget 内へ cap、または支払い不可にする。
 
 ## 4. On-chain Design
@@ -490,7 +492,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `admin::create_designated_pool` | `AdminCap` で複数存在しうる Designated / Campaign Pool を作成 |
 | `admin::create_program` / `admin::create_campaign` | `AdminCap` で Program / Campaign を作成。domain module の lifecycle helper は package 内に留め、transaction-callable admin setup API は `admin` に集約する |
 | `admin::create_default_disaster_policy` / `admin::create_disaster_registry` | `AdminCap` で MVP setup object を作成。`ClaimIndex` は genesis singleton であり、追加作成 API は提供しない |
-| `admin::open_campaign_budget_from_main` / `admin::open_campaign_budget_from_designated_and_main` | `AdminCap` で Program / mutable Campaign / Pool に基づく budget cap を一度だけ作成し、Campaign を mark して duplicate budget open を拒否する |
+| `admin::open_campaign_budget_from_main` / `admin::open_campaign_budget_from_designated_and_main` | `AdminCap` で Program / mutable Campaign / Pool に基づく budget cap を一度だけ作成し、Campaign の effective designated pool 設定を検証してから Campaign を mark し、duplicate budget open を拒否する |
 | `admin::bind_disaster_campaign` | `AdminCap` で Campaign と DisasterEvent を binding し、DisasterRegistry の campaign binding index を更新 |
 | `accessor::donate_general_usdc` | `Coin<usdc::usdc::USDC>` を 100% Main Pool に入金し、初回寄付として DonorPass / DonationRecord / donor 集計を作成する |
 | `accessor::donate_general_usdc_with_pass` | 既存 DonorPass を registry と照合し、General USDC DonationRecord と donor 集計を更新する |

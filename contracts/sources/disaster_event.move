@@ -250,6 +250,10 @@ public fun min_claim_band(disaster_event: &DisasterEvent): u8 {
     disaster_event.min_claim_band
 }
 
+public fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
+    disaster_event.occurred_at_ms
+}
+
 public fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
     registry.event_count
 }
