@@ -9,6 +9,8 @@ import {
 
 const target = "0x123::disaster_oracle::submit_payload_v1";
 const registry = "0x456";
+const verifierRegistry = "0x654";
+const clock = "0x0000000000000000000000000000000000000000000000000000000000000006";
 const senderAddress = "0x789";
 const grpcUrl = "https://fullnode.testnet.sui.io:443";
 
@@ -66,15 +68,23 @@ function failedTransactionResponse(effects = { status: { success: false, error: 
 
 describe("relayer request preview", () => {
     it("converts the finalized fixture into deterministic Move entry arguments", () => {
-        const result = buildRelayerRequestPreview(fixtureInput, { target, registry });
+        const result = buildRelayerRequestPreview(fixtureInput, {
+            target,
+            registry,
+            verifierRegistry,
+        });
 
         expect(result).toEqual({
             ok: true,
             value: {
                 target,
                 registry,
+                verifierRegistry,
+                clock,
                 arguments: [
                     registry,
+                    verifierRegistry,
+                    clock,
                     fixturePayloadBytes,
                     fixtureSignatureBytes,
                     fixturePublicKeyBytes,
@@ -82,8 +92,12 @@ describe("relayer request preview", () => {
                 submitRequest: {
                     target,
                     registry,
+                    verifierRegistry,
+                    clock,
                     arguments: [
                         registry,
+                        verifierRegistry,
+                        clock,
                         fixturePayloadBytes,
                         fixtureSignatureBytes,
                         fixturePublicKeyBytes,
@@ -100,7 +114,9 @@ describe("relayer request preview", () => {
             null,
             [],
         ]) {
-            expect(buildRelayerRequestPreview(input, { target, registry })).toMatchObject({
+            expect(
+                buildRelayerRequestPreview(input, { target, registry, verifierRegistry }),
+            ).toMatchObject({
                 ok: false,
                 error_code: "RELAYER_SUBMIT_FAILED",
             });
@@ -119,7 +135,10 @@ describe("relayer request preview", () => {
             { signature: "AFakeSuiSerializedSignatureValue==" },
         ]) {
             expect(
-                buildRelayerRequestPreview({ ...fixtureInput, ...patch }, { target, registry }),
+                buildRelayerRequestPreview(
+                    { ...fixtureInput, ...patch },
+                    { target, registry, verifierRegistry },
+                ),
             ).toMatchObject({
                 ok: false,
                 error_code: "RELAYER_SUBMIT_FAILED",
@@ -135,17 +154,17 @@ describe("relayer request preview", () => {
             public_key: fixtureInput.public_key.slice(2),
         };
 
-        expect(buildRelayerRequestPreview(withoutPrefixes, { target, registry })).toEqual(
-            buildRelayerRequestPreview(fixtureInput, { target, registry }),
-        );
+        expect(
+            buildRelayerRequestPreview(withoutPrefixes, { target, registry, verifierRegistry }),
+        ).toEqual(buildRelayerRequestPreview(fixtureInput, { target, registry, verifierRegistry }));
     });
 
     it("does not mutate input and returns identical output for retry-safe previews", () => {
         const input = structuredClone(fixtureInput);
         const before = structuredClone(input);
 
-        const first = buildRelayerRequestPreview(input, { target, registry });
-        const second = buildRelayerRequestPreview(input, { target, registry });
+        const first = buildRelayerRequestPreview(input, { target, registry, verifierRegistry });
+        const second = buildRelayerRequestPreview(input, { target, registry, verifierRegistry });
 
         expect(input).toEqual(before);
         expect(second).toEqual(first);
@@ -164,6 +183,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
+                verifierRegistry,
                 grpcUrl,
                 senderAddress,
                 client,
@@ -175,6 +195,7 @@ describe("relayer submit execution", () => {
             submitRelayerPayload(fixtureInput, {
                 target,
                 registry,
+                verifierRegistry,
                 grpcUrl,
                 signer,
                 client,
@@ -188,6 +209,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
+                verifierRegistry,
                 grpcUrl,
                 senderAddress: "",
                 client: {
@@ -201,6 +223,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
+                verifierRegistry,
                 grpcUrl,
                 senderAddress,
                 client: {
@@ -214,6 +237,7 @@ describe("relayer submit execution", () => {
             dryRunRelayerSubmit(fixtureInput, {
                 target,
                 registry,
+                verifierRegistry,
                 grpcUrl,
                 senderAddress,
                 client: {
@@ -229,6 +253,7 @@ describe("relayer submit execution", () => {
             submitRelayerPayload(fixtureInput, {
                 target,
                 registry,
+                verifierRegistry,
                 grpcUrl,
                 client: {
                     signAndExecuteTransaction: async () => successfulTransactionResponse(),
@@ -251,6 +276,7 @@ describe("relayer submit execution", () => {
         const result = await dryRunRelayerSubmit(fixtureInput, {
             target,
             registry,
+            verifierRegistry,
             grpcUrl,
             senderAddress,
             client,
@@ -287,6 +313,7 @@ describe("relayer submit execution", () => {
         const result = await submitRelayerPayload(fixtureInput, {
             target,
             registry,
+            verifierRegistry,
             grpcUrl,
             signer,
             client,
@@ -327,6 +354,7 @@ describe("relayer submit execution", () => {
                 dryRunRelayerSubmit(fixtureInput, {
                     target,
                     registry,
+                    verifierRegistry,
                     grpcUrl,
                     senderAddress,
                     client: {

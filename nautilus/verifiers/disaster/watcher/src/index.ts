@@ -102,6 +102,7 @@ export interface WorkerEnv {
     RELAYER_MODE?: string;
     RELAYER_TARGET?: string;
     RELAYER_REGISTRY?: string;
+    RELAYER_VERIFIER_REGISTRY?: string;
     RELAYER_GRPC_URL?: string;
     RELAYER_SENDER_ADDRESS?: string;
     RELAYER_ALLOW_SUBMIT?: string;
@@ -659,12 +660,13 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
     if (
         !isNonEmptyString(env.ORACLE_SIDECAR_URL) ||
         !isNonEmptyString(env.RELAYER_TARGET) ||
-        !isNonEmptyString(env.RELAYER_REGISTRY)
+        !isNonEmptyString(env.RELAYER_REGISTRY) ||
+        !isNonEmptyString(env.RELAYER_VERIFIER_REGISTRY)
     ) {
         return new StaticFailingRelayerAdapter(
             mode,
             "RELAYER_SUBMIT_FAILED",
-            `${mode} relayer requires ORACLE_SIDECAR_URL, RELAYER_TARGET, and RELAYER_REGISTRY`,
+            `${mode} relayer requires ORACLE_SIDECAR_URL, RELAYER_TARGET, RELAYER_REGISTRY, and RELAYER_VERIFIER_REGISTRY`,
         );
     }
 
@@ -683,6 +685,7 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         sidecarUrl: env.ORACLE_SIDECAR_URL,
         target: env.RELAYER_TARGET,
         registry: env.RELAYER_REGISTRY,
+        verifierRegistry: env.RELAYER_VERIFIER_REGISTRY,
         mode,
     };
     if (mode === "dry_run") {

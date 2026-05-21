@@ -33,11 +33,29 @@ const finalized = {
 const preview: RelayerRequestPreview = {
     target: "0x123::disaster_oracle::submit_payload_v1",
     registry: "0x456",
-    arguments: ["0x456", [1], [2], [3]],
+    verifierRegistry: "0x654",
+    clock: "0x0000000000000000000000000000000000000000000000000000000000000006",
+    arguments: [
+        "0x456",
+        "0x654",
+        "0x0000000000000000000000000000000000000000000000000000000000000006",
+        [1],
+        [2],
+        [3],
+    ],
     submitRequest: {
         target: "0x123::disaster_oracle::submit_payload_v1",
         registry: "0x456",
-        arguments: ["0x456", [1], [2], [3]],
+        verifierRegistry: "0x654",
+        clock: "0x0000000000000000000000000000000000000000000000000000000000000006",
+        arguments: [
+            "0x456",
+            "0x654",
+            "0x0000000000000000000000000000000000000000000000000000000000000006",
+            [1],
+            [2],
+            [3],
+        ],
     },
 };
 
@@ -245,6 +263,7 @@ describe("HTTP sidecar adapters", () => {
                 sidecarUrl: "http://127.0.0.1:8789",
                 target: preview.target,
                 registry: preview.registry,
+                verifierRegistry: preview.verifierRegistry,
             },
             async () => {
                 calls += 1;
@@ -272,6 +291,7 @@ describe("HTTP sidecar adapters", () => {
                 sidecarUrl: "http://127.0.0.1:8789",
                 target: preview.target,
                 registry: preview.registry,
+                verifierRegistry: preview.verifierRegistry,
             },
             async (input: RequestInfo | URL) => {
                 const outbound = input instanceof Request ? input : new Request(input);
@@ -291,6 +311,7 @@ describe("HTTP sidecar adapters", () => {
             input: finalized,
             target: preview.target,
             registry: preview.registry,
+            verifierRegistry: preview.verifierRegistry,
         });
     });
 });

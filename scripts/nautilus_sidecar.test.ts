@@ -32,6 +32,7 @@ describe("Nautilus sidecar relayer submit endpoint", () => {
                 input: loadFixtureRelayerSubmitInput("usgs/finalized_minimal"),
                 target: "0x123::disaster_oracle::submit_payload_v1",
                 registry: "0x456",
+                verifierRegistry: "0x654",
                 grpcUrl: "https://fullnode.testnet.sui.io:443",
                 senderAddress: "0x789",
             }),

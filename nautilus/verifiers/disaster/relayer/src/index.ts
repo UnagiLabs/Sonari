@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type { Signer } from "@mysten/sui/cryptography";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
+import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 import { type RelayerSubmitInput, validateRelayerSubmitInput } from "@sonari/oracle-shared";
 
 export const relayerPackage = "@sonari/oracle-relayer";
@@ -18,6 +19,7 @@ export type RelayerResult<T> =
 export interface RelayerRequestConfig {
     target: string;
     registry: string;
+    verifierRegistry: string;
 }
 
 export interface RelayerDryRunConfig extends RelayerRequestConfig {
@@ -95,11 +97,15 @@ export interface ParsedRelayerSubmitInput {
 export interface RelayerRequestPreview {
     target: string;
     registry: string;
-    arguments: [string, number[], number[], number[]];
+    verifierRegistry: string;
+    clock: string;
+    arguments: [string, string, string, number[], number[], number[]];
     submitRequest: {
         target: string;
         registry: string;
-        arguments: [string, number[], number[], number[]];
+        verifierRegistry: string;
+        clock: string;
+        arguments: [string, string, string, number[], number[], number[]];
     };
 }
 
@@ -159,8 +165,10 @@ export function buildRelayerRequestPreview(
         return configResult;
     }
 
-    const moveArguments: [string, number[], number[], number[]] = [
+    const moveArguments: [string, string, string, number[], number[], number[]] = [
         config.registry,
+        config.verifierRegistry,
+        SUI_CLOCK_OBJECT_ID,
         [...parsed.value.payloadBcsBytes],
         [...parsed.value.signatureBytes],
         [...parsed.value.publicKeyBytes],
@@ -168,6 +176,8 @@ export function buildRelayerRequestPreview(
     const submitRequest = {
         target: config.target,
         registry: config.registry,
+        verifierRegistry: config.verifierRegistry,
+        clock: SUI_CLOCK_OBJECT_ID,
         arguments: cloneMoveArguments(moveArguments),
     };
 
@@ -176,6 +186,8 @@ export function buildRelayerRequestPreview(
         value: {
             target: config.target,
             registry: config.registry,
+            verifierRegistry: config.verifierRegistry,
+            clock: SUI_CLOCK_OBJECT_ID,
             arguments: cloneMoveArguments(moveArguments),
             submitRequest,
         },
@@ -283,9 +295,11 @@ export function createSuiSubmitTransaction(
         target: request.target,
         arguments: [
             tx.object(request.registry),
-            tx.pure.vector("u8", Array.from(request.arguments[1])),
-            tx.pure.vector("u8", Array.from(request.arguments[2])),
+            tx.object(request.verifierRegistry),
+            tx.object.clock(),
             tx.pure.vector("u8", Array.from(request.arguments[3])),
+            tx.pure.vector("u8", Array.from(request.arguments[4])),
+            tx.pure.vector("u8", Array.from(request.arguments[5])),
         ],
     });
     return tx;
@@ -332,11 +346,24 @@ export function parseRelayerSubmitInput(input: unknown): RelayerResult<ParsedRel
 }
 
 function validateRequestConfig(config: RelayerRequestConfig): RelayerResult<RelayerRequestConfig> {
-    if (!isNonEmptyString(config.target) || !isNonEmptyString(config.registry)) {
-        return relayerSubmitFailed("Relayer request requires target and registry");
+    if (
+        !isNonEmptyString(config.target) ||
+        !isNonEmptyString(config.registry) ||
+        !isNonEmptyString(config.verifierRegistry)
+    ) {
+        return relayerSubmitFailed(
+            "Relayer request requires target, registry, and verifierRegistry",
+        );
     }
 
-    return { ok: true, value: { target: config.target, registry: config.registry } };
+    return {
+        ok: true,
+        value: {
+            target: config.target,
+            registry: config.registry,
+            verifierRegistry: config.verifierRegistry,
+        },
+    };
 }
 
 function createSuiGrpcClient(grpcUrl: string): RelayerDryRunClient & RelayerSubmitClient {
@@ -479,9 +506,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function cloneMoveArguments(
-    args: [string, number[], number[], number[]],
-): [string, number[], number[], number[]] {
-    return [args[0], [...args[1]], [...args[2]], [...args[3]]];
+    args: [string, string, string, number[], number[], number[]],
+): [string, string, string, number[], number[], number[]] {
+    return [args[0], args[1], args[2], [...args[3]], [...args[4]], [...args[5]]];
 }
 
 function readJson(url: URL): Record<string, unknown> {

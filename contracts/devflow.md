@@ -28,8 +28,8 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - 実装 PR では schema、BCS field order、`AffectedCellLeaf` canonical order を必要なく変更しない。
 - Pool、Program、Membership、Verifier Result、Claim、Admin の責務を分ける。
 - User-facing callable API は `accessor.move` に集約する。PR3 の `accessor.move` は donation 実行と必要最小限の donation record read helper の薄い入口に留める。
-- `admin.move` は `AdminCap` gated な admin-facing API を集約する。MVP でグローバルに 1 個だけ存在する `MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry` は package init の genesis object として作成し、admin create API は持たせない。複数存在しうる `DesignatedPool`、Program / Campaign 作成、verifier key 管理、emergency pause 操作は `admin.move` に置き、実ロジックは責務を持つ各 module の private または `public(package)` helper に委譲する。
-- `GenesisObjectCreated` は package init で作成された singleton object 一覧の追跡用 event である。`PoolCreated` / `RegistryCreated` は各 module 固有の作成 event であり、init で作成される singleton Pool / Registry では両方が emit される。
+- `admin.move` は `AdminCap` gated な admin-facing API を集約する。MVP でグローバルに 1 個だけ存在する `MainPool`、`OperationsPool`、`DonorRegistry`、`MembershipRegistry`、`VerifierRegistry`、`ClaimIndex` は package init の genesis object として作成し、admin create API は持たせない。複数存在しうる `DesignatedPool`、Program / Campaign 作成、verifier key 管理、emergency pause 操作は `admin.move` に置き、実ロジックは責務を持つ各 module の private または `public(package)` helper に委譲する。
+- `GenesisObjectCreated` は package init で作成された singleton object 一覧の追跡用 event である。`PoolCreated` / `RegistryCreated` / `ClaimIndexCreated` は各 module 固有の作成 event であり、init で作成される singleton Pool / Registry / ClaimIndex では両方が emit される。
 - `PauseState` の pause 判定は `target_id` ベースで行う。`target_kind` は `Paused` / `Unpaused` event と dapp / script の readability 用分類であり、認可や判定の source of truth にしない。
 - `accessor.move` / `admin.move` 以外の責務 module は、検証、状態遷移、accounting、event emit などの実ロジックを private または `public(package)` helper に定義し、外部公開 API として分散させない。
 - MembershipPass は全受取者必須にする。
