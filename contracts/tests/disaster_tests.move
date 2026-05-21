@@ -246,6 +246,39 @@ fun duplicate_disaster_event_uid_and_revision_is_rejected() {
     clock.destroy_for_testing();
 }
 
+#[test, expected_failure(abort_code = disaster_event::EStaleDisasterEventRevision)]
+fun stale_disaster_event_revision_is_rejected_after_newer_revision() {
+    let mut scenario = initialized_disaster_registry();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let revision_2_payload = payload_v1::decode_finalized(
+            revision_payload_bcs(2),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+        );
+        let revision_1_payload = payload_v1::decode_finalized(
+            revision_payload_bcs(1),
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+        );
+        disaster_event::create_from_payload_for_testing(
+            &mut registry,
+            revision_2_payload,
+            scenario.ctx(),
+        );
+        disaster_event::create_from_payload_for_testing(
+            &mut registry,
+            revision_1_payload,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.end();
+}
+
 #[test]
 fun relayer_without_admin_cap_can_submit_registered_signed_payload() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
@@ -535,4 +568,10 @@ fun oracle_signature(): vector<u8> {
 
 fun finalized_payload_bcs(): vector<u8> {
     x"010100000000000000eef4db66cd5fb2f612f5295553d192ed3b9754ed75ec58fec0f814a85a13437f01030100000000f451c28c01000000b153c78c01000000b153c78c0100000102d905a14141efb9b0a8f23dbb01bdb9b537182faf5038d1fa76d9acfe2af298a72c051b491e6f2da3e7d193071bcdf2748f3c077a1eb1f94ffd03cfbe976c2efd3a697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f7261775f646174615f6d616e69666573742e6a736f6e56e5b1020cb655fa99cec324da2fbf79e03dcfe84d3eee72e163111d3b01f6af37697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f61666665637465645f63656c6c732e6a736f6e86a82292fbdc1381c58742d53c02fd0534d49bd6f8858e24219f9f3d57b3df2507010101010202000000000000000100489dc88c010000"
+}
+
+fun revision_payload_bcs(revision: u8): vector<u8> {
+    let mut bytes = finalized_payload_bcs();
+    *bytes.borrow_mut(43) = revision;
+    bytes
 }

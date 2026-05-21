@@ -7,6 +7,7 @@ use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
 use contracts::pools::{Self, DesignatedPool, MainPool};
 use contracts::program::{Self, Campaign, Program};
 use sui::bcs;
+use sui::clock::{Self, Clock};
 use sui::coin;
 use sui::dynamic_field;
 use sui::event;
@@ -73,6 +74,7 @@ public struct ClaimPaid has copy, drop {
     main_paid_usdc: u64,
     designated_paid_usdc: u64,
     recipient: address,
+    claimed_at_ms: u64,
     actor: address,
 }
 
@@ -151,6 +153,7 @@ public(package) fun claim_disaster_usdc(
     binding: &DisasterCampaignBinding,
     disaster_event: &DisasterEvent,
     pass: &MembershipPass,
+    clock: &Clock,
     leaf: AffectedCellLeaf,
     proof: vector<ProofStep>,
     designated_pool: &mut DesignatedPool,
@@ -158,7 +161,7 @@ public(package) fun claim_disaster_usdc(
     user_max_amount_usdc: u64,
     ctx: &mut TxContext,
 ) {
-    let now_ms = ctx.epoch_timestamp_ms();
+    let now_ms = clock::timestamp_ms(clock);
     program::assert_claim_precheck(program, campaign);
     program::assert_claim_window(campaign, now_ms);
     payout_policy::assert_budget_matches(budget, program, campaign);
@@ -305,6 +308,7 @@ fun create_receipt_and_emit(
         main_paid_usdc: main_amount,
         designated_paid_usdc: designated_amount,
         recipient,
+        claimed_at_ms,
         actor: ctx.sender(),
     });
     event::emit(ClaimReceiptCreated {
@@ -361,7 +365,7 @@ public fun available_usdc_for_testing(designated_available: u64, main_available:
 #[test_only]
 public fun claim_paid_event_fields(
     event: ClaimPaid,
-): (ID, ID, ID, u64, u64, u64, address, address) {
+): (ID, ID, ID, u64, u64, u64, address, u64, address) {
     let ClaimPaid {
         receipt_id,
         program_id,
@@ -370,6 +374,7 @@ public fun claim_paid_event_fields(
         main_paid_usdc,
         designated_paid_usdc,
         recipient,
+        claimed_at_ms,
         actor,
     } = event;
     (
@@ -380,6 +385,7 @@ public fun claim_paid_event_fields(
         main_paid_usdc,
         designated_paid_usdc,
         recipient,
+        claimed_at_ms,
         actor,
     )
 }

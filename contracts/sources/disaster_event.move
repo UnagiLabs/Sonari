@@ -10,6 +10,7 @@ use sui::event;
 const EDuplicateDisasterEvent: u64 = 0;
 const EDisasterCampaignBindingMismatch: u64 = 1;
 const EDuplicateDisasterCampaignBinding: u64 = 2;
+const EStaleDisasterEventRevision: u64 = 3;
 
 public struct DisasterRegistry has key {
     id: UID,
@@ -41,6 +42,10 @@ public struct DisasterCampaignBinding has key {
 public struct DisasterEventKey has copy, drop, store {
     event_uid: vector<u8>,
     event_revision: u32,
+}
+
+public struct LatestDisasterEventRevisionKey has copy, drop, store {
+    event_uid: vector<u8>,
 }
 
 public struct DisasterCampaignBindingKey has copy, drop, store {
@@ -161,21 +166,40 @@ fun create_from_verified_payload(
     payload: Payload,
     ctx: &mut TxContext,
 ) {
+    let event_uid = payload_v1::event_uid(&payload);
+    let event_revision = payload_v1::event_revision(&payload);
     let key = DisasterEventKey {
-        event_uid: payload_v1::event_uid(&payload),
-        event_revision: payload_v1::event_revision(&payload),
+        event_uid,
+        event_revision,
     };
     assert!(
         !dynamic_field::exists_with_type<DisasterEventKey, bool>(&registry.id, key),
         EDuplicateDisasterEvent,
     );
+
+    let latest_key = LatestDisasterEventRevisionKey { event_uid };
+    if (dynamic_field::exists_with_type<LatestDisasterEventRevisionKey, u32>(
+        &registry.id,
+        latest_key,
+    )) {
+        let latest_revision =
+            dynamic_field::borrow_mut<LatestDisasterEventRevisionKey, u32>(
+                &mut registry.id,
+                latest_key,
+            );
+        assert!(event_revision > *latest_revision, EStaleDisasterEventRevision);
+        *latest_revision = event_revision;
+    } else {
+        dynamic_field::add(&mut registry.id, latest_key, event_revision);
+    };
+
     dynamic_field::add(&mut registry.id, key, true);
     registry.event_count = registry.event_count + 1;
 
     let disaster_event = DisasterEvent {
         id: object::new(ctx),
-        event_uid: payload_v1::event_uid(&payload),
-        event_revision: payload_v1::event_revision(&payload),
+        event_uid,
+        event_revision,
         hazard_type: payload_v1::hazard_type(&payload),
         occurred_at_ms: payload_v1::occurred_at_ms(&payload),
         affected_cells_root: payload_v1::affected_cells_root(&payload),

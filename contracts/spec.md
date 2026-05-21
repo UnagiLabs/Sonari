@@ -360,6 +360,8 @@ flowchart LR
 - MembershipRegistry current pass と MembershipPass の id / owner / payout address が一致する
 - `pass_lineage_id + campaign_id/event_uid` で二重 Claim を拒否する
 
+Claim window、residence metadata expiry、payout policy の membership age multiplier、ClaimReceipt / ClaimPaid の claim timestamp は、すべて Sui `Clock` の `timestamp_ms` から得た同一 `now_ms` で判定する。`TxContext.epoch_timestamp_ms()` は claim validity の根拠にしない。
+
 `AffectedCellLeaf` の canonical order、BCS payload、hash 仕様は `schemas/affected_cell_leaf.md` と Disaster Oracle v1 仕様を維持する。この docs 更新では field order、schema、golden vector を変更しない。
 
 ### 3.3 Eligibility Result
@@ -469,6 +471,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `PayoutPolicy` | tier amount、multipliers、caps、reserve ratios |
 | `CampaignBudget` | designated budget、main backstop budget、claimed、remaining |
 | `DisasterEvent` | event uid、revision、hazard type、`affected_cells_root`、data hash、min claim band |
+| `DisasterRegistry` | DisasterEvent count、campaign binding index、`event_uid` ごとの latest accepted revision。exact duplicate `(event_uid, revision)` は duplicate として拒否し、latest accepted revision 以下の新規投稿は stale revision として拒否する |
 | `DisasterCampaignBinding` | campaign と DisasterEvent の明示的な対応。`DisasterRegistry` の campaign binding index により 1 campaign = 1 DisasterEvent binding を強制し、claim 時に campaign id、event object id、event uid / revision を検証する |
 | `ClaimReceipt` | claimant、pass lineage、program / campaign、amount、paid_from、claimed_at |
 
@@ -494,7 +497,7 @@ MVP では全対象者 target amount 合計に基づく完全な pro-rata は Fu
 | `accessor::register_member_usdc` | genesis `MembershipRegistry` を更新し、Verification Fee を Operations Pool に入れ、MembershipPass を発行 |
 | `submit_pass_metadata_update` | Nautilus 署名済み Residence / Student metadata update を検証して Pass 更新 |
 | `disaster_event::create_from_signed_payload` | Disaster Oracle v1 BCS payload、署名、public key を登録済み `VerifierRegistry` と Sui `Clock` で検証して DisasterEvent を作成。`AdminCap` は不要で、Relayer は payload の意味を変更しない配送者として扱う |
-| `accessor::claim_disaster_usdc` | Disaster Claim。global / Program / Campaign / Designated Pool / Main Pool pause、campaign binding、DisasterEvent、Pass residence metadata、AffectedCellLeaf / Merkle proof、budget、Designated Pool、Main Pool を検証して支払う |
+| `accessor::claim_disaster_usdc` | Disaster Claim。Sui `Clock` の `timestamp_ms` を claim validity 時刻として使い、global / Program / Campaign / Designated Pool / Main Pool pause、campaign binding、DisasterEvent、Pass residence metadata、AffectedCellLeaf / Merkle proof、budget、Designated Pool、Main Pool を検証して支払う |
 
 Generic `accessor::claim_usdc` は MVP の public API から公開しない。`claim::claim_usdc` は package 内の disabled stub として残し、signed eligibility payload と verifier semantics が定義されるまでは常に `EGenericClaimDisabled` で abort する。
 | `pause` / `unpause` | admin-only emergency control |

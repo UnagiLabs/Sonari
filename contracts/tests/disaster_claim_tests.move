@@ -12,6 +12,7 @@ use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
 use sui::bcs;
+use sui::clock;
 use sui::coin;
 use sui::event;
 use sui::test_scenario;
@@ -28,6 +29,8 @@ const H3_INDEX: u64 = 608_819_013_597_790_207;
 
 #[test]
 fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
@@ -60,6 +63,7 @@ fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
             &binding,
             &disaster_event,
             &pass,
+            &clock,
             affected_leaf(),
             proof(),
             &mut designated_pool,
@@ -88,18 +92,22 @@ fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
 
     let paid_events = event::events_by_type<claim::ClaimPaid>();
     assert!(paid_events.length() == 1);
-    let (_, _, _, amount, main_paid, designated_paid, recipient, _) =
+    let (_, _, _, amount, main_paid, designated_paid, recipient, claimed_at_ms, _) =
         claim::claim_paid_event_fields(*paid_events.borrow(0));
     assert!(amount == 50_000_000);
     assert!(main_paid == 34_000_000);
     assert!(designated_paid == 16_000_000);
     assert!(recipient == PAYOUT);
+    assert!(claimed_at_ms == NINETY_ONE_DAYS_MS);
 
     scenario.end();
+    clock.destroy_for_testing();
 }
 
 #[test, expected_failure(abort_code = claim::EResidenceCellMismatch)]
 fun disaster_claim_rejects_pass_residence_cell_mismatch() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
@@ -133,6 +141,7 @@ fun disaster_claim_rejects_pass_residence_cell_mismatch() {
             &binding,
             &disaster_event,
             &pass,
+            &clock,
             affected_leaf(),
             proof(),
             &mut designated_pool,
@@ -156,6 +165,42 @@ fun disaster_claim_rejects_pass_residence_cell_mismatch() {
     };
 
     scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = program::EClaimWindowNotOpen)]
+fun disaster_claim_window_uses_clock_timestamp() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(CLAIM_WINDOW_END_MS);
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    apply_residence_metadata(&mut scenario);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_clock(&mut scenario, &clock);
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = claim::EResidenceMetadataExpired)]
+fun disaster_claim_residence_expiry_uses_clock_timestamp() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(2_000);
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    let h3_index = H3_INDEX;
+    apply_residence_metadata_cell_with_expiry(
+        &mut scenario,
+        bcs::to_bytes(&h3_index),
+        1_000,
+    );
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_clock(&mut scenario, &clock);
+    scenario.end();
+    clock.destroy_for_testing();
 }
 
 #[test, expected_failure(abort_code = payout_policy::EDesignatedPoolMismatch)]
@@ -365,6 +410,14 @@ fun apply_residence_metadata_cell(
     scenario: &mut test_scenario::Scenario,
     residence_cell: vector<u8>,
 ) {
+    apply_residence_metadata_cell_with_expiry(scenario, residence_cell, CLAIM_WINDOW_END_MS);
+}
+
+fun apply_residence_metadata_cell_with_expiry(
+    scenario: &mut test_scenario::Scenario,
+    residence_cell: vector<u8>,
+    expires_at_ms: u64,
+) {
     scenario.next_tx(MEMBER);
     {
         let mut pass = scenario.take_from_sender<membership::MembershipPass>();
@@ -376,7 +429,7 @@ fun apply_residence_metadata_cell(
             1,
             b"evidence",
             0,
-            CLAIM_WINDOW_END_MS,
+            expires_at_ms,
             1,
             1,
             scenario.ctx().epoch_timestamp_ms(),
@@ -387,6 +440,16 @@ fun apply_residence_metadata_cell(
 }
 
 fun execute_disaster_claim(scenario: &mut test_scenario::Scenario) {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
+    execute_disaster_claim_with_clock(scenario, &clock);
+    clock.destroy_for_testing();
+}
+
+fun execute_disaster_claim_with_clock(
+    scenario: &mut test_scenario::Scenario,
+    clock: &clock::Clock,
+) {
     scenario.next_tx(MEMBER);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
@@ -401,6 +464,7 @@ fun execute_disaster_claim(scenario: &mut test_scenario::Scenario) {
             registry,
             program,
             campaign,
+            clock,
         );
     };
 }
@@ -443,6 +507,7 @@ fun execute_disaster_claim_with_objects(
     registry: membership::MembershipRegistry,
     program: program::Program,
     campaign: program::Campaign,
+    clock: &clock::Clock,
 ) {
     let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
     let mut budget = scenario.take_shared<payout_policy::CampaignBudget>();
@@ -463,6 +528,7 @@ fun execute_disaster_claim_with_objects(
         &binding,
         &disaster_event,
         &pass,
+        clock,
         affected_leaf(),
         proof(),
         &mut designated_pool,
