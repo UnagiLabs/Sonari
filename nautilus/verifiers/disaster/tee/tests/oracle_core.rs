@@ -268,6 +268,41 @@ fn finalized_usgs_rejects_zip_grid_uri_without_raw_artifact_bytes() {
 }
 
 #[test]
+fn finalized_usgs_rejects_raw_grid_artifact_that_does_not_match_grid_xml() {
+    let mismatched_grid_xml =
+        b"<shakemap_grid><grid_data>139.7000 35.6000 7.23</grid_data></shakemap_grid>";
+    let mismatched_grid_zip = zip_with_entries(&[("grid.xml", mismatched_grid_xml.as_slice())]);
+    let mut input = finalized_input();
+    input.raw_grid_uri = Some("https://example.test/download/grid.xml.zip".to_owned());
+    input.raw_grid_bytes = Some(mismatched_grid_zip);
+
+    let error = process_usgs(input)
+        .expect_err("raw grid artifact must match the grid_xml used for affected cells");
+
+    assert!(format!("{error}").contains("raw_grid_bytes"));
+}
+
+#[test]
+fn source_archive_rejects_raw_grid_artifact_mismatch_before_archive_or_signature() {
+    let signer = CountingSigner::default();
+    let archive = RecordingSourceArchive::default();
+    let mismatched_grid_xml =
+        b"<shakemap_grid><grid_data>139.7000 35.6000 7.23</grid_data></shakemap_grid>";
+    let mismatched_grid_zip = zip_with_entries(&[("grid.xml", mismatched_grid_xml.as_slice())]);
+    let mut input = finalized_input();
+    input.raw_grid_uri = Some("https://example.test/download/grid.xml.zip".to_owned());
+    input.raw_grid_bytes = Some(mismatched_grid_zip);
+
+    let error = process_usgs_with_source_archive(input, &archive, &signer)
+        .expect_err("raw grid artifact mismatch must fail before archive and signing");
+
+    assert!(format!("{error}").contains("raw_grid_bytes"));
+    assert_eq!(archive.stored.get(), 0);
+    assert_eq!(archive.fetched.get(), 0);
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
 fn usgs_archive_failure_prevents_finalized_signature() {
     let signer = CountingSigner::default();
     let archive = FailingSourceArchive;

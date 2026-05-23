@@ -11,7 +11,9 @@ use crate::core::types::{
 use crate::crypto::{PayloadSigner, sha3_256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
-use crate::source::usgs::{UsgsDetail, UsgsShakeMapProduct, parse_detail, parse_grid_points};
+use crate::source::usgs::{
+    UsgsDetail, UsgsShakeMapProduct, grid_xml_from_artifact, parse_detail, parse_grid_points,
+};
 use crate::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_NAME, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
@@ -404,6 +406,12 @@ fn raw_grid_bytes_for_source(
     raw_grid_uri: &str,
 ) -> Result<Vec<u8>, OracleError> {
     if let Some(raw_grid_bytes) = input.raw_grid_bytes.as_ref() {
+        let derived_grid_xml = grid_xml_from_artifact(raw_grid_uri, raw_grid_bytes)?;
+        if derived_grid_xml != grid_xml {
+            return Err(OracleError::InvalidGridPoint(
+                "raw_grid_bytes does not match grid_xml".to_owned(),
+            ));
+        }
         return Ok(raw_grid_bytes.clone());
     }
     if raw_grid_uri.ends_with(".zip") {
