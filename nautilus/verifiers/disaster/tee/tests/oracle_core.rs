@@ -1,5 +1,5 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -9,9 +9,11 @@ use tee::{
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
     LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
-    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, UsgsOracleInput, WorkerToTeeRequest,
-    cell_band, grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
-    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer, sha3_256_bytes,
+    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive, SourceArchiveError,
+    StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, cell_band, grid_xml_from_artifact,
+    merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100, process_usgs,
+    process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
+    sha3_256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
@@ -26,11 +28,12 @@ fn finalized_input() -> UsgsOracleInput {
         case_id: "usgs/finalized_minimal".to_owned(),
         detail_json: read_fixture(format!("{FIXTURE_DIR}/input/usgs_detail.json")),
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_detail_uri:
-            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
+            "nautilus/verifiers/disaster/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
                 .to_owned(),
         raw_grid_uri: Some(
-            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
+            "nautilus/verifiers/disaster/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
                 .to_owned(),
         ),
         raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
@@ -192,6 +195,167 @@ fn finalized_entrypoint_signs_core_payload_with_injected_signer() {
 }
 
 #[test]
+fn finalized_usgs_archives_raw_sources_before_signing_payload() {
+    let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
+    let archive = RecordingSourceArchive::default();
+    let output = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect("fixture should finalize with archived raw sources");
+
+    assert_eq!(output.result.status, OracleStatus::Finalized);
+    assert!(output.signature.is_some());
+    let raw_manifest = output
+        .raw_data_manifest
+        .expect("finalized output should include raw manifest");
+    assert_eq!(raw_manifest.entries.len(), 2);
+    assert_eq!(archive.stored.get(), 2);
+    assert_eq!(archive.fetched.get(), 2);
+
+    for entry in &raw_manifest.entries {
+        assert!(entry.uri.starts_with("walrus://blob/"));
+        assert!(entry.walrus_blob_id.starts_with("test-walrus-"));
+        assert!(!entry.source_uri.is_empty());
+        assert_eq!(entry.content_hash, entry.source_hash);
+    }
+}
+
+#[test]
+fn finalized_usgs_archives_raw_grid_zip_artifact_bytes_not_expanded_xml() {
+    let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
+    let archive = RecordingSourceArchive::default();
+    let grid_xml = read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"));
+    let grid_zip = zip_with_entries(&[("grid.xml", grid_xml.as_slice())]);
+    let mut input = finalized_input();
+    input.grid_xml = Some(grid_xml);
+    input.raw_grid_bytes = Some(grid_zip.clone());
+    input.raw_grid_uri = Some("https://example.test/download/grid.xml.zip".to_owned());
+
+    let output = process_usgs_with_source_archive(input, &archive, &signer)
+        .expect("zip raw artifact should finalize with archived raw zip bytes");
+
+    let raw_manifest = output.raw_data_manifest.expect("raw manifest should exist");
+    let grid_entry = raw_manifest
+        .entries
+        .iter()
+        .find(|entry| entry.product == "shakemap_grid_xml")
+        .expect("grid entry should exist");
+    let grid_zip_hash = format!("0x{}", hex::encode(sha3_256_bytes(&grid_zip)));
+    assert_eq!(
+        grid_entry.source_uri,
+        "https://example.test/download/grid.xml.zip"
+    );
+    assert_eq!(grid_entry.content_hash, grid_zip_hash);
+    assert_eq!(grid_entry.source_hash, grid_zip_hash);
+    assert_eq!(grid_entry.size_bytes, grid_zip.len() as u64);
+
+    let stored = archive.records.borrow();
+    let grid_record = stored
+        .iter()
+        .find(|record| record.source_uri == "https://example.test/download/grid.xml.zip")
+        .expect("zip source should be archived");
+    assert_eq!(grid_record.bytes, grid_zip);
+    assert_eq!(grid_record.source_hash, grid_zip_hash);
+}
+
+#[test]
+fn finalized_usgs_rejects_zip_grid_uri_without_raw_artifact_bytes() {
+    let mut input = finalized_input();
+    input.raw_grid_uri = Some("https://example.test/download/grid.xml.zip".to_owned());
+    input.raw_grid_bytes = None;
+
+    let error = process_usgs(input).expect_err("zip URI without raw artifact bytes must fail");
+
+    assert!(format!("{error}").contains("raw_grid_bytes"));
+}
+
+#[test]
+fn finalized_usgs_rejects_raw_grid_artifact_that_does_not_match_grid_xml() {
+    let mismatched_grid_xml =
+        b"<shakemap_grid><grid_data>139.7000 35.6000 7.23</grid_data></shakemap_grid>";
+    let mismatched_grid_zip = zip_with_entries(&[("grid.xml", mismatched_grid_xml.as_slice())]);
+    let mut input = finalized_input();
+    input.raw_grid_uri = Some("https://example.test/download/grid.xml.zip".to_owned());
+    input.raw_grid_bytes = Some(mismatched_grid_zip);
+
+    let error = process_usgs(input)
+        .expect_err("raw grid artifact must match the grid_xml used for affected cells");
+
+    assert!(format!("{error}").contains("raw_grid_bytes"));
+}
+
+#[test]
+fn source_archive_rejects_raw_grid_artifact_mismatch_before_archive_or_signature() {
+    let signer = CountingSigner::default();
+    let archive = RecordingSourceArchive::default();
+    let mismatched_grid_xml =
+        b"<shakemap_grid><grid_data>139.7000 35.6000 7.23</grid_data></shakemap_grid>";
+    let mismatched_grid_zip = zip_with_entries(&[("grid.xml", mismatched_grid_xml.as_slice())]);
+    let mut input = finalized_input();
+    input.raw_grid_uri = Some("https://example.test/download/grid.xml.zip".to_owned());
+    input.raw_grid_bytes = Some(mismatched_grid_zip);
+
+    let error = process_usgs_with_source_archive(input, &archive, &signer)
+        .expect_err("raw grid artifact mismatch must fail before archive and signing");
+
+    assert!(format!("{error}").contains("raw_grid_bytes"));
+    assert_eq!(archive.stored.get(), 0);
+    assert_eq!(archive.fetched.get(), 0);
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
+fn usgs_archive_failure_prevents_finalized_signature() {
+    let signer = CountingSigner::default();
+    let archive = FailingSourceArchive;
+    let error = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect_err("archive failures must fail closed before signing");
+
+    assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
+fn usgs_archive_blob_mismatch_prevents_finalized_signature() {
+    let signer = CountingSigner::default();
+    let archive = MismatchingSourceArchive;
+    let error = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect_err("blob mismatches must fail closed before signing");
+
+    assert!(matches!(error, SourceArchiveError::BlobMismatch { .. }));
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
+fn source_archive_entrypoint_preserves_non_finalized_status_without_archive_or_signature() {
+    let signer = CountingSigner::default();
+    let archive = RecordingSourceArchive::default();
+
+    for (case_id, expected_status) in [
+        (
+            "usgs/pending_source_no_shakemap",
+            OracleStatus::PendingSource,
+        ),
+        ("usgs/pending_mmi_empty_grid", OracleStatus::PendingMmi),
+        ("usgs/rejected_cancelled_shakemap", OracleStatus::Rejected),
+        ("usgs/rejected_no_affected_cells", OracleStatus::Rejected),
+    ] {
+        let output =
+            process_usgs_with_source_archive(non_finalized_input(case_id), &archive, &signer)
+                .expect("non-finalized archive mode should return status output");
+
+        assert_eq!(output.result.status, expected_status);
+        assert!(output.signature.is_none());
+        assert!(output.unsigned_payload.is_none());
+        assert!(output.unsigned_bcs_payload.is_none());
+        assert!(output.raw_data_manifest.is_none());
+        assert!(output.affected_cells.is_none());
+    }
+
+    assert_eq!(archive.stored.get(), 0);
+    assert_eq!(archive.fetched.get(), 0);
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
 fn entrypoint_calls_signer_only_for_finalized_results() {
     let signer = CountingSigner::default();
 
@@ -241,6 +405,9 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
             case_id: case_id.to_owned(),
             detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
             grid_xml: Path::new(&grid_path)
+                .exists()
+                .then(|| read_fixture(&grid_path)),
+            raw_grid_bytes: Path::new(&grid_path)
                 .exists()
                 .then(|| read_fixture(&grid_path)),
             raw_detail_uri: format!(
@@ -342,11 +509,19 @@ fn low_level_cli_normalizes_grid_zip_artifact_with_raw_grid_uri() {
     )
     .unwrap();
     let expected_raw_data_manifest = read_expected("raw_data_manifest.json");
+    let expected_grid_hash = format!(
+        "0x{}",
+        hex::encode(sha3_256_bytes(&fs::read(&grid_zip_path).unwrap()))
+    );
     assert_eq!(
         raw_data_manifest["entries"][1]["uri"],
         "https://example.test/download/grid.xml.zip"
     );
     assert_eq!(
+        raw_data_manifest["entries"][1]["content_hash"],
+        expected_grid_hash
+    );
+    assert_ne!(
         raw_data_manifest["entries"][1]["content_hash"],
         expected_raw_data_manifest["entries"][1]["content_hash"]
     );
@@ -414,6 +589,27 @@ fn low_level_cli_infers_zip_grid_uri_from_file_path_when_raw_grid_uri_is_absent(
 }
 
 #[test]
+fn low_level_cli_rejects_zero_walrus_timeout() {
+    let output = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .args([
+            "--walrus-archive",
+            "--walrus-aggregator-url",
+            "https://aggregator.test",
+            "--walrus-timeout-ms",
+            "0",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Walrus CLI timeout"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
     let detail_json = br#"{
         "id": "us7000multi",
@@ -452,6 +648,7 @@ fn selects_shakemap_products_deterministically_by_preferred_version_update_and_k
         case_id: "usgs/multi".to_owned(),
         detail_json: detail_json.to_vec(),
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_detail_uri: "detail.json".to_owned(),
         raw_grid_uri: Some("grid.xml".to_owned()),
         raw_data_uri: "raw.json".to_owned(),
@@ -487,6 +684,75 @@ impl PayloadSigner for CountingSigner {
     }
 }
 
+#[derive(Default)]
+struct RecordingSourceArchive {
+    stored: Cell<usize>,
+    fetched: Cell<usize>,
+    records: RefCell<Vec<ArchivedSourceRecord>>,
+}
+
+struct ArchivedSourceRecord {
+    source_uri: String,
+    source_hash: String,
+    bytes: Vec<u8>,
+}
+
+impl SourceArchive for RecordingSourceArchive {
+    fn store_and_verify(
+        &self,
+        source_uri: &str,
+        source_hash: &str,
+        bytes: &[u8],
+    ) -> Result<StoredSourceRef, SourceArchiveError> {
+        let index = self.stored.get();
+        self.stored.set(index + 1);
+        self.fetched.set(self.fetched.get() + 1);
+        self.records.borrow_mut().push(ArchivedSourceRecord {
+            source_uri: source_uri.to_owned(),
+            source_hash: source_hash.to_owned(),
+            bytes: bytes.to_vec(),
+        });
+        Ok(StoredSourceRef {
+            uri: format!("walrus://blob/test-walrus-{index}"),
+            walrus_blob_id: format!("test-walrus-{index}"),
+            source_hash: source_hash.to_owned(),
+            size_bytes: bytes.len() as u64,
+        })
+    }
+}
+
+struct FailingSourceArchive;
+
+impl SourceArchive for FailingSourceArchive {
+    fn store_and_verify(
+        &self,
+        _source_uri: &str,
+        _source_hash: &str,
+        _bytes: &[u8],
+    ) -> Result<StoredSourceRef, SourceArchiveError> {
+        Err(SourceArchiveError::StoreFailed(
+            "publisher unavailable".to_owned(),
+        ))
+    }
+}
+
+struct MismatchingSourceArchive;
+
+impl SourceArchive for MismatchingSourceArchive {
+    fn store_and_verify(
+        &self,
+        source_uri: &str,
+        source_hash: &str,
+        _bytes: &[u8],
+    ) -> Result<StoredSourceRef, SourceArchiveError> {
+        Err(SourceArchiveError::BlobMismatch {
+            source_uri: source_uri.to_owned(),
+            expected_hash: source_hash.to_owned(),
+            actual_hash: "0xdeadbeef".to_owned(),
+        })
+    }
+}
+
 fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
     let dir = format!("../fixtures/{case_id}");
     let grid_path = format!("{dir}/input/usgs_grid.xml");
@@ -494,6 +760,9 @@ fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
         case_id: case_id.to_owned(),
         detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
         grid_xml: Path::new(&grid_path)
+            .exists()
+            .then(|| read_fixture(&grid_path)),
+        raw_grid_bytes: Path::new(&grid_path)
             .exists()
             .then(|| read_fixture(&grid_path)),
         raw_detail_uri: format!(

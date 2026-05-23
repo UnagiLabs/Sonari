@@ -23,7 +23,17 @@ SOURCE_ENTRY_ORDER = [
     "url_hash",
 ]
 RAW_ORDER = ["entries", "oracle_version"]
-RAW_ENTRY_ORDER = ["name", "event_id", "product", "uri", "content_hash"]
+RAW_ENTRY_ORDER = [
+    "name",
+    "event_id",
+    "product",
+    "uri",
+    "content_hash",
+    "source_uri",
+    "walrus_blob_id",
+    "source_hash",
+    "size_bytes",
+]
 AFFECTED_ORDER = [
     "event_uid",
     "event_revision",
@@ -38,8 +48,8 @@ AFFECTED_ORDER = [
 AFFECTED_CELL_ORDER = ["h3_index", "intensity_value", "cell_band"]
 
 CELLS_GENERATION_METHOD = {"shakemap_gridxml_h3_grid_point_p90_v1": 1}
-CELL_METRIC = {"USGS_MMI": 1, "JMA_SHINDO": 2}
-INTENSITY_SCALE = {"MMI_X100": 1, "JMA_SHINDO_X10": 2}
+CELL_METRIC = {"USGS_MMI": 1}
+INTENSITY_SCALE = {"MMI_X100": 1}
 
 
 def load_json(path: Path) -> Any:

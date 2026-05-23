@@ -92,6 +92,7 @@ const TERMINAL_STATUSES = new Set<OffchainStatus>([
     "submitted",
     "rejected",
 ]);
+const INLINE_TEST_RUNNER_TIMEOUT_MS = 90_000;
 
 export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
@@ -242,7 +243,7 @@ export async function processDueEventsInlineForTests(
             lifecycleRunner,
             new InlineMessage(job),
             nowMs,
-            30_000,
+            INLINE_TEST_RUNNER_TIMEOUT_MS,
             relayer,
         );
         const after = await repository.get(job.source_event_id);

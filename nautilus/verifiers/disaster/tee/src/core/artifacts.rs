@@ -31,6 +31,18 @@ pub struct RawDataEntry {
     pub product: String,
     pub uri: String,
     pub content_hash: String,
+    pub source_uri: String,
+    pub walrus_blob_id: String,
+    pub source_hash: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StoredSourceRef {
+    pub uri: String,
+    pub walrus_blob_id: String,
+    pub source_hash: String,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -32,6 +32,7 @@ pub struct UsgsOracleInput {
     pub case_id: String,
     pub detail_json: Vec<u8>,
     pub grid_xml: Option<Vec<u8>>,
+    pub raw_grid_bytes: Option<Vec<u8>>,
     pub raw_detail_uri: String,
     pub raw_grid_uri: Option<String>,
     pub raw_data_uri: String,

@@ -37,13 +37,12 @@
       "type": "string",
       "enum": [
         "shakemap_gridxml_h3_grid_point_p90_v1",
-        "shakemap_hdf_h3_area_weighted_p90_v1",
-        "jma_250m_h3_p90_v1"
+        "shakemap_hdf_h3_area_weighted_p90_v1"
       ]
     },
     "cell_metric": {
       "type": "string",
-      "enum": ["USGS_MMI", "JMA_SHINDO"]
+      "enum": ["USGS_MMI"]
     },
     "cell_aggregation": {
       "type": "string",
@@ -51,7 +50,7 @@
     },
     "intensity_scale": {
       "type": "string",
-      "enum": ["MMI_X100", "JMA_SHINDO_X10"]
+      "enum": ["MMI_X100"]
     },
     "affected_cells": {
       "type": "array",

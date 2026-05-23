@@ -25,7 +25,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "enum": ["USGS", "JMA"]
+            "enum": ["USGS"]
           },
           "event_id": {
             "type": "string",
@@ -58,8 +58,7 @@
       "type": "string",
       "enum": [
         "shakemap_gridxml_h3_grid_point_p90_v1",
-        "shakemap_hdf_h3_area_weighted_p90_v1",
-        "jma_250m_h3_p90_v1"
+        "shakemap_hdf_h3_area_weighted_p90_v1"
       ]
     },
     "oracle_version": {

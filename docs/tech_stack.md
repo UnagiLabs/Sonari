@@ -57,7 +57,7 @@ Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster
 | `nautilus/verifiers/disaster/watcher/` | 軽量監視プロセス。USGS 候補検出、D1 状態管理、Queue 投入、TEE 起動 API 呼び出し、手動投入 API を担当する。 | Cloudflare Workers、TypeScript、Wrangler、D1 / Queues |
 | `nautilus/verifiers/disaster/relayer/` | Nautilus / TEE が生成した署名済み payload を Sui へ投稿する。Payload 内容は変更しない。 | TypeScript または Rust、Sui SDK |
 | `nautilus/verifiers/disaster/shared/` | Disaster verifier 内部の TypeScript 共有型、定数、validator。 | TypeScript |
-| `nautilus/verifiers/disaster/fixtures/` | USGS / JMA の再現用サンプルデータ。TEE、Watcher、Relayer の共通テスト入力。 | JSON |
+| `nautilus/verifiers/disaster/fixtures/` | USGS の再現用サンプルデータ。TEE、Watcher、Relayer の共通テスト入力。 | JSON |
 | `nautilus/verifiers/membership/` | Membership Pass metadata verifier family。residence / student verifier の docs、shared types、fixtures、dummy implementation を置く。 | TypeScript、Rust future、Nautilus |
 | `nautilus/verifiers/membership/shared/` | `ResidenceMetadataUpdate`、`StudentMetadataUpdate`、confidence / risk bucket などの placeholder shared types。 | TypeScript |
 | `nautilus/verifiers/membership/verifiers/residence/` | Web MVP residence confidence scoring verifier。raw evidence を秘匿し、Pass metadata update を生成する。 | TypeScript dummy first、Rust / Nautilus future |
@@ -90,7 +90,7 @@ Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster
 | Disaster Relayer | Sui SDK、TypeScript または Rust | 署名済み Disaster Payload の Sui 投稿 |
 | Membership Verifiers | TypeScript dummy first、Nautilus / Rust future | Residence / Student metadata update 生成 |
 | Contracts | Sui Move | Program、Campaign、Pool、Membership Pass、Nautilus result verification、Claim / Payout、DisasterEvent 接続 |
-| Fixtures / Tests | JSON fixture、Rust / TypeScript test runner | USGS / JMA / residence / student 入力の再現、verifier 判定の検証 |
+| Fixtures / Tests | JSON fixture、Rust / TypeScript test runner | USGS / residence / student 入力の再現、verifier 判定の検証 |
 
 ## Contracts 方針
 

@@ -2,15 +2,18 @@ use crate::compute::geo::affected_cells_from_points;
 use crate::compute::merkle::{merkle_root_from_leaf_hashes, sample_proof};
 use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest,
-    RawSourceContentHash, SourceEntry, SourceManifest, UnsignedPayloadV1,
+    RawSourceContentHash, SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayloadV1,
 };
+use crate::core::source_archive::{SourceArchive, SourceArchiveError};
 use crate::core::types::{
     OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,
 };
 use crate::crypto::{PayloadSigner, sha3_256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
-use crate::source::usgs::{UsgsDetail, UsgsShakeMapProduct, parse_detail, parse_grid_points};
+use crate::source::usgs::{
+    UsgsDetail, UsgsShakeMapProduct, grid_xml_from_artifact, parse_detail, parse_grid_points,
+};
 use crate::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_NAME, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
@@ -20,6 +23,53 @@ use crate::{
 };
 
 pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError> {
+    process_usgs_inner(input, None)
+}
+
+pub fn process_usgs_with_source_archive(
+    input: UsgsOracleInput,
+    archive: &impl SourceArchive,
+    signer: &impl PayloadSigner,
+) -> Result<OracleOutput, SourceArchiveError> {
+    let output = process_usgs_inner(input.clone(), None)?;
+    if output.result.status != OracleStatus::Finalized {
+        return Ok(output);
+    }
+
+    let grid_xml = input.grid_xml.clone().ok_or_else(|| {
+        SourceArchiveError::Oracle(OracleError::InvalidGridPoint(
+            "grid_xml is required for archived finalized output".to_owned(),
+        ))
+    })?;
+    let raw_grid_uri = input.raw_grid_uri.clone().ok_or_else(|| {
+        SourceArchiveError::Oracle(OracleError::InvalidGridPoint(
+            "raw_grid_uri is required for archived finalized output".to_owned(),
+        ))
+    })?;
+    let raw_grid_bytes = raw_grid_bytes_for_source(&input, &grid_xml, &raw_grid_uri)
+        .map_err(SourceArchiveError::Oracle)?;
+    let detail_hash = to_hex(&sha3_256_bytes(&input.detail_json));
+    let grid_hash = to_hex(&sha3_256_bytes(&raw_grid_bytes));
+    let detail_ref =
+        archive.store_and_verify(&input.raw_detail_uri, &detail_hash, &input.detail_json)?;
+    let grid_ref = archive.store_and_verify(&raw_grid_uri, &grid_hash, &raw_grid_bytes)?;
+    let archive_refs = UsgsArchiveRefs {
+        detail_source_uri: input.raw_detail_uri.clone(),
+        detail_ref,
+        grid_source_uri: raw_grid_uri,
+        grid_ref,
+    };
+    let mut output = process_usgs_inner(input, Some(archive_refs))?;
+    if let Some(payload) = output.unsigned_bcs_payload.as_ref() {
+        output.signature = Some(signer.sign_payload(payload));
+    }
+    Ok(output)
+}
+
+fn process_usgs_inner(
+    input: UsgsOracleInput,
+    archive_refs: Option<UsgsArchiveRefs>,
+) -> Result<OracleOutput, OracleError> {
     let detail = parse_detail(&input.detail_json)?;
     let base_result =
         |status, error_code: Option<&str>, expected_payload: Option<&str>| ResultSummary {
@@ -97,12 +147,14 @@ pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError>
     let raw_grid_uri = input.raw_grid_uri.clone().ok_or_else(|| {
         OracleError::InvalidGridPoint("raw_grid_uri is required for finalized output".to_owned())
     })?;
+    let raw_grid_bytes = raw_grid_bytes_for_source(&input, grid_xml, &raw_grid_uri)?;
     let raw_data_manifest = raw_data_manifest(
         &detail.id,
         &input.raw_detail_uri,
         &input.detail_json,
         &raw_grid_uri,
-        grid_xml,
+        &raw_grid_bytes,
+        archive_refs.as_ref(),
     );
     let affected_artifact = AffectedCellsArtifact {
         event_uid: event_uid.clone(),
@@ -254,6 +306,14 @@ fn status_only(result: ResultSummary) -> OracleOutput {
     }
 }
 
+#[derive(Debug, Clone)]
+struct UsgsArchiveRefs {
+    detail_source_uri: String,
+    detail_ref: StoredSourceRef,
+    grid_source_uri: String,
+    grid_ref: StoredSourceRef,
+}
+
 fn source_manifest(detail: &UsgsDetail, shakemap: &UsgsShakeMapProduct) -> SourceManifest {
     let detail_url = format!(
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
@@ -309,25 +369,27 @@ fn raw_data_manifest(
     detail_bytes: &[u8],
     grid_uri: &str,
     grid_bytes: &[u8],
+    archive_refs: Option<&UsgsArchiveRefs>,
 ) -> RawDataManifest {
-    // `grid_uri` records the fetched artifact URI. When the artifact is grid.xml.zip,
-    // `grid_bytes` is the single decompressed grid.xml passed into the pure core; the
-    // current manifest schema has one hash slot, so it pins the exact core input bytes.
+    let detail_hash = to_hex(&sha3_256_bytes(detail_bytes));
+    let grid_hash = to_hex(&sha3_256_bytes(grid_bytes));
     let mut entries = vec![
-        RawDataEntry {
-            name: "USGS".to_owned(),
-            event_id: event_id.to_owned(),
-            product: "detail_geojson".to_owned(),
-            uri: detail_uri.to_owned(),
-            content_hash: to_hex(&sha3_256_bytes(detail_bytes)),
-        },
-        RawDataEntry {
-            name: "USGS".to_owned(),
-            event_id: event_id.to_owned(),
-            product: "shakemap_grid_xml".to_owned(),
-            uri: grid_uri.to_owned(),
-            content_hash: to_hex(&sha3_256_bytes(grid_bytes)),
-        },
+        raw_data_entry(
+            event_id,
+            "detail_geojson",
+            detail_uri,
+            &detail_hash,
+            archive_refs.map(|refs| (&refs.detail_source_uri, &refs.detail_ref)),
+            detail_bytes.len() as u64,
+        ),
+        raw_data_entry(
+            event_id,
+            "shakemap_grid_xml",
+            grid_uri,
+            &grid_hash,
+            archive_refs.map(|refs| (&refs.grid_source_uri, &refs.grid_ref)),
+            grid_bytes.len() as u64,
+        ),
     ];
     entries.sort_by(|a, b| {
         (&a.name, &a.event_id, &a.product, &a.uri).cmp(&(&b.name, &b.event_id, &b.product, &b.uri))
@@ -335,5 +397,61 @@ fn raw_data_manifest(
     RawDataManifest {
         entries,
         oracle_version: ORACLE_VERSION,
+    }
+}
+
+fn raw_grid_bytes_for_source(
+    input: &UsgsOracleInput,
+    grid_xml: &[u8],
+    raw_grid_uri: &str,
+) -> Result<Vec<u8>, OracleError> {
+    if let Some(raw_grid_bytes) = input.raw_grid_bytes.as_ref() {
+        let derived_grid_xml = grid_xml_from_artifact(raw_grid_uri, raw_grid_bytes)?;
+        if derived_grid_xml != grid_xml {
+            return Err(OracleError::InvalidGridPoint(
+                "raw_grid_bytes does not match grid_xml".to_owned(),
+            ));
+        }
+        return Ok(raw_grid_bytes.clone());
+    }
+    if raw_grid_uri.ends_with(".zip") {
+        return Err(OracleError::InvalidGridPoint(
+            "raw_grid_bytes is required when raw_grid_uri points to a zip artifact".to_owned(),
+        ));
+    }
+    Ok(grid_xml.to_vec())
+}
+
+fn raw_data_entry(
+    event_id: &str,
+    product: &str,
+    uri: &str,
+    content_hash: &str,
+    archived: Option<(&String, &StoredSourceRef)>,
+    size_bytes: u64,
+) -> RawDataEntry {
+    if let Some((source_uri, stored)) = archived {
+        return RawDataEntry {
+            name: "USGS".to_owned(),
+            event_id: event_id.to_owned(),
+            product: product.to_owned(),
+            uri: stored.uri.clone(),
+            content_hash: content_hash.to_owned(),
+            source_uri: source_uri.clone(),
+            walrus_blob_id: stored.walrus_blob_id.clone(),
+            source_hash: stored.source_hash.clone(),
+            size_bytes: stored.size_bytes,
+        };
+    }
+    RawDataEntry {
+        name: "USGS".to_owned(),
+        event_id: event_id.to_owned(),
+        product: product.to_owned(),
+        uri: uri.to_owned(),
+        content_hash: content_hash.to_owned(),
+        source_uri: uri.to_owned(),
+        walrus_blob_id: String::new(),
+        source_hash: content_hash.to_owned(),
+        size_bytes,
     }
 }
