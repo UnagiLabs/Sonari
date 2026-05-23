@@ -172,7 +172,7 @@ runner.stop(runnerId) → クリーンアップ
 3つのモードがあります（詳細は [relayer/README.md](../relayer/README.md) 参照）：
 - `preview` — リクエスト確認のみ（デフォルト）
 - `dry_run` — シミュレーション
-- `submit` — 本番送信
+- `submit` — 本番送信（Worker経由では現在未対応。signer設定がないためfail-closed）
 
 ---
 
@@ -196,14 +196,15 @@ runner.stop(runnerId) → クリーンアップ
 | `EARTHQUAKE_EVENTS` | ✓ | D1データベースバインディング |
 | `RUNNER_JOBS` | ✓ | Cloudflare Queue バインディング |
 | `MANUAL_SUBMIT_TOKEN` | — | 手動登録用の認証トークン |
+| `RUNNER_SIDECAR_URL` | — | TEE Runner SidecarのURL。AWS設定がない場合に`HttpRunnerAdapter`で使用 |
 | `ORACLE_SIDECAR_URL` | — | Oracle Sidecar（Relayer）のURL |
-| `RELAYER_MODE` | — | `preview` / `dry_run` / `submit` |
+| `RELAYER_MODE` | — | `preview` / `dry_run` / `submit`（Workerの`submit`は現在未対応） |
 | `RELAYER_TARGET` | — | SUI Moveコントラクトのターゲット |
 | `RELAYER_REGISTRY` | — | OracleレジストリのオブジェクトID |
 | `RELAYER_VERIFIER_REGISTRY` | — | Verifierレジストリのオブジェクトid |
 | `RELAYER_GRPC_URL` | — | SUI gRPC URLdry_run/submit用 |
 | `RELAYER_SENDER_ADDRESS` | — | 送信者のSUIアドレス |
-| `RELAYER_ALLOW_SUBMIT` | — | `"true"` でsubmitモードを許可 |
+| `RELAYER_ALLOW_SUBMIT` | — | `"true"` でsubmitモードの明示許可。ただしWorkerにはsigner設定がないため送信は未対応 |
 | `AWS_RUNNER_BASE_URL` | — | AWS Lambda の API URL |
 | `AWS_RUNNER_TOKEN` | — | AWS Lambda の認証トークン |
 | `AWS_RUNNER_TIMEOUT_MS` | — | Lambdaのタイムアウト（デフォルト30秒） |
@@ -219,7 +220,4 @@ npm test
 
 # 型チェック
 npm run typecheck
-
-# ビルド
-npm run build
 ```

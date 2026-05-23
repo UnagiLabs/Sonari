@@ -155,9 +155,6 @@ npm test
 
 # 型チェック
 npm run typecheck
-
-# ビルド
-npm run build
 ```
 
 ---
