@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Report>
+  <Control>
+    <Title>震源・震度に関する情報</Title>
+    <DateTime>2024-01-01T16:15:00+09:00</DateTime>
+  </Control>
+  <Head>
+    <Title>震源・震度に関する情報</Title>
+    <ReportDateTime>2024-01-01T16:15:30+09:00</ReportDateTime>
+    <TargetDateTime>2024-01-01T16:10:10+09:00</TargetDateTime>
+    <EventID>20240101161010</EventID>
+    <Serial>1</Serial>
+  </Head>
+  <Body>
+    <Earthquake>
+      <OriginTime>2024-01-01T16:10:10+09:00</OriginTime>
+      <Hypocenter>
+        <Area>
+          <Name>石川県能登地方</Name>
+          <Coordinate>+37.2+136.9-10000/</Coordinate>
+        </Area>
+      </Hypocenter>
+    </Earthquake>
+    <Intensity>
+      <Observation>
+        <MaxInt>6弱</MaxInt>
+      </Observation>
+    </Intensity>
+  </Body>
+</Report>

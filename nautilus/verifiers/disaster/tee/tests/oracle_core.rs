@@ -8,10 +8,12 @@ use tee::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
-    LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
-    PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, UsgsOracleInput, WorkerToTeeRequest,
-    cell_band, grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
-    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer, sha3_256_bytes,
+    JmaEventInput, LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION,
+    OracleStatus, PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive,
+    SourceArchiveError, StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, cell_band,
+    grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
+    process_jma_event_with_archive, process_usgs, process_usgs_from_worker_request,
+    process_usgs_with_signer, process_usgs_with_source_archive, sha3_256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
@@ -189,6 +191,93 @@ fn finalized_entrypoint_signs_core_payload_with_injected_signer() {
             &Signature::from_bytes(&signature),
         )
         .unwrap();
+}
+
+#[test]
+fn finalized_usgs_archives_raw_sources_before_signing_payload() {
+    let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
+    let archive = RecordingSourceArchive::default();
+    let output = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect("fixture should finalize with archived raw sources");
+
+    assert_eq!(output.result.status, OracleStatus::Finalized);
+    assert!(output.signature.is_some());
+    let raw_manifest = output
+        .raw_data_manifest
+        .expect("finalized output should include raw manifest");
+    assert_eq!(raw_manifest.entries.len(), 2);
+    assert_eq!(archive.stored.get(), 2);
+    assert_eq!(archive.fetched.get(), 2);
+
+    for entry in &raw_manifest.entries {
+        assert!(entry.uri.starts_with("walrus://blob/"));
+        assert!(entry.walrus_blob_id.starts_with("test-walrus-"));
+        assert!(entry.source_uri.is_some());
+        assert_eq!(entry.content_hash, entry.source_hash);
+    }
+}
+
+#[test]
+fn usgs_archive_failure_prevents_finalized_signature() {
+    let signer = CountingSigner::default();
+    let archive = FailingSourceArchive;
+    let error = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect_err("archive failures must fail closed before signing");
+
+    assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
+fn usgs_archive_blob_mismatch_prevents_finalized_signature() {
+    let signer = CountingSigner::default();
+    let archive = MismatchingSourceArchive;
+    let error = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect_err("blob mismatches must fail closed before signing");
+
+    assert!(matches!(error, SourceArchiveError::BlobMismatch { .. }));
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
+fn jma_vxse53_event_attestation_archives_source_without_claim_root() {
+    let archive = RecordingSourceArchive::default();
+    let output = process_jma_event_with_archive(
+        JmaEventInput {
+            case_id: "jma/vxse53_minimal".to_owned(),
+            source_xml: read_fixture("../fixtures/jma/vxse53_minimal/input/vxse53.xml"),
+            source_uri: "https://example.test/jma/vxse53.xml".to_owned(),
+        },
+        &archive,
+    )
+    .expect("VXSE53 should produce event attestation");
+
+    assert_eq!(output.result.status, OracleStatus::PendingMmi);
+    assert_eq!(output.result.source_event_id, "20240101161010");
+    assert_eq!(output.result.error_code.as_deref(), Some("JMA_IMPACT_SOURCE_REQUIRED"));
+    assert!(output.affected_cells.is_none());
+    assert!(output.unsigned_payload.is_none());
+    assert!(output.signature.is_none());
+
+    let event_attestation = output
+        .event_attestation
+        .expect("JMA event attestation should exist");
+    assert_eq!(event_attestation.provider, "JMA");
+    assert_eq!(event_attestation.event_id, "20240101161010");
+    assert_eq!(event_attestation.serial, "1");
+    assert_eq!(event_attestation.origin_time_ms, 1704100210000);
+    assert_eq!(event_attestation.max_shindo, Some("6弱".to_owned()));
+    assert_eq!(event_attestation.max_shindo_x10, Some(55));
+    assert_eq!(event_attestation.hypocenter_name, Some("石川県能登地方".to_owned()));
+    assert_eq!(event_attestation.hypocenter_lat_e7, Some(372000000));
+    assert_eq!(event_attestation.hypocenter_lon_e7, Some(1369000000));
+    assert_eq!(event_attestation.source_xml_blob.uri, "walrus://blob/test-walrus-0");
+    assert_eq!(
+        event_attestation.source_xml_hash,
+        event_attestation.source_xml_blob.source_hash
+    );
+    assert_eq!(archive.stored.get(), 1);
+    assert_eq!(archive.fetched.get(), 1);
 }
 
 #[test]
@@ -484,6 +573,61 @@ impl PayloadSigner for CountingSigner {
             public_key: "0x01".to_owned(),
             signature: "0x02".to_owned(),
         }
+    }
+}
+
+#[derive(Default)]
+struct RecordingSourceArchive {
+    stored: Cell<usize>,
+    fetched: Cell<usize>,
+}
+
+impl SourceArchive for RecordingSourceArchive {
+    fn store_and_verify(
+        &self,
+        _source_uri: &str,
+        source_hash: &str,
+        bytes: &[u8],
+    ) -> Result<StoredSourceRef, SourceArchiveError> {
+        let index = self.stored.get();
+        self.stored.set(index + 1);
+        self.fetched.set(self.fetched.get() + 1);
+        Ok(StoredSourceRef {
+            uri: format!("walrus://blob/test-walrus-{index}"),
+            walrus_blob_id: format!("test-walrus-{index}"),
+            source_hash: source_hash.to_owned(),
+            size_bytes: bytes.len() as u64,
+        })
+    }
+}
+
+struct FailingSourceArchive;
+
+impl SourceArchive for FailingSourceArchive {
+    fn store_and_verify(
+        &self,
+        _source_uri: &str,
+        _source_hash: &str,
+        _bytes: &[u8],
+    ) -> Result<StoredSourceRef, SourceArchiveError> {
+        Err(SourceArchiveError::StoreFailed("publisher unavailable".to_owned()))
+    }
+}
+
+struct MismatchingSourceArchive;
+
+impl SourceArchive for MismatchingSourceArchive {
+    fn store_and_verify(
+        &self,
+        source_uri: &str,
+        source_hash: &str,
+        _bytes: &[u8],
+    ) -> Result<StoredSourceRef, SourceArchiveError> {
+        Err(SourceArchiveError::BlobMismatch {
+            source_uri: source_uri.to_owned(),
+            expected_hash: source_hash.to_owned(),
+            actual_hash: "0xdeadbeef".to_owned(),
+        })
     }
 }
 
