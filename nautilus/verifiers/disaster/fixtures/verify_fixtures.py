@@ -98,8 +98,8 @@ AFFECTED_ORDER = [
 AFFECTED_CELL_ORDER = ["h3_index", "intensity_value", "cell_band"]
 
 CELLS_GENERATION_METHOD = {"shakemap_gridxml_h3_grid_point_p90_v1": 1}
-CELL_METRIC = {"USGS_MMI": 1, "JMA_SHINDO": 2}
-INTENSITY_SCALE = {"MMI_X100": 1, "JMA_SHINDO_X10": 2}
+CELL_METRIC = {"USGS_MMI": 1}
+INTENSITY_SCALE = {"MMI_X100": 1}
 
 
 def load_json(path: Path) -> Any:

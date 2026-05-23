@@ -538,7 +538,7 @@ Generic `accessor::claim_usdc` は MVP の public API から公開しない。`c
 - replay prevention
 - disabled key rejection
 
-Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order、BCS encoding、`AffectedCellLeaf` hash 仕様を変更しない。on-chain MVP は enum を狭く受理し、`primary_source = USGS`、`cells_generation_method = SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1`、`cell_metric = USGS_MMI`、`cell_aggregation = GRID_POINT_P90`、`intensity_scale = MMI_X100` のみ許可する。JMA 系 enum は future extension として v1 payload schema 上は残せるが、この Move v1 では reject する。`severity_band` は 1〜3、`max_cell_band == severity_band` を必須にする。
+Disaster Oracle v1 payload では、既存の `oracle_version = 1`、field order、BCS encoding、`AffectedCellLeaf` hash 仕様を変更しない。on-chain MVP は `primary_source = USGS`、`cells_generation_method = SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1`、`cell_metric = USGS_MMI`、`cell_aggregation = GRID_POINT_P90`、`intensity_scale = MMI_X100` のみ許可する。`severity_band` は 1〜3、`max_cell_band == severity_band` を必須にする。
 
 ### 5.2 Privacy
 

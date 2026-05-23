@@ -27,7 +27,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "enum": ["USGS", "JMA"]
+            "enum": ["USGS"]
           },
           "event_id": {
             "type": "string",

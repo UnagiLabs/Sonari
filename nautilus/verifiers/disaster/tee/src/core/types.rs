@@ -1,6 +1,6 @@
 use crate::core::artifacts::{
-    AffectedCellsArtifact, EventAttestation, ExpectedHashes, RawDataManifest, SampleProof,
-    SignatureArtifact, SourceManifest, UnsignedPayloadV1,
+    AffectedCellsArtifact, ExpectedHashes, RawDataManifest, SampleProof, SignatureArtifact,
+    SourceManifest, UnsignedPayloadV1,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -25,8 +25,6 @@ pub enum OracleError {
     Zip(String),
     #[error("invalid Worker to TEE request: {0}")]
     WorkerRequest(String),
-    #[error("invalid JMA VXSE53 XML: {0}")]
-    JmaXml(String),
 }
 
 #[derive(Debug, Clone)]
@@ -34,17 +32,11 @@ pub struct UsgsOracleInput {
     pub case_id: String,
     pub detail_json: Vec<u8>,
     pub grid_xml: Option<Vec<u8>>,
+    pub raw_grid_bytes: Option<Vec<u8>>,
     pub raw_detail_uri: String,
     pub raw_grid_uri: Option<String>,
     pub raw_data_uri: String,
     pub affected_cells_uri: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct JmaEventInput {
-    pub case_id: String,
-    pub source_xml: Vec<u8>,
-    pub source_uri: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,7 +121,6 @@ pub struct ResultSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OracleOutput {
     pub result: ResultSummary,
-    pub event_attestation: Option<EventAttestation>,
     pub source_manifest: Option<SourceManifest>,
     pub raw_data_manifest: Option<RawDataManifest>,
     pub affected_cells: Option<AffectedCellsArtifact>,

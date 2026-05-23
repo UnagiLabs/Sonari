@@ -56,18 +56,15 @@ export const BCS_ENUMS = {
     cellsGenerationMethod: {
         SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1: 1,
         SHAKEMAP_HDF_H3_WEIGHTED_P90_V1: 2,
-        JMA_250M_H3_P90_V1: 3,
     },
     cellMetric: {
         USGS_MMI: 1,
-        JMA_SHINDO: 2,
     },
     cellAggregation: {
         GRID_POINT_P90: 1,
     },
     intensityScale: {
         MMI_X100: 1,
-        JMA_SHINDO_X10: 2,
     },
 } as const;
 
@@ -105,7 +102,6 @@ export const ERROR_CODES = [
     "TEE_SIGNATURE_FAILED",
     "BCS_SERIALIZATION_FAILED",
     "MERKLE_ROOT_FAILED",
-    "JMA_IMPACT_SOURCE_REQUIRED",
     "AWS_RUNNER_START_FAILED",
     "AWS_RUNNER_PROCESS_FAILED",
     "AWS_RUNNER_TIMEOUT",

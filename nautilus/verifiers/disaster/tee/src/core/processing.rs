@@ -1,19 +1,16 @@
 use crate::compute::geo::affected_cells_from_points;
 use crate::compute::merkle::{merkle_root_from_leaf_hashes, sample_proof};
 use crate::core::artifacts::{
-    AffectedCellsArtifact, EventAttestation, ExpectedHashes, LeafHash, RawDataEntry,
-    RawDataManifest, RawSourceContentHash, SourceEntry, SourceManifest, StoredSourceRef,
-    UnsignedPayloadV1,
+    AffectedCellsArtifact, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest,
+    RawSourceContentHash, SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayloadV1,
 };
 use crate::core::source_archive::{SourceArchive, SourceArchiveError};
 use crate::core::types::{
-    JmaEventInput, OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput,
-    WorkerToTeeRequest,
+    OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,
 };
 use crate::crypto::{PayloadSigner, sha3_256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
-use crate::source::jma::parse_vxse53_event;
 use crate::source::usgs::{UsgsDetail, UsgsShakeMapProduct, parse_detail, parse_grid_points};
 use crate::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELL_METRIC_USGS_MMI,
@@ -42,11 +39,13 @@ pub fn process_usgs_with_source_archive(
             "raw_grid_uri is required for archived finalized output".to_owned(),
         ))
     })?;
+    let raw_grid_bytes = raw_grid_bytes_for_source(&input, &grid_xml, &raw_grid_uri)
+        .map_err(SourceArchiveError::Oracle)?;
     let detail_hash = to_hex(&sha3_256_bytes(&input.detail_json));
-    let grid_hash = to_hex(&sha3_256_bytes(&grid_xml));
+    let grid_hash = to_hex(&sha3_256_bytes(&raw_grid_bytes));
     let detail_ref =
         archive.store_and_verify(&input.raw_detail_uri, &detail_hash, &input.detail_json)?;
-    let grid_ref = archive.store_and_verify(&raw_grid_uri, &grid_hash, &grid_xml)?;
+    let grid_ref = archive.store_and_verify(&raw_grid_uri, &grid_hash, &raw_grid_bytes)?;
     let archive_refs = UsgsArchiveRefs {
         detail_source_uri: input.raw_detail_uri.clone(),
         detail_ref,
@@ -141,12 +140,13 @@ fn process_usgs_inner(
     let raw_grid_uri = input.raw_grid_uri.clone().ok_or_else(|| {
         OracleError::InvalidGridPoint("raw_grid_uri is required for finalized output".to_owned())
     })?;
+    let raw_grid_bytes = raw_grid_bytes_for_source(&input, grid_xml, &raw_grid_uri)?;
     let raw_data_manifest = raw_data_manifest(
         &detail.id,
         &input.raw_detail_uri,
         &input.detail_json,
         &raw_grid_uri,
-        grid_xml,
+        &raw_grid_bytes,
         archive_refs.as_ref(),
     );
     let affected_artifact = AffectedCellsArtifact {
@@ -239,7 +239,6 @@ fn process_usgs_inner(
             None,
             Some("unsigned_payload_v1.json"),
         ),
-        event_attestation: None,
         source_manifest: Some(source_manifest),
         raw_data_manifest: Some(raw_data_manifest),
         affected_cells: Some(affected_artifact),
@@ -286,58 +285,9 @@ pub fn process_usgs_with_signer(
     Ok(output)
 }
 
-pub fn process_jma_event_with_archive(
-    input: JmaEventInput,
-    archive: &impl SourceArchive,
-) -> Result<OracleOutput, SourceArchiveError> {
-    let source_hash = to_hex(&sha3_256_bytes(&input.source_xml));
-    let source_xml_blob =
-        archive.store_and_verify(&input.source_uri, &source_hash, &input.source_xml)?;
-    let event = parse_vxse53_event(&input.source_xml)?;
-    let event_attestation = EventAttestation {
-        provider: "JMA".to_owned(),
-        event_id: event.event_id.clone(),
-        serial: event.serial,
-        occurred_at_ms: event.origin_time_ms,
-        updated_at_ms: event.report_time_ms,
-        origin_time_ms: event.origin_time_ms,
-        max_shindo: event.max_shindo,
-        max_shindo_x10: event.max_shindo_x10,
-        hypocenter_name: event.hypocenter_name,
-        hypocenter_lat_e7: event.hypocenter_lat_e7,
-        hypocenter_lon_e7: event.hypocenter_lon_e7,
-        hypocenter_depth_m: event.hypocenter_depth_m,
-        source_xml_blob,
-        source_xml_hash: source_hash,
-    };
-
-    Ok(OracleOutput {
-        result: ResultSummary {
-            case_id: input.case_id,
-            status: OracleStatus::PendingMmi,
-            source_event_id: event.event_id,
-            hazard_type: "EARTHQUAKE".to_owned(),
-            primary_source: "JMA".to_owned(),
-            geo_resolution: GEO_RESOLUTION,
-            error_code: Some("JMA_IMPACT_SOURCE_REQUIRED".to_owned()),
-            expected_payload: None,
-        },
-        event_attestation: Some(event_attestation),
-        source_manifest: None,
-        raw_data_manifest: None,
-        affected_cells: None,
-        expected_hashes: None,
-        sample_proof: None,
-        unsigned_payload: None,
-        unsigned_bcs_payload: None,
-        signature: None,
-    })
-}
-
 fn status_only(result: ResultSummary) -> OracleOutput {
     OracleOutput {
         result,
-        event_attestation: None,
         source_manifest: None,
         raw_data_manifest: None,
         affected_cells: None,
@@ -414,9 +364,6 @@ fn raw_data_manifest(
     grid_bytes: &[u8],
     archive_refs: Option<&UsgsArchiveRefs>,
 ) -> RawDataManifest {
-    // `grid_uri` records the fetched artifact URI. When the artifact is grid.xml.zip,
-    // `grid_bytes` is the single decompressed grid.xml passed into the pure core; the
-    // current manifest schema has one hash slot, so it pins the exact core input bytes.
     let detail_hash = to_hex(&sha3_256_bytes(detail_bytes));
     let grid_hash = to_hex(&sha3_256_bytes(grid_bytes));
     let mut entries = vec![
@@ -444,6 +391,22 @@ fn raw_data_manifest(
         entries,
         oracle_version: ORACLE_VERSION,
     }
+}
+
+fn raw_grid_bytes_for_source(
+    input: &UsgsOracleInput,
+    grid_xml: &[u8],
+    raw_grid_uri: &str,
+) -> Result<Vec<u8>, OracleError> {
+    if let Some(raw_grid_bytes) = input.raw_grid_bytes.as_ref() {
+        return Ok(raw_grid_bytes.clone());
+    }
+    if raw_grid_uri.ends_with(".zip") {
+        return Err(OracleError::InvalidGridPoint(
+            "raw_grid_bytes is required when raw_grid_uri points to a zip artifact".to_owned(),
+        ));
+    }
+    Ok(grid_xml.to_vec())
 }
 
 fn raw_data_entry(

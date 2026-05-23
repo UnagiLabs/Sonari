@@ -12,9 +12,9 @@ Rust、TypeScript、Moveは、必ず以下の順序で `AffectedCellLeaf` をBCS
 | 2 | `event_revision` | `u32` | Payloadと同じSonari Finalized Revision |
 | 3 | `h3_index` | `u64` | H3 index。JSON artifactではdecimal string |
 | 4 | `geo_resolution` | `u8` | MVP値は `7` |
-| 5 | `cell_metric` | `u8` | `USGS_MMI` または `JMA_SHINDO` |
+| 5 | `cell_metric` | `u8` | `USGS_MMI` |
 | 6 | `intensity_value` | `u16` | scale適用後の震度値 |
-| 7 | `intensity_scale` | `u8` | `MMI_X100` または `JMA_SHINDO_X10` |
+| 7 | `intensity_scale` | `u8` | `MMI_X100` |
 | 8 | `cell_band` | `u8` | Claim対象セルのみなので `1..3` |
 | 9 | `cells_generation_method` | `u8` | Payloadと同じ生成方式 |
 | 10 | `oracle_version` | `u64` | Payloadと同じoracle version |
