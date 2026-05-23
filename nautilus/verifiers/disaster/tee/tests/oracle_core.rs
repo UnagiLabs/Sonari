@@ -290,6 +290,37 @@ fn usgs_archive_blob_mismatch_prevents_finalized_signature() {
 }
 
 #[test]
+fn source_archive_entrypoint_preserves_non_finalized_status_without_archive_or_signature() {
+    let signer = CountingSigner::default();
+    let archive = RecordingSourceArchive::default();
+
+    for (case_id, expected_status) in [
+        (
+            "usgs/pending_source_no_shakemap",
+            OracleStatus::PendingSource,
+        ),
+        ("usgs/pending_mmi_empty_grid", OracleStatus::PendingMmi),
+        ("usgs/rejected_cancelled_shakemap", OracleStatus::Rejected),
+        ("usgs/rejected_no_affected_cells", OracleStatus::Rejected),
+    ] {
+        let output =
+            process_usgs_with_source_archive(non_finalized_input(case_id), &archive, &signer)
+                .expect("non-finalized archive mode should return status output");
+
+        assert_eq!(output.result.status, expected_status);
+        assert!(output.signature.is_none());
+        assert!(output.unsigned_payload.is_none());
+        assert!(output.unsigned_bcs_payload.is_none());
+        assert!(output.raw_data_manifest.is_none());
+        assert!(output.affected_cells.is_none());
+    }
+
+    assert_eq!(archive.stored.get(), 0);
+    assert_eq!(archive.fetched.get(), 0);
+    assert_eq!(signer.calls.get(), 0);
+}
+
+#[test]
 fn entrypoint_calls_signer_only_for_finalized_results() {
     let signer = CountingSigner::default();
 

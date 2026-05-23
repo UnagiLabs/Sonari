@@ -240,7 +240,11 @@ where
         );
         let fetched_bytes = self
             .blob_fetcher
-            .fetch(&blob_url)
+            .fetch(
+                &blob_url,
+                bytes.len() as u64,
+                self.config.command_timeout_ms,
+            )
             .map_err(SourceArchiveError::FetchFailed)?;
         let fetched_hash = to_hex(&sha3_256_bytes(&fetched_bytes));
         if fetched_hash != source_hash {
@@ -370,12 +374,22 @@ impl WalrusCommandRunner for SystemWalrusCommandRunner {
 }
 
 pub trait BlobFetcher {
-    fn fetch(&self, url: &str) -> Result<Vec<u8>, String>;
+    fn fetch(
+        &self,
+        url: &str,
+        expected_size_bytes: u64,
+        timeout_ms: u64,
+    ) -> Result<Vec<u8>, String>;
 }
 
 impl<T: BlobFetcher + ?Sized> BlobFetcher for &T {
-    fn fetch(&self, url: &str) -> Result<Vec<u8>, String> {
-        (*self).fetch(url)
+    fn fetch(
+        &self,
+        url: &str,
+        expected_size_bytes: u64,
+        timeout_ms: u64,
+    ) -> Result<Vec<u8>, String> {
+        (*self).fetch(url, expected_size_bytes, timeout_ms)
     }
 }
 
@@ -383,15 +397,38 @@ impl<T: BlobFetcher + ?Sized> BlobFetcher for &T {
 pub struct ReqwestBlobFetcher;
 
 impl BlobFetcher for ReqwestBlobFetcher {
-    fn fetch(&self, url: &str) -> Result<Vec<u8>, String> {
-        let response = reqwest::blocking::get(url)
+    fn fetch(
+        &self,
+        url: &str,
+        expected_size_bytes: u64,
+        timeout_ms: u64,
+    ) -> Result<Vec<u8>, String> {
+        if timeout_ms == 0 {
+            return Err("aggregator fetch timeout must be greater than zero".to_owned());
+        }
+        let max_read_bytes = expected_size_bytes
+            .checked_add(1)
+            .ok_or_else(|| "expected source size is too large".to_owned())?;
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_millis(timeout_ms))
+            .build()
+            .map_err(|error| format!("GET {url} client build failed: {error}"))?;
+        let response = client
+            .get(url)
+            .send()
             .map_err(|error| format!("GET {url} failed: {error}"))?
             .error_for_status()
             .map_err(|error| format!("GET {url} returned error status: {error}"))?;
-        response
-            .bytes()
-            .map(|bytes| bytes.to_vec())
-            .map_err(|error| format!("GET {url} body read failed: {error}"))
+        let mut body = response.take(max_read_bytes);
+        let mut bytes = Vec::new();
+        body.read_to_end(&mut bytes)
+            .map_err(|error| format!("GET {url} body read failed: {error}"))?;
+        if bytes.len() as u64 > expected_size_bytes {
+            return Err(format!(
+                "GET {url} body exceeds expected size {expected_size_bytes} bytes"
+            ));
+        }
+        Ok(bytes)
     }
 }
 
@@ -576,6 +613,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::ffi::OsString;
     use std::fs;
+    use std::net::TcpListener;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -621,6 +659,14 @@ mod tests {
         assert_eq!(
             fetcher.urls.borrow().as_slice(),
             ["https://aggregator.test/v1/blobs/blob-123"]
+        );
+        assert_eq!(
+            fetcher.requests.borrow().as_slice(),
+            [FetchRequest {
+                url: "https://aggregator.test/v1/blobs/blob-123".to_owned(),
+                expected_size_bytes: bytes.len() as u64,
+                timeout_ms: 120_000,
+            }]
         );
         assert_eq!(
             walrus
@@ -792,6 +838,27 @@ mod tests {
     }
 
     #[test]
+    fn reqwest_blob_fetcher_rejects_body_larger_than_expected_size() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("test request should connect");
+            let mut buffer = [0_u8; 1024];
+            let _ = stream.read(&mut buffer);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd")
+                .unwrap();
+        });
+
+        let error = ReqwestBlobFetcher
+            .fetch(&format!("http://{address}/v1/blobs/blob-123"), 3, 1_000)
+            .expect_err("oversized aggregator response must fail closed");
+
+        server.join().unwrap();
+        assert!(error.contains("exceeds expected size"));
+    }
+
+    #[test]
     fn walrus_cli_archive_rejects_aggregator_blob_id_mismatch() {
         let bytes = b"source".to_vec();
         let hash = source_hash(&bytes);
@@ -912,6 +979,14 @@ mod tests {
         bytes: Vec<u8>,
         error: Option<String>,
         urls: RefCell<Vec<String>>,
+        requests: RefCell<Vec<FetchRequest>>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct FetchRequest {
+        url: String,
+        expected_size_bytes: u64,
+        timeout_ms: u64,
     }
 
     impl FakeBlobFetcher {
@@ -920,6 +995,7 @@ mod tests {
                 bytes,
                 error: None,
                 urls: RefCell::new(Vec::new()),
+                requests: RefCell::new(Vec::new()),
             }
         }
 
@@ -928,13 +1004,24 @@ mod tests {
                 bytes: Vec::new(),
                 error: Some(error.to_owned()),
                 urls: RefCell::new(Vec::new()),
+                requests: RefCell::new(Vec::new()),
             }
         }
     }
 
     impl BlobFetcher for FakeBlobFetcher {
-        fn fetch(&self, url: &str) -> Result<Vec<u8>, String> {
+        fn fetch(
+            &self,
+            url: &str,
+            expected_size_bytes: u64,
+            timeout_ms: u64,
+        ) -> Result<Vec<u8>, String> {
             self.urls.borrow_mut().push(url.to_owned());
+            self.requests.borrow_mut().push(FetchRequest {
+                url: url.to_owned(),
+                expected_size_bytes,
+                timeout_ms,
+            });
             if let Some(error) = &self.error {
                 return Err(error.clone());
             }

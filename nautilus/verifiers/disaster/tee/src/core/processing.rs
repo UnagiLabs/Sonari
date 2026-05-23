@@ -29,6 +29,11 @@ pub fn process_usgs_with_source_archive(
     archive: &impl SourceArchive,
     signer: &impl PayloadSigner,
 ) -> Result<OracleOutput, SourceArchiveError> {
+    let output = process_usgs_inner(input.clone(), None)?;
+    if output.result.status != OracleStatus::Finalized {
+        return Ok(output);
+    }
+
     let grid_xml = input.grid_xml.clone().ok_or_else(|| {
         SourceArchiveError::Oracle(OracleError::InvalidGridPoint(
             "grid_xml is required for archived finalized output".to_owned(),
