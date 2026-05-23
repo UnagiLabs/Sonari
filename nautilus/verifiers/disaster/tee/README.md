@@ -45,68 +45,61 @@ tee/
 
 ## 処理パイプライン詳細
 
-```
-入力: UsgsOracleInput
-  ├── detail_json     ← USGS地震詳細データ（JSON）
-  ├── grid_xml        ← ShakeMapグリッドXML（MMI値の格子データ）
-  ├── raw_grid_uri    ← グリッドXMLの保存URI
-  └── その他URIなど
+```mermaid
+flowchart TD
+  input[
+    入力: UsgsOracleInput<br/>
+    detail_json / grid_xml / raw_grid_uri / その他URI
+  ]
 
-  ステップ 1: USGS JSONパース（source/usgs.rs）
-     parse_detail(detail_json)
-     → UsgsDetail { id, properties: { time, updated, products: { shakemap } } }
+  parse["ステップ 1: USGS JSONパース<br/>parse_detail(detail_json)<br/>source/usgs.rs"]
 
-  ステップ 2: ShakeMap選択
-     select_preferred_shakemap_product(products)
-     → UsgsShakeMapProduct（なければ pending_source を返して終了）
-     ※ map_status == "CANCELLED" なら rejected を返して終了
+  select["ステップ 2: ShakeMap選択<br/>select_preferred_shakemap_product(products)"]
 
-  ステップ 3: グリッドXML解析（source/usgs.rs）
-     parse_grid_points(grid_xml)
-     → Vec<GridPoint> { lat, lon, mmi_x100 }
-     ※ グリッドが空なら pending_mmi を返して終了
+  hasShakeMap{ShakeMap がある?}
+  cancelled{map_status が CANCELLED?}
 
-  ステップ 4: H3セル変換・P90集計（compute/geo.rs, intensity.rs）
-     affected_cells_from_points(points)
-       - 各グリッドポイントを H3解像度7 のセルIDに変換
-       - 同じセルに複数ポイントがあれば全MMI値を収集
-       - p90_x100(values) で P90（90パーセンタイル）値を計算
-       - cell_band(mmi_x100) でバンド（0-3）に分類
-       - バンド >= MIN_CLAIM_BAND（1）のセルのみ残す
-     → Vec<AffectedCellJson>（影響セル一覧）
-     ※ 0件なら rejected を返して終了
+  grid["ステップ 3: グリッドXML解析<br/>parse_grid_points(grid_xml)<br/>Vec&lt;GridPoint&gt;: lat / lon / mmi_x100"]
 
-  ステップ 5: ハッシュ計算
-     source_manifest → SHA3-256 → source_set_hash
-     raw_data_manifest → SHA3-256 → raw_data_hash
-     affected_cells → SHA3-256 → affected_cells_data_hash
+  hasGrid{グリッドポイントがある?}
 
-  ステップ 6: Merkleツリー構築（compute/merkle.rs）
-     leaf_hashes(affected_cells, event_uid_bytes)
-       - 各セルを BCS シリアライズ → SHA3-256 でリーフハッシュ生成
-     merkle_root_from_leaf_hashes(leaf_hashes)
-       - リーフを2つずつペアにして内部ノードハッシュを計算
-       - 奇数個の場合は最後を1つそのまま上げる
-       - 繰り返してルートハッシュを得る
+  cells["ステップ 4: H3セル変換・P90集計<br/>affected_cells_from_points(points)<br/>H3解像度7 / P90 / バンド分類"]
 
-  ステップ 7: BCSシリアライゼーション（encoding/bcs_payload.rs）
-     payload_bcs_bytes(unsigned_payload)
-     - PAYLOAD_V1_FIELD_ORDER の順でフィールドをシリアライズ
+  hasAffectedCells{影響セルがある?}
 
-  ステップ 8: Ed25519署名（crypto/mod.rs）
-     signer.sign_payload(bcs_bytes)
-     → signature（64バイト）+ public_key（32バイト）
+  hash[
+    ステップ 5: ハッシュ計算<br/>
+    source_set_hash<br/>
+    raw_data_hash<br/>
+    affected_cells_data_hash
+  ]
 
-出力: OracleOutput
-  ├── result          ← ResultSummary（status, error_code など）
-  ├── source_manifest ← ソース記録
-  ├── raw_data_manifest ← 生データ記録
-  ├── affected_cells  ← 影響セル一覧（AffectedCellsArtifact）
-  ├── expected_hashes ← 各種ハッシュの期待値（テスト検証用）
-  ├── sample_proof    ← Merkle証明サンプル
-  ├── unsigned_payload ← 署名前ペイロード
-  ├── unsigned_bcs_payload ← BCSバイト列
-  └── signature       ← Ed25519署名（finalizedの場合のみ）
+  merkle["ステップ 6: Merkleツリー構築<br/>leaf_hashes()<br/>merkle_root_from_leaf_hashes()"]
+
+  bcs["ステップ 7: BCSシリアライゼーション<br/>payload_bcs_bytes(unsigned_payload)<br/>PAYLOAD_V1_FIELD_ORDER の順で変換"]
+
+  sign["ステップ 8: Ed25519署名<br/>signer.sign_payload(bcs_bytes)<br/>signature + public_key"]
+
+  output[
+    出力: OracleOutput<br/>
+    result / manifests / affected_cells / hashes<br/>
+    sample_proof / unsigned_payload / signature
+  ]
+
+  pendingSource[pending_source]
+  pendingMmi[pending_mmi]
+  rejectedCancelled[rejected<br/>SHAKEMAP_CANCELLED]
+  rejectedNoCells[rejected<br/>NO_AFFECTED_CELLS]
+
+  input --> parse --> select --> hasShakeMap
+  hasShakeMap -->|いいえ| pendingSource
+  hasShakeMap -->|はい| cancelled
+  cancelled -->|はい| rejectedCancelled
+  cancelled -->|いいえ| grid --> hasGrid
+  hasGrid -->|いいえ| pendingMmi
+  hasGrid -->|はい| cells --> hasAffectedCells
+  hasAffectedCells -->|いいえ| rejectedNoCells
+  hasAffectedCells -->|はい| hash --> merkle --> bcs --> sign --> output
 ```
 
 ---
@@ -133,20 +126,29 @@ tee/
 - セルIDが1つの64bit整数で表せる（ブロックチェーンに乗せやすい）
 - 解像度7では1セルあたり約1.2km²（適度な粒度）
 
-```
-affected_cells_from_points(points) の処理:
+```mermaid
+flowchart TD
+  point[
+    GridPoint<br/>
+    lat / lon / mmi_x100
+  ]
+  h3["H3セルID（u64）<br/>LatLng::new(lat, lon).to_cell(Resolution::Seven)"]
+  group[
+    同じセルのMMI値をグループ化<br/>
+    BTreeMap
+  ]
+  values["[mmi_x100, mmi_x100, ...]"]
+  p90["P90 MMI値<br/>p90_x100(&values)"]
+  band["バンド（0-3）<br/>cell_band(mmi_x100)"]
+  filter[
+    MIN_CLAIM_BAND 以上でフィルタ
+  ]
+  affected[
+    AffectedCellJson<br/>
+    h3_index / intensity_value / cell_band
+  ]
 
-  GridPoint { lat, lon, mmi_x100 }
-       ↓ LatLng::new(lat, lon).to_cell(Resolution::Seven)
-  H3セルID（u64）
-       ↓ BTreeMapで同セルのMMI値をグループ化
-  [mmi_x100, mmi_x100, ...]
-       ↓ p90_x100(&values)
-  P90 MMI値
-       ↓ cell_band(mmi_x100)
-  バンド（0-3）
-       ↓ band >= MIN_CLAIM_BAND でフィルタ
-  AffectedCellJson { h3_index, intensity_value, cell_band }
+  point --> h3 --> group --> values --> p90 --> band --> filter --> affected
 ```
 
 ### `compute/intensity.rs` — MMI計算
@@ -161,13 +163,12 @@ affected_cells_from_points(points) の処理:
 2. `p90_x100(values)` → ソートして上位10%の境界値を取得
 3. `cell_band(mmi_x100)` → 以下のバンドに分類：
 
-```
-MMI値（×100） │ バンド │ 意味
-0 〜 699      │   0   │ 申請対象外（MMI 6.99以下）
-700 〜 799    │   1   │ 弱い被害（MMI 7.00〜7.99）
-800 〜 899    │   2   │ 中程度の被害（MMI 8.00〜8.99）
-900以上       │   3   │ 強い被害（MMI 9.00以上）
-```
+| MMI値（×100） | バンド | 意味 |
+|---|---:|---|
+| 0 〜 699 | 0 | 申請対象外（MMI 6.99以下） |
+| 700 〜 799 | 1 | 弱い被害（MMI 7.00〜7.99） |
+| 800 〜 899 | 2 | 中程度の被害（MMI 8.00〜8.99） |
+| 900以上 | 3 | 強い被害（MMI 9.00以上） |
 
 ### `compute/merkle.rs` — Merkleツリー
 
@@ -175,13 +176,23 @@ MMI値（×100） │ バンド │ 意味
 
 木の形に似たデータ構造で、大量のデータを1つのハッシュ（ルートハッシュ）で表現できます。
 
-```
-葉（リーフ）ノード：各H3セルのハッシュ
-  [セルA] [セルB] [セルC] [セルD]
-      ↓ペア結合         ↓ペア結合
-  [AB ハッシュ]      [CD ハッシュ]
-         ↓ペア結合
-      [ルートハッシュ]
+```mermaid
+flowchart TD
+  leafA[セルA<br/>リーフハッシュ]
+  leafB[セルB<br/>リーフハッシュ]
+  leafC[セルC<br/>リーフハッシュ]
+  leafD[セルD<br/>リーフハッシュ]
+
+  ab[AB ハッシュ]
+  cd[CD ハッシュ]
+  root[ルートハッシュ]
+
+  leafA --> ab
+  leafB --> ab
+  leafC --> cd
+  leafD --> cd
+  ab --> root
+  cd --> root
 ```
 
 内部ノードのハッシュ計算：
