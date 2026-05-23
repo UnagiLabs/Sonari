@@ -15,7 +15,8 @@ import {
 const target = "0x123::disaster_oracle::submit_payload_v1";
 const registry = "0x456";
 const verifierRegistry = "0x654";
-const LOCAL_E2E_TEST_TIMEOUT_MS = 30_000;
+// CI runs this test with a cold Cargo binary build before the Rust TEE tests.
+const LOCAL_E2E_TEST_TIMEOUT_MS = 90_000;
 
 describe("Nautilus local oracle E2E", () => {
     it(
