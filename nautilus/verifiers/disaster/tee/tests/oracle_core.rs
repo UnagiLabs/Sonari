@@ -29,10 +29,10 @@ fn finalized_input() -> UsgsOracleInput {
         detail_json: read_fixture(format!("{FIXTURE_DIR}/input/usgs_detail.json")),
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_detail_uri:
-            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
+            "nautilus/verifiers/disaster/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
                 .to_owned(),
         raw_grid_uri: Some(
-            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
+            "nautilus/verifiers/disaster/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
                 .to_owned(),
         ),
         raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
@@ -212,7 +212,7 @@ fn finalized_usgs_archives_raw_sources_before_signing_payload() {
     for entry in &raw_manifest.entries {
         assert!(entry.uri.starts_with("walrus://blob/"));
         assert!(entry.walrus_blob_id.starts_with("test-walrus-"));
-        assert!(entry.source_uri.is_some());
+        assert!(!entry.source_uri.is_empty());
         assert_eq!(entry.content_hash, entry.source_hash);
     }
 }
@@ -254,7 +254,10 @@ fn jma_vxse53_event_attestation_archives_source_without_claim_root() {
 
     assert_eq!(output.result.status, OracleStatus::PendingMmi);
     assert_eq!(output.result.source_event_id, "20240101161010");
-    assert_eq!(output.result.error_code.as_deref(), Some("JMA_IMPACT_SOURCE_REQUIRED"));
+    assert_eq!(
+        output.result.error_code.as_deref(),
+        Some("JMA_IMPACT_SOURCE_REQUIRED")
+    );
     assert!(output.affected_cells.is_none());
     assert!(output.unsigned_payload.is_none());
     assert!(output.signature.is_none());
@@ -265,13 +268,19 @@ fn jma_vxse53_event_attestation_archives_source_without_claim_root() {
     assert_eq!(event_attestation.provider, "JMA");
     assert_eq!(event_attestation.event_id, "20240101161010");
     assert_eq!(event_attestation.serial, "1");
-    assert_eq!(event_attestation.origin_time_ms, 1704100210000);
+    assert_eq!(event_attestation.origin_time_ms, 1704093010000);
     assert_eq!(event_attestation.max_shindo, Some("6弱".to_owned()));
     assert_eq!(event_attestation.max_shindo_x10, Some(55));
-    assert_eq!(event_attestation.hypocenter_name, Some("石川県能登地方".to_owned()));
+    assert_eq!(
+        event_attestation.hypocenter_name,
+        Some("石川県能登地方".to_owned())
+    );
     assert_eq!(event_attestation.hypocenter_lat_e7, Some(372000000));
     assert_eq!(event_attestation.hypocenter_lon_e7, Some(1369000000));
-    assert_eq!(event_attestation.source_xml_blob.uri, "walrus://blob/test-walrus-0");
+    assert_eq!(
+        event_attestation.source_xml_blob.uri,
+        "walrus://blob/test-walrus-0"
+    );
     assert_eq!(
         event_attestation.source_xml_hash,
         event_attestation.source_xml_blob.source_hash
@@ -610,7 +619,9 @@ impl SourceArchive for FailingSourceArchive {
         _source_hash: &str,
         _bytes: &[u8],
     ) -> Result<StoredSourceRef, SourceArchiveError> {
-        Err(SourceArchiveError::StoreFailed("publisher unavailable".to_owned()))
+        Err(SourceArchiveError::StoreFailed(
+            "publisher unavailable".to_owned(),
+        ))
     }
 }
 

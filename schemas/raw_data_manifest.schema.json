@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sonari.example/schemas/raw_data_manifest.schema.json",
   "title": "Sonari Raw Data Manifest",
-  "$comment": "raw_data_hash = SHA3-256(canonical_raw_data_manifest_json_bytes). Canonical JSON must emit keys in this schema order, with no whitespace, no trailing newline, and UTF-8 bytes. entries must be sorted by name, event_id, product, uri ascending. content_hash = SHA3-256(raw_source_bytes). Hex hashes must be lowercase 0x plus 64 hex characters.",
+  "$comment": "raw_data_hash = SHA3-256(canonical_raw_data_manifest_json_bytes). Canonical JSON must emit keys in this schema order, with no whitespace, no trailing newline, and UTF-8 bytes. entries must be sorted by name, event_id, product, uri ascending. content_hash/source_hash = SHA3-256(raw_source_bytes). Production finalized entries use uri = walrus://blob/<blob_id> and non-empty walrus_blob_id after store/read verification. Hex hashes must be lowercase 0x plus 64 hex characters.",
   "type": "object",
   "additionalProperties": false,
   "required": ["entries", "oracle_version"],
@@ -13,7 +13,17 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "event_id", "product", "uri", "content_hash"],
+        "required": [
+          "name",
+          "event_id",
+          "product",
+          "uri",
+          "content_hash",
+          "source_uri",
+          "walrus_blob_id",
+          "source_hash",
+          "size_bytes"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -34,6 +44,21 @@
           "content_hash": {
             "type": "string",
             "pattern": "^0x[0-9a-f]{64}$"
+          },
+          "source_uri": {
+            "type": "string",
+            "minLength": 1
+          },
+          "walrus_blob_id": {
+            "type": "string"
+          },
+          "source_hash": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

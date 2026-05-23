@@ -76,7 +76,7 @@ event_uid = SHA3-256(
 
 - `event_uid` 生成時の `primary_source` はPayload enum名ではなくsource name文字列です。MVPでは `USGS` を使います。
 - `source_set_hash = SHA3-256(canonical_source_manifest_json_bytes)` です。
-- `raw_data_hash = SHA3-256(canonical_raw_data_manifest_json_bytes)` です。raw source bytesを単純結合してhashしてはいけません。
+- `raw_data_hash = SHA3-256(canonical_raw_data_manifest_json_bytes)` です。raw source bytesを単純結合してhashしてはいけません。Production finalized の raw data manifest には Walrus の content-addressed blob id と raw source hash を含め、`raw_data_uri` は Walrus-backed manifest を指します。
 - `affected_cells_data_hash = SHA3-256(canonical_affected_cells_json_bytes)` です。
 - `affected_cells_root` とMerkle leaf / internal node hashはすべて `SHA3-256` です。詳細は `schemas/affected_cell_leaf.md` に従います。
 - `freshness_deadline_ms` はD1上の72時間finalization deadlineとは別物です。

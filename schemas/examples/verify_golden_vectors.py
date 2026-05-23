@@ -23,7 +23,17 @@ SOURCE_ENTRY_ORDER = [
     "url_hash",
 ]
 RAW_ORDER = ["entries", "oracle_version"]
-RAW_ENTRY_ORDER = ["name", "event_id", "product", "uri", "content_hash"]
+RAW_ENTRY_ORDER = [
+    "name",
+    "event_id",
+    "product",
+    "uri",
+    "content_hash",
+    "source_uri",
+    "walrus_blob_id",
+    "source_hash",
+    "size_bytes",
+]
 AFFECTED_ORDER = [
     "event_uid",
     "event_revision",

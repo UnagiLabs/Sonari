@@ -31,6 +31,42 @@ pub struct RawDataEntry {
     pub product: String,
     pub uri: String,
     pub content_hash: String,
+    pub source_uri: String,
+    pub walrus_blob_id: String,
+    pub source_hash: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EventAttestation {
+    pub provider: String,
+    pub event_id: String,
+    pub serial: String,
+    pub occurred_at_ms: u64,
+    pub updated_at_ms: u64,
+    pub origin_time_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_shindo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_shindo_x10: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypocenter_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypocenter_lat_e7: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypocenter_lon_e7: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypocenter_depth_m: Option<i32>,
+    pub source_xml_blob: StoredSourceRef,
+    pub source_xml_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StoredSourceRef {
+    pub uri: String,
+    pub walrus_blob_id: String,
+    pub source_hash: String,
+    pub size_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

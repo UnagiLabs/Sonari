@@ -7,15 +7,18 @@ mod source;
 pub use compute::intensity::{cell_band, mmi_decimal_to_x100, p90_x100};
 pub use compute::merkle::merkle_root_from_leaf_hashes;
 pub use core::artifacts::{
-    AffectedCellJson, AffectedCellsArtifact, ExpectedHashes, LeafHash, ProofStep, RawDataEntry,
-    RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact, SourceEntry,
-    SourceManifest, UnsignedPayloadV1,
+    AffectedCellJson, AffectedCellsArtifact, EventAttestation, ExpectedHashes, LeafHash, ProofStep,
+    RawDataEntry, RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact,
+    SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayloadV1,
 };
 pub use core::processing::{
-    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer,
+    process_jma_event_with_archive, process_usgs, process_usgs_from_worker_request,
+    process_usgs_with_signer, process_usgs_with_source_archive,
 };
+pub use core::source_archive::{SourceArchive, SourceArchiveError};
 pub use core::types::{
-    OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,
+    JmaEventInput, OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput,
+    WorkerToTeeRequest,
 };
 pub use crypto::{LocalEd25519Signer, PayloadSigner, sha3_256_bytes};
 pub use encoding::json::canonical_json_bytes;

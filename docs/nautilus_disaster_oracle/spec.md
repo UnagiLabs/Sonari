@@ -51,7 +51,7 @@ flowchart TD
 | Claim 接続 | `finalized` の DisasterEvent のみ root として使用可能 |
 | H3 | resolution 7 固定 |
 | affected_cells | `cell_band >= 1` の H3 セル集合 |
-| raw data | `raw_data_hash` は必須、`raw_data_uri` は MVP では optional |
+| raw data | `raw_data_hash` は必須。Production finalized では `raw_data_uri` は Walrus-backed raw data manifest を指す |
 | TEE | AWS EC2 / Nitro Enclaves 上の Nautilus 実行環境。候補検出時のみ起動する |
 
 ## 2. 責任分界
@@ -90,7 +90,7 @@ flowchart TD
 - ShakeMap が未公開の場合は finalize せず、`pending_source` として再チェック対象にする。
 - MVP live source として USGS ShakeMap `grid.xml.zip` を取得・照合する。
 - source freshness、source 更新時刻、許可 source を検証する。
-- raw source data から `raw_data_hash` を生成する。
+- raw source data を Walrus に保存し、blob id で再取得・hash 照合したうえで `raw_data_hash` を生成する。
 - H3 resolution 7 の候補セルを生成する。
 - 各 H3 セルに対して USGS MMI を集約する。
 - 各 H3 セルの `cell_band` を決定する。
@@ -100,7 +100,7 @@ flowchart TD
 - Claim 対象セルだけの `affected_cells_root` を生成する。
 - `source_set_hash` を生成する。
 - Move と同じ構造の BCS Payload を生成する。
-- `finalized` の場合だけ、Nautilus / TEE 内の秘密鍵で Payload に署名する。
+- `finalized` の場合だけ、Walrus 保存・再取得検証済みの artifact に対して Nautilus / TEE 内の秘密鍵で Payload に署名する。
 
 ### Nautilus / TEE がやらないこと
 
@@ -205,12 +205,15 @@ MVP の status は `new` / `processing` / `pending_source` / `pending_mmi` / `fi
 | error_code | 意味 |
 | --- | --- |
 | `NO_AFFECTED_CELLS` | TEE/Core が USGS 詳細と ShakeMap を検証したが、Claim 対象セルが 1 つもなかった |
+| `JMA_IMPACT_SOURCE_REQUIRED` | JMA VXSE53 から event attestation は作れたが、claim cell を作る spatial source が未取得 |
 | `WATCHER_BELOW_AUTO_THRESHOLD` | Watcher が summary auto-screening で小さい地震として skip し、TEE/Core を呼んでいない |
 | `REJECTED_AUTO_TRIGGER` | 72h finalization deadline 超過により auto trigger 処理を終了した |
 
 ## 6. Payload 要件
 
 この docs 更新では、Disaster Oracle v1 payload と `AffectedCellLeaf` の仕様を変更しない。BCS field order、enum 値、integer encoding、hash 対象 field、sort rule は `schemas/` と golden vector を正とする。
+
+Event attestation と impact attestation は分離する。Event attestation は USGS/JMA が公表した raw source bytes の hash と Walrus blob id を固定する。Impact attestation は Sonari の Claim 判定に使う `affected_cells_root` を固定する。JMA VXSE53 は震源・最大震度の event attestation には使えるが、空間的な claim cell source ではないため、VXSE53 単体では production claim root を生成しない。JMA の claim root には VXSE54 など、別途監査した spatial source を要求する。
 
 ### 入力要件
 
@@ -245,7 +248,7 @@ Nautilus / TEE が Move へ渡す BCS Payload には、既存 v1 として少な
 | `primary_source` | 許可 source 名 |
 | `source_set_hash` | source 集合の監査 hash |
 | `raw_data_hash` | 元データの監査 hash |
-| `raw_data_uri` | MVP では optional |
+| `raw_data_uri` | Production finalized では Walrus-backed raw data manifest |
 | `affected_cells_root` | Claim 対象セルだけの Merkle root。`cell_band >= 1` の leaf のみ含める |
 | `affected_cells_uri` | `finalized` では必須 |
 | `affected_cells_data_hash` | 対象セル一覧ファイル全体の 32-byte hash |
@@ -366,10 +369,10 @@ Claim 時は、提出された `AffectedCellLeaf` と Merkle proof が `affected
 - Cloudflare Queues によるジョブ化。
 - 過去 24 時間の定期バックフィル。
 - Worker 失敗・Nautilus 起動失敗通知。
-- JMA 震度 fixture。
+- JMA VXSE53 event attestation fixture。
 - `cell_metric` / `cell_aggregation` / `intensity_scale` を Payload に含める。
 - 異常に大きい `affected_cell_count` の warning log と admin 通知。
-- `raw_data_uri`。
+- Walrus-backed `raw_data_uri`。
 
 ### Could
 
@@ -378,14 +381,14 @@ Claim 時は、提出された `AffectedCellLeaf` と Merkle proof が `affected
 - R2 watcher snapshot 保存。
 - 複数 AWS Region / 複数 Enclave fallback。
 - USGS ShakeMap HDF 対応。
-- JMA 本番 parser。
+- JMA impact source parser。
 - 複数 source の quorum。
 - UI で H3 セルごとの Band 可視化。
-- Walrus 保存。
+- Walrus live integration。
 
 ## 10. Implementation follow-up TODO
 
-この docs-only 更新では実装コード、schemas、contracts、relayer、tee は変更しない。次 PR 以降で以下を実装対象にする。
+次 PR 以降で以下を実装対象にする。
 
 - shared 型へ `ignored_small` status と `WATCHER_BELOW_AUTO_THRESHOLD` error code を追加する。
 - watcher parser で USGS recent feed summary fields の `mag`、`mmi`、`alert`、`tsunami` を保持する。
