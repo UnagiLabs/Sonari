@@ -121,6 +121,7 @@ describe("HTTP sidecar adapters", () => {
             `Bearer ${runnerAuth}`,
             `Bearer ${runnerAuth}`,
         ]);
+        expect(calls[1]?.headers.get("x-runner-id")).toBe("runner-123");
         await expect(calls[1]?.json()).resolves.toEqual({ payload: request });
         await expect(calls[2]?.json()).resolves.toEqual({ runner_id: "runner-123" });
     });

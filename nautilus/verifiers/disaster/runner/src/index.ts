@@ -1,9 +1,9 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import {
     buildRelayerRequestPreview,
     dryRunRelayerSubmit,
@@ -16,8 +16,8 @@ import {
     type WorkerToTeeRequest,
 } from "@sonari/oracle-shared";
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
+const ABORT_KILL_GRACE_MS = 250;
 
 export interface RunnerServiceOptions {
     token: string;
@@ -26,11 +26,12 @@ export interface RunnerServiceOptions {
 }
 
 export interface TeeProcessAdapter {
-    process(request: WorkerToTeeRequest): Promise<TeeCoreResult>;
+    process(request: WorkerToTeeRequest, signal?: AbortSignal): Promise<TeeCoreResult>;
 }
 
 export function createRunnerServer(options: RunnerServiceOptions): Server {
     const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+    const sessions = new Map<string, RunnerSession>();
     return createServer(async (request, response) => {
         try {
             if (!isAuthorized(request, options.token)) {
@@ -57,17 +58,19 @@ export function createRunnerServer(options: RunnerServiceOptions): Server {
             }
 
             if (request.url === "/start") {
-                writeJson(response, 200, { ok: true, runner_id: `runner-${Date.now()}` });
+                const runnerId = `runner-${randomUUID()}`;
+                sessions.set(runnerId, {});
+                writeJson(response, 200, { ok: true, runner_id: runnerId });
                 return;
             }
 
             if (request.url === "/stop") {
-                writeJson(response, 200, { ok: true });
+                await handleStop(request, response, sessions, bodyLimitBytes);
                 return;
             }
 
             if (request.url === "/process") {
-                await handleProcess(request, response, options.tee, bodyLimitBytes);
+                await handleProcess(request, response, options.tee, sessions, bodyLimitBytes);
                 return;
             }
 
@@ -92,12 +95,46 @@ export function createRunnerServer(options: RunnerServiceOptions): Server {
     });
 }
 
+interface RunnerSession {
+    activeProcess?: AbortController;
+}
+
 async function handleProcess(
     request: IncomingMessage,
     response: ServerResponse,
     tee: TeeProcessAdapter,
+    sessions: Map<string, RunnerSession>,
     bodyLimitBytes: number,
 ): Promise<void> {
+    const runnerId = singleHeaderValue(request.headers["x-runner-id"]);
+    if (runnerId === undefined || runnerId.length === 0) {
+        writeJson(response, 400, {
+            ok: false,
+            error_code: "AWS_RUNNER_CONTRACT_INVALID",
+            message: "process requires x-runner-id",
+        });
+        return;
+    }
+
+    const session = sessions.get(runnerId);
+    if (session === undefined) {
+        writeJson(response, 404, {
+            ok: false,
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
+            message: "unknown runner_id",
+        });
+        return;
+    }
+
+    if (session.activeProcess !== undefined) {
+        writeJson(response, 409, {
+            ok: false,
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
+            message: "runner already has an active process",
+        });
+        return;
+    }
+
     const body = await readJsonBody(request, bodyLimitBytes);
     if (!isRecord(body) || firstUnexpectedKey(body, ["payload"]) !== undefined) {
         writeJson(response, 400, {
@@ -118,8 +155,61 @@ async function handleProcess(
         return;
     }
 
-    const result = await tee.process(validation.value);
-    writeJson(response, 200, { ok: true, result });
+    if (sessions.get(runnerId) !== session) {
+        writeJson(response, 404, {
+            ok: false,
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
+            message: "unknown runner_id",
+        });
+        return;
+    }
+
+    const abortController = new AbortController();
+    session.activeProcess = abortController;
+    try {
+        const result = await tee.process(validation.value, abortController.signal);
+        writeJson(response, 200, { ok: true, result });
+    } finally {
+        if (session.activeProcess === abortController) {
+            delete session.activeProcess;
+        }
+    }
+}
+
+async function handleStop(
+    request: IncomingMessage,
+    response: ServerResponse,
+    sessions: Map<string, RunnerSession>,
+    bodyLimitBytes: number,
+): Promise<void> {
+    const body = await readJsonBody(request, bodyLimitBytes);
+    if (
+        !isRecord(body) ||
+        firstUnexpectedKey(body, ["runner_id"]) !== undefined ||
+        typeof body.runner_id !== "string" ||
+        body.runner_id.length === 0
+    ) {
+        writeJson(response, 400, {
+            ok: false,
+            error_code: "AWS_RUNNER_CONTRACT_INVALID",
+            message: "stop accepts only runner_id",
+        });
+        return;
+    }
+
+    const session = sessions.get(body.runner_id);
+    if (session === undefined) {
+        writeJson(response, 404, {
+            ok: false,
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
+            message: "unknown runner_id",
+        });
+        return;
+    }
+
+    session.activeProcess?.abort();
+    sessions.delete(body.runner_id);
+    writeJson(response, 200, { ok: true });
 }
 
 async function handleRelayer(
@@ -184,12 +274,25 @@ export interface RustCliTeeAdapterOptions {
 export class RustCliTeeAdapter implements TeeProcessAdapter {
     constructor(private readonly options: RustCliTeeAdapterOptions) {}
 
-    async process(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
+    async process(request: WorkerToTeeRequest, signal?: AbortSignal): Promise<TeeCoreResult> {
         const dir = await mkdtemp(path.join(tmpdir(), "sonari-runner-"));
         const inputPath = path.join(dir, "worker_request.json");
         try {
             await writeFile(inputPath, JSON.stringify(request));
-            const { stdout } = await execFileAsync(
+            const options: Parameters<typeof execWithStdin>[2] = {
+                stdin: "",
+                maxBuffer: 10 * 1024 * 1024,
+            };
+            if (this.options.cwd !== undefined) {
+                options.cwd = this.options.cwd;
+            }
+            if (this.options.env !== undefined) {
+                options.env = this.options.env;
+            }
+            if (signal !== undefined) {
+                options.signal = signal;
+            }
+            const stdout = await execWithStdin(
                 "cargo",
                 [
                     "run",
@@ -201,11 +304,7 @@ export class RustCliTeeAdapter implements TeeProcessAdapter {
                     "--input",
                     inputPath,
                 ],
-                {
-                    cwd: this.options.cwd,
-                    env: this.options.env,
-                    maxBuffer: 10 * 1024 * 1024,
-                },
+                options,
             );
             return JSON.parse(stdout) as TeeCoreResult;
         } finally {
@@ -224,11 +323,14 @@ export interface EnclaveCommandTeeAdapterOptions {
 export class EnclaveCommandTeeAdapter implements TeeProcessAdapter {
     constructor(private readonly options: EnclaveCommandTeeAdapterOptions) {}
 
-    async process(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
+    async process(request: WorkerToTeeRequest, signal?: AbortSignal): Promise<TeeCoreResult> {
         const options: Parameters<typeof execWithStdin>[2] = {
             maxBuffer: 10 * 1024 * 1024,
             stdin: JSON.stringify(request),
         };
+        if (signal !== undefined) {
+            options.signal = signal;
+        }
         if (this.options.cwd !== undefined) {
             options.cwd = this.options.cwd;
         }
@@ -248,8 +350,13 @@ function execWithStdin(
         env?: NodeJS.ProcessEnv;
         stdin: string;
         maxBuffer: number;
+        signal?: AbortSignal;
     },
 ): Promise<string> {
+    if (options.signal?.aborted === true) {
+        return Promise.reject(new Error("process aborted"));
+    }
+
     return new Promise((resolve, reject) => {
         const child = spawn(command, args, {
             cwd: options.cwd,
@@ -259,11 +366,35 @@ function execWithStdin(
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
         let outputBytes = 0;
+        let killTimer: NodeJS.Timeout | undefined;
+        let settled = false;
+        const finish = (callback: () => void): void => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            callback();
+        };
+        const cleanup = (): void => {
+            if (killTimer !== undefined) {
+                clearTimeout(killTimer);
+                killTimer = undefined;
+            }
+            options.signal?.removeEventListener("abort", onAbort);
+        };
+        const onAbort = (): void => {
+            child.kill("SIGTERM");
+            killTimer = setTimeout(() => {
+                child.kill("SIGKILL");
+            }, ABORT_KILL_GRACE_MS);
+        };
+        options.signal?.addEventListener("abort", onAbort, { once: true });
         child.stdout.on("data", (chunk: Buffer) => {
             outputBytes += chunk.byteLength;
             if (outputBytes > options.maxBuffer) {
-                child.kill();
-                reject(new Error("process stdout exceeded maxBuffer"));
+                child.kill("SIGTERM");
+                finish(() => reject(new Error("process stdout exceeded maxBuffer")));
                 return;
             }
             stdout.push(chunk);
@@ -271,15 +402,29 @@ function execWithStdin(
         child.stderr.on("data", (chunk: Buffer) => {
             stderr.push(chunk);
         });
-        child.on("error", reject);
-        child.on("close", (code) => {
-            if (code === 0) {
-                resolve(Buffer.concat(stdout).toString("utf8"));
+        child.stdin.on("error", (error) => {
+            if (options.signal?.aborted === true) {
                 return;
             }
-            reject(
-                new Error(
-                    `${command} exited with ${code}: ${Buffer.concat(stderr).toString("utf8")}`,
+            finish(() => reject(error));
+        });
+        child.on("error", (error) => {
+            finish(() => reject(error));
+        });
+        child.on("close", (code) => {
+            if (options.signal?.aborted === true) {
+                finish(() => reject(new Error("process aborted")));
+                return;
+            }
+            if (code === 0) {
+                finish(() => resolve(Buffer.concat(stdout).toString("utf8")));
+                return;
+            }
+            finish(() =>
+                reject(
+                    new Error(
+                        `${command} exited with ${code}: ${Buffer.concat(stderr).toString("utf8")}`,
+                    ),
                 ),
             );
         });
@@ -306,6 +451,10 @@ async function readJsonBody(
 
 function isAuthorized(request: IncomingMessage, token: string): boolean {
     return token.length > 0 && request.headers.authorization === `Bearer ${token}`;
+}
+
+function singleHeaderValue(value: string | string[] | undefined): string | undefined {
+    return typeof value === "string" ? value : undefined;
 }
 
 function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {
