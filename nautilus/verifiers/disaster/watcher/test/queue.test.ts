@@ -235,6 +235,60 @@ describe("runner queue enqueue", () => {
 });
 
 describe("runner queue consumer", () => {
+    it("fails closed when RUNNER_MODE is not explicitly configured", async () => {
+        const repository = new InMemoryStateRepository();
+        const app = createWorkerApp({ now: () => baseNow });
+
+        await scanCandidates(repository, [candidate("us7000nomode")], baseNow);
+        const job = await repository.enqueueRunnerJob("us7000nomode", 1, "us7000nomode:1", baseNow);
+
+        await expect(app.queue({ messages: [new FakeQueueMessage(job as RunnerQueueJob)] }, env(repository))).rejects.toThrow(
+            /RUNNER_MODE is required/,
+        );
+    });
+
+    it("requires ALLOW_MOCK_RUNNER=true before using mock runner mode", async () => {
+        const repository = new InMemoryStateRepository();
+        const app = createWorkerApp({ now: () => baseNow });
+
+        await scanCandidates(repository, [candidate("us7000mockdenied")], baseNow);
+        const job = await repository.enqueueRunnerJob(
+            "us7000mockdenied",
+            1,
+            "us7000mockdenied:1",
+            baseNow,
+        );
+
+        await expect(
+            app.queue(
+                { messages: [new FakeQueueMessage(job as RunnerQueueJob)] },
+                { ...env(repository), RUNNER_MODE: "mock" },
+            ),
+        ).rejects.toThrow(/ALLOW_MOCK_RUNNER=true/);
+    });
+
+    it("allows mock runner mode only when explicitly opted in", async () => {
+        const repository = new InMemoryStateRepository();
+        const app = createWorkerApp({ now: () => baseNow });
+
+        await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
+        const job = await repository.enqueueRunnerJob("us7000sonari", 1, "us7000sonari:1", baseNow);
+        const message = new FakeQueueMessage(job as RunnerQueueJob);
+
+        await app.queue(
+            { messages: [message] },
+            { ...env(repository), RUNNER_MODE: "mock", ALLOW_MOCK_RUNNER: "true" },
+        );
+
+        expect(message.acked).toBe(true);
+        expect(await repository.get("us7000sonari")).toMatchObject({
+            status: "finalized",
+            payload_bcs_hex: "0x01",
+            signature: "0xsig",
+            public_key: "0xpub",
+        });
+    });
+
     it("claims queued jobs before invoking AWS runner lifecycle", async () => {
         const repository = new InMemoryStateRepository();
         const runner = new RecordingRunnerLifecycleAdapter();
@@ -263,6 +317,11 @@ describe("runner queue consumer", () => {
         expect(await repository.get("us7000sonari")).toMatchObject({
             status: "finalized",
             event_uid: "us7000sonari",
+            tee_result_json: JSON.stringify(runner.lastFinalizedResult),
+            payload_bcs_hex: "0x01",
+            signature: "0xsig",
+            public_key: "0xpub",
+            finalized_at_ms: baseNow,
             runner_id: "runner-1",
             runner_started_at_ms: baseNow,
             runner_stopped_at_ms: baseNow,
@@ -459,6 +518,7 @@ class RecordingRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
     starts = 0;
     readonly stops: string[] = [];
     readonly processRequests: WorkerToTeeRequest[] = [];
+    lastFinalizedResult: TeeCoreResult | null = null;
 
     constructor(
         private readonly options: {
@@ -486,7 +546,7 @@ class RecordingRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
         if (this.options.processError !== undefined) {
             throw this.options.processError;
         }
-        return (
+        const result =
             this.options.result ?? {
                 status: "finalized",
                 payload: {
@@ -497,8 +557,9 @@ class RecordingRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
                 payload_bcs_hex: "0x01",
                 signature: "0xsig",
                 public_key: "0xpub",
-            }
-        );
+            };
+        this.lastFinalizedResult = result.status === "finalized" ? structuredClone(result) : null;
+        return result;
     }
 
     async stop(runnerId: string): Promise<void> {

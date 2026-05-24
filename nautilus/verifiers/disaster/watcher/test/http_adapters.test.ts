@@ -314,4 +314,32 @@ describe("HTTP sidecar adapters", () => {
             verifierRegistry: preview.verifierRegistry,
         });
     });
+
+    it("can authenticate relayer dry-runs against the AWS runner service", async () => {
+        const calls: Request[] = [];
+        const adapter = new HttpRelayerAdapter(
+            {
+                sidecarUrl: "https://runner.example",
+                bearerToken: "runner-token",
+                mode: "dry_run",
+                target: preview.target,
+                registry: preview.registry,
+                verifierRegistry: preview.verifierRegistry,
+                grpcUrl: "https://sui.example",
+                senderAddress: "0xabc",
+            },
+            async (input: RequestInfo | URL) => {
+                const outbound = input instanceof Request ? input : new Request(input);
+                calls.push(outbound.clone());
+                return Response.json({ ok: true, value: { request: preview } });
+            },
+        );
+
+        await expect(adapter.relay(finalized)).resolves.toMatchObject({
+            ok: true,
+            value: { mode: "dry_run" },
+        });
+        expect(calls[0]?.url).toBe("https://runner.example/relayer/dry_run");
+        expect(calls[0]?.headers.get("authorization")).toBe("Bearer runner-token");
+    });
 });

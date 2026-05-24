@@ -42,6 +42,7 @@ export interface RelayerAdapter {
 
 export interface HttpRelayerPreviewConfig {
     sidecarUrl: string;
+    bearerToken?: string;
     target: string;
     registry: string;
     verifierRegistry: string;
@@ -66,6 +67,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
         this.mode = config.mode ?? "preview";
         this.grpcUrl = config.grpcUrl;
         this.senderAddress = config.senderAddress;
+        this.bearerToken = config.bearerToken;
     }
 
     private readonly target: string;
@@ -74,6 +76,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
     readonly mode: RelayerMode;
     private readonly grpcUrl: string | undefined;
     private readonly senderAddress: string | undefined;
+    private readonly bearerToken: string | undefined;
 
     async relay(input: TeeCoreResult): Promise<RelayerRunResult> {
         const validation = validateRelayerSubmitInput(input);
@@ -86,9 +89,13 @@ export class HttpRelayerAdapter implements RelayerAdapter {
         }
 
         try {
+            const headers = new Headers({ "content-type": "application/json" });
+            if (this.bearerToken !== undefined) {
+                headers.set("authorization", `Bearer ${this.bearerToken}`);
+            }
             const sidecarRequest = new Request(`${this.sidecarUrl}/relayer/${this.mode}`, {
                 method: "POST",
-                headers: { "content-type": "application/json" },
+                headers,
                 body: JSON.stringify({
                     input: validation.value satisfies SignedFinalizedPayload,
                     target: this.target,

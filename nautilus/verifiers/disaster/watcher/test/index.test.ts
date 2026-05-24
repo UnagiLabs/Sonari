@@ -435,6 +435,11 @@ describe("watcher state transitions", () => {
             runner_timeout_at_ms: null,
             runner_error_message: null,
             runner_stop_error: null,
+            tee_result_json: null,
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
         };
@@ -494,6 +499,11 @@ describe("watcher state transitions", () => {
             runner_timeout_at_ms: null,
             runner_error_message: null,
             runner_stop_error: null,
+            tee_result_json: null,
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
             created_at_ms: baseNow,
             updated_at_ms: baseNow,
         };
@@ -877,7 +887,7 @@ describe("relayer environment mode validation", () => {
         });
     });
 
-    it("keeps ORACLE_SIDECAR_URL scoped to the relayer and uses the mock runner by default", async () => {
+    it("keeps ORACLE_SIDECAR_URL scoped to the relayer when mock runner is explicit", async () => {
         const repository = new InMemoryStateRepository();
         const queue = new TestRunnerQueue();
         const calls: Request[] = [];
@@ -900,6 +910,8 @@ describe("relayer environment mode validation", () => {
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         await processQueuedEvent(app, repository, queue, {
+            RUNNER_MODE: "mock",
+            ALLOW_MOCK_RUNNER: "true",
             RELAYER_MODE: "preview",
             ORACLE_SIDECAR_URL: "http://127.0.0.1:8789",
             RELAYER_TARGET: "0x123::disaster_oracle::submit_payload_v1",
@@ -934,6 +946,7 @@ describe("relayer environment mode validation", () => {
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         await processQueuedEvent(app, repository, queue, {
+            RUNNER_MODE: "sidecar",
             RUNNER_SIDECAR_URL: "http://127.0.0.1:8789",
         });
 
@@ -970,6 +983,7 @@ describe("relayer environment mode validation", () => {
 
         await scanCandidates(repository, [candidate("us7000sonari")], baseNow);
         await processQueuedEvent(app, repository, queue, {
+            RUNNER_MODE: "aws",
             AWS_RUNNER_BASE_URL: "https://runner.example",
             AWS_RUNNER_TOKEN: "runner-token",
             RUNNER_SIDECAR_URL: "http://127.0.0.1:8789",

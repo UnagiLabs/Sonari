@@ -37,6 +37,11 @@ export interface EarthquakeEventRow {
     runner_timeout_at_ms: number | null;
     runner_error_message: string | null;
     runner_stop_error: string | null;
+    tee_result_json: string | null;
+    payload_bcs_hex: string | null;
+    signature: string | null;
+    public_key: string | null;
+    finalized_at_ms: number | null;
     created_at_ms: number;
     updated_at_ms: number;
 }
@@ -166,6 +171,11 @@ const SELECT_COLUMNS = `
   runner_timeout_at_ms,
   runner_error_message,
   runner_stop_error,
+  tee_result_json,
+  payload_bcs_hex,
+  signature,
+  public_key,
+  finalized_at_ms,
   created_at_ms,
   updated_at_ms
 `;
@@ -289,6 +299,11 @@ export class D1StateRepository implements StateRepository {
                      runner_timeout_at_ms = NULL,
                      runner_error_message = NULL,
                      runner_stop_error = NULL,
+                     tee_result_json = NULL,
+                     payload_bcs_hex = NULL,
+                     signature = NULL,
+                     public_key = NULL,
+                     finalized_at_ms = NULL,
                      updated_at_ms = ?
                  WHERE source_event_id = ?
                    AND status IN (${placeholders})
@@ -497,6 +512,11 @@ export class D1StateRepository implements StateRepository {
                          event_uid = ?,
                          latest_revision = ?,
                          source_updated_at_ms = ?,
+                         tee_result_json = ?,
+                         payload_bcs_hex = ?,
+                         signature = ?,
+                         public_key = ?,
+                         finalized_at_ms = ?,
                          updated_at_ms = ?
                      WHERE source_event_id = ?`,
                 )
@@ -504,6 +524,11 @@ export class D1StateRepository implements StateRepository {
                     payload.event_uid,
                     payload.event_revision,
                     payload.source_updated_at_ms,
+                    JSON.stringify(result),
+                    result.payload_bcs_hex,
+                    result.signature,
+                    result.public_key,
+                    nowMs,
                     nowMs,
                     sourceEventId,
                 )
@@ -690,6 +715,11 @@ export class InMemoryStateRepository implements StateRepository {
                 runner_timeout_at_ms: null,
                 runner_error_message: null,
                 runner_stop_error: null,
+                tee_result_json: null,
+                payload_bcs_hex: null,
+                signature: null,
+                public_key: null,
+                finalized_at_ms: null,
                 created_at_ms: nowMs,
                 updated_at_ms: nowMs,
             });
@@ -765,6 +795,11 @@ export class InMemoryStateRepository implements StateRepository {
             runner_timeout_at_ms: null,
             runner_error_message: null,
             runner_stop_error: null,
+            tee_result_json: null,
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
             updated_at_ms: nowMs,
         });
         return {
@@ -941,6 +976,11 @@ export class InMemoryStateRepository implements StateRepository {
                 event_uid: String(result.payload.event_uid),
                 latest_revision: Number(result.payload.event_revision),
                 source_updated_at_ms: Number(result.payload.source_updated_at_ms),
+                tee_result_json: JSON.stringify(result),
+                payload_bcs_hex: result.payload_bcs_hex,
+                signature: result.signature,
+                public_key: result.public_key,
+                finalized_at_ms: nowMs,
                 updated_at_ms: nowMs,
             });
             return;
@@ -1096,6 +1136,11 @@ interface RawEarthquakeEventRow extends Record<string, unknown> {
     runner_timeout_at_ms: number | null;
     runner_error_message: string | null;
     runner_stop_error: string | null;
+    tee_result_json: string | null;
+    payload_bcs_hex: string | null;
+    signature: string | null;
+    public_key: string | null;
+    finalized_at_ms: number | null;
     created_at_ms: number;
     updated_at_ms: number;
 }
@@ -1129,6 +1174,11 @@ function normalizeRow(row: RawEarthquakeEventRow): EarthquakeEventRow {
         runner_timeout_at_ms: row.runner_timeout_at_ms,
         runner_error_message: row.runner_error_message,
         runner_stop_error: row.runner_stop_error,
+        tee_result_json: row.tee_result_json,
+        payload_bcs_hex: row.payload_bcs_hex,
+        signature: row.signature,
+        public_key: row.public_key,
+        finalized_at_ms: row.finalized_at_ms,
         created_at_ms: row.created_at_ms,
         updated_at_ms: row.updated_at_ms,
     };
