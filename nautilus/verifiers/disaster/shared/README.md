@@ -137,10 +137,10 @@ rejected         → 拒否確定（再試行不可）
 | `TEE_SIGNATURE_FAILED` | TEE署名失敗 |
 | `BCS_SERIALIZATION_FAILED` | BCSシリアライゼーション失敗 |
 | `MERKLE_ROOT_FAILED` | Merkleルート計算失敗 |
-| `AWS_RUNNER_START_FAILED` | AWS Lambda起動失敗 |
-| `AWS_RUNNER_PROCESS_FAILED` | AWS Lambda処理失敗 |
-| `AWS_RUNNER_TIMEOUT` | AWS Lambdaタイムアウト |
-| `AWS_RUNNER_CONTRACT_INVALID` | AWS Lambdaの契約違反 |
+| `AWS_RUNNER_START_FAILED` | AWS runner起動失敗 |
+| `AWS_RUNNER_PROCESS_FAILED` | AWS runner処理失敗 |
+| `AWS_RUNNER_TIMEOUT` | AWS runnerタイムアウト |
+| `AWS_RUNNER_CONTRACT_INVALID` | AWS runnerの契約違反 |
 | `RELAYER_SUBMIT_FAILED` | Relayer送信失敗 |
 | `MOVE_REJECTED` | MoveコントラクトがRejectを返した |
 | `REJECTED_AUTO_TRIGGER` | 締切超過により自動拒否 |

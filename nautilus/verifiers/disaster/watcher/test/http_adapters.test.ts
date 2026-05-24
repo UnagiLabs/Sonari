@@ -121,6 +121,7 @@ describe("HTTP sidecar adapters", () => {
             `Bearer ${runnerAuth}`,
             `Bearer ${runnerAuth}`,
         ]);
+        expect(calls[1]?.headers.get("x-runner-id")).toBe("runner-123");
         await expect(calls[1]?.json()).resolves.toEqual({ payload: request });
         await expect(calls[2]?.json()).resolves.toEqual({ runner_id: "runner-123" });
     });
@@ -313,5 +314,33 @@ describe("HTTP sidecar adapters", () => {
             registry: preview.registry,
             verifierRegistry: preview.verifierRegistry,
         });
+    });
+
+    it("can authenticate relayer dry-runs against the AWS runner service", async () => {
+        const calls: Request[] = [];
+        const adapter = new HttpRelayerAdapter(
+            {
+                sidecarUrl: "https://runner.example",
+                bearerToken: "runner-token",
+                mode: "dry_run",
+                target: preview.target,
+                registry: preview.registry,
+                verifierRegistry: preview.verifierRegistry,
+                grpcUrl: "https://sui.example",
+                senderAddress: "0xabc",
+            },
+            async (input: RequestInfo | URL) => {
+                const outbound = input instanceof Request ? input : new Request(input);
+                calls.push(outbound.clone());
+                return Response.json({ ok: true, value: { request: preview } });
+            },
+        );
+
+        await expect(adapter.relay(finalized)).resolves.toMatchObject({
+            ok: true,
+            value: { mode: "dry_run" },
+        });
+        expect(calls[0]?.url).toBe("https://runner.example/relayer/dry_run");
+        expect(calls[0]?.headers.get("authorization")).toBe("Bearer runner-token");
     });
 });

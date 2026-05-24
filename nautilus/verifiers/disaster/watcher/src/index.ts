@@ -98,6 +98,8 @@ export interface WorkerEnv {
     EARTHQUAKE_EVENTS?: StateRepository | D1Database;
     RUNNER_JOBS?: RunnerJobQueue;
     MANUAL_SUBMIT_TOKEN?: string;
+    RUNNER_MODE?: string;
+    ALLOW_MOCK_RUNNER?: string;
     RUNNER_SIDECAR_URL?: string;
     ORACLE_SIDECAR_URL?: string;
     RELAYER_MODE?: string;
@@ -610,19 +612,38 @@ function queueFromEnv(env: WorkerEnv): RunnerJobQueue {
 }
 
 function runnerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RunnerLifecycleAdapter {
-    if (isNonEmptyString(env.AWS_RUNNER_BASE_URL) && isNonEmptyString(env.AWS_RUNNER_TOKEN)) {
-        return new AwsRunnerLifecycleAdapter({
-            baseUrl: env.AWS_RUNNER_BASE_URL,
-            token: env.AWS_RUNNER_TOKEN,
-            fetcher,
-        });
+    switch (env.RUNNER_MODE) {
+        case "aws":
+            if (
+                !isNonEmptyString(env.AWS_RUNNER_BASE_URL) ||
+                !isNonEmptyString(env.AWS_RUNNER_TOKEN)
+            ) {
+                throw new Error(
+                    "RUNNER_MODE=aws requires AWS_RUNNER_BASE_URL and AWS_RUNNER_TOKEN",
+                );
+            }
+            return new AwsRunnerLifecycleAdapter({
+                baseUrl: env.AWS_RUNNER_BASE_URL,
+                token: env.AWS_RUNNER_TOKEN,
+                fetcher,
+            });
+        case "sidecar":
+            if (!isNonEmptyString(env.RUNNER_SIDECAR_URL)) {
+                throw new Error("RUNNER_MODE=sidecar requires RUNNER_SIDECAR_URL");
+            }
+            return new RunnerAdapterLifecycleBridge(
+                new HttpRunnerAdapter(env.RUNNER_SIDECAR_URL, fetcher),
+            );
+        case "mock":
+            if (env.ALLOW_MOCK_RUNNER !== "true") {
+                throw new Error("RUNNER_MODE=mock requires ALLOW_MOCK_RUNNER=true");
+            }
+            return new MockRunnerLifecycleAdapter();
+        case undefined:
+            throw new Error("RUNNER_MODE is required; set aws, sidecar, or mock explicitly");
+        default:
+            throw new Error(`Unsupported RUNNER_MODE: ${env.RUNNER_MODE}`);
     }
-    if (isNonEmptyString(env.RUNNER_SIDECAR_URL)) {
-        return new RunnerAdapterLifecycleBridge(
-            new HttpRunnerAdapter(env.RUNNER_SIDECAR_URL, fetcher),
-        );
-    }
-    return new MockRunnerLifecycleAdapter();
 }
 
 function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter | undefined {
@@ -658,8 +679,9 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         );
     }
 
+    const relayerEndpoint = relayerEndpointFromEnv(env);
     if (
-        !isNonEmptyString(env.ORACLE_SIDECAR_URL) ||
+        !isNonEmptyString(relayerEndpoint.url) ||
         !isNonEmptyString(env.RELAYER_TARGET) ||
         !isNonEmptyString(env.RELAYER_REGISTRY) ||
         !isNonEmptyString(env.RELAYER_VERIFIER_REGISTRY)
@@ -667,7 +689,7 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         return new StaticFailingRelayerAdapter(
             mode,
             "RELAYER_SUBMIT_FAILED",
-            `${mode} relayer requires ORACLE_SIDECAR_URL, RELAYER_TARGET, RELAYER_REGISTRY, and RELAYER_VERIFIER_REGISTRY`,
+            `${mode} relayer requires a runner or sidecar URL, RELAYER_TARGET, RELAYER_REGISTRY, and RELAYER_VERIFIER_REGISTRY`,
         );
     }
 
@@ -682,13 +704,23 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         );
     }
 
-    const config = {
-        sidecarUrl: env.ORACLE_SIDECAR_URL,
+    const config: {
+        sidecarUrl: string;
+        bearerToken?: string;
+        target: string;
+        registry: string;
+        verifierRegistry: string;
+        mode: RelayerMode;
+    } = {
+        sidecarUrl: relayerEndpoint.url,
         target: env.RELAYER_TARGET,
         registry: env.RELAYER_REGISTRY,
         verifierRegistry: env.RELAYER_VERIFIER_REGISTRY,
         mode,
     };
+    if (relayerEndpoint.bearerToken !== undefined) {
+        config.bearerToken = relayerEndpoint.bearerToken;
+    }
     if (mode === "dry_run") {
         return new HttpRelayerAdapter(
             {
@@ -700,6 +732,22 @@ function relayerFromEnv(env: WorkerEnv, fetcher: typeof fetch): RelayerAdapter |
         );
     }
     return new HttpRelayerAdapter(config, fetcher);
+}
+
+function relayerEndpointFromEnv(env: WorkerEnv): { url: string | undefined; bearerToken?: string } {
+    if (env.RUNNER_MODE === "aws") {
+        const endpoint: { url: string | undefined; bearerToken?: string } = {
+            url: env.AWS_RUNNER_BASE_URL,
+        };
+        if (env.AWS_RUNNER_TOKEN !== undefined) {
+            endpoint.bearerToken = env.AWS_RUNNER_TOKEN;
+        }
+        return endpoint;
+    }
+    if (env.RUNNER_MODE === "sidecar" && isNonEmptyString(env.RUNNER_SIDECAR_URL)) {
+        return { url: env.RUNNER_SIDECAR_URL };
+    }
+    return { url: env.ORACLE_SIDECAR_URL };
 }
 
 function relayerModeFromEnv(env: WorkerEnv): RelayerMode {

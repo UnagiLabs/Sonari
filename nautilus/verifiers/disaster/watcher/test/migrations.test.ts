@@ -54,4 +54,14 @@ describe("watcher D1 migrations", () => {
             ]),
         );
     });
+
+    it("adds finalized payload persistence columns after runner lifecycle columns", () => {
+        expect(addedColumns(migration("0005_add_finalized_payload_columns.sql"))).toEqual([
+            "tee_result_json",
+            "payload_bcs_hex",
+            "signature",
+            "public_key",
+            "finalized_at_ms",
+        ]);
+    });
 });

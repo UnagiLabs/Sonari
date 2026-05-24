@@ -25,7 +25,7 @@ flowchart TD
 
   fetch["fetch()<br/>HTTP エンドポイント<br/><br/>GET /health<br/>POST /manual/earthquakes<br/>POST /tasks/process-due"]
 
-  tee[AWS Lambda / TEE Core]
+  tee[AWS EC2 + Nitro Enclaves Runner / TEE Core]
   relayer[Relayer]
 
   usgs --> scheduled
@@ -141,15 +141,17 @@ candidate.tsunami = true        // 津波警報あり
 | `recoverStaleProcessing(...)` | タイムアウトした処理中を回復 |
 | `markRelayerSucceeded(id, result, nowMs)` | Relayer成功を記録 |
 
-### `trigger_tee.ts` — AWS Lambda（TEE）制御
+### `trigger_tee.ts` — Runner（TEE）制御
+
+Runner backend は `RUNNER_MODE` で必ず明示します。未設定の場合は production 安全側として fail-closed します。
 
 3種類のアダプタがあります：
 
 | アダプタ | 用途 |
 |---|---|
-| `AwsRunnerLifecycleAdapter` | 本番用。AWS Lambda を起動・停止 |
+| `AwsRunnerLifecycleAdapter` | 本番用。AWS runner service の `start/process/stop` contract を呼ぶ |
 | `HttpRunnerAdapter` | サイドカーURL経由でTEEを呼び出す |
-| `MockRunnerLifecycleAdapter` | テスト用モック |
+| `MockRunnerLifecycleAdapter` | テスト用モック。`RUNNER_MODE=mock` と `ALLOW_MOCK_RUNNER=true` が必要 |
 
 処理フロー：
 ```mermaid
@@ -197,8 +199,10 @@ flowchart LR
 | `EARTHQUAKE_EVENTS` | ✓ | D1データベースバインディング |
 | `RUNNER_JOBS` | ✓ | Cloudflare Queue バインディング |
 | `MANUAL_SUBMIT_TOKEN` | — | 手動登録用の認証トークン |
-| `RUNNER_SIDECAR_URL` | — | TEE Runner SidecarのURL。AWS設定がない場合に`HttpRunnerAdapter`で使用 |
-| `ORACLE_SIDECAR_URL` | — | Oracle Sidecar（Relayer）のURL |
+| `RUNNER_MODE` | ✓ | `aws` / `sidecar` / `mock`。未設定は fail-closed |
+| `ALLOW_MOCK_RUNNER` | test only | `RUNNER_MODE=mock` を許可する明示フラグ |
+| `RUNNER_SIDECAR_URL` | sidecar | `RUNNER_MODE=sidecar` の sidecar URL |
+| `ORACLE_SIDECAR_URL` | local | Relayer sidecar URL。AWS dry-run では `AWS_RUNNER_BASE_URL` を使用 |
 | `RELAYER_MODE` | — | `preview` / `dry_run` / `submit`（Workerの`submit`は現在未対応） |
 | `RELAYER_TARGET` | — | SUI Moveコントラクトのターゲット |
 | `RELAYER_REGISTRY` | — | OracleレジストリのオブジェクトID |
@@ -206,9 +210,25 @@ flowchart LR
 | `RELAYER_GRPC_URL` | — | SUI gRPC URLdry_run/submit用 |
 | `RELAYER_SENDER_ADDRESS` | — | 送信者のSUIアドレス |
 | `RELAYER_ALLOW_SUBMIT` | — | `"true"` でsubmitモードの明示許可。ただしWorkerにはsigner設定がないため送信は未対応 |
-| `AWS_RUNNER_BASE_URL` | — | AWS Lambda の API URL |
-| `AWS_RUNNER_TOKEN` | — | AWS Lambda の認証トークン |
-| `AWS_RUNNER_TIMEOUT_MS` | — | Lambdaのタイムアウト（デフォルト30秒） |
+| `AWS_RUNNER_BASE_URL` | aws | AWS runner service の HTTPS URL |
+| `AWS_RUNNER_TOKEN` | aws | AWS runner service の Bearer token |
+| `AWS_RUNNER_TIMEOUT_MS` | — | runner処理のタイムアウト（デフォルト30秒） |
+
+Production の dry-run 構成例：
+
+```txt
+RUNNER_MODE=aws
+AWS_RUNNER_BASE_URL=https://<runner-endpoint>
+AWS_RUNNER_TOKEN=<secret>
+AWS_RUNNER_TIMEOUT_MS=90000
+
+RELAYER_MODE=dry_run
+RELAYER_GRPC_URL=<sui-grpc-url>
+RELAYER_SENDER_ADDRESS=<sui-address>
+RELAYER_TARGET=<package>::<module>::<function>
+RELAYER_REGISTRY=<object-id>
+RELAYER_VERIFIER_REGISTRY=<object-id>
+```
 
 ---
 

@@ -1,12 +1,13 @@
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
     WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
-    grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs, process_usgs_with_signer,
-    process_usgs_with_source_archive,
+    grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs,
+    process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
 
 const DEV_SIGNING_KEY_SEED: &str =
@@ -58,6 +59,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Fixture(FixtureArgs),
+    Production(ProductionArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -74,6 +76,14 @@ struct FixtureArgs {
     write_expected: bool,
 }
 
+#[derive(Debug, Parser)]
+struct ProductionArgs {
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    signing_key_seed: Option<String>,
+}
+
 struct RunConfig {
     input: UsgsOracleInput,
     output_dir: Option<PathBuf>,
@@ -85,6 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let run = match cli.command {
         Some(Command::Fixture(args)) => fixture_input(args)?,
+        Some(Command::Production(args)) => {
+            let result = production_result(args)?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
         None => low_level_input(cli)?,
     };
     let signer = LocalEd25519Signer::new(run.signing_key_seed);
@@ -102,6 +117,244 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
+    let seed = strict_signing_key_seed(args.signing_key_seed)?;
+    let request_json: serde_json::Value = serde_json::from_slice(&fs::read(args.input)?)?;
+    let request = tee::WorkerToTeeRequest::from_json_value(request_json)?;
+    let detail_url = format!(
+        "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
+        request.source_event_id
+    );
+    let detail_json = match reqwest::blocking::get(&detail_url).and_then(|response| {
+        if response.status().is_success() {
+            response.bytes()
+        } else {
+            Err(response.error_for_status().unwrap_err())
+        }
+    }) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => {
+            return Ok(TeeJsonResult::PendingSource {
+                source_event_id: request.source_event_id,
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            });
+        }
+    };
+    let detail_value: serde_json::Value = match serde_json::from_slice(&detail_json) {
+        Ok(value) => value,
+        Err(_) => {
+            return Ok(TeeJsonResult::PendingSource {
+                source_event_id: request.source_event_id,
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            });
+        }
+    };
+    if detail_value.get("id").and_then(serde_json::Value::as_str)
+        != Some(request.source_event_id.as_str())
+    {
+        return Ok(TeeJsonResult::PendingSource {
+            source_event_id: request.source_event_id,
+            error_code: "USGS_DETAIL_UNAVAILABLE",
+        });
+    }
+
+    let grid = match preferred_grid_uri_from_detail(&detail_value) {
+        Some(uri) => match fetch_grid(&uri) {
+            Ok(grid) => Some(grid),
+            Err(_) => {
+                return Ok(TeeJsonResult::PendingSource {
+                    source_event_id: request.source_event_id,
+                    error_code: "SHAKEMAP_GRID_UNAVAILABLE",
+                });
+            }
+        },
+        None => None,
+    };
+    let source_event_id = request.source_event_id.clone();
+    let input = UsgsOracleInput {
+        case_id: format!("usgs-live/{source_event_id}"),
+        detail_json,
+        grid_xml: grid.as_ref().map(|item| item.grid_xml.clone()),
+        raw_grid_bytes: grid.as_ref().map(|item| item.raw_grid_bytes.clone()),
+        raw_detail_uri: detail_url,
+        raw_grid_uri: grid.as_ref().map(|item| item.raw_grid_uri.clone()),
+        raw_data_uri: format!("ipfs://sonari/live/{source_event_id}/raw_data_manifest.json"),
+        affected_cells_uri: format!("ipfs://sonari/live/{source_event_id}/affected_cells.json"),
+    };
+    let preliminary = process_usgs_from_worker_request(request, input.clone())?;
+    if preliminary.result.status != tee::OracleStatus::Finalized {
+        return output_to_tee_json(preliminary);
+    }
+
+    let signer = LocalEd25519Signer::new(seed);
+    let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
+    let output = process_usgs_with_source_archive(input, &archive, &signer)?;
+    output_to_tee_json(output)
+}
+
+fn strict_signing_key_seed(
+    explicit_seed: Option<String>,
+) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    let seed = explicit_seed
+        .or_else(|| non_empty_env("SONARI_TEE_SIGNING_KEY_SEED"))
+        .ok_or("SONARI_TEE_SIGNING_KEY_SEED is required for production execution")?;
+    parse_seed(&seed)
+}
+
+struct FetchedGrid {
+    grid_xml: Vec<u8>,
+    raw_grid_bytes: Vec<u8>,
+    raw_grid_uri: String,
+}
+
+fn fetch_grid(uri: &str) -> Result<FetchedGrid, Box<dyn std::error::Error>> {
+    let bytes = match reqwest::blocking::get(uri).and_then(|response| {
+        if response.status().is_success() {
+            response.bytes()
+        } else {
+            Err(response.error_for_status().unwrap_err())
+        }
+    }) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => {
+            return Err("SHAKEMAP_GRID_UNAVAILABLE".into());
+        }
+    };
+    let grid_xml = grid_xml_from_artifact(uri, &bytes)?;
+    Ok(FetchedGrid {
+        grid_xml,
+        raw_grid_bytes: bytes,
+        raw_grid_uri: uri.to_owned(),
+    })
+}
+
+fn preferred_grid_uri_from_detail(detail: &serde_json::Value) -> Option<String> {
+    let products = detail
+        .get("properties")?
+        .get("products")?
+        .get("shakemap")?
+        .as_array()?;
+    let selected = products
+        .iter()
+        .max_by(|left, right| product_sort_key(left).cmp(&product_sort_key(right)))?;
+    let contents = selected.get("contents")?.as_object()?;
+    contents
+        .get("download/grid.xml.zip")
+        .or_else(|| contents.get("download/grid.xml"))
+        .and_then(|content| content.get("url"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+fn product_sort_key(product: &serde_json::Value) -> (u64, u64, u64, String, String, String) {
+    let properties = product
+        .get("properties")
+        .unwrap_or(&serde_json::Value::Null);
+    (
+        product
+            .get("preferredWeight")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        properties
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0),
+        product
+            .get("updateTime")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        product
+            .get("source")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        product
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        product
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    )
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum TeeJsonResult {
+    PendingSource {
+        source_event_id: String,
+        error_code: &'static str,
+    },
+    PendingMmi {
+        source_event_id: String,
+        error_code: String,
+    },
+    Rejected {
+        source_event_id: String,
+        error_code: String,
+    },
+    Finalized {
+        payload: tee::UnsignedPayloadV1,
+        payload_bcs_hex: String,
+        signature: String,
+        public_key: String,
+    },
+}
+
+fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
+    match output.result.status {
+        tee::OracleStatus::Finalized => {
+            let payload = output
+                .unsigned_payload
+                .ok_or("finalized output is missing unsigned payload")?;
+            let payload_bcs_hex = output
+                .expected_hashes
+                .ok_or("finalized output is missing expected hashes")?
+                .unsigned_bcs_payload_hex;
+            let signature = output
+                .signature
+                .ok_or("finalized output is missing signature")?;
+            Ok(TeeJsonResult::Finalized {
+                payload,
+                payload_bcs_hex,
+                signature: signature.signature,
+                public_key: signature.public_key,
+            })
+        }
+        tee::OracleStatus::PendingSource => Ok(TeeJsonResult::PendingSource {
+            source_event_id: output.result.source_event_id,
+            error_code: static_error_code(output.result.error_code)?,
+        }),
+        tee::OracleStatus::PendingMmi => Ok(TeeJsonResult::PendingMmi {
+            source_event_id: output.result.source_event_id,
+            error_code: output
+                .result
+                .error_code
+                .ok_or("pending_mmi requires error_code")?,
+        }),
+        tee::OracleStatus::Rejected => Ok(TeeJsonResult::Rejected {
+            source_event_id: output.result.source_event_id,
+            error_code: output
+                .result
+                .error_code
+                .ok_or("rejected requires error_code")?,
+        }),
+    }
+}
+
+fn static_error_code(value: Option<String>) -> Result<&'static str, Box<dyn std::error::Error>> {
+    match value.as_deref() {
+        Some("SHAKEMAP_PRODUCT_MISSING") => Ok("SHAKEMAP_PRODUCT_MISSING"),
+        Some("SHAKEMAP_GRID_UNAVAILABLE") => Ok("SHAKEMAP_GRID_UNAVAILABLE"),
+        Some("USGS_DETAIL_UNAVAILABLE") => Ok("USGS_DETAIL_UNAVAILABLE"),
+        _ => Err("pending_source requires a supported error_code".into()),
+    }
 }
 
 fn low_level_input(cli: Cli) -> Result<RunConfig, Box<dyn std::error::Error>> {

@@ -50,6 +50,11 @@ function row(patch: Partial<EarthquakeEventRow> = {}): EarthquakeEventRow {
         runner_timeout_at_ms: null,
         runner_error_message: null,
         runner_stop_error: null,
+        tee_result_json: null,
+        payload_bcs_hex: null,
+        signature: null,
+        public_key: null,
+        finalized_at_ms: null,
         created_at_ms: baseNow - 1_000,
         updated_at_ms: baseNow - 1_000,
     };
@@ -510,6 +515,11 @@ class FakeD1PreparedStatement {
                 runner_timeout_at_ms: null,
                 runner_error_message: null,
                 runner_stop_error: null,
+                tee_result_json: null,
+                payload_bcs_hex: null,
+                signature: null,
+                public_key: null,
+                finalized_at_ms: null,
                 created_at_ms: Number(createdAtMs),
                 updated_at_ms: Number(updatedAtMs),
             });
