@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sonari Nautilus disaster verifier runner on EC2 with Nitro Enclaves enabled.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  AcmCertificateArn:
+    Type: String
+  RunnerTokenSecretArn:
+    Type: String
+  TeeSigningKeySecretArn:
+    Type: String
+  WalrusConfigSecretArn:
+    Type: String
+  InstanceType:
+    Type: String
+    Default: m6i.xlarge
+  AmiId:
+    Type: AWS::EC2::Image::Id
+  AllowedIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Restrict this to Cloudflare egress or an approved management range before production.
+  DesiredCapacity:
+    Type: Number
+    Default: 1
+  LogsRetentionDays:
+    Type: Number
+    Default: 30
+
+Resources:
+  RunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /sonari/disaster-runner/${AWS::StackName}
+      RetentionInDays: !Ref LogsRetentionDays
+
+  RunnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: ReadRunnerSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref RunnerTokenSecretArn
+                  - !Ref TeeSigningKeySecretArn
+                  - !Ref WalrusConfigSecretArn
+
+  RunnerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref RunnerRole
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sonari disaster runner ALB ingress
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AllowedIngressCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sonari disaster runner instance ingress from ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8789
+          ToPort: 8789
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  RunnerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt RunnerInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref InstanceSecurityGroup
+        EnclaveOptions:
+          Enabled: true
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            dnf install -y awscli git nodejs npm aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli git nodejs npm aws-nitro-enclaves-cli
+            usermod -aG ne ec2-user || true
+            systemctl enable --now nitro-enclaves-allocator.service || true
+            mkdir -p /opt/sonari
+            cd /opt/sonari
+            aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
+            aws secretsmanager get-secret-value --secret-id '${TeeSigningKeySecretArn}' --query SecretString --output text > /opt/sonari/tee-signing-key
+            aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-config.json
+            chmod 0600 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
+            cat >/etc/systemd/system/sonari-disaster-runner.service <<'UNIT'
+            [Unit]
+            Description=Sonari Disaster Runner
+            After=network-online.target
+            Wants=network-online.target
+
+            [Service]
+            WorkingDirectory=/opt/sonari/app
+            Environment=PORT=8789
+            Environment=RUNNER_BACKEND=aws
+            EnvironmentFile=-/opt/sonari/runner.env
+            ExecStart=/usr/bin/node nautilus/verifiers/disaster/runner/dist/cli.js
+            Restart=always
+            RestartSec=5
+            User=ec2-user
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            cat >/opt/sonari/runner.env <<'ENV'
+            RUNNER_TOKEN_FILE=/opt/sonari/runner-token
+            SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key
+            SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json
+            ENV
+            systemctl daemon-reload
+            systemctl enable sonari-disaster-runner.service
+
+  RunnerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 8789
+      Protocol: HTTP
+      TargetType: instance
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: "200,401"
+
+  RunnerAlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+
+  RunnerHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref RunnerAlb
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref AcmCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref RunnerTargetGroup
+
+  RunnerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref SubnetIds
+      MinSize: "1"
+      MaxSize: "1"
+      DesiredCapacity: !Ref DesiredCapacity
+      TargetGroupARNs:
+        - !Ref RunnerTargetGroup
+      LaunchTemplate:
+        LaunchTemplateId: !Ref RunnerLaunchTemplate
+        Version: !GetAtt RunnerLaunchTemplate.LatestVersionNumber
+
+Outputs:
+  RunnerEndpoint:
+    Value: !Sub https://${RunnerAlb.DNSName}
+  RunnerLogGroupName:
+    Value: !Ref RunnerLogGroup
