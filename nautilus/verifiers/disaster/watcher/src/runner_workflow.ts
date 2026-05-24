@@ -377,7 +377,7 @@ function buildSsmShellCommand(input: {
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
         `printf '%s' ${shellSingleQuote(JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)))} | "$NITRO_ENCLAVE_PROCESS_COMMAND" > ${shellSingleQuote(tempResultPath)}`,
-        `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/$RESULT_S3_KEY`)}`,
+        `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
 
