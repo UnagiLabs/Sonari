@@ -87,6 +87,18 @@ export interface WorkflowStartInput {
     attempt: number;
 }
 
+export interface RunnerWorkflowProgressUpdate {
+    sourceEventId: string;
+    attempt: number;
+    phase: RunnerPhase;
+    nowMs: number;
+    instanceId?: string | undefined;
+    commandId?: string | undefined;
+    resultS3Key?: string | undefined;
+    lastPollAtMs?: number | undefined;
+    allowNonProcessing?: boolean | undefined;
+}
+
 export interface StateRepository {
     upsertCandidate(
         candidate: UsgsEarthquakeCandidate,
@@ -96,37 +108,42 @@ export interface StateRepository {
     upsertManualEvent(sourceEventId: string, nowMs: number): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
-    hasActiveRunnerWorkflow(): Promise<boolean>;
+    hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean>;
     markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
         nowMs: number,
     ): Promise<WorkflowStartInput | null>;
+    updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean>;
     markFailed(
         sourceEventId: string,
         errorCode: OracleErrorCode,
         nowMs: number,
         nextRetryAtMs: number,
         runnerErrorMessage?: string,
-    ): Promise<void>;
+        expectedAttempt?: number,
+    ): Promise<boolean>;
     applyRunnerResult(
         sourceEventId: string,
         result: TeeCoreResult,
         nowMs: number,
         pendingNextRetryAtMs?: number,
-    ): Promise<void>;
+        expectedAttempt?: number,
+    ): Promise<boolean>;
     markRelayerSucceeded(
         sourceEventId: string,
         success: RelayerSuccess,
         nowMs: number,
-    ): Promise<void>;
+        expectedAttempt?: number,
+    ): Promise<boolean>;
     markRelayerFailed(
         sourceEventId: string,
         mode: RelayerMode,
         errorCode: RelayerErrorCode,
         message: string,
         nowMs: number,
-    ): Promise<void>;
+        expectedAttempt?: number,
+    ): Promise<boolean>;
 
     // Compatibility helpers used by local scripts while AWS Lambda is the production path.
     enqueueRunnerJob(
@@ -256,8 +273,12 @@ export class InMemoryStateRepository implements StateRepository {
             .map((row) => structuredClone(row));
     }
 
-    async hasActiveRunnerWorkflow(): Promise<boolean> {
-        return [...this.rows.values()].some((row) => row.status === "processing");
+    async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
+        return [...this.rows.values()].some(
+            (row) =>
+                row.status === "processing" &&
+                (staleBeforeMs === undefined || row.updated_at_ms > staleBeforeMs),
+        );
     }
 
     async markWorkflowStarted(
@@ -281,16 +302,36 @@ export class InMemoryStateRepository implements StateRepository {
         return { sourceEventId, executionName, attempt };
     }
 
+    async updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean> {
+        const row = this.rows.get(input.sourceEventId);
+        if (
+            row === undefined ||
+            row.runner_attempt !== input.attempt ||
+            (!input.allowNonProcessing && row.status !== "processing")
+        ) {
+            return false;
+        }
+        applyRunnerWorkflowProgress(row, input);
+        return true;
+    }
+
     async markFailed(
         sourceEventId: string,
         errorCode: OracleErrorCode,
         nowMs: number,
         nextRetryAtMs: number,
         runnerErrorMessage?: string,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = this.rows.get(sourceEventId);
         if (row === undefined) {
-            return;
+            return false;
+        }
+        if (
+            expectedAttempt !== undefined &&
+            (row.status !== "processing" || row.runner_attempt !== expectedAttempt)
+        ) {
+            return false;
         }
         row.status = "failed";
         row.retry_count += 1;
@@ -298,6 +339,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.error_code = errorCode;
         row.runner_error_message = runnerErrorMessage ?? null;
         row.updated_at_ms = nowMs;
+        return true;
     }
 
     async applyRunnerResult(
@@ -305,22 +347,34 @@ export class InMemoryStateRepository implements StateRepository {
         result: TeeCoreResult,
         nowMs: number,
         pendingNextRetryAtMs?: number,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = this.rows.get(sourceEventId);
         if (row === undefined) {
-            return;
+            return false;
+        }
+        if (
+            expectedAttempt !== undefined &&
+            (row.status !== "processing" || row.runner_attempt !== expectedAttempt)
+        ) {
+            return false;
         }
         await applyResultToRow(row, result, nowMs, pendingNextRetryAtMs);
+        return true;
     }
 
     async markRelayerSucceeded(
         sourceEventId: string,
         success: RelayerSuccess,
         nowMs: number,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = this.rows.get(sourceEventId);
         if (row === undefined) {
-            return;
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
         }
         if (success.mode === "submit") {
             row.status = "submitted";
@@ -334,6 +388,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_error_message = null;
         row.relayer_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
+        return true;
     }
 
     async markRelayerFailed(
@@ -342,10 +397,14 @@ export class InMemoryStateRepository implements StateRepository {
         errorCode: RelayerErrorCode,
         message: string,
         nowMs: number,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = this.rows.get(sourceEventId);
         if (row === undefined) {
-            return;
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
         }
         row.relayer_mode = mode;
         row.relayer_status = "failed";
@@ -353,6 +412,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
+        return true;
     }
 
     async enqueueRunnerJob(
@@ -495,13 +555,15 @@ export class InMemoryStateRepository implements StateRepository {
         let recovered = 0;
         for (const row of this.rows.values()) {
             if (row.status === "processing" && row.updated_at_ms <= staleBeforeMs) {
-                await this.markFailed(
+                const didRecover = await this.markFailed(
                     row.source_event_id,
                     "AWS_RUNNER_TIMEOUT",
                     nowMs,
                     nextRetryAtMs,
                 );
-                recovered += 1;
+                if (didRecover) {
+                    recovered += 1;
+                }
             }
         }
         return recovered;
@@ -598,8 +660,12 @@ export class DynamoDbStateRepository implements StateRepository {
             .slice(0, limit);
     }
 
-    async hasActiveRunnerWorkflow(): Promise<boolean> {
-        return (await this.scanRows()).some((row) => row.status === "processing");
+    async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
+        return (await this.scanRows()).some(
+            (row) =>
+                row.status === "processing" &&
+                (staleBeforeMs === undefined || row.updated_at_ms > staleBeforeMs),
+        );
     }
 
     async markWorkflowStarted(
@@ -624,16 +690,75 @@ export class DynamoDbStateRepository implements StateRepository {
         return { sourceEventId, executionName, attempt };
     }
 
+    async updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean> {
+        const patch: Partial<EarthquakeEventRow> = {
+            runner_phase: input.phase,
+            updated_at_ms: input.nowMs,
+        };
+        if (input.instanceId !== undefined) {
+            patch.runner_instance_id = input.instanceId;
+        }
+        if (input.commandId !== undefined) {
+            patch.runner_command_id = input.commandId;
+        }
+        if (input.resultS3Key !== undefined) {
+            patch.runner_result_s3_key = input.resultS3Key;
+        }
+        if (input.lastPollAtMs !== undefined) {
+            patch.runner_last_poll_at_ms = input.lastPollAtMs;
+        }
+        const entries = Object.entries(patch);
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: input.sourceEventId },
+                    ConditionExpression: input.allowNonProcessing
+                        ? "#runner_attempt = :expected_attempt"
+                        : "#status = :processing_status AND #runner_attempt = :expected_attempt",
+                    UpdateExpression: `SET ${entries
+                        .map(([field]) => `#${field} = :${field}`)
+                        .join(", ")}`,
+                    ExpressionAttributeNames: {
+                        ...expressionNames(entries.map(([field]) => field)),
+                        "#status": "status",
+                        "#runner_attempt": "runner_attempt",
+                    },
+                    ExpressionAttributeValues: {
+                        ...Object.fromEntries(
+                            entries.map(([field, value]) => [`:${field}`, value]),
+                        ),
+                        ...(input.allowNonProcessing ? {} : { ":processing_status": "processing" }),
+                        ":expected_attempt": input.attempt,
+                    },
+                }),
+            );
+            return true;
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return false;
+            }
+            throw error;
+        }
+    }
+
     async markFailed(
         sourceEventId: string,
         errorCode: OracleErrorCode,
         nowMs: number,
         nextRetryAtMs: number,
         runnerErrorMessage?: string,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = await this.get(sourceEventId);
         if (row === null) {
-            return;
+            return false;
+        }
+        if (
+            expectedAttempt !== undefined &&
+            (row.status !== "processing" || row.runner_attempt !== expectedAttempt)
+        ) {
+            return false;
         }
         row.status = "failed";
         row.retry_count += 1;
@@ -641,7 +766,7 @@ export class DynamoDbStateRepository implements StateRepository {
         row.error_code = errorCode;
         row.runner_error_message = runnerErrorMessage ?? null;
         row.updated_at_ms = nowMs;
-        await this.put(row);
+        return this.put(row, expectedAttempt);
     }
 
     async applyRunnerResult(
@@ -649,23 +774,34 @@ export class DynamoDbStateRepository implements StateRepository {
         result: TeeCoreResult,
         nowMs: number,
         pendingNextRetryAtMs?: number,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = await this.get(sourceEventId);
         if (row === null) {
-            return;
+            return false;
+        }
+        if (
+            expectedAttempt !== undefined &&
+            (row.status !== "processing" || row.runner_attempt !== expectedAttempt)
+        ) {
+            return false;
         }
         await applyResultToRow(row, result, nowMs, pendingNextRetryAtMs);
-        await this.put(row);
+        return this.put(row, expectedAttempt);
     }
 
     async markRelayerSucceeded(
         sourceEventId: string,
         success: RelayerSuccess,
         nowMs: number,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = await this.get(sourceEventId);
         if (row === null) {
-            return;
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
         }
         if (success.mode === "submit") {
             row.status = "submitted";
@@ -679,7 +815,7 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_error_message = null;
         row.relayer_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
-        await this.put(row);
+        return this.put(row, expectedAttempt, true);
     }
 
     async markRelayerFailed(
@@ -688,10 +824,14 @@ export class DynamoDbStateRepository implements StateRepository {
         errorCode: RelayerErrorCode,
         message: string,
         nowMs: number,
-    ): Promise<void> {
+        expectedAttempt?: number,
+    ): Promise<boolean> {
         const row = await this.get(sourceEventId);
         if (row === null) {
-            return;
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
         }
         row.relayer_mode = mode;
         row.relayer_status = "failed";
@@ -699,7 +839,7 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
-        await this.put(row);
+        return this.put(row, expectedAttempt, true);
     }
 
     async enqueueRunnerJob(
@@ -851,13 +991,11 @@ export class DynamoDbStateRepository implements StateRepository {
         let recovered = 0;
         for (const row of rows) {
             if (row.status === "processing" && row.updated_at_ms <= staleBeforeMs) {
-                await this.markFailed(
-                    row.source_event_id,
-                    "AWS_RUNNER_TIMEOUT",
-                    nowMs,
-                    nextRetryAtMs,
-                );
-                recovered += 1;
+                if (
+                    await this.recoverStaleProcessingRow(row, staleBeforeMs, nowMs, nextRetryAtMs)
+                ) {
+                    recovered += 1;
+                }
             }
         }
         return recovered;
@@ -910,13 +1048,86 @@ export class DynamoDbStateRepository implements StateRepository {
         return rows;
     }
 
-    private async put(row: EarthquakeEventRow): Promise<void> {
-        await this.documentClient.send(
-            new PutCommand({
-                TableName: this.tableName,
-                Item: row,
-            }),
-        );
+    private async put(
+        row: EarthquakeEventRow,
+        expectedAttempt?: number,
+        allowNonProcessing = false,
+    ): Promise<boolean> {
+        try {
+            await this.documentClient.send(
+                new PutCommand({
+                    TableName: this.tableName,
+                    Item: row,
+                    ...(expectedAttempt === undefined
+                        ? {}
+                        : {
+                              ConditionExpression: allowNonProcessing
+                                  ? "#runner_attempt = :expected_attempt"
+                                  : "#status = :processing_status AND #runner_attempt = :expected_attempt",
+                              ExpressionAttributeNames: {
+                                  ...(allowNonProcessing ? {} : { "#status": "status" }),
+                                  "#runner_attempt": "runner_attempt",
+                              },
+                              ExpressionAttributeValues: {
+                                  ...(allowNonProcessing
+                                      ? {}
+                                      : { ":processing_status": "processing" }),
+                                  ":expected_attempt": expectedAttempt,
+                              },
+                          }),
+                }),
+            );
+            return true;
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return false;
+            }
+            throw error;
+        }
+    }
+
+    private async recoverStaleProcessingRow(
+        row: EarthquakeEventRow,
+        staleBeforeMs: number,
+        nowMs: number,
+        nextRetryAtMs: number,
+    ): Promise<boolean> {
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: row.source_event_id },
+                    ConditionExpression:
+                        "#status = :processing_status AND #updated_at_ms <= :stale_before_ms",
+                    UpdateExpression:
+                        "SET #status = :failed_status, #retry_count = :retry_count, #next_retry_at_ms = :next_retry_at_ms, #error_code = :error_code, #runner_error_message = :runner_error_message, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#status": "status",
+                        "#retry_count": "retry_count",
+                        "#next_retry_at_ms": "next_retry_at_ms",
+                        "#error_code": "error_code",
+                        "#runner_error_message": "runner_error_message",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":processing_status": "processing",
+                        ":stale_before_ms": staleBeforeMs,
+                        ":failed_status": "failed",
+                        ":retry_count": row.retry_count + 1,
+                        ":next_retry_at_ms": nextRetryAtMs,
+                        ":error_code": "AWS_RUNNER_TIMEOUT",
+                        ":runner_error_message": null,
+                        ":updated_at_ms": nowMs,
+                    },
+                }),
+            );
+            return true;
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return false;
+            }
+            throw error;
+        }
     }
 
     private async updateScreenableCandidate(
@@ -1000,31 +1211,51 @@ export class DynamoDbStateRepository implements StateRepository {
         nowMs: number,
     ): Promise<void> {
         try {
-            await this.documentClient.send(
-                new UpdateCommand({
-                    TableName: this.tableName,
-                    Key: { source_event_id: candidate.source_event_id },
-                    ConditionExpression: "attribute_exists(#source_event_id)",
-                    UpdateExpression:
-                        "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms, #updated_at_ms = :updated_at_ms",
-                    ExpressionAttributeNames: {
-                        "#source_event_id": "source_event_id",
-                        "#last_seen_at_ms": "last_seen_at_ms",
-                        "#source_updated_at_ms": "source_updated_at_ms",
-                        "#updated_at_ms": "updated_at_ms",
-                    },
-                    ExpressionAttributeValues: {
-                        ":last_seen_at_ms": nowMs,
-                        ":source_updated_at_ms": candidate.source_updated_at_ms,
-                        ":updated_at_ms": nowMs,
-                    },
-                }),
-            );
+            await this.updateWatcherMetadataFields(candidate, nowMs, true);
         } catch (error) {
             if (!isConditionalCheckFailed(error)) {
                 throw error;
             }
+            try {
+                await this.updateWatcherMetadataFields(candidate, nowMs, false);
+            } catch (fallbackError) {
+                if (!isConditionalCheckFailed(fallbackError)) {
+                    throw fallbackError;
+                }
+            }
         }
+    }
+
+    private async updateWatcherMetadataFields(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+        shouldUpdateHeartbeat: boolean,
+    ): Promise<void> {
+        await this.documentClient.send(
+            new UpdateCommand({
+                TableName: this.tableName,
+                Key: { source_event_id: candidate.source_event_id },
+                ConditionExpression: shouldUpdateHeartbeat
+                    ? "attribute_exists(#source_event_id) AND #status <> :processing_status"
+                    : "attribute_exists(#source_event_id) AND #status = :processing_status",
+                UpdateExpression: shouldUpdateHeartbeat
+                    ? "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms, #updated_at_ms = :updated_at_ms"
+                    : "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms",
+                ExpressionAttributeNames: {
+                    "#source_event_id": "source_event_id",
+                    "#status": "status",
+                    "#last_seen_at_ms": "last_seen_at_ms",
+                    "#source_updated_at_ms": "source_updated_at_ms",
+                    ...(shouldUpdateHeartbeat ? { "#updated_at_ms": "updated_at_ms" } : {}),
+                },
+                ExpressionAttributeValues: {
+                    ":processing_status": "processing",
+                    ":last_seen_at_ms": nowMs,
+                    ":source_updated_at_ms": candidate.source_updated_at_ms,
+                    ...(shouldUpdateHeartbeat ? { ":updated_at_ms": nowMs } : {}),
+                },
+            }),
+        );
     }
 }
 
@@ -1116,7 +1347,7 @@ function mergePreservingResult(
         last_seen_at_ms: next.last_seen_at_ms,
         source_updated_at_ms: next.source_updated_at_ms,
         error_code: next.status === "ignored_small" ? next.error_code : existing.error_code,
-        updated_at_ms: nowMs,
+        updated_at_ms: existing.status === "processing" ? existing.updated_at_ms : nowMs,
     };
 }
 
@@ -1161,6 +1392,26 @@ async function applyResultToRow(
     row.status = result.status;
     row.retry_count += 1;
     row.next_retry_at_ms = pendingNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+}
+
+function applyRunnerWorkflowProgress(
+    row: EarthquakeEventRow,
+    input: RunnerWorkflowProgressUpdate,
+): void {
+    row.runner_phase = input.phase;
+    row.updated_at_ms = input.nowMs;
+    if (input.instanceId !== undefined) {
+        row.runner_instance_id = input.instanceId;
+    }
+    if (input.commandId !== undefined) {
+        row.runner_command_id = input.commandId;
+    }
+    if (input.resultS3Key !== undefined) {
+        row.runner_result_s3_key = input.resultS3Key;
+    }
+    if (input.lastPollAtMs !== undefined) {
+        row.runner_last_poll_at_ms = input.lastPollAtMs;
+    }
 }
 
 function finalizedPayloadMetadata(

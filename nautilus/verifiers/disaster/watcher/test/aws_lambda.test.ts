@@ -310,6 +310,218 @@ describe("DynamoDB-compatible repository behavior", () => {
         await expect(repository.get("us7000next")).resolves.toMatchObject({ status: "new" });
     });
 
+    it("does not recover stale processing rows while another workflow is actively heartbeating", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000stale", baseNow);
+        await repository.markWorkflowStarted("us7000stale", "disaster-us7000stale-1", baseNow);
+        await repository.upsertManualEvent("us7000active", baseNow + 1_000);
+        await repository.markWorkflowStarted(
+            "us7000active",
+            "disaster-us7000active-1",
+            baseNow + 20 * 60 * 1_000,
+        );
+        await repository.upsertManualEvent("us7000next", baseNow + 20 * 60 * 1_000 + 1);
+
+        const started = await startDueWorkflows(
+            repository,
+            workflow,
+            baseNow + 20 * 60 * 1_000 + 2,
+            1,
+        );
+
+        expect(started).toBe(0);
+        expect(workflow.starts).toEqual([]);
+        await expect(repository.get("us7000stale")).resolves.toMatchObject({
+            status: "processing",
+            retry_count: 0,
+            runner_attempt: 1,
+        });
+        await expect(repository.get("us7000next")).resolves.toMatchObject({ status: "new" });
+    });
+
+    it("recovers stale processing rows only when no active workflow is heartbeating", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000stale", baseNow);
+        await repository.markWorkflowStarted("us7000stale", "disaster-us7000stale-1", baseNow);
+
+        const started = await startDueWorkflows(repository, workflow, baseNow + 20 * 60 * 1_000, 1);
+
+        expect(started).toBe(0);
+        expect(workflow.starts).toEqual([]);
+        await expect(repository.get("us7000stale")).resolves.toMatchObject({
+            status: "failed",
+            retry_count: 1,
+            error_code: "AWS_RUNNER_TIMEOUT",
+        });
+    });
+
+    it("does not recover a DynamoDB processing row that heartbeats during stale recovery", async () => {
+        const staleRow = await eventRow("us7000race", {
+            status: "processing",
+            runner_job_id: "disaster-us7000race-1",
+            runner_attempt: 1,
+            runner_phase: "polling_command",
+            updated_at_ms: baseNow,
+        });
+        const freshRow = {
+            ...staleRow,
+            runner_last_poll_at_ms: baseNow + 20 * 60 * 1_000,
+            updated_at_ms: baseNow + 20 * 60 * 1_000,
+        };
+        const client = new StaleRecoveryHeartbeatRaceClient(staleRow, freshRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        const recovered = await repository.recoverStaleProcessing(
+            baseNow + 15 * 60 * 1_000,
+            baseNow + 20 * 60 * 1_000,
+            baseNow + 30 * 60 * 1_000,
+        );
+
+        expect(recovered).toBe(0);
+        expect(client.currentRow).toMatchObject({
+            status: "processing",
+            retry_count: 0,
+            runner_attempt: 1,
+            updated_at_ms: baseNow + 20 * 60 * 1_000,
+        });
+    });
+
+    it("does not let watcher metadata updates refresh a row that becomes processing during the write", async () => {
+        const newRow = await eventRow("us7000race", {
+            status: "new",
+            updated_at_ms: baseNow,
+        });
+        const processingRow = {
+            ...newRow,
+            status: "processing" as const,
+            runner_job_id: "disaster-us7000race-1",
+            runner_attempt: 1,
+            runner_phase: "starting_instance" as const,
+            updated_at_ms: baseNow + 1_000,
+        };
+        const client = new WatcherMetadataProcessingRaceClient(newRow, processingRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await repository.upsertCandidate(candidate("us7000race"), baseNow + 20 * 60 * 1_000);
+
+        expect(client.currentRow).toMatchObject({
+            status: "processing",
+            runner_attempt: 1,
+            last_seen_at_ms: baseNow + 20 * 60 * 1_000,
+            updated_at_ms: baseNow + 1_000,
+        });
+    });
+
+    it("reports guarded DynamoDB result writes as stale when the conditional write loses a race", async () => {
+        const staleRow = await eventRow("us7000race", {
+            status: "processing",
+            runner_job_id: "disaster-us7000race-1",
+            runner_attempt: 1,
+            runner_phase: "applying_result",
+        });
+        const supersedingRow = {
+            ...staleRow,
+            runner_job_id: "disaster-us7000race-2",
+            runner_attempt: 2,
+            updated_at_ms: baseNow + 1_000,
+        };
+        const client = new ConditionalPutRaceClient(staleRow, supersedingRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        const applied = await repository.applyRunnerResult(
+            "us7000race",
+            pendingSourceResult("us7000race"),
+            baseNow + 2_000,
+            baseNow + HOUR_MS,
+            1,
+        );
+        const failed = await repository.markFailed(
+            "us7000race",
+            "AWS_RUNNER_PROCESS_FAILED",
+            baseNow + 3_000,
+            baseNow + HOUR_MS,
+            "stale failure",
+            1,
+        );
+
+        expect(applied).toBe(false);
+        expect(failed).toBe(false);
+        expect(client.currentRow).toMatchObject({
+            status: "processing",
+            runner_attempt: 2,
+            tee_result_json: null,
+            error_code: null,
+        });
+    });
+
+    it("keeps long-running workflows active when progress heartbeats are fresh", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000active", baseNow);
+        await startDueWorkflows(repository, workflow, baseNow + 1_000, 1);
+        await repository.updateRunnerWorkflowProgress({
+            sourceEventId: "us7000active",
+            attempt: 1,
+            phase: "polling_command",
+            nowMs: baseNow + 20 * 60 * 1_000,
+            instanceId: "i-active",
+            commandId: "cmd-active",
+            resultS3Key: "results/us7000active/1.json",
+            lastPollAtMs: baseNow + 20 * 60 * 1_000,
+        });
+        await repository.upsertManualEvent("us7000next", baseNow + 20 * 60 * 1_000 + 1);
+
+        const started = await startDueWorkflows(
+            repository,
+            workflow,
+            baseNow + 20 * 60 * 1_000 + 2,
+            1,
+        );
+
+        expect(started).toBe(0);
+        expect(workflow.starts).toHaveLength(1);
+        await expect(repository.get("us7000active")).resolves.toMatchObject({
+            status: "processing",
+            runner_phase: "polling_command",
+            runner_instance_id: "i-active",
+            runner_command_id: "cmd-active",
+            runner_last_poll_at_ms: baseNow + 20 * 60 * 1_000,
+        });
+    });
+
+    it("does not treat watcher feed refreshes as runner workflow heartbeats", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertCandidate(candidate("us7000dead"), baseNow);
+        await startDueWorkflows(repository, workflow, baseNow + 1_000, 1);
+        await repository.upsertCandidate(candidate("us7000dead"), baseNow + 20 * 60 * 1_000);
+
+        const started = await startDueWorkflows(
+            repository,
+            workflow,
+            baseNow + 20 * 60 * 1_000 + 1,
+            1,
+        );
+
+        expect(started).toBe(0);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000dead",
+                executionName: "disaster-us7000dead-1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000dead")).resolves.toMatchObject({
+            status: "failed",
+            error_code: "AWS_RUNNER_TIMEOUT",
+            retry_count: 1,
+            last_seen_at_ms: baseNow + 20 * 60 * 1_000,
+            updated_at_ms: baseNow + 20 * 60 * 1_000 + 1,
+        });
+    });
+
     it("counts pending runner results as attempts before starting the next retry", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -470,6 +682,14 @@ class StaleReadRaceClient {
         if (condition === "attribute_exists(#source_event_id)") {
             return this.currentRow !== undefined;
         }
+        if (condition.includes("#status <> :processing_status")) {
+            const statusField = names["#status"];
+            return (
+                statusField !== undefined &&
+                this.currentRow[statusField as keyof EarthquakeEventRow] !==
+                    values[":processing_status"]
+            );
+        }
         const statusField = names["#status"];
         if (statusField === undefined) {
             throw new Error(`unexpected condition ${condition}`);
@@ -478,6 +698,222 @@ class StaleReadRaceClient {
             .filter(([key]) => condition.includes(key))
             .map(([, value]) => value);
         return allowedStatuses.includes(this.currentRow[statusField as keyof EarthquakeEventRow]);
+    }
+}
+
+class StaleRecoveryHeartbeatRaceClient {
+    currentRow: EarthquakeEventRow;
+    private scanned = false;
+
+    constructor(
+        private readonly staleRow: EarthquakeEventRow,
+        freshRow: EarthquakeEventRow,
+    ) {
+        this.currentRow = structuredClone(freshRow);
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("Key" in input && !("UpdateExpression" in input)) {
+            return { Item: structuredClone(this.currentRow) };
+        }
+        if ("Item" in input) {
+            this.currentRow = structuredClone(input.Item as EarthquakeEventRow);
+            return {};
+        }
+        if ("UpdateExpression" in input) {
+            this.applyUpdate(input);
+            return {};
+        }
+        if (!this.scanned) {
+            this.scanned = true;
+            return { Items: [structuredClone(this.staleRow)] };
+        }
+        return { Items: [] };
+    }
+
+    private applyUpdate(input: Record<string, unknown>): void {
+        const names = input.ExpressionAttributeNames as Record<string, string> | undefined;
+        const values = input.ExpressionAttributeValues as Record<string, unknown> | undefined;
+        if (names === undefined || values === undefined) {
+            throw new Error("test update command must use expression names and values");
+        }
+        const condition = input.ConditionExpression;
+        if (typeof condition === "string" && !this.matchesCondition(condition, names, values)) {
+            throw Object.assign(new Error("conditional request failed"), {
+                name: "ConditionalCheckFailedException",
+            });
+        }
+        const updateExpression = input.UpdateExpression;
+        if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
+            throw new Error("test client only supports SET update expressions");
+        }
+        for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
+            const [nameToken, valueToken] = assignment.split(" = ");
+            if (nameToken === undefined || valueToken === undefined) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            const field = names[nameToken];
+            if (field === undefined || !(valueToken in values)) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            this.currentRow = {
+                ...this.currentRow,
+                [field]: values[valueToken],
+            };
+        }
+    }
+
+    private matchesCondition(
+        condition: string,
+        names: Record<string, string>,
+        values: Record<string, unknown>,
+    ): boolean {
+        const statusField = names["#status"];
+        const updatedAtField = names["#updated_at_ms"];
+        if (statusField === undefined || updatedAtField === undefined) {
+            return false;
+        }
+        const updatedAt = this.currentRow[updatedAtField as keyof EarthquakeEventRow];
+        const staleBeforeMs = values[":stale_before_ms"];
+        return (
+            condition.includes("#updated_at_ms <= :stale_before_ms") &&
+            this.currentRow[statusField as keyof EarthquakeEventRow] === values[":processing_status"] &&
+            typeof updatedAt === "number" &&
+            typeof staleBeforeMs === "number" &&
+            updatedAt <= staleBeforeMs
+        );
+    }
+}
+
+class ConditionalPutRaceClient {
+    currentRow: EarthquakeEventRow;
+
+    constructor(
+        private readonly staleRow: EarthquakeEventRow,
+        currentRow: EarthquakeEventRow,
+    ) {
+        this.currentRow = structuredClone(currentRow);
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("Key" in input && !("UpdateExpression" in input)) {
+            return { Item: structuredClone(this.staleRow) };
+        }
+        if ("Item" in input) {
+            if (!this.matchesPutCondition(input)) {
+                throw Object.assign(new Error("conditional request failed"), {
+                    name: "ConditionalCheckFailedException",
+                });
+            }
+            this.currentRow = structuredClone(input.Item as EarthquakeEventRow);
+            return {};
+        }
+        throw new Error("unexpected conditional put race client command");
+    }
+
+    private matchesPutCondition(input: Record<string, unknown>): boolean {
+        const condition = input.ConditionExpression;
+        if (condition === undefined) {
+            return true;
+        }
+        if (typeof condition !== "string") {
+            return false;
+        }
+        const names = input.ExpressionAttributeNames as Record<string, string> | undefined;
+        const values = input.ExpressionAttributeValues as Record<string, unknown> | undefined;
+        if (names === undefined || values === undefined) {
+            return false;
+        }
+        const statusField = names["#status"];
+        const attemptField = names["#runner_attempt"];
+        return (
+            statusField !== undefined &&
+            attemptField !== undefined &&
+            condition.includes("#status = :processing_status") &&
+            condition.includes("#runner_attempt = :expected_attempt") &&
+            this.currentRow[statusField as keyof EarthquakeEventRow] === values[":processing_status"] &&
+            this.currentRow[attemptField as keyof EarthquakeEventRow] === values[":expected_attempt"]
+        );
+    }
+}
+
+class WatcherMetadataProcessingRaceClient {
+    currentRow: EarthquakeEventRow;
+    private returnedStaleRead = false;
+
+    constructor(
+        private readonly staleRow: EarthquakeEventRow,
+        processingRow: EarthquakeEventRow,
+    ) {
+        this.currentRow = structuredClone(processingRow);
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("Key" in input && !("UpdateExpression" in input)) {
+            if (!this.returnedStaleRead) {
+                this.returnedStaleRead = true;
+                return { Item: structuredClone(this.staleRow) };
+            }
+            return { Item: structuredClone(this.currentRow) };
+        }
+        if ("UpdateExpression" in input) {
+            this.applyUpdate(input);
+            return {};
+        }
+        throw new Error("unexpected watcher metadata race client command");
+    }
+
+    private applyUpdate(input: Record<string, unknown>): void {
+        const names = input.ExpressionAttributeNames as Record<string, string> | undefined;
+        const values = input.ExpressionAttributeValues as Record<string, unknown> | undefined;
+        if (names === undefined || values === undefined) {
+            throw new Error("test update command must use expression names and values");
+        }
+        const condition = input.ConditionExpression;
+        if (typeof condition === "string" && !this.matchesCondition(condition, names, values)) {
+            throw Object.assign(new Error("conditional request failed"), {
+                name: "ConditionalCheckFailedException",
+            });
+        }
+        const updateExpression = input.UpdateExpression;
+        if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
+            throw new Error("test client only supports SET update expressions");
+        }
+        for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
+            const [nameToken, valueToken] = assignment.split(" = ");
+            if (nameToken === undefined || valueToken === undefined) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            const field = names[nameToken];
+            if (field === undefined || !(valueToken in values)) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            this.currentRow = {
+                ...this.currentRow,
+                [field]: values[valueToken],
+            };
+        }
+    }
+
+    private matchesCondition(
+        condition: string,
+        names: Record<string, string>,
+        values: Record<string, unknown>,
+    ): boolean {
+        if (!condition.includes("attribute_exists(#source_event_id)")) {
+            return false;
+        }
+        if (!condition.includes("#status <> :processing_status")) {
+            return true;
+        }
+        const statusField = names["#status"];
+        return (
+            statusField !== undefined &&
+            this.currentRow[statusField as keyof EarthquakeEventRow] !== values[":processing_status"]
+        );
     }
 }
 

@@ -42,6 +42,7 @@ export type {
     EarthquakeEventRow,
     RunnerPhase,
     RunnerQueueJob,
+    RunnerWorkflowProgressUpdate,
     StateRepository,
     UpsertCandidateOptions,
 } from "./state.js";
@@ -171,12 +172,12 @@ export async function startDueWorkflows(
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
 ): Promise<number> {
-    await repository.recoverStaleProcessing(
-        nowMs - PROCESSING_STALE_AFTER_MS,
-        nowMs,
-        nowMs + FAILED_RETRY_BACKOFF_MS,
-    );
-    if (await repository.hasActiveRunnerWorkflow()) {
+    const staleBeforeMs = nowMs - PROCESSING_STALE_AFTER_MS;
+    if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
+        return 0;
+    }
+    await repository.recoverStaleProcessing(staleBeforeMs, nowMs, nowMs + FAILED_RETRY_BACKOFF_MS);
+    if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
         return 0;
     }
     const rows = await repository.listDue(nowMs, limit);

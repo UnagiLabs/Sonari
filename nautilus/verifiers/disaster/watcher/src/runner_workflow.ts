@@ -63,41 +63,81 @@ export interface S3ClientLike {
 }
 
 export type RunnerControlEvent =
-    | { action: "start_instance"; source_event_id: string }
-    | { action: "find_ready_instance"; source_event_id: string }
-    | { action: "dispatch_tee_command"; source_event_id: string; instance_id: string }
+    | { action: "start_instance"; source_event_id: string; attempt?: number | undefined }
+    | { action: "find_ready_instance"; source_event_id: string; attempt?: number | undefined }
+    | {
+          action: "dispatch_tee_command";
+          source_event_id: string;
+          attempt?: number | undefined;
+          instance_id: string;
+      }
     | {
           action: "poll_command";
           source_event_id: string;
+          attempt?: number | undefined;
           instance_id: string;
           command_id: string;
           result_s3_key?: string;
       }
-    | { action: "read_result"; source_event_id: string; result_s3_key: string }
-    | { action: "apply_result"; source_event_id: string; result: TeeCoreResult }
-    | { action: "relayer_preview_or_dry_run"; source_event_id: string; result: TeeCoreResult }
-    | { action: "mark_failed"; source_event_id: string; error_code?: string; message?: string }
-    | { action: "stop_instance"; source_event_id: string };
+    | {
+          action: "read_result";
+          source_event_id: string;
+          attempt?: number | undefined;
+          result_s3_key: string;
+      }
+    | {
+          action: "apply_result";
+          source_event_id: string;
+          attempt?: number | undefined;
+          result: TeeCoreResult;
+      }
+    | {
+          action: "relayer_preview_or_dry_run";
+          source_event_id: string;
+          attempt?: number | undefined;
+          result: TeeCoreResult;
+      }
+    | {
+          action: "mark_failed";
+          source_event_id: string;
+          attempt?: number | undefined;
+          error_code?: string;
+          message?: string;
+      }
+    | { action: "stop_instance"; source_event_id: string; attempt?: number | undefined };
 
 export type RunnerControlResult =
-    | { source_event_id: string; capacity: number }
-    | { source_event_id: string; instance_id: string }
-    | { source_event_id: string; instance_id: string; command_id: string; result_s3_key: string }
+    | { source_event_id: string; attempt?: number | undefined; capacity: number }
+    | { source_event_id: string; attempt?: number | undefined; instance_id: string }
     | {
           source_event_id: string;
+          attempt?: number | undefined;
+          instance_id: string;
+          command_id: string;
+          result_s3_key: string;
+      }
+    | {
+          source_event_id: string;
+          attempt?: number | undefined;
           instance_id?: string;
           command_id?: string;
           result_s3_key?: string;
           command_status: "PENDING" | "SUCCEEDED" | "FAILED";
       }
-    | { source_event_id: string; result: TeeCoreResult }
-    | { source_event_id: string; applied: true; result: TeeCoreResult }
+    | { source_event_id: string; attempt?: number | undefined; result: TeeCoreResult }
     | {
           source_event_id: string;
+          attempt?: number | undefined;
+          applied: true;
+          result: TeeCoreResult;
+      }
+    | {
+          source_event_id: string;
+          attempt?: number | undefined;
           relayer: "skipped" | "succeeded" | "failed";
           result: TeeCoreResult;
       }
-    | { source_event_id: string; failed: true };
+    | { source_event_id: string; attempt?: number | undefined; failed: true };
 
 export interface RunnerControlHandlerOptions {
     autoscaling: AutoScalingClientLike;
@@ -116,29 +156,56 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
     ): Promise<RunnerControlResult> {
         switch (event.action) {
             case "start_instance":
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "starting_instance",
+                });
                 await options.autoscaling.setDesiredCapacity({
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 1,
                 });
-                return { source_event_id: event.source_event_id, capacity: 1 };
+                return {
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    capacity: 1,
+                };
             case "stop_instance":
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "stopping_instance",
+                    allowNonProcessing: true,
+                });
                 await options.autoscaling.setDesiredCapacity({
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 0,
                 });
-                return { source_event_id: event.source_event_id, capacity: 0 };
-            case "find_ready_instance":
                 return {
                     source_event_id: event.source_event_id,
-                    instance_id: await findReadyInstance(
-                        options.ec2,
-                        options.ssm,
-                        options.config.autoScalingGroupName,
-                    ),
+                    attempt: event.attempt,
+                    capacity: 0,
                 };
+            case "find_ready_instance": {
+                const instanceId = await findReadyInstance(
+                    options.ec2,
+                    options.ssm,
+                    options.config.autoScalingGroupName,
+                );
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "waiting_for_instance",
+                    instanceId,
+                });
+                return {
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    instance_id: instanceId,
+                };
+            }
             case "dispatch_tee_command": {
                 assertValidUsgsSourceEventId(event.source_event_id);
                 const dispatchTimestampMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "dispatching_command",
+                    instanceId: event.instance_id,
+                    nowMs: dispatchTimestampMs,
+                });
                 const resultS3Key = `results/${event.source_event_id}/${dispatchTimestampMs}.json`;
                 const command = buildSsmShellCommand({
                     sourceEventId: event.source_event_id,
@@ -151,47 +218,79 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     instanceId: event.instance_id,
                     shellCommand: command,
                 });
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "dispatching_command",
+                    instanceId: event.instance_id,
+                    commandId: sent.commandId,
+                    resultS3Key,
+                    nowMs: dispatchTimestampMs,
+                });
                 return {
                     source_event_id: event.source_event_id,
+                    attempt: event.attempt,
                     instance_id: event.instance_id,
                     command_id: sent.commandId,
                     result_s3_key: resultS3Key,
                 };
             }
             case "poll_command": {
-                const invocation = await options.ssm.getCommandInvocation({
+                const pollTimestampMs = options.now?.() ?? Date.now();
+                const commandStatus = await pollCommandStatus(options.ssm, {
                     instanceId: event.instance_id,
                     commandId: event.command_id,
                 });
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "polling_command",
+                    instanceId: event.instance_id,
+                    commandId: event.command_id,
+                    resultS3Key: event.result_s3_key,
+                    lastPollAtMs: pollTimestampMs,
+                    nowMs: pollTimestampMs,
+                });
                 return {
                     source_event_id: event.source_event_id,
+                    attempt: event.attempt,
                     instance_id: event.instance_id,
                     command_id: event.command_id,
                     result_s3_key: event.result_s3_key,
-                    command_status: normalizeCommandStatus(invocation.status),
+                    command_status: commandStatus,
                 };
             }
             case "read_result": {
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "reading_result",
+                    resultS3Key: event.result_s3_key,
+                });
                 const text = await options.s3.getObjectText({
                     bucket: options.config.resultBucket,
                     key: event.result_s3_key,
                 });
                 return {
                     source_event_id: event.source_event_id,
+                    attempt: event.attempt,
                     result: parseTeeResult(text),
                 };
             }
             case "apply_result": {
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
-                await repository.applyRunnerResult(
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "applying_result",
+                    nowMs,
+                });
+                const applied = await repository.applyRunnerResult(
                     event.source_event_id,
                     event.result,
                     nowMs,
                     isPendingTeeResult(event.result) ? nowMs + HOUR_MS : undefined,
+                    event.attempt,
                 );
+                if (!applied) {
+                    throw new Error("stale runner workflow attempt");
+                }
                 return {
                     source_event_id: event.source_event_id,
+                    attempt: event.attempt,
                     applied: true,
                     result: event.result,
                 };
@@ -202,33 +301,58 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (relayer === undefined || event.result.status !== "finalized") {
                     return {
                         source_event_id: event.source_event_id,
+                        attempt: event.attempt,
                         relayer: "skipped",
                         result: event.result,
                     };
                 }
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "complete",
+                    allowNonProcessing: true,
+                });
                 const nowMs = options.now?.() ?? Date.now();
                 const result = await relayer.relay(event.result);
                 if (result.ok) {
-                    await repository.markRelayerSucceeded(
+                    await requireCurrentWorkflowAttempt(options, event, {
+                        phase: "complete",
+                        nowMs,
+                        allowNonProcessing: true,
+                    });
+                    const marked = await repository.markRelayerSucceeded(
                         event.source_event_id,
                         result.value,
                         nowMs,
+                        event.attempt,
                     );
+                    if (!marked) {
+                        throw new Error("stale runner workflow attempt");
+                    }
                     return {
                         source_event_id: event.source_event_id,
+                        attempt: event.attempt,
                         relayer: "succeeded",
                         result: event.result,
                     };
                 }
-                await repository.markRelayerFailed(
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "complete",
+                    nowMs,
+                    allowNonProcessing: true,
+                });
+                const marked = await repository.markRelayerFailed(
                     event.source_event_id,
                     relayer.mode,
                     result.error_code,
                     result.message,
                     nowMs,
+                    event.attempt,
                 );
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
                 return {
                     source_event_id: event.source_event_id,
+                    attempt: event.attempt,
                     relayer: "failed",
                     result: event.result,
                 };
@@ -236,14 +360,27 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
             case "mark_failed": {
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
-                await repository.markFailed(
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "complete",
+                    nowMs,
+                    allowNonProcessing: true,
+                });
+                const marked = await repository.markFailed(
                     event.source_event_id,
                     "AWS_RUNNER_PROCESS_FAILED",
                     nowMs,
                     nowMs + FAILED_RETRY_BACKOFF_MS,
                     event.message ?? event.error_code ?? "runner workflow failed",
+                    event.attempt,
                 );
-                return { source_event_id: event.source_event_id, failed: true };
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                return {
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    failed: true,
+                };
             }
         }
     };
@@ -443,6 +580,30 @@ function normalizeCommandStatus(status: string): "PENDING" | "SUCCEEDED" | "FAIL
     return "FAILED";
 }
 
+async function pollCommandStatus(
+    ssm: SsmClientLike,
+    input: { instanceId: string; commandId: string },
+): Promise<"PENDING" | "SUCCEEDED" | "FAILED"> {
+    try {
+        const invocation = await ssm.getCommandInvocation(input);
+        return normalizeCommandStatus(invocation.status);
+    } catch (error) {
+        if (isTransientCommandInvocationLookupError(error)) {
+            return "PENDING";
+        }
+        throw error;
+    }
+}
+
+function isTransientCommandInvocationLookupError(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "InvocationDoesNotExist"
+    );
+}
+
 function parseTeeResult(text: string): TeeCoreResult {
     const parsed = JSON.parse(text) as unknown;
     if (isRecord(parsed) && parsed.status === "finalized") {
@@ -474,6 +635,41 @@ function requireRepository(options: RunnerControlHandlerOptions): StateRepositor
         throw new Error("state repository is required for this runner workflow action");
     }
     return options.repository;
+}
+
+async function requireCurrentWorkflowAttempt(
+    options: RunnerControlHandlerOptions,
+    event: { source_event_id: string; attempt?: number | undefined },
+    input: {
+        phase: Parameters<StateRepository["updateRunnerWorkflowProgress"]>[0]["phase"];
+        nowMs?: number;
+        instanceId?: string | undefined;
+        commandId?: string | undefined;
+        resultS3Key?: string | undefined;
+        lastPollAtMs?: number | undefined;
+        allowNonProcessing?: boolean | undefined;
+    },
+): Promise<void> {
+    if (options.repository === undefined) {
+        return;
+    }
+    if (event.attempt === undefined) {
+        throw new Error("runner workflow attempt is required");
+    }
+    const updated = await options.repository.updateRunnerWorkflowProgress({
+        sourceEventId: event.source_event_id,
+        attempt: event.attempt,
+        phase: input.phase,
+        nowMs: input.nowMs ?? options.now?.() ?? Date.now(),
+        instanceId: input.instanceId,
+        commandId: input.commandId,
+        resultS3Key: input.resultS3Key,
+        lastPollAtMs: input.lastPollAtMs,
+        allowNonProcessing: input.allowNonProcessing,
+    });
+    if (!updated) {
+        throw new Error("stale runner workflow attempt");
+    }
 }
 
 function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | undefined {

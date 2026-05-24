@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { TeeCoreResult } from "@sonari/oracle-shared";
+import { BCS_ENUMS, type TeeCoreResult } from "@sonari/oracle-shared";
+import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     createRunnerControlHandler,
     type AutoScalingClientLike,
@@ -104,6 +105,297 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.commands[0]).not.toContain("latest.json");
     });
 
+    it("records guarded workflow progress when dispatching and polling SSM commands", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const ssm = new RecordingSsmClient({ invocationStatus: "InProgress" });
+        let nowMs = 1_800_000_000_123;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => nowMs,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "dispatch_tee_command",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            instance_id: "i-123",
+        });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            runner_attempt: 1,
+            runner_phase: "dispatching_command",
+            runner_instance_id: "i-123",
+            runner_command_id: "cmd-123",
+            runner_result_s3_key: "results/us7000sonari/1800000000123.json",
+            updated_at_ms: 1_800_000_000_123,
+        });
+
+        nowMs += 30_000;
+        const polled = await handler({
+            action: "poll_command",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            instance_id: "i-123",
+            command_id: "cmd-123",
+            result_s3_key: "results/us7000sonari/1800000000123.json",
+        });
+
+        expect(polled).toMatchObject({ command_status: "PENDING" });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            runner_phase: "polling_command",
+            runner_instance_id: "i-123",
+            runner_command_id: "cmd-123",
+            runner_result_s3_key: "results/us7000sonari/1800000000123.json",
+            runner_last_poll_at_ms: 1_800_000_030_123,
+            updated_at_ms: 1_800_000_030_123,
+        });
+    });
+
+    it("requires attempt metadata for repository-guarded workflow actions", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const autoscaling = new RecordingAutoScalingClient();
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling,
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_030_123,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                source_event_id: "us7000sonari",
+                instance_id: "i-123",
+            }),
+        ).rejects.toThrow(/runner workflow attempt is required/);
+        await expect(
+            handler({
+                action: "mark_failed",
+                source_event_id: "us7000sonari",
+            }),
+        ).rejects.toThrow(/runner workflow attempt is required/);
+        await expect(
+            handler({
+                action: "stop_instance",
+                source_event_id: "us7000sonari",
+            }),
+        ).rejects.toThrow(/runner workflow attempt is required/);
+
+        expect(ssm.commands).toEqual([]);
+        expect(autoscaling.capacities).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            runner_phase: "starting_instance",
+        });
+    });
+
+    it("treats missing SSM command invocations as pending while command registration propagates", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient({ invocationErrorName: "InvocationDoesNotExist" }),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_030_123,
+            config: baseConfig(),
+        });
+
+        const polled = await handler({
+            action: "poll_command",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            instance_id: "i-123",
+            command_id: "cmd-123",
+            result_s3_key: "results/us7000sonari/1800000000123.json",
+        });
+
+        expect(polled).toMatchObject({ command_status: "PENDING" });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            runner_phase: "polling_command",
+            runner_last_poll_at_ms: 1_800_000_030_123,
+        });
+    });
+
+    it("does not let a superseded workflow attempt dispatch, fail, apply, or stop newer work", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markFailed(
+            "us7000sonari",
+            "AWS_RUNNER_TIMEOUT",
+            1_800_000_000_000,
+            1_800_000_000_000,
+        );
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-2",
+            1_800_000_000_001,
+        );
+        const autoscaling = new RecordingAutoScalingClient();
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling,
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_030_123,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                instance_id: "i-123",
+            }),
+        ).rejects.toThrow(/stale runner workflow attempt/);
+        await expect(
+            handler({
+                action: "apply_result",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result: pendingSourceResult("us7000sonari"),
+            }),
+        ).rejects.toThrow(/stale runner workflow attempt/);
+        await expect(
+            handler({
+                action: "mark_failed",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+            }),
+        ).rejects.toThrow(/stale runner workflow attempt/);
+        await expect(
+            handler({
+                action: "stop_instance",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+            }),
+        ).rejects.toThrow(/stale runner workflow attempt/);
+
+        expect(ssm.commands).toEqual([]);
+        expect(autoscaling.capacities).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            retry_count: 1,
+            runner_attempt: 2,
+            runner_phase: "starting_instance",
+        });
+    });
+
+    it("does not let a superseded workflow attempt relay finalized results", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markFailed(
+            "us7000sonari",
+            "AWS_RUNNER_TIMEOUT",
+            1_800_000_000_000,
+            1_800_000_000_000,
+        );
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-2",
+            1_800_000_000_001,
+        );
+        const relayer = new RecordingRelayerAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            now: () => 1_800_000_030_123,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result: finalizedResult(),
+            }),
+        ).rejects.toThrow(/stale runner workflow attempt/);
+
+        expect(relayer.inputs).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            runner_attempt: 2,
+            relayer_status: null,
+        });
+    });
+
+    it("allows the current workflow attempt to stop capacity after applying a terminal result", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            pendingSourceResult("us7000sonari"),
+            1_800_000_030_000,
+            1_800_000_060_000,
+            1,
+        );
+        const autoscaling = new RecordingAutoScalingClient();
+        const handler = createRunnerControlHandler({
+            autoscaling,
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_030_123,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "stop_instance",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+            }),
+        ).resolves.toMatchObject({ capacity: 0 });
+
+        expect(autoscaling.capacities).toEqual([0]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "pending_source",
+            runner_attempt: 1,
+            runner_phase: "stopping_instance",
+        });
+    });
+
     it("fails closed before dispatching SSM commands for malformed event IDs", async () => {
         const ssm = new RecordingSsmClient();
         const handler = createRunnerControlHandler({
@@ -193,6 +485,11 @@ describe("AWS runner workflow helper", () => {
     it("applies TEE results to DynamoDB-compatible state and skips relayer when not configured", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-1",
+            1_800_000_000_001,
+        );
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -204,10 +501,16 @@ describe("AWS runner workflow helper", () => {
         });
         const result = pendingSourceResult("us7000sonari");
 
-        await handler({ action: "apply_result", source_event_id: "us7000sonari", result });
+        await handler({
+            action: "apply_result",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result,
+        });
         const relayer = await handler({
             action: "relayer_preview_or_dry_run",
             source_event_id: "us7000sonari",
+            attempt: 1,
             result,
         });
 
@@ -235,6 +538,44 @@ function pendingSourceResult(sourceEventId: string): TeeCoreResult {
     };
 }
 
+function finalizedResult(): TeeCoreResult {
+    return {
+        status: "finalized",
+        payload: {
+            intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
+            oracle_version: 1,
+            event_uid: "us7000sonari",
+            hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+            status: BCS_ENUMS.onchainStatus.FINALIZED,
+            event_revision: 1,
+            occurred_at_ms: 1_800_000_000_000,
+            observed_at_ms: 1_800_000_000_000,
+            source_updated_at_ms: 1_800_000_000_000,
+            primary_source: BCS_ENUMS.primarySource.USGS,
+            severity_band: 2,
+            source_set_hash: `0x${"11".repeat(32)}`,
+            raw_data_hash: `0x${"22".repeat(32)}`,
+            raw_data_uri: "walrus://raw",
+            affected_cells_root: `0x${"33".repeat(32)}`,
+            affected_cells_uri: "walrus://cells",
+            affected_cells_data_hash: `0x${"44".repeat(32)}`,
+            geo_resolution: 7,
+            cells_generation_method:
+                BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
+            cell_metric: BCS_ENUMS.cellMetric.USGS_MMI,
+            cell_aggregation: BCS_ENUMS.cellAggregation.GRID_POINT_P90,
+            intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
+            max_cell_band: 2,
+            affected_cell_count: 1,
+            min_claim_band: 1,
+            freshness_deadline_ms: 1_800_000_060_000,
+        },
+        payload_bcs_hex: "0x01",
+        signature: "0xsig",
+        public_key: "0xpub",
+    };
+}
+
 class RecordingAutoScalingClient implements AutoScalingClientLike {
     readonly capacities: number[] = [];
 
@@ -257,7 +598,11 @@ class RecordingSsmClient implements SsmClientLike {
     readonly commands: string[] = [];
 
     constructor(
-        private readonly options: { invocationStatus?: string; onlineManagedInstanceIds?: string[] } = {},
+        private readonly options: {
+            invocationStatus?: string;
+            onlineManagedInstanceIds?: string[];
+            invocationErrorName?: string;
+        } = {},
     ) {}
 
     async listOnlineManagedInstanceIds(input: { instanceIds: string[] }): Promise<Set<string>> {
@@ -271,6 +616,11 @@ class RecordingSsmClient implements SsmClientLike {
     }
 
     async getCommandInvocation(): Promise<{ status: string }> {
+        if (this.options.invocationErrorName !== undefined) {
+            throw Object.assign(new Error(this.options.invocationErrorName), {
+                name: this.options.invocationErrorName,
+            });
+        }
         return { status: this.options.invocationStatus ?? "InProgress" };
     }
 }
@@ -286,5 +636,34 @@ class RecordingS3Client implements S3ClientLike {
                 error_code: "SHAKEMAP_PRODUCT_MISSING",
             })
         );
+    }
+}
+
+class RecordingRelayerAdapter implements RelayerAdapter {
+    readonly mode = "preview" as const;
+    readonly inputs: TeeCoreResult[] = [];
+
+    async relay(input: TeeCoreResult): Promise<{ ok: true; value: RelayerSuccess }> {
+        this.inputs.push(input);
+        return {
+            ok: true,
+            value: {
+                mode: this.mode,
+                request: {
+                    target: "0xtarget",
+                    registry: "0xregistry",
+                    verifierRegistry: "0xverifier",
+                    clock: "0x6",
+                    arguments: ["0xtarget", "0xregistry", "0xverifier", [], [], []],
+                    submitRequest: {
+                        target: "0xtarget",
+                        registry: "0xregistry",
+                        verifierRegistry: "0xverifier",
+                        clock: "0x6",
+                        arguments: ["0xtarget", "0xregistry", "0xverifier", [], [], []],
+                    },
+                },
+            },
+        };
     }
 }

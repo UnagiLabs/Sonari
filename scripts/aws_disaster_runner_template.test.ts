@@ -68,4 +68,23 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).not.toContain("Handler: dist/lambda.manualHandler");
         expect(template).not.toContain("Handler: dist/runner_workflow.handler");
     });
+
+    it("retries transient PollCommand Lambda or SSM lookup failures before failing the workflow", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"PollCommand": {');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }]',
+        );
+    });
+
+    it("passes the workflow attempt to every runner control task", async () => {
+        const template = await readFile(templatePath, "utf8");
+        const runnerTaskCount =
+            template.match(/"Resource": "\$\{RunnerControlLambda\.Arn\}"/g)?.length ?? 0;
+        const attemptParameterCount = template.match(/"attempt\.\$": "\$\.attempt"/g)?.length ?? 0;
+
+        expect(runnerTaskCount).toBeGreaterThan(0);
+        expect(attemptParameterCount).toBe(runnerTaskCount);
+    });
 });
