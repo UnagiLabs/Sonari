@@ -40,6 +40,37 @@ describe("AWS runner workflow helper", () => {
         ).rejects.toThrow(/No running SSM-managed runner instance/);
     });
 
+    it("requires a running EC2 instance to be online in SSM before it is ready", async () => {
+        const offlineHandler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client({
+                instances: [{ instanceId: "i-offline", state: "running" }],
+            }),
+            ssm: new RecordingSsmClient({ onlineManagedInstanceIds: [] }),
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+        const onlineHandler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client({
+                instances: [
+                    { instanceId: "i-stopped", state: "stopped" },
+                    { instanceId: "i-online", state: "running" },
+                ],
+            }),
+            ssm: new RecordingSsmClient({ onlineManagedInstanceIds: ["i-online"] }),
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        await expect(
+            offlineHandler({ action: "find_ready_instance", source_event_id: "us7000sonari" }),
+        ).rejects.toThrow(/No running SSM-managed runner instance/);
+        await expect(
+            onlineHandler({ action: "find_ready_instance", source_event_id: "us7000sonari" }),
+        ).resolves.toMatchObject({ instance_id: "i-online" });
+    });
+
     it("dispatches SSM command and polls pending/success states", async () => {
         const ssm = new RecordingSsmClient({ invocationStatus: "Success" });
         const handler = createRunnerControlHandler({
@@ -225,7 +256,14 @@ class RecordingEc2Client implements Ec2ClientLike {
 class RecordingSsmClient implements SsmClientLike {
     readonly commands: string[] = [];
 
-    constructor(private readonly options: { invocationStatus?: string } = {}) {}
+    constructor(
+        private readonly options: { invocationStatus?: string; onlineManagedInstanceIds?: string[] } = {},
+    ) {}
+
+    async listOnlineManagedInstanceIds(input: { instanceIds: string[] }): Promise<Set<string>> {
+        const online = new Set(this.options.onlineManagedInstanceIds ?? input.instanceIds);
+        return new Set(input.instanceIds.filter((instanceId) => online.has(instanceId)));
+    }
 
     async sendCommand(input: { shellCommand: string }): Promise<{ commandId: string }> {
         this.commands.push(input.shellCommand);

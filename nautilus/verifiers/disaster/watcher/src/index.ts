@@ -7,6 +7,7 @@ import {
     type TeeCoreResult,
 } from "@sonari/oracle-shared";
 import {
+    DAY_MS,
     DEFAULT_DUE_LIMIT,
     FAILED_RETRY_BACKOFF_MS,
     HOUR_MS,
@@ -151,6 +152,16 @@ export async function scanCandidates(
         }
         seen.add(candidate.source_event_id);
         await repository.upsertCandidate(candidate, nowMs, options);
+        if (!options.bypassScreening && nowMs - candidate.occurred_at_ms < DAY_MS) {
+            const row = await repository.get(candidate.source_event_id);
+            if (row?.status === "new") {
+                await repository.deferUntil(
+                    candidate.source_event_id,
+                    candidate.occurred_at_ms + DAY_MS,
+                    nowMs,
+                );
+            }
+        }
     }
 }
 

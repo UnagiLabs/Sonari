@@ -4,6 +4,8 @@ import {
     buildDisasterVerifierRequest,
     createManualHandler,
     createScheduledHandler,
+    DAY_MS,
+    HOUR_MS,
     DynamoDbStateRepository,
     InMemoryStateRepository,
     startDueWorkflows,
@@ -72,6 +74,32 @@ describe("AWS Lambda watcher handlers", () => {
         await expect(repository.get("us7000small")).resolves.toMatchObject({
             status: "ignored_small",
             error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+        });
+    });
+
+    it("defers scheduled candidates that are less than 24 hours old", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const occurredAtMs = baseNow - 23 * HOUR_MS;
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            fetchCandidates: async () => [
+                candidate("us7000fresh", {
+                    occurred_at_ms: occurredAtMs,
+                    source_updated_at_ms: baseNow,
+                }),
+            ],
+        });
+
+        const result = await handler();
+
+        expect(result).toEqual({ scanned: 1, workflow_started: 0 });
+        expect(workflow.starts).toEqual([]);
+        await expect(repository.get("us7000fresh")).resolves.toMatchObject({
+            status: "new",
+            next_retry_at_ms: occurredAtMs + DAY_MS,
         });
     });
 
@@ -245,6 +273,54 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toHaveLength(1);
         await expect(repository.get("us7000next")).resolves.toMatchObject({ status: "new" });
     });
+
+    it("counts pending runner results as attempts before starting the next retry", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000pending", baseNow);
+        await startDueWorkflows(repository, workflow, baseNow + 1_000, 1);
+        await repository.applyRunnerResult(
+            "us7000pending",
+            pendingSourceResult("us7000pending"),
+            baseNow + 2_000,
+            baseNow + HOUR_MS,
+        );
+
+        const started = await startDueWorkflows(repository, workflow, baseNow + HOUR_MS, 1);
+
+        expect(started).toBe(1);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000pending",
+                executionName: "disaster-us7000pending-1",
+                attempt: 1,
+            },
+            {
+                sourceEventId: "us7000pending",
+                executionName: "disaster-us7000pending-2",
+                attempt: 2,
+            },
+        ]);
+        await expect(repository.get("us7000pending")).resolves.toMatchObject({
+            status: "processing",
+            retry_count: 1,
+            runner_attempt: 2,
+        });
+    });
+
+    it("preserves finalized TEE payload metadata on the event row", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+
+        await repository.applyRunnerResult("us7000sonari", finalizedResult(), baseNow + 1_000);
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            event_uid: "us7000sonari",
+            latest_revision: 1,
+            source_updated_at_ms: baseNow,
+        });
+    });
 });
 
 async function eventRow(
@@ -332,5 +408,13 @@ function finalizedResult(): TeeCoreResult {
         payload_bcs_hex: "0x01",
         signature: "0xsig",
         public_key: "0xpub",
+    };
+}
+
+function pendingSourceResult(sourceEventId: string): TeeCoreResult {
+    return {
+        status: "pending_source",
+        source_event_id: sourceEventId,
+        error_code: "SHAKEMAP_PRODUCT_MISSING",
     };
 }

@@ -304,26 +304,7 @@ export class InMemoryStateRepository implements StateRepository {
         if (row === undefined) {
             return;
         }
-        row.tee_result_json = JSON.stringify(result);
-        row.updated_at_ms = nowMs;
-        row.error_code = result.status === "finalized" ? null : result.error_code;
-        row.runner_phase = "complete";
-        if (result.status === "finalized") {
-            row.status = "finalized";
-            row.next_retry_at_ms = null;
-            row.payload_bcs_hex = result.payload_bcs_hex;
-            row.signature = result.signature;
-            row.public_key = result.public_key;
-            row.finalized_at_ms = nowMs;
-            return;
-        }
-        if (result.status === "rejected") {
-            row.status = "rejected";
-            row.next_retry_at_ms = null;
-            return;
-        }
-        row.status = result.status;
-        row.next_retry_at_ms = pendingNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+        await applyResultToRow(row, result, nowMs, pendingNextRetryAtMs);
     }
 
     async markRelayerSucceeded(
@@ -1043,8 +1024,12 @@ async function applyResultToRow(
     row.error_code = result.status === "finalized" ? null : result.error_code;
     row.runner_phase = "complete";
     if (result.status === "finalized") {
+        const metadata = finalizedPayloadMetadata(result.payload);
         row.status = "finalized";
         row.next_retry_at_ms = null;
+        row.event_uid = metadata.eventUid;
+        row.latest_revision = metadata.eventRevision;
+        row.source_updated_at_ms = metadata.sourceUpdatedAtMs;
         row.payload_bcs_hex = result.payload_bcs_hex;
         row.signature = result.signature;
         row.public_key = result.public_key;
@@ -1057,5 +1042,27 @@ async function applyResultToRow(
         return;
     }
     row.status = result.status;
+    row.retry_count += 1;
     row.next_retry_at_ms = pendingNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+}
+
+function finalizedPayloadMetadata(
+    payload: Extract<TeeCoreResult, { status: "finalized" }>["payload"],
+): {
+    eventUid: string;
+    eventRevision: number;
+    sourceUpdatedAtMs: number;
+} {
+    if (
+        typeof payload.event_uid !== "string" ||
+        typeof payload.event_revision !== "number" ||
+        typeof payload.source_updated_at_ms !== "number"
+    ) {
+        throw new Error("invalid finalized TEE result metadata");
+    }
+    return {
+        eventUid: payload.event_uid,
+        eventRevision: payload.event_revision,
+        sourceUpdatedAtMs: payload.source_updated_at_ms,
+    };
 }

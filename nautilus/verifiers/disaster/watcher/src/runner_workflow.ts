@@ -5,7 +5,12 @@ import {
 } from "@aws-sdk/client-auto-scaling";
 import { DescribeInstancesCommand, EC2Client } from "@aws-sdk/client-ec2";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { GetCommandInvocationCommand, SendCommandCommand, SSMClient } from "@aws-sdk/client-ssm";
+import {
+    DescribeInstanceInformationCommand,
+    GetCommandInvocationCommand,
+    SendCommandCommand,
+    SSMClient,
+} from "@aws-sdk/client-ssm";
 import { type TeeCoreResult, validateRelayerSubmitInput } from "@sonari/oracle-shared";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildDisasterVerifierRequest } from "./index.js";
@@ -42,6 +47,7 @@ export interface Ec2ClientLike {
 }
 
 export interface SsmClientLike {
+    listOnlineManagedInstanceIds(input: { instanceIds: string[] }): Promise<Set<string>>;
     sendCommand(input: {
         instanceId: string;
         shellCommand: string;
@@ -126,6 +132,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     instance_id: await findReadyInstance(
                         options.ec2,
+                        options.ssm,
                         options.config.autoScalingGroupName,
                     ),
                 };
@@ -299,6 +306,28 @@ class AwsEc2Client implements Ec2ClientLike {
 class AwsSsmClient implements SsmClientLike {
     private readonly client = new SSMClient({});
 
+    async listOnlineManagedInstanceIds(input: { instanceIds: string[] }): Promise<Set<string>> {
+        if (input.instanceIds.length === 0) {
+            return new Set();
+        }
+        const result = await this.client.send(
+            new DescribeInstanceInformationCommand({
+                Filters: [
+                    {
+                        Key: "InstanceIds",
+                        Values: input.instanceIds,
+                    },
+                ],
+            }),
+        );
+        return new Set(
+            (result.InstanceInformationList ?? [])
+                .filter((instance) => instance.PingStatus === "Online")
+                .map((instance) => instance.InstanceId)
+                .filter(isNonEmptyString),
+        );
+    }
+
     async sendCommand(input: {
         instanceId: string;
         shellCommand: string;
@@ -387,14 +416,21 @@ function shellSingleQuote(value: string): string {
 
 async function findReadyInstance(
     ec2: Ec2ClientLike,
+    ssm: SsmClientLike,
     autoScalingGroupName: string,
 ): Promise<string> {
     const instances = await ec2.listRunnerInstances({ autoScalingGroupName });
-    const ready = instances.find((instance) => instance.state === "running");
+    const runningIds = instances
+        .filter((instance) => instance.state === "running")
+        .map((instance) => instance.instanceId);
+    const onlineManagedInstanceIds = await ssm.listOnlineManagedInstanceIds({
+        instanceIds: runningIds,
+    });
+    const ready = runningIds.find((instanceId) => onlineManagedInstanceIds.has(instanceId));
     if (ready === undefined) {
         throw new Error("No running SSM-managed runner instance is available");
     }
-    return ready.instanceId;
+    return ready;
 }
 
 function normalizeCommandStatus(status: string): "PENDING" | "SUCCEEDED" | "FAILED" {
