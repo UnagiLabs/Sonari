@@ -193,6 +193,7 @@ describe("TEE process adapters", () => {
     it("terminates enclave command child processes when aborted", async () => {
         const dir = await mkdtemp(path.join(tmpdir(), "sonari-runner-test-"));
         const scriptPath = path.join(dir, "wait-for-abort.mjs");
+        const readyPath = path.join(dir, "sigterm-ready");
         const markerPath = path.join(dir, "sigterm-marker");
         await writeFile(
             scriptPath,
@@ -204,6 +205,7 @@ process.on("SIGTERM", () => {
   writeFileSync(${JSON.stringify(markerPath)}, "terminated");
   setInterval(() => {}, 1_000);
 });
+writeFileSync(${JSON.stringify(readyPath)}, "ready");
 setTimeout(() => {
   process.stdout.write(${JSON.stringify(JSON.stringify(finalized))});
   process.exit(0);
@@ -224,7 +226,8 @@ setTimeout(() => {
                 }
             ).process(request, controller.signal);
 
-            setTimeout(() => controller.abort(), 50);
+            await expect(waitForFile(readyPath)).resolves.toBe("ready");
+            controller.abort();
 
             await expect(processing).rejects.toThrow(/aborted/i);
             await expect(waitForFile(markerPath)).resolves.toBe("terminated");
