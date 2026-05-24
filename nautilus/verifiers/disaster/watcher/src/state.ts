@@ -90,6 +90,7 @@ export interface StateRepository {
     upsertManualEvent(sourceEventId: string, nowMs: number): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
+    hasActiveRunnerWorkflow(): Promise<boolean>;
     markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
@@ -247,6 +248,10 @@ export class InMemoryStateRepository implements StateRepository {
             .sort((a, b) => a.updated_at_ms - b.updated_at_ms)
             .slice(0, limit)
             .map((row) => structuredClone(row));
+    }
+
+    async hasActiveRunnerWorkflow(): Promise<boolean> {
+        return [...this.rows.values()].some((row) => row.status === "processing");
     }
 
     async markWorkflowStarted(
@@ -618,16 +623,14 @@ export class DynamoDbStateRepository implements StateRepository {
     }
 
     async listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]> {
-        const result = (await this.documentClient.send(
-            new ScanCommand({
-                TableName: this.tableName,
-                Limit: limit,
-            }),
-        )) as { Items?: EarthquakeEventRow[] };
-        return (result.Items ?? [])
+        return (await this.scanRows())
             .filter((row) => DUE_STATUSES.has(row.status) && isReadyForRetryOrDeadline(row, nowMs))
             .sort((a, b) => a.updated_at_ms - b.updated_at_ms)
             .slice(0, limit);
+    }
+
+    async hasActiveRunnerWorkflow(): Promise<boolean> {
+        return (await this.scanRows()).some((row) => row.status === "processing");
     }
 
     async markWorkflowStarted(
@@ -918,10 +921,24 @@ export class DynamoDbStateRepository implements StateRepository {
     }
 
     private async scanRows(): Promise<EarthquakeEventRow[]> {
-        const result = (await this.documentClient.send(
-            new ScanCommand({ TableName: this.tableName }),
-        )) as { Items?: EarthquakeEventRow[] };
-        return result.Items ?? [];
+        const rows: EarthquakeEventRow[] = [];
+        let exclusiveStartKey: Record<string, unknown> | undefined;
+        do {
+            const result = (await this.documentClient.send(
+                new ScanCommand({
+                    TableName: this.tableName,
+                    ...(exclusiveStartKey === undefined
+                        ? {}
+                        : { ExclusiveStartKey: exclusiveStartKey }),
+                }),
+            )) as {
+                Items?: EarthquakeEventRow[];
+                LastEvaluatedKey?: Record<string, unknown>;
+            };
+            rows.push(...(result.Items ?? []));
+            exclusiveStartKey = result.LastEvaluatedKey;
+        } while (exclusiveStartKey !== undefined);
+        return rows;
     }
 
     private async put(row: EarthquakeEventRow): Promise<void> {

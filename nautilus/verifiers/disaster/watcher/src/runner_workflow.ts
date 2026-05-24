@@ -10,6 +10,7 @@ import { type TeeCoreResult, validateRelayerSubmitInput } from "@sonari/oracle-s
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildDisasterVerifierRequest } from "./index.js";
 import { DirectRelayerAdapter, type RelayerAdapter, type RelayerMode } from "./relayer_preview.js";
+import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
 
 export interface RunnerWorkflowConfig {
@@ -129,9 +130,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     ),
                 };
             case "dispatch_tee_command": {
-                const resultS3Key = `results/${event.source_event_id}/latest.json`;
+                assertValidUsgsSourceEventId(event.source_event_id);
+                const dispatchTimestampMs = options.now?.() ?? Date.now();
+                const resultS3Key = `results/${event.source_event_id}/${dispatchTimestampMs}.json`;
                 const command = buildSsmShellCommand({
                     sourceEventId: event.source_event_id,
+                    dispatchTimestampMs,
                     resultBucket: options.config.resultBucket,
                     resultS3Key,
                     nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
@@ -360,23 +364,25 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
 
 function buildSsmShellCommand(input: {
     sourceEventId: string;
+    dispatchTimestampMs: number;
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
 }): string {
-    const requestJson = JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)).replace(
-        /'/g,
-        "'\\''",
-    );
+    const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
-        `RESULT_S3_KEY="${input.resultS3Key}"`,
-        `NITRO_ENCLAVE_PROCESS_COMMAND="${input.nitroEnclaveProcessCommand}"`,
+        `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
+        `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' '${requestJson}' | "$NITRO_ENCLAVE_PROCESS_COMMAND" > /tmp/sonari-tee-result.json`,
-        `aws s3 cp /tmp/sonari-tee-result.json "s3://${input.resultBucket}/$RESULT_S3_KEY"`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)))} | "$NITRO_ENCLAVE_PROCESS_COMMAND" > ${shellSingleQuote(tempResultPath)}`,
+        `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/$RESULT_S3_KEY`)}`,
     ].join("\n");
+}
+
+function shellSingleQuote(value: string): string {
+    return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 async function findReadyInstance(

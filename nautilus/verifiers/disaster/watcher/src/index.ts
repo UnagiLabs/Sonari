@@ -13,6 +13,7 @@ import {
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
 import type { RelayerAdapter } from "./relayer_preview.js";
+import { isValidUsgsSourceEventId } from "./source_event_id.js";
 import {
     DynamoDbStateRepository,
     type RunnerQueueJob,
@@ -35,6 +36,7 @@ export {
     WATCHER_MIN_MAGNITUDE,
     WATCHER_MIN_SUMMARY_MMI,
 } from "./screening.js";
+export { assertValidUsgsSourceEventId, isValidUsgsSourceEventId } from "./source_event_id.js";
 export type {
     EarthquakeEventRow,
     RunnerPhase,
@@ -111,9 +113,9 @@ export function createManualHandler(options: ManualHandlerOptions) {
         if (
             !isRecord(body) ||
             typeof body.source_event_id !== "string" ||
-            body.source_event_id.length === 0
+            !isValidUsgsSourceEventId(body.source_event_id)
         ) {
-            return jsonResponse(400, { ok: false, message: "source_event_id is required" });
+            return jsonResponse(400, { ok: false, message: "valid source_event_id is required" });
         }
         const nowMs = options.now?.() ?? Date.now();
         await options.repository.upsertManualEvent(body.source_event_id, nowMs);
@@ -158,6 +160,14 @@ export async function startDueWorkflows(
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
 ): Promise<number> {
+    await repository.recoverStaleProcessing(
+        nowMs - PROCESSING_STALE_AFTER_MS,
+        nowMs,
+        nowMs + FAILED_RETRY_BACKOFF_MS,
+    );
+    if (await repository.hasActiveRunnerWorkflow()) {
+        return 0;
+    }
     const rows = await repository.listDue(nowMs, limit);
     let started = 0;
     for (const row of rows) {
@@ -175,12 +185,24 @@ export async function startDueWorkflows(
         if (start === null) {
             continue;
         }
-        await workflow.start({
-            sourceEventId: row.source_event_id,
-            executionName,
-            attempt,
-        });
+        try {
+            await workflow.start({
+                sourceEventId: row.source_event_id,
+                executionName,
+                attempt,
+            });
+        } catch (error) {
+            await repository.markFailed(
+                row.source_event_id,
+                "AWS_RUNNER_START_FAILED",
+                nowMs,
+                nowMs + FAILED_RETRY_BACKOFF_MS,
+                error instanceof Error ? error.message : String(error),
+            );
+            continue;
+        }
         started += 1;
+        break;
     }
     return started;
 }
