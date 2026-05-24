@@ -1,0 +1,481 @@
+import {
+    AutoScalingClient,
+    DescribeAutoScalingGroupsCommand,
+    SetDesiredCapacityCommand,
+} from "@aws-sdk/client-auto-scaling";
+import { DescribeInstancesCommand, EC2Client } from "@aws-sdk/client-ec2";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetCommandInvocationCommand, SendCommandCommand, SSMClient } from "@aws-sdk/client-ssm";
+import { type TeeCoreResult, validateRelayerSubmitInput } from "@sonari/oracle-shared";
+import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
+import { buildDisasterVerifierRequest } from "./index.js";
+import { DirectRelayerAdapter, type RelayerAdapter, type RelayerMode } from "./relayer_preview.js";
+import { DynamoDbStateRepository, type StateRepository } from "./state.js";
+
+export interface RunnerWorkflowConfig {
+    autoScalingGroupName: string;
+    resultBucket: string;
+    nitroEnclaveProcessCommand: string;
+    eventsTableName?: string;
+    relayer?: {
+        mode: RelayerMode;
+        target: string;
+        registry: string;
+        verifierRegistry: string;
+        grpcUrl?: string;
+        senderAddress?: string;
+    };
+}
+
+export interface AutoScalingClientLike {
+    setDesiredCapacity(input: {
+        autoScalingGroupName: string;
+        desiredCapacity: number;
+    }): Promise<void>;
+}
+
+export interface Ec2ClientLike {
+    listRunnerInstances(input: {
+        autoScalingGroupName: string;
+    }): Promise<Array<{ instanceId: string; state: string }>>;
+}
+
+export interface SsmClientLike {
+    sendCommand(input: {
+        instanceId: string;
+        shellCommand: string;
+    }): Promise<{ commandId: string }>;
+    getCommandInvocation(input: {
+        instanceId: string;
+        commandId: string;
+    }): Promise<{ status: string }>;
+}
+
+export interface S3ClientLike {
+    getObjectText(input: { bucket: string; key: string }): Promise<string>;
+}
+
+export type RunnerControlEvent =
+    | { action: "start_instance"; source_event_id: string }
+    | { action: "find_ready_instance"; source_event_id: string }
+    | { action: "dispatch_tee_command"; source_event_id: string; instance_id: string }
+    | {
+          action: "poll_command";
+          source_event_id: string;
+          instance_id: string;
+          command_id: string;
+          result_s3_key?: string;
+      }
+    | { action: "read_result"; source_event_id: string; result_s3_key: string }
+    | { action: "apply_result"; source_event_id: string; result: TeeCoreResult }
+    | { action: "relayer_preview_or_dry_run"; source_event_id: string; result: TeeCoreResult }
+    | { action: "mark_failed"; source_event_id: string; error_code?: string; message?: string }
+    | { action: "stop_instance"; source_event_id: string };
+
+export type RunnerControlResult =
+    | { source_event_id: string; capacity: number }
+    | { source_event_id: string; instance_id: string }
+    | { source_event_id: string; instance_id: string; command_id: string; result_s3_key: string }
+    | {
+          source_event_id: string;
+          instance_id?: string;
+          command_id?: string;
+          result_s3_key?: string;
+          command_status: "PENDING" | "SUCCEEDED" | "FAILED";
+      }
+    | { source_event_id: string; result: TeeCoreResult }
+    | { source_event_id: string; applied: true; result: TeeCoreResult }
+    | {
+          source_event_id: string;
+          relayer: "skipped" | "succeeded" | "failed";
+          result: TeeCoreResult;
+      }
+    | { source_event_id: string; failed: true };
+
+export interface RunnerControlHandlerOptions {
+    autoscaling: AutoScalingClientLike;
+    ec2: Ec2ClientLike;
+    ssm: SsmClientLike;
+    s3: S3ClientLike;
+    repository?: StateRepository;
+    relayer?: RelayerAdapter;
+    now?: () => number;
+    config: RunnerWorkflowConfig;
+}
+
+export function createRunnerControlHandler(options: RunnerControlHandlerOptions) {
+    return async function runnerControlHandler(
+        event: RunnerControlEvent,
+    ): Promise<RunnerControlResult> {
+        switch (event.action) {
+            case "start_instance":
+                await options.autoscaling.setDesiredCapacity({
+                    autoScalingGroupName: options.config.autoScalingGroupName,
+                    desiredCapacity: 1,
+                });
+                return { source_event_id: event.source_event_id, capacity: 1 };
+            case "stop_instance":
+                await options.autoscaling.setDesiredCapacity({
+                    autoScalingGroupName: options.config.autoScalingGroupName,
+                    desiredCapacity: 0,
+                });
+                return { source_event_id: event.source_event_id, capacity: 0 };
+            case "find_ready_instance":
+                return {
+                    source_event_id: event.source_event_id,
+                    instance_id: await findReadyInstance(
+                        options.ec2,
+                        options.config.autoScalingGroupName,
+                    ),
+                };
+            case "dispatch_tee_command": {
+                const resultS3Key = `results/${event.source_event_id}/latest.json`;
+                const command = buildSsmShellCommand({
+                    sourceEventId: event.source_event_id,
+                    resultBucket: options.config.resultBucket,
+                    resultS3Key,
+                    nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                });
+                const sent = await options.ssm.sendCommand({
+                    instanceId: event.instance_id,
+                    shellCommand: command,
+                });
+                return {
+                    source_event_id: event.source_event_id,
+                    instance_id: event.instance_id,
+                    command_id: sent.commandId,
+                    result_s3_key: resultS3Key,
+                };
+            }
+            case "poll_command": {
+                const invocation = await options.ssm.getCommandInvocation({
+                    instanceId: event.instance_id,
+                    commandId: event.command_id,
+                });
+                return {
+                    source_event_id: event.source_event_id,
+                    instance_id: event.instance_id,
+                    command_id: event.command_id,
+                    result_s3_key: event.result_s3_key,
+                    command_status: normalizeCommandStatus(invocation.status),
+                };
+            }
+            case "read_result": {
+                const text = await options.s3.getObjectText({
+                    bucket: options.config.resultBucket,
+                    key: event.result_s3_key,
+                });
+                return {
+                    source_event_id: event.source_event_id,
+                    result: parseTeeResult(text),
+                };
+            }
+            case "apply_result": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                await repository.applyRunnerResult(
+                    event.source_event_id,
+                    event.result,
+                    nowMs,
+                    isPendingTeeResult(event.result) ? nowMs + HOUR_MS : undefined,
+                );
+                return {
+                    source_event_id: event.source_event_id,
+                    applied: true,
+                    result: event.result,
+                };
+            }
+            case "relayer_preview_or_dry_run": {
+                const repository = requireRepository(options);
+                const relayer = options.relayer ?? buildRelayerFromConfig(options.config);
+                if (relayer === undefined || event.result.status !== "finalized") {
+                    return {
+                        source_event_id: event.source_event_id,
+                        relayer: "skipped",
+                        result: event.result,
+                    };
+                }
+                const nowMs = options.now?.() ?? Date.now();
+                const result = await relayer.relay(event.result);
+                if (result.ok) {
+                    await repository.markRelayerSucceeded(
+                        event.source_event_id,
+                        result.value,
+                        nowMs,
+                    );
+                    return {
+                        source_event_id: event.source_event_id,
+                        relayer: "succeeded",
+                        result: event.result,
+                    };
+                }
+                await repository.markRelayerFailed(
+                    event.source_event_id,
+                    relayer.mode,
+                    result.error_code,
+                    result.message,
+                    nowMs,
+                );
+                return {
+                    source_event_id: event.source_event_id,
+                    relayer: "failed",
+                    result: event.result,
+                };
+            }
+            case "mark_failed": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                await repository.markFailed(
+                    event.source_event_id,
+                    "AWS_RUNNER_PROCESS_FAILED",
+                    nowMs,
+                    nowMs + FAILED_RETRY_BACKOFF_MS,
+                    event.message ?? event.error_code ?? "runner workflow failed",
+                );
+                return { source_event_id: event.source_event_id, failed: true };
+            }
+        }
+    };
+}
+
+class AwsAutoScalingClient implements AutoScalingClientLike {
+    private readonly client = new AutoScalingClient({});
+
+    async setDesiredCapacity(input: {
+        autoScalingGroupName: string;
+        desiredCapacity: number;
+    }): Promise<void> {
+        await this.client.send(
+            new SetDesiredCapacityCommand({
+                AutoScalingGroupName: input.autoScalingGroupName,
+                DesiredCapacity: input.desiredCapacity,
+                HonorCooldown: false,
+            }),
+        );
+    }
+}
+
+class AwsEc2Client implements Ec2ClientLike {
+    private readonly autoscaling = new AutoScalingClient({});
+    private readonly ec2 = new EC2Client({});
+
+    async listRunnerInstances(input: {
+        autoScalingGroupName: string;
+    }): Promise<Array<{ instanceId: string; state: string }>> {
+        const group = await this.autoscaling.send(
+            new DescribeAutoScalingGroupsCommand({
+                AutoScalingGroupNames: [input.autoScalingGroupName],
+            }),
+        );
+        const instanceIds =
+            group.AutoScalingGroups?.[0]?.Instances?.map((instance) => instance.InstanceId).filter(
+                isNonEmptyString,
+            ) ?? [];
+        if (instanceIds.length === 0) {
+            return [];
+        }
+        const reservations = await this.ec2.send(
+            new DescribeInstancesCommand({ InstanceIds: instanceIds }),
+        );
+        return (reservations.Reservations ?? []).flatMap((reservation) =>
+            (reservation.Instances ?? []).flatMap((instance) =>
+                instance.InstanceId === undefined
+                    ? []
+                    : [
+                          {
+                              instanceId: instance.InstanceId,
+                              state: instance.State?.Name ?? "unknown",
+                          },
+                      ],
+            ),
+        );
+    }
+}
+
+class AwsSsmClient implements SsmClientLike {
+    private readonly client = new SSMClient({});
+
+    async sendCommand(input: {
+        instanceId: string;
+        shellCommand: string;
+    }): Promise<{ commandId: string }> {
+        const result = await this.client.send(
+            new SendCommandCommand({
+                DocumentName: "AWS-RunShellScript",
+                InstanceIds: [input.instanceId],
+                Parameters: { commands: [input.shellCommand] },
+            }),
+        );
+        if (result.Command?.CommandId === undefined) {
+            throw new Error("SSM sendCommand did not return CommandId");
+        }
+        return { commandId: result.Command.CommandId };
+    }
+
+    async getCommandInvocation(input: {
+        instanceId: string;
+        commandId: string;
+    }): Promise<{ status: string }> {
+        const result = await this.client.send(
+            new GetCommandInvocationCommand({
+                InstanceId: input.instanceId,
+                CommandId: input.commandId,
+            }),
+        );
+        return { status: result.Status ?? "Unknown" };
+    }
+}
+
+class AwsS3Client implements S3ClientLike {
+    private readonly client = new S3Client({});
+
+    async getObjectText(input: { bucket: string; key: string }): Promise<string> {
+        const result = await this.client.send(
+            new GetObjectCommand({ Bucket: input.bucket, Key: input.key }),
+        );
+        if (result.Body === undefined) {
+            throw new Error(`S3 object was empty: ${input.key}`);
+        }
+        return result.Body.transformToString();
+    }
+}
+
+export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
+    const relayer = readRelayerConfigFromEnv();
+    const config: RunnerWorkflowConfig = {
+        autoScalingGroupName: requiredEnv("RUNNER_ASG_NAME"),
+        resultBucket: requiredEnv("RESULT_BUCKET"),
+        nitroEnclaveProcessCommand: requiredEnv("NITRO_ENCLAVE_PROCESS_COMMAND"),
+        ...(relayer === undefined ? {} : { relayer }),
+    };
+    return createRunnerControlHandler({
+        autoscaling: new AwsAutoScalingClient(),
+        ec2: new AwsEc2Client(),
+        ssm: new AwsSsmClient(),
+        s3: new AwsS3Client(),
+        repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
+        config,
+    })(event);
+}
+
+function buildSsmShellCommand(input: {
+    sourceEventId: string;
+    resultBucket: string;
+    resultS3Key: string;
+    nitroEnclaveProcessCommand: string;
+}): string {
+    const requestJson = JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)).replace(
+        /'/g,
+        "'\\''",
+    );
+    return [
+        "set -euo pipefail",
+        "source /opt/sonari/runner.env",
+        `RESULT_S3_KEY="${input.resultS3Key}"`,
+        `NITRO_ENCLAVE_PROCESS_COMMAND="${input.nitroEnclaveProcessCommand}"`,
+        "export NITRO_ENCLAVE_PROCESS_COMMAND",
+        `printf '%s' '${requestJson}' | "$NITRO_ENCLAVE_PROCESS_COMMAND" > /tmp/sonari-tee-result.json`,
+        `aws s3 cp /tmp/sonari-tee-result.json "s3://${input.resultBucket}/$RESULT_S3_KEY"`,
+    ].join("\n");
+}
+
+async function findReadyInstance(
+    ec2: Ec2ClientLike,
+    autoScalingGroupName: string,
+): Promise<string> {
+    const instances = await ec2.listRunnerInstances({ autoScalingGroupName });
+    const ready = instances.find((instance) => instance.state === "running");
+    if (ready === undefined) {
+        throw new Error("No running SSM-managed runner instance is available");
+    }
+    return ready.instanceId;
+}
+
+function normalizeCommandStatus(status: string): "PENDING" | "SUCCEEDED" | "FAILED" {
+    if (status === "Success") {
+        return "SUCCEEDED";
+    }
+    if (status === "Pending" || status === "InProgress" || status === "Delayed") {
+        return "PENDING";
+    }
+    return "FAILED";
+}
+
+function parseTeeResult(text: string): TeeCoreResult {
+    const parsed = JSON.parse(text) as unknown;
+    if (isRecord(parsed) && parsed.status === "finalized") {
+        const validation = validateRelayerSubmitInput(parsed);
+        if (!validation.ok) {
+            throw new Error(`invalid finalized TEE result: ${validation.message}`);
+        }
+        return validation.value;
+    }
+    if (
+        isRecord(parsed) &&
+        (parsed.status === "pending_source" ||
+            parsed.status === "pending_mmi" ||
+            parsed.status === "rejected") &&
+        typeof parsed.source_event_id === "string" &&
+        typeof parsed.error_code === "string"
+    ) {
+        return parsed as TeeCoreResult;
+    }
+    throw new Error("invalid TEE result");
+}
+
+function isPendingTeeResult(result: TeeCoreResult): boolean {
+    return result.status === "pending_source" || result.status === "pending_mmi";
+}
+
+function requireRepository(options: RunnerControlHandlerOptions): StateRepository {
+    if (options.repository === undefined) {
+        throw new Error("state repository is required for this runner workflow action");
+    }
+    return options.repository;
+}
+
+function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | undefined {
+    if (config.relayer === undefined) {
+        return undefined;
+    }
+    return new DirectRelayerAdapter(config.relayer);
+}
+
+function readRelayerConfigFromEnv(): RunnerWorkflowConfig["relayer"] {
+    const mode = process.env.RELAYER_MODE;
+    if (mode === undefined || mode.length === 0) {
+        return undefined;
+    }
+    if (mode !== "preview" && mode !== "dry_run" && mode !== "submit") {
+        throw new Error(`Unsupported RELAYER_MODE: ${mode}`);
+    }
+    const config: NonNullable<RunnerWorkflowConfig["relayer"]> = {
+        mode,
+        target: requiredEnv("RELAYER_TARGET"),
+        registry: requiredEnv("RELAYER_REGISTRY"),
+        verifierRegistry: requiredEnv("RELAYER_VERIFIER_REGISTRY"),
+    };
+    if (process.env.RELAYER_GRPC_URL !== undefined) {
+        config.grpcUrl = process.env.RELAYER_GRPC_URL;
+    }
+    if (process.env.RELAYER_SENDER_ADDRESS !== undefined) {
+        config.senderAddress = process.env.RELAYER_SENDER_ADDRESS;
+    }
+    return config;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function isNonEmptyString(input: string | undefined): input is string {
+    return input !== undefined && input.length > 0;
+}
+
+function requiredEnv(name: string): string {
+    const value = process.env[name];
+    if (value === undefined || value.length === 0) {
+        throw new Error(`${name} is required`);
+    }
+    return value;
+}

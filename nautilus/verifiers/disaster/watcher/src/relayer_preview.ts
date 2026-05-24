@@ -1,4 +1,9 @@
 import {
+    buildRelayerRequestPreview,
+    type RelayerRequestPreview as DirectRelayerRequestPreview,
+    dryRunRelayerSubmit,
+} from "@sonari/oracle-relayer";
+import {
     type OracleErrorCode,
     type SignedFinalizedPayload,
     type TeeCoreResult,
@@ -47,6 +52,15 @@ export interface HttpRelayerPreviewConfig {
     registry: string;
     verifierRegistry: string;
     mode?: RelayerMode;
+    grpcUrl?: string;
+    senderAddress?: string;
+}
+
+export interface DirectRelayerConfig {
+    mode: RelayerMode;
+    target: string;
+    registry: string;
+    verifierRegistry: string;
     grpcUrl?: string;
     senderAddress?: string;
 }
@@ -132,6 +146,59 @@ export class HttpRelayerAdapter implements RelayerAdapter {
     }
 }
 
+export class DirectRelayerAdapter implements RelayerAdapter {
+    readonly mode: RelayerMode;
+
+    constructor(private readonly config: DirectRelayerConfig) {
+        this.mode = config.mode;
+    }
+
+    async relay(input: TeeCoreResult): Promise<RelayerRunResult> {
+        const validation = validateRelayerSubmitInput(input);
+        if (!validation.ok) {
+            return relayerSubmitFailed(validation.message);
+        }
+
+        const requestConfig = {
+            target: this.config.target,
+            registry: this.config.registry,
+            verifierRegistry: this.config.verifierRegistry,
+        };
+        if (this.mode === "preview") {
+            const result = buildRelayerRequestPreview(validation.value, requestConfig);
+            return result.ok
+                ? {
+                      ok: true,
+                      value: {
+                          mode: this.mode,
+                          request: normalizeDirectRelayerRequest(result.value),
+                      },
+                  }
+                : result;
+        }
+        if (this.mode === "dry_run") {
+            if (this.config.grpcUrl === undefined || this.config.senderAddress === undefined) {
+                return relayerSubmitFailed("dry_run requires grpcUrl and senderAddress");
+            }
+            const result = await dryRunRelayerSubmit(validation.value, {
+                ...requestConfig,
+                grpcUrl: this.config.grpcUrl,
+                senderAddress: this.config.senderAddress,
+            });
+            return result.ok
+                ? {
+                      ok: true,
+                      value: {
+                          mode: this.mode,
+                          request: normalizeDirectRelayerRequest(result.value.request),
+                      },
+                  }
+                : result;
+        }
+        return relayerSubmitFailed("submit signer is not configured in the AWS Lambda runner");
+    }
+}
+
 export class StaticFailingRelayerAdapter implements RelayerAdapter {
     constructor(
         readonly mode: RelayerMode,
@@ -212,6 +279,17 @@ function readRelayerDigest(
     input: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string },
 ): string | undefined {
     return "request" in input ? readOptionalString(input.digest) : undefined;
+}
+
+function normalizeDirectRelayerRequest(input: DirectRelayerRequestPreview): RelayerRequestPreview {
+    return {
+        target: input.target,
+        registry: input.registry,
+        verifierRegistry: input.verifierRegistry,
+        clock: input.clock,
+        arguments: input.arguments,
+        submitRequest: input.submitRequest,
+    };
 }
 
 function errorMessage(error: unknown): string {

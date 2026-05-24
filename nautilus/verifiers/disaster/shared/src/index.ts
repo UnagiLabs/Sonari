@@ -153,6 +153,8 @@ export interface WorkerToTeeRequest {
     geo_resolution: typeof DEFAULT_ORACLE_CONTRACT.geo_resolution;
 }
 
+export type DisasterVerifierRequest = WorkerToTeeRequest;
+
 export interface SignedFinalizedPayload {
     status: "finalized";
     payload: DisasterOraclePayloadV1 | Record<string, unknown>;
@@ -250,6 +252,12 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
             geo_resolution: input.geo_resolution,
         },
     };
+}
+
+export function validateDisasterVerifierRequest(
+    input: unknown,
+): ValidationResult<DisasterVerifierRequest> {
+    return validateWorkerToTeeRequest(input);
 }
 
 export function validateRelayerSubmitInput(input: unknown): ValidationResult<RelayerSubmitInput> {

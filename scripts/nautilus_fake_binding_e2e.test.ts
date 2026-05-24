@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runFakeBindingOracleE2e } from "./nautilus_fake_binding_e2e.js";
 
 describe("Nautilus fake-binding oracle E2E", () => {
-    it("covers controlled queue and stale recovery paths without Wrangler", async () => {
+    it("covers controlled local dispatch and stale recovery paths", async () => {
         const output = await runFakeBindingOracleE2e();
 
         expect(output).toMatchObject({
