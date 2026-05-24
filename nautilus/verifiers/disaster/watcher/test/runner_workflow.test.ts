@@ -47,6 +47,7 @@ describe("AWS runner workflow helper", () => {
             ec2: new RecordingEc2Client(),
             ssm,
             s3: new RecordingS3Client(),
+            now: () => 1_800_000_000_123,
             config: baseConfig(),
         });
 
@@ -64,10 +65,78 @@ describe("AWS runner workflow helper", () => {
 
         expect(dispatched).toMatchObject({
             command_id: "cmd-123",
-            result_s3_key: "results/us7000sonari/latest.json",
+            result_s3_key: "results/us7000sonari/1800000000123.json",
         });
         expect(polled).toMatchObject({ command_status: "SUCCEEDED" });
         expect(ssm.commands[0]).toContain("NITRO_ENCLAVE_PROCESS_COMMAND");
+        expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
+        expect(ssm.commands[0]).not.toContain("latest.json");
+    });
+
+    it("fails closed before dispatching SSM commands for malformed event IDs", async () => {
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                source_event_id: "us7000$(touch bad)",
+                instance_id: "i-123",
+            }),
+        ).rejects.toThrow(/invalid source_event_id/);
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                source_event_id: "us7000/bad",
+                instance_id: "i-123",
+            }),
+        ).rejects.toThrow(/invalid source_event_id/);
+        expect(ssm.commands).toEqual([]);
+    });
+
+    it("single-quotes shell interpolations and creates unique result paths per dispatch", async () => {
+        const ssm = new RecordingSsmClient();
+        let nowMs = 1_800_000_000_123;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            now: () => nowMs,
+            config: {
+                ...baseConfig(),
+                resultBucket: "sonari-results-$(touch bad)",
+                nitroEnclaveProcessCommand: "/opt/sonari/bin/run-enclave 'quoted value'",
+            },
+        });
+
+        const first = await handler({
+            action: "dispatch_tee_command",
+            source_event_id: "us7000sonari",
+            instance_id: "i-123",
+        });
+        nowMs += 1;
+        const second = await handler({
+            action: "dispatch_tee_command",
+            source_event_id: "us7000sonari",
+            instance_id: "i-123",
+        });
+
+        expect(first).toMatchObject({ result_s3_key: "results/us7000sonari/1800000000123.json" });
+        expect(second).toMatchObject({ result_s3_key: "results/us7000sonari/1800000000124.json" });
+        expect(ssm.commands[0]).toContain(
+            "NITRO_ENCLAVE_PROCESS_COMMAND='/opt/sonari/bin/run-enclave '\\''quoted value'\\'''",
+        );
+        expect(ssm.commands[0]).toContain("'s3://sonari-results-$(touch bad)/$RESULT_S3_KEY'");
+        expect(ssm.commands[0]).not.toContain('"s3://sonari-results-$(touch bad)');
+        expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
+        expect(ssm.commands[1]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000124.json");
     });
 
     it("rejects malformed S3 TEE results", async () => {
