@@ -193,6 +193,7 @@ export async function startDueWorkflows(
             row.source_event_id,
             executionName,
             nowMs,
+            row.retry_count,
         );
         if (start === null) {
             continue;
@@ -201,7 +202,7 @@ export async function startDueWorkflows(
             await workflow.start({
                 sourceEventId: row.source_event_id,
                 executionName,
-                attempt,
+                attempt: start.attempt,
             });
         } catch (error) {
             await repository.markFailed(
@@ -210,6 +211,7 @@ export async function startDueWorkflows(
                 nowMs,
                 nowMs + FAILED_RETRY_BACKOFF_MS,
                 error instanceof Error ? error.message : String(error),
+                start.attempt,
             );
             continue;
         }

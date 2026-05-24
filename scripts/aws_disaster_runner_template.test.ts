@@ -78,11 +78,23 @@ describe("AWS disaster runner CloudFormation template", () => {
         );
     });
 
+    it("times out SSM command polling after 30 minutes", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"command_poll_count": 0');
+        expect(template).toContain('"command_poll_count.$": "$.command_poll_count"');
+        expect(template).toContain(
+            '{ "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }',
+        );
+        expect(template).toContain('"message": "SSM command polling exceeded 30 minutes"');
+    });
+
     it("passes the workflow attempt to every runner control task", async () => {
         const template = await readFile(templatePath, "utf8");
         const runnerTaskCount =
             template.match(/"Resource": "\$\{RunnerControlLambda\.Arn\}"/g)?.length ?? 0;
-        const attemptParameterCount = template.match(/"attempt\.\$": "\$\.attempt"/g)?.length ?? 0;
+        const attemptParameterCount =
+            template.match(/"Parameters": \{[^}]*"attempt\.\$": "\$\.attempt"/g)?.length ?? 0;
 
         expect(runnerTaskCount).toBeGreaterThan(0);
         expect(attemptParameterCount).toBe(runnerTaskCount);

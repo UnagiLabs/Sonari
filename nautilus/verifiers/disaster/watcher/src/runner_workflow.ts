@@ -78,6 +78,7 @@ export type RunnerControlEvent =
           instance_id: string;
           command_id: string;
           result_s3_key?: string;
+          command_poll_count?: number | undefined;
       }
     | {
           action: "read_result";
@@ -115,6 +116,7 @@ export type RunnerControlResult =
           instance_id: string;
           command_id: string;
           result_s3_key: string;
+          command_poll_count: number;
       }
     | {
           source_event_id: string;
@@ -122,6 +124,7 @@ export type RunnerControlResult =
           instance_id?: string;
           command_id?: string;
           result_s3_key?: string;
+          command_poll_count?: number;
           command_status: "PENDING" | "SUCCEEDED" | "FAILED";
       }
     | { source_event_id: string; attempt?: number | undefined; result: TeeCoreResult }
@@ -177,6 +180,16 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 0,
                 });
+                if (options.repository !== undefined && event.attempt !== undefined) {
+                    const stopped = await options.repository.markWorkflowStopped(
+                        event.source_event_id,
+                        event.attempt,
+                        options.now?.() ?? Date.now(),
+                    );
+                    if (!stopped) {
+                        throw new Error("stale runner workflow attempt");
+                    }
+                }
                 return {
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
@@ -231,6 +244,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     instance_id: event.instance_id,
                     command_id: sent.commandId,
                     result_s3_key: resultS3Key,
+                    command_poll_count: 0,
                 };
             }
             case "poll_command": {
@@ -239,6 +253,10 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     instanceId: event.instance_id,
                     commandId: event.command_id,
                 });
+                const commandPollCount =
+                    commandStatus === "PENDING"
+                        ? (event.command_poll_count ?? 0) + 1
+                        : (event.command_poll_count ?? 0);
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "polling_command",
                     instanceId: event.instance_id,
@@ -253,6 +271,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     instance_id: event.instance_id,
                     command_id: event.command_id,
                     result_s3_key: event.result_s3_key,
+                    command_poll_count: commandPollCount,
                     command_status: commandStatus,
                 };
             }

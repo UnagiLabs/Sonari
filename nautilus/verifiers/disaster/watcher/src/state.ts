@@ -113,7 +113,9 @@ export interface StateRepository {
         sourceEventId: string,
         executionName: string,
         nowMs: number,
+        expectedRetryCount?: number,
     ): Promise<WorkflowStartInput | null>;
+    markWorkflowStopped(sourceEventId: string, attempt: number, nowMs: number): Promise<boolean>;
     updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean>;
     markFailed(
         sourceEventId: string,
@@ -274,32 +276,60 @@ export class InMemoryStateRepository implements StateRepository {
     }
 
     async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
-        return [...this.rows.values()].some(
-            (row) =>
-                row.status === "processing" &&
-                (staleBeforeMs === undefined || row.updated_at_ms > staleBeforeMs),
-        );
+        return [...this.rows.values()].some((row) => isActiveRunnerWorkflow(row, staleBeforeMs));
     }
 
     async markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
         nowMs: number,
+        expectedRetryCount?: number,
     ): Promise<WorkflowStartInput | null> {
         const row = this.rows.get(sourceEventId);
-        if (row === undefined || !DUE_STATUSES.has(row.status)) {
+        if (
+            row === undefined ||
+            !DUE_STATUSES.has(row.status) ||
+            !isReadyForRetryOrDeadline(row, nowMs) ||
+            (expectedRetryCount !== undefined && row.retry_count !== expectedRetryCount)
+        ) {
             return null;
         }
         const attempt = row.retry_count + 1;
         row.status = "processing";
         row.runner_job_id = executionName;
+        row.runner_queued_at_ms = null;
         row.runner_attempt = attempt;
+        row.runner_id = null;
         row.runner_phase = "starting_instance";
         row.runner_started_at_ms = nowMs;
+        row.runner_stopped_at_ms = null;
         row.runner_timeout_at_ms = nowMs + FAILED_RETRY_BACKOFF_MS;
+        row.runner_error_message = null;
+        row.runner_stop_error = null;
+        row.runner_instance_id = null;
+        row.runner_command_id = null;
+        row.runner_result_s3_key = null;
+        row.runner_last_poll_at_ms = null;
+        row.tee_result_json = null;
         row.error_code = null;
         row.updated_at_ms = nowMs;
         return { sourceEventId, executionName, attempt };
+    }
+
+    async markWorkflowStopped(
+        sourceEventId: string,
+        attempt: number,
+        nowMs: number,
+    ): Promise<boolean> {
+        const row = this.rows.get(sourceEventId);
+        if (row === undefined || row.runner_attempt !== attempt) {
+            return false;
+        }
+        row.runner_stopped_at_ms = nowMs;
+        row.runner_stop_error = null;
+        row.runner_phase = "complete";
+        row.updated_at_ms = nowMs;
+        return true;
     }
 
     async updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean> {
@@ -661,33 +691,131 @@ export class DynamoDbStateRepository implements StateRepository {
     }
 
     async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
-        return (await this.scanRows()).some(
-            (row) =>
-                row.status === "processing" &&
-                (staleBeforeMs === undefined || row.updated_at_ms > staleBeforeMs),
-        );
+        return (await this.scanRows()).some((row) => isActiveRunnerWorkflow(row, staleBeforeMs));
     }
 
     async markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
         nowMs: number,
+        expectedRetryCount?: number,
     ): Promise<WorkflowStartInput | null> {
-        const row = await this.get(sourceEventId);
-        if (row === null || !DUE_STATUSES.has(row.status)) {
+        const retryCount = expectedRetryCount ?? (await this.get(sourceEventId))?.retry_count;
+        if (retryCount === undefined) {
             return null;
         }
-        const attempt = row.retry_count + 1;
-        row.status = "processing";
-        row.runner_job_id = executionName;
-        row.runner_attempt = attempt;
-        row.runner_phase = "starting_instance";
-        row.runner_started_at_ms = nowMs;
-        row.runner_timeout_at_ms = nowMs + FAILED_RETRY_BACKOFF_MS;
-        row.error_code = null;
-        row.updated_at_ms = nowMs;
-        await this.put(row);
+        const attempt = retryCount + 1;
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: sourceEventId },
+                    ConditionExpression:
+                        "#retry_count = :expected_retry_count AND #status IN (:new_status, :pending_source_status, :pending_mmi_status, :failed_status) AND (attribute_not_exists(#next_retry_at_ms) OR #next_retry_at_ms = :null_value OR #next_retry_at_ms <= :now_ms OR (#status IN (:pending_source_status, :pending_mmi_status) AND #finalization_deadline_at_ms <= :now_ms))",
+                    UpdateExpression: [
+                        "SET #status = :processing_status",
+                        "#runner_job_id = :runner_job_id",
+                        "#runner_queued_at_ms = :null_value",
+                        "#runner_attempt = :runner_attempt",
+                        "#runner_id = :null_value",
+                        "#runner_phase = :runner_phase",
+                        "#runner_started_at_ms = :now_ms",
+                        "#runner_stopped_at_ms = :null_value",
+                        "#runner_timeout_at_ms = :runner_timeout_at_ms",
+                        "#runner_error_message = :null_value",
+                        "#runner_stop_error = :null_value",
+                        "#runner_instance_id = :null_value",
+                        "#runner_command_id = :null_value",
+                        "#runner_result_s3_key = :null_value",
+                        "#runner_last_poll_at_ms = :null_value",
+                        "#tee_result_json = :null_value",
+                        "#error_code = :null_value",
+                        "#updated_at_ms = :now_ms",
+                    ].join(", "),
+                    ExpressionAttributeNames: {
+                        "#status": "status",
+                        "#retry_count": "retry_count",
+                        "#next_retry_at_ms": "next_retry_at_ms",
+                        "#finalization_deadline_at_ms": "finalization_deadline_at_ms",
+                        "#runner_job_id": "runner_job_id",
+                        "#runner_queued_at_ms": "runner_queued_at_ms",
+                        "#runner_attempt": "runner_attempt",
+                        "#runner_id": "runner_id",
+                        "#runner_phase": "runner_phase",
+                        "#runner_started_at_ms": "runner_started_at_ms",
+                        "#runner_stopped_at_ms": "runner_stopped_at_ms",
+                        "#runner_timeout_at_ms": "runner_timeout_at_ms",
+                        "#runner_error_message": "runner_error_message",
+                        "#runner_stop_error": "runner_stop_error",
+                        "#runner_instance_id": "runner_instance_id",
+                        "#runner_command_id": "runner_command_id",
+                        "#runner_result_s3_key": "runner_result_s3_key",
+                        "#runner_last_poll_at_ms": "runner_last_poll_at_ms",
+                        "#tee_result_json": "tee_result_json",
+                        "#error_code": "error_code",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":expected_retry_count": retryCount,
+                        ":new_status": "new",
+                        ":pending_source_status": "pending_source",
+                        ":pending_mmi_status": "pending_mmi",
+                        ":failed_status": "failed",
+                        ":processing_status": "processing",
+                        ":runner_job_id": executionName,
+                        ":runner_attempt": attempt,
+                        ":runner_phase": "starting_instance",
+                        ":runner_timeout_at_ms": nowMs + FAILED_RETRY_BACKOFF_MS,
+                        ":now_ms": nowMs,
+                        ":null_value": null,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return null;
+            }
+            throw error;
+        }
         return { sourceEventId, executionName, attempt };
+    }
+
+    async markWorkflowStopped(
+        sourceEventId: string,
+        attempt: number,
+        nowMs: number,
+    ): Promise<boolean> {
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: sourceEventId },
+                    ConditionExpression: "#runner_attempt = :expected_attempt",
+                    UpdateExpression:
+                        "SET #runner_stopped_at_ms = :runner_stopped_at_ms, #runner_stop_error = :runner_stop_error, #runner_phase = :runner_phase, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#runner_attempt": "runner_attempt",
+                        "#runner_stopped_at_ms": "runner_stopped_at_ms",
+                        "#runner_stop_error": "runner_stop_error",
+                        "#runner_phase": "runner_phase",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":expected_attempt": attempt,
+                        ":runner_stopped_at_ms": nowMs,
+                        ":runner_stop_error": null,
+                        ":runner_phase": "complete",
+                        ":updated_at_ms": nowMs,
+                    },
+                }),
+            );
+            return true;
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return false;
+            }
+            throw error;
+        }
     }
 
     async updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean> {
@@ -1231,25 +1359,32 @@ export class DynamoDbStateRepository implements StateRepository {
         nowMs: number,
         shouldUpdateHeartbeat: boolean,
     ): Promise<void> {
+        const stopPendingCondition =
+            "(#runner_phase IN (:complete_phase, :stopping_instance_phase) AND #runner_stopped_at_ms = :null_value)";
         await this.documentClient.send(
             new UpdateCommand({
                 TableName: this.tableName,
                 Key: { source_event_id: candidate.source_event_id },
                 ConditionExpression: shouldUpdateHeartbeat
-                    ? "attribute_exists(#source_event_id) AND #status <> :processing_status"
-                    : "attribute_exists(#source_event_id) AND #status = :processing_status",
+                    ? `attribute_exists(#source_event_id) AND #status <> :processing_status AND NOT ${stopPendingCondition}`
+                    : `attribute_exists(#source_event_id) AND (#status = :processing_status OR ${stopPendingCondition})`,
                 UpdateExpression: shouldUpdateHeartbeat
                     ? "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms, #updated_at_ms = :updated_at_ms"
                     : "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms",
                 ExpressionAttributeNames: {
                     "#source_event_id": "source_event_id",
                     "#status": "status",
+                    "#runner_phase": "runner_phase",
+                    "#runner_stopped_at_ms": "runner_stopped_at_ms",
                     "#last_seen_at_ms": "last_seen_at_ms",
                     "#source_updated_at_ms": "source_updated_at_ms",
                     ...(shouldUpdateHeartbeat ? { "#updated_at_ms": "updated_at_ms" } : {}),
                 },
                 ExpressionAttributeValues: {
                     ":processing_status": "processing",
+                    ":complete_phase": "complete",
+                    ":stopping_instance_phase": "stopping_instance",
+                    ":null_value": null,
                     ":last_seen_at_ms": nowMs,
                     ":source_updated_at_ms": candidate.source_updated_at_ms,
                     ...(shouldUpdateHeartbeat ? { ":updated_at_ms": nowMs } : {}),
@@ -1347,7 +1482,7 @@ function mergePreservingResult(
         last_seen_at_ms: next.last_seen_at_ms,
         source_updated_at_ms: next.source_updated_at_ms,
         error_code: next.status === "ignored_small" ? next.error_code : existing.error_code,
-        updated_at_ms: existing.status === "processing" ? existing.updated_at_ms : nowMs,
+        updated_at_ms: isActiveRunnerWorkflow(existing) ? existing.updated_at_ms : nowMs,
     };
 }
 
@@ -1359,6 +1494,21 @@ function isReadyForRetryOrDeadline(row: EarthquakeEventRow, nowMs: number): bool
         return true;
     }
     return row.next_retry_at_ms === null || row.next_retry_at_ms <= nowMs;
+}
+
+function isActiveRunnerWorkflow(row: EarthquakeEventRow, staleBeforeMs?: number): boolean {
+    if (staleBeforeMs !== undefined && row.updated_at_ms <= staleBeforeMs) {
+        return false;
+    }
+    if (row.status === "processing") {
+        return true;
+    }
+    return (
+        (row.runner_phase === "complete" || row.runner_phase === "stopping_instance") &&
+        row.runner_attempt !== null &&
+        row.runner_started_at_ms !== null &&
+        row.runner_stopped_at_ms === null
+    );
 }
 
 async function applyResultToRow(

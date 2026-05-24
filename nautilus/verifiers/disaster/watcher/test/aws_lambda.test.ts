@@ -522,7 +522,46 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
-    it("counts pending runner results as attempts before starting the next retry", async () => {
+    it("does not treat watcher feed refreshes as StopInstance-pending heartbeats", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertCandidate(candidate("us7000pending"), baseNow);
+        await startDueWorkflows(repository, workflow, baseNow + 1_000, 1);
+        await repository.applyRunnerResult(
+            "us7000pending",
+            pendingSourceResult("us7000pending"),
+            baseNow + 2_000,
+            baseNow + 3_000,
+        );
+        await repository.upsertCandidate(candidate("us7000pending"), baseNow + 20 * 60 * 1_000);
+
+        const started = await startDueWorkflows(
+            repository,
+            workflow,
+            baseNow + 20 * 60 * 1_000 + 1,
+            1,
+        );
+
+        expect(started).toBe(1);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000pending",
+                executionName: "disaster-us7000pending-1",
+                attempt: 1,
+            },
+            {
+                sourceEventId: "us7000pending",
+                executionName: "disaster-us7000pending-2",
+                attempt: 2,
+            },
+        ]);
+        await expect(repository.get("us7000pending")).resolves.toMatchObject({
+            status: "processing",
+            runner_attempt: 2,
+        });
+    });
+
+    it("keeps a completed attempt active until StopInstance records shutdown", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
         await repository.upsertManualEvent("us7000pending", baseNow);
@@ -531,10 +570,41 @@ describe("DynamoDB-compatible repository behavior", () => {
             "us7000pending",
             pendingSourceResult("us7000pending"),
             baseNow + 2_000,
-            baseNow + HOUR_MS,
+            baseNow + 3_000,
         );
 
-        const started = await startDueWorkflows(repository, workflow, baseNow + HOUR_MS, 1);
+        const started = await startDueWorkflows(repository, workflow, baseNow + 3_001, 1);
+
+        expect(started).toBe(0);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000pending",
+                executionName: "disaster-us7000pending-1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000pending")).resolves.toMatchObject({
+            status: "pending_source",
+            retry_count: 1,
+            runner_attempt: 1,
+            runner_stopped_at_ms: null,
+        });
+    });
+
+    it("starts the next due workflow after StopInstance records shutdown", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000pending", baseNow);
+        await startDueWorkflows(repository, workflow, baseNow + 1_000, 1);
+        await repository.applyRunnerResult(
+            "us7000pending",
+            pendingSourceResult("us7000pending"),
+            baseNow + 2_000,
+            baseNow + 3_000,
+        );
+        await repository.markWorkflowStopped("us7000pending", 1, baseNow + 3_000);
+
+        const started = await startDueWorkflows(repository, workflow, baseNow + 3_001, 1);
 
         expect(started).toBe(1);
         expect(workflow.starts).toEqual([
@@ -553,7 +623,43 @@ describe("DynamoDB-compatible repository behavior", () => {
             status: "processing",
             retry_count: 1,
             runner_attempt: 2,
+            runner_stopped_at_ms: null,
         });
+    });
+
+    it("returns null when a DynamoDB workflow start loses the conditional race", async () => {
+        const dueRow = await eventRow("us7000race", {
+            status: "new",
+            retry_count: 0,
+            updated_at_ms: baseNow,
+        });
+        const alreadyStartedRow = {
+            ...dueRow,
+            status: "processing" as const,
+            runner_job_id: "disaster-us7000race-1",
+            runner_attempt: 1,
+            runner_phase: "starting_instance" as const,
+            runner_started_at_ms: baseNow + 1_000,
+            runner_stopped_at_ms: null,
+            updated_at_ms: baseNow + 1_000,
+        };
+        const client = new WorkflowStartRaceClient(alreadyStartedRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        const started = await repository.markWorkflowStarted(
+            "us7000race",
+            "disaster-us7000race-1",
+            baseNow + 2_000,
+            0,
+        );
+
+        expect(started).toBeNull();
+        expect(client.currentRow).toMatchObject({
+            status: "processing",
+            runner_attempt: 1,
+            error_code: null,
+        });
+        expect(client.putCount).toBe(0);
     });
 
     it("preserves finalized TEE payload metadata on the event row", async () => {
@@ -836,6 +942,29 @@ class ConditionalPutRaceClient {
             this.currentRow[statusField as keyof EarthquakeEventRow] === values[":processing_status"] &&
             this.currentRow[attemptField as keyof EarthquakeEventRow] === values[":expected_attempt"]
         );
+    }
+}
+
+class WorkflowStartRaceClient {
+    putCount = 0;
+
+    constructor(readonly currentRow: EarthquakeEventRow) {}
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("Item" in input) {
+            this.putCount += 1;
+            return {};
+        }
+        if ("UpdateExpression" in input) {
+            throw Object.assign(new Error("conditional request failed"), {
+                name: "ConditionalCheckFailedException",
+            });
+        }
+        if ("Key" in input) {
+            return { Item: structuredClone(this.currentRow) };
+        }
+        throw new Error("unexpected workflow start race client command");
     }
 }
 

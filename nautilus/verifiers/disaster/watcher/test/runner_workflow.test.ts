@@ -105,6 +105,30 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.commands[0]).not.toContain("latest.json");
     });
 
+    it("increments SSM command poll count while the command remains pending", async () => {
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient({ invocationStatus: "InProgress" }),
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        const polled = await handler({
+            action: "poll_command",
+            source_event_id: "us7000sonari",
+            instance_id: "i-123",
+            command_id: "cmd-123",
+            result_s3_key: "results/us7000sonari/1800000000123.json",
+            command_poll_count: 59,
+        });
+
+        expect(polled).toMatchObject({
+            command_status: "PENDING",
+            command_poll_count: 60,
+        });
+    });
+
     it("records guarded workflow progress when dispatching and polling SSM commands", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -392,7 +416,8 @@ describe("AWS runner workflow helper", () => {
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "pending_source",
             runner_attempt: 1,
-            runner_phase: "stopping_instance",
+            runner_phase: "complete",
+            runner_stopped_at_ms: 1_800_000_030_123,
         });
     });
 

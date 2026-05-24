@@ -368,6 +368,7 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "action": "dispatch_tee_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
               "Next": "WaitForCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -375,7 +376,7 @@ Resources:
             "PollCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "poll_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "action": "poll_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
               "Next": "CommandComplete",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -384,7 +385,8 @@ Resources:
               "Type": "Choice",
               "Choices": [
                 { "Variable": "$.command_status", "StringEquals": "SUCCEEDED", "Next": "ReadResult" },
-                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" }
+                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" },
+                { "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }
               ],
               "Default": "WaitForCommand"
             },
@@ -413,6 +415,13 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "MarkCommandPollingTimedOut": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "message": "SSM command polling exceeded 30 minutes" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
