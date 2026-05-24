@@ -5,10 +5,14 @@ import { describe, expect, it } from "vitest";
 const templatePath = path.join(process.cwd(), "infra/aws/disaster-runner/template.yaml");
 
 describe("AWS disaster runner CloudFormation template", () => {
-    it("starts the runner service during instance bootstrap", async () => {
+    it("does not expose a public HTTP runner surface", async () => {
         const template = await readFile(templatePath, "utf8");
 
-        expect(template).toContain("systemctl enable --now sonari-disaster-runner.service");
+        expect(template).not.toContain("AWS::ElasticLoadBalancingV2::LoadBalancer");
+        expect(template).not.toContain("AWS::ElasticLoadBalancingV2::Listener");
+        expect(template).not.toContain("AWS::ElasticLoadBalancingV2::TargetGroup");
+        expect(template).not.toContain("sonari-disaster-runner.service");
+        expect(template).not.toContain("ToPort: 8789");
     });
 
     it("makes runner secret files readable by ec2-user only", async () => {
@@ -31,5 +35,26 @@ describe("AWS disaster runner CloudFormation template", () => {
             `NITRO_ENCLAVE_PROCESS_COMMAND=$${"{NitroEnclaveProcessCommand}"}`,
         );
         expect(template).toContain(`SONARI_WALRUS_AGGREGATOR_URL=$${"{WalrusAggregatorUrl}"}`);
+    });
+
+    it("keeps EC2 capacity at zero until the Step Functions workflow starts a job", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('MinSize: "0"');
+        expect(template).toContain('MaxSize: "1"');
+        expect(template).toContain('DesiredCapacity: "0"');
+    });
+
+    it("defines AWS-only orchestration resources", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("AWS::DynamoDB::Table");
+        expect(template).toContain("AWS::S3::Bucket");
+        expect(template).toContain("AWS::Lambda::Function");
+        expect(template).toContain("AWS::StepFunctions::StateMachine");
+        expect(template).toContain("AWS::Scheduler::Schedule");
+        expect(template).toContain("AWS::Lambda::Url");
+        expect(template).toContain("ssm:SendCommand");
+        expect(template).toContain("autoscaling:SetDesiredCapacity");
     });
 });
