@@ -133,8 +133,10 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.commands[0]).toContain(
             "NITRO_ENCLAVE_PROCESS_COMMAND='/opt/sonari/bin/run-enclave '\\''quoted value'\\'''",
         );
-        expect(ssm.commands[0]).toContain("'s3://sonari-results-$(touch bad)/$RESULT_S3_KEY'");
-        expect(ssm.commands[0]).not.toContain('"s3://sonari-results-$(touch bad)');
+        expect(ssm.commands[0]).toContain(
+            "'s3://sonari-results-$(touch bad)/results/us7000sonari/1800000000123.json'",
+        );
+        expect(ssm.commands[0]).not.toContain("$RESULT_S3_KEY'");
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[1]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000124.json");
     });
