@@ -4,6 +4,7 @@
         { "path": "./nautilus/verifiers/disaster/shared" },
         { "path": "./nautilus/verifiers/disaster/watcher" },
         { "path": "./nautilus/verifiers/disaster/relayer" },
+        { "path": "./nautilus/verifiers/disaster/runner" },
         { "path": "./nautilus/verifiers/membership/shared" }
     ]
 }

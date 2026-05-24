@@ -610,6 +610,34 @@ fn low_level_cli_rejects_zero_walrus_timeout() {
 }
 
 #[test]
+fn production_cli_rejects_missing_signing_key_seed() {
+    let workspace = cli_test_workspace("production-missing-signing-key");
+    let input_path = workspace.join("worker_request.json");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        &input_path,
+        r#"{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .args(["production", "--input"])
+        .arg(&input_path)
+        .env_remove("SONARI_TEE_SIGNING_KEY_SEED")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("SONARI_TEE_SIGNING_KEY_SEED"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
 fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
     let detail_json = br#"{
         "id": "us7000multi",

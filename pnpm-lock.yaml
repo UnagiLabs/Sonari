@@ -56,6 +56,15 @@ importers:
         specifier: ^4.22.0
         version: 4.22.0
 
+  nautilus/verifiers/disaster/runner:
+    dependencies:
+      '@sonari/oracle-relayer':
+        specifier: workspace:*
+        version: link:../relayer
+      '@sonari/oracle-shared':
+        specifier: workspace:*
+        version: link:../shared
+
   nautilus/verifiers/disaster/shared: {}
 
   nautilus/verifiers/disaster/watcher:
