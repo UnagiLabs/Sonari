@@ -29,9 +29,9 @@ flowchart TD
 
   watcher[
     Watcher（監視役）<br/>
-    Cloudflare Workers 上で動く見張り番<br/><br/>
+    AWS Lambda 上で動く見張り番<br/><br/>
     ・M5.5以上 / 推定震度6以上 / 警報色ありなら処理開始<br/>
-    ・D1データベースで地震の状態を管理<br/>
+    ・DynamoDBデータベースで地震の状態を管理<br/>
     ・AWS EC2 / Nitro Enclaves runner に処理を依頼
   ]
 
@@ -59,7 +59,7 @@ flowchart TD
 
   quake --> usgs
   usgs -->|RSSフィードを定期取得| watcher
-  watcher -->|Queue + runner HTTP contract| tee
+  watcher -->|Step Functions runner workflow| tee
   tee -->|署名済み結果| watcher
   watcher -->|finalized payload を転送| relayer
   relayer -->|transaction submit| sui
@@ -99,10 +99,10 @@ TypeScript と Rust の両方で使う型・定数・バリデーション関数
 地震データの検証と Oracle ペイロードの計算を行います。改ざん防止が証明できる TEE 環境で実行され、Ed25519 署名で結果の真正性を保証します。
 
 ### [runner/](./runner/) — AWS Runner Host（TypeScript）
-EC2 上で HTTPS runner contract を公開し、Worker からの `start/process/stop` と relayer dry-run を受けます。`process` は Nitro Enclave 側の production TEE entrypoint に `WorkerToTeeRequest` を渡します。
+EC2 上で SSM runner workflow を公開し、Step Functions からの SSM command と relayer preview/dry-run を受けます。`process` は Nitro Enclave 側の production TEE entrypoint に `DisasterVerifierRequest` を渡します。
 
 ### [watcher/](./watcher/) — 監視 & オーケストレーション（TypeScript）
-Cloudflare Workers 上で動く監視システム。地震を検知し、TEE Core への処理依頼・結果の記録・Relayer への転送を管理します。
+AWS Lambda 上で動く監視システム。地震を検知し、TEE Core への処理依頼・結果の記録・Relayer への転送を管理します。
 
 ### [relayer/](./relayer/) — ブロックチェーン中継（TypeScript）
 TEE の署名済み結果を SUI ブロックチェーンのスマートコントラクトに送信します。
@@ -141,7 +141,7 @@ disaster/
 ├── tee/                  ← Rust製 Oracle Core（TEE環境で動く）
 │   ├── README.md
 │   └── src/
-├── watcher/              ← Cloudflare Workers 監視システム
+├── watcher/              ← AWS Lambda 監視システム
 │   ├── README.md
 │   └── src/
 ├── runner/               ← AWS EC2 / Nitro Enclaves host runner
