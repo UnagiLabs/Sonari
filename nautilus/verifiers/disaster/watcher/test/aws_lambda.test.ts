@@ -221,6 +221,42 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(client.scanInputs[1]).toMatchObject({ ExclusiveStartKey: { source_event_id: "page-1" } });
     });
 
+    it("preserves finalized DynamoDB result fields when watcher upsert races a stale read", async () => {
+        const staleProcessingRow = await eventRow("us7000race", {
+            status: "processing",
+            runner_job_id: "disaster-us7000race-1",
+            runner_attempt: 1,
+            runner_phase: "applying_result",
+        });
+        const finalizedRow = {
+            ...staleProcessingRow,
+            status: "finalized" as const,
+            tee_result_json: JSON.stringify(finalizedResult()),
+            payload_bcs_hex: "0x01",
+            signature: "0xsig",
+            public_key: "0xpub",
+            finalized_at_ms: baseNow + 1_000,
+            updated_at_ms: baseNow + 1_000,
+        };
+        const client = new StaleReadRaceClient(staleProcessingRow, finalizedRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await repository.upsertCandidate(
+            candidate("us7000race", { source_updated_at_ms: baseNow + 2_000 }),
+            baseNow + 2_000,
+        );
+
+        expect(client.currentRow).toMatchObject({
+            status: "finalized",
+            source_updated_at_ms: baseNow + 2_000,
+            last_seen_at_ms: baseNow + 2_000,
+            payload_bcs_hex: "0x01",
+            signature: "0xsig",
+            public_key: "0xpub",
+            finalized_at_ms: baseNow + 1_000,
+        });
+    });
+
     it("marks a due row failed when Step Functions start fails", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000manual", baseNow);
@@ -357,6 +393,85 @@ class PaginatedScanClient {
                 ? { LastEvaluatedKey: { source_event_id: `page-${pageIndex + 1}` } }
                 : {}),
         };
+    }
+}
+
+class StaleReadRaceClient {
+    currentRow: EarthquakeEventRow;
+    private returnedStaleRead = false;
+
+    constructor(
+        private readonly staleRow: EarthquakeEventRow,
+        finalizedRow: EarthquakeEventRow,
+    ) {
+        this.currentRow = structuredClone(finalizedRow);
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("Key" in input && !("UpdateExpression" in input)) {
+            if (!this.returnedStaleRead) {
+                this.returnedStaleRead = true;
+                return { Item: structuredClone(this.staleRow) };
+            }
+            return { Item: structuredClone(this.currentRow) };
+        }
+        if ("Item" in input) {
+            this.currentRow = structuredClone(input.Item as EarthquakeEventRow);
+            return {};
+        }
+        if ("UpdateExpression" in input) {
+            this.applyUpdate(input);
+            return {};
+        }
+        throw new Error("unexpected stale read race client command");
+    }
+
+    private applyUpdate(input: Record<string, unknown>): void {
+        const names = input.ExpressionAttributeNames as Record<string, string> | undefined;
+        const values = input.ExpressionAttributeValues as Record<string, unknown> | undefined;
+        if (names === undefined || values === undefined) {
+            throw new Error("test update command must use expression names and values");
+        }
+        const condition = input.ConditionExpression;
+        if (typeof condition === "string" && !this.matchesCondition(condition, names, values)) {
+            throw Object.assign(new Error("conditional request failed"), {
+                name: "ConditionalCheckFailedException",
+            });
+        }
+        const updateExpression = input.UpdateExpression;
+        if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
+            throw new Error("test client only supports SET update expressions");
+        }
+        for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
+            const [nameToken, valueToken] = assignment.split(" = ");
+            const field = names[nameToken];
+            if (field === undefined || !(valueToken in values)) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            this.currentRow = {
+                ...this.currentRow,
+                [field]: values[valueToken],
+            };
+        }
+    }
+
+    private matchesCondition(
+        condition: string,
+        names: Record<string, string>,
+        values: Record<string, unknown>,
+    ): boolean {
+        if (condition.includes("attribute_not_exists")) {
+            return this.currentRow === undefined;
+        }
+        const statusField = names["#status"];
+        if (statusField === undefined) {
+            throw new Error(`unexpected condition ${condition}`);
+        }
+        const allowedStatuses = Object.entries(values)
+            .filter(([key]) => condition.includes(key))
+            .map(([, value]) => value);
+        return allowedStatuses.includes(this.currentRow[statusField as keyof EarthquakeEventRow]);
     }
 }
 

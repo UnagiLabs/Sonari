@@ -57,4 +57,15 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).toContain("ssm:SendCommand");
         expect(template).toContain("autoscaling:SetDesiredCapacity");
     });
+
+    it("points Lambda handlers at the TypeScript dist/src emit layout", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("Handler: dist/src/lambda.scheduledHandler");
+        expect(template).toContain("Handler: dist/src/lambda.manualHandler");
+        expect(template).toContain("Handler: dist/src/runner_workflow.handler");
+        expect(template).not.toContain("Handler: dist/lambda.scheduledHandler");
+        expect(template).not.toContain("Handler: dist/lambda.manualHandler");
+        expect(template).not.toContain("Handler: dist/runner_workflow.handler");
+    });
 });
