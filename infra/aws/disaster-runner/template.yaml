@@ -277,7 +277,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Runtime: nodejs22.x
-      Handler: dist/lambda.scheduledHandler
+      Handler: dist/src/lambda.scheduledHandler
       Role: !GetAtt WatcherLambdaRole.Arn
       Timeout: 60
       MemorySize: 256
@@ -294,7 +294,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Runtime: nodejs22.x
-      Handler: dist/lambda.manualHandler
+      Handler: dist/src/lambda.manualHandler
       Role: !GetAtt WatcherLambdaRole.Arn
       Timeout: 30
       MemorySize: 256
@@ -325,7 +325,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Runtime: nodejs22.x
-      Handler: dist/runner_workflow.handler
+      Handler: dist/src/runner_workflow.handler
       Role: !GetAtt RunnerControlLambdaRole.Arn
       Timeout: 60
       MemorySize: 256

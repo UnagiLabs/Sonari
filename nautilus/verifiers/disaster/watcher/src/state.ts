@@ -1,5 +1,11 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import {
+    DynamoDBDocumentClient,
+    GetCommand,
+    PutCommand,
+    ScanCommand,
+    UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
 import type { OffchainStatus, OracleErrorCode, TeeCoreResult } from "@sonari/oracle-shared";
 import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
 import type {
@@ -546,35 +552,17 @@ export class DynamoDbStateRepository implements StateRepository {
         nowMs: number,
         options: UpsertCandidateOptions = {},
     ): Promise<void> {
-        const existing = await this.get(candidate.source_event_id);
         const screening = options.bypassScreening
             ? { status: "new" as const, error_code: null }
             : screenUsgsCandidate(candidate);
-        const status =
-            existing?.status === "ignored_small"
-                ? screening.status
-                : existing !== null &&
-                    (TERMINAL_STATUSES.has(existing.status) || existing.status !== "new")
-                  ? existing.status
-                  : screening.status;
-        const next = baseRow(candidate.source_event_id, nowMs, {
-            event_uid: existing?.event_uid ?? candidate.source_event_id,
-            status,
-            retry_count: existing?.retry_count ?? 0,
-            next_retry_at_ms: status === "new" ? null : (existing?.next_retry_at_ms ?? null),
-            finalization_deadline_at_ms:
-                existing?.finalization_deadline_at_ms ??
-                candidate.occurred_at_ms + FINALIZATION_WINDOW_MS,
-            latest_revision: existing?.latest_revision ?? 0,
-            last_seen_at_ms: nowMs,
-            source_updated_at_ms: candidate.source_updated_at_ms,
-            error_code:
-                status === "ignored_small"
-                    ? "WATCHER_BELOW_AUTO_THRESHOLD"
-                    : (existing?.error_code ?? null),
-            created_at_ms: existing?.created_at_ms ?? nowMs,
-        });
-        await this.put(mergePreservingResult(existing ?? undefined, next, nowMs));
+        try {
+            await this.updateScreenableCandidate(candidate, nowMs, screening);
+        } catch (error) {
+            if (!isConditionalCheckFailed(error)) {
+                throw error;
+            }
+            await this.updateWatcherMetadata(candidate, nowMs);
+        }
     }
 
     async upsertManualEvent(sourceEventId: string, nowMs: number): Promise<void> {
@@ -930,6 +918,135 @@ export class DynamoDbStateRepository implements StateRepository {
             }),
         );
     }
+
+    private async updateScreenableCandidate(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+        screening: { status: OffchainStatus; error_code: OracleErrorCode | null },
+    ): Promise<void> {
+        const row = baseRow(candidate.source_event_id, nowMs, {
+            event_uid: candidate.source_event_id,
+            status: screening.status,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            finalization_deadline_at_ms: candidate.occurred_at_ms + FINALIZATION_WINDOW_MS,
+            latest_revision: 0,
+            last_seen_at_ms: nowMs,
+            source_updated_at_ms: candidate.source_updated_at_ms,
+            error_code:
+                screening.status === "ignored_small"
+                    ? "WATCHER_BELOW_AUTO_THRESHOLD"
+                    : screening.error_code,
+            created_at_ms: nowMs,
+        });
+        await this.documentClient.send(
+            new UpdateCommand({
+                TableName: this.tableName,
+                Key: { source_event_id: candidate.source_event_id },
+                ConditionExpression:
+                    "attribute_not_exists(#source_event_id) OR #status IN (:new_status, :ignored_small_status)",
+                UpdateExpression: [
+                    "SET #event_uid = :event_uid",
+                    "#status = :status",
+                    "#retry_count = :retry_count",
+                    "#next_retry_at_ms = :next_retry_at_ms",
+                    "#finalization_deadline_at_ms = :finalization_deadline_at_ms",
+                    "#latest_revision = :latest_revision",
+                    "#last_seen_at_ms = :last_seen_at_ms",
+                    "#source_updated_at_ms = :source_updated_at_ms",
+                    "#error_code = :error_code",
+                    "#relayer_mode = :relayer_mode",
+                    "#relayer_status = :relayer_status",
+                    "#relayer_request_json = :relayer_request_json",
+                    "#relayer_digest = :relayer_digest",
+                    "#relayer_error_code = :relayer_error_code",
+                    "#relayer_error_message = :relayer_error_message",
+                    "#relayer_updated_at_ms = :relayer_updated_at_ms",
+                    "#relayer_submitted_at_ms = :relayer_submitted_at_ms",
+                    "#runner_job_id = :runner_job_id",
+                    "#runner_queued_at_ms = :runner_queued_at_ms",
+                    "#runner_attempt = :runner_attempt",
+                    "#runner_id = :runner_id",
+                    "#runner_started_at_ms = :runner_started_at_ms",
+                    "#runner_stopped_at_ms = :runner_stopped_at_ms",
+                    "#runner_timeout_at_ms = :runner_timeout_at_ms",
+                    "#runner_error_message = :runner_error_message",
+                    "#runner_stop_error = :runner_stop_error",
+                    "#runner_phase = :runner_phase",
+                    "#runner_instance_id = :runner_instance_id",
+                    "#runner_command_id = :runner_command_id",
+                    "#runner_result_s3_key = :runner_result_s3_key",
+                    "#runner_last_poll_at_ms = :runner_last_poll_at_ms",
+                    "#tee_result_json = :tee_result_json",
+                    "#payload_bcs_hex = :payload_bcs_hex",
+                    "#signature = :signature",
+                    "#public_key = :public_key",
+                    "#finalized_at_ms = :finalized_at_ms",
+                    "#created_at_ms = :created_at_ms",
+                    "#updated_at_ms = :updated_at_ms",
+                ].join(", "),
+                ExpressionAttributeNames: expressionNames(Object.keys(row)),
+                ExpressionAttributeValues: {
+                    ...expressionValues(row),
+                    ":new_status": "new",
+                    ":ignored_small_status": "ignored_small",
+                },
+            }),
+        );
+    }
+
+    private async updateWatcherMetadata(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+    ): Promise<void> {
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: candidate.source_event_id },
+                    ConditionExpression: "attribute_exists(#source_event_id)",
+                    UpdateExpression:
+                        "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#source_event_id": "source_event_id",
+                        "#last_seen_at_ms": "last_seen_at_ms",
+                        "#source_updated_at_ms": "source_updated_at_ms",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":last_seen_at_ms": nowMs,
+                        ":source_updated_at_ms": candidate.source_updated_at_ms,
+                        ":updated_at_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (!isConditionalCheckFailed(error)) {
+                throw error;
+            }
+        }
+    }
+}
+
+function expressionNames(fields: string[]): Record<string, string> {
+    return Object.fromEntries(fields.map((field) => [`#${field}`, field]));
+}
+
+function expressionValues(row: EarthquakeEventRow): Record<string, unknown> {
+    return Object.fromEntries(
+        Object.entries(row)
+            .filter(([field]) => field !== "source_event_id")
+            .map(([field, value]) => [`:${field}`, value]),
+    );
+}
+
+function isConditionalCheckFailed(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "ConditionalCheckFailedException"
+    );
 }
 
 function baseRow(

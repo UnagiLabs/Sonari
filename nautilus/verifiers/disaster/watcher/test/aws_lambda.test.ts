@@ -445,6 +445,9 @@ class StaleReadRaceClient {
         }
         for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
             const [nameToken, valueToken] = assignment.split(" = ");
+            if (nameToken === undefined || valueToken === undefined) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
             const field = names[nameToken];
             if (field === undefined || !(valueToken in values)) {
                 throw new Error(`unexpected update assignment ${assignment}`);
@@ -461,8 +464,11 @@ class StaleReadRaceClient {
         names: Record<string, string>,
         values: Record<string, unknown>,
     ): boolean {
-        if (condition.includes("attribute_not_exists")) {
+        if (condition === "attribute_not_exists(#source_event_id)") {
             return this.currentRow === undefined;
+        }
+        if (condition === "attribute_exists(#source_event_id)") {
+            return this.currentRow !== undefined;
         }
         const statusField = names["#status"];
         if (statusField === undefined) {
