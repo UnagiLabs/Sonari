@@ -429,7 +429,14 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "action": "stop_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
               "End": true
+            },
+            "StopInstanceFailed": {
+              "Type": "Fail",
+              "Error": "StopInstanceFailed",
+              "Cause": "Runner cleanup failed after retrying StopInstance"
             }
           }
         }

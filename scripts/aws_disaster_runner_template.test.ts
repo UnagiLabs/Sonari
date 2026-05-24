@@ -78,6 +78,22 @@ describe("AWS disaster runner CloudFormation template", () => {
         );
     });
 
+    it("retries runner cleanup and fails explicitly when StopInstance cannot complete", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"StopInstance": {');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }]',
+        );
+        expect(template).toContain(
+            '"Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }]',
+        );
+        expect(template).toContain('"StopInstanceFailed": {');
+        expect(template).toContain('"Type": "Fail"');
+        expect(template).toContain('"Error": "StopInstanceFailed"');
+        expect(template).toContain('"Cause": "Runner cleanup failed after retrying StopInstance"');
+    });
+
     it("times out SSM command polling after 30 minutes", async () => {
         const template = await readFile(templatePath, "utf8");
 
