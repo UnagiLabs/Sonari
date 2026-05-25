@@ -1,6 +1,6 @@
-# Disaster Oracle AWS Template
+# Earthquake Oracle AWS Template
 
-Sonari disaster oracle を AWS 内で完結して動かすための CloudFormation template です。
+Sonari earthquake oracle を AWS 内で完結して動かすための CloudFormation template です。
 
 この構成では、通常時に EC2 runner や ALB を起動しません。EventBridge Scheduler が定期的に Watcher Lambda を起動し、対象地震がある場合だけ Step Functions が Auto Scaling Group を `0 -> 1 -> 0` に変更して、EC2 + Nitro Enclave 上の TEE command を SSM Run Command で実行します。
 
@@ -48,7 +48,7 @@ LambdaCodeS3Bucket
 LambdaCodeS3Key
 ```
 
-`NitroEnclaveProcessCommand` は EC2 host 側から Nitro Enclave へ disaster verifier request を渡す command です。`node /opt/sonari/process.js` のように引数を含められます。SSM 実行時に `SONARI_TEE_SIGNING_KEY_SEED_FILE` から `SONARI_TEE_SIGNING_KEY_SEED` を作成し、TEE process には `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_TEE_SIGNING_KEY_SEED` が渡されます。
+`NitroEnclaveProcessCommand` は EC2 host 側から Nitro Enclave へ earthquake verifier request を渡す command です。`node /opt/sonari/process.js` のように引数を含められます。SSM 実行時に `SONARI_TEE_SIGNING_KEY_SEED_FILE` から `SONARI_TEE_SIGNING_KEY_SEED` を作成し、TEE process には `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_TEE_SIGNING_KEY_SEED` が渡されます。
 
 bootstrap script は `/opt/sonari/runner-token`、`/opt/sonari/tee-signing-key`、`/opt/sonari/walrus-config.json`、`/opt/sonari/runner.env` を `ec2-user:ec2-user` 所有、`0400` permission で作成します。
 

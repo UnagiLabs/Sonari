@@ -1,156 +1,107 @@
-# Disaster Oracle — システム全体ガイド
+# Sonari Earthquake Verifier
 
-地震が起きたとき、「本当に被害があったか」をコンピュータが自動で確認し、保険金などの支払いをブロックチェーン上で実行する仕組みです。
+## Overview
 
----
+The Earthquake verifier is the Sonari MVP earthquake oracle implementation. It verifies public earthquake data inside Nautilus / TEE and produces the signed, finalized payload used by Sui contracts to create the claim-facing disaster event root.
 
-## なぜこのシステムが必要か
+MVP scope is earthquake only. Tsunami, flood, fire, nuclear accident, and other secondary hazards are not finalized by this verifier.
 
-従来の地震保険は、担当者が現地を調査して被害を確認するため、支払いまでに数週間〜数ヶ月かかります。このシステムは：
+## Responsibilities
 
-- **USGS**（アメリカ地質調査所）の公開地震データを自動取得
-- **TEE**（改ざんが証明できる安全な計算環境）でデータを検証・計算
-- **SUIブロックチェーン**に結果を記録
+- Detect USGS earthquake candidates through the watcher and keep off-chain state in DynamoDB.
+- Re-fetch and verify source data inside TEE instead of trusting the worker, watcher, relayer, UI, or external API responses.
+- Compute ShakeMap MMI, H3 cells, affected cells, Merkle root, source hashes, BCS payload bytes, and TEE signature.
+- Return `pending_source`, `pending_mmi`, `rejected`, `ignored_small`, `failed`, or `finalized` as off-chain processing state.
+- Send only signed `finalized` payloads toward Sui submission.
 
-することで、数時間以内に支払いの根拠となる「Oracle結果」を生成します。
+## Trust Boundary
 
----
+The trust boundary is the signed TEE result. Worker, Lambda, watcher, runner, relayer, and UI code may detect candidates, enqueue work, store state, and deliver payloads, but they must not change payload meaning.
 
-## 全体フロー
+Sui contracts verify the registered Earthquake verifier key, intent, `oracle_version`, freshness, revision, source, hashes, affected cell root, and finalized status. Membership / residence eligibility remains in `nautilus/verifiers/membership/`.
 
-```mermaid
-flowchart TD
-  quake[地震が発生する]
+Generic Move names such as `DisasterEvent` and `disaster_event` remain generic disaster-relief contract concepts. They are not the name of this verifier implementation.
 
-  usgs[
-    USGS（アメリカ地質調査所）<br/>
-    地震情報 + ShakeMap（揺れの強さマップ）を公開
-  ]
+## Data Sources
 
-  watcher[
-    Watcher（監視役）<br/>
-    AWS Lambda 上で動く見張り番<br/><br/>
-    ・M5.5以上 / 推定震度6以上 / 警報色ありなら処理開始<br/>
-    ・DynamoDBデータベースで地震の状態を管理<br/>
-    ・AWS EC2 / Nitro Enclaves runner に処理を依頼
-  ]
+- MVP primary source: USGS earthquake detail GeoJSON and ShakeMap `grid.xml.zip`.
+- Future sources may include JMA or other public earthquake datasets, but they must be added as explicit source policies.
+- Watcher summary fields such as magnitude, summary MMI, alert, and tsunami flag are only runner-start screening signals. Finalization depends on TEE-retrieved source data and cell-level MMI.
 
-  tee[
-    TEE Core（検証役）<br/>
-    Rust で書かれた安全な計算環境<br/><br/>
-    ・USGS データを再取得・検証<br/>
-    ・H3セル変換<br/>
-    ・P90計算<br/>
-    ・Merkleツリー構築<br/>
-    ・Ed25519署名
-  ]
+## AWS Execution Model
 
-  relayer[
-    Relayer（中継役）<br/>
-    署名済み payload を<br/>
-    Sui ブロックチェーンに送信
-  ]
+AWS runs the verifier only when there is work:
 
-  sui[
-    Sui ブロックチェーン<br/>
-    Oracle結果を記録<br/>
-    保険金などの支払いをスマートコントラクトで実行
-  ]
+1. EventBridge Scheduler invokes the watcher Lambda.
+2. The watcher scans USGS recent earthquake feeds and records event state in DynamoDB.
+3. Eligible or manually submitted events start a Step Functions workflow.
+4. The workflow scales an Auto Scaling Group from `0 -> 1`.
+5. EC2 + Nitro Enclave runs the production TEE command.
+6. Results are written to S3 and applied back to DynamoDB.
+7. The workflow scales the ASG back to `1 -> 0`.
 
-  quake --> usgs
-  usgs -->|RSSフィードを定期取得| watcher
-  watcher -->|Step Functions runner workflow| tee
-  tee -->|署名済み結果| watcher
-  watcher -->|finalized payload を転送| relayer
-  relayer -->|transaction submit| sui
+Normal idle state is `DesiredCapacity = 0`. Relayer execution defaults to preview / dry-run. Real submit must be explicitly enabled and remains fail-closed without signer configuration.
+
+The CloudFormation template lives in `infra/aws/earthquake-runner/README.md`.
+
+## Local Development
+
+```bash
+pnpm --filter @sonari/earthquake-shared test
+pnpm --filter @sonari/earthquake-watcher test
+pnpm --filter @sonari/earthquake-relayer test
+pnpm --filter @sonari/earthquake-runner test
+cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml
+python3 nautilus/verifiers/earthquake/fixtures/verify_fixtures.py
 ```
 
----
+Root verification:
 
-## 状態遷移
-
-地震イベントは以下の状態を通って処理されます：
-
-```mermaid
-stateDiagram-v2
-  [*] --> new: 新規検知
-  new --> ignored_small: M5.5未満など小さい
-  new --> queued: 処理対象
-  queued --> processing: TEE処理開始
-  processing --> pending_source: ShakeMapがまだない
-  pending_source --> queued: 再試行
-  processing --> pending_mmi: グリッドデータがない
-  pending_mmi --> queued: 再試行
-  processing --> rejected: 締切超過
-  processing --> finalized: TEE検証完了
-  finalized --> submitted: ブロックチェーン送信
+```bash
+pnpm check
+pnpm typecheck
+pnpm test
+pnpm test:oracle
 ```
 
-> `failed` はシステムエラー（AWS起動失敗など）で、再試行可能な状態です。
+## Directory Structure
 
----
-
-## 各コンポーネントの役割
-
-### [shared/](./shared/) — 共通ルール定義
-TypeScript と Rust の両方で使う型・定数・バリデーション関数を管理します。ペイロードの26フィールド定義、エラーコード一覧などがここにあります。
-
-### [tee/](./tee/) — TEE Core（Rust）
-地震データの検証と Oracle ペイロードの計算を行います。改ざん防止が証明できる TEE 環境で実行され、Ed25519 署名で結果の真正性を保証します。
-
-### [runner/](./runner/) — AWS Runner Host（TypeScript）
-EC2 上で SSM runner workflow を公開し、Step Functions からの SSM command と relayer preview/dry-run を受けます。`process` は Nitro Enclave 側の production TEE entrypoint に `DisasterVerifierRequest` を渡します。
-
-### [watcher/](./watcher/) — 監視 & オーケストレーション（TypeScript）
-AWS Lambda 上で動く監視システム。地震を検知し、TEE Core への処理依頼・結果の記録・Relayer への転送を管理します。
-
-### [relayer/](./relayer/) — ブロックチェーン中継（TypeScript）
-TEE の署名済み結果を SUI ブロックチェーンのスマートコントラクトに送信します。
-
-### [fixtures/](./fixtures/) — テストデータ
-TEE Core の正確性を検証するための入力データと期待結果を管理します。
-
----
-
-## 用語集
-
-| 用語 | 意味 |
-|---|---|
-| **USGS** | アメリカ地質調査所。地震データの公開元 |
-| **ShakeMap** | 地震の揺れの強さを地図上に表したもの（USGS提供） |
-| **MMI** | 修正メルカリ震度（Modified Mercalli Intensity）。揺れの強さの国際的な尺度 |
-| **H3セル** | 地球の表面を六角形のタイルで区切った単位。Uber社が開発 |
-| **TEE** | Trusted Execution Environment。外部から内容を見えなくしたまま計算できる安全な環境 |
-| **Merkleツリー** | 大量のデータを木のような構造でまとめ、改ざんを効率的に検出できる仕組み |
-| **BCS** | Binary Canonical Serialization。SUIブロックチェーンで使うバイト列変換形式 |
-| **Ed25519** | 電子署名のアルゴリズム。計算機が「この結果は私が出した」と証明するために使う |
-| **SUI** | 高速なブロックチェーンプラットフォーム |
-| **Oracle** | ブロックチェーン外のデータ（地震情報など）をブロックチェーン上に届ける仕組み |
-| **P90** | 90パーセンタイル。100個のデータを小さい順に並べたとき90番目の値 |
-
----
-
-## ディレクトリ構成
-
+```txt
+nautilus/verifiers/earthquake/
+  README.md
+  shared/      TypeScript contracts, constants, and validators
+  tee/         Rust / Nautilus core
+  watcher/     Candidate scan, state management, runner workflow start
+  runner/      EC2 host service and Nitro Enclave command bridge
+  relayer/     Sui preview, dry-run, and explicit submit
+  fixtures/    USGS fixtures and golden output checks
 ```
-earthquake/
-├── README.md             ← このファイル
-├── shared/               ← 共通型定義・定数・バリデーション
-│   ├── README.md
-│   └── src/index.ts
-├── tee/                  ← Rust製 Oracle Core（TEE環境で動く）
-│   ├── README.md
-│   └── src/
-├── watcher/              ← AWS Lambda 監視システム
-│   ├── README.md
-│   └── src/
-├── runner/               ← AWS EC2 / Nitro Enclaves host runner
-│   ├── package.json
-│   └── src/
-├── relayer/              ← SUI ブロックチェーン中継
-│   ├── README.md
-│   └── src/
-└── fixtures/             ← テストデータ
-    ├── README.md
-    └── usgs/
-```
+
+Detailed component notes live in each subdirectory README.
+
+## Output
+
+TEE output is one of:
+
+- `pending_source`: source or ShakeMap is not available yet.
+- `pending_mmi`: source exists but usable MMI grid data is not available.
+- `rejected`: source was verified but cannot produce claimable affected cells.
+- `finalized`: signed Earthquake Oracle v1 payload with affected cells root, artifact hashes, BCS bytes, public key, and signature.
+
+Only `finalized` output is eligible for Sui submission.
+
+## Privacy / Security
+
+- This verifier does not process personal residence, student, phone, GPS, address, or document evidence.
+- Raw earthquake source artifacts are hashed and may be archived through Walrus-backed references.
+- TEE signing keys stay inside the production TEE boundary.
+- Watcher and relayer input is treated as untrusted at contract boundaries.
+- Failures in source fetch, archive verification, BCS serialization, Merkle generation, or signing fail closed.
+
+## Future Work
+
+- Add explicitly versioned source policies for JMA or other public earthquake feeds.
+- Support additional ShakeMap formats only with new fixtures and golden vectors.
+- Add multi-region runner fallback after the single-region MVP is stable.
+- Add operational dashboards for pending, rejected, failed, and finalized states.
+- Generalize common runner or relayer utilities only after duplication appears across verifier families.

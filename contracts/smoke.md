@@ -17,7 +17,7 @@
 4. default disaster `PayoutPolicy` を `admin::create_default_disaster_policy` で作成する。
 5. package publish で作成済みの genesis `ClaimIndex` を claim execution に使う。
 6. `DisasterRegistry` を `admin::create_disaster_registry` で作成する。
-7. Residence verifier key と Disaster Oracle verifier key を `admin::add_verifier_key` で登録する。
+7. Residence verifier key と Earthquake Oracle verifier key を `admin::add_verifier_key` で登録する。
 8. pool funding 後に `CampaignBudget` を `admin::open_campaign_budget_from_designated_and_main` で開く。
 
 ## Happy Path
@@ -28,9 +28,9 @@
    - 期待値: `MembershipPassIssued` が発火し、verification fee は `OperationsPool` だけを増やす。
 3. Residence verifier が `accessor::update_residence_metadata` を提出する。
    - 期待値: Residence metadata のみを更新する `PassMetadataUpdated` が発火する。
-4. relayer が `disaster_event::create_from_signed_payload` へ Disaster Oracle v1 BCS bytes、signature、public key を提出する。引数には `DisasterRegistry`、`VerifierRegistry`、Sui `Clock` を渡す。
+4. relayer が `disaster_event::create_from_signed_payload` へ Earthquake Oracle v1 BCS bytes、signature、public key を提出する。引数には `DisasterRegistry`、`VerifierRegistry`、Sui `Clock` を渡す。
    - 期待値: `DisasterEventCreated` が発火し、同じ `(event_uid, event_revision)` の再投稿は拒否される。
-   - 認可条件: `AdminCap` は不要である。登録済み Disaster Oracle verifier signature と Clock-based freshness が認可境界であり、relayer は payload の意味を変更しない配送者として扱う。
+   - 認可条件: `AdminCap` は不要である。登録済み Earthquake Oracle verifier signature と Clock-based freshness が認可境界であり、relayer は payload の意味を変更しない配送者として扱う。
 5. admin が作成済み DisasterEvent と campaign を `admin::bind_disaster_campaign` で bind する。`DisasterRegistry` を渡し、campaign binding index を更新する。
    - 期待値: `DisasterCampaignBound` が発火する。無関係な campaign / event による claim は拒否され、同一 campaign の二重 binding も拒否される。
 6. recipient が binding、`AffectedCellLeaf`、Merkle proof を渡して `accessor::claim_disaster_usdc` を提出する。

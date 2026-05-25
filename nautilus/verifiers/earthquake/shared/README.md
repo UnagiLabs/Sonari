@@ -150,13 +150,13 @@ rejected         → 拒否確定（再試行不可）
 
 ## バリデーション関数
 
-### `validateDisasterVerifierRequest(input)`
+### `validateEarthquakeVerifierRequest(input)`
 
 Watcher → TEE へのリクエストが正しい形式か検証します。
 
 ```typescript
 // 正常
-validateDisasterVerifierRequest({
+validateEarthquakeVerifierRequest({
   source_event_id: "us7000abc1",
   hazard_type: 1,          // EARTHQUAKE
   primary_source: 1,       // USGS
@@ -165,7 +165,7 @@ validateDisasterVerifierRequest({
 // → { ok: true, value: {...} }
 
 // 異常（余分なフィールドがある）
-validateDisasterVerifierRequest({ source_event_id: "us7000abc1", unknown_field: true, ... })
+validateEarthquakeVerifierRequest({ source_event_id: "us7000abc1", unknown_field: true, ... })
 // → { ok: false, error_code: "INVALID_WORKER_TEE_REQUEST", message: "..." }
 ```
 
@@ -189,8 +189,8 @@ validateRelayerSubmitInput({
 ## 型定義
 
 ```
-DisasterOraclePayloadV1    ← Oracleペイロードの完全型
-DisasterVerifierRequest         ← Watcher→TEE リクエスト型
+EarthquakeOraclePayloadV1    ← Oracleペイロードの完全型
+EarthquakeVerifierRequest         ← Watcher→TEE リクエスト型
 SignedFinalizedPayload     ← 署名済み完了ペイロード型
 TeeCoreResult              ← TEEの4種類の結果型
   ├── { status: "pending_source", error_code: ... }
