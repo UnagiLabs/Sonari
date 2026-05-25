@@ -558,12 +558,20 @@ function buildSsmShellCommand(input: {
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
+        buildRequiredShellEnvCheck("SONARI_TEE_SIGNING_KEY_SEED_FILE"),
+        buildRequiredShellEnvCheck("SONARI_WALRUS_CONFIG"),
+        buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
+        "export SONARI_TEE_SIGNING_KEY_SEED_FILE SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
         `printf '%s' ${shellSingleQuote(JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)))} | "$NITRO_ENCLAVE_PROCESS_COMMAND" > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
+}
+
+function buildRequiredShellEnvCheck(name: string): string {
+    return `: "\${${name}:?${name} is required}"`;
 }
 
 function shellSingleQuote(value: string): string {

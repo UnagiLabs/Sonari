@@ -101,6 +101,18 @@ describe("AWS runner workflow helper", () => {
         });
         expect(polled).toMatchObject({ command_status: "SUCCEEDED" });
         expect(ssm.commands[0]).toContain("NITRO_ENCLAVE_PROCESS_COMMAND");
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_TEE_SIGNING_KEY_SEED_FILE:?SONARI_TEE_SIGNING_KEY_SEED_FILE is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            "export SONARI_TEE_SIGNING_KEY_SEED_FILE SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
+        );
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[0]).not.toContain("latest.json");
     });
