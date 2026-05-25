@@ -794,6 +794,12 @@ function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreRes
         if (!validation.ok) {
             throw new Error(`invalid finalized TEE result: ${validation.message}`);
         }
+        if (
+            !isRecord(validation.value.payload) ||
+            validation.value.payload.event_uid !== expectedSourceEventId
+        ) {
+            throw new Error("TEE result source_event_id mismatch");
+        }
         return validation.value;
     }
     if (

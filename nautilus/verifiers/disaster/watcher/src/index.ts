@@ -148,6 +148,9 @@ export async function scanCandidates(
 ): Promise<void> {
     const seen = new Set<string>();
     for (const candidate of candidates) {
+        if (!isValidUsgsSourceEventId(candidate.source_event_id)) {
+            continue;
+        }
         if (seen.has(candidate.source_event_id)) {
             continue;
         }
