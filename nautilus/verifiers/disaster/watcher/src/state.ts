@@ -1368,6 +1368,10 @@ export class DynamoDbStateRepository implements StateRepository {
             screening.status === "ignored_small"
                 ? "attribute_not_exists(#source_event_id) OR #status = :ignored_small_status"
                 : "attribute_not_exists(#source_event_id) OR #status IN (:new_status, :ignored_small_status)";
+        const conditionValues =
+            screening.status === "ignored_small"
+                ? { ":ignored_small_status": "ignored_small" }
+                : { ":new_status": "new", ":ignored_small_status": "ignored_small" };
         const row = baseRow(candidate.source_event_id, nowMs, {
             event_uid: candidate.source_event_id,
             status: screening.status,
@@ -1431,8 +1435,7 @@ export class DynamoDbStateRepository implements StateRepository {
                 ExpressionAttributeNames: expressionNames(Object.keys(row)),
                 ExpressionAttributeValues: {
                     ...expressionValues(row),
-                    ":new_status": "new",
-                    ":ignored_small_status": "ignored_small",
+                    ...conditionValues,
                 },
             }),
         );

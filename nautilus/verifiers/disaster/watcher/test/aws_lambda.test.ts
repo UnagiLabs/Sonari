@@ -960,15 +960,20 @@ class StaleReadRaceClient {
         if (names === undefined || values === undefined) {
             throw new Error("test update command must use expression names and values");
         }
+        const updateExpression = input.UpdateExpression;
+        if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
+            throw new Error("test client only supports SET update expressions");
+        }
+        for (const valueToken of Object.keys(values)) {
+            if (!expressionReferencesValue(input, valueToken)) {
+                throw new Error(`unused expression attribute value ${valueToken}`);
+            }
+        }
         const condition = input.ConditionExpression;
         if (typeof condition === "string" && !this.matchesCondition(condition, names, values)) {
             throw Object.assign(new Error("conditional request failed"), {
                 name: "ConditionalCheckFailedException",
             });
-        }
-        const updateExpression = input.UpdateExpression;
-        if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
-            throw new Error("test client only supports SET update expressions");
         }
         for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
             const [nameToken, valueToken] = assignment.split(" = ");
@@ -1368,6 +1373,17 @@ function readCommandInput(command: unknown): Record<string, unknown> {
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function expressionReferencesValue(input: Record<string, unknown>, valueToken: string): boolean {
+    const expressions = [input.ConditionExpression, input.UpdateExpression]
+        .filter((expression): expression is string => typeof expression === "string")
+        .join(" ");
+    return new RegExp(`${escapeRegExp(valueToken)}(?![A-Za-z0-9_])`).test(expressions);
+}
+
+function escapeRegExp(input: string): string {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function finalizedResult(): TeeCoreResult {
