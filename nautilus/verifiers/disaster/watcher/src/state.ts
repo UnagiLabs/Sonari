@@ -1200,13 +1200,33 @@ export class DynamoDbStateRepository implements StateRepository {
     }
 
     async deferUntil(sourceEventId: string, nextRetryAtMs: number, nowMs: number): Promise<void> {
-        const row = await this.get(sourceEventId);
-        if (row === null) {
-            return;
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: sourceEventId },
+                    ConditionExpression:
+                        "attribute_exists(#source_event_id) AND #status = :new_status",
+                    UpdateExpression:
+                        "SET #next_retry_at_ms = :next_retry_at_ms, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#source_event_id": "source_event_id",
+                        "#status": "status",
+                        "#next_retry_at_ms": "next_retry_at_ms",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":new_status": "new",
+                        ":next_retry_at_ms": nextRetryAtMs,
+                        ":updated_at_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (!isConditionalCheckFailed(error)) {
+                throw error;
+            }
         }
-        row.next_retry_at_ms = nextRetryAtMs;
-        row.updated_at_ms = nowMs;
-        await this.put(row);
     }
 
     async markRejected(
