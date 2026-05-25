@@ -77,6 +77,34 @@ describe("AWS Lambda watcher handlers", () => {
         });
     });
 
+    it("skips malformed scheduled source event IDs before storing or starting workflows", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            fetchCandidates: async () => [
+                candidate("__sonari_runner_workflow_lock__"),
+                candidate("us7000/bad"),
+                candidate("us7000eligible"),
+            ],
+        });
+
+        const result = await handler();
+
+        expect(result).toEqual({ scanned: 3, workflow_started: 1 });
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000eligible",
+                executionName: "disaster-us7000eligible-1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("__sonari_runner_workflow_lock__")).resolves.toBeNull();
+        await expect(repository.get("us7000/bad")).resolves.toBeNull();
+    });
+
     it("defers scheduled candidates that are less than 24 hours old", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();

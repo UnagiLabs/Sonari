@@ -722,6 +722,33 @@ describe("AWS runner workflow helper", () => {
         ).rejects.toThrow(/source_event_id mismatch/);
     });
 
+    it("rejects finalized S3 TEE results for a different source event", async () => {
+        const result = finalizedResult();
+        if (result.status !== "finalized") {
+            throw new Error("test finalized result helper returned non-finalized result");
+        }
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({
+                body: JSON.stringify({
+                    ...result,
+                    payload: { ...result.payload, event_uid: "us7000other" },
+                }),
+            }),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "read_result",
+                source_event_id: "us7000sonari",
+                result_s3_key: "results/us7000sonari/cmd-123.json",
+            }),
+        ).rejects.toThrow(/source_event_id mismatch/);
+    });
+
     it("applies TEE results to DynamoDB-compatible state and skips relayer when not configured", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
