@@ -466,6 +466,43 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("does not refresh terminal rows that are still waiting for StopInstance", async () => {
+        const staleProcessingRow = await eventRow("us7000stop", {
+            status: "processing",
+            runner_job_id: "disaster-us7000stop-1",
+            runner_attempt: 1,
+            runner_phase: "applying_result",
+        });
+        const stopPendingTerminalRow = {
+            ...staleProcessingRow,
+            status: "finalized" as const,
+            runner_phase: "complete" as const,
+            runner_stopped_at_ms: null,
+            tee_result_json: JSON.stringify(finalizedResult()),
+            payload_bcs_hex: "0x01",
+            signature: "0xsig",
+            public_key: "0xpub",
+            finalized_at_ms: baseNow + 1_000,
+            source_updated_at_ms: baseNow,
+            updated_at_ms: baseNow + 1_000,
+        };
+        const client = new StaleReadRaceClient(staleProcessingRow, stopPendingTerminalRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await repository.upsertCandidate(
+            candidate("us7000stop", { source_updated_at_ms: baseNow + 2_000 }),
+            baseNow + 2_000,
+        );
+
+        expect(client.currentRow).toMatchObject({
+            status: "finalized",
+            runner_phase: "complete",
+            runner_stopped_at_ms: null,
+            source_updated_at_ms: baseNow,
+            updated_at_ms: baseNow + 1_000,
+        });
+    });
+
     it("marks a due row failed when Step Functions start fails", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000manual", baseNow);

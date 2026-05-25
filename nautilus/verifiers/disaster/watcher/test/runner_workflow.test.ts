@@ -722,11 +722,12 @@ describe("AWS runner workflow helper", () => {
         ).rejects.toThrow(/source_event_id mismatch/);
     });
 
-    it("rejects finalized S3 TEE results for a different source event", async () => {
+    it("accepts finalized S3 TEE results with hashed event UIDs", async () => {
         const result = finalizedResult();
         if (result.status !== "finalized") {
             throw new Error("test finalized result helper returned non-finalized result");
         }
+        const hashedEventUid = `0x${"aa".repeat(32)}`;
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -734,7 +735,7 @@ describe("AWS runner workflow helper", () => {
             s3: new RecordingS3Client({
                 body: JSON.stringify({
                     ...result,
-                    payload: { ...result.payload, event_uid: "us7000other" },
+                    payload: { ...result.payload, event_uid: hashedEventUid },
                 }),
             }),
             config: baseConfig(),
@@ -746,7 +747,13 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 result_s3_key: "results/us7000sonari/cmd-123.json",
             }),
-        ).rejects.toThrow(/source_event_id mismatch/);
+        ).resolves.toMatchObject({
+            source_event_id: "us7000sonari",
+            result: {
+                status: "finalized",
+                payload: { event_uid: hashedEventUid },
+            },
+        });
     });
 
     it("applies TEE results to DynamoDB-compatible state and skips relayer when not configured", async () => {
