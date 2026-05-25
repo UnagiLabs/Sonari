@@ -216,4 +216,28 @@ describe("oracle boundary validators", () => {
             }),
         ).toMatchObject({ ok: false, error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD" });
     });
+
+    it("rejects malformed finalized payload metadata", () => {
+        for (const payloadPatch of [
+            { event_uid: "" },
+            { event_revision: 1.5 },
+            { event_revision: 0x1_0000_0000 },
+            { event_revision: Number.MAX_SAFE_INTEGER + 1 },
+            { source_updated_at_ms: 1_700_000_000_000.5 },
+            { source_updated_at_ms: Number.MAX_SAFE_INTEGER + 1 },
+        ]) {
+            expect(
+                validateRelayerSubmitInput({
+                    status: "finalized",
+                    payload: { ...unsignedPayload, ...payloadPatch },
+                    payload_bcs_hex: "0x01",
+                    signature: "0xsig",
+                    public_key: "0xpub",
+                }),
+            ).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            });
+        }
+    });
 });

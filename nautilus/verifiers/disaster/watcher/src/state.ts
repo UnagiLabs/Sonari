@@ -8,7 +8,12 @@ import {
     TransactWriteCommand,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import type { OffchainStatus, OracleErrorCode, TeeCoreResult } from "@sonari/oracle-shared";
+import {
+    type OffchainStatus,
+    type OracleErrorCode,
+    type TeeCoreResult,
+    validateRelayerSubmitInput,
+} from "@sonari/oracle-shared";
 import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
 import type {
     RelayerErrorCode,
@@ -1707,12 +1712,12 @@ async function applyResultToRow(
     nowMs: number,
     pendingNextRetryAtMs?: number,
 ): Promise<void> {
-    row.tee_result_json = JSON.stringify(result);
-    row.updated_at_ms = nowMs;
-    row.error_code = result.status === "finalized" ? null : result.error_code;
-    row.runner_phase = "complete";
     if (result.status === "finalized") {
-        const metadata = finalizedPayloadMetadata(result.payload);
+        const metadata = finalizedPayloadMetadata(result);
+        row.tee_result_json = JSON.stringify(result);
+        row.updated_at_ms = nowMs;
+        row.error_code = null;
+        row.runner_phase = "complete";
         row.status = "finalized";
         row.next_retry_at_ms = null;
         row.event_uid = metadata.eventUid;
@@ -1724,6 +1729,10 @@ async function applyResultToRow(
         row.finalized_at_ms = nowMs;
         return;
     }
+    row.tee_result_json = JSON.stringify(result);
+    row.updated_at_ms = nowMs;
+    row.error_code = result.error_code;
+    row.runner_phase = "complete";
     if (result.status === "rejected") {
         row.status = "rejected";
         row.next_retry_at_ms = null;
@@ -1754,20 +1763,20 @@ function applyRunnerWorkflowProgress(
     }
 }
 
-function finalizedPayloadMetadata(
-    payload: Extract<TeeCoreResult, { status: "finalized" }>["payload"],
-): {
+function finalizedPayloadMetadata(result: Extract<TeeCoreResult, { status: "finalized" }>): {
     eventUid: string;
     eventRevision: number;
     sourceUpdatedAtMs: number;
 } {
-    if (
-        typeof payload.event_uid !== "string" ||
-        typeof payload.event_revision !== "number" ||
-        typeof payload.source_updated_at_ms !== "number"
-    ) {
-        throw new Error("invalid finalized TEE result metadata");
+    const validation = validateRelayerSubmitInput(result);
+    if (!validation.ok) {
+        throw new Error(`invalid finalized TEE result metadata: ${validation.message}`);
     }
+    const payload = validation.value.payload as {
+        event_uid: string;
+        event_revision: number;
+        source_updated_at_ms: number;
+    };
     return {
         eventUid: payload.event_uid,
         eventRevision: payload.event_revision,

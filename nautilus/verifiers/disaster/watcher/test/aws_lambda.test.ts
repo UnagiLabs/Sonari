@@ -811,6 +811,40 @@ describe("DynamoDB-compatible repository behavior", () => {
             source_updated_at_ms: baseNow,
         });
     });
+
+    it("rejects malformed finalized TEE payload metadata before mutating the event row", async () => {
+        for (const payloadPatch of [
+            { event_uid: "" },
+            { event_revision: 1.5 },
+            { event_revision: 0x1_0000_0000 },
+            { source_updated_at_ms: baseNow + 0.5 },
+            { source_updated_at_ms: Number.MAX_SAFE_INTEGER + 1 },
+        ]) {
+            const repository = new InMemoryStateRepository();
+            await repository.upsertManualEvent("us7000sonari", baseNow);
+            const before = await repository.get("us7000sonari");
+            if (before === null) {
+                throw new Error("failed to create test row");
+            }
+            const result = finalizedResult();
+            if (result.status !== "finalized") {
+                throw new Error("test finalized result helper returned a non-finalized result");
+            }
+
+            await expect(
+                repository.applyRunnerResult(
+                    "us7000sonari",
+                    {
+                        ...result,
+                        payload: { ...result.payload, ...payloadPatch },
+                    } as TeeCoreResult,
+                    baseNow + 1_000,
+                ),
+            ).rejects.toThrow(/invalid finalized TEE result metadata/);
+
+            await expect(repository.get("us7000sonari")).resolves.toEqual(before);
+        }
+    });
 });
 
 async function eventRow(
