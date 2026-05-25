@@ -43,7 +43,7 @@ importers:
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
 
-  nautilus/verifiers/disaster/relayer:
+  nautilus/verifiers/earthquake/relayer:
     dependencies:
       '@mysten/sui':
         specifier: ^2.16.3
@@ -56,7 +56,7 @@ importers:
         specifier: ^4.22.0
         version: 4.22.0
 
-  nautilus/verifiers/disaster/runner:
+  nautilus/verifiers/earthquake/runner:
     dependencies:
       '@sonari/oracle-relayer':
         specifier: workspace:*
@@ -65,9 +65,9 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
-  nautilus/verifiers/disaster/shared: {}
+  nautilus/verifiers/earthquake/shared: {}
 
-  nautilus/verifiers/disaster/watcher:
+  nautilus/verifiers/earthquake/watcher:
     dependencies:
       '@aws-sdk/client-auto-scaling':
         specifier: ^3.948.0

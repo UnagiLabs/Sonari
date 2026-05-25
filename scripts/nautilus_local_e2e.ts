@@ -9,13 +9,13 @@ import {
     buildRelayerRequestPreview,
     type RelayerRequestPreview,
     type RelayerResult,
-} from "../nautilus/verifiers/disaster/relayer/src/index.js";
+} from "../nautilus/verifiers/earthquake/relayer/src/index.js";
 import type {
     OracleErrorCode,
     SignedFinalizedPayload,
     TeeCoreResult,
     WorkerToTeeRequest,
-} from "../nautilus/verifiers/disaster/shared/src/index.js";
+} from "../nautilus/verifiers/earthquake/shared/src/index.js";
 import {
     HOUR_MS,
     InMemoryStateRepository,
@@ -25,14 +25,14 @@ import {
     scanCandidates,
     USGS_RECENT_FEED_URL,
     type UsgsEarthquakeCandidate,
-} from "../nautilus/verifiers/disaster/watcher/src/index.js";
-import type { EarthquakeEventRow } from "../nautilus/verifiers/disaster/watcher/src/state.js";
-import type { RunnerAdapter } from "../nautilus/verifiers/disaster/watcher/src/trigger_tee.js";
+} from "../nautilus/verifiers/earthquake/watcher/src/index.js";
+import type { EarthquakeEventRow } from "../nautilus/verifiers/earthquake/watcher/src/state.js";
+import type { RunnerAdapter } from "../nautilus/verifiers/earthquake/watcher/src/trigger_tee.js";
 
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_CASE_ID = "usgs/finalized_minimal";
-const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/disaster/fixtures";
+const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/earthquake/fixtures";
 const LEGACY_FIXTURES_URI_DIR = "nautilus_disaster_oracle/fixtures";
 const DEFAULT_TARGET = "0x123::disaster_oracle::submit_payload_v1";
 const DEFAULT_REGISTRY = "0x456";
@@ -448,7 +448,7 @@ async function runRustOracleCore(options: {
         "run",
         "--quiet",
         "--manifest-path",
-        path.join(resolveFromCwd("."), "nautilus/verifiers/disaster/tee/Cargo.toml"),
+        path.join(resolveFromCwd("."), "nautilus/verifiers/earthquake/tee/Cargo.toml"),
         "--",
         "--case-id",
         options.source.case_id,

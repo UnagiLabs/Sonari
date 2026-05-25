@@ -33,7 +33,7 @@ function createTeeAdapter(): TeeProcessAdapter {
     return new RustCliTeeAdapter({
         cargoManifestPath:
             process.env.TEE_CARGO_MANIFEST_PATH ??
-            "nautilus/verifiers/disaster/tee/Cargo.toml",
+            "nautilus/verifiers/earthquake/tee/Cargo.toml",
         cwd: process.cwd(),
         env: teeEnv(),
     });

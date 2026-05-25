@@ -9,7 +9,7 @@ dapp/
   src/
   public/
 
-nautilus/verifiers/disaster/
+nautilus/verifiers/earthquake/
   tee/
   watcher/
   relayer/
@@ -41,7 +41,7 @@ scripts/
 
 TypeScript package manager は `pnpm@10.27.0` を採用する。root `package.json` は workspace の集約コマンドだけを持ち、実装単位は `pnpm-workspace.yaml` で `dapp/*`、`packages/*`、`nautilus/verifiers/*/*` を対象にする。
 
-Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster/shared`、`nautilus/verifiers/disaster/watcher`、`nautilus/verifiers/disaster/relayer` に分ける。`shared` は Oracle 内部専用の型契約・定数・validator を持つ workspace package とし、`watcher` と `relayer` から `workspace:*` で参照する。
+Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/earthquake/shared`、`nautilus/verifiers/earthquake/watcher`、`nautilus/verifiers/earthquake/relayer` に分ける。`shared` は Oracle 内部専用の型契約・定数・validator を持つ workspace package とし、`watcher` と `relayer` から `workspace:*` で参照する。
 
 `nautilus/verifiers/membership/` は Membership Pass metadata verifier family の置き場である。residence verifier と student verifier はここに置く。MVP では docs-only design、dummy verifier、shared type placeholder、fixture placeholder を中心にし、production schema、migration、runner、relayer、Sui 投稿処理は必要になった時点で追加する。
 
@@ -52,12 +52,12 @@ Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster
 | ディレクトリ | 役割 | 主な技術 |
 | --- | --- | --- |
 | `dapp/` | Dashboard、Donation、Membership Pass、Claim、Program / Campaign 表示、Wallet 接続。 | React / Next.js、TypeScript、Sui dApp Kit |
-| `nautilus/verifiers/disaster/` | Disaster verifier family。地震イベント、対象セル root、署名 payload を生成する。 | Rust、TypeScript、Nautilus、AWS Lambda |
-| `nautilus/verifiers/disaster/tee/` | Nautilus / TEE 内で動く検証・署名実装。外部 source 再取得、Band 判定、H3 生成、Merkle root、Payload、署名を担当する。 | Rust、serde、reqwest、bcs、sha2、h3o または h3ron |
-| `nautilus/verifiers/disaster/watcher/` | 軽量監視プロセス。USGS 候補検出、DynamoDB 状態管理、Step Functions workflow 起動、手動投入 API を担当する。 | AWS Lambda、TypeScript、Lambda local test、DynamoDB / Step Functions |
-| `nautilus/verifiers/disaster/relayer/` | Nautilus / TEE が生成した署名済み payload を Sui へ投稿する。Payload 内容は変更しない。 | TypeScript または Rust、Sui SDK |
-| `nautilus/verifiers/disaster/shared/` | Disaster verifier 内部の TypeScript 共有型、定数、validator。 | TypeScript |
-| `nautilus/verifiers/disaster/fixtures/` | USGS の再現用サンプルデータ。TEE、Watcher、Relayer の共通テスト入力。 | JSON |
+| `nautilus/verifiers/earthquake/` | Disaster verifier family。地震イベント、対象セル root、署名 payload を生成する。 | Rust、TypeScript、Nautilus、AWS Lambda |
+| `nautilus/verifiers/earthquake/tee/` | Nautilus / TEE 内で動く検証・署名実装。外部 source 再取得、Band 判定、H3 生成、Merkle root、Payload、署名を担当する。 | Rust、serde、reqwest、bcs、sha2、h3o または h3ron |
+| `nautilus/verifiers/earthquake/watcher/` | 軽量監視プロセス。USGS 候補検出、DynamoDB 状態管理、Step Functions workflow 起動、手動投入 API を担当する。 | AWS Lambda、TypeScript、Lambda local test、DynamoDB / Step Functions |
+| `nautilus/verifiers/earthquake/relayer/` | Nautilus / TEE が生成した署名済み payload を Sui へ投稿する。Payload 内容は変更しない。 | TypeScript または Rust、Sui SDK |
+| `nautilus/verifiers/earthquake/shared/` | Disaster verifier 内部の TypeScript 共有型、定数、validator。 | TypeScript |
+| `nautilus/verifiers/earthquake/fixtures/` | USGS の再現用サンプルデータ。TEE、Watcher、Relayer の共通テスト入力。 | JSON |
 | `nautilus/verifiers/membership/` | Membership Pass metadata verifier family。residence / student verifier の docs、shared types、fixtures、dummy implementation を置く。 | TypeScript、Rust future、Nautilus |
 | `nautilus/verifiers/membership/shared/` | `ResidenceMetadataUpdate`、`StudentMetadataUpdate`、confidence / risk bucket などの placeholder shared types。 | TypeScript |
 | `nautilus/verifiers/membership/verifiers/residence/` | Web MVP residence confidence scoring verifier。raw evidence を秘匿し、Pass metadata update を生成する。 | TypeScript dummy first、Rust / Nautilus future |
@@ -73,7 +73,7 @@ Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster
 - 機能単位のルート構成を優先し、汎用的な中間ディレクトリは使わない。
 - TypeScript workspace は pnpm で管理し、root から `pnpm typecheck`、`pnpm test`、`pnpm test:oracle` を実行できる状態を保つ。
 - dApp は `dapp/` に置き、Dashboard、Donation、Membership Pass、Claim、Program / Campaign 表示、Wallet 接続を同じプロダクト面として扱う。
-- Disaster verifier 専用コードは `nautilus/verifiers/disaster/` に閉じる。
+- Disaster verifier 専用コードは `nautilus/verifiers/earthquake/` に閉じる。
 - Membership verifier 専用コードは `nautilus/verifiers/membership/` に閉じる。
 - Oracle / verifier 内部の shared 型・定数・validator は各 verifier family の `shared/` に置き、`packages/` へ漏らさない。
 - `schemas/` は root 共通仕様として扱い、Disaster Oracle 実装と Move package の両方から参照する。

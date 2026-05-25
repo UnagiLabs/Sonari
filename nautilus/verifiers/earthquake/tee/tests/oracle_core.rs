@@ -30,10 +30,10 @@ fn finalized_input() -> UsgsOracleInput {
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_detail_uri:
-            "nautilus/verifiers/disaster/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
                 .to_owned(),
         raw_grid_uri: Some(
-            "nautilus/verifiers/disaster/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
                 .to_owned(),
         ),
         raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),

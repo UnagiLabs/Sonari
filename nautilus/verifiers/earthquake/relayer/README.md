@@ -133,7 +133,7 @@ if (result.ok) {
 
 ```bash
 # Relayer のユニットテスト
-cd nautilus/verifiers/disaster/relayer
+cd nautilus/verifiers/earthquake/relayer
 npm test
 
 # 型チェック

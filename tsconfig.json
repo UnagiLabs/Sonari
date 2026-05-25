@@ -1,10 +1,10 @@
 {
     "files": [],
     "references": [
-        { "path": "./nautilus/verifiers/disaster/shared" },
-        { "path": "./nautilus/verifiers/disaster/watcher" },
-        { "path": "./nautilus/verifiers/disaster/relayer" },
-        { "path": "./nautilus/verifiers/disaster/runner" },
+        { "path": "./nautilus/verifiers/earthquake/shared" },
+        { "path": "./nautilus/verifiers/earthquake/watcher" },
+        { "path": "./nautilus/verifiers/earthquake/relayer" },
+        { "path": "./nautilus/verifiers/earthquake/runner" },
         { "path": "./nautilus/verifiers/membership/shared" }
     ]
 }

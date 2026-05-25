@@ -45,4 +45,4 @@ jobs:
         run: pnpm test
 
       - name: Test Rust TEE
-        run: cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml
+        run: cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml

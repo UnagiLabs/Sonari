@@ -11,7 +11,7 @@ from typing import Any
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[4]
-FIXTURES = ROOT / "nautilus" / "verifiers" / "disaster" / "fixtures"
+FIXTURES = ROOT / "nautilus" / "verifiers" / "earthquake" / "fixtures"
 
 CASES = {
     "usgs/finalized_minimal": {
