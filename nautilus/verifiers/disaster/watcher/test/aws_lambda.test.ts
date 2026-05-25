@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BCS_ENUMS, type TeeCoreResult } from "@sonari/oracle-shared";
 import {
     buildDisasterVerifierRequest,
+    createDefaultScheduledHandlerFromEnv,
     createManualHandler,
     createScheduledHandler,
     DAY_MS,
@@ -128,6 +129,40 @@ describe("AWS Lambda watcher handlers", () => {
         await expect(repository.get("us7000fresh")).resolves.toMatchObject({
             status: "new",
             next_retry_at_ms: occurredAtMs + DAY_MS,
+        });
+    });
+
+    it("default scheduled handler starts Step Functions executions for due events", async () => {
+        const repository = new InMemoryStateRepository();
+        const commands: unknown[] = [];
+        const handler = createDefaultScheduledHandlerFromEnv(
+            {
+                EVENTS_TABLE_NAME: "events",
+                RUNNER_STATE_MACHINE_ARN: "arn:aws:states:runner",
+            },
+            {
+                repository,
+                fetchCandidates: async () => [candidate("us7000default")],
+                now: () => baseNow,
+                sfnClient: {
+                    async send(command: unknown): Promise<void> {
+                        commands.push(command);
+                    },
+                },
+            },
+        );
+
+        const result = await handler();
+
+        expect(result).toEqual({ scanned: 1, workflow_started: 1 });
+        expect(commands).toHaveLength(1);
+        expect(readCommandInput(commands[0])).toMatchObject({
+            stateMachineArn: "arn:aws:states:runner",
+            name: "disaster-us7000default-1",
+        });
+        expect(JSON.parse(String(readCommandInput(commands[0]).input))).toEqual({
+            source_event_id: "us7000default",
+            attempt: 1,
         });
     });
 
