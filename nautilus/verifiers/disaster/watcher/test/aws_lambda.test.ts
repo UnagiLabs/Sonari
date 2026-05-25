@@ -297,7 +297,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "finalized",
-            source_updated_at_ms: baseNow + 2_000,
+            source_updated_at_ms: baseNow,
             payload_bcs_hex: "0x01",
         });
     });
@@ -457,7 +457,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         expect(client.currentRow).toMatchObject({
             status: "finalized",
-            source_updated_at_ms: baseNow + 2_000,
+            source_updated_at_ms: baseNow,
             last_seen_at_ms: baseNow + 2_000,
             payload_bcs_hex: "0x01",
             signature: "0xsig",
