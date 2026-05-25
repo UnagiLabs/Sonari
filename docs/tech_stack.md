@@ -52,9 +52,9 @@ Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster
 | ディレクトリ | 役割 | 主な技術 |
 | --- | --- | --- |
 | `dapp/` | Dashboard、Donation、Membership Pass、Claim、Program / Campaign 表示、Wallet 接続。 | React / Next.js、TypeScript、Sui dApp Kit |
-| `nautilus/verifiers/disaster/` | Disaster verifier family。地震イベント、対象セル root、署名 payload を生成する。 | Rust、TypeScript、Nautilus、Cloudflare Workers |
+| `nautilus/verifiers/disaster/` | Disaster verifier family。地震イベント、対象セル root、署名 payload を生成する。 | Rust、TypeScript、Nautilus、AWS Lambda |
 | `nautilus/verifiers/disaster/tee/` | Nautilus / TEE 内で動く検証・署名実装。外部 source 再取得、Band 判定、H3 生成、Merkle root、Payload、署名を担当する。 | Rust、serde、reqwest、bcs、sha2、h3o または h3ron |
-| `nautilus/verifiers/disaster/watcher/` | 軽量監視プロセス。USGS 候補検出、D1 状態管理、Queue 投入、TEE 起動 API 呼び出し、手動投入 API を担当する。 | Cloudflare Workers、TypeScript、Wrangler、D1 / Queues |
+| `nautilus/verifiers/disaster/watcher/` | 軽量監視プロセス。USGS 候補検出、DynamoDB 状態管理、Step Functions workflow 起動、手動投入 API を担当する。 | AWS Lambda、TypeScript、Lambda local test、DynamoDB / Step Functions |
 | `nautilus/verifiers/disaster/relayer/` | Nautilus / TEE が生成した署名済み payload を Sui へ投稿する。Payload 内容は変更しない。 | TypeScript または Rust、Sui SDK |
 | `nautilus/verifiers/disaster/shared/` | Disaster verifier 内部の TypeScript 共有型、定数、validator。 | TypeScript |
 | `nautilus/verifiers/disaster/fixtures/` | USGS の再現用サンプルデータ。TEE、Watcher、Relayer の共通テスト入力。 | JSON |
@@ -85,7 +85,7 @@ Nautilus Disaster Oracle の TypeScript package は `nautilus/verifiers/disaster
 | 領域 | 技術 | 用途 |
 | --- | --- | --- |
 | Frontend | React / Next.js、TypeScript、Sui dApp Kit | Dashboard、Donation、Membership Pass、Claim UI、Program / Campaign 表示、Wallet 接続 |
-| Disaster Watcher | Cloudflare Workers、Wrangler、D1 / Queues | USGS 候補検出、D1 primary state 管理、TEE 起動 |
+| Disaster Watcher | AWS Lambda、Lambda local test、DynamoDB / Step Functions | USGS 候補検出、DynamoDB primary state 管理、TEE 起動 |
 | Disaster TEE | Rust、Nautilus、AWS Nitro Enclaves | 外部 source 再検証、対象セル root 生成、Payload 生成、秘密鍵隔離、署名 |
 | Disaster Relayer | Sui SDK、TypeScript または Rust | 署名済み Disaster Payload の Sui 投稿 |
 | Membership Verifiers | TypeScript dummy first、Nautilus / Rust future | Residence / Student metadata update 生成 |

@@ -45,7 +45,7 @@ Disaster Relief は最初の Program であり、`DisasterEvent` はその Progr
 - Verification Fee は Operations Pool へ入れ、支払い保証や Relief payout 原資として扱わない。
 - Main Pool、Designated / Campaign Pool、Operations Pool を分離する。
 - Disaster Claim は `DisasterEvent.affected_cells_root` と `MembershipPass.verified_residence_cell` の合成で判定する。
-- Move は Relayer、Worker、dapp、D1、外部 API を信用しない。
+- Move は Relayer、Worker、dapp、offchain DB、外部 API を信用しない。
 - emergency pause を必ず入れる。
 
 ## 3. 共通 TDD cycle

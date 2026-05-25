@@ -1,21 +1,21 @@
 import {
     BCS_ENUMS,
     type DisasterOraclePayloadV1,
+    type DisasterVerifierRequest,
     ERROR_CODES,
     type OracleErrorCode,
     type TeeCoreResult,
-    type WorkerToTeeRequest,
 } from "@sonari/oracle-shared";
 
 export interface RunnerAdapter {
-    run(request: WorkerToTeeRequest): Promise<TeeCoreResult>;
+    run(request: DisasterVerifierRequest): Promise<TeeCoreResult>;
 }
 
 export interface RunnerLifecycleAdapter {
     start(): Promise<{ runner_id: string }>;
     process(
         runnerId: string,
-        request: WorkerToTeeRequest,
+        request: DisasterVerifierRequest,
         signal?: AbortSignal,
     ): Promise<TeeCoreResult>;
     stop(runnerId: string): Promise<void>;
@@ -61,7 +61,7 @@ export class HttpRunnerAdapter implements RunnerAdapter {
         this.sidecarUrl = stripTrailingSlash(sidecarUrl);
     }
 
-    async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
+    async run(request: DisasterVerifierRequest): Promise<TeeCoreResult> {
         const sidecarRequest = new Request(`${this.sidecarUrl}/process_data`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -113,7 +113,7 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
 
     async process(
         runnerId: string,
-        request: WorkerToTeeRequest,
+        request: DisasterVerifierRequest,
         signal?: AbortSignal,
     ): Promise<TeeCoreResult> {
         const body = await this.postJson("/process", { payload: request }, signal, runnerId);
@@ -216,9 +216,9 @@ const finalizedPayload: DisasterOraclePayloadV1 = {
 };
 
 export class MockRunnerAdapter implements RunnerAdapter {
-    readonly requests: WorkerToTeeRequest[] = [];
+    readonly requests: DisasterVerifierRequest[] = [];
 
-    async run(request: WorkerToTeeRequest): Promise<TeeCoreResult> {
+    async run(request: DisasterVerifierRequest): Promise<TeeCoreResult> {
         this.requests.push(structuredClone(request));
 
         switch (request.source_event_id) {
@@ -267,7 +267,7 @@ export class MockRunnerAdapter implements RunnerAdapter {
 export class MockRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
     private nextRunnerId = 1;
     readonly starts: string[] = [];
-    readonly requests: WorkerToTeeRequest[] = [];
+    readonly requests: DisasterVerifierRequest[] = [];
     readonly stops: string[] = [];
 
     constructor(private readonly runner = new MockRunnerAdapter()) {}
@@ -281,7 +281,7 @@ export class MockRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
 
     async process(
         _runnerId: string,
-        request: WorkerToTeeRequest,
+        request: DisasterVerifierRequest,
         _signal?: AbortSignal,
     ): Promise<TeeCoreResult> {
         this.requests.push(structuredClone(request));

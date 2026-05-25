@@ -153,6 +153,8 @@ export interface WorkerToTeeRequest {
     geo_resolution: typeof DEFAULT_ORACLE_CONTRACT.geo_resolution;
 }
 
+export type DisasterVerifierRequest = WorkerToTeeRequest;
+
 export interface SignedFinalizedPayload {
     status: "finalized";
     payload: DisasterOraclePayloadV1 | Record<string, unknown>;
@@ -195,6 +197,8 @@ const WORKER_TO_TEE_KEYS = [
     "geo_resolution",
 ] as const;
 
+const U32_MAX = 0xffff_ffff;
+
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
 }
@@ -208,6 +212,24 @@ function firstUnexpectedKey(
 
 function isNonEmptyString(value: unknown): value is string {
     return typeof value === "string" && value.length > 0;
+}
+
+function isSafeUint32(value: unknown): value is number {
+    return (
+        typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= U32_MAX
+    );
+}
+
+function isSafeNonNegativeInteger(value: unknown): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function hasValidFinalizedPayloadMetadata(payload: Record<string, unknown>): boolean {
+    return (
+        isNonEmptyString(payload.event_uid) &&
+        isSafeUint32(payload.event_revision) &&
+        isSafeNonNegativeInteger(payload.source_updated_at_ms)
+    );
 }
 
 export function validateWorkerToTeeRequest(input: unknown): ValidationResult<WorkerToTeeRequest> {
@@ -252,6 +274,12 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
     };
 }
 
+export function validateDisasterVerifierRequest(
+    input: unknown,
+): ValidationResult<DisasterVerifierRequest> {
+    return validateWorkerToTeeRequest(input);
+}
+
 export function validateRelayerSubmitInput(input: unknown): ValidationResult<RelayerSubmitInput> {
     if (!isRecord(input)) {
         return {
@@ -274,6 +302,14 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             ok: false,
             error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
             message: "Relayer payload must use onchain status FINALIZED",
+        };
+    }
+
+    if (!hasValidFinalizedPayloadMetadata(input.payload)) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer payload metadata is malformed",
         };
     }
 

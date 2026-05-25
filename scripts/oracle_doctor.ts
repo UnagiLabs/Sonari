@@ -1,6 +1,4 @@
-import type { Dirent } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
-import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 export type DoctorStatus = "ok" | "warn" | "fail";
@@ -13,8 +11,7 @@ export interface DoctorCheck {
 
 export interface OracleDoctorOptions {
     env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
-    migrationsDir?: string;
-    schemaSqlPath?: string;
+    templatePath?: string;
 }
 
 export interface OracleDoctorResult {
@@ -22,16 +19,8 @@ export interface OracleDoctorResult {
     checks: DoctorCheck[];
 }
 
-const DEFAULT_MIGRATIONS_DIR = "nautilus/verifiers/disaster/watcher/migrations";
-const DEFAULT_SCHEMA_SQL_PATH = ".wrangler/state/v3/d1/miniflare-D1DatabaseObject/**/db.sqlite";
+const DEFAULT_TEMPLATE_PATH = "infra/aws/disaster-runner/template.yaml";
 const RELAYER_MODES = new Set(["preview", "dry_run", "submit"]);
-const REQUIRED_D1_COLUMNS = [
-    "runner_job_id",
-    "runner_stop_error",
-    "relayer_mode",
-    "relayer_status",
-    "relayer_submitted_at_ms",
-];
 
 export async function runOracleDoctor(
     options: OracleDoctorOptions = {},
@@ -49,15 +38,16 @@ export async function runOracleDoctor(
             env.RELAYER_MODE,
         ),
     );
-    checks.push(checkOptionalSecretPair("AWS_RUNNER_BASE_URL", env.AWS_RUNNER_BASE_URL));
-    checks.push(checkOptionalSecretPair("AWS_RUNNER_TOKEN", env.AWS_RUNNER_TOKEN));
     checks.push(checkOptionalSecretPair("MANUAL_SUBMIT_TOKEN", env.MANUAL_SUBMIT_TOKEN));
+    checks.push(checkOptionalSecretPair("RUNNER_TOKEN_SECRET_ARN", env.RUNNER_TOKEN_SECRET_ARN));
+    checks.push(checkOptionalSecretPair("EVENTS_TABLE_NAME", env.EVENTS_TABLE_NAME));
+    checks.push(checkOptionalSecretPair("RUNNER_STATE_MACHINE_ARN", env.RUNNER_STATE_MACHINE_ARN));
+    checks.push(checkOptionalSecretPair("RESULT_BUCKET", env.RESULT_BUCKET));
+    checks.push(checkOptionalSecretPair("RUNNER_ASG_NAME", env.RUNNER_ASG_NAME));
     checks.push(
-        await checkD1Consistency(
-            options.migrationsDir ?? DEFAULT_MIGRATIONS_DIR,
-            options.schemaSqlPath ?? DEFAULT_SCHEMA_SQL_PATH,
-        ),
+        checkOptionalSecretPair("NITRO_ENCLAVE_PROCESS_COMMAND", env.NITRO_ENCLAVE_PROCESS_COMMAND),
     );
+    checks.push(await checkAwsOnlyTemplate(options.templatePath ?? DEFAULT_TEMPLATE_PATH));
 
     return {
         ok: checks.every((check) => check.status !== "fail"),
@@ -113,98 +103,50 @@ function checkOptionalSecretPair(name: string, value: string | undefined): Docto
     return { name, status: "warn", message: "not configured" };
 }
 
-async function checkD1Consistency(
-    migrationsDir: string,
-    schemaSqlPath: string,
-): Promise<DoctorCheck> {
+async function checkAwsOnlyTemplate(templatePath: string): Promise<DoctorCheck> {
     try {
-        const migrationSql = await readMigrationSql(migrationsDir);
-        const missingColumns = REQUIRED_D1_COLUMNS.filter(
-            (column) => !migrationSql.includes(`ADD COLUMN ${column}`),
-        );
-        if (missingColumns.length > 0) {
+        const template = await readFile(templatePath, "utf8");
+        const missing = [
+            "AWS::DynamoDB::Table",
+            "AWS::S3::Bucket",
+            "AWS::Lambda::Function",
+            "AWS::StepFunctions::StateMachine",
+            "AWS::Scheduler::Schedule",
+        ].filter((needle) => !template.includes(needle));
+        if (template.includes("AWS::ElasticLoadBalancingV2") || template.includes("ToPort: 8789")) {
             return {
-                name: "D1_MIGRATIONS",
+                name: "AWS_ONLY_TEMPLATE",
                 status: "fail",
-                message: `missing migration columns: ${missingColumns.join(", ")}`,
+                message: "template still exposes the legacy ALB/HTTP runner path",
             };
         }
-
-        const schemaExists = await localD1SqliteExists(schemaSqlPath);
+        if (missing.length > 0) {
+            return {
+                name: "AWS_ONLY_TEMPLATE",
+                status: "fail",
+                message: `missing orchestration resources: ${missing.join(", ")}`,
+            };
+        }
         return {
-            name: "D1_MIGRATIONS",
-            status: schemaExists ? "ok" : "warn",
-            message: schemaExists
-                ? "migrations and local D1 sqlite are present"
-                : "migrations are present; local D1 sqlite was not found",
+            name: "AWS_ONLY_TEMPLATE",
+            status: "ok",
+            message: "AWS-only Lambda/Step Functions template is present",
         };
     } catch (error) {
         return {
-            name: "D1_MIGRATIONS",
+            name: "AWS_ONLY_TEMPLATE",
             status: "fail",
             message: error instanceof Error ? error.message : String(error),
         };
     }
 }
 
-async function readMigrationSql(migrationsDir: string): Promise<string> {
-    const entries = await readdir(migrationsDir);
-    const sqlFiles = entries.filter((entry) => entry.endsWith(".sql")).sort();
-    if (sqlFiles.length === 0) {
-        throw new Error(`no migration files found in ${migrationsDir}`);
-    }
-    const contents = await Promise.all(
-        sqlFiles.map((file) => readFile(path.join(migrationsDir, file), "utf8")),
-    );
-    return contents.join("\n");
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-    try {
-        return (await stat(filePath)).isFile();
-    } catch {
-        return false;
-    }
-}
-
-async function localD1SqliteExists(schemaSqlPath: string): Promise<boolean> {
-    if (await fileExists(schemaSqlPath)) {
-        return true;
-    }
-    const wildcardIndex = schemaSqlPath.indexOf("*");
-    if (wildcardIndex === -1) {
-        return false;
-    }
-
-    const searchRoot = schemaSqlPath.slice(0, wildcardIndex).replace(/[\\/]+$/, "");
-    const targetName = path.basename(schemaSqlPath);
-    return fileNamedExists(searchRoot.length === 0 ? "." : searchRoot, targetName);
-}
-
-async function fileNamedExists(directory: string, targetName: string): Promise<boolean> {
-    let entries: Dirent[];
-    try {
-        entries = await readdir(directory, { withFileTypes: true });
-    } catch {
-        return false;
-    }
-
-    for (const entry of entries) {
-        const entryPath = path.join(directory, entry.name);
-        if (entry.isFile() && entry.name === targetName) {
-            return true;
-        }
-        if (entry.isDirectory() && (await fileNamedExists(entryPath, targetName))) {
-            return true;
-        }
-    }
-    return false;
-}
-
 async function main(): Promise<void> {
     const result = await runOracleDoctor();
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-    process.exitCode = result.ok ? 0 : 1;
+    if (!result.ok) {
+        process.exitCode = 1;
+    }
 }
 
 const mainPath = process.argv[1] === undefined ? null : pathToFileURL(process.argv[1]).href;

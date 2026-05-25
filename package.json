@@ -25,7 +25,6 @@
         "oracle:e2e:local": "tsx scripts/nautilus_local_e2e.ts",
         "oracle:e2e:fake-binding": "tsx scripts/nautilus_fake_binding_e2e.ts",
         "oracle:e2e:live": "tsx scripts/nautilus_live_e2e.ts",
-        "oracle:e2e:wrangler": "tsx scripts/nautilus_wrangler_e2e.ts",
         "test:oracle": "pnpm --filter './nautilus/verifiers/disaster/**' test && cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml"
     },
     "devDependencies": {

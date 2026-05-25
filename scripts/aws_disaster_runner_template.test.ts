@@ -5,10 +5,14 @@ import { describe, expect, it } from "vitest";
 const templatePath = path.join(process.cwd(), "infra/aws/disaster-runner/template.yaml");
 
 describe("AWS disaster runner CloudFormation template", () => {
-    it("starts the runner service during instance bootstrap", async () => {
+    it("does not expose a public HTTP runner surface", async () => {
         const template = await readFile(templatePath, "utf8");
 
-        expect(template).toContain("systemctl enable --now sonari-disaster-runner.service");
+        expect(template).not.toContain("AWS::ElasticLoadBalancingV2::LoadBalancer");
+        expect(template).not.toContain("AWS::ElasticLoadBalancingV2::Listener");
+        expect(template).not.toContain("AWS::ElasticLoadBalancingV2::TargetGroup");
+        expect(template).not.toContain("sonari-disaster-runner.service");
+        expect(template).not.toContain("ToPort: 8789");
     });
 
     it("makes runner secret files readable by ec2-user only", async () => {
@@ -27,9 +31,133 @@ describe("AWS disaster runner CloudFormation template", () => {
 
         expect(template).toContain("NitroEnclaveProcessCommand:");
         expect(template).toContain("WalrusAggregatorUrl:");
+        expect(template).toContain("nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'");
+        expect(template).toContain(`$${"{NitroEnclaveProcessCommand}"}`);
         expect(template).toContain(
+            "printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\\n' \"$nitro_enclave_process_command\"",
+        );
+        expect(template).toContain(
+            "printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\\n' \"$walrus_aggregator_url\"",
+        );
+        expect(template).not.toContain(
+            `NITRO_ENCLAVE_PROCESS_COMMAND='$${"{NitroEnclaveProcessCommand}"}'`,
+        );
+        expect(template).not.toContain(
             `NITRO_ENCLAVE_PROCESS_COMMAND=$${"{NitroEnclaveProcessCommand}"}`,
         );
-        expect(template).toContain(`SONARI_WALRUS_AGGREGATOR_URL=$${"{WalrusAggregatorUrl}"}`);
+    });
+
+    it("marks runner bootstrap completion only after required files and allocator are ready", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
+        expect(template).toContain("touch /opt/sonari/bootstrap-complete");
+        expect(template.indexOf("touch /opt/sonari/bootstrap-complete")).toBeGreaterThan(
+            template.indexOf("chmod 0400 /opt/sonari/runner.env"),
+        );
+    });
+
+    it("keeps EC2 capacity at zero until the Step Functions workflow starts a job", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('MinSize: "0"');
+        expect(template).toContain('MaxSize: "1"');
+        expect(template).toContain('DesiredCapacity: "0"');
+    });
+
+    it("defines AWS-only orchestration resources", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("AWS::DynamoDB::Table");
+        expect(template).toContain("AWS::S3::Bucket");
+        expect(template).toContain("AWS::Lambda::Function");
+        expect(template).toContain("AWS::StepFunctions::StateMachine");
+        expect(template).toContain("AWS::Scheduler::Schedule");
+        expect(template).toContain("AWS::Lambda::Url");
+        expect(template).toContain("ssm:SendCommand");
+        expect(template).toContain("autoscaling:SetDesiredCapacity");
+    });
+
+    it("points Lambda handlers at the TypeScript dist/src emit layout", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("Handler: dist/src/lambda.scheduledHandler");
+        expect(template).toContain("Handler: dist/src/lambda.manualHandler");
+        expect(template).toContain("Handler: dist/src/runner_workflow.handler");
+        expect(template).not.toContain("Handler: dist/lambda.scheduledHandler");
+        expect(template).not.toContain("Handler: dist/lambda.manualHandler");
+        expect(template).not.toContain("Handler: dist/runner_workflow.handler");
+    });
+
+    it("retries transient PollCommand Lambda or SSM lookup failures before failing the workflow", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"PollCommand": {');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }]',
+        );
+    });
+
+    it("retries FindReadyInstance long enough for cold bootstrap readiness", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"FindReadyInstance": {');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }]',
+        );
+    });
+
+    it("retries and records failure when StartInstance cannot scale runner capacity", async () => {
+        const template = await readFile(templatePath, "utf8");
+        const startInstanceBlock = template.slice(
+            template.indexOf('"StartInstance": {'),
+            template.indexOf('"WaitForInstance": {'),
+        );
+
+        expect(startInstanceBlock).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }]',
+        );
+        expect(startInstanceBlock).toContain(
+            '"Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]',
+        );
+    });
+
+    it("retries runner cleanup and fails explicitly when StopInstance cannot complete", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"StopInstance": {');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }]',
+        );
+        expect(template).toContain(
+            '"Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }]',
+        );
+        expect(template).toContain('"StopInstanceFailed": {');
+        expect(template).toContain('"Type": "Fail"');
+        expect(template).toContain('"Error": "StopInstanceFailed"');
+        expect(template).toContain('"Cause": "Runner cleanup failed after retrying StopInstance"');
+    });
+
+    it("times out SSM command polling after 30 minutes", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"command_poll_count": 0');
+        expect(template).toContain('"command_poll_count.$": "$.command_poll_count"');
+        expect(template).toContain(
+            '{ "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }',
+        );
+        expect(template).toContain('"error_code": "AWS_RUNNER_TIMEOUT"');
+        expect(template).toContain('"message": "SSM command polling exceeded 30 minutes"');
+    });
+
+    it("passes the workflow attempt to every runner control task", async () => {
+        const template = await readFile(templatePath, "utf8");
+        const runnerTaskCount =
+            template.match(/"Resource": "\$\{RunnerControlLambda\.Arn\}"/g)?.length ?? 0;
+        const attemptParameterCount =
+            template.match(/"Parameters": \{[^}]*"attempt\.\$": "\$\.attempt"/g)?.length ?? 0;
+
+        expect(runnerTaskCount).toBeGreaterThan(0);
+        expect(attemptParameterCount).toBe(runnerTaskCount);
     });
 });

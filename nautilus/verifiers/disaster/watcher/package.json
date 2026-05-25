@@ -8,16 +8,19 @@
     },
     "types": "./src/index.ts",
     "scripts": {
-        "dev": "wrangler dev --local",
-        "d1:migrate:local": "wrangler d1 migrations apply sonari-oracle-watcher-local --local",
         "typecheck": "tsc -b --noEmit",
         "test": "vitest run"
     },
     "dependencies": {
+        "@aws-sdk/client-auto-scaling": "^3.948.0",
+        "@aws-sdk/client-dynamodb": "^3.948.0",
+        "@aws-sdk/client-ec2": "^3.948.0",
+        "@aws-sdk/client-s3": "^3.948.0",
+        "@aws-sdk/client-secrets-manager": "^3.948.0",
+        "@aws-sdk/client-sfn": "^3.948.0",
+        "@aws-sdk/client-ssm": "^3.948.0",
+        "@aws-sdk/lib-dynamodb": "^3.948.0",
+        "@sonari/oracle-relayer": "workspace:*",
         "@sonari/oracle-shared": "workspace:*"
-    },
-    "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260516.1",
-        "wrangler": "^4.92.0"
     }
 }

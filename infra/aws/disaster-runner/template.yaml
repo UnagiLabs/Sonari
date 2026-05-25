@@ -1,13 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Sonari Nautilus disaster verifier runner on EC2 with Nitro Enclaves enabled.
+Description: Sonari disaster oracle on AWS Lambda, Step Functions, and EC2 Nitro Enclaves with zero idle EC2 capacity.
 
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
-  AcmCertificateArn:
-    Type: String
   RunnerTokenSecretArn:
     Type: String
   TeeSigningKeySecretArn:
@@ -25,18 +23,46 @@ Parameters:
     Default: m6i.xlarge
   AmiId:
     Type: AWS::EC2::Image::Id
-  AllowedIngressCidr:
+  LambdaCodeS3Bucket:
     Type: String
-    Default: 0.0.0.0/0
-    Description: Restrict this to Cloudflare egress or an approved management range before production.
-  DesiredCapacity:
-    Type: Number
-    Default: 1
+  LambdaCodeS3Key:
+    Type: String
+  ScheduleExpression:
+    Type: String
+    Default: rate(5 minutes)
   LogsRetentionDays:
     Type: Number
     Default: 30
+  ResultRetentionDays:
+    Type: Number
+    Default: 7
 
 Resources:
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: source_event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: source_event_id
+          KeyType: HASH
+
+  RunnerResultBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteRunnerResults
+            Status: Enabled
+            ExpirationInDays: !Ref ResultRetentionDays
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
   RunnerLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -54,9 +80,10 @@ Resources:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
       Policies:
-        - PolicyName: ReadRunnerSecrets
+        - PolicyName: ReadRunnerSecretsAndWriteResults
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -66,6 +93,10 @@ Resources:
                   - !Ref RunnerTokenSecretArn
                   - !Ref TeeSigningKeySecretArn
                   - !Ref WalrusConfigSecretArn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/results/*
 
   RunnerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -73,30 +104,11 @@ Resources:
       Roles:
         - !Ref RunnerRole
 
-  AlbSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Sonari disaster runner ALB ingress
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: !Ref AllowedIngressCidr
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Sonari disaster runner instance ingress from ALB
+      GroupDescription: Sonari disaster runner instance with SSM-only control plane
       VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 8789
-          ToPort: 8789
-          SourceSecurityGroupId: !Ref AlbSecurityGroup
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -120,93 +132,349 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euo pipefail
-            dnf install -y awscli git nodejs npm aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli git nodejs npm aws-nitro-enclaves-cli
+            dnf install -y awscli amazon-ssm-agent git nodejs npm aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm aws-nitro-enclaves-cli
+            systemctl enable --now amazon-ssm-agent || true
             usermod -aG ne ec2-user || true
             systemctl enable --now nitro-enclaves-allocator.service || true
             mkdir -p /opt/sonari
-            cd /opt/sonari
             aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
             aws secretsmanager get-secret-value --secret-id '${TeeSigningKeySecretArn}' --query SecretString --output text > /opt/sonari/tee-signing-key
             aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-config.json
             chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
             chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
-            cat >/etc/systemd/system/sonari-disaster-runner.service <<'UNIT'
-            [Unit]
-            Description=Sonari Disaster Runner
-            After=network-online.target
-            Wants=network-online.target
-
-            [Service]
-            WorkingDirectory=/opt/sonari/app
-            Environment=PORT=8789
-            Environment=RUNNER_BACKEND=aws
-            EnvironmentFile=-/opt/sonari/runner.env
-            ExecStart=/usr/bin/node nautilus/verifiers/disaster/runner/dist/cli.js
-            Restart=always
-            RestartSec=5
-            User=ec2-user
-
-            [Install]
-            WantedBy=multi-user.target
-            UNIT
-            cat >/opt/sonari/runner.env <<'ENV'
-            RUNNER_TOKEN_FILE=/opt/sonari/runner-token
-            SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key
-            SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json
-            NITRO_ENCLAVE_PROCESS_COMMAND=${NitroEnclaveProcessCommand}
-            SONARI_WALRUS_AGGREGATOR_URL=${WalrusAggregatorUrl}
-            ENV
-            systemctl daemon-reload
-            systemctl enable --now sonari-disaster-runner.service
-
-  RunnerTargetGroup:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      VpcId: !Ref VpcId
-      Port: 8789
-      Protocol: HTTP
-      TargetType: instance
-      HealthCheckPath: /health
-      HealthCheckProtocol: HTTP
-      Matcher:
-        HttpCode: "200,401"
-
-  RunnerAlb:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      Scheme: internet-facing
-      Type: application
-      Subnets: !Ref SubnetIds
-      SecurityGroups:
-        - !Ref AlbSecurityGroup
-
-  RunnerHttpsListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref RunnerAlb
-      Port: 443
-      Protocol: HTTPS
-      Certificates:
-        - CertificateArn: !Ref AcmCertificateArn
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref RunnerTargetGroup
+            nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
+            ${NitroEnclaveProcessCommand}
+            SONARI_COMMAND
+            )
+            walrus_aggregator_url=$(cat <<'SONARI_WALRUS_URL'
+            ${WalrusAggregatorUrl}
+            SONARI_WALRUS_URL
+            )
+            {
+              echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
+              echo "SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key"
+              echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json"
+              printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
+              printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
+            } >/opt/sonari/runner.env
+            chown ec2-user:ec2-user /opt/sonari/runner.env
+            chmod 0400 /opt/sonari/runner.env
+            systemctl is-active --quiet nitro-enclaves-allocator.service
+            touch /opt/sonari/bootstrap-complete
 
   RunnerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier: !Ref SubnetIds
-      MinSize: "1"
+      MinSize: "0"
       MaxSize: "1"
-      DesiredCapacity: !Ref DesiredCapacity
-      TargetGroupARNs:
-        - !Ref RunnerTargetGroup
+      DesiredCapacity: "0"
       LaunchTemplate:
         LaunchTemplateId: !Ref RunnerLaunchTemplate
         Version: !GetAtt RunnerLaunchTemplate.LatestVersionNumber
 
+  WatcherLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WatcherStateAndWorkflow
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:TransactWriteItems
+                Resource: !GetAtt EventsTable.Arn
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref RunnerStateMachine
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref RunnerTokenSecretArn
+
+  RunnerControlLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ControlRunnerAndState
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetDesiredCapacity
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/results/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource: !GetAtt EventsTable.Arn
+
+  RunnerStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeRunnerControl
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt RunnerControlLambda.Arn
+
+  WatcherScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeWatcherLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt WatcherLambda.Arn
+
+  WatcherLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.scheduledHandler
+      Role: !GetAtt WatcherLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          RUNNER_STATE_MACHINE_ARN: !Ref RunnerStateMachine
+          RUNNER_TOKEN_SECRET_ARN: !Ref RunnerTokenSecretArn
+
+  ManualWatcherLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.manualHandler
+      Role: !GetAtt WatcherLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          RUNNER_STATE_MACHINE_ARN: !Ref RunnerStateMachine
+          RUNNER_TOKEN_SECRET_ARN: !Ref RunnerTokenSecretArn
+
+  ManualWatcherFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref ManualWatcherLambda
+
+  ManualWatcherFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref ManualWatcherLambda
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  RunnerControlLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/runner_workflow.handler
+      Role: !GetAtt RunnerControlLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          RUNNER_ASG_NAME: !Ref RunnerAutoScalingGroup
+          RESULT_BUCKET: !Ref RunnerResultBucket
+          NITRO_ENCLAVE_PROCESS_COMMAND: !Ref NitroEnclaveProcessCommand
+
+  RunnerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt RunnerStateMachineRole.Arn
+      StateMachineType: STANDARD
+      DefinitionString: !Sub |
+        {
+          "Comment": "Run Sonari disaster verifier on ephemeral EC2 Nitro Enclave capacity.",
+          "StartAt": "StartInstance",
+          "States": {
+            "StartInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "start_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "WaitForInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForInstance": { "Type": "Wait", "Seconds": 60, "Next": "FindReadyInstance" },
+            "FindReadyInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "find_ready_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "DispatchTeeCommand",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DispatchTeeCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "dispatch_tee_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Next": "WaitForCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForCommand": { "Type": "Wait", "Seconds": 30, "Next": "PollCommand" },
+            "PollCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "poll_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Next": "CommandComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "CommandComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.command_status", "StringEquals": "SUCCEEDED", "Next": "ReadResult" },
+                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" },
+                { "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }
+              ],
+              "Default": "WaitForCommand"
+            },
+            "ReadResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "read_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Next": "ApplyResult",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "ApplyResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "apply_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "RelayerPreviewOrDryRun",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "RelayerPreviewOrDryRun": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "MarkFailed": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "MarkCommandPollingTimedOut": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "error_code": "AWS_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "StopInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "stop_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
+              "End": true
+            },
+            "StopInstanceFailed": {
+              "Type": "Fail",
+              "Error": "StopInstanceFailed",
+              "Cause": "Runner cleanup failed after retrying StopInstance"
+            }
+          }
+        }
+
+  WatcherSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !GetAtt WatcherLambda.Arn
+        RoleArn: !GetAtt WatcherScheduleRole.Arn
+
 Outputs:
-  RunnerEndpoint:
-    Value: !Sub https://${RunnerAlb.DNSName}
+  EventsTableName:
+    Value: !Ref EventsTable
+  RunnerResultBucketName:
+    Value: !Ref RunnerResultBucket
+  RunnerStateMachineArn:
+    Value: !Ref RunnerStateMachine
+  ManualWatcherUrl:
+    Value: !GetAtt ManualWatcherFunctionUrl.FunctionUrl
   RunnerLogGroupName:
     Value: !Ref RunnerLogGroup

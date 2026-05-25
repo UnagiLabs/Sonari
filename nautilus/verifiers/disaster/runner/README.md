@@ -1,6 +1,6 @@
 # Disaster Runner
 
-disaster verifier 用の AWS EC2 host service です。Cloudflare Worker が利用する runner HTTP contract を公開します。
+disaster verifier 用の AWS EC2 host service です。AWS Lambda watcher が利用する Step Functions runner workflow を公開します。
 
 - `GET /health`
 - `POST /start`

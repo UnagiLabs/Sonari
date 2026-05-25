@@ -109,7 +109,7 @@ describe("Nautilus local oracle E2E", () => {
             });
             expect(output.final_event).toMatchObject({
                 status,
-                retry_count: 0,
+                retry_count: status === "rejected" ? 0 : 1,
                 error_code: errorCode,
             });
             expect(output.relayer_skipped).toEqual({
