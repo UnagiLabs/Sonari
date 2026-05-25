@@ -32,9 +32,12 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).toContain("NitroEnclaveProcessCommand:");
         expect(template).toContain("WalrusAggregatorUrl:");
         expect(template).toContain(
+            `NITRO_ENCLAVE_PROCESS_COMMAND='$${"{NitroEnclaveProcessCommand}"}'`,
+        );
+        expect(template).toContain(`SONARI_WALRUS_AGGREGATOR_URL='$${"{WalrusAggregatorUrl}"}'`);
+        expect(template).not.toContain(
             `NITRO_ENCLAVE_PROCESS_COMMAND=$${"{NitroEnclaveProcessCommand}"}`,
         );
-        expect(template).toContain(`SONARI_WALRUS_AGGREGATOR_URL=$${"{WalrusAggregatorUrl}"}`);
     });
 
     it("marks runner bootstrap completion only after required files and allocator are ready", async () => {
@@ -94,6 +97,21 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).toContain('"FindReadyInstance": {');
         expect(template).toContain(
             '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }]',
+        );
+    });
+
+    it("retries and records failure when StartInstance cannot scale runner capacity", async () => {
+        const template = await readFile(templatePath, "utf8");
+        const startInstanceBlock = template.slice(
+            template.indexOf('"StartInstance": {'),
+            template.indexOf('"WaitForInstance": {'),
+        );
+
+        expect(startInstanceBlock).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }]',
+        );
+        expect(startInstanceBlock).toContain(
+            '"Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]',
         );
     });
 

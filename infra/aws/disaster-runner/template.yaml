@@ -146,8 +146,8 @@ Resources:
             RUNNER_TOKEN_FILE=/opt/sonari/runner-token
             SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key
             SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json
-            NITRO_ENCLAVE_PROCESS_COMMAND=${NitroEnclaveProcessCommand}
-            SONARI_WALRUS_AGGREGATOR_URL=${WalrusAggregatorUrl}
+            NITRO_ENCLAVE_PROCESS_COMMAND='${NitroEnclaveProcessCommand}'
+            SONARI_WALRUS_AGGREGATOR_URL='${WalrusAggregatorUrl}'
             ENV
             chown ec2-user:ec2-user /opt/sonari/runner.env
             chmod 0400 /opt/sonari/runner.env
@@ -358,7 +358,9 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "action": "start_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
-              "Next": "WaitForInstance"
+              "Next": "WaitForInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "WaitForInstance": { "Type": "Wait", "Seconds": 60, "Next": "FindReadyInstance" },
             "FindReadyInstance": {

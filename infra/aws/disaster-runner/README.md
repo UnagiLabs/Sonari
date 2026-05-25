@@ -48,7 +48,7 @@ LambdaCodeS3Bucket
 LambdaCodeS3Key
 ```
 
-`NitroEnclaveProcessCommand` は EC2 host 側から Nitro Enclave へ disaster verifier request を渡す executable path です。TEE process には `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_TEE_SIGNING_KEY_SEED_FILE` が注入されます。
+`NitroEnclaveProcessCommand` は EC2 host 側から Nitro Enclave へ disaster verifier request を渡す command です。`node /opt/sonari/process.js` のように引数を含められます。SSM 実行時に `SONARI_TEE_SIGNING_KEY_SEED_FILE` から `SONARI_TEE_SIGNING_KEY_SEED` を作成し、TEE process には `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_TEE_SIGNING_KEY_SEED` が渡されます。
 
 bootstrap script は `/opt/sonari/runner-token`、`/opt/sonari/tee-signing-key`、`/opt/sonari/walrus-config.json`、`/opt/sonari/runner.env` を `ec2-user:ec2-user` 所有、`0400` permission で作成します。
 
