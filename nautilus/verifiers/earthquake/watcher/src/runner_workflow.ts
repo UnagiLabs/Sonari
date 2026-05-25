@@ -16,9 +16,9 @@ import {
     type OracleErrorCode,
     type TeeCoreResult,
     validateRelayerSubmitInput,
-} from "@sonari/oracle-shared";
+} from "@sonari/earthquake-shared";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
-import { buildDisasterVerifierRequest } from "./index.js";
+import { buildEarthquakeVerifierRequest } from "./index.js";
 import { DirectRelayerAdapter, type RelayerAdapter, type RelayerMode } from "./relayer_preview.js";
 import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
@@ -598,7 +598,7 @@ function buildSsmShellCommand(input: {
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' ${shellSingleQuote(JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(buildEarthquakeVerifierRequest(input.sourceEventId)))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
@@ -625,7 +625,7 @@ function buildRequiredShellEnvCheck(name: string, message = `${name} is required
 
 function buildSigningKeySeedShellLines(): string[] {
     return [
-        'if [ -z "${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then',
+        `if [ -z "\${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then`,
         buildRequiredShellEnvCheck(
             "SONARI_TEE_SIGNING_KEY_SEED_FILE",
             "SONARI_TEE_SIGNING_KEY_SEED_FILE is required when SONARI_TEE_SIGNING_KEY_SEED is unset",

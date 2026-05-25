@@ -2,13 +2,13 @@ import {
     buildRelayerRequestPreview,
     type RelayerRequestPreview as DirectRelayerRequestPreview,
     dryRunRelayerSubmit,
-} from "@sonari/oracle-relayer";
+} from "@sonari/earthquake-relayer";
 import {
     type OracleErrorCode,
     type SignedFinalizedPayload,
     type TeeCoreResult,
     validateRelayerSubmitInput,
-} from "@sonari/oracle-shared";
+} from "@sonari/earthquake-shared";
 
 export interface RelayerRequestPreview {
     target: string;

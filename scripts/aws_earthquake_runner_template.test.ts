@@ -2,16 +2,16 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const templatePath = path.join(process.cwd(), "infra/aws/disaster-runner/template.yaml");
+const templatePath = path.join(process.cwd(), "infra/aws/earthquake-runner/template.yaml");
 
-describe("AWS disaster runner CloudFormation template", () => {
+describe("AWS earthquake runner CloudFormation template", () => {
     it("does not expose a public HTTP runner surface", async () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).not.toContain("AWS::ElasticLoadBalancingV2::LoadBalancer");
         expect(template).not.toContain("AWS::ElasticLoadBalancingV2::Listener");
         expect(template).not.toContain("AWS::ElasticLoadBalancingV2::TargetGroup");
-        expect(template).not.toContain("sonari-disaster-runner.service");
+        expect(template).not.toContain("sonari-earthquake-runner.service");
         expect(template).not.toContain("ToPort: 8789");
     });
 

@@ -13,7 +13,7 @@ function main(): void {
     const tee = createTeeAdapter();
     const server = createRunnerServer({ token, tee });
     server.listen(port, "0.0.0.0", () => {
-        process.stdout.write(`sonari disaster runner listening on ${port}\n`);
+        process.stdout.write(`sonari earthquake runner listening on ${port}\n`);
     });
 }
 

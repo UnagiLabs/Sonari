@@ -1,4 +1,4 @@
-# Disaster Oracle Response BCS Payload
+# Earthquake Oracle Response BCS Payload
 
 このファイルは、repository rootの `schemas/` に置くroot共通仕様です。Sonari Earthquake Oracle BCS Payloadのcanonical field orderを定義し、Rust、TypeScript、Moveは必ず同じフィールドを同じ順序でserializeします。
 

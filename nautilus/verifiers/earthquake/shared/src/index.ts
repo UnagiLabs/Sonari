@@ -117,7 +117,7 @@ export type AffectedCellLeafField = (typeof AFFECTED_CELL_LEAF_FIELD_ORDER)[numb
 export type OffchainStatus = (typeof OFFCHAIN_STATUSES)[number];
 export type OracleErrorCode = (typeof ERROR_CODES)[number];
 
-export interface DisasterOraclePayloadV1 {
+export interface EarthquakeOraclePayloadV1 {
     intent: number;
     oracle_version: number;
     event_uid: string;
@@ -153,11 +153,11 @@ export interface WorkerToTeeRequest {
     geo_resolution: typeof DEFAULT_ORACLE_CONTRACT.geo_resolution;
 }
 
-export type DisasterVerifierRequest = WorkerToTeeRequest;
+export type EarthquakeVerifierRequest = WorkerToTeeRequest;
 
 export interface SignedFinalizedPayload {
     status: "finalized";
-    payload: DisasterOraclePayloadV1 | Record<string, unknown>;
+    payload: EarthquakeOraclePayloadV1 | Record<string, unknown>;
     payload_bcs_hex: string;
     signature: string;
     public_key: string;
@@ -274,9 +274,9 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
     };
 }
 
-export function validateDisasterVerifierRequest(
+export function validateEarthquakeVerifierRequest(
     input: unknown,
-): ValidationResult<DisasterVerifierRequest> {
+): ValidationResult<EarthquakeVerifierRequest> {
     return validateWorkerToTeeRequest(input);
 }
 

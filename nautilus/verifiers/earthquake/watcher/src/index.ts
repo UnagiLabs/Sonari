@@ -2,11 +2,11 @@ import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
-    type DisasterVerifierRequest,
+    type EarthquakeVerifierRequest,
     type OffchainStatus,
     type SignedFinalizedPayload,
     type TeeCoreResult,
-} from "@sonari/oracle-shared";
+} from "@sonari/earthquake-shared";
 import {
     DAY_MS,
     DEFAULT_DUE_LIMIT,
@@ -164,7 +164,7 @@ export function createManualHandler(options: ManualHandlerOptions) {
     };
 }
 
-export function buildDisasterVerifierRequest(sourceEventId: string): DisasterVerifierRequest {
+export function buildEarthquakeVerifierRequest(sourceEventId: string): EarthquakeVerifierRequest {
     return {
         source_event_id: sourceEventId,
         hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
@@ -224,7 +224,7 @@ export async function startDueWorkflows(
             continue;
         }
         const attempt = row.retry_count + 1;
-        const executionName = `disaster-${sanitizeExecutionName(row.source_event_id)}-${attempt}`;
+        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-${attempt}`;
         const start = await repository.tryStartRunnerWorkflowExclusively(
             row.source_event_id,
             executionName,
@@ -333,7 +333,7 @@ export interface ProcessSummary {
 }
 
 export interface RunnerAdapter {
-    run(request: DisasterVerifierRequest): Promise<TeeCoreResult>;
+    run(request: EarthquakeVerifierRequest): Promise<TeeCoreResult>;
 }
 
 export async function processDueEventsInlineForTests(
@@ -366,7 +366,7 @@ export async function processDueEventsInlineForTests(
             continue;
         }
         try {
-            const result = await runner.run(buildDisasterVerifierRequest(job.source_event_id));
+            const result = await runner.run(buildEarthquakeVerifierRequest(job.source_event_id));
             await repository.applyRunnerResult(
                 job.source_event_id,
                 result,

@@ -2,7 +2,7 @@ import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
     type TeeCoreResult,
-} from "@sonari/oracle-shared";
+} from "@sonari/earthquake-shared";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";

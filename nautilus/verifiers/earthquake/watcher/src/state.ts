@@ -13,7 +13,7 @@ import {
     type OracleErrorCode,
     type TeeCoreResult,
     validateRelayerSubmitInput,
-} from "@sonari/oracle-shared";
+} from "@sonari/earthquake-shared";
 import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
 import type {
     RelayerErrorCode,

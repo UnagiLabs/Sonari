@@ -1,5 +1,5 @@
 {
-    "name": "@sonari/oracle-relayer",
+    "name": "@sonari/earthquake-relayer",
     "version": "0.1.0",
     "private": true,
     "type": "module",
@@ -14,7 +14,7 @@
     },
     "dependencies": {
         "@mysten/sui": "^2.16.3",
-        "@sonari/oracle-shared": "workspace:*"
+        "@sonari/earthquake-shared": "workspace:*"
     },
     "devDependencies": {
         "tsx": "^4.22.0"

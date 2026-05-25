@@ -105,7 +105,7 @@ public fun create_from_signed_payload(
 ) {
     metadata_verifier::assert_signed_bytes(
         verifier_registry,
-        metadata_verifier::verifier_family_disaster_oracle(),
+        metadata_verifier::verifier_family_earthquake_oracle(),
         metadata_verifier::verifier_version_v1(),
         &payload_bcs,
         &signature,

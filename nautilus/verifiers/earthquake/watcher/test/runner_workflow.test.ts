@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BCS_ENUMS, type TeeCoreResult } from "@sonari/oracle-shared";
+import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
@@ -216,7 +216,7 @@ describe("AWS runner workflow helper", () => {
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-1",
+            "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
         const ssm = new RecordingSsmClient({ invocationStatus: "InProgress" });
@@ -273,7 +273,7 @@ describe("AWS runner workflow helper", () => {
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-1",
+            "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
         const autoscaling = new RecordingAutoScalingClient();
@@ -321,7 +321,7 @@ describe("AWS runner workflow helper", () => {
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-1",
+            "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
         const handler = createRunnerControlHandler({
@@ -361,7 +361,7 @@ describe("AWS runner workflow helper", () => {
         );
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-2",
+            "earthquake-us7000sonari-2",
             1_800_000_000_001,
         );
         const autoscaling = new RecordingAutoScalingClient();
@@ -428,7 +428,7 @@ describe("AWS runner workflow helper", () => {
         );
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-2",
+            "earthquake-us7000sonari-2",
             1_800_000_000_001,
         );
         const relayer = new RecordingRelayerAdapter();
@@ -465,7 +465,7 @@ describe("AWS runner workflow helper", () => {
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-1",
+            "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
         const handler = createRunnerControlHandler({
@@ -498,7 +498,7 @@ describe("AWS runner workflow helper", () => {
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-1",
+            "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
         await repository.applyRunnerResult(
@@ -761,7 +761,7 @@ describe("AWS runner workflow helper", () => {
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
             "us7000sonari",
-            "disaster-us7000sonari-1",
+            "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
         const handler = createRunnerControlHandler({

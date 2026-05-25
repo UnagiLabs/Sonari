@@ -35,7 +35,7 @@ interface LiveE2eOptions {
     nowMs?: number;
 }
 
-const DEFAULT_TARGET = "0x123::disaster_oracle::submit_payload_v1";
+const DEFAULT_TARGET = "0x123::earthquake_oracle::submit_payload_v1";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
 

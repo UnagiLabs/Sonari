@@ -1,4 +1,4 @@
-import type { OffchainStatus, OracleErrorCode } from "@sonari/oracle-shared";
+import type { OffchainStatus, OracleErrorCode } from "@sonari/earthquake-shared";
 import type { UsgsAlertLevel, UsgsEarthquakeCandidate } from "./usgs.js";
 
 export const WATCHER_MIN_MAGNITUDE = 5.5;

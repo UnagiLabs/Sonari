@@ -12,7 +12,7 @@ import {
     UsgsSourceClient,
 } from "./nautilus_local_e2e.js";
 
-const target = "0x123::disaster_oracle::submit_payload_v1";
+const target = "0x123::earthquake_oracle::submit_payload_v1";
 const registry = "0x456";
 const verifierRegistry = "0x654";
 // CI runs this test with a cold Cargo binary build before the Rust TEE tests.
@@ -153,12 +153,12 @@ describe("Nautilus local oracle E2E", () => {
                 /nautilus\/verifiers\/earthquake\/fixtures\/usgs\/finalized_minimal\/input\/usgs_detail\.json$/,
             ),
             raw_detail_uri:
-                "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+                "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
             raw_grid_path: expect.stringMatching(
                 /nautilus\/verifiers\/earthquake\/fixtures\/usgs\/finalized_minimal\/input\/usgs_grid\.xml$/,
             ),
             raw_grid_uri:
-                "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
+                "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
             raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
             affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json",
             temporary_dir: null,

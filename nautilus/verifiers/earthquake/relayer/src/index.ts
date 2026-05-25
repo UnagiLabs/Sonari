@@ -3,9 +3,9 @@ import type { Signer } from "@mysten/sui/cryptography";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
-import { type RelayerSubmitInput, validateRelayerSubmitInput } from "@sonari/oracle-shared";
+import { type RelayerSubmitInput, validateRelayerSubmitInput } from "@sonari/earthquake-shared";
 
-export const relayerPackage = "@sonari/oracle-relayer";
+export const relayerPackage = "@sonari/earthquake-relayer";
 
 export const RELAYER_SUBMIT_FAILED = "RELAYER_SUBMIT_FAILED";
 export const MOVE_REJECTED = "MOVE_REJECTED";
