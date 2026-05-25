@@ -1692,7 +1692,12 @@ function mergePreservingResult(
         latest_revision: next.latest_revision,
         last_seen_at_ms: next.last_seen_at_ms,
         source_updated_at_ms: next.source_updated_at_ms,
-        error_code: next.status === "ignored_small" ? next.error_code : existing.error_code,
+        error_code:
+            existing.status === "ignored_small" && next.status === "new"
+                ? null
+                : next.status === "ignored_small"
+                  ? next.error_code
+                  : existing.error_code,
         updated_at_ms: isActiveRunnerWorkflow(existing) ? existing.updated_at_ms : nowMs,
     };
 }

@@ -233,6 +233,38 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("clears the ignored-small error when in-memory rows are promoted to new", async () => {
+        const promotedBySummary = new InMemoryStateRepository();
+        await promotedBySummary.upsertCandidate(
+            candidate("us7000promoted", { magnitude: 5.1 }),
+            baseNow,
+        );
+        await promotedBySummary.upsertCandidate(
+            candidate("us7000promoted", {
+                magnitude: 5.6,
+                source_updated_at_ms: baseNow + 1_000,
+            }),
+            baseNow + 1_000,
+        );
+
+        await expect(promotedBySummary.get("us7000promoted")).resolves.toMatchObject({
+            status: "new",
+            error_code: null,
+        });
+
+        const promotedByManualBypass = new InMemoryStateRepository();
+        await promotedByManualBypass.upsertCandidate(
+            candidate("us7000manual", { magnitude: 5.1 }),
+            baseNow,
+        );
+        await promotedByManualBypass.upsertManualEvent("us7000manual", baseNow + 1_000);
+
+        await expect(promotedByManualBypass.get("us7000manual")).resolves.toMatchObject({
+            status: "new",
+            error_code: null,
+        });
+    });
+
     it("paginates DynamoDB scans before filtering and applying the due limit", async () => {
         const firstPageRows = [
             await eventRow("us7000done", {
