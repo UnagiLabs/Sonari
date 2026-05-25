@@ -1260,6 +1260,9 @@ class StaleReadRaceClient {
             throw new Error(`unexpected condition ${condition}`);
         }
         const status = this.currentRow[statusField as keyof EarthquakeEventRow];
+        if (condition.includes("AND NOT (#runner_phase IN") && this.isStopPending()) {
+            return false;
+        }
         if (condition.includes("NOT (#status IN")) {
             return ![
                 values[":processing_status"],
@@ -1284,6 +1287,14 @@ class StaleReadRaceClient {
             .filter(([key]) => condition.includes(key))
             .map(([, value]) => value);
         return allowedStatuses.includes(status);
+    }
+
+    private isStopPending(): boolean {
+        return (
+            (this.currentRow.runner_phase === "complete" ||
+                this.currentRow.runner_phase === "stopping_instance") &&
+            this.currentRow.runner_stopped_at_ms === null
+        );
     }
 }
 
@@ -1618,6 +1629,9 @@ class WatcherMetadataProcessingRaceClient {
             return false;
         }
         const status = this.currentRow[statusField as keyof EarthquakeEventRow];
+        if (condition.includes("AND NOT (#runner_phase IN") && this.isStopPending()) {
+            return false;
+        }
         if (condition.includes("NOT (#status IN")) {
             return ![
                 values[":processing_status"],
@@ -1639,6 +1653,14 @@ class WatcherMetadataProcessingRaceClient {
             return status === values[":processing_status"];
         }
         return true;
+    }
+
+    private isStopPending(): boolean {
+        return (
+            (this.currentRow.runner_phase === "complete" ||
+                this.currentRow.runner_phase === "stopping_instance") &&
+            this.currentRow.runner_stopped_at_ms === null
+        );
     }
 }
 

@@ -1550,17 +1550,20 @@ export class DynamoDbStateRepository implements StateRepository {
         candidate: UsgsEarthquakeCandidate,
         nowMs: number,
     ): Promise<void> {
+        const stopPendingCondition =
+            "(#runner_phase IN (:complete_phase, :stopping_instance_phase) AND #runner_stopped_at_ms = :null_value)";
         await this.documentClient.send(
             new UpdateCommand({
                 TableName: this.tableName,
                 Key: { source_event_id: candidate.source_event_id },
-                ConditionExpression:
-                    "attribute_exists(#source_event_id) AND #status IN (:finalized_status, :submitted_status, :rejected_status)",
+                ConditionExpression: `attribute_exists(#source_event_id) AND #status IN (:finalized_status, :submitted_status, :rejected_status) AND NOT ${stopPendingCondition}`,
                 UpdateExpression:
                     "SET #last_seen_at_ms = :last_seen_at_ms, #updated_at_ms = :updated_at_ms",
                 ExpressionAttributeNames: {
                     "#source_event_id": "source_event_id",
                     "#status": "status",
+                    "#runner_phase": "runner_phase",
+                    "#runner_stopped_at_ms": "runner_stopped_at_ms",
                     "#last_seen_at_ms": "last_seen_at_ms",
                     "#updated_at_ms": "updated_at_ms",
                 },
@@ -1568,6 +1571,9 @@ export class DynamoDbStateRepository implements StateRepository {
                     ":finalized_status": "finalized",
                     ":submitted_status": "submitted",
                     ":rejected_status": "rejected",
+                    ":complete_phase": "complete",
+                    ":stopping_instance_phase": "stopping_instance",
+                    ":null_value": null,
                     ":last_seen_at_ms": nowMs,
                     ":updated_at_ms": nowMs,
                 },
@@ -1579,28 +1585,22 @@ export class DynamoDbStateRepository implements StateRepository {
         candidate: UsgsEarthquakeCandidate,
         nowMs: number,
     ): Promise<void> {
-        const stopPendingCondition =
-            "(#runner_phase IN (:complete_phase, :stopping_instance_phase) AND #runner_stopped_at_ms = :null_value)";
         await this.documentClient.send(
             new UpdateCommand({
                 TableName: this.tableName,
                 Key: { source_event_id: candidate.source_event_id },
-                ConditionExpression: `attribute_exists(#source_event_id) AND (#status = :processing_status OR ${stopPendingCondition})`,
+                ConditionExpression:
+                    "attribute_exists(#source_event_id) AND #status = :processing_status",
                 UpdateExpression:
                     "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms",
                 ExpressionAttributeNames: {
                     "#source_event_id": "source_event_id",
                     "#status": "status",
-                    "#runner_phase": "runner_phase",
-                    "#runner_stopped_at_ms": "runner_stopped_at_ms",
                     "#last_seen_at_ms": "last_seen_at_ms",
                     "#source_updated_at_ms": "source_updated_at_ms",
                 },
                 ExpressionAttributeValues: {
                     ":processing_status": "processing",
-                    ":complete_phase": "complete",
-                    ":stopping_instance_phase": "stopping_instance",
-                    ":null_value": null,
                     ":last_seen_at_ms": nowMs,
                     ":source_updated_at_ms": candidate.source_updated_at_ms,
                 },
