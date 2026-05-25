@@ -612,6 +612,31 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("omits unused status names from DynamoDB non-processing progress updates", async () => {
+        const row = await eventRow("us7000complete", {
+            status: "pending_source",
+            runner_attempt: 1,
+            runner_phase: "complete",
+        });
+        const client = new StaleReadRaceClient(row, row);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await expect(
+            repository.updateRunnerWorkflowProgress({
+                sourceEventId: "us7000complete",
+                attempt: 1,
+                phase: "complete",
+                nowMs: baseNow + 1_000,
+                allowNonProcessing: true,
+            }),
+        ).resolves.toBe(true);
+
+        expect(client.currentRow).toMatchObject({
+            runner_phase: "complete",
+            updated_at_ms: baseNow + 1_000,
+        });
+    });
+
     it("does not treat watcher feed refreshes as runner workflow heartbeats", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -964,6 +989,11 @@ class StaleReadRaceClient {
         if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
             throw new Error("test client only supports SET update expressions");
         }
+        for (const nameToken of Object.keys(names)) {
+            if (!expressionReferencesName(input, nameToken)) {
+                throw new Error(`unused expression attribute name ${nameToken}`);
+            }
+        }
         for (const valueToken of Object.keys(values)) {
             if (!expressionReferencesValue(input, valueToken)) {
                 throw new Error(`unused expression attribute value ${valueToken}`);
@@ -1008,6 +1038,14 @@ class StaleReadRaceClient {
                 statusField !== undefined &&
                 this.currentRow[statusField as keyof EarthquakeEventRow] !==
                     values[":processing_status"]
+            );
+        }
+        if (condition === "#runner_attempt = :expected_attempt") {
+            const attemptField = names["#runner_attempt"];
+            return (
+                attemptField !== undefined &&
+                this.currentRow[attemptField as keyof EarthquakeEventRow] ===
+                    values[":expected_attempt"]
             );
         }
         const statusField = names["#status"];
@@ -1373,6 +1411,13 @@ function readCommandInput(command: unknown): Record<string, unknown> {
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function expressionReferencesName(input: Record<string, unknown>, nameToken: string): boolean {
+    const expressions = [input.ConditionExpression, input.UpdateExpression]
+        .filter((expression): expression is string => typeof expression === "string")
+        .join(" ");
+    return new RegExp(`${escapeRegExp(nameToken)}(?![A-Za-z0-9_])`).test(expressions);
 }
 
 function expressionReferencesValue(input: Record<string, unknown>, valueToken: string): boolean {

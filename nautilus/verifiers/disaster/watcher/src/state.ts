@@ -924,7 +924,7 @@ export class DynamoDbStateRepository implements StateRepository {
                         .join(", ")}`,
                     ExpressionAttributeNames: {
                         ...expressionNames(entries.map(([field]) => field)),
-                        "#status": "status",
+                        ...(input.allowNonProcessing ? {} : { "#status": "status" }),
                         "#runner_attempt": "runner_attempt",
                     },
                     ExpressionAttributeValues: {
