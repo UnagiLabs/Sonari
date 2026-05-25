@@ -11,7 +11,12 @@ import {
     SendCommandCommand,
     SSMClient,
 } from "@aws-sdk/client-ssm";
-import { type TeeCoreResult, validateRelayerSubmitInput } from "@sonari/oracle-shared";
+import {
+    ERROR_CODES,
+    type OracleErrorCode,
+    type TeeCoreResult,
+    validateRelayerSubmitInput,
+} from "@sonari/oracle-shared";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildDisasterVerifierRequest } from "./index.js";
 import { DirectRelayerAdapter, type RelayerAdapter, type RelayerMode } from "./relayer_preview.js";
@@ -385,9 +390,10 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     nowMs,
                     allowNonProcessing: true,
                 });
+                const errorCode = readRunnerFailureErrorCode(event.error_code);
                 const marked = await repository.markFailed(
                     event.source_event_id,
-                    "AWS_RUNNER_PROCESS_FAILED",
+                    errorCode,
                     nowMs,
                     nowMs + FAILED_RETRY_BACKOFF_MS,
                     event.message ?? event.error_code ?? "runner workflow failed",
@@ -745,6 +751,16 @@ function normalizeCommandStatus(status: string): "PENDING" | "SUCCEEDED" | "FAIL
         return "PENDING";
     }
     return "FAILED";
+}
+
+function readRunnerFailureErrorCode(errorCode: string | undefined): OracleErrorCode {
+    if (errorCode === undefined) {
+        return "AWS_RUNNER_PROCESS_FAILED";
+    }
+    if ((ERROR_CODES as readonly string[]).includes(errorCode)) {
+        return errorCode as OracleErrorCode;
+    }
+    throw new Error(`invalid runner error_code: ${errorCode}`);
 }
 
 async function pollCommandStatus(

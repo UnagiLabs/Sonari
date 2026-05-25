@@ -31,10 +31,17 @@ describe("AWS disaster runner CloudFormation template", () => {
 
         expect(template).toContain("NitroEnclaveProcessCommand:");
         expect(template).toContain("WalrusAggregatorUrl:");
+        expect(template).toContain("nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'");
+        expect(template).toContain(`$${"{NitroEnclaveProcessCommand}"}`);
         expect(template).toContain(
+            "printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\\n' \"$nitro_enclave_process_command\"",
+        );
+        expect(template).toContain(
+            "printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\\n' \"$walrus_aggregator_url\"",
+        );
+        expect(template).not.toContain(
             `NITRO_ENCLAVE_PROCESS_COMMAND='$${"{NitroEnclaveProcessCommand}"}'`,
         );
-        expect(template).toContain(`SONARI_WALRUS_AGGREGATOR_URL='$${"{WalrusAggregatorUrl}"}'`);
         expect(template).not.toContain(
             `NITRO_ENCLAVE_PROCESS_COMMAND=$${"{NitroEnclaveProcessCommand}"}`,
         );
@@ -139,6 +146,7 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).toContain(
             '{ "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }',
         );
+        expect(template).toContain('"error_code": "AWS_RUNNER_TIMEOUT"');
         expect(template).toContain('"message": "SSM command polling exceeded 30 minutes"');
     });
 

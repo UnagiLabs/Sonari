@@ -460,6 +460,39 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("records explicit runner timeout codes for workflow timeout failures", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "disaster-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_001_800_000,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "mark_failed",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            error_code: "AWS_RUNNER_TIMEOUT",
+            message: "SSM command polling exceeded 30 minutes",
+        });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "failed",
+            error_code: "AWS_RUNNER_TIMEOUT",
+            runner_error_message: "SSM command polling exceeded 30 minutes",
+        });
+    });
+
     it("allows the current workflow attempt to stop capacity after applying a terminal result", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);

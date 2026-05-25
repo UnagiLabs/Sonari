@@ -142,13 +142,21 @@ Resources:
             aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-config.json
             chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
             chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
-            cat >/opt/sonari/runner.env <<'ENV'
-            RUNNER_TOKEN_FILE=/opt/sonari/runner-token
-            SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key
-            SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json
-            NITRO_ENCLAVE_PROCESS_COMMAND='${NitroEnclaveProcessCommand}'
-            SONARI_WALRUS_AGGREGATOR_URL='${WalrusAggregatorUrl}'
-            ENV
+            nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
+            ${NitroEnclaveProcessCommand}
+            SONARI_COMMAND
+            )
+            walrus_aggregator_url=$(cat <<'SONARI_WALRUS_URL'
+            ${WalrusAggregatorUrl}
+            SONARI_WALRUS_URL
+            )
+            {
+              echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
+              echo "SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key"
+              echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json"
+              printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
+              printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
+            } >/opt/sonari/runner.env
             chown ec2-user:ec2-user /opt/sonari/runner.env
             chmod 0400 /opt/sonari/runner.env
             systemctl is-active --quiet nitro-enclaves-allocator.service
@@ -428,7 +436,7 @@ Resources:
             "MarkCommandPollingTimedOut": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "message": "SSM command polling exceeded 30 minutes" },
+              "Parameters": { "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "error_code": "AWS_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
