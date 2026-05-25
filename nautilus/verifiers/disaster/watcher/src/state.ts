@@ -242,13 +242,7 @@ export class InMemoryStateRepository implements StateRepository {
         const screening = options.bypassScreening
             ? { status: "new" as const, error_code: null }
             : screenUsgsCandidate(candidate);
-        const status =
-            existing?.status === "ignored_small"
-                ? screening.status
-                : existing !== undefined &&
-                    (TERMINAL_STATUSES.has(existing.status) || existing.status !== "new")
-                  ? existing.status
-                  : screening.status;
+        const status = nextScreeningStatus(existing?.status, screening.status);
         const retryCount = existing?.retry_count ?? 0;
         const row = baseRow(candidate.source_event_id, nowMs, {
             event_uid: existing?.event_uid ?? candidate.source_event_id,
@@ -1370,6 +1364,10 @@ export class DynamoDbStateRepository implements StateRepository {
         nowMs: number,
         screening: { status: OffchainStatus; error_code: OracleErrorCode | null },
     ): Promise<void> {
+        const conditionExpression =
+            screening.status === "ignored_small"
+                ? "attribute_not_exists(#source_event_id) OR #status = :ignored_small_status"
+                : "attribute_not_exists(#source_event_id) OR #status IN (:new_status, :ignored_small_status)";
         const row = baseRow(candidate.source_event_id, nowMs, {
             event_uid: candidate.source_event_id,
             status: screening.status,
@@ -1389,8 +1387,7 @@ export class DynamoDbStateRepository implements StateRepository {
             new UpdateCommand({
                 TableName: this.tableName,
                 Key: { source_event_id: candidate.source_event_id },
-                ConditionExpression:
-                    "attribute_not_exists(#source_event_id) OR #status IN (:new_status, :ignored_small_status)",
+                ConditionExpression: conditionExpression,
                 UpdateExpression: [
                     "SET #event_uid = :event_uid",
                     "#status = :status",
@@ -1574,6 +1571,22 @@ function workflowStartExpressionValues(input: {
         ":now_ms": input.nowMs,
         ":null_value": null,
     };
+}
+
+function nextScreeningStatus(
+    existingStatus: OffchainStatus | undefined,
+    screeningStatus: OffchainStatus,
+): OffchainStatus {
+    if (existingStatus === undefined || existingStatus === "ignored_small") {
+        return screeningStatus;
+    }
+    if (existingStatus === "new" && screeningStatus === "ignored_small") {
+        return "new";
+    }
+    if (TERMINAL_STATUSES.has(existingStatus) || existingStatus !== "new") {
+        return existingStatus;
+    }
+    return screeningStatus;
 }
 
 function expressionNames(fields: string[]): Record<string, string> {

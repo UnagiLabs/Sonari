@@ -194,6 +194,45 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("preserves accepted new rows when a later summary drops below screening threshold", async () => {
+        const memoryRepository = new InMemoryStateRepository();
+        await memoryRepository.upsertCandidate(candidate("us7000accepted"), baseNow);
+        await memoryRepository.upsertCandidate(
+            candidate("us7000accepted", {
+                magnitude: 5.1,
+                source_updated_at_ms: baseNow + 1_000,
+            }),
+            baseNow + 1_000,
+        );
+
+        await expect(memoryRepository.get("us7000accepted")).resolves.toMatchObject({
+            status: "new",
+            error_code: null,
+            source_updated_at_ms: baseNow + 1_000,
+        });
+
+        const acceptedRow = await eventRow("us7000accepted", {
+            status: "new",
+            error_code: null,
+        });
+        const client = new StaleReadRaceClient(acceptedRow, acceptedRow);
+        const dynamoRepository = new DynamoDbStateRepository("events", client);
+
+        await dynamoRepository.upsertCandidate(
+            candidate("us7000accepted", {
+                magnitude: 5.1,
+                source_updated_at_ms: baseNow + 2_000,
+            }),
+            baseNow + 2_000,
+        );
+
+        expect(client.currentRow).toMatchObject({
+            status: "new",
+            error_code: null,
+            source_updated_at_ms: baseNow + 2_000,
+        });
+    });
+
     it("paginates DynamoDB scans before filtering and applying the due limit", async () => {
         const firstPageRows = [
             await eventRow("us7000done", {
