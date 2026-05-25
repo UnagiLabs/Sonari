@@ -1,4 +1,4 @@
-# Nautilus Earthquake Oracle フィクスチャ
+# Nautilus 地震オラクルフィクスチャ
 
 これらのフィクスチャは、Rust製 Oracle Core 向けに Oracle ワークフローの入力と期待結果を固定します。
 

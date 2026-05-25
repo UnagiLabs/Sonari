@@ -1,3 +1,3 @@
-# Residence Fixtures Placeholder
+# Residence フィクスチャ予約領域
 
-Reserved for future residence verifier fixtures.
+将来の residence verifier fixture 用に予約しているディレクトリです。

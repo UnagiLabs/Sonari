@@ -1,3 +1,3 @@
-# Student Verifier Placeholder
+# Student Verifier 予約領域
 
-Reserved for future student verifier implementation.
+将来の student verifier 実装用に予約しているディレクトリです。

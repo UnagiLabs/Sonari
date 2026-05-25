@@ -1,50 +1,50 @@
-# Sonari Earthquake Verifier
+# Sonari 地震検証器
 
-## Overview
+## 概要
 
-The Earthquake verifier is the Sonari MVP earthquake oracle implementation. It verifies public earthquake data inside Nautilus / TEE and produces the signed, finalized payload used by Sui contracts to create the claim-facing disaster event root.
+地震検証器は、Sonari MVP の地震オラクル実装です。Nautilus / TEE 内で公開地震データを検証し、Sui コントラクトが請求処理向けの災害イベント root を作成するための署名済み finalized payload を生成します。
 
-MVP scope is earthquake only. Tsunami, flood, fire, nuclear accident, and other secondary hazards are not finalized by this verifier.
+MVP の対象は地震のみです。津波、浸水、火災、原発事故、その他の二次災害はこの検証器では finalize しません。
 
-## Responsibilities
+## 責務
 
-- Detect USGS earthquake candidates through the watcher and keep off-chain state in DynamoDB.
-- Re-fetch and verify source data inside TEE instead of trusting the worker, watcher, relayer, UI, or external API responses.
-- Compute ShakeMap MMI, H3 cells, affected cells, Merkle root, source hashes, BCS payload bytes, and TEE signature.
-- Return `pending_source`, `pending_mmi`, `rejected`, `ignored_small`, `failed`, or `finalized` as off-chain processing state.
-- Send only signed `finalized` payloads toward Sui submission.
+- Watcher で USGS の地震候補を検出し、DynamoDB にオフチェーン状態を保持する。
+- Worker、watcher、relayer、UI、外部 API 応答を信頼せず、TEE 内で source data を再取得して検証する。
+- ShakeMap MMI、H3 cell、affected cells、Merkle root、source hash、BCS payload bytes、TEE signature を生成する。
+- off-chain processing state として `pending_source`、`pending_mmi`、`rejected`、`ignored_small`、`failed`、`finalized` を返す。
+- Sui 投稿対象には署名済み `finalized` payload だけを渡す。
 
-## Trust Boundary
+## 信頼境界
 
-The trust boundary is the signed TEE result. Worker, Lambda, watcher, runner, relayer, and UI code may detect candidates, enqueue work, store state, and deliver payloads, but they must not change payload meaning.
+信頼境界は署名済み TEE result です。Worker、Lambda、watcher、runner、relayer、UI は候補検出、queue 投入、状態保存、payload 配送を担当できますが、payload の意味を変更してはいけません。
 
-Sui contracts verify the registered Earthquake verifier key, intent, `oracle_version`, freshness, revision, source, hashes, affected cell root, and finalized status. Membership / residence eligibility remains in `nautilus/verifiers/membership/`.
+Sui コントラクトは、登録済み地震 verifier key、intent、`oracle_version`、freshness、revision、source、hash、affected cell root、finalized status を検証します。Membership / residence eligibility は `nautilus/verifiers/membership/` の責務です。
 
-Generic Move names such as `DisasterEvent` and `disaster_event` remain generic disaster-relief contract concepts. They are not the name of this verifier implementation.
+`DisasterEvent` や `disaster_event` などの Move 名は、将来の複数災害種類にも対応する disaster relief コントラクトの総称として残します。この地震検証器実装の名前ではありません。
 
-## Data Sources
+## データソース
 
-- MVP primary source: USGS earthquake detail GeoJSON and ShakeMap `grid.xml.zip`.
-- Future sources may include JMA or other public earthquake datasets, but they must be added as explicit source policies.
-- Watcher summary fields such as magnitude, summary MMI, alert, and tsunami flag are only runner-start screening signals. Finalization depends on TEE-retrieved source data and cell-level MMI.
+- MVP の主要データソースは USGS earthquake detail GeoJSON と ShakeMap `grid.xml.zip`。
+- JMA など他の公開地震データは将来追加可能ですが、明示的な source policy として追加する必要があります。
+- Magnitude、summary MMI、alert、tsunami flag などの watcher summary fields は runner 起動対象を絞るための screening signal に限定します。Finalization は TEE が再取得した source data と cell-level MMI に基づきます。
 
-## AWS Execution Model
+## AWS 実行モデル
 
-AWS runs the verifier only when there is work:
+AWS は処理対象がある時だけ地震検証器を起動します。
 
-1. EventBridge Scheduler invokes the watcher Lambda.
-2. The watcher scans USGS recent earthquake feeds and records event state in DynamoDB.
-3. Eligible or manually submitted events start a Step Functions workflow.
-4. The workflow scales an Auto Scaling Group from `0 -> 1`.
-5. EC2 + Nitro Enclave runs the production TEE command.
-6. Results are written to S3 and applied back to DynamoDB.
-7. The workflow scales the ASG back to `1 -> 0`.
+1. EventBridge Scheduler が watcher Lambda を起動する。
+2. Watcher が USGS recent earthquake feed を scan し、DynamoDB に event state を記録する。
+3. 条件を満たした event、または手動投入された event が Step Functions ワークフローを開始する。
+4. ワークフローが Auto Scaling Group を `0 -> 1` に scale する。
+5. EC2 + Nitro Enclave が本番 TEE command を実行する。
+6. 結果を S3 に保存し、DynamoDB state に反映する。
+7. ワークフローが ASG を `1 -> 0` に戻す。
 
-Normal idle state is `DesiredCapacity = 0`. Relayer execution defaults to preview / dry-run. Real submit must be explicitly enabled and remains fail-closed without signer configuration.
+通常時は `DesiredCapacity = 0` です。Relayer は preview / dry-run を既定とし、実 submit は明示設定がある場合だけ有効にします。Signer 設定がない場合は fail-closed にします。
 
-The CloudFormation template lives in `infra/aws/earthquake-runner/README.md`.
+CloudFormation テンプレートは `infra/aws/earthquake-runner/README.md` を参照してください。
 
-## Local Development
+## ローカル開発
 
 ```bash
 pnpm --filter @sonari/earthquake-shared test
@@ -55,7 +55,7 @@ cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml
 python3 nautilus/verifiers/earthquake/fixtures/verify_fixtures.py
 ```
 
-Root verification:
+ルートからの検証:
 
 ```bash
 pnpm check
@@ -64,44 +64,44 @@ pnpm test
 pnpm test:oracle
 ```
 
-## Directory Structure
+## ディレクトリ構成
 
 ```txt
 nautilus/verifiers/earthquake/
   README.md
-  shared/      TypeScript contracts, constants, and validators
+  shared/      TypeScript contract、定数、validator
   tee/         Rust / Nautilus core
-  watcher/     Candidate scan, state management, runner workflow start
-  runner/      EC2 host service and Nitro Enclave command bridge
-  relayer/     Sui preview, dry-run, and explicit submit
-  fixtures/    USGS fixtures and golden output checks
+  watcher/     candidate scan、state 管理、runner workflow 起動
+  runner/      EC2 host service と Nitro Enclave command bridge
+  relayer/     Sui preview、dry-run、明示 submit
+  fixtures/    USGS fixture と golden output check
 ```
 
-Detailed component notes live in each subdirectory README.
+詳細なコンポーネント説明は各サブディレクトリの README に置きます。
 
-## Output
+## 出力
 
-TEE output is one of:
+TEE の出力は次のいずれかです。
 
-- `pending_source`: source or ShakeMap is not available yet.
-- `pending_mmi`: source exists but usable MMI grid data is not available.
-- `rejected`: source was verified but cannot produce claimable affected cells.
-- `finalized`: signed Earthquake Oracle v1 payload with affected cells root, artifact hashes, BCS bytes, public key, and signature.
+- `pending_source`: source または ShakeMap がまだ利用できない。
+- `pending_mmi`: source はあるが利用可能な MMI grid data がまだない。
+- `rejected`: source は検証済みだが claimable affected cells を生成できない。
+- `finalized`: affected cells root、artifact hash、BCS bytes、公開鍵、signature を含む署名済み地震オラクル v1 payload。
 
-Only `finalized` output is eligible for Sui submission.
+Sui 投稿対象になるのは `finalized` 出力だけです。
 
-## Privacy / Security
+## プライバシー / セキュリティ
 
-- This verifier does not process personal residence, student, phone, GPS, address, or document evidence.
-- Raw earthquake source artifacts are hashed and may be archived through Walrus-backed references.
-- TEE signing keys stay inside the production TEE boundary.
-- Watcher and relayer input is treated as untrusted at contract boundaries.
-- Failures in source fetch, archive verification, BCS serialization, Merkle generation, or signing fail closed.
+- この検証器は個人の residence、student、phone、GPS、address、document evidence を扱いません。
+- 生の地震 source artifact は hash 化し、必要に応じて Walrus-backed reference として archive します。
+- TEE signing key は本番 TEE boundary 内に隔離します。
+- Watcher と relayer の入力は contract boundary では untrusted として扱います。
+- Source fetch、archive verification、BCS serialization、Merkle generation、signing の失敗は fail-closed にします。
 
-## Future Work
+## 今後の作業
 
-- Add explicitly versioned source policies for JMA or other public earthquake feeds.
-- Support additional ShakeMap formats only with new fixtures and golden vectors.
-- Add multi-region runner fallback after the single-region MVP is stable.
-- Add operational dashboards for pending, rejected, failed, and finalized states.
-- Generalize common runner or relayer utilities only after duplication appears across verifier families.
+- JMA など他の公開地震 feed を明示的に versioned source policy として追加する。
+- 新しい ShakeMap format は fixture と golden vector を追加してから対応する。
+- 単一 region MVP が安定した後に multi-region runner fallback を追加する。
+- pending、rejected、failed、finalized state の運用 dashboard を追加する。
+- 検証器ファミリー間で重複が見えた時点で runner / relayer utility の共通化を検討する。

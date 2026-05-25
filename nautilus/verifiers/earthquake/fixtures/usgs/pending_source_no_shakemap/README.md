@@ -8,11 +8,11 @@
 
 <!--
 verifier:
-Source:
-- Derived from USGS event:
-- Captured at:
-- Modified for fixture:
-- Network access required for tests: no
+情報:
+- 派生元の USGS イベント:
+- 取得日:
+- フィクスチャ用の変更:
+- テストに必要なネットワークアクセス: いいえ
 -->
 
 この人工フィクスチャは、取得自体は成功したものの `products.shakemap` が存在しない USGS 詳細レスポンスを表します。Oracle は確定してはならず、`pending_source` と `SHAKEMAP_PRODUCT_MISSING` を返す必要があります。

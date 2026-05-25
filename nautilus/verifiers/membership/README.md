@@ -1,52 +1,52 @@
-# Sonari Membership Verifiers
+# Sonari 本人認証検証器
 
-## Overview
+## 概要
 
-Membership verifiers update Membership Pass metadata for receiver-side eligibility. They are separate from the Earthquake verifier, which creates the affected-cell root for earthquake events.
+本人認証検証器は、受取者側の eligibility に使う Membership Pass metadata を更新する検証器ファミリーです。地震検証器が地震 event の affected-cell root を作るのに対し、本人認証検証器は residence、student、migration など受取者側の metadata を扱います。
 
-Verifier families:
+検証器ファミリーは次の通りです。
 
-- `residence`: produces `ResidenceMetadataUpdate` for coarse H3 residence eligibility.
-- `student`: produces `StudentMetadataUpdate` for Student Aid campaigns.
-- `migration`: future pass lineage / wallet migration verification.
+- `residence`: coarse H3 residence eligibility 用の `ResidenceMetadataUpdate` を生成する。
+- `student`: Student Aid campaign 用の `StudentMetadataUpdate` を生成する。
+- `migration`: 将来の pass lineage / wallet migration verification。
 
-Contracts trust only Nautilus-signed metadata updates, not raw dapp input.
+コントラクトは Nautilus 署名済み metadata update だけを信頼し、dapp からの生 input は信頼しません。
 
-## Responsibilities
+## 責務
 
-- Normalize and score private evidence inside verifier execution.
-- Produce signed metadata updates bound to `pass_lineage_id` and owner wallet.
-- Keep raw personal evidence off-chain and out of verifier output.
-- Provide confidence and risk buckets for campaign-specific payout policy.
+- private evidence を verifier execution 内で normalize / score する。
+- `pass_lineage_id` と owner wallet に bind された署名済み metadata update を生成する。
+- 生の個人 evidence を off-chain に留め、verifier output に含めない。
+- Campaign-specific payout policy が使う confidence と risk bucket を提供する。
 
-Membership verifiers do not create earthquake affected-cell roots, update Earthquake Oracle payload field order, or execute payouts.
+本人認証検証器は地震 affected-cell root の作成、地震オラクル payload field order の更新、payout 実行を行いません。
 
-## Batch Runner Policy
+## 一括 Runner 方針
 
-Residence, student, and migration verification do not start EC2 immediately for each dapp request. A dapp request first creates a queued verification job. A scheduled batch runner, such as once per day, processes queued jobs together.
+Residence、student、migration verification は、dapp 申請ごとに EC2 を即時起動しません。dapp 申請はまず queued verification job を作成します。1日1回などの scheduled batch runner が queued job をまとめて処理します。
 
-If queued jobs are zero, EC2 / Nitro Enclave is not started. When jobs exist, the batch workflow scales the ASG `0 -> 1 -> 0` and minimizes EC2 runtime. Future claim periods or major disaster windows may add urgent priority and increased execution frequency.
+Queued job が 0 件なら EC2 / Nitro Enclave は起動しません。Job がある場合だけ batch workflow が ASG を `0 -> 1 -> 0` に scale し、EC2 稼働時間を最小化します。将来、claim 期間中や大規模災害時には urgent priority と実行頻度増加を追加できる設計にします。
 
 ```mermaid
 flowchart TD
-  Dapp[dapp verification request] --> Submit[SubmitVerification Lambda]
+  Dapp[dapp verification 申請] --> Submit[SubmitVerification Lambda]
   Submit --> Jobs[DynamoDB verification_jobs status=queued]
-  Submit --> Evidence[S3 encrypted evidence snapshot]
-  Scheduler[EventBridge Scheduler daily] --> Batch[BatchVerifier Lambda]
+  Submit --> Evidence[S3 暗号化 evidence snapshot]
+  Scheduler[EventBridge Scheduler 日次] --> Batch[BatchVerifier Lambda]
   Batch --> Jobs
-  Batch --> Empty{queued jobs exist?}
-  Empty -->|no| End[End without EC2]
-  Empty -->|yes| Workflow[Step Functions batch workflow]
+  Batch --> Empty{queued job があるか}
+  Empty -->|いいえ| End[EC2 を起動せず終了]
+  Empty -->|はい| Workflow[Step Functions batch workflow]
   Workflow --> ASG[ASG DesiredCapacity 0 -> 1]
   ASG --> EC2[EC2 + Nitro Enclave]
-  EC2 --> Result[S3 verifier results]
-  Workflow --> Apply[DynamoDB update]
+  EC2 --> Result[S3 verifier result]
+  Workflow --> Apply[DynamoDB 更新]
   Apply --> Stop[ASG DesiredCapacity 1 -> 0]
 ```
 
-## Job Schema
+## ジョブスキーマ
 
-Proposed DynamoDB fields:
+DynamoDB 項目の提案:
 
 - `job_id`
 - `pass_lineage_id`
@@ -66,42 +66,42 @@ Proposed DynamoDB fields:
 - `risk_bucket`
 - `error_code`
 
-## Metadata Outputs
+## メタデータ出力
 
-Residence output includes `verified_residence_cell`, `residence_confidence`, `risk_bucket`, `evidence_snapshot_hash`, issue / expiry times, and verifier version.
+Residence output は、`verified_residence_cell`、`residence_confidence`、`risk_bucket`、`evidence_snapshot_hash`、issued / expiry time、verifier version を含みます。
 
-Student output includes student status bucket, school region hash, confidence, risk bucket, `evidence_snapshot_hash`, issue / expiry times, and verifier version.
+Student output は、student status bucket、school region hash、confidence、risk bucket、`evidence_snapshot_hash`、issued / expiry time、verifier version を含みます。
 
-Migration output will bind old owner, new owner, payout address, migration reason bucket, and `pass_lineage_id`.
+Migration output は、old owner、new owner、payout address、migration reason bucket、`pass_lineage_id` を bind します。
 
-## Privacy / Security
+## プライバシー / セキュリティ
 
-- Raw evidence is never written on-chain.
-- Raw evidence is stored in encrypted S3 only when needed and with short retention.
-- Long-term audit state keeps `evidence_snapshot_hash`, not recoverable raw evidence.
-- Verifier output must not include raw phone, GPS history, detailed address, school email, student id, IP history, or raw document images.
-- Signing keys are separated by verifier family.
-- Dapp self-declarations may be inputs, but contracts must not treat them as trusted eligibility.
+- 生の evidence は on-chain に書きません。
+- 生の evidence は必要な場合だけ暗号化 S3 に短期保存します。
+- 長期 audit state には生の evidence を復元できない `evidence_snapshot_hash` を残します。
+- 検証器の出力には raw phone、GPS history、detailed address、school email、student id、IP history、raw document image を含めません。
+- Signing key は検証器ファミリーごとに分けます。
+- dapp self-declaration は input にできますが、contract が trusted eligibility として扱ってはいけません。
 
-## Directory Structure
+## ディレクトリ構成
 
 ```txt
 nautilus/verifiers/membership/
   README.md
-  shared/              Placeholder shared TypeScript contracts
-  tee/                 Future Nautilus / TEE implementation
-  fixtures/residence/  Residence fixture notes
-  fixtures/student/    Student fixture notes
-  verifiers/residence/ Residence verifier notes
-  verifiers/student/   Student verifier notes
+  shared/              共有 TypeScript contract の placeholder
+  tee/                 将来の Nautilus / TEE 実装
+  fixtures/residence/  residence fixture のメモ
+  fixtures/student/    student fixture のメモ
+  verifiers/residence/ residence verifier のメモ
+  verifiers/student/   student verifier のメモ
 ```
 
-No empty runner directory is added until implementation needs it.
+実装が必要になるまで空の `runner/` ディレクトリは追加しません。
 
-## Future Work
+## 今後の作業
 
-- Implement deterministic residence and student dummy verifiers from fixtures.
-- Define signed metadata update canonical payloads.
-- Add encrypted evidence retention policy and deletion automation.
-- Add contracts integration for metadata update verification.
-- Add urgent priority scheduling for active claim windows.
+- Fixture から deterministic residence / student dummy verifier を実装する。
+- 署名済み metadata update の canonical payload を定義する。
+- Encrypted evidence retention policy と deletion automation を追加する。
+- Metadata update verification の contract integration を追加する。
+- Active claim window 用の urgent priority scheduling を追加する。

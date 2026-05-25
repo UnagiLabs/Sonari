@@ -8,11 +8,11 @@
 
 <!--
 verifier:
-Source:
-- Derived from USGS event:
-- Captured at:
-- Modified for fixture:
-- Network access required for tests: no
+情報:
+- 派生元の USGS イベント:
+- 取得日:
+- フィクスチャ用の変更:
+- テストに必要なネットワークアクセス: いいえ
 -->
 
 この人工フィクスチャは、`map-status` が `CANCELLED` の USGS の ShakeMap プロダクトを表します。Oracle はグリッドを読まずに拒否し、`SHAKEMAP_CANCELLED` を返す必要があります。

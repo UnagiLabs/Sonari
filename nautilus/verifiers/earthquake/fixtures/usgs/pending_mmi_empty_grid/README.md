@@ -8,11 +8,11 @@
 
 <!--
 verifier:
-Source:
-- Derived from USGS event:
-- Captured at:
-- Modified for fixture:
-- Network access required for tests: no
+情報:
+- 派生元の USGS イベント:
+- 取得日:
+- フィクスチャ用の変更:
+- テストに必要なネットワークアクセス: いいえ
 -->
 
 この人工フィクスチャは、ShakeMap ソースと取得済みグリッドを含むものの、グリッドに利用可能な MMI 値がない USGS 詳細レスポンスを表します。Oracle は確定してはならず、`pending_mmi` と `MMI_NOT_AVAILABLE` を返す必要があります。
