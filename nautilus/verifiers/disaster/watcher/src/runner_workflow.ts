@@ -585,10 +585,10 @@ function buildSsmShellCommand(input: {
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
-        buildRequiredShellEnvCheck("SONARI_TEE_SIGNING_KEY_SEED_FILE"),
+        ...buildSigningKeySeedShellLines(),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONFIG"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
-        "export SONARI_TEE_SIGNING_KEY_SEED_FILE SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
+        "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
@@ -604,18 +604,31 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         "test -s /opt/sonari/runner.env",
         "source /opt/sonari/runner.env",
         buildRequiredShellEnvCheck("RUNNER_TOKEN_FILE"),
-        buildRequiredShellEnvCheck("SONARI_TEE_SIGNING_KEY_SEED_FILE"),
+        ...buildSigningKeySeedShellLines(),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONFIG"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
         'test -s "$RUNNER_TOKEN_FILE"',
-        'test -s "$SONARI_TEE_SIGNING_KEY_SEED_FILE"',
         'test -s "$SONARI_WALRUS_CONFIG"',
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
     ].join("\n");
 }
 
-function buildRequiredShellEnvCheck(name: string): string {
-    return `: "\${${name}:?${name} is required}"`;
+function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
+    return `: "\${${name}:?${message}}"`;
+}
+
+function buildSigningKeySeedShellLines(): string[] {
+    return [
+        'if [ -z "${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then',
+        buildRequiredShellEnvCheck(
+            "SONARI_TEE_SIGNING_KEY_SEED_FILE",
+            "SONARI_TEE_SIGNING_KEY_SEED_FILE is required when SONARI_TEE_SIGNING_KEY_SEED is unset",
+        ),
+        'test -s "$SONARI_TEE_SIGNING_KEY_SEED_FILE"',
+        'SONARI_TEE_SIGNING_KEY_SEED="$(tr -d \'[:space:]\' < "$SONARI_TEE_SIGNING_KEY_SEED_FILE")"',
+        "fi",
+        buildRequiredShellEnvCheck("SONARI_TEE_SIGNING_KEY_SEED"),
+    ];
 }
 
 function parseNitroEnclaveProcessCommand(command: string): string[] {

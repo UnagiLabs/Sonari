@@ -124,7 +124,14 @@ describe("AWS runner workflow helper", () => {
         expect(command).toContain("test -f /opt/sonari/bootstrap-complete");
         expect(command).toContain("test -s /opt/sonari/runner.env");
         expect(command).toContain("source /opt/sonari/runner.env");
+        expect(command).toContain('if [ -z "${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then');
+        expect(command).toContain(
+            ': "${SONARI_TEE_SIGNING_KEY_SEED_FILE:?SONARI_TEE_SIGNING_KEY_SEED_FILE is required when SONARI_TEE_SIGNING_KEY_SEED is unset}"',
+        );
         expect(command).toContain("test -s \"$SONARI_TEE_SIGNING_KEY_SEED_FILE\"");
+        expect(command).toContain(
+            ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
+        );
         expect(command).toContain("test -s \"$SONARI_WALRUS_CONFIG\"");
         expect(command).toContain(
             ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
@@ -162,7 +169,10 @@ describe("AWS runner workflow helper", () => {
         expect(polled).toMatchObject({ command_status: "SUCCEEDED" });
         expect(ssm.commands[0]).toContain("NITRO_ENCLAVE_PROCESS_COMMAND");
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED_FILE:?SONARI_TEE_SIGNING_KEY_SEED_FILE is required}"',
+            'SONARI_TEE_SIGNING_KEY_SEED="$(tr -d \'[:space:]\' < "$SONARI_TEE_SIGNING_KEY_SEED_FILE")"',
+        );
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
         );
         expect(ssm.commands[0]).toContain(
             ': "${SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"',
@@ -171,7 +181,7 @@ describe("AWS runner workflow helper", () => {
             ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            "export SONARI_TEE_SIGNING_KEY_SEED_FILE SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
+            "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
         );
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[0]).not.toContain("latest.json");
