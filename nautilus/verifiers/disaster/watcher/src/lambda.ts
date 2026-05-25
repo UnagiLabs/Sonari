@@ -1,42 +1,21 @@
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
-import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
+import { SFNClient } from "@aws-sdk/client-sfn";
 import {
     createManualHandler,
     createScheduledHandler,
     DynamoDbStateRepository,
     type ManualLambdaEvent,
-    type WorkflowStarter,
+    StepFunctionsWorkflowStarter,
 } from "./index.js";
 
 const sfn = new SFNClient({});
 const secrets = new SecretsManagerClient({});
 let cachedManualToken: string | undefined;
 
-class StepFunctionsWorkflowStarter implements WorkflowStarter {
-    constructor(private readonly stateMachineArn: string) {}
-
-    async start(input: {
-        sourceEventId: string;
-        executionName: string;
-        attempt?: number;
-    }): Promise<void> {
-        await sfn.send(
-            new StartExecutionCommand({
-                stateMachineArn: this.stateMachineArn,
-                name: input.executionName,
-                input: JSON.stringify({
-                    source_event_id: input.sourceEventId,
-                    attempt: input.attempt ?? 1,
-                }),
-            }),
-        );
-    }
-}
-
 export async function scheduledHandler(): Promise<unknown> {
     return createScheduledHandler({
         repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
-        workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN")),
+        workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
     })();
 }
 
@@ -44,7 +23,7 @@ export async function manualHandler(event: ManualLambdaEvent): Promise<unknown> 
     const token = await manualToken();
     return createManualHandler({
         repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
-        workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN")),
+        workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
         token,
     })(event);
 }

@@ -1,3 +1,4 @@
+import { SFNClient, StartExecutionCommand } from "@aws-sdk/client-sfn";
 import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
@@ -58,6 +59,38 @@ const INLINE_TEST_RUNNER_TIMEOUT_MS = 90_000;
 
 export interface WorkflowStarter {
     start(input: { sourceEventId: string; executionName: string; attempt?: number }): Promise<void>;
+}
+
+export interface StepFunctionsClientLike {
+    send(command: StartExecutionCommand): Promise<unknown>;
+}
+
+export class StepFunctionsWorkflowStarter implements WorkflowStarter {
+    private readonly client: StepFunctionsClientLike;
+
+    constructor(
+        private readonly stateMachineArn: string,
+        client?: StepFunctionsClientLike,
+    ) {
+        this.client = client ?? new SFNClient({});
+    }
+
+    async start(input: {
+        sourceEventId: string;
+        executionName: string;
+        attempt?: number;
+    }): Promise<void> {
+        await this.client.send(
+            new StartExecutionCommand({
+                stateMachineArn: this.stateMachineArn,
+                name: input.executionName,
+                input: JSON.stringify({
+                    source_event_id: input.sourceEventId,
+                    attempt: input.attempt ?? 1,
+                }),
+            }),
+        );
+    }
 }
 
 export interface ScheduledHandlerOptions {
@@ -364,25 +397,34 @@ export async function processDueEventsInlineForTests(
     return summary;
 }
 
-export function createDefaultScheduledHandlerFromEnv(env: NodeJS.ProcessEnv = process.env) {
-    const tableName = requiredEnv(env, "EVENTS_TABLE_NAME");
-    const stateMachineArn = requiredEnv(env, "RUNNER_STATE_MACHINE_ARN");
-    return createScheduledHandler({
-        repository: new DynamoDbStateRepository(tableName),
-        workflow: new EnvWorkflowStarter(stateMachineArn),
-    });
+export interface DefaultScheduledHandlerOptions {
+    repository?: StateRepository;
+    fetchCandidates?: () => Promise<UsgsEarthquakeCandidate[]>;
+    now?: () => number;
+    dueLimit?: number;
+    sfnClient?: StepFunctionsClientLike;
 }
 
-class EnvWorkflowStarter implements WorkflowStarter {
-    constructor(private readonly stateMachineArn: string) {}
-
-    async start(_input: {
-        sourceEventId: string;
-        executionName: string;
-        attempt?: number;
-    }): Promise<void> {
-        throw new Error(`Step Functions client is not configured for ${this.stateMachineArn}`);
+export function createDefaultScheduledHandlerFromEnv(
+    env: NodeJS.ProcessEnv = process.env,
+    options: DefaultScheduledHandlerOptions = {},
+) {
+    const tableName = requiredEnv(env, "EVENTS_TABLE_NAME");
+    const stateMachineArn = requiredEnv(env, "RUNNER_STATE_MACHINE_ARN");
+    const scheduledOptions: ScheduledHandlerOptions = {
+        repository: options.repository ?? new DynamoDbStateRepository(tableName),
+        workflow: new StepFunctionsWorkflowStarter(stateMachineArn, options.sfnClient),
+    };
+    if (options.fetchCandidates !== undefined) {
+        scheduledOptions.fetchCandidates = options.fetchCandidates;
     }
+    if (options.now !== undefined) {
+        scheduledOptions.now = options.now;
+    }
+    if (options.dueLimit !== undefined) {
+        scheduledOptions.dueLimit = options.dueLimit;
+    }
+    return createScheduledHandler(scheduledOptions);
 }
 
 class InlineQueue implements RunnerJobQueue {
