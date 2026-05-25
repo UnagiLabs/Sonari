@@ -37,6 +37,16 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).toContain(`SONARI_WALRUS_AGGREGATOR_URL=$${"{WalrusAggregatorUrl}"}`);
     });
 
+    it("marks runner bootstrap completion only after required files and allocator are ready", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
+        expect(template).toContain("touch /opt/sonari/bootstrap-complete");
+        expect(template.indexOf("touch /opt/sonari/bootstrap-complete")).toBeGreaterThan(
+            template.indexOf("chmod 0400 /opt/sonari/runner.env"),
+        );
+    });
+
     it("keeps EC2 capacity at zero until the Step Functions workflow starts a job", async () => {
         const template = await readFile(templatePath, "utf8");
 
@@ -75,6 +85,15 @@ describe("AWS disaster runner CloudFormation template", () => {
         expect(template).toContain('"PollCommand": {');
         expect(template).toContain(
             '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }]',
+        );
+    });
+
+    it("retries FindReadyInstance long enough for cold bootstrap readiness", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"FindReadyInstance": {');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }]',
         );
     });
 

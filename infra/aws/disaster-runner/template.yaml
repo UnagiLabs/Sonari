@@ -151,6 +151,8 @@ Resources:
             ENV
             chown ec2-user:ec2-user /opt/sonari/runner.env
             chmod 0400 /opt/sonari/runner.env
+            systemctl is-active --quiet nitro-enclaves-allocator.service
+            touch /opt/sonari/bootstrap-complete
 
   RunnerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -185,8 +187,10 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                   - dynamodb:Query
                   - dynamodb:Scan
+                  - dynamodb:TransactWriteItems
                 Resource: !GetAtt EventsTable.Arn
               - Effect: Allow
                 Action: states:StartExecution
@@ -233,6 +237,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt EventsTable.Arn
 
   RunnerStateMachineRole:
@@ -361,7 +366,7 @@ Resources:
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "action": "find_ready_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
               "Next": "DispatchTeeCommand",
-              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 1.0 }],
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "DispatchTeeCommand": {

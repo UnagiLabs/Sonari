@@ -296,6 +296,88 @@ describe("DynamoDB-compatible repository behavior", () => {
         await expect(repository.get("us7000second")).resolves.toMatchObject({ status: "new" });
     });
 
+    it("does not try a second due row when an exclusive workflow claim is already held", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000first", baseNow);
+        await repository.upsertManualEvent("us7000second", baseNow + 1);
+        await repository.tryStartRunnerWorkflowExclusively(
+            "us7000first",
+            "disaster-us7000first-1",
+            baseNow + 1_000,
+            0,
+        );
+
+        const started = await startDueWorkflows(repository, workflow, baseNow + 2_000, 25);
+
+        expect(started).toBe(0);
+        expect(workflow.starts).toEqual([]);
+        await expect(repository.get("us7000second")).resolves.toMatchObject({ status: "new" });
+    });
+
+    it("releases an exclusive workflow claim when StopInstance records shutdown", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000first", baseNow);
+        await repository.upsertManualEvent("us7000second", baseNow + 1);
+
+        await startDueWorkflows(repository, workflow, baseNow + 2_000, 25);
+        await repository.applyRunnerResult(
+            "us7000first",
+            pendingSourceResult("us7000first"),
+            baseNow + 2_500,
+            baseNow + 3_000,
+            1,
+        );
+        await repository.markWorkflowStopped("us7000first", 1, baseNow + 3_000);
+        const started = await startDueWorkflows(repository, workflow, baseNow + 4_000, 25);
+
+        expect(started).toBe(1);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000first",
+                executionName: "disaster-us7000first-1",
+                attempt: 1,
+            },
+            {
+                sourceEventId: "us7000second",
+                executionName: "disaster-us7000second-1",
+                attempt: 1,
+            },
+        ]);
+    });
+
+    it("marks a workflow-start failure failed and releases the exclusive claim", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        await repository.upsertManualEvent("us7000first", baseNow);
+        await repository.upsertManualEvent("us7000second", baseNow + 1);
+
+        const failedStart = await startDueWorkflows(
+            repository,
+            new FailingWorkflowStarter(),
+            baseNow + 2_000,
+            25,
+        );
+        const nextStart = await startDueWorkflows(repository, workflow, baseNow + 3_000, 25);
+
+        expect(failedStart).toBe(0);
+        expect(nextStart).toBe(1);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000second",
+                executionName: "disaster-us7000second-1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000first")).resolves.toMatchObject({
+            status: "failed",
+            error_code: "AWS_RUNNER_START_FAILED",
+            runner_phase: "complete",
+            runner_stopped_at_ms: baseNow + 2_000,
+        });
+    });
+
     it("does not start new workflow while a fresh runner workflow is active", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -662,6 +744,60 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(client.putCount).toBe(0);
     });
 
+    it("returns null when a DynamoDB exclusive workflow start loses the lock race", async () => {
+        const dueRow = await eventRow("us7000race", {
+            status: "new",
+            retry_count: 0,
+            updated_at_ms: baseNow,
+        });
+        const client = new WorkflowStartTransactionConflictClient(dueRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        const started = await repository.tryStartRunnerWorkflowExclusively(
+            "us7000race",
+            "disaster-us7000race-1",
+            baseNow + 2_000,
+            0,
+        );
+
+        expect(started).toBeNull();
+        expect(client.transactInputs).toHaveLength(1);
+        expect(client.currentRow).toMatchObject({ status: "new", runner_attempt: null });
+    });
+
+    it("writes and releases a DynamoDB exclusive workflow lock", async () => {
+        const dueRow = await eventRow("us7000race", {
+            status: "new",
+            retry_count: 0,
+            updated_at_ms: baseNow,
+        });
+        const client = new WorkflowStartTransactionClient(dueRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        const started = await repository.tryStartRunnerWorkflowExclusively(
+            "us7000race",
+            "disaster-us7000race-1",
+            baseNow + 2_000,
+            0,
+        );
+        const stopped = await repository.markWorkflowStopped("us7000race", 1, baseNow + 3_000);
+
+        expect(started).toEqual({
+            sourceEventId: "us7000race",
+            executionName: "disaster-us7000race-1",
+            attempt: 1,
+        });
+        expect(stopped).toBe(true);
+        expect(client.currentRow).toMatchObject({
+            status: "processing",
+            runner_attempt: 1,
+            runner_phase: "complete",
+            runner_stopped_at_ms: baseNow + 3_000,
+        });
+        expect(client.lockRow).toBeUndefined();
+        expect(client.scanInputs.every((input) => input.ConsistentRead === true)).toBe(true);
+    });
+
     it("preserves finalized TEE payload metadata on the event row", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", baseNow);
@@ -968,6 +1104,104 @@ class WorkflowStartRaceClient {
     }
 }
 
+class WorkflowStartTransactionConflictClient {
+    readonly transactInputs: Array<Record<string, unknown>> = [];
+    currentRow: EarthquakeEventRow;
+
+    constructor(currentRow: EarthquakeEventRow) {
+        this.currentRow = structuredClone(currentRow);
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("TransactItems" in input) {
+            this.transactInputs.push(input);
+            throw Object.assign(new Error("transaction canceled"), {
+                name: "TransactionCanceledException",
+            });
+        }
+        if ("Key" in input) {
+            return { Item: structuredClone(this.currentRow) };
+        }
+        throw new Error("unexpected workflow start transaction conflict client command");
+    }
+}
+
+class WorkflowStartTransactionClient {
+    readonly scanInputs: Array<Record<string, unknown>> = [];
+    currentRow: EarthquakeEventRow;
+    lockRow: Record<string, unknown> | undefined;
+
+    constructor(currentRow: EarthquakeEventRow) {
+        this.currentRow = structuredClone(currentRow);
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+        if ("TransactItems" in input) {
+            this.applyTransaction(input);
+            return {};
+        }
+        if ("UpdateExpression" in input) {
+            this.applyUpdate(input);
+            return {};
+        }
+        if ("Key" in input && "ConditionExpression" in input) {
+            this.lockRow = undefined;
+            return {};
+        }
+        if ("Key" in input) {
+            return { Item: structuredClone(this.currentRow) };
+        }
+        this.scanInputs.push(input);
+        return { Items: [structuredClone(this.currentRow)] };
+    }
+
+    private applyTransaction(input: Record<string, unknown>): void {
+        const transactItems = input.TransactItems;
+        if (!Array.isArray(transactItems)) {
+            throw new Error("transaction test input must include TransactItems");
+        }
+        for (const item of transactItems) {
+            if (!isPlainRecord(item)) {
+                throw new Error("transaction item must be an object");
+            }
+            if (isPlainRecord(item.Update)) {
+                this.applyUpdate(item.Update);
+            }
+            if (isPlainRecord(item.Put)) {
+                this.lockRow = structuredClone(item.Put.Item as Record<string, unknown>);
+            }
+        }
+    }
+
+    private applyUpdate(input: Record<string, unknown>): void {
+        const names = input.ExpressionAttributeNames as Record<string, string> | undefined;
+        const values = input.ExpressionAttributeValues as Record<string, unknown> | undefined;
+        if (names === undefined || values === undefined) {
+            throw new Error("test update command must use expression names and values");
+        }
+        const updateExpression = input.UpdateExpression;
+        if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
+            throw new Error("test client only supports SET update expressions");
+        }
+        for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
+            const [nameToken, valueToken] = assignment.split(" = ");
+            if (nameToken === undefined || valueToken === undefined) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            const field = names[nameToken];
+            if (field === undefined || !(valueToken in values)) {
+                throw new Error(`unexpected update assignment ${assignment}`);
+            }
+            this.currentRow = {
+                ...this.currentRow,
+                [field]: values[valueToken],
+            };
+        }
+    }
+}
+
 class WatcherMetadataProcessingRaceClient {
     currentRow: EarthquakeEventRow;
     private returnedStaleRead = false;
@@ -1057,6 +1291,10 @@ function readCommandInput(command: unknown): Record<string, unknown> {
         return command.input as Record<string, unknown>;
     }
     throw new Error("unexpected AWS command shape");
+}
+
+function isPlainRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
 function finalizedResult(): TeeCoreResult {

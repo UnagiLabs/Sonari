@@ -85,7 +85,7 @@ describe("oracle schema contracts", () => {
         expect(DEFAULT_ORACLE_CONTRACT.min_claim_band).toBe(1);
     });
 
-    it("pins offchain status and error code contracts for D1 state", () => {
+    it("pins offchain status and error code contracts for offchain state", () => {
         expect(OFFCHAIN_STATUSES).toEqual([
             "new",
             "queued",

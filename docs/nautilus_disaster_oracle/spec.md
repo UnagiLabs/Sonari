@@ -377,7 +377,7 @@ Claim 時は、提出された `AffectedCellLeaf` と Merkle proof が `affected
 ### Could
 
 - permissionless trigger。
-- R2 watcher snapshot 保存。
+- AWS S3 watcher snapshot 保存。
 - 複数 AWS Region / 複数 Enclave fallback。
 - USGS ShakeMap HDF 対応。
 - 複数 source の quorum。

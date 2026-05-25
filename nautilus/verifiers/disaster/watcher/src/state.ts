@@ -1,9 +1,11 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
+    DeleteCommand,
     DynamoDBDocumentClient,
     GetCommand,
     PutCommand,
     ScanCommand,
+    TransactWriteCommand,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { OffchainStatus, OracleErrorCode, TeeCoreResult } from "@sonari/oracle-shared";
@@ -87,6 +89,15 @@ export interface WorkflowStartInput {
     attempt: number;
 }
 
+interface RunnerWorkflowLockRow {
+    source_event_id: typeof RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID;
+    lock_owner_source_event_id: string;
+    runner_job_id: string;
+    runner_attempt: number;
+    lock_acquired_at_ms: number;
+    lock_expires_at_ms: number;
+}
+
 export interface RunnerWorkflowProgressUpdate {
     sourceEventId: string;
     attempt: number;
@@ -109,6 +120,12 @@ export interface StateRepository {
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
     hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean>;
+    tryStartRunnerWorkflowExclusively(
+        sourceEventId: string,
+        executionName: string,
+        nowMs: number,
+        expectedRetryCount?: number,
+    ): Promise<WorkflowStartInput | null>;
     markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
@@ -205,9 +222,11 @@ const TERMINAL_STATUSES = new Set<OffchainStatus>([
     "rejected",
     "ignored_small",
 ]);
+const RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID = "__sonari_runner_workflow_lock__";
 
 export class InMemoryStateRepository implements StateRepository {
     private readonly rows = new Map<string, EarthquakeEventRow>();
+    private runnerWorkflowLock: RunnerWorkflowLockRow | undefined;
 
     async upsertCandidate(
         candidate: UsgsEarthquakeCandidate,
@@ -279,6 +298,38 @@ export class InMemoryStateRepository implements StateRepository {
         return [...this.rows.values()].some((row) => isActiveRunnerWorkflow(row, staleBeforeMs));
     }
 
+    async tryStartRunnerWorkflowExclusively(
+        sourceEventId: string,
+        executionName: string,
+        nowMs: number,
+        expectedRetryCount?: number,
+    ): Promise<WorkflowStartInput | null> {
+        if (
+            this.runnerWorkflowLock !== undefined &&
+            this.runnerWorkflowLock.lock_expires_at_ms > nowMs
+        ) {
+            return null;
+        }
+        const started = await this.markWorkflowStarted(
+            sourceEventId,
+            executionName,
+            nowMs,
+            expectedRetryCount,
+        );
+        if (started === null) {
+            return null;
+        }
+        this.runnerWorkflowLock = {
+            source_event_id: RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID,
+            lock_owner_source_event_id: sourceEventId,
+            runner_job_id: executionName,
+            runner_attempt: started.attempt,
+            lock_acquired_at_ms: nowMs,
+            lock_expires_at_ms: nowMs + FAILED_RETRY_BACKOFF_MS,
+        };
+        return started;
+    }
+
     async markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
@@ -329,6 +380,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.runner_stop_error = null;
         row.runner_phase = "complete";
         row.updated_at_ms = nowMs;
+        this.releaseRunnerWorkflowLock(sourceEventId, attempt);
         return true;
     }
 
@@ -623,6 +675,15 @@ export class InMemoryStateRepository implements StateRepository {
         }
         return recovered;
     }
+
+    private releaseRunnerWorkflowLock(sourceEventId: string, attempt: number): void {
+        if (
+            this.runnerWorkflowLock?.lock_owner_source_event_id === sourceEventId &&
+            this.runnerWorkflowLock.runner_attempt === attempt
+        ) {
+            this.runnerWorkflowLock = undefined;
+        }
+    }
 }
 
 export interface DynamoDbDocumentClientLike {
@@ -694,6 +755,70 @@ export class DynamoDbStateRepository implements StateRepository {
         return (await this.scanRows()).some((row) => isActiveRunnerWorkflow(row, staleBeforeMs));
     }
 
+    async tryStartRunnerWorkflowExclusively(
+        sourceEventId: string,
+        executionName: string,
+        nowMs: number,
+        expectedRetryCount?: number,
+    ): Promise<WorkflowStartInput | null> {
+        const retryCount = expectedRetryCount ?? (await this.get(sourceEventId))?.retry_count;
+        if (retryCount === undefined) {
+            return null;
+        }
+        const attempt = retryCount + 1;
+        try {
+            await this.documentClient.send(
+                new TransactWriteCommand({
+                    TransactItems: [
+                        {
+                            Update: {
+                                TableName: this.tableName,
+                                Key: { source_event_id: sourceEventId },
+                                ConditionExpression: workflowStartConditionExpression(),
+                                UpdateExpression: workflowStartUpdateExpression(),
+                                ExpressionAttributeNames: workflowStartExpressionNames(),
+                                ExpressionAttributeValues: workflowStartExpressionValues({
+                                    retryCount,
+                                    executionName,
+                                    attempt,
+                                    nowMs,
+                                }),
+                            },
+                        },
+                        {
+                            Put: {
+                                TableName: this.tableName,
+                                Item: {
+                                    source_event_id: RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID,
+                                    lock_owner_source_event_id: sourceEventId,
+                                    runner_job_id: executionName,
+                                    runner_attempt: attempt,
+                                    lock_acquired_at_ms: nowMs,
+                                    lock_expires_at_ms: nowMs + FAILED_RETRY_BACKOFF_MS,
+                                } satisfies RunnerWorkflowLockRow,
+                                ConditionExpression:
+                                    "attribute_not_exists(#source_event_id) OR #lock_expires_at_ms <= :now_ms",
+                                ExpressionAttributeNames: {
+                                    "#source_event_id": "source_event_id",
+                                    "#lock_expires_at_ms": "lock_expires_at_ms",
+                                },
+                                ExpressionAttributeValues: {
+                                    ":now_ms": nowMs,
+                                },
+                            },
+                        },
+                    ],
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error) || isTransactionCanceled(error)) {
+                return null;
+            }
+            throw error;
+        }
+        return { sourceEventId, executionName, attempt };
+    }
+
     async markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
@@ -710,65 +835,15 @@ export class DynamoDbStateRepository implements StateRepository {
                 new UpdateCommand({
                     TableName: this.tableName,
                     Key: { source_event_id: sourceEventId },
-                    ConditionExpression:
-                        "#retry_count = :expected_retry_count AND #status IN (:new_status, :pending_source_status, :pending_mmi_status, :failed_status) AND (attribute_not_exists(#next_retry_at_ms) OR #next_retry_at_ms = :null_value OR #next_retry_at_ms <= :now_ms OR (#status IN (:pending_source_status, :pending_mmi_status) AND #finalization_deadline_at_ms <= :now_ms))",
-                    UpdateExpression: [
-                        "SET #status = :processing_status",
-                        "#runner_job_id = :runner_job_id",
-                        "#runner_queued_at_ms = :null_value",
-                        "#runner_attempt = :runner_attempt",
-                        "#runner_id = :null_value",
-                        "#runner_phase = :runner_phase",
-                        "#runner_started_at_ms = :now_ms",
-                        "#runner_stopped_at_ms = :null_value",
-                        "#runner_timeout_at_ms = :runner_timeout_at_ms",
-                        "#runner_error_message = :null_value",
-                        "#runner_stop_error = :null_value",
-                        "#runner_instance_id = :null_value",
-                        "#runner_command_id = :null_value",
-                        "#runner_result_s3_key = :null_value",
-                        "#runner_last_poll_at_ms = :null_value",
-                        "#tee_result_json = :null_value",
-                        "#error_code = :null_value",
-                        "#updated_at_ms = :now_ms",
-                    ].join(", "),
-                    ExpressionAttributeNames: {
-                        "#status": "status",
-                        "#retry_count": "retry_count",
-                        "#next_retry_at_ms": "next_retry_at_ms",
-                        "#finalization_deadline_at_ms": "finalization_deadline_at_ms",
-                        "#runner_job_id": "runner_job_id",
-                        "#runner_queued_at_ms": "runner_queued_at_ms",
-                        "#runner_attempt": "runner_attempt",
-                        "#runner_id": "runner_id",
-                        "#runner_phase": "runner_phase",
-                        "#runner_started_at_ms": "runner_started_at_ms",
-                        "#runner_stopped_at_ms": "runner_stopped_at_ms",
-                        "#runner_timeout_at_ms": "runner_timeout_at_ms",
-                        "#runner_error_message": "runner_error_message",
-                        "#runner_stop_error": "runner_stop_error",
-                        "#runner_instance_id": "runner_instance_id",
-                        "#runner_command_id": "runner_command_id",
-                        "#runner_result_s3_key": "runner_result_s3_key",
-                        "#runner_last_poll_at_ms": "runner_last_poll_at_ms",
-                        "#tee_result_json": "tee_result_json",
-                        "#error_code": "error_code",
-                        "#updated_at_ms": "updated_at_ms",
-                    },
-                    ExpressionAttributeValues: {
-                        ":expected_retry_count": retryCount,
-                        ":new_status": "new",
-                        ":pending_source_status": "pending_source",
-                        ":pending_mmi_status": "pending_mmi",
-                        ":failed_status": "failed",
-                        ":processing_status": "processing",
-                        ":runner_job_id": executionName,
-                        ":runner_attempt": attempt,
-                        ":runner_phase": "starting_instance",
-                        ":runner_timeout_at_ms": nowMs + FAILED_RETRY_BACKOFF_MS,
-                        ":now_ms": nowMs,
-                        ":null_value": null,
-                    },
+                    ConditionExpression: workflowStartConditionExpression(),
+                    UpdateExpression: workflowStartUpdateExpression(),
+                    ExpressionAttributeNames: workflowStartExpressionNames(),
+                    ExpressionAttributeValues: workflowStartExpressionValues({
+                        retryCount,
+                        executionName,
+                        attempt,
+                        nowMs,
+                    }),
                 }),
             );
         } catch (error) {
@@ -809,6 +884,7 @@ export class DynamoDbStateRepository implements StateRepository {
                     },
                 }),
             );
+            await this.releaseRunnerWorkflowLock(sourceEventId, attempt);
             return true;
         } catch (error) {
             if (isConditionalCheckFailed(error)) {
@@ -1162,6 +1238,7 @@ export class DynamoDbStateRepository implements StateRepository {
             const result = (await this.documentClient.send(
                 new ScanCommand({
                     TableName: this.tableName,
+                    ConsistentRead: true,
                     ...(exclusiveStartKey === undefined
                         ? {}
                         : { ExclusiveStartKey: exclusiveStartKey }),
@@ -1170,10 +1247,35 @@ export class DynamoDbStateRepository implements StateRepository {
                 Items?: EarthquakeEventRow[];
                 LastEvaluatedKey?: Record<string, unknown>;
             };
-            rows.push(...(result.Items ?? []));
+            rows.push(...(result.Items ?? []).filter(isEarthquakeEventRow));
             exclusiveStartKey = result.LastEvaluatedKey;
         } while (exclusiveStartKey !== undefined);
         return rows;
+    }
+
+    private async releaseRunnerWorkflowLock(sourceEventId: string, attempt: number): Promise<void> {
+        try {
+            await this.documentClient.send(
+                new DeleteCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID },
+                    ConditionExpression:
+                        "#lock_owner_source_event_id = :source_event_id AND #runner_attempt = :runner_attempt",
+                    ExpressionAttributeNames: {
+                        "#lock_owner_source_event_id": "lock_owner_source_event_id",
+                        "#runner_attempt": "runner_attempt",
+                    },
+                    ExpressionAttributeValues: {
+                        ":source_event_id": sourceEventId,
+                        ":runner_attempt": attempt,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (!isConditionalCheckFailed(error)) {
+                throw error;
+            }
+        }
     }
 
     private async put(
@@ -1394,6 +1496,81 @@ export class DynamoDbStateRepository implements StateRepository {
     }
 }
 
+function workflowStartConditionExpression(): string {
+    return "#retry_count = :expected_retry_count AND #status IN (:new_status, :pending_source_status, :pending_mmi_status, :failed_status) AND (attribute_not_exists(#next_retry_at_ms) OR #next_retry_at_ms = :null_value OR #next_retry_at_ms <= :now_ms OR (#status IN (:pending_source_status, :pending_mmi_status) AND #finalization_deadline_at_ms <= :now_ms))";
+}
+
+function workflowStartUpdateExpression(): string {
+    return [
+        "SET #status = :processing_status",
+        "#runner_job_id = :runner_job_id",
+        "#runner_queued_at_ms = :null_value",
+        "#runner_attempt = :runner_attempt",
+        "#runner_id = :null_value",
+        "#runner_phase = :runner_phase",
+        "#runner_started_at_ms = :now_ms",
+        "#runner_stopped_at_ms = :null_value",
+        "#runner_timeout_at_ms = :runner_timeout_at_ms",
+        "#runner_error_message = :null_value",
+        "#runner_stop_error = :null_value",
+        "#runner_instance_id = :null_value",
+        "#runner_command_id = :null_value",
+        "#runner_result_s3_key = :null_value",
+        "#runner_last_poll_at_ms = :null_value",
+        "#tee_result_json = :null_value",
+        "#error_code = :null_value",
+        "#updated_at_ms = :now_ms",
+    ].join(", ");
+}
+
+function workflowStartExpressionNames(): Record<string, string> {
+    return {
+        "#status": "status",
+        "#retry_count": "retry_count",
+        "#next_retry_at_ms": "next_retry_at_ms",
+        "#finalization_deadline_at_ms": "finalization_deadline_at_ms",
+        "#runner_job_id": "runner_job_id",
+        "#runner_queued_at_ms": "runner_queued_at_ms",
+        "#runner_attempt": "runner_attempt",
+        "#runner_id": "runner_id",
+        "#runner_phase": "runner_phase",
+        "#runner_started_at_ms": "runner_started_at_ms",
+        "#runner_stopped_at_ms": "runner_stopped_at_ms",
+        "#runner_timeout_at_ms": "runner_timeout_at_ms",
+        "#runner_error_message": "runner_error_message",
+        "#runner_stop_error": "runner_stop_error",
+        "#runner_instance_id": "runner_instance_id",
+        "#runner_command_id": "runner_command_id",
+        "#runner_result_s3_key": "runner_result_s3_key",
+        "#runner_last_poll_at_ms": "runner_last_poll_at_ms",
+        "#tee_result_json": "tee_result_json",
+        "#error_code": "error_code",
+        "#updated_at_ms": "updated_at_ms",
+    };
+}
+
+function workflowStartExpressionValues(input: {
+    retryCount: number;
+    executionName: string;
+    attempt: number;
+    nowMs: number;
+}): Record<string, unknown> {
+    return {
+        ":expected_retry_count": input.retryCount,
+        ":new_status": "new",
+        ":pending_source_status": "pending_source",
+        ":pending_mmi_status": "pending_mmi",
+        ":failed_status": "failed",
+        ":processing_status": "processing",
+        ":runner_job_id": input.executionName,
+        ":runner_attempt": input.attempt,
+        ":runner_phase": "starting_instance",
+        ":runner_timeout_at_ms": input.nowMs + FAILED_RETRY_BACKOFF_MS,
+        ":now_ms": input.nowMs,
+        ":null_value": null,
+    };
+}
+
 function expressionNames(fields: string[]): Record<string, string> {
     return Object.fromEntries(fields.map((field) => [`#${field}`, field]));
 }
@@ -1413,6 +1590,19 @@ function isConditionalCheckFailed(error: unknown): boolean {
         "name" in error &&
         error.name === "ConditionalCheckFailedException"
     );
+}
+
+function isTransactionCanceled(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "TransactionCanceledException"
+    );
+}
+
+function isEarthquakeEventRow(row: EarthquakeEventRow): boolean {
+    return row.source_event_id !== RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID;
 }
 
 function baseRow(

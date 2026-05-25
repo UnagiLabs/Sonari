@@ -189,14 +189,14 @@ export async function startDueWorkflows(
         }
         const attempt = row.retry_count + 1;
         const executionName = `disaster-${sanitizeExecutionName(row.source_event_id)}-${attempt}`;
-        const start = await repository.markWorkflowStarted(
+        const start = await repository.tryStartRunnerWorkflowExclusively(
             row.source_event_id,
             executionName,
             nowMs,
             row.retry_count,
         );
         if (start === null) {
-            continue;
+            break;
         }
         try {
             await workflow.start({
@@ -213,7 +213,8 @@ export async function startDueWorkflows(
                 error instanceof Error ? error.message : String(error),
                 start.attempt,
             );
-            continue;
+            await repository.markWorkflowStopped(row.source_event_id, start.attempt, nowMs);
+            break;
         }
         started += 1;
         break;

@@ -48,6 +48,7 @@ export interface Ec2ClientLike {
 
 export interface SsmClientLike {
     listOnlineManagedInstanceIds(input: { instanceIds: string[] }): Promise<Set<string>>;
+    checkRunnerBootstrapReady(instanceId: string): Promise<boolean>;
     sendCommand(input: {
         instanceId: string;
         shellCommand: string;
@@ -484,6 +485,29 @@ class AwsSsmClient implements SsmClientLike {
         );
     }
 
+    async checkRunnerBootstrapReady(instanceId: string): Promise<boolean> {
+        const sent = await this.sendCommand({
+            instanceId,
+            shellCommand: buildRunnerBootstrapReadinessShellCommand(),
+        });
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const status = await pollCommandStatus(this, {
+                instanceId,
+                commandId: sent.commandId,
+            });
+            if (status === "SUCCEEDED") {
+                return true;
+            }
+            if (status === "FAILED") {
+                return false;
+            }
+            if (attempt < 4) {
+                await sleep(1_000);
+            }
+        }
+        return false;
+    }
+
     async sendCommand(input: {
         instanceId: string;
         shellCommand: string;
@@ -570,6 +594,23 @@ function buildSsmShellCommand(input: {
     ].join("\n");
 }
 
+export function buildRunnerBootstrapReadinessShellCommand(): string {
+    return [
+        "set -euo pipefail",
+        "test -f /opt/sonari/bootstrap-complete",
+        "test -s /opt/sonari/runner.env",
+        "source /opt/sonari/runner.env",
+        buildRequiredShellEnvCheck("RUNNER_TOKEN_FILE"),
+        buildRequiredShellEnvCheck("SONARI_TEE_SIGNING_KEY_SEED_FILE"),
+        buildRequiredShellEnvCheck("SONARI_WALRUS_CONFIG"),
+        buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
+        'test -s "$RUNNER_TOKEN_FILE"',
+        'test -s "$SONARI_TEE_SIGNING_KEY_SEED_FILE"',
+        'test -s "$SONARI_WALRUS_CONFIG"',
+        "systemctl is-active --quiet nitro-enclaves-allocator.service",
+    ].join("\n");
+}
+
 function buildRequiredShellEnvCheck(name: string): string {
     return `: "\${${name}:?${name} is required}"`;
 }
@@ -590,9 +631,17 @@ async function findReadyInstance(
     const onlineManagedInstanceIds = await ssm.listOnlineManagedInstanceIds({
         instanceIds: runningIds,
     });
-    const ready = runningIds.find((instanceId) => onlineManagedInstanceIds.has(instanceId));
+    for (const instanceId of runningIds) {
+        if (!onlineManagedInstanceIds.has(instanceId)) {
+            continue;
+        }
+        if (await ssm.checkRunnerBootstrapReady(instanceId)) {
+            return instanceId;
+        }
+    }
+    const ready = undefined;
     if (ready === undefined) {
-        throw new Error("No running SSM-managed runner instance is available");
+        throw new Error("No running SSM-managed runner instance is bootstrap-ready");
     }
     return ready;
 }
@@ -743,4 +792,8 @@ function requiredEnv(name: string): string {
         throw new Error(`${name} is required`);
     }
     return value;
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BCS_ENUMS, type TeeCoreResult } from "@sonari/oracle-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
+    buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     type AutoScalingClientLike,
     type Ec2ClientLike,
@@ -70,6 +71,65 @@ describe("AWS runner workflow helper", () => {
         await expect(
             onlineHandler({ action: "find_ready_instance", source_event_id: "us7000sonari" }),
         ).resolves.toMatchObject({ instance_id: "i-online" });
+    });
+
+    it("requires bootstrap readiness after a runner instance is online in SSM", async () => {
+        const ssm = new RecordingSsmClient({
+            onlineManagedInstanceIds: ["i-cold", "i-ready"],
+            bootstrapReadyInstanceIds: ["i-ready"],
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client({
+                instances: [
+                    { instanceId: "i-cold", state: "running" },
+                    { instanceId: "i-ready", state: "running" },
+                ],
+            }),
+            ssm,
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({ action: "find_ready_instance", source_event_id: "us7000sonari" }),
+        ).resolves.toMatchObject({ instance_id: "i-ready" });
+        expect(ssm.bootstrapReadinessChecks).toEqual(["i-cold", "i-ready"]);
+    });
+
+    it("fails closed when SSM is online but bootstrap readiness is incomplete", async () => {
+        const ssm = new RecordingSsmClient({
+            onlineManagedInstanceIds: ["i-cold"],
+            bootstrapReadyInstanceIds: [],
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client({
+                instances: [{ instanceId: "i-cold", state: "running" }],
+            }),
+            ssm,
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({ action: "find_ready_instance", source_event_id: "us7000sonari" }),
+        ).rejects.toThrow(/No running SSM-managed runner instance is bootstrap-ready/);
+        expect(ssm.bootstrapReadinessChecks).toEqual(["i-cold"]);
+    });
+
+    it("checks required bootstrap sentinel, env, secret files, Walrus config, and Nitro allocator", () => {
+        const command = buildRunnerBootstrapReadinessShellCommand();
+
+        expect(command).toContain("test -f /opt/sonari/bootstrap-complete");
+        expect(command).toContain("test -s /opt/sonari/runner.env");
+        expect(command).toContain("source /opt/sonari/runner.env");
+        expect(command).toContain("test -s \"$SONARI_TEE_SIGNING_KEY_SEED_FILE\"");
+        expect(command).toContain("test -s \"$SONARI_WALRUS_CONFIG\"");
+        expect(command).toContain(
+            ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
+        );
+        expect(command).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
     });
 
     it("dispatches SSM command and polls pending/success states", async () => {
@@ -633,18 +693,26 @@ class RecordingEc2Client implements Ec2ClientLike {
 
 class RecordingSsmClient implements SsmClientLike {
     readonly commands: string[] = [];
+    readonly bootstrapReadinessChecks: string[] = [];
 
     constructor(
         private readonly options: {
             invocationStatus?: string;
             onlineManagedInstanceIds?: string[];
             invocationErrorName?: string;
+            bootstrapReadyInstanceIds?: string[];
         } = {},
     ) {}
 
     async listOnlineManagedInstanceIds(input: { instanceIds: string[] }): Promise<Set<string>> {
         const online = new Set(this.options.onlineManagedInstanceIds ?? input.instanceIds);
         return new Set(input.instanceIds.filter((instanceId) => online.has(instanceId)));
+    }
+
+    async checkRunnerBootstrapReady(instanceId: string): Promise<boolean> {
+        this.bootstrapReadinessChecks.push(instanceId);
+        const ready = new Set(this.options.bootstrapReadyInstanceIds ?? [instanceId]);
+        return ready.has(instanceId);
     }
 
     async sendCommand(input: { shellCommand: string }): Promise<{ commandId: string }> {
