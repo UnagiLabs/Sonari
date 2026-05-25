@@ -278,6 +278,11 @@ export class InMemoryStateRepository implements StateRepository {
             nowMs,
             { bypassScreening: true },
         );
+        const row = this.rows.get(sourceEventId);
+        if (row !== undefined && DUE_STATUSES.has(row.status)) {
+            row.next_retry_at_ms = null;
+            row.updated_at_ms = nowMs;
+        }
     }
 
     async get(sourceEventId: string): Promise<EarthquakeEventRow | null> {
@@ -731,6 +736,40 @@ export class DynamoDbStateRepository implements StateRepository {
             nowMs,
             { bypassScreening: true },
         );
+        await this.clearManualRetryBackoff(sourceEventId, nowMs);
+    }
+
+    private async clearManualRetryBackoff(sourceEventId: string, nowMs: number): Promise<void> {
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: sourceEventId },
+                    ConditionExpression:
+                        "attribute_exists(#source_event_id) AND #status IN (:new_status, :pending_source_status, :pending_mmi_status, :failed_status)",
+                    UpdateExpression:
+                        "SET #next_retry_at_ms = :null_value, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#source_event_id": "source_event_id",
+                        "#status": "status",
+                        "#next_retry_at_ms": "next_retry_at_ms",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":new_status": "new",
+                        ":pending_source_status": "pending_source",
+                        ":pending_mmi_status": "pending_mmi",
+                        ":failed_status": "failed",
+                        ":null_value": null,
+                        ":updated_at_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (!isConditionalCheckFailed(error)) {
+                throw error;
+            }
+        }
     }
 
     async get(sourceEventId: string): Promise<EarthquakeEventRow | null> {

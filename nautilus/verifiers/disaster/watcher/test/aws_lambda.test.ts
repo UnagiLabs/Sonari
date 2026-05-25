@@ -185,33 +185,44 @@ describe("AWS Lambda watcher handlers", () => {
             },
         ]);
 
-        await repository.upsertManualEvent("us7000pending", baseNow);
-        await repository.markWorkflowStarted(
+        const pendingRepository = new InMemoryStateRepository();
+        const pendingWorkflow = new RecordingWorkflowStarter();
+        const pendingHandler = createManualHandler({
+            repository: pendingRepository,
+            workflow: pendingWorkflow,
+            now: () => baseNow + 4_000,
+            token: manualAuthToken,
+        });
+
+        await pendingRepository.upsertManualEvent("us7000pending", baseNow);
+        await pendingRepository.markWorkflowStarted(
             "us7000pending",
             "disaster-us7000pending-1",
             baseNow + 1_000,
         );
-        await repository.applyRunnerResult(
+        await pendingRepository.applyRunnerResult(
             "us7000pending",
             pendingSourceResult("us7000pending"),
             baseNow + 2_000,
             baseNow + HOUR_MS,
             1,
         );
-        await repository.markWorkflowStopped("us7000pending", 1, baseNow + 3_000);
+        await pendingRepository.markWorkflowStopped("us7000pending", 1, baseNow + 3_000);
 
-        const pendingResponse = await handler({
+        const pendingResponse = await pendingHandler({
             headers: { authorization: `Bearer ${manualAuthToken}` },
             body: JSON.stringify({ source_event_id: "us7000pending" }),
         });
 
         expect(pendingResponse.statusCode).toBe(200);
         expect(JSON.parse(pendingResponse.body)).toMatchObject({ workflow_started: 1 });
-        expect(workflow.starts.at(-1)).toEqual({
-            sourceEventId: "us7000pending",
-            executionName: "disaster-us7000pending-2",
-            attempt: 2,
-        });
+        expect(pendingWorkflow.starts).toEqual([
+            {
+                sourceEventId: "us7000pending",
+                executionName: "disaster-us7000pending-2",
+                attempt: 2,
+            },
+        ]);
     });
 
     it("rejects malformed manual source event IDs before enqueueing runner work", async () => {
