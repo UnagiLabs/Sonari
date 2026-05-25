@@ -1222,10 +1222,31 @@ class StaleReadRaceClient {
         if (statusField === undefined) {
             throw new Error(`unexpected condition ${condition}`);
         }
+        const status = this.currentRow[statusField as keyof EarthquakeEventRow];
+        if (condition.includes("NOT (#status IN")) {
+            return ![
+                values[":processing_status"],
+                values[":finalized_status"],
+                values[":submitted_status"],
+                values[":rejected_status"],
+            ].includes(status);
+        }
+        if (
+            condition.includes(
+                "#status IN (:finalized_status, :submitted_status, :rejected_status)",
+            )
+        ) {
+            return [values[":finalized_status"], values[":submitted_status"], values[":rejected_status"]].includes(
+                status,
+            );
+        }
+        if (condition.includes("#status = :processing_status")) {
+            return status === values[":processing_status"];
+        }
         const allowedStatuses = Object.entries(values)
             .filter(([key]) => condition.includes(key))
             .map(([, value]) => value);
-        return allowedStatuses.includes(this.currentRow[statusField as keyof EarthquakeEventRow]);
+        return allowedStatuses.includes(status);
     }
 }
 
@@ -1555,14 +1576,32 @@ class WatcherMetadataProcessingRaceClient {
         if (!condition.includes("attribute_exists(#source_event_id)")) {
             return false;
         }
-        if (!condition.includes("#status <> :processing_status")) {
-            return true;
-        }
         const statusField = names["#status"];
-        return (
-            statusField !== undefined &&
-            this.currentRow[statusField as keyof EarthquakeEventRow] !== values[":processing_status"]
-        );
+        if (statusField === undefined) {
+            return false;
+        }
+        const status = this.currentRow[statusField as keyof EarthquakeEventRow];
+        if (condition.includes("NOT (#status IN")) {
+            return ![
+                values[":processing_status"],
+                values[":finalized_status"],
+                values[":submitted_status"],
+                values[":rejected_status"],
+            ].includes(status);
+        }
+        if (
+            condition.includes(
+                "#status IN (:finalized_status, :submitted_status, :rejected_status)",
+            )
+        ) {
+            return [values[":finalized_status"], values[":submitted_status"], values[":rejected_status"]].includes(
+                status,
+            );
+        }
+        if (condition.includes("#status = :processing_status")) {
+            return status === values[":processing_status"];
+        }
+        return true;
     }
 }
 

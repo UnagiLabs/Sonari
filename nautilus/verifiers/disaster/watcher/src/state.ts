@@ -227,6 +227,7 @@ const TERMINAL_STATUSES = new Set<OffchainStatus>([
     "rejected",
     "ignored_small",
 ]);
+const RESULT_TERMINAL_STATUSES = new Set<OffchainStatus>(["finalized", "submitted", "rejected"]);
 const RUNNER_WORKFLOW_LOCK_SOURCE_EVENT_ID = "__sonari_runner_workflow_lock__";
 
 export class InMemoryStateRepository implements StateRepository {
@@ -1485,25 +1486,31 @@ export class DynamoDbStateRepository implements StateRepository {
         nowMs: number,
     ): Promise<void> {
         try {
-            await this.updateWatcherMetadataFields(candidate, nowMs, true);
+            await this.updateNonTerminalWatcherMetadataFields(candidate, nowMs);
         } catch (error) {
             if (!isConditionalCheckFailed(error)) {
                 throw error;
             }
             try {
-                await this.updateWatcherMetadataFields(candidate, nowMs, false);
+                await this.updateTerminalWatcherMetadataFields(candidate, nowMs);
             } catch (fallbackError) {
                 if (!isConditionalCheckFailed(fallbackError)) {
                     throw fallbackError;
+                }
+                try {
+                    await this.updateActiveWatcherMetadataFields(candidate, nowMs);
+                } catch (activeFallbackError) {
+                    if (!isConditionalCheckFailed(activeFallbackError)) {
+                        throw activeFallbackError;
+                    }
                 }
             }
         }
     }
 
-    private async updateWatcherMetadataFields(
+    private async updateNonTerminalWatcherMetadataFields(
         candidate: UsgsEarthquakeCandidate,
         nowMs: number,
-        shouldUpdateHeartbeat: boolean,
     ): Promise<void> {
         const stopPendingCondition =
             "(#runner_phase IN (:complete_phase, :stopping_instance_phase) AND #runner_stopped_at_ms = :null_value)";
@@ -1511,12 +1518,9 @@ export class DynamoDbStateRepository implements StateRepository {
             new UpdateCommand({
                 TableName: this.tableName,
                 Key: { source_event_id: candidate.source_event_id },
-                ConditionExpression: shouldUpdateHeartbeat
-                    ? `attribute_exists(#source_event_id) AND #status <> :processing_status AND NOT ${stopPendingCondition}`
-                    : `attribute_exists(#source_event_id) AND (#status = :processing_status OR ${stopPendingCondition})`,
-                UpdateExpression: shouldUpdateHeartbeat
-                    ? "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms, #updated_at_ms = :updated_at_ms"
-                    : "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms",
+                ConditionExpression: `attribute_exists(#source_event_id) AND NOT (#status IN (:processing_status, :finalized_status, :submitted_status, :rejected_status)) AND NOT ${stopPendingCondition}`,
+                UpdateExpression:
+                    "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms, #updated_at_ms = :updated_at_ms",
                 ExpressionAttributeNames: {
                     "#source_event_id": "source_event_id",
                     "#status": "status",
@@ -1524,7 +1528,73 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#runner_stopped_at_ms": "runner_stopped_at_ms",
                     "#last_seen_at_ms": "last_seen_at_ms",
                     "#source_updated_at_ms": "source_updated_at_ms",
-                    ...(shouldUpdateHeartbeat ? { "#updated_at_ms": "updated_at_ms" } : {}),
+                    "#updated_at_ms": "updated_at_ms",
+                },
+                ExpressionAttributeValues: {
+                    ":processing_status": "processing",
+                    ":finalized_status": "finalized",
+                    ":submitted_status": "submitted",
+                    ":rejected_status": "rejected",
+                    ":complete_phase": "complete",
+                    ":stopping_instance_phase": "stopping_instance",
+                    ":null_value": null,
+                    ":last_seen_at_ms": nowMs,
+                    ":source_updated_at_ms": candidate.source_updated_at_ms,
+                    ":updated_at_ms": nowMs,
+                },
+            }),
+        );
+    }
+
+    private async updateTerminalWatcherMetadataFields(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+    ): Promise<void> {
+        await this.documentClient.send(
+            new UpdateCommand({
+                TableName: this.tableName,
+                Key: { source_event_id: candidate.source_event_id },
+                ConditionExpression:
+                    "attribute_exists(#source_event_id) AND #status IN (:finalized_status, :submitted_status, :rejected_status)",
+                UpdateExpression:
+                    "SET #last_seen_at_ms = :last_seen_at_ms, #updated_at_ms = :updated_at_ms",
+                ExpressionAttributeNames: {
+                    "#source_event_id": "source_event_id",
+                    "#status": "status",
+                    "#last_seen_at_ms": "last_seen_at_ms",
+                    "#updated_at_ms": "updated_at_ms",
+                },
+                ExpressionAttributeValues: {
+                    ":finalized_status": "finalized",
+                    ":submitted_status": "submitted",
+                    ":rejected_status": "rejected",
+                    ":last_seen_at_ms": nowMs,
+                    ":updated_at_ms": nowMs,
+                },
+            }),
+        );
+    }
+
+    private async updateActiveWatcherMetadataFields(
+        candidate: UsgsEarthquakeCandidate,
+        nowMs: number,
+    ): Promise<void> {
+        const stopPendingCondition =
+            "(#runner_phase IN (:complete_phase, :stopping_instance_phase) AND #runner_stopped_at_ms = :null_value)";
+        await this.documentClient.send(
+            new UpdateCommand({
+                TableName: this.tableName,
+                Key: { source_event_id: candidate.source_event_id },
+                ConditionExpression: `attribute_exists(#source_event_id) AND (#status = :processing_status OR ${stopPendingCondition})`,
+                UpdateExpression:
+                    "SET #last_seen_at_ms = :last_seen_at_ms, #source_updated_at_ms = :source_updated_at_ms",
+                ExpressionAttributeNames: {
+                    "#source_event_id": "source_event_id",
+                    "#status": "status",
+                    "#runner_phase": "runner_phase",
+                    "#runner_stopped_at_ms": "runner_stopped_at_ms",
+                    "#last_seen_at_ms": "last_seen_at_ms",
+                    "#source_updated_at_ms": "source_updated_at_ms",
                 },
                 ExpressionAttributeValues: {
                     ":processing_status": "processing",
@@ -1533,7 +1603,6 @@ export class DynamoDbStateRepository implements StateRepository {
                     ":null_value": null,
                     ":last_seen_at_ms": nowMs,
                     ":source_updated_at_ms": candidate.source_updated_at_ms,
-                    ...(shouldUpdateHeartbeat ? { ":updated_at_ms": nowMs } : {}),
                 },
             }),
         );
@@ -1730,7 +1799,9 @@ function mergePreservingResult(
         finalization_deadline_at_ms: next.finalization_deadline_at_ms,
         latest_revision: next.latest_revision,
         last_seen_at_ms: next.last_seen_at_ms,
-        source_updated_at_ms: next.source_updated_at_ms,
+        source_updated_at_ms: RESULT_TERMINAL_STATUSES.has(existing.status)
+            ? existing.source_updated_at_ms
+            : next.source_updated_at_ms,
         error_code:
             existing.status === "ignored_small" && next.status === "new"
                 ? null
