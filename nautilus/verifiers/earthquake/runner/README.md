@@ -1,6 +1,30 @@
 # 地震 Runner
 
-地震検証器用の AWS EC2 ホストサービスです。AWS Lambda watcher が利用する Step Functions runner workflow から呼び出されます。
+地震検証器用の EC2 host service です。Nitro Enclave / TEE に地震 verifier request を渡し、TEE が返した result JSON を呼び出し元へ返すための薄い HTTP server です。
+
+現在の CloudFormation 本線では、この HTTP server は必須経路ではありません。本番 AWS workflow は、Step Functions が RunnerControl Lambda を呼び、RunnerControl Lambda が SSM Run Command で EC2 host に直接 command を送ります。
+
+```mermaid
+flowchart TB
+  subgraph Current["現在の AWS 本線"]
+    SFN["Step Functions"] --> Control["RunnerControl Lambda"]
+    Control --> SSM["SSM Run Command"]
+    SSM --> Host["EC2 host"]
+    Host --> TEE["Nitro Enclave / TEE"]
+  end
+
+  subgraph Optional["この package の HTTP server"]
+    Client["curl / test client / future private caller"] --> Runner["runner HTTP server"]
+    Runner --> Tee2["Nitro Enclave / TEE"]
+  end
+```
+
+この package は、主に次の用途のために残しています。
+
+- ローカル検証や手動テストで `curl` から TEE 実行を試す。
+- EC2 host 上で `/health` を確認する。
+- 将来、SSM Run Command ではなく private network 内の runner service として動かす。
+- relayer preview / dry-run を sidecar 的に試す。
 
 提供するエンドポイント:
 
@@ -32,7 +56,7 @@
 
 `RUNNER_BACKEND=aws` の場合、設定された `NITRO_ENCLAVE_PROCESS_COMMAND` を実行し、request JSON を stdin で渡します。`RUNNER_BACKEND=aws` 以外では、local verification 用に `cargo run --manifest-path <TEE_CARGO_MANIFEST_PATH> -- production --input <tmp>` を使います。
 
-本番必須の環境変数:
+HTTP server を AWS backend で起動する場合の環境変数:
 
 ```txt
 RUNNER_TOKEN=<bearer-token>
