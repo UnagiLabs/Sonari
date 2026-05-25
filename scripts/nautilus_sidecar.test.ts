@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadFixtureRelayerSubmitInput } from "../nautilus/verifiers/disaster/relayer/src/index.js";
+import { loadFixtureRelayerSubmitInput } from "../nautilus/verifiers/earthquake/relayer/src/index.js";
 import { createNautilusSidecarServer } from "./nautilus_sidecar.js";
 
 const servers: ReturnType<typeof createNautilusSidecarServer>[] = [];

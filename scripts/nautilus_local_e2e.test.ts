@@ -2,7 +2,7 @@ import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HOUR_MS } from "../nautilus/verifiers/disaster/watcher/src/index.js";
+import { HOUR_MS } from "../nautilus/verifiers/earthquake/watcher/src/index.js";
 import {
     E2E_FIXTURE_CASES,
     FixtureSourceClient,
@@ -143,19 +143,19 @@ describe("Nautilus local oracle E2E", () => {
     it("resolves raw fixture artifacts through FixtureSourceClient", async () => {
         const sourceClient = new FixtureSourceClient({
             caseId: "usgs/finalized_minimal",
-            fixturesDir: "nautilus/verifiers/disaster/fixtures",
+            fixturesDir: "nautilus/verifiers/earthquake/fixtures",
         });
 
         await expect(sourceClient.getSourceArtifacts("us7000sonari")).resolves.toEqual({
             case_id: "usgs/finalized_minimal",
             source_event_id: "us7000sonari",
             raw_detail_path: expect.stringMatching(
-                /nautilus\/verifiers\/disaster\/fixtures\/usgs\/finalized_minimal\/input\/usgs_detail\.json$/,
+                /nautilus\/verifiers\/earthquake\/fixtures\/usgs\/finalized_minimal\/input\/usgs_detail\.json$/,
             ),
             raw_detail_uri:
                 "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
             raw_grid_path: expect.stringMatching(
-                /nautilus\/verifiers\/disaster\/fixtures\/usgs\/finalized_minimal\/input\/usgs_grid\.xml$/,
+                /nautilus\/verifiers\/earthquake\/fixtures\/usgs\/finalized_minimal\/input\/usgs_grid\.xml$/,
             ),
             raw_grid_uri:
                 "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
@@ -170,7 +170,7 @@ describe("Nautilus local oracle E2E", () => {
         async () => {
             const sourceClient = new FixtureSourceClient({
                 caseId: "usgs/finalized_minimal",
-                fixturesDir: "nautilus/verifiers/disaster/fixtures",
+                fixturesDir: "nautilus/verifiers/earthquake/fixtures",
             });
             const runner = new LocalOracleCoreRunnerAdapter({ sourceClient });
 
@@ -349,7 +349,7 @@ describe("Nautilus local oracle E2E", () => {
             const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-source-test-"));
             const sourceClient = new FixtureSourceClient({
                 caseId: "usgs/finalized_minimal",
-                fixturesDir: "nautilus/verifiers/disaster/fixtures",
+                fixturesDir: "nautilus/verifiers/earthquake/fixtures",
             });
             const runner = new LocalOracleCoreRunnerAdapter({
                 sourceClient: {

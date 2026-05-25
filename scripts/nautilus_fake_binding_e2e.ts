@@ -9,7 +9,7 @@ import {
     type RunnerQueueJob,
     scanCandidates,
     type UsgsEarthquakeCandidate,
-} from "../nautilus/verifiers/disaster/watcher/src/index.js";
+} from "../nautilus/verifiers/earthquake/watcher/src/index.js";
 
 const baseNow = 1_800_000_000_000;
 

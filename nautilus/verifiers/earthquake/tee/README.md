@@ -263,16 +263,16 @@ finalized（正常完了）時に生成される主要ファイル：
 
 ```bash
 # ユニットテスト（リポジトリルートから）
-cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml
+cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml
 
 # フィクスチャ統合テスト（詳細出力付き）
-cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml -- --nocapture
+cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml -- --nocapture
 
 # 特定のテストのみ実行
-cargo test --manifest-path nautilus/verifiers/disaster/tee/Cargo.toml finalized_fixture_core_matches_expected_hashes_without_signing
+cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml finalized_fixture_core_matches_expected_hashes_without_signing
 
 # Pythonフィクスチャ検証（ハッシュ・BCS・Merkleの独立検証）
-python3 nautilus/verifiers/disaster/fixtures/verify_fixtures.py
+python3 nautilus/verifiers/earthquake/fixtures/verify_fixtures.py
 ```
 
 ---

@@ -140,11 +140,11 @@ Sonari MVP の Disaster Oracle は、USGS ShakeMap が表す地震動だけを c
 
 | 対象 | 採用技術 | 役割 |
 | --- | --- | --- |
-| `nautilus/verifiers/disaster/watcher/` | AWS Lambda、TypeScript、Lambda local test | EventBridge Scheduler、USGS recent earthquakes API 取得、DynamoDB 状態管理、Step Functions workflow 起動、手動投入 API |
-| `nautilus/verifiers/disaster/tee/` | Rust、Nautilus、serde、reqwest、bcs、sha2、h3o または h3ron | USGS 詳細再取得、セル別震度集約、Band 判定、H3 生成、Merkle root 生成、監査 hash 生成、BCS Payload 生成、TEE 署名 |
-| `nautilus/verifiers/disaster/relayer/` | TypeScript または Rust、Sui SDK | 署名済み Payload の Sui 投稿、投稿結果の記録、再試行 |
-| `nautilus/verifiers/disaster/shared/` | TypeScript | Disaster verifier 内部の共有型、定数、validator |
-| `nautilus/verifiers/disaster/fixtures/` | JSON | USGS の再現用サンプルデータ、TEE・Watcher・Relayer の共通テスト入力 |
+| `nautilus/verifiers/earthquake/watcher/` | AWS Lambda、TypeScript、Lambda local test | EventBridge Scheduler、USGS recent earthquakes API 取得、DynamoDB 状態管理、Step Functions workflow 起動、手動投入 API |
+| `nautilus/verifiers/earthquake/tee/` | Rust、Nautilus、serde、reqwest、bcs、sha2、h3o または h3ron | USGS 詳細再取得、セル別震度集約、Band 判定、H3 生成、Merkle root 生成、監査 hash 生成、BCS Payload 生成、TEE 署名 |
+| `nautilus/verifiers/earthquake/relayer/` | TypeScript または Rust、Sui SDK | 署名済み Payload の Sui 投稿、投稿結果の記録、再試行 |
+| `nautilus/verifiers/earthquake/shared/` | TypeScript | Disaster verifier 内部の共有型、定数、validator |
+| `nautilus/verifiers/earthquake/fixtures/` | JSON | USGS の再現用サンプルデータ、TEE・Watcher・Relayer の共通テスト入力 |
 | `nautilus/verifiers/membership/` | TypeScript / docs / future Nautilus | Residence / Student metadata verifier family。個人 metadata 更新はこちらで扱う |
 | `contracts/` | Sui Move | Payload 検証、DisasterEvent 作成、Claim 接続用 root 保存、generic claim との接続 |
 
