@@ -7,7 +7,7 @@ import {
     submitRelayerPayload,
 } from "./index.js";
 
-const target = "0x123::disaster_oracle::submit_payload_v1";
+const target = "0x123::earthquake_oracle::submit_payload_v1";
 const registry = "0x456";
 const verifierRegistry = "0x654";
 const clock = "0x0000000000000000000000000000000000000000000000000000000000000006";

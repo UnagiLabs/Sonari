@@ -29,7 +29,7 @@ flowchart TD
   input[
     入力: SignedFinalizedPayload<br/>
     status: finalized<br/>
-    payload: DisasterOraclePayloadV1（26フィールド）<br/>
+    payload: EarthquakeOraclePayloadV1（26フィールド）<br/>
     payload_bcs_hex / signature / public_key
   ]
 
@@ -110,7 +110,7 @@ RelayerResult<T>         ← { ok: true, value: T } | { ok: false, error_code, m
 ## フィクスチャを使ったテスト
 
 ```typescript
-import { loadFixtureRelayerSubmitInput, buildRelayerRequestPreview } from "@sonari/oracle-relayer";
+import { loadFixtureRelayerSubmitInput, buildRelayerRequestPreview } from "@sonari/earthquake-relayer";
 
 // フィクスチャから入力を読み込む
 const input = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");

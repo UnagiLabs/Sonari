@@ -8,11 +8,11 @@
 
 <!--
 verifier:
-Source:
-- Derived from USGS event:
-- Captured at:
-- Modified for fixture:
-- Network access required for tests: no
+情報:
+- 派生元の USGS イベント:
+- 取得日:
+- フィクスチャ用の変更:
+- テストに必要なネットワークアクセス: いいえ
 -->
 
 この人工フィクスチャは、有効な MMI 値を持つものの、すべての値が MMI VII を下回る USGS の ShakeMap ソースを表します。`cell_band >= 1` の影響セルが存在しないため、Oracle は拒否する必要があります。

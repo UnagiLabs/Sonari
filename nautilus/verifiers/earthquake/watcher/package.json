@@ -1,5 +1,5 @@
 {
-    "name": "@sonari/oracle-watcher",
+    "name": "@sonari/earthquake-watcher",
     "version": "0.1.0",
     "private": true,
     "type": "module",
@@ -20,7 +20,7 @@
         "@aws-sdk/client-sfn": "^3.948.0",
         "@aws-sdk/client-ssm": "^3.948.0",
         "@aws-sdk/lib-dynamodb": "^3.948.0",
-        "@sonari/oracle-relayer": "workspace:*",
-        "@sonari/oracle-shared": "workspace:*"
+        "@sonari/earthquake-relayer": "workspace:*",
+        "@sonari/earthquake-shared": "workspace:*"
     }
 }

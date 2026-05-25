@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { BCS_ENUMS, type TeeCoreResult } from "@sonari/oracle-shared";
+import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
 import {
-    buildDisasterVerifierRequest,
+    buildEarthquakeVerifierRequest,
     createDefaultScheduledHandlerFromEnv,
     createManualHandler,
     createScheduledHandler,
@@ -68,7 +68,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000eligible",
-                executionName: "disaster-us7000eligible-1",
+                executionName: "earthquake-us7000eligible-1",
                 attempt: 1,
             },
         ]);
@@ -98,7 +98,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000eligible",
-                executionName: "disaster-us7000eligible-1",
+                executionName: "earthquake-us7000eligible-1",
                 attempt: 1,
             },
         ]);
@@ -158,7 +158,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(commands).toHaveLength(1);
         expect(readCommandInput(commands[0])).toMatchObject({
             stateMachineArn: "arn:aws:states:runner",
-            name: "disaster-us7000default-1",
+            name: "earthquake-us7000default-1",
         });
         expect(JSON.parse(String(readCommandInput(commands[0]).input))).toEqual({
             source_event_id: "us7000default",
@@ -201,7 +201,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000manual",
-                executionName: "disaster-us7000manual-1",
+                executionName: "earthquake-us7000manual-1",
                 attempt: 1,
             },
         ]);
@@ -221,7 +221,7 @@ describe("AWS Lambda watcher handlers", () => {
         await repository.upsertManualEvent("us7000failed", baseNow);
         await repository.markWorkflowStarted(
             "us7000failed",
-            "disaster-us7000failed-1",
+            "earthquake-us7000failed-1",
             baseNow + 1_000,
         );
         await repository.markFailed(
@@ -243,7 +243,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000failed",
-                executionName: "disaster-us7000failed-2",
+                executionName: "earthquake-us7000failed-2",
                 attempt: 2,
             },
         ]);
@@ -260,7 +260,7 @@ describe("AWS Lambda watcher handlers", () => {
         await pendingRepository.upsertManualEvent("us7000pending", baseNow);
         await pendingRepository.markWorkflowStarted(
             "us7000pending",
-            "disaster-us7000pending-1",
+            "earthquake-us7000pending-1",
             baseNow + 1_000,
         );
         await pendingRepository.applyRunnerResult(
@@ -282,7 +282,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(pendingWorkflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "disaster-us7000pending-2",
+                executionName: "earthquake-us7000pending-2",
                 attempt: 2,
             },
         ]);
@@ -310,7 +310,7 @@ describe("AWS Lambda watcher handlers", () => {
     });
 
     it("builds the minimal TEE request without trusting summary fields", () => {
-        expect(buildDisasterVerifierRequest("us7000sonari")).toEqual({
+        expect(buildEarthquakeVerifierRequest("us7000sonari")).toEqual({
             source_event_id: "us7000sonari",
             hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
             primary_source: BCS_ENUMS.primarySource.USGS,
@@ -468,7 +468,7 @@ describe("DynamoDB-compatible repository behavior", () => {
     it("preserves finalized DynamoDB result fields when watcher upsert races a stale read", async () => {
         const staleProcessingRow = await eventRow("us7000race", {
             status: "processing",
-            runner_job_id: "disaster-us7000race-1",
+            runner_job_id: "earthquake-us7000race-1",
             runner_attempt: 1,
             runner_phase: "applying_result",
         });
@@ -504,7 +504,7 @@ describe("DynamoDB-compatible repository behavior", () => {
     it("does not refresh terminal rows that are still waiting for StopInstance", async () => {
         const staleProcessingRow = await eventRow("us7000stop", {
             status: "processing",
-            runner_job_id: "disaster-us7000stop-1",
+            runner_job_id: "earthquake-us7000stop-1",
             runner_attempt: 1,
             runner_phase: "applying_result",
         });
@@ -570,7 +570,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000first",
-                executionName: "disaster-us7000first-1",
+                executionName: "earthquake-us7000first-1",
                 attempt: 1,
             },
         ]);
@@ -584,7 +584,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         await repository.upsertManualEvent("us7000second", baseNow + 1);
         await repository.tryStartRunnerWorkflowExclusively(
             "us7000first",
-            "disaster-us7000first-1",
+            "earthquake-us7000first-1",
             baseNow + 1_000,
             0,
         );
@@ -617,12 +617,12 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000first",
-                executionName: "disaster-us7000first-1",
+                executionName: "earthquake-us7000first-1",
                 attempt: 1,
             },
             {
                 sourceEventId: "us7000second",
-                executionName: "disaster-us7000second-1",
+                executionName: "earthquake-us7000second-1",
                 attempt: 1,
             },
         ]);
@@ -647,7 +647,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000second",
-                executionName: "disaster-us7000second-1",
+                executionName: "earthquake-us7000second-1",
                 attempt: 1,
             },
         ]);
@@ -677,11 +677,11 @@ describe("DynamoDB-compatible repository behavior", () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
         await repository.upsertManualEvent("us7000stale", baseNow);
-        await repository.markWorkflowStarted("us7000stale", "disaster-us7000stale-1", baseNow);
+        await repository.markWorkflowStarted("us7000stale", "earthquake-us7000stale-1", baseNow);
         await repository.upsertManualEvent("us7000active", baseNow + 1_000);
         await repository.markWorkflowStarted(
             "us7000active",
-            "disaster-us7000active-1",
+            "earthquake-us7000active-1",
             baseNow + 20 * 60 * 1_000,
         );
         await repository.upsertManualEvent("us7000next", baseNow + 20 * 60 * 1_000 + 1);
@@ -707,7 +707,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
         await repository.upsertManualEvent("us7000stale", baseNow);
-        await repository.markWorkflowStarted("us7000stale", "disaster-us7000stale-1", baseNow);
+        await repository.markWorkflowStarted("us7000stale", "earthquake-us7000stale-1", baseNow);
 
         const started = await startDueWorkflows(repository, workflow, baseNow + 20 * 60 * 1_000, 1);
 
@@ -723,7 +723,7 @@ describe("DynamoDB-compatible repository behavior", () => {
     it("does not recover a DynamoDB processing row that heartbeats during stale recovery", async () => {
         const staleRow = await eventRow("us7000race", {
             status: "processing",
-            runner_job_id: "disaster-us7000race-1",
+            runner_job_id: "earthquake-us7000race-1",
             runner_attempt: 1,
             runner_phase: "polling_command",
             updated_at_ms: baseNow,
@@ -759,7 +759,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         const processingRow = {
             ...newRow,
             status: "processing" as const,
-            runner_job_id: "disaster-us7000race-1",
+            runner_job_id: "earthquake-us7000race-1",
             runner_attempt: 1,
             runner_phase: "starting_instance" as const,
             updated_at_ms: baseNow + 1_000,
@@ -786,7 +786,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         const processingRow = {
             ...newRow,
             status: "processing" as const,
-            runner_job_id: "disaster-us7000fresh-1",
+            runner_job_id: "earthquake-us7000fresh-1",
             runner_attempt: 1,
             runner_phase: "starting_instance" as const,
             runner_started_at_ms: baseNow + 1_000,
@@ -800,7 +800,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         expect(client.currentRow).toMatchObject({
             status: "processing",
-            runner_job_id: "disaster-us7000fresh-1",
+            runner_job_id: "earthquake-us7000fresh-1",
             runner_attempt: 1,
             runner_phase: "starting_instance",
             next_retry_at_ms: null,
@@ -811,13 +811,13 @@ describe("DynamoDB-compatible repository behavior", () => {
     it("reports guarded DynamoDB result writes as stale when the conditional write loses a race", async () => {
         const staleRow = await eventRow("us7000race", {
             status: "processing",
-            runner_job_id: "disaster-us7000race-1",
+            runner_job_id: "earthquake-us7000race-1",
             runner_attempt: 1,
             runner_phase: "applying_result",
         });
         const supersedingRow = {
             ...staleRow,
-            runner_job_id: "disaster-us7000race-2",
+            runner_job_id: "earthquake-us7000race-2",
             runner_attempt: 2,
             updated_at_ms: baseNow + 1_000,
         };
@@ -928,7 +928,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000dead",
-                executionName: "disaster-us7000dead-1",
+                executionName: "earthquake-us7000dead-1",
                 attempt: 1,
             },
         ]);
@@ -965,12 +965,12 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "disaster-us7000pending-1",
+                executionName: "earthquake-us7000pending-1",
                 attempt: 1,
             },
             {
                 sourceEventId: "us7000pending",
-                executionName: "disaster-us7000pending-2",
+                executionName: "earthquake-us7000pending-2",
                 attempt: 2,
             },
         ]);
@@ -998,7 +998,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "disaster-us7000pending-1",
+                executionName: "earthquake-us7000pending-1",
                 attempt: 1,
             },
         ]);
@@ -1029,12 +1029,12 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "disaster-us7000pending-1",
+                executionName: "earthquake-us7000pending-1",
                 attempt: 1,
             },
             {
                 sourceEventId: "us7000pending",
-                executionName: "disaster-us7000pending-2",
+                executionName: "earthquake-us7000pending-2",
                 attempt: 2,
             },
         ]);
@@ -1055,7 +1055,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         const alreadyStartedRow = {
             ...dueRow,
             status: "processing" as const,
-            runner_job_id: "disaster-us7000race-1",
+            runner_job_id: "earthquake-us7000race-1",
             runner_attempt: 1,
             runner_phase: "starting_instance" as const,
             runner_started_at_ms: baseNow + 1_000,
@@ -1067,7 +1067,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         const started = await repository.markWorkflowStarted(
             "us7000race",
-            "disaster-us7000race-1",
+            "earthquake-us7000race-1",
             baseNow + 2_000,
             0,
         );
@@ -1092,7 +1092,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         const started = await repository.tryStartRunnerWorkflowExclusively(
             "us7000race",
-            "disaster-us7000race-1",
+            "earthquake-us7000race-1",
             baseNow + 2_000,
             0,
         );
@@ -1113,7 +1113,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         const started = await repository.tryStartRunnerWorkflowExclusively(
             "us7000race",
-            "disaster-us7000race-1",
+            "earthquake-us7000race-1",
             baseNow + 2_000,
             0,
         );
@@ -1121,7 +1121,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         expect(started).toEqual({
             sourceEventId: "us7000race",
-            executionName: "disaster-us7000race-1",
+            executionName: "earthquake-us7000race-1",
             attempt: 1,
         });
         expect(stopped).toBe(true);

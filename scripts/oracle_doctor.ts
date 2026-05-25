@@ -19,7 +19,7 @@ export interface OracleDoctorResult {
     checks: DoctorCheck[];
 }
 
-const DEFAULT_TEMPLATE_PATH = "infra/aws/disaster-runner/template.yaml";
+const DEFAULT_TEMPLATE_PATH = "infra/aws/earthquake-runner/template.yaml";
 const RELAYER_MODES = new Set(["preview", "dry_run", "submit"]);
 
 export async function runOracleDoctor(

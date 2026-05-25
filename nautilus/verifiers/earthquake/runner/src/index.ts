@@ -7,14 +7,14 @@ import path from "node:path";
 import {
     buildRelayerRequestPreview,
     dryRunRelayerSubmit,
-} from "@sonari/oracle-relayer";
+} from "@sonari/earthquake-relayer";
 import {
     type OracleErrorCode,
     type TeeCoreResult,
     validateRelayerSubmitInput,
     validateWorkerToTeeRequest,
     type WorkerToTeeRequest,
-} from "@sonari/oracle-shared";
+} from "@sonari/earthquake-shared";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024;
 const ABORT_KILL_GRACE_MS = 250;
@@ -44,7 +44,7 @@ export function createRunnerServer(options: RunnerServiceOptions): Server {
             }
 
             if (request.method === "GET" && request.url === "/health") {
-                writeJson(response, 200, { ok: true, service: "sonari-disaster-runner" });
+                writeJson(response, 200, { ok: true, service: "sonari-earthquake-runner" });
                 return;
             }
 

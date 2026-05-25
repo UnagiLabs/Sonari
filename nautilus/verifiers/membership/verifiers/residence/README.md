@@ -1,3 +1,3 @@
-# Residence Verifier Placeholder
+# Residence Verifier 予約領域
 
-Reserved for future residence verifier implementation.
+将来の residence verifier 実装用に予約しているディレクトリです。

@@ -10,7 +10,7 @@
 Program / Pool / Donation / DonorPass / Membership
   -> generic Nautilus verifier result
   -> generic claim / payout
-  -> disaster verifier 接続
+  -> earthquake verifier 接続
   -> residence / student verifier 拡張
 ```
 
@@ -82,10 +82,10 @@ PR 2 以降の実装は、以下の cycle を機能単位で繰り返す。
 - `contracts/devflow.md`
 - `docs/business_logic.md`
 - `docs/tech_stack.md`
-- `docs/nautilus_disaster_oracle/spec.md`
-- `docs/nautilus_disaster_oracle/devflow.md`
-- `docs/nautilus_membership_verifier/spec.md`
-- `docs/nautilus_membership_verifier/devflow.md`
+- `nautilus/verifiers/earthquake/README.md`
+- `nautilus/verifiers/earthquake/README.md`
+- `nautilus/verifiers/membership/README.md`
+- `nautilus/verifiers/membership/README.md`
 
 内容:
 
@@ -94,12 +94,12 @@ PR 2 以降の実装は、以下の cycle を機能単位で繰り返す。
 - `DisasterEvent` は Disaster Relief Program 固有 object として位置づける。
 - DonorPass、DonationRecord、初回寄付時の自動発行、寄付履歴、donor tier、donor events を定義する。
 - Membership Pass、Residence / Student metadata、Web MVP residence confidence scoring、Student Aid model を定義する。
-- Disaster Oracle は災害対象セル root 作成に集中し、個人 residence 判定は membership verifier に分離する。
+- Earthquake Oracle は災害対象セル root 作成に集中し、個人 residence 判定は membership verifier に分離する。
 
 最初に定義する test:
 
 - PR 1 は docs-only のため executable test は作らない。
-- `contracts/spec.md` と `contracts/devflow.md` の acceptance matrix が、Pool split、MembershipPass、DonorPass、Claim / Payout、Disaster Oracle v1 の不変条件を覆うことをレビュー観点として固定する。
+- `contracts/spec.md` と `contracts/devflow.md` の acceptance matrix が、Pool split、MembershipPass、DonorPass、Claim / Payout、Earthquake Oracle v1 の不変条件を覆うことをレビュー観点として固定する。
 - schema、BCS field order、Move type、golden vector を変更していないことを diff で確認する。
 
 実装順:
@@ -111,10 +111,10 @@ PR 2 以降の実装は、以下の cycle を機能単位で繰り返す。
 完了条件:
 
 - docs-only 差分である。
-- existing Disaster Oracle v1 payload、schema、BCS field order、`AffectedCellLeaf` 仕様を変更していない。
+- existing Earthquake Oracle v1 payload、schema、BCS field order、`AffectedCellLeaf` 仕様を変更していない。
 - 既存の Pool split、MembershipPass、Claim / Payout、golden vector を変更していない。
 - `contracts/spec.md` とこの devflow の test plan / acceptance matrix が矛盾していない。
-- test plan が Pool split、MembershipPass、DonorPass、Claim / Payout、Disaster Oracle v1 の不変条件を覆っている。
+- test plan が Pool split、MembershipPass、DonorPass、Claim / Payout、Earthquake Oracle v1 の不変条件を覆っている。
 - 汎用 Program 基盤から disaster / student へ自然に拡張できる。
 
 ### PR 2. Program / Admin / Pause scaffold
@@ -477,7 +477,7 @@ PR4 の実装範囲:
 - Pool 残高、CampaignBudget、PayoutPolicy cap を超えない。
 - duplicate claim を拒否する。
 
-### PR 9. Disaster Oracle payload v1 接続
+### PR 9. Earthquake Oracle payload v1 接続
 
 対象:
 
@@ -487,7 +487,7 @@ PR4 の実装範囲:
 
 内容:
 
-- 既存 Disaster Oracle v1 BCS payload decode
+- 既存 Earthquake Oracle v1 BCS payload decode
 - signature / intent / freshness / revision validation
 - `DisasterEvent` 作成
 - `affected_cells_root` 保存
@@ -548,7 +548,7 @@ PR4 の実装範囲:
 
 完了条件:
 
-- Disaster Oracle fixture proof を Move で検証できる。
+- Earthquake Oracle fixture proof を Move で検証できる。
 - `AffectedCellLeaf` canonical order を既存 schema と一致させる。
 
 ### PR 11. Disaster Claim composition
@@ -765,7 +765,7 @@ docs-only PR では以下を確認する。
 - Mermaid fence の基本構文
 - docs-only 差分であること
 - `contracts/spec.md` と devflow の test plan / acceptance matrix が矛盾しないこと
-- test plan が Pool split、MembershipPass、DonorPass、Claim / Payout、Disaster Oracle v1 不変条件を覆うこと
+- test plan が Pool split、MembershipPass、DonorPass、Claim / Payout、Earthquake Oracle v1 不変条件を覆うこと
 - `DisasterEvent` が唯一の Claim 基盤に見える表現が残っていないこと
 - DonorPass が Claim / Payout 権利や支払い保証に見える表現が残っていないこと
 - MembershipPass が受取者向け、DonorPass が寄付者向けとして分離されていること

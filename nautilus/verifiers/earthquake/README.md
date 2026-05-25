@@ -1,156 +1,107 @@
-# Disaster Oracle — システム全体ガイド
+# Sonari 地震検証器
 
-地震が起きたとき、「本当に被害があったか」をコンピュータが自動で確認し、保険金などの支払いをブロックチェーン上で実行する仕組みです。
+## 概要
 
----
+地震検証器は、Sonari MVP の地震オラクル実装です。Nautilus / TEE 内で公開地震データを検証し、Sui コントラクトが請求処理向けの災害イベント root を作成するための署名済み finalized payload を生成します。
 
-## なぜこのシステムが必要か
+MVP の対象は地震のみです。津波、浸水、火災、原発事故、その他の二次災害はこの検証器では finalize しません。
 
-従来の地震保険は、担当者が現地を調査して被害を確認するため、支払いまでに数週間〜数ヶ月かかります。このシステムは：
+## 責務
 
-- **USGS**（アメリカ地質調査所）の公開地震データを自動取得
-- **TEE**（改ざんが証明できる安全な計算環境）でデータを検証・計算
-- **SUIブロックチェーン**に結果を記録
+- Watcher で USGS の地震候補を検出し、DynamoDB にオフチェーン状態を保持する。
+- Worker、watcher、relayer、UI、外部 API 応答を信頼せず、TEE 内で source data を再取得して検証する。
+- ShakeMap MMI、H3 cell、affected cells、Merkle root、source hash、BCS payload bytes、TEE signature を生成する。
+- off-chain processing state として `pending_source`、`pending_mmi`、`rejected`、`ignored_small`、`failed`、`finalized` を返す。
+- Sui 投稿対象には署名済み `finalized` payload だけを渡す。
 
-することで、数時間以内に支払いの根拠となる「Oracle結果」を生成します。
+## 信頼境界
 
----
+信頼境界は署名済み TEE result です。Worker、Lambda、watcher、runner、relayer、UI は候補検出、queue 投入、状態保存、payload 配送を担当できますが、payload の意味を変更してはいけません。
 
-## 全体フロー
+Sui コントラクトは、登録済み地震 verifier key、intent、`oracle_version`、freshness、revision、source、hash、affected cell root、finalized status を検証します。Membership / residence eligibility は `nautilus/verifiers/membership/` の責務です。
 
-```mermaid
-flowchart TD
-  quake[地震が発生する]
+`DisasterEvent` や `disaster_event` などの Move 名は、将来の複数災害種類にも対応する disaster relief コントラクトの総称として残します。この地震検証器実装の名前ではありません。
 
-  usgs[
-    USGS（アメリカ地質調査所）<br/>
-    地震情報 + ShakeMap（揺れの強さマップ）を公開
-  ]
+## データソース
 
-  watcher[
-    Watcher（監視役）<br/>
-    AWS Lambda 上で動く見張り番<br/><br/>
-    ・M5.5以上 / 推定震度6以上 / 警報色ありなら処理開始<br/>
-    ・DynamoDBデータベースで地震の状態を管理<br/>
-    ・AWS EC2 / Nitro Enclaves runner に処理を依頼
-  ]
+- MVP の主要データソースは USGS earthquake detail GeoJSON と ShakeMap `grid.xml.zip`。
+- JMA など他の公開地震データは将来追加可能ですが、明示的な source policy として追加する必要があります。
+- Magnitude、summary MMI、alert、tsunami flag などの watcher summary fields は runner 起動対象を絞るための screening signal に限定します。Finalization は TEE が再取得した source data と cell-level MMI に基づきます。
 
-  tee[
-    TEE Core（検証役）<br/>
-    Rust で書かれた安全な計算環境<br/><br/>
-    ・USGS データを再取得・検証<br/>
-    ・H3セル変換<br/>
-    ・P90計算<br/>
-    ・Merkleツリー構築<br/>
-    ・Ed25519署名
-  ]
+## AWS 実行モデル
 
-  relayer[
-    Relayer（中継役）<br/>
-    署名済み payload を<br/>
-    Sui ブロックチェーンに送信
-  ]
+AWS は処理対象がある時だけ地震検証器を起動します。
 
-  sui[
-    Sui ブロックチェーン<br/>
-    Oracle結果を記録<br/>
-    保険金などの支払いをスマートコントラクトで実行
-  ]
+1. EventBridge Scheduler が watcher Lambda を起動する。
+2. Watcher が USGS recent earthquake feed を scan し、DynamoDB に event state を記録する。
+3. 条件を満たした event、または手動投入された event が Step Functions ワークフローを開始する。
+4. ワークフローが Auto Scaling Group を `0 -> 1` に scale する。
+5. EC2 + Nitro Enclave が本番 TEE command を実行する。
+6. 結果を S3 に保存し、DynamoDB state に反映する。
+7. ワークフローが ASG を `1 -> 0` に戻す。
 
-  quake --> usgs
-  usgs -->|RSSフィードを定期取得| watcher
-  watcher -->|Step Functions runner workflow| tee
-  tee -->|署名済み結果| watcher
-  watcher -->|finalized payload を転送| relayer
-  relayer -->|transaction submit| sui
+通常時は `DesiredCapacity = 0` です。Relayer は preview / dry-run を既定とし、実 submit は明示設定がある場合だけ有効にします。Signer 設定がない場合は fail-closed にします。
+
+CloudFormation テンプレートは `infra/aws/earthquake-runner/README.md` を参照してください。
+
+## ローカル開発
+
+```bash
+pnpm --filter @sonari/earthquake-shared test
+pnpm --filter @sonari/earthquake-watcher test
+pnpm --filter @sonari/earthquake-relayer test
+pnpm --filter @sonari/earthquake-runner test
+cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml
+python3 nautilus/verifiers/earthquake/fixtures/verify_fixtures.py
 ```
 
----
+ルートからの検証:
 
-## 状態遷移
-
-地震イベントは以下の状態を通って処理されます：
-
-```mermaid
-stateDiagram-v2
-  [*] --> new: 新規検知
-  new --> ignored_small: M5.5未満など小さい
-  new --> queued: 処理対象
-  queued --> processing: TEE処理開始
-  processing --> pending_source: ShakeMapがまだない
-  pending_source --> queued: 再試行
-  processing --> pending_mmi: グリッドデータがない
-  pending_mmi --> queued: 再試行
-  processing --> rejected: 締切超過
-  processing --> finalized: TEE検証完了
-  finalized --> submitted: ブロックチェーン送信
+```bash
+pnpm check
+pnpm typecheck
+pnpm test
+pnpm test:oracle
 ```
-
-> `failed` はシステムエラー（AWS起動失敗など）で、再試行可能な状態です。
-
----
-
-## 各コンポーネントの役割
-
-### [shared/](./shared/) — 共通ルール定義
-TypeScript と Rust の両方で使う型・定数・バリデーション関数を管理します。ペイロードの26フィールド定義、エラーコード一覧などがここにあります。
-
-### [tee/](./tee/) — TEE Core（Rust）
-地震データの検証と Oracle ペイロードの計算を行います。改ざん防止が証明できる TEE 環境で実行され、Ed25519 署名で結果の真正性を保証します。
-
-### [runner/](./runner/) — AWS Runner Host（TypeScript）
-EC2 上で SSM runner workflow を公開し、Step Functions からの SSM command と relayer preview/dry-run を受けます。`process` は Nitro Enclave 側の production TEE entrypoint に `DisasterVerifierRequest` を渡します。
-
-### [watcher/](./watcher/) — 監視 & オーケストレーション（TypeScript）
-AWS Lambda 上で動く監視システム。地震を検知し、TEE Core への処理依頼・結果の記録・Relayer への転送を管理します。
-
-### [relayer/](./relayer/) — ブロックチェーン中継（TypeScript）
-TEE の署名済み結果を SUI ブロックチェーンのスマートコントラクトに送信します。
-
-### [fixtures/](./fixtures/) — テストデータ
-TEE Core の正確性を検証するための入力データと期待結果を管理します。
-
----
-
-## 用語集
-
-| 用語 | 意味 |
-|---|---|
-| **USGS** | アメリカ地質調査所。地震データの公開元 |
-| **ShakeMap** | 地震の揺れの強さを地図上に表したもの（USGS提供） |
-| **MMI** | 修正メルカリ震度（Modified Mercalli Intensity）。揺れの強さの国際的な尺度 |
-| **H3セル** | 地球の表面を六角形のタイルで区切った単位。Uber社が開発 |
-| **TEE** | Trusted Execution Environment。外部から内容を見えなくしたまま計算できる安全な環境 |
-| **Merkleツリー** | 大量のデータを木のような構造でまとめ、改ざんを効率的に検出できる仕組み |
-| **BCS** | Binary Canonical Serialization。SUIブロックチェーンで使うバイト列変換形式 |
-| **Ed25519** | 電子署名のアルゴリズム。計算機が「この結果は私が出した」と証明するために使う |
-| **SUI** | 高速なブロックチェーンプラットフォーム |
-| **Oracle** | ブロックチェーン外のデータ（地震情報など）をブロックチェーン上に届ける仕組み |
-| **P90** | 90パーセンタイル。100個のデータを小さい順に並べたとき90番目の値 |
-
----
 
 ## ディレクトリ構成
 
+```txt
+nautilus/verifiers/earthquake/
+  README.md
+  shared/      TypeScript contract、定数、validator
+  tee/         Rust / Nautilus core
+  watcher/     candidate scan、state 管理、runner workflow 起動
+  runner/      EC2 host service と Nitro Enclave command bridge
+  relayer/     Sui preview、dry-run、明示 submit
+  fixtures/    USGS fixture と golden output check
 ```
-earthquake/
-├── README.md             ← このファイル
-├── shared/               ← 共通型定義・定数・バリデーション
-│   ├── README.md
-│   └── src/index.ts
-├── tee/                  ← Rust製 Oracle Core（TEE環境で動く）
-│   ├── README.md
-│   └── src/
-├── watcher/              ← AWS Lambda 監視システム
-│   ├── README.md
-│   └── src/
-├── runner/               ← AWS EC2 / Nitro Enclaves host runner
-│   ├── package.json
-│   └── src/
-├── relayer/              ← SUI ブロックチェーン中継
-│   ├── README.md
-│   └── src/
-└── fixtures/             ← テストデータ
-    ├── README.md
-    └── usgs/
-```
+
+詳細なコンポーネント説明は各サブディレクトリの README に置きます。
+
+## 出力
+
+TEE の出力は次のいずれかです。
+
+- `pending_source`: source または ShakeMap がまだ利用できない。
+- `pending_mmi`: source はあるが利用可能な MMI grid data がまだない。
+- `rejected`: source は検証済みだが claimable affected cells を生成できない。
+- `finalized`: affected cells root、artifact hash、BCS bytes、公開鍵、signature を含む署名済み地震オラクル v1 payload。
+
+Sui 投稿対象になるのは `finalized` 出力だけです。
+
+## プライバシー / セキュリティ
+
+- この検証器は個人の residence、student、phone、GPS、address、document evidence を扱いません。
+- 生の地震 source artifact は hash 化し、必要に応じて Walrus-backed reference として archive します。
+- TEE signing key は本番 TEE boundary 内に隔離します。
+- Watcher と relayer の入力は contract boundary では untrusted として扱います。
+- Source fetch、archive verification、BCS serialization、Merkle generation、signing の失敗は fail-closed にします。
+
+## 今後の作業
+
+- JMA など他の公開地震 feed を明示的に versioned source policy として追加する。
+- 新しい ShakeMap format は fixture と golden vector を追加してから対応する。
+- 単一 region MVP が安定した後に multi-region runner fallback を追加する。
+- pending、rejected、failed、finalized state の運用 dashboard を追加する。
+- 検証器ファミリー間で重複が見えた時点で runner / relayer utility の共通化を検討する。

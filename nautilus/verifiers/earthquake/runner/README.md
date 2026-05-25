@@ -1,6 +1,8 @@
-# Disaster Runner
+# 地震 Runner
 
-disaster verifier 用の AWS EC2 host service です。AWS Lambda watcher が利用する Step Functions runner workflow を公開します。
+地震検証器用の AWS EC2 ホストサービスです。AWS Lambda watcher が利用する Step Functions runner workflow から呼び出されます。
+
+提供するエンドポイント:
 
 - `GET /health`
 - `POST /start`
@@ -9,7 +11,7 @@ disaster verifier 用の AWS EC2 host service です。AWS Lambda watcher が利
 - `POST /relayer/preview`
 - `POST /relayer/dry_run`
 
-すべての endpoint は `Authorization: Bearer <RUNNER_TOKEN>` を必須とします。`/process` が受け付ける body は次の形式だけです。
+すべてのエンドポイントは `Authorization: Bearer <RUNNER_TOKEN>` を必須とします。`/process` が受け付ける body は次の形式だけです。
 
 ```json
 {
@@ -22,15 +24,15 @@ disaster verifier 用の AWS EC2 host service です。AWS Lambda watcher が利
 }
 ```
 
-lifecycle contract:
+ライフサイクル契約:
 
-1. `POST /start` を `{}` で呼び出します。response は `{ "ok": true, "runner_id": "..." }` を含みます。
-2. 上記 payload wrapper と `x-runner-id: <runner_id>` header を付けて `POST /process` を呼び出します。runner は runner id がない request、または unknown runner id の request を拒否します。
-3. `{ "runner_id": "..." }` で `POST /stop` を呼び出します。対象 runner で TEE command が実行中の場合、service はそれを abort し、spawn 済み child process を終了します。unknown runner id は error です。
+1. `POST /start` を `{}` で呼び出す。応答は `{ "ok": true, "runner_id": "..." }` を含む。
+2. 上記 payload wrapper と `x-runner-id: <runner_id>` header を付けて `POST /process` を呼び出す。Runner は runner id がない request、または unknown runner id の request を拒否する。
+3. `{ "runner_id": "..." }` で `POST /stop` を呼び出す。対象 runner で TEE command が実行中の場合、service はそれを abort し、spawn 済み child process を終了する。Unknown runner id は error にする。
 
-`RUNNER_BACKEND=aws` の場合、設定された `NITRO_ENCLAVE_PROCESS_COMMAND` を実行し、request JSON を stdin で渡します。`RUNNER_BACKEND=aws` でない場合、local verification 用に `cargo run --manifest-path <TEE_CARGO_MANIFEST_PATH> -- production --input <tmp>` を使います。
+`RUNNER_BACKEND=aws` の場合、設定された `NITRO_ENCLAVE_PROCESS_COMMAND` を実行し、request JSON を stdin で渡します。`RUNNER_BACKEND=aws` 以外では、local verification 用に `cargo run --manifest-path <TEE_CARGO_MANIFEST_PATH> -- production --input <tmp>` を使います。
 
-本番必須 environment:
+本番必須の環境変数:
 
 ```txt
 RUNNER_TOKEN=<bearer-token>

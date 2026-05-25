@@ -1,3 +1,3 @@
-# Student Fixtures Placeholder
+# Student フィクスチャ予約領域
 
-Reserved for future student verifier fixtures.
+将来の student verifier fixture 用に予約しているディレクトリです。

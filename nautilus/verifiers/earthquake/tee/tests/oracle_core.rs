@@ -411,10 +411,10 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
                 .exists()
                 .then(|| read_fixture(&grid_path)),
             raw_detail_uri: format!(
-                "nautilus_disaster_oracle/fixtures/{case_id}/input/usgs_detail.json"
+                "nautilus/verifiers/earthquake/fixtures/{case_id}/input/usgs_detail.json"
             ),
             raw_grid_uri: Path::new(&grid_path).exists().then(|| {
-                format!("nautilus_disaster_oracle/fixtures/{case_id}/input/usgs_grid.xml")
+                format!("nautilus/verifiers/earthquake/fixtures/{case_id}/input/usgs_grid.xml")
             }),
             raw_data_uri: String::new(),
             affected_cells_uri: String::new(),
@@ -481,7 +481,7 @@ fn low_level_cli_normalizes_grid_zip_artifact_with_raw_grid_uri() {
         .arg(&grid_zip_path)
         .args([
             "--raw-detail-uri",
-            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
             "--raw-grid-uri",
             "https://example.test/download/grid.xml.zip",
             "--raw-data-uri",
@@ -555,7 +555,7 @@ fn low_level_cli_infers_zip_grid_uri_from_file_path_when_raw_grid_uri_is_absent(
         .arg(&grid_zip_path)
         .args([
             "--raw-detail-uri",
-            "nautilus_disaster_oracle/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
             "--raw-data-uri",
             "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
             "--affected-cells-uri",
@@ -794,11 +794,11 @@ fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
             .exists()
             .then(|| read_fixture(&grid_path)),
         raw_detail_uri: format!(
-            "nautilus_disaster_oracle/fixtures/{case_id}/input/usgs_detail.json"
+            "nautilus/verifiers/earthquake/fixtures/{case_id}/input/usgs_detail.json"
         ),
-        raw_grid_uri: Path::new(&grid_path)
-            .exists()
-            .then(|| format!("nautilus_disaster_oracle/fixtures/{case_id}/input/usgs_grid.xml")),
+        raw_grid_uri: Path::new(&grid_path).exists().then(|| {
+            format!("nautilus/verifiers/earthquake/fixtures/{case_id}/input/usgs_grid.xml")
+        }),
         raw_data_uri: String::new(),
         affected_cells_uri: String::new(),
     }

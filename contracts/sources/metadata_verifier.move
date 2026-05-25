@@ -9,7 +9,7 @@ use sui::vec_map::{Self, VecMap};
 
 const VERIFIER_FAMILY_RESIDENCE: u8 = 1;
 const VERIFIER_FAMILY_STUDENT: u8 = 2;
-const VERIFIER_FAMILY_DISASTER_ORACLE: u8 = 3;
+const VERIFIER_FAMILY_EARTHQUAKE_ORACLE: u8 = 3;
 const VERIFIER_VERSION_V1: u64 = 1;
 const TARGET_KIND_VERIFIER_REGISTRY: u8 = 6;
 const REGISTRY_KIND_VERIFIER: u8 = 3;
@@ -346,8 +346,8 @@ public fun verifier_family_student(): u8 {
     VERIFIER_FAMILY_STUDENT
 }
 
-public fun verifier_family_disaster_oracle(): u8 {
-    VERIFIER_FAMILY_DISASTER_ORACLE
+public fun verifier_family_earthquake_oracle(): u8 {
+    VERIFIER_FAMILY_EARTHQUAKE_ORACLE
 }
 
 public fun verifier_version_v1(): u64 {
@@ -564,7 +564,7 @@ fun assert_allowed_verifier_family(verifier_family: u8) {
     assert!(
         verifier_family == VERIFIER_FAMILY_RESIDENCE
             || verifier_family == VERIFIER_FAMILY_STUDENT
-            || verifier_family == VERIFIER_FAMILY_DISASTER_ORACLE,
+            || verifier_family == VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
         EVerifierFamilyMismatch,
     );
 }

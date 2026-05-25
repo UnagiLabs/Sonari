@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Sonari disaster oracle on AWS Lambda, Step Functions, and EC2 Nitro Enclaves with zero idle EC2 capacity.
+Description: Sonari earthquake oracle on AWS Lambda, Step Functions, and EC2 Nitro Enclaves with zero idle EC2 capacity.
 
 Parameters:
   VpcId:
@@ -14,7 +14,7 @@ Parameters:
     Type: String
   NitroEnclaveProcessCommand:
     Type: String
-    Description: Executable path for the host command that forwards disaster verifier requests to Nitro Enclave.
+    Description: Executable path for the host command that forwards earthquake verifier requests to Nitro Enclave.
   WalrusAggregatorUrl:
     Type: String
     Description: Walrus aggregator URL used by the production TEE process.
@@ -66,7 +66,7 @@ Resources:
   RunnerLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /sonari/disaster-runner/${AWS::StackName}
+      LogGroupName: !Sub /sonari/earthquake-runner/${AWS::StackName}
       RetentionInDays: !Ref LogsRetentionDays
 
   RunnerRole:
@@ -107,7 +107,7 @@ Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Sonari disaster runner instance with SSM-only control plane
+      GroupDescription: Sonari earthquake runner instance with SSM-only control plane
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: -1
@@ -359,7 +359,7 @@ Resources:
       StateMachineType: STANDARD
       DefinitionString: !Sub |
         {
-          "Comment": "Run Sonari disaster verifier on ephemeral EC2 Nitro Enclave capacity.",
+          "Comment": "Run Sonari earthquake verifier on ephemeral EC2 Nitro Enclave capacity.",
           "StartAt": "StartInstance",
           "States": {
             "StartInstance": {

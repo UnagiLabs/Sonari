@@ -2,7 +2,7 @@ module contracts::payload_v1;
 
 use sui::bcs::{Self, BCS};
 
-const INTENT_DISASTER_ORACLE_PAYLOAD_V1: u8 = 1;
+const INTENT_EARTHQUAKE_ORACLE_PAYLOAD_V1: u8 = 1;
 const ORACLE_VERSION_V1: u64 = 1;
 const HAZARD_TYPE_EARTHQUAKE: u8 = 1;
 const STATUS_FINALIZED: u8 = 3;
@@ -97,7 +97,7 @@ public fun decode_finalized(bytes: vector<u8>, now_ms: u64): Payload {
 }
 
 fun assert_finalized(payload: &Payload, now_ms: u64) {
-    assert!(payload.intent == INTENT_DISASTER_ORACLE_PAYLOAD_V1, EInvalidIntent);
+    assert!(payload.intent == INTENT_EARTHQUAKE_ORACLE_PAYLOAD_V1, EInvalidIntent);
     assert!(payload.oracle_version == ORACLE_VERSION_V1, EUnsupportedVersion);
     assert!(payload.hazard_type == HAZARD_TYPE_EARTHQUAKE, EUnsupportedHazardType);
     assert!(payload.status == STATUS_FINALIZED, ENonFinalizedStatus);
@@ -180,8 +180,8 @@ public fun occurred_at_ms(payload: &Payload): u64 {
     payload.occurred_at_ms
 }
 
-public fun intent_disaster_oracle_payload_v1(): u8 {
-    INTENT_DISASTER_ORACLE_PAYLOAD_V1
+public fun intent_earthquake_oracle_payload_v1(): u8 {
+    INTENT_EARTHQUAKE_ORACLE_PAYLOAD_V1
 }
 
 public fun hazard_type_earthquake(): u8 {
