@@ -10,6 +10,7 @@ import {
 
 const sfn = new SFNClient({});
 const secrets = new SecretsManagerClient({});
+let cachedManualToken: string | undefined;
 
 class StepFunctionsWorkflowStarter implements WorkflowStarter {
     constructor(private readonly stateMachineArn: string) {}
@@ -55,12 +56,17 @@ async function manualToken(): Promise<string> {
     ) {
         return process.env.MANUAL_SUBMIT_TOKEN;
     }
+    if (cachedManualToken !== undefined) {
+        return cachedManualToken;
+    }
     const secretId = requiredEnv("RUNNER_TOKEN_SECRET_ARN");
     const result = await secrets.send(new GetSecretValueCommand({ SecretId: secretId }));
-    if (result.SecretString === undefined || result.SecretString.length === 0) {
+    const token = result.SecretString?.trim();
+    if (token === undefined || token.length === 0) {
         throw new Error(`${secretId} did not contain SecretString`);
     }
-    return result.SecretString.trim();
+    cachedManualToken = token;
+    return token;
 }
 
 function requiredEnv(name: string): string {
