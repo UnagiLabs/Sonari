@@ -554,11 +554,63 @@ describe("AWS runner workflow helper", () => {
             "NITRO_ENCLAVE_PROCESS_COMMAND='/opt/sonari/bin/run-enclave '\\''quoted value'\\'''",
         );
         expect(ssm.commands[0]).toContain(
+            "| '/opt/sonari/bin/run-enclave' 'quoted value' > '/tmp/sonari-tee-result-us7000sonari-1800000000123.json'",
+        );
+        expect(ssm.commands[0]).not.toContain('| "$NITRO_ENCLAVE_PROCESS_COMMAND"');
+        expect(ssm.commands[0]).toContain(
             "'s3://sonari-results-$(touch bad)/results/us7000sonari/1800000000123.json'",
         );
         expect(ssm.commands[0]).not.toContain("$RESULT_S3_KEY'");
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[1]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000124.json");
+    });
+
+    it("preserves command arguments for direct Node-based TEE commands", async () => {
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            now: () => 1_800_000_000_123,
+            config: {
+                ...baseConfig(),
+                nitroEnclaveProcessCommand: "node /opt/sonari/process.js --mode production",
+            },
+        });
+
+        await handler({
+            action: "dispatch_tee_command",
+            source_event_id: "us7000sonari",
+            instance_id: "i-123",
+        });
+
+        expect(ssm.commands[0]).toContain(
+            "| 'node' '/opt/sonari/process.js' '--mode' 'production' > '/tmp/sonari-tee-result-us7000sonari-1800000000123.json'",
+        );
+    });
+
+    it("fails closed before dispatching malformed Nitro command strings", async () => {
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            config: {
+                ...baseConfig(),
+                nitroEnclaveProcessCommand: "/opt/sonari/bin/run-enclave 'unterminated",
+            },
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                source_event_id: "us7000sonari",
+                instance_id: "i-123",
+            }),
+        ).rejects.toThrow(/invalid NITRO_ENCLAVE_PROCESS_COMMAND/);
+        expect(ssm.commands).toEqual([]);
     });
 
     it("rejects malformed S3 TEE results", async () => {

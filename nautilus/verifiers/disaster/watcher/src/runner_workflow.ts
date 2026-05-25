@@ -579,6 +579,9 @@ function buildSsmShellCommand(input: {
     nitroEnclaveProcessCommand: string;
 }): string {
     const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
+    const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
+        .map(shellSingleQuote)
+        .join(" ");
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
@@ -589,7 +592,7 @@ function buildSsmShellCommand(input: {
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' ${shellSingleQuote(JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)))} | "$NITRO_ENCLAVE_PROCESS_COMMAND" > ${shellSingleQuote(tempResultPath)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(buildDisasterVerifierRequest(input.sourceEventId)))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
@@ -613,6 +616,81 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
 
 function buildRequiredShellEnvCheck(name: string): string {
     return `: "\${${name}:?${name} is required}"`;
+}
+
+function parseNitroEnclaveProcessCommand(command: string): string[] {
+    const words: string[] = [];
+    let current = "";
+    let quote: "'" | '"' | undefined;
+    let wordStarted = false;
+
+    for (let index = 0; index < command.length; index += 1) {
+        const char = command[index];
+        if (char === undefined) {
+            throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND");
+        }
+        if (quote === "'") {
+            if (char === "'") {
+                quote = undefined;
+            } else {
+                current += char;
+            }
+            continue;
+        }
+        if (quote === '"') {
+            if (char === '"') {
+                quote = undefined;
+                continue;
+            }
+            if (char === "\\") {
+                const next = command[index + 1];
+                if (next === undefined) {
+                    throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: trailing escape");
+                }
+                current += next;
+                index += 1;
+                continue;
+            }
+            current += char;
+            continue;
+        }
+        if (char === "'" || char === '"') {
+            quote = char;
+            wordStarted = true;
+            continue;
+        }
+        if (char === "\\") {
+            const next = command[index + 1];
+            if (next === undefined) {
+                throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: trailing escape");
+            }
+            current += next;
+            wordStarted = true;
+            index += 1;
+            continue;
+        }
+        if (/\s/.test(char)) {
+            if (wordStarted) {
+                words.push(current);
+                current = "";
+                wordStarted = false;
+            }
+            continue;
+        }
+        current += char;
+        wordStarted = true;
+    }
+
+    if (quote !== undefined) {
+        throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: unterminated quote");
+    }
+    if (wordStarted) {
+        words.push(current);
+    }
+    if (words.length === 0 || words[0]?.length === 0) {
+        throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: command is empty");
+    }
+    return words;
 }
 
 function shellSingleQuote(value: string): string {
