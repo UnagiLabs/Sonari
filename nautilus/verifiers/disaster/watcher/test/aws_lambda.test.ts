@@ -742,6 +742,37 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("does not overwrite a DynamoDB row that becomes processing during deferUntil", async () => {
+        const newRow = await eventRow("us7000fresh", {
+            status: "new",
+            next_retry_at_ms: null,
+            updated_at_ms: baseNow,
+        });
+        const processingRow = {
+            ...newRow,
+            status: "processing" as const,
+            runner_job_id: "disaster-us7000fresh-1",
+            runner_attempt: 1,
+            runner_phase: "starting_instance" as const,
+            runner_started_at_ms: baseNow + 1_000,
+            runner_stopped_at_ms: null,
+            updated_at_ms: baseNow + 1_000,
+        };
+        const client = new StaleReadRaceClient(newRow, processingRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await repository.deferUntil("us7000fresh", baseNow + DAY_MS, baseNow + 2_000);
+
+        expect(client.currentRow).toMatchObject({
+            status: "processing",
+            runner_job_id: "disaster-us7000fresh-1",
+            runner_attempt: 1,
+            runner_phase: "starting_instance",
+            next_retry_at_ms: null,
+            updated_at_ms: baseNow + 1_000,
+        });
+    });
+
     it("reports guarded DynamoDB result writes as stale when the conditional write loses a race", async () => {
         const staleRow = await eventRow("us7000race", {
             status: "processing",
