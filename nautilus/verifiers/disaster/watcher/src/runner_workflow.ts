@@ -293,7 +293,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return {
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
-                    result: parseTeeResult(text),
+                    result: parseTeeResult(text, event.source_event_id),
                 };
             }
             case "apply_result": {
@@ -787,7 +787,7 @@ function isTransientCommandInvocationLookupError(error: unknown): boolean {
     );
 }
 
-function parseTeeResult(text: string): TeeCoreResult {
+function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreResult {
     const parsed = JSON.parse(text) as unknown;
     if (isRecord(parsed) && parsed.status === "finalized") {
         const validation = validateRelayerSubmitInput(parsed);
@@ -804,9 +804,32 @@ function parseTeeResult(text: string): TeeCoreResult {
         typeof parsed.source_event_id === "string" &&
         typeof parsed.error_code === "string"
     ) {
+        if (parsed.source_event_id !== expectedSourceEventId) {
+            throw new Error("TEE result source_event_id mismatch");
+        }
+        if (!isValidNonFinalizedTeeErrorCode(parsed.status, parsed.error_code)) {
+            throw new Error("invalid non-finalized TEE result error_code");
+        }
         return parsed as TeeCoreResult;
     }
     throw new Error("invalid TEE result");
+}
+
+function isValidNonFinalizedTeeErrorCode(
+    status: "pending_source" | "pending_mmi" | "rejected",
+    errorCode: string,
+): errorCode is OracleErrorCode {
+    if (status === "pending_source") {
+        return (
+            errorCode === "USGS_DETAIL_UNAVAILABLE" ||
+            errorCode === "SHAKEMAP_PRODUCT_MISSING" ||
+            errorCode === "SHAKEMAP_GRID_UNAVAILABLE"
+        );
+    }
+    if (status === "pending_mmi") {
+        return errorCode === "MMI_NOT_AVAILABLE";
+    }
+    return (ERROR_CODES as readonly string[]).includes(errorCode);
 }
 
 function isPendingTeeResult(result: TeeCoreResult): boolean {

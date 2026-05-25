@@ -674,6 +674,54 @@ describe("AWS runner workflow helper", () => {
         ).rejects.toThrow(/invalid finalized TEE result/);
     });
 
+    it("rejects non-finalized S3 TEE results with invalid status-specific error codes", async () => {
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({
+                body: JSON.stringify({
+                    status: "pending_mmi",
+                    source_event_id: "us7000sonari",
+                    error_code: "RELAYER_SUBMIT_FAILED",
+                }),
+            }),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "read_result",
+                source_event_id: "us7000sonari",
+                result_s3_key: "results/us7000sonari/cmd-123.json",
+            }),
+        ).rejects.toThrow(/invalid non-finalized TEE result/);
+    });
+
+    it("rejects non-finalized S3 TEE results for a different source event", async () => {
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({
+                body: JSON.stringify({
+                    status: "pending_source",
+                    source_event_id: "us7000other",
+                    error_code: "SHAKEMAP_PRODUCT_MISSING",
+                }),
+            }),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "read_result",
+                source_event_id: "us7000sonari",
+                result_s3_key: "results/us7000sonari/cmd-123.json",
+            }),
+        ).rejects.toThrow(/source_event_id mismatch/);
+    });
+
     it("applies TEE results to DynamoDB-compatible state and skips relayer when not configured", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -833,6 +881,7 @@ class RecordingS3Client implements S3ClientLike {
             this.options.body ??
             JSON.stringify({
                 status: "pending_source",
+                source_event_id: "us7000sonari",
                 error_code: "SHAKEMAP_PRODUCT_MISSING",
             })
         );
