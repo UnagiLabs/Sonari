@@ -145,6 +145,75 @@ describe("AWS Lambda watcher handlers", () => {
         await expect(repository.get("us7000manual")).resolves.toMatchObject({ status: "processing" });
     });
 
+    it("manual submissions clear retry backoff and rerun existing failed or pending events", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 4_000,
+            token: manualAuthToken,
+        });
+
+        await repository.upsertManualEvent("us7000failed", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000failed",
+            "disaster-us7000failed-1",
+            baseNow + 1_000,
+        );
+        await repository.markFailed(
+            "us7000failed",
+            "AWS_RUNNER_TIMEOUT",
+            baseNow + 2_000,
+            baseNow + HOUR_MS,
+            "timed out",
+            1,
+        );
+
+        const failedResponse = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000failed" }),
+        });
+
+        expect(failedResponse.statusCode).toBe(200);
+        expect(JSON.parse(failedResponse.body)).toMatchObject({ workflow_started: 1 });
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000failed",
+                executionName: "disaster-us7000failed-2",
+                attempt: 2,
+            },
+        ]);
+
+        await repository.upsertManualEvent("us7000pending", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000pending",
+            "disaster-us7000pending-1",
+            baseNow + 1_000,
+        );
+        await repository.applyRunnerResult(
+            "us7000pending",
+            pendingSourceResult("us7000pending"),
+            baseNow + 2_000,
+            baseNow + HOUR_MS,
+            1,
+        );
+        await repository.markWorkflowStopped("us7000pending", 1, baseNow + 3_000);
+
+        const pendingResponse = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000pending" }),
+        });
+
+        expect(pendingResponse.statusCode).toBe(200);
+        expect(JSON.parse(pendingResponse.body)).toMatchObject({ workflow_started: 1 });
+        expect(workflow.starts.at(-1)).toEqual({
+            sourceEventId: "us7000pending",
+            executionName: "disaster-us7000pending-2",
+            attempt: 2,
+        });
+    });
+
     it("rejects malformed manual source event IDs before enqueueing runner work", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -263,6 +332,36 @@ describe("DynamoDB-compatible repository behavior", () => {
             status: "new",
             error_code: null,
         });
+    });
+
+    it("clears DynamoDB retry backoff for manual reruns of failed and pending events", async () => {
+        for (const row of [
+            await eventRow("us7000failed", {
+                status: "failed",
+                retry_count: 1,
+                next_retry_at_ms: baseNow + HOUR_MS,
+                error_code: "AWS_RUNNER_TIMEOUT",
+            }),
+            await eventRow("us7000pending", {
+                status: "pending_source",
+                retry_count: 1,
+                next_retry_at_ms: baseNow + HOUR_MS,
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            }),
+        ]) {
+            const client = new StaleReadRaceClient(row, row);
+            const repository = new DynamoDbStateRepository("events", client);
+
+            await repository.upsertManualEvent(row.source_event_id, baseNow + 4_000);
+
+            expect(client.currentRow).toMatchObject({
+                status: row.status,
+                retry_count: 1,
+                next_retry_at_ms: null,
+                last_seen_at_ms: baseNow + 4_000,
+                source_updated_at_ms: baseNow + 4_000,
+            });
+        }
     });
 
     it("paginates DynamoDB scans before filtering and applying the due limit", async () => {
