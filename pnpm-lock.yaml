@@ -14,6 +14,12 @@ importers:
       '@types/node':
         specifier: ^24.10.2
         version: 24.12.4
+      '@types/yazl':
+        specifier: ^3.3.1
+        version: 3.3.1
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
       tsx:
         specifier: ^4.22.0
         version: 4.22.0
@@ -23,6 +29,9 @@ importers:
       vitest:
         specifier: ^4.0.15
         version: 4.1.6(@types/node@24.12.4)(vite@8.0.13(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.0))
+      yazl:
+        specifier: ^3.3.1
+        version: 3.3.1
 
   dapp:
     dependencies:
@@ -928,6 +937,9 @@ packages:
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
 
+  '@types/yazl@3.3.1':
+    resolution: {integrity: sha512-DIWfCKpsTp6hE5BDBHV3+fIL/bLUF9Bv13iDrWnMlmhQpH67buNvI291ZauQ1xcccxK3FqQ9honnXpq4R8NMuQ==}
+
   '@vitest/expect@4.1.6':
     resolution: {integrity: sha512-7EHDquPthALSV0jhhjgEW8FXaviMx7rSqu8W6oqCoAuOhKov814P99QDV1pxMA3QPv21YudvJngIhjrNI4opLg==}
 
@@ -968,6 +980,10 @@ packages:
 
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
+
+  buffer-crc32@1.0.0:
+    resolution: {integrity: sha512-Db1SbgBS/fg/392AblrMJk97KggmvYhr4pB5ZIMTWtaivCPMWLkmb7m21cJvpvgK+J3nsU2CmmixNBZx4vFj/w==}
+    engines: {node: '>=8.0.0'}
 
   caniuse-lite@1.0.30001793:
     resolution: {integrity: sha512-iwSsYWaCOoh26cV8NwNRViHlrfUvYsHDfRVcbtmw0Kg6PJIZZXwMkj1442FYLBGkeUf1juAsU3DTfxW579mrPA==}
@@ -1354,6 +1370,9 @@ packages:
   xml-naming@0.1.0:
     resolution: {integrity: sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==}
     engines: {node: '>=16.0.0'}
+
+  yazl@3.3.1:
+    resolution: {integrity: sha512-BbETDVWG+VcMUle37k5Fqp//7SDOK2/1+T7X8TD96M3D9G8jK5VLUdQVdVjGi8im7FGkazX7kk5hkU8X4L5Bng==}
 
 snapshots:
 
@@ -2230,6 +2249,10 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
+  '@types/yazl@3.3.1':
+    dependencies:
+      '@types/node': 24.12.4
+
   '@vitest/expect@4.1.6':
     dependencies:
       '@standard-schema/spec': 1.1.0
@@ -2276,6 +2299,8 @@ snapshots:
   baseline-browser-mapping@2.10.31: {}
 
   bowser@2.14.1: {}
+
+  buffer-crc32@1.0.0: {}
 
   caniuse-lite@1.0.30001793: {}
 
@@ -2621,3 +2646,7 @@ snapshots:
       stackback: 0.0.2
 
   xml-naming@0.1.0: {}
+
+  yazl@3.3.1:
+    dependencies:
+      buffer-crc32: 1.0.0

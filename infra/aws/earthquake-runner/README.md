@@ -182,6 +182,23 @@ LambdaCodeS3Key
 
 初回デプロイでは、`ScheduleState` は既定値の `DISABLED` のままにしてください。Manual Watcher Function URL から手動 event で workflow を確認し、EC2 起動、SSM 実行、TEE result 保存、DynamoDB 更新が成功してから `ENABLED` に切り替えます。
 
+## Lambda artifact の作成
+
+CloudFormation の `LambdaCodeS3Bucket` / `LambdaCodeS3Key` には、repo で作成した Lambda zip を S3 に置いた場所を渡します。
+
+```bash
+pnpm build:aws-earthquake-lambda
+aws s3 cp dist/aws/earthquake-runner-lambda.zip s3://<bucket>/<prefix>/earthquake-runner-lambda.zip
+```
+
+このコマンドは、Watcher Lambda 用の `dist/src/lambda.js` と RunnerControl Lambda 用の `dist/src/runner_workflow.js` を bundle し、zip ルートに ESM 用の `package.json` を含めます。zip 内の path は CloudFormation template の handler 指定と一致している必要があります。
+
+出力先を変える場合は `--out` を指定します。中間 build directory を確認したい場合だけ `--keep-work-dir` を使います。
+
+```bash
+pnpm build:aws-earthquake-lambda -- --out /tmp/earthquake-runner-lambda.zip --keep-work-dir
+```
+
 `NitroEnclaveProcessCommand` は、EC2 host 側から Nitro Enclave へ地震 verifier request を渡す command です。この command は stdin から `WorkerToTeeRequest` JSON を読み、stdout に `TeeCoreResult` JSON を出す契約です。
 
 AWS runner workflow は request JSON を pipe で渡すため、本番 command は `--input` file を要求してはいけません。TEE CLI を直接使う場合の例は次の通りです。
