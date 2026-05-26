@@ -30,6 +30,13 @@ Parameters:
   ScheduleExpression:
     Type: String
     Default: rate(5 minutes)
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Keep DISABLED for first deploys; enable after manual workflow verification succeeds.
   LogsRetentionDays:
     Type: Number
     Default: 30
@@ -460,7 +467,7 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       ScheduleExpression: !Ref ScheduleExpression
-      State: ENABLED
+      State: !Ref ScheduleState
       FlexibleTimeWindow:
         Mode: "OFF"
       Target:
