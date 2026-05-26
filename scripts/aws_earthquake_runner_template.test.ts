@@ -30,6 +30,7 @@ describe("AWS earthquake runner CloudFormation template", () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).toContain("NitroEnclaveProcessCommand:");
+        expect(template).toContain("Default: /opt/sonari/tee-artifact/bin/tee production");
         expect(template).toContain(
             "Command that reads WorkerToTeeRequest JSON from stdin and writes TeeCoreResult JSON to stdout.",
         );
@@ -50,6 +51,31 @@ describe("AWS earthquake runner CloudFormation template", () => {
         );
     });
 
+    it("requires a checksum-pinned S3 TEE artifact for development bootstrap", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("TeeArtifactS3Bucket:");
+        expect(template).toContain("TeeArtifactS3Key:");
+        expect(template).toContain("TeeArtifactSha256:");
+        expect(template).toContain("SHA-256 hex digest for the development TEE artifact tar.gz.");
+        expect(template).toContain("aws s3 cp");
+        expect(template).toContain(`s3://$${"{TeeArtifactS3Bucket}"}/$${"{TeeArtifactS3Key}"}`);
+        expect(template).toContain(
+            `printf '%s  %s\\n' '$${"{TeeArtifactSha256}"}' "$tee_artifact_archive" | sha256sum -c -`,
+        );
+        expect(template).toContain('tar -xzf "$tee_artifact_archive" -C /opt/sonari/tee-artifact');
+        expect(template).toContain("test -x /opt/sonari/tee-artifact/bin/tee");
+    });
+
+    it("allows the runner instance role to read exactly the configured TEE artifact object", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("Action: s3:GetObject");
+        expect(template).toContain(
+            `Resource: !Sub arn:$${"{AWS::Partition}"}:s3:::$${"{TeeArtifactS3Bucket}"}/$${"{TeeArtifactS3Key}"}`,
+        );
+    });
+
     it("marks runner bootstrap completion only after required files and allocator are ready", async () => {
         const template = await readFile(templatePath, "utf8");
 
@@ -57,6 +83,9 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(template).toContain("touch /opt/sonari/bootstrap-complete");
         expect(template.indexOf("touch /opt/sonari/bootstrap-complete")).toBeGreaterThan(
             template.indexOf("chmod 0400 /opt/sonari/runner.env"),
+        );
+        expect(template.indexOf("touch /opt/sonari/bootstrap-complete")).toBeGreaterThan(
+            template.indexOf("test -x /opt/sonari/tee-artifact/bin/tee"),
         );
     });
 

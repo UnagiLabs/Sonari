@@ -14,10 +14,20 @@ Parameters:
     Type: String
   NitroEnclaveProcessCommand:
     Type: String
+    Default: /opt/sonari/tee-artifact/bin/tee production
     Description: Command that reads WorkerToTeeRequest JSON from stdin and writes TeeCoreResult JSON to stdout.
   WalrusAggregatorUrl:
     Type: String
     Description: Walrus aggregator URL used by the production TEE process.
+  TeeArtifactS3Bucket:
+    Type: String
+    Description: S3 bucket containing the development TEE artifact tar.gz.
+  TeeArtifactS3Key:
+    Type: String
+    Description: S3 object key for the development TEE artifact tar.gz.
+  TeeArtifactSha256:
+    Type: String
+    Description: SHA-256 hex digest for the development TEE artifact tar.gz.
   InstanceType:
     Type: String
     Default: m6i.xlarge
@@ -104,6 +114,9 @@ Resources:
                 Action:
                   - s3:PutObject
                 Resource: !Sub ${RunnerResultBucket.Arn}/results/*
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${TeeArtifactS3Bucket}/${TeeArtifactS3Key}
 
   RunnerInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -144,6 +157,16 @@ Resources:
             usermod -aG ne ec2-user || true
             systemctl enable --now nitro-enclaves-allocator.service || true
             mkdir -p /opt/sonari
+            tee_artifact_archive=/tmp/sonari-tee-artifact.tar.gz
+            aws s3 cp 's3://${TeeArtifactS3Bucket}/${TeeArtifactS3Key}' "$tee_artifact_archive"
+            printf '%s  %s\n' '${TeeArtifactSha256}' "$tee_artifact_archive" | sha256sum -c -
+            rm -rf /opt/sonari/tee-artifact
+            mkdir -p /opt/sonari/tee-artifact
+            tar -xzf "$tee_artifact_archive" -C /opt/sonari/tee-artifact
+            test -x /opt/sonari/tee-artifact/bin/tee
+            chown -R ec2-user:ec2-user /opt/sonari/tee-artifact
+            chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact
+            rm -f "$tee_artifact_archive"
             aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
             aws secretsmanager get-secret-value --secret-id '${TeeSigningKeySecretArn}' --query SecretString --output text > /opt/sonari/tee-signing-key
             aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-config.json
