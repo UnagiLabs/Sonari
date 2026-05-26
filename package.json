@@ -19,6 +19,7 @@
         "test": "pnpm -r test && pnpm test:local-e2e",
         "test:local-e2e": "vitest run scripts",
         "build:aws-earthquake-lambda": "tsx scripts/build_aws_earthquake_lambda.ts",
+        "build:aws-earthquake-tee-artifact": "tsx scripts/build_aws_earthquake_tee_artifact.ts",
         "test:relayer": "pnpm --filter @sonari/earthquake-relayer test",
         "relayer": "pnpm --filter @sonari/earthquake-relayer cli",
         "oracle:sidecar:local": "tsx scripts/nautilus_sidecar.ts",
