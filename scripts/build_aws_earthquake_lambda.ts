@@ -74,6 +74,9 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        if (arg === "--") {
+            continue;
+        }
         if (arg === "--keep-work-dir") {
             options.keepWorkDir = true;
             continue;
