@@ -30,6 +30,9 @@ describe("AWS earthquake runner CloudFormation template", () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).toContain("NitroEnclaveProcessCommand:");
+        expect(template).toContain(
+            "Command that reads WorkerToTeeRequest JSON from stdin and writes TeeCoreResult JSON to stdout.",
+        );
         expect(template).toContain("WalrusAggregatorUrl:");
         expect(template).toContain("nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'");
         expect(template).toContain(`$${"{NitroEnclaveProcessCommand}"}`);
