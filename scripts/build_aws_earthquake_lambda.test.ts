@@ -49,6 +49,22 @@ describe("AWS earthquake Lambda artifact builder", () => {
         expect(runnerWorkflowJs).not.toContain("@sonari/");
         expect(runnerWorkflowJs).not.toContain("workspace:");
     });
+
+    it("accepts pnpm's argument separator before script flags", async () => {
+        const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-lambda-zip-"));
+        tempDirs.push(tempDir);
+        const outPath = path.join(tempDir, "custom", "earthquake-runner-lambda.zip");
+
+        await execFileAsync("pnpm", ["build:aws-earthquake-lambda", "--", "--out", outPath]);
+
+        const entries = await readZipEntries(outPath);
+
+        expect([...entries.keys()].sort()).toEqual([
+            "dist/src/lambda.js",
+            "dist/src/runner_workflow.js",
+            "package.json",
+        ]);
+    });
 });
 
 async function readZipEntries(zipPath: string): Promise<Map<string, Buffer>> {
