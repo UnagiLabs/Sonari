@@ -117,13 +117,19 @@ flowchart TD
 | `process_usgs_from_worker_request(request, input)` | `EarthquakeVerifierRequest` を検証してから実行。関数名は旧互換名 |
 | `process_usgs_with_source_archive(input, archive, signer)` | Walrusアーカイブ付き本番用 |
 
-本番 runner からは CLI の `production` subcommand を使います。
+本番 runner からは CLI の `production` subcommand を使います。production input contract は stdin/stdout です。
+
+```bash
+printf '%s' '{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}' | tee production
+```
+
+stdin は `WorkerToTeeRequest` JSON、stdout は `TeeCoreResult` JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では Walrus archive 設定（例: `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_WALRUS_WALLET`）が必須で、保存・fetch・hash verify が失敗した場合は署名しません。
+
+ローカル検証や fixture/debug では、従来どおり file input も使えます。
 
 ```bash
 tee production --input worker_request.json
 ```
-
-`worker_request.json` は `EarthquakeVerifierRequest` の JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では Walrus archive 設定（例: `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_WALRUS_WALLET`）が必須で、保存・fetch・hash verify が失敗した場合は署名しません。
 
 ### `compute/geo.rs` — H3地理空間変換
 

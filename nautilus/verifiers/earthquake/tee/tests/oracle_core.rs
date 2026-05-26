@@ -3,7 +3,7 @@ use std::cell::{Cell, RefCell};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tee::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
@@ -635,6 +635,38 @@ fn production_cli_rejects_missing_signing_key_seed() {
     );
 
     fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
+fn production_cli_reads_worker_request_from_stdin_when_input_is_omitted() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7,"affected_cells_root":"0xdeadbeef"}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unexpected Worker to TEE field"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

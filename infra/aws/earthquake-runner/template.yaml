@@ -14,7 +14,7 @@ Parameters:
     Type: String
   NitroEnclaveProcessCommand:
     Type: String
-    Description: Executable path for the host command that forwards earthquake verifier requests to Nitro Enclave.
+    Description: Command that reads WorkerToTeeRequest JSON from stdin and writes TeeCoreResult JSON to stdout.
   WalrusAggregatorUrl:
     Type: String
     Description: Walrus aggregator URL used by the production TEE process.

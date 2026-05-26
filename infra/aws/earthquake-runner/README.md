@@ -182,7 +182,15 @@ LambdaCodeS3Key
 
 初回デプロイでは、`ScheduleState` は既定値の `DISABLED` のままにしてください。Manual Watcher Function URL から手動 event で workflow を確認し、EC2 起動、SSM 実行、TEE result 保存、DynamoDB 更新が成功してから `ENABLED` に切り替えます。
 
-`NitroEnclaveProcessCommand` は、EC2 host 側から Nitro Enclave へ地震 verifier request を渡す command です。
+`NitroEnclaveProcessCommand` は、EC2 host 側から Nitro Enclave へ地震 verifier request を渡す command です。この command は stdin から `WorkerToTeeRequest` JSON を読み、stdout に `TeeCoreResult` JSON を出す契約です。
+
+AWS runner workflow は request JSON を pipe で渡すため、本番 command は `--input` file を要求してはいけません。TEE CLI を直接使う場合の例は次の通りです。
+
+```bash
+/opt/sonari/bin/tee production
+```
+
+`tee production --input worker_request.json` は、ローカル検証や fixture/debug 用の互換入口です。
 
 SSM 実行時には、EC2 host 上で次の値を読み込み、TEE process に渡します。
 

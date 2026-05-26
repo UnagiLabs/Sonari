@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::env;
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
@@ -79,7 +80,7 @@ struct FixtureArgs {
 #[derive(Debug, Parser)]
 struct ProductionArgs {
     #[arg(long)]
-    input: PathBuf,
+    input: Option<PathBuf>,
     #[arg(long)]
     signing_key_seed: Option<String>,
 }
@@ -121,7 +122,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
     let seed = strict_signing_key_seed(args.signing_key_seed)?;
-    let request_json: serde_json::Value = serde_json::from_slice(&fs::read(args.input)?)?;
+    let request_json: serde_json::Value =
+        serde_json::from_slice(&production_request_bytes(args.input)?)?;
     let request = tee::WorkerToTeeRequest::from_json_value(request_json)?;
     let detail_url = format!(
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
@@ -192,6 +194,16 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
     let output = process_usgs_with_source_archive(input, &archive, &signer)?;
     output_to_tee_json(output)
+}
+
+fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    if let Some(path) = input {
+        return Ok(fs::read(path)?);
+    }
+
+    let mut bytes = Vec::new();
+    io::stdin().read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn strict_signing_key_seed(
