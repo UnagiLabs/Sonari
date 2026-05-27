@@ -118,9 +118,7 @@ export function createScheduledHandler(options: ScheduledHandlerOptions) {
         const nowMs = options.now?.() ?? Date.now();
         const candidates = await (options.fetchCandidates ?? fetchUsgsRecentCandidates)();
         await scanCandidates(options.repository, candidates, nowMs, {
-            ...(options.resolveSourceEventId === undefined
-                ? {}
-                : { resolveSourceEventId: options.resolveSourceEventId }),
+            resolveSourceEventId: options.resolveSourceEventId ?? defaultResolveUsgsSourceEventId,
         });
         const started = await startDueWorkflows(
             options.repository,
@@ -266,7 +264,7 @@ async function resolveSourceEventId(
     input: Parameters<UsgsSourceEventIdResolver>[0],
     resolver: UsgsSourceEventIdResolver | undefined,
 ): Promise<UsgsSourceEventIdResolverResult | null> {
-    return (resolver ?? defaultResolveUsgsSourceEventId)(input);
+    return resolver === undefined ? { source_event_id: input.sourceEventId } : resolver(input);
 }
 
 function isUnavailableSourceEventIdResolution(

@@ -10,6 +10,7 @@ import {
     DynamoDbStateRepository,
     InMemoryStateRepository,
     parseUsgsRecentFeed,
+    scanCandidates,
     startDueWorkflows,
     type EarthquakeEventRow,
     type WorkflowStarter,
@@ -110,6 +111,16 @@ describe("AWS Lambda watcher handlers", () => {
         ]);
         await expect(repository.get("__sonari_runner_workflow_lock__")).resolves.toBeNull();
         await expect(repository.get("us7000/bad")).resolves.toBeNull();
+    });
+
+    it("keeps scanCandidates pass-through by default for fixture callers", async () => {
+        const repository = new InMemoryStateRepository();
+
+        await scanCandidates(repository, [candidate("us7000fixture")], baseNow);
+
+        await expect(repository.get("us7000fixture")).resolves.toMatchObject({
+            status: "new",
+        });
     });
 
     it("resolves scheduled candidate aliases before deduping and enqueueing", async () => {
