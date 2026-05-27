@@ -170,13 +170,23 @@ describe("USGS source event ID resolver", () => {
         ).resolves.toBeNull();
     });
 
-    it("falls back to the requested ID when detail is temporarily unavailable", async () => {
-        const fetcher = async () => responseJson({ message: "unavailable" }, false);
-
-        await expect(
-            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
-        ).resolves.toEqual({ source_event_id: "usc0001xgp" });
-    });
+    it.each([
+        ["fetch failure", async () => Promise.reject(new Error("network unavailable"))],
+        ["non-OK response", async () => responseJson({ message: "unavailable" }, false)],
+        ["invalid JSON", async () => responseJsonFailure()],
+        ["invalid detail identity", async () => responseJson({ properties: {} })],
+    ] as const)(
+        "returns unavailable instead of falling back to the requested ID on %s",
+        async (_name, fetcher) => {
+            await expect(
+                resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+            ).resolves.toEqual({
+                unavailable: true,
+                source_event_id: "usc0001xgp",
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            });
+        },
+    );
 });
 
 function responseJson(body: unknown, ok = true): Response {
@@ -184,6 +194,15 @@ function responseJson(body: unknown, ok = true): Response {
         ok,
         async json(): Promise<unknown> {
             return body;
+        },
+    } as Response;
+}
+
+function responseJsonFailure(): Response {
+    return {
+        ok: true,
+        async json(): Promise<unknown> {
+            throw new Error("invalid json");
         },
     } as Response;
 }

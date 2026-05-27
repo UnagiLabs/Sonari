@@ -24,6 +24,8 @@ import {
     type UsgsEarthquakeCandidate,
     type UsgsSourceEventIdResolution,
     type UsgsSourceEventIdResolver,
+    type UsgsSourceEventIdResolverResult,
+    type UsgsSourceEventIdUnavailableResolution,
 } from "./usgs.js";
 
 export {
@@ -169,6 +171,12 @@ export function createManualHandler(options: ManualHandlerOptions) {
             },
             options.resolveSourceEventId,
         );
+        if (resolution !== null && isUnavailableSourceEventIdResolution(resolution)) {
+            return jsonResponse(503, {
+                ok: false,
+                message: "USGS detail unavailable; retry later",
+            });
+        }
         if (resolution === null || !isValidUsgsSourceEventId(resolution.source_event_id)) {
             return jsonResponse(400, {
                 ok: false,
@@ -223,6 +231,9 @@ export async function scanCandidates(
             { sourceEventId: candidate.source_event_id },
             options.resolveSourceEventId,
         );
+        if (resolution !== null && isUnavailableSourceEventIdResolution(resolution)) {
+            continue;
+        }
         if (resolution === null || !isValidUsgsSourceEventId(resolution.source_event_id)) {
             continue;
         }
@@ -254,8 +265,14 @@ export async function scanCandidates(
 async function resolveSourceEventId(
     input: Parameters<UsgsSourceEventIdResolver>[0],
     resolver: UsgsSourceEventIdResolver | undefined,
-): Promise<UsgsSourceEventIdResolution | null> {
+): Promise<UsgsSourceEventIdResolverResult | null> {
     return (resolver ?? defaultResolveUsgsSourceEventId)(input);
+}
+
+function isUnavailableSourceEventIdResolution(
+    resolution: UsgsSourceEventIdResolverResult,
+): resolution is UsgsSourceEventIdUnavailableResolution {
+    return "unavailable" in resolution;
 }
 
 function manualSubmitResponse(

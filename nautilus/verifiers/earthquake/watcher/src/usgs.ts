@@ -16,13 +16,23 @@ export interface UsgsSourceEventIdResolution {
     requested_source_event_id?: string;
 }
 
+export interface UsgsSourceEventIdUnavailableResolution {
+    unavailable: true;
+    source_event_id: string;
+    error_code: "USGS_DETAIL_UNAVAILABLE";
+}
+
+export type UsgsSourceEventIdResolverResult =
+    | UsgsSourceEventIdResolution
+    | UsgsSourceEventIdUnavailableResolution;
+
 export interface UsgsSourceEventIdResolverInput {
     sourceEventId: string;
 }
 
 export type UsgsSourceEventIdResolver = (
     input: UsgsSourceEventIdResolverInput,
-) => Promise<UsgsSourceEventIdResolution | null>;
+) => Promise<UsgsSourceEventIdResolverResult | null>;
 
 export const USGS_RECENT_FEED_URL =
     "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson";
@@ -44,27 +54,31 @@ export async function fetchUsgsRecentCandidates(
 export async function resolveUsgsSourceEventId(
     input: UsgsSourceEventIdResolverInput,
     fetcher: typeof fetch = fetch,
-): Promise<UsgsSourceEventIdResolution | null> {
-    const fallback = { source_event_id: input.sourceEventId };
+): Promise<UsgsSourceEventIdResolverResult | null> {
+    const unavailable: UsgsSourceEventIdUnavailableResolution = {
+        unavailable: true,
+        source_event_id: input.sourceEventId,
+        error_code: "USGS_DETAIL_UNAVAILABLE",
+    };
     let response: Response;
     try {
         response = await fetcher(usgsDetailUrl(input.sourceEventId));
     } catch {
-        return fallback;
+        return unavailable;
     }
     if (!response.ok) {
-        return fallback;
+        return unavailable;
     }
 
     let detail: unknown;
     try {
         detail = await response.json();
     } catch {
-        return fallback;
+        return unavailable;
     }
     const identity = parseUsgsDetailIdentity(detail);
     if (identity === null) {
-        return fallback;
+        return unavailable;
     }
     if (identity.id === input.sourceEventId) {
         return { source_event_id: identity.id };

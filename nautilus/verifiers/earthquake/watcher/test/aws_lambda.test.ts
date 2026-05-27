@@ -223,6 +223,28 @@ describe("AWS Lambda watcher handlers", () => {
         expect(resolverInputs).toEqual([{ sourceEventId: "usc0001xgp" }]);
     });
 
+    it("does not store or enqueue scheduled candidates when source ID resolution is unavailable", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            fetchCandidates: async () => [candidate("usc0001xgp", { magnitude: 6 })],
+            resolveSourceEventId: async ({ sourceEventId }) => ({
+                unavailable: true,
+                source_event_id: sourceEventId,
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            }),
+        });
+
+        const result = await handler();
+
+        expect(result).toEqual({ scanned: 1, workflow_started: 0 });
+        expect(workflow.starts).toEqual([]);
+        await expect(repository.get("usc0001xgp")).resolves.toBeNull();
+    });
+
     it("defers scheduled candidates that are less than 24 hours old", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -368,7 +390,7 @@ describe("AWS Lambda watcher handlers", () => {
         });
     });
 
-    it("falls back to the requested manual ID when USGS detail resolution is unavailable", async () => {
+    it("rejects manual submissions when USGS detail resolution is unavailable", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
         const handler = createManualHandler({
@@ -376,7 +398,11 @@ describe("AWS Lambda watcher handlers", () => {
             workflow,
             now: () => baseNow,
             token: manualAuthToken,
-            resolveSourceEventId: async ({ sourceEventId }) => ({ source_event_id: sourceEventId }),
+            resolveSourceEventId: async ({ sourceEventId }) => ({
+                unavailable: true,
+                source_event_id: sourceEventId,
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            }),
         });
 
         const response = await handler({
@@ -384,19 +410,13 @@ describe("AWS Lambda watcher handlers", () => {
             body: JSON.stringify({ source_event_id: "usc0001xgp" }),
         });
 
-        expect(response.statusCode).toBe(200);
+        expect(response.statusCode).toBe(503);
         expect(JSON.parse(response.body)).toEqual({
-            ok: true,
-            workflow_started: 1,
-            source_event_id: "usc0001xgp",
+            ok: false,
+            message: "USGS detail unavailable; retry later",
         });
-        expect(workflow.starts).toEqual([
-            {
-                sourceEventId: "usc0001xgp",
-                executionName: "earthquake-usc0001xgp-1",
-                attempt: 1,
-            },
-        ]);
+        expect(workflow.starts).toEqual([]);
+        await expect(repository.get("usc0001xgp")).resolves.toBeNull();
     });
 
     it("manual submissions clear retry backoff and rerun existing failed or pending events", async () => {
