@@ -153,14 +153,14 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
             });
         }
     };
-    if detail_value.get("id").and_then(serde_json::Value::as_str)
-        != Some(request.source_event_id.as_str())
-    {
+    let Some(canonical_source_event_id) =
+        canonical_usgs_detail_id_for_request(&detail_value, &request.source_event_id)
+    else {
         return Ok(TeeJsonResult::PendingSource {
             source_event_id: request.source_event_id,
             error_code: "USGS_DETAIL_UNAVAILABLE",
         });
-    }
+    };
 
     let grid = match preferred_grid_uri_from_detail(&detail_value) {
         Some(uri) => match fetch_grid(&uri) {
@@ -174,13 +174,16 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
         },
         None => None,
     };
-    let source_event_id = request.source_event_id.clone();
+    let source_event_id = canonical_source_event_id.to_owned();
+    let raw_detail_uri = format!(
+        "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{source_event_id}.geojson"
+    );
     let input = UsgsOracleInput {
         case_id: format!("usgs-live/{source_event_id}"),
         detail_json,
         grid_xml: grid.as_ref().map(|item| item.grid_xml.clone()),
         raw_grid_bytes: grid.as_ref().map(|item| item.raw_grid_bytes.clone()),
-        raw_detail_uri: detail_url,
+        raw_detail_uri,
         raw_grid_uri: grid.as_ref().map(|item| item.raw_grid_uri.clone()),
         raw_data_uri: format!("ipfs://sonari/live/{source_event_id}/raw_data_manifest.json"),
         affected_cells_uri: format!("ipfs://sonari/live/{source_event_id}/affected_cells.json"),
@@ -194,6 +197,28 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
     let output = process_usgs_with_source_archive(input, &archive, &signer)?;
     output_to_tee_json(output)
+}
+
+fn canonical_usgs_detail_id_for_request<'a>(
+    detail: &'a serde_json::Value,
+    request_source_event_id: &str,
+) -> Option<&'a str> {
+    let canonical_id = detail.get("id").and_then(serde_json::Value::as_str)?;
+    if canonical_id == request_source_event_id {
+        return Some(canonical_id);
+    }
+    let ids = detail
+        .get("properties")
+        .and_then(|properties| properties.get("ids"))
+        .and_then(serde_json::Value::as_str)?;
+    if ids
+        .split(',')
+        .map(str::trim)
+        .any(|alias| alias == request_source_event_id)
+    {
+        return Some(canonical_id);
+    }
+    None
 }
 
 fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseUsgsRecentFeed, USGS_RECENT_FEED_URL } from "../src/usgs.js";
+import {
+    parseUsgsRecentFeed,
+    resolveUsgsSourceEventId,
+    USGS_RECENT_FEED_URL,
+} from "../src/usgs.js";
 
 describe("USGS recent feed parser", () => {
     it("extracts earthquake candidates with id, occurred time, and source update time", () => {
@@ -117,3 +121,53 @@ describe("USGS recent feed parser", () => {
         );
     });
 });
+
+describe("USGS source event ID resolver", () => {
+    it("resolves alias detail responses to canonical IDs only when properties.ids contains an exact match", async () => {
+        const fetcher = async () =>
+            responseJson({
+                id: "official20110311054624120_30",
+                properties: {
+                    ids: ",usc0001xgp,official20110311054624120_30,",
+                },
+            });
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toEqual({
+            source_event_id: "official20110311054624120_30",
+            requested_source_event_id: "usc0001xgp",
+        });
+    });
+
+    it("rejects USGS detail IDs that only substring-match the requested alias", async () => {
+        const fetcher = async () =>
+            responseJson({
+                id: "official20110311054624120_30",
+                properties: {
+                    ids: ",usc0001xgp-extra,official20110311054624120_30,",
+                },
+            });
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toBeNull();
+    });
+
+    it("falls back to the requested ID when detail is temporarily unavailable", async () => {
+        const fetcher = async () => responseJson({ message: "unavailable" }, false);
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toEqual({ source_event_id: "usc0001xgp" });
+    });
+});
+
+function responseJson(body: unknown, ok = true): Response {
+    return {
+        ok,
+        async json(): Promise<unknown> {
+            return body;
+        },
+    } as Response;
+}

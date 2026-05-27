@@ -20,6 +20,8 @@ pub(crate) struct UsgsDetail {
 pub(crate) struct UsgsProperties {
     pub(crate) time: u64,
     pub(crate) updated: u64,
+    #[serde(default)]
+    pub(crate) ids: Option<String>,
     pub(crate) products: UsgsProducts,
 }
 
@@ -66,6 +68,21 @@ pub(crate) struct GridPoint {
 
 pub(crate) fn parse_detail(detail_json: &[u8]) -> Result<UsgsDetail, OracleError> {
     serde_json::from_slice(detail_json).map_err(OracleError::from)
+}
+
+pub(crate) fn detail_matches_source_event_id(detail: &UsgsDetail, source_event_id: &str) -> bool {
+    detail.id == source_event_id || detail_aliases_contain(&detail.properties.ids, source_event_id)
+}
+
+fn detail_aliases_contain(ids: &Option<String>, source_event_id: &str) -> bool {
+    ids.as_ref()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .any(|alias| alias == source_event_id)
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn select_preferred_shakemap_product(

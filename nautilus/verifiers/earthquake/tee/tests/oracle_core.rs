@@ -41,6 +41,21 @@ fn finalized_input() -> UsgsOracleInput {
     }
 }
 
+fn input_with_detail_id_and_aliases(canonical_id: &str, aliases: &str) -> UsgsOracleInput {
+    let mut input = finalized_input();
+    let mut detail: serde_json::Value =
+        serde_json::from_slice(&input.detail_json).expect("fixture detail should be valid JSON");
+    detail["id"] = serde_json::Value::String(canonical_id.to_owned());
+    detail["properties"]["ids"] = serde_json::Value::String(aliases.to_owned());
+    input.case_id = format!("usgs-live/{canonical_id}");
+    input.detail_json = serde_json::to_vec(&detail).expect("detail JSON should serialize");
+    input.raw_detail_uri =
+        format!("https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{canonical_id}.geojson");
+    input.raw_data_uri = format!("ipfs://sonari/live/{canonical_id}/raw_data_manifest.json");
+    input.affected_cells_uri = format!("ipfs://sonari/live/{canonical_id}/affected_cells.json");
+    input
+}
+
 fn read_expected(name: &str) -> serde_json::Value {
     serde_json::from_slice(&read_fixture(format!("{FIXTURE_DIR}/expected/{name}")))
         .expect("expected fixture should be valid JSON")
@@ -147,6 +162,64 @@ fn pre_tee_worker_scaffold_matches_pure_core_output_for_fixture_sources() {
     assert_eq!(worker_output.result, pure_output.result);
     assert_eq!(worker_output.unsigned_payload, pure_output.unsigned_payload);
     assert_eq!(worker_output.expected_hashes, pure_output.expected_hashes);
+}
+
+#[test]
+fn worker_request_accepts_usgs_alias_when_detail_ids_list_contains_exact_alias() {
+    let request = WorkerToTeeRequest {
+        source_event_id: "usc0001xgp".to_owned(),
+        hazard_type: HAZARD_TYPE_EARTHQUAKE,
+        primary_source: PRIMARY_SOURCE_USGS,
+        geo_resolution: GEO_RESOLUTION,
+    };
+    let input = input_with_detail_id_and_aliases(
+        "official20110311054624120_30",
+        ",usc0001xgp,official20110311054624120_30,",
+    );
+
+    let output = process_usgs_from_worker_request(request, input).expect("alias should verify");
+
+    assert_eq!(output.result.status, OracleStatus::Finalized);
+    assert_eq!(
+        output.result.source_event_id,
+        "official20110311054624120_30"
+    );
+    assert_eq!(
+        output.unsigned_payload.as_ref().unwrap().raw_data_uri,
+        "ipfs://sonari/live/official20110311054624120_30/raw_data_manifest.json"
+    );
+    for source in &output.source_manifest.as_ref().unwrap().sources {
+        assert_eq!(source.event_id, "official20110311054624120_30");
+    }
+    for entry in &output.raw_data_manifest.as_ref().unwrap().entries {
+        assert_eq!(entry.event_id, "official20110311054624120_30");
+        assert!(!entry.uri.contains("usc0001xgp"));
+    }
+}
+
+#[test]
+fn worker_request_rejects_alias_substrings_or_unlisted_ids() {
+    for aliases in [
+        ",usc0001xgp-extra,official20110311054624120_30,",
+        ",official20110311054624120_30,",
+    ] {
+        let request = WorkerToTeeRequest {
+            source_event_id: "usc0001xgp".to_owned(),
+            hazard_type: HAZARD_TYPE_EARTHQUAKE,
+            primary_source: PRIMARY_SOURCE_USGS,
+            geo_resolution: GEO_RESOLUTION,
+        };
+        let input = input_with_detail_id_and_aliases("official20110311054624120_30", aliases);
+
+        let error = process_usgs_from_worker_request(request, input)
+            .expect_err("unlisted alias should fail closed");
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match fetched USGS detail id")
+        );
+    }
 }
 
 #[test]

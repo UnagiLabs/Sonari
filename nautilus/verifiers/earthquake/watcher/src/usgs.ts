@@ -1,5 +1,6 @@
 export interface UsgsEarthquakeCandidate {
     source_event_id: string;
+    requested_source_event_id?: string;
     occurred_at_ms: number;
     source_updated_at_ms: number;
     magnitude: number | null;
@@ -11,8 +12,26 @@ export interface UsgsEarthquakeCandidate {
 
 export type UsgsAlertLevel = "green" | "yellow" | "orange" | "red";
 
+export interface UsgsSourceEventIdResolution {
+    source_event_id: string;
+    requested_source_event_id?: string;
+}
+
+export interface UsgsSourceEventIdResolverInput {
+    sourceEventId: string;
+    detailUrl?: string;
+}
+
+export type UsgsSourceEventIdResolver = (
+    input: UsgsSourceEventIdResolverInput,
+) => Promise<UsgsSourceEventIdResolution | null>;
+
 export const USGS_RECENT_FEED_URL =
     "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson";
+
+export function usgsDetailUrl(sourceEventId: string): string {
+    return `https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/${sourceEventId}.geojson`;
+}
 
 export async function fetchUsgsRecentCandidates(
     fetcher: typeof fetch = fetch,
@@ -22,6 +41,43 @@ export async function fetchUsgsRecentCandidates(
         throw new Error(`USGS recent feed unavailable: ${response.status}`);
     }
     return parseUsgsRecentFeed(await response.json());
+}
+
+export async function resolveUsgsSourceEventId(
+    input: UsgsSourceEventIdResolverInput,
+    fetcher: typeof fetch = fetch,
+): Promise<UsgsSourceEventIdResolution | null> {
+    const fallback = { source_event_id: input.sourceEventId };
+    let response: Response;
+    try {
+        response = await fetcher(input.detailUrl ?? usgsDetailUrl(input.sourceEventId));
+    } catch {
+        return fallback;
+    }
+    if (!response.ok) {
+        return fallback;
+    }
+
+    let detail: unknown;
+    try {
+        detail = await response.json();
+    } catch {
+        return fallback;
+    }
+    const identity = parseUsgsDetailIdentity(detail);
+    if (identity === null) {
+        return fallback;
+    }
+    if (identity.id === input.sourceEventId) {
+        return { source_event_id: identity.id };
+    }
+    if (usgsIdsContains(identity.ids, input.sourceEventId)) {
+        return {
+            source_event_id: identity.id,
+            requested_source_event_id: input.sourceEventId,
+        };
+    }
+    return null;
 }
 
 export function parseUsgsRecentFeed(input: unknown): UsgsEarthquakeCandidate[] {
@@ -68,6 +124,25 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         candidate.detail_url = detailUrl;
     }
     return candidate;
+}
+
+function parseUsgsDetailIdentity(input: unknown): { id: string; ids: string | undefined } | null {
+    if (!isRecord(input) || typeof input.id !== "string" || !isRecord(input.properties)) {
+        return null;
+    }
+    return {
+        id: input.id,
+        ids: typeof input.properties.ids === "string" ? input.properties.ids : undefined,
+    };
+}
+
+function usgsIdsContains(ids: string | undefined, sourceEventId: string): boolean {
+    return (
+        ids
+            ?.split(",")
+            .map((item) => item.trim())
+            .some((item) => item === sourceEventId) ?? false
+    );
 }
 
 function readNonEmptyString(input: unknown): string | undefined {

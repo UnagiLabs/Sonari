@@ -17,6 +17,9 @@ import type { UsgsEarthquakeCandidate } from "../src/usgs.js";
 
 const baseNow = 1_800_000_000_000;
 const manualAuthToken = ["manual", "test", "token"].join("-");
+const passthroughSourceEventIdResolver = async ({ sourceEventId }: { sourceEventId: string }) => ({
+    source_event_id: sourceEventId,
+});
 
 function candidate(
     sourceEventId: string,
@@ -56,6 +59,7 @@ describe("AWS Lambda watcher handlers", () => {
             repository,
             workflow,
             now: () => baseNow,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
             fetchCandidates: async () => [
                 candidate("us7000eligible"),
                 candidate("us7000small", { magnitude: 5.1 }),
@@ -85,6 +89,7 @@ describe("AWS Lambda watcher handlers", () => {
             repository,
             workflow,
             now: () => baseNow,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
             fetchCandidates: async () => [
                 candidate("__sonari_runner_workflow_lock__"),
                 candidate("us7000/bad"),
@@ -106,6 +111,42 @@ describe("AWS Lambda watcher handlers", () => {
         await expect(repository.get("us7000/bad")).resolves.toBeNull();
     });
 
+    it("resolves scheduled candidate aliases before deduping and enqueueing", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            fetchCandidates: async () => [
+                candidate("usc0001xgp"),
+                candidate("official20110311054624120_30"),
+            ],
+            resolveSourceEventId: async ({ sourceEventId }) =>
+                sourceEventId === "usc0001xgp"
+                    ? {
+                          source_event_id: "official20110311054624120_30",
+                          requested_source_event_id: "usc0001xgp",
+                      }
+                    : { source_event_id: sourceEventId },
+        });
+
+        const result = await handler();
+
+        expect(result).toEqual({ scanned: 2, workflow_started: 1 });
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "official20110311054624120_30",
+                executionName: "earthquake-official20110311054624120_30-1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("usc0001xgp")).resolves.toBeNull();
+        await expect(repository.get("official20110311054624120_30")).resolves.toMatchObject({
+            requested_source_event_id: "usc0001xgp",
+        });
+    });
+
     it("defers scheduled candidates that are less than 24 hours old", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -114,6 +155,7 @@ describe("AWS Lambda watcher handlers", () => {
             repository,
             workflow,
             now: () => baseNow,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
             fetchCandidates: async () => [
                 candidate("us7000fresh", {
                     occurred_at_ms: occurredAtMs,
@@ -144,6 +186,7 @@ describe("AWS Lambda watcher handlers", () => {
                 repository,
                 fetchCandidates: async () => [candidate("us7000default")],
                 now: () => baseNow,
+                resolveSourceEventId: passthroughSourceEventIdResolver,
                 sfnClient: {
                     async send(command: unknown): Promise<void> {
                         commands.push(command);
@@ -190,6 +233,7 @@ describe("AWS Lambda watcher handlers", () => {
             workflow,
             now: () => baseNow,
             token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
         });
 
         const response = await handler({
@@ -208,6 +252,77 @@ describe("AWS Lambda watcher handlers", () => {
         await expect(repository.get("us7000manual")).resolves.toMatchObject({ status: "processing" });
     });
 
+    it("resolves manual USGS aliases to canonical source event IDs before starting work", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            token: manualAuthToken,
+            resolveSourceEventId: async ({ sourceEventId }) => ({
+                source_event_id: "official20110311054624120_30",
+                requested_source_event_id: sourceEventId,
+            }),
+        });
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "usc0001xgp" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(JSON.parse(response.body)).toEqual({
+            ok: true,
+            workflow_started: 1,
+            source_event_id: "official20110311054624120_30",
+            requested_source_event_id: "usc0001xgp",
+        });
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "official20110311054624120_30",
+                executionName: "earthquake-official20110311054624120_30-1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("usc0001xgp")).resolves.toBeNull();
+        await expect(repository.get("official20110311054624120_30")).resolves.toMatchObject({
+            status: "processing",
+            requested_source_event_id: "usc0001xgp",
+        });
+    });
+
+    it("falls back to the requested manual ID when USGS detail resolution is unavailable", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            token: manualAuthToken,
+            resolveSourceEventId: async ({ sourceEventId }) => ({ source_event_id: sourceEventId }),
+        });
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "usc0001xgp" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(JSON.parse(response.body)).toEqual({
+            ok: true,
+            workflow_started: 1,
+            source_event_id: "usc0001xgp",
+        });
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "usc0001xgp",
+                executionName: "earthquake-usc0001xgp-1",
+                attempt: 1,
+            },
+        ]);
+    });
+
     it("manual submissions clear retry backoff and rerun existing failed or pending events", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -216,6 +331,7 @@ describe("AWS Lambda watcher handlers", () => {
             workflow,
             now: () => baseNow + 4_000,
             token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
         });
 
         await repository.upsertManualEvent("us7000failed", baseNow);
@@ -255,6 +371,7 @@ describe("AWS Lambda watcher handlers", () => {
             workflow: pendingWorkflow,
             now: () => baseNow + 4_000,
             token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
         });
 
         await pendingRepository.upsertManualEvent("us7000pending", baseNow);
