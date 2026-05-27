@@ -272,15 +272,15 @@ export default function LandingPage() {
                             sub="No hidden discretion. No payout promises. Just verifiable steps anyone can audit."
                             title="Four steps from donation to relief."
                         />
-                        <div className="steps">
+                        <ol className="steps" aria-label="Donation to relief flow">
                             {steps.map((step) => (
-                                <article className="step" key={step.number}>
-                                    <div className="step-num">{step.number}</div>
+                                <li className="step" key={step.number}>
+                                    <span className="step-num">{step.number}</span>
                                     <h4>{step.title}</h4>
                                     <p>{step.body}</p>
-                                </article>
+                                </li>
                             ))}
-                        </div>
+                        </ol>
                     </section>
 
                     <section className="section" aria-labelledby="pools-title">
