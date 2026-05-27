@@ -12,6 +12,7 @@ import {
     parseUsgsRecentFeed,
     scanCandidates,
     startDueWorkflows,
+    usgsDetailUrl,
     type EarthquakeEventRow,
     type WorkflowStarter,
 } from "../src/index.js";
@@ -399,6 +400,58 @@ describe("AWS Lambda watcher handlers", () => {
             status: "processing",
             requested_source_event_id: "usc0001xgp",
         });
+    });
+
+    it("uses the default USGS resolver for manual submissions when no resolver is injected", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const requests: string[] = [];
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+            requests.push(String(input));
+            return Response.json({
+                id: "official20110311054624120_30",
+                properties: {
+                    ids: ",usc0001xgp,official20110311054624120_30,",
+                },
+            });
+        }) as typeof fetch;
+        try {
+            const handler = createManualHandler({
+                repository,
+                workflow,
+                now: () => baseNow,
+                token: manualAuthToken,
+            });
+
+            const response = await handler({
+                headers: { authorization: `Bearer ${manualAuthToken}` },
+                body: JSON.stringify({ source_event_id: "usc0001xgp" }),
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(JSON.parse(response.body)).toEqual({
+                ok: true,
+                workflow_started: 1,
+                source_event_id: "official20110311054624120_30",
+                requested_source_event_id: "usc0001xgp",
+            });
+            expect(requests).toEqual([usgsDetailUrl("usc0001xgp")]);
+            expect(workflow.starts).toEqual([
+                {
+                    sourceEventId: "official20110311054624120_30",
+                    executionName: "earthquake-official20110311054624120_30-1",
+                    attempt: 1,
+                },
+            ]);
+            await expect(repository.get("usc0001xgp")).resolves.toBeNull();
+            await expect(repository.get("official20110311054624120_30")).resolves.toMatchObject({
+                status: "processing",
+                requested_source_event_id: "usc0001xgp",
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 
     it("rejects manual submissions when USGS detail resolution is unavailable", async () => {

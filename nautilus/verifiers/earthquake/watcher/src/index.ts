@@ -167,7 +167,7 @@ export function createManualHandler(options: ManualHandlerOptions) {
             {
                 sourceEventId: body.source_event_id,
             },
-            options.resolveSourceEventId,
+            options.resolveSourceEventId ?? defaultResolveUsgsSourceEventId,
         );
         if (resolution !== null && isUnavailableSourceEventIdResolution(resolution)) {
             return jsonResponse(503, {
