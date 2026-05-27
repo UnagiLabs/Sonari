@@ -4,6 +4,7 @@
 !.codex/config.toml
 !.codex/hooks.json
 .cache/
+.build/
 node_modules/
 dist/
 site/.next/
