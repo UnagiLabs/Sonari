@@ -8,7 +8,7 @@ use crate::core::source_archive::{SourceArchive, SourceArchiveError};
 use crate::core::types::{
     OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,
 };
-use crate::crypto::{PayloadSigner, sha3_256_bytes, to_hex};
+use crate::crypto::{PayloadSigner, sha256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
 use crate::source::usgs::{
@@ -48,8 +48,8 @@ pub fn process_usgs_with_source_archive(
     })?;
     let raw_grid_bytes = raw_grid_bytes_for_source(&input, &grid_xml, &raw_grid_uri)
         .map_err(SourceArchiveError::Oracle)?;
-    let detail_hash = to_hex(&sha3_256_bytes(&input.detail_json));
-    let grid_hash = to_hex(&sha3_256_bytes(&raw_grid_bytes));
+    let detail_hash = to_hex(&sha256_bytes(&input.detail_json));
+    let grid_hash = to_hex(&sha256_bytes(&raw_grid_bytes));
     let detail_ref =
         archive.store_and_verify(&input.raw_detail_uri, &detail_hash, &input.detail_json)?;
     let grid_ref = archive.store_and_verify(&raw_grid_uri, &grid_hash, &raw_grid_bytes)?;
@@ -171,9 +171,9 @@ fn process_usgs_inner(
     let source_bytes = canonical_json_bytes(&source_manifest)?;
     let raw_bytes = canonical_json_bytes(&raw_data_manifest)?;
     let affected_bytes = canonical_json_bytes(&affected_artifact)?;
-    let source_set_hash = sha3_256_bytes(&source_bytes);
-    let raw_data_hash = sha3_256_bytes(&raw_bytes);
-    let affected_cells_data_hash = sha3_256_bytes(&affected_bytes);
+    let source_set_hash = sha256_bytes(&source_bytes);
+    let raw_data_hash = sha256_bytes(&raw_bytes);
+    let affected_cells_data_hash = sha256_bytes(&affected_bytes);
     let leaf_hashes = leaf_hashes(&affected_artifact, event_uid_bytes)?;
     let affected_cells_root =
         merkle_root_from_leaf_hashes(&leaf_hashes.iter().map(|item| item.1).collect::<Vec<_>>())
@@ -328,7 +328,7 @@ fn source_manifest(detail: &UsgsDetail, shakemap: &UsgsShakeMapProduct) -> Sourc
             product_version: "1".to_owned(),
             map_status: shakemap.properties.map_status.clone(),
             updated_at_ms: detail.properties.updated,
-            url_hash: to_hex(&sha3_256_bytes(detail_url.as_bytes())),
+            url_hash: to_hex(&sha256_bytes(detail_url.as_bytes())),
         },
         SourceEntry {
             name: "USGS".to_owned(),
@@ -337,7 +337,7 @@ fn source_manifest(detail: &UsgsDetail, shakemap: &UsgsShakeMapProduct) -> Sourc
             product_version: shakemap.properties.version.clone(),
             map_status: shakemap.properties.map_status.clone(),
             updated_at_ms: detail.properties.updated,
-            url_hash: to_hex(&sha3_256_bytes(grid_url.as_bytes())),
+            url_hash: to_hex(&sha256_bytes(grid_url.as_bytes())),
         },
     ];
     sources.sort_by(|a, b| {
@@ -371,8 +371,8 @@ fn raw_data_manifest(
     grid_bytes: &[u8],
     archive_refs: Option<&UsgsArchiveRefs>,
 ) -> RawDataManifest {
-    let detail_hash = to_hex(&sha3_256_bytes(detail_bytes));
-    let grid_hash = to_hex(&sha3_256_bytes(grid_bytes));
+    let detail_hash = to_hex(&sha256_bytes(detail_bytes));
+    let grid_hash = to_hex(&sha256_bytes(grid_bytes));
     let mut entries = vec![
         raw_data_entry(
             event_id,

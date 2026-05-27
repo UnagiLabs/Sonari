@@ -2,7 +2,7 @@
 use crate::core::artifacts::SignatureArtifact;
 use crate::core::types::OracleError;
 use ed25519_dalek::{Signer, SigningKey};
-use sha3::{Digest, Sha3_256};
+use sha2::{Digest, Sha256};
 
 pub trait PayloadSigner {
     fn sign_payload(&self, payload: &[u8]) -> SignatureArtifact;
@@ -32,8 +32,8 @@ impl PayloadSigner for LocalEd25519Signer {
     }
 }
 
-pub fn sha3_256_bytes(data: &[u8]) -> [u8; 32] {
-    Sha3_256::digest(data).into()
+pub fn sha256_bytes(data: &[u8]) -> [u8; 32] {
+    Sha256::digest(data).into()
 }
 
 pub(crate) fn to_hex(data: &[u8]) -> String {

@@ -1,5 +1,5 @@
 use crate::core::artifacts::{LeafHash, ProofStep, SampleProof};
-use crate::crypto::{sha3_256_bytes, to_hex};
+use crate::crypto::{sha256_bytes, to_hex};
 
 pub fn merkle_root_from_leaf_hashes(leaf_hashes: &[[u8; 32]]) -> Option<[u8; 32]> {
     let mut level = leaf_hashes.to_vec();
@@ -16,7 +16,7 @@ pub fn merkle_root_from_leaf_hashes(leaf_hashes: &[[u8; 32]]) -> Option<[u8; 32]
                 data.push(0x01);
                 data.extend_from_slice(&chunk[0]);
                 data.extend_from_slice(&chunk[1]);
-                next.push(sha3_256_bytes(&data));
+                next.push(sha256_bytes(&data));
             }
         }
         level = next;
@@ -81,7 +81,7 @@ fn internal_hash(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     data.push(0x01);
     data.extend_from_slice(&left);
     data.extend_from_slice(&right);
-    sha3_256_bytes(&data)
+    sha256_bytes(&data)
 }
 
 fn hex_hash_to_32(value: &str) -> Option<[u8; 32]> {
@@ -95,7 +95,7 @@ mod tests {
     fn fixture_leaf_hashes(count: usize) -> Vec<LeafHash> {
         (0..count)
             .map(|index| {
-                let hash = sha3_256_bytes(&[index as u8]);
+                let hash = sha256_bytes(&[index as u8]);
                 LeafHash {
                     h3_index: index.to_string(),
                     leaf_hash: to_hex(&hash),
@@ -138,7 +138,7 @@ mod tests {
                 }
                 direction => panic!("unsupported proof direction {direction}"),
             }
-            current = sha3_256_bytes(&data);
+            current = sha256_bytes(&data);
         }
 
         current

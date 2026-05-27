@@ -8,6 +8,12 @@
 
 <!--
 verifier:
+Source:
+- Derived from USGS event:
+- Captured at:
+- Modified for fixture:
+- Network access required for tests: no
+
 情報:
 - 派生元の USGS イベント:
 - 取得日:

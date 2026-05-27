@@ -1,13 +1,13 @@
 {
   "target_leaf": {
     "h3_index": "608819013597790207",
-    "leaf_hash": "0x1dd74699033a94f1a4946edd673d3d7cbcda82412c782d2aedbb28a3bc9392f6"
+    "leaf_hash": "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f"
   },
   "proof": [
     {
       "direction": "LEFT",
-      "sibling_hash": "0x954d0c90f737aa6e9015cf4d33a1ff98997bb6ebe2006e200d91bdecb1ba8ba0"
+      "sibling_hash": "0x8c91dac6cd4c206c4d8ac7cb0a99a4b0bdd7fefdf1205f1be3e26700aa1951a4"
     }
   ],
-  "expected_root": "0x56e5b1020cb655fa99cec324da2fbf79e03dcfe84d3eee72e163111d3b01f6af"
+  "expected_root": "0x54d59943d5e2a17abce689271c3124d6971f42258924109da6673ab57198ca93"
 }

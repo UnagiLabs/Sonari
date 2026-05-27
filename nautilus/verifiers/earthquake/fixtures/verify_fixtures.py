@@ -5,7 +5,7 @@ import json
 import math
 import struct
 import sys
-from hashlib import sha3_256
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -156,8 +156,8 @@ def hx(data: bytes) -> str:
     return "0x" + data.hex()
 
 
-def sha3_hex(data: bytes) -> str:
-    return hx(sha3_256(data).digest())
+def sha256_hex(data: bytes) -> str:
+    return hx(sha256(data).digest())
 
 
 def hex_bytes(value: str) -> bytes:
@@ -242,7 +242,7 @@ def merkle_root(leaf_hashes: list[str]) -> str:
             if index + 1 == len(level):
                 nxt.append(level[index])
             else:
-                nxt.append(sha3_256(b"\x01" + level[index] + level[index + 1]).digest())
+                nxt.append(sha256(b"\x01" + level[index] + level[index + 1]).digest())
         level = nxt
     return hx(level[0])
 
@@ -252,9 +252,9 @@ def proof_root(leaf_hash: str, proof: list[dict[str, str]]) -> str:
     for step in proof:
         sibling = hex_bytes(step["sibling_hash"])
         if step["direction"] == "LEFT":
-            current = sha3_256(b"\x01" + sibling + current).digest()
+            current = sha256(b"\x01" + sibling + current).digest()
         elif step["direction"] == "RIGHT":
-            current = sha3_256(b"\x01" + current + sibling).digest()
+            current = sha256(b"\x01" + current + sibling).digest()
         else:
             fail(f"bad proof direction {step['direction']!r}")
     return hx(current)
@@ -433,20 +433,20 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         raw_path = ROOT / entry["uri"]
         if not raw_path.exists():
             fail(f"{case_id}: raw source does not exist: {entry['uri']}")
-        content_hash = sha3_hex(raw_path.read_bytes())
+        content_hash = sha256_hex(raw_path.read_bytes())
         if entry["content_hash"] != content_hash:
             fail(f"{case_id}: raw source content_hash mismatch for {entry['uri']}")
 
     source_bytes = canonical_json_bytes(source, SOURCE_ORDER, SOURCE_ENTRY_ORDER)
     raw_bytes = canonical_json_bytes(raw_manifest, RAW_ORDER, RAW_ENTRY_ORDER)
     affected_bytes = canonical_json_bytes(affected, AFFECTED_ORDER, AFFECTED_CELL_ORDER)
-    source_set_hash = sha3_hex(source_bytes)
-    raw_data_hash = sha3_hex(raw_bytes)
-    affected_cells_data_hash = sha3_hex(affected_bytes)
+    source_set_hash = sha256_hex(source_bytes)
+    raw_data_hash = sha256_hex(raw_bytes)
+    affected_cells_data_hash = sha256_hex(affected_bytes)
     leaf_hashes = [
         {
             "h3_index": cell["h3_index"],
-            "leaf_hash": sha3_hex(b"\x00" + leaf_bcs(affected, cell)),
+            "leaf_hash": sha256_hex(b"\x00" + leaf_bcs(affected, cell)),
         }
         for cell in affected["affected_cells"]
     ]

@@ -1,6 +1,6 @@
 use crate::core::artifacts::{AffectedCellsArtifact, UnsignedPayloadV1};
 use crate::core::types::OracleError;
-use crate::crypto::{hex_to_32, sha3_256_bytes};
+use crate::crypto::{hex_to_32, sha256_bytes};
 use crate::{
     CELL_METRIC_USGS_MMI, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
     INTENSITY_SCALE_MMI_X100,
@@ -97,7 +97,7 @@ pub(crate) fn event_uid_bytes(
     data.extend_from_slice(&(source_event_id.len() as u32).to_le_bytes());
     data.extend_from_slice(source_event_id.as_bytes());
     data.extend_from_slice(&occurred_at_ms.to_le_bytes());
-    sha3_256_bytes(&data)
+    sha256_bytes(&data)
 }
 
 pub(crate) fn leaf_hashes(
@@ -127,7 +127,7 @@ pub(crate) fn leaf_hashes(
             let mut data = Vec::with_capacity(1);
             data.push(0x00);
             data.extend(bcs::to_bytes(&leaf)?);
-            Ok((h3_index, sha3_256_bytes(&data)))
+            Ok((h3_index, sha256_bytes(&data)))
         })
         .collect()
 }
