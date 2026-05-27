@@ -73,6 +73,8 @@ describe("AWS earthquake runner CloudFormation template", () => {
 
         expect(template).toContain("SuiWalletConfigSecretArn:");
         expect(template).toContain("SuiKeystoreSecretArn:");
+        expect(template).toContain("WalrusContext:");
+        expect(template).toContain("Default: testnet");
         expect(template).toContain(
             `aws secretsmanager get-secret-value --secret-id '$${"{WalrusConfigSecretArn}"}' --query SecretString --output text > /opt/sonari/walrus-client-config.yaml`,
         );
@@ -87,7 +89,10 @@ describe("AWS earthquake runner CloudFormation template", () => {
             'echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml"',
         );
         expect(template).toContain('echo "SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml"');
-        expect(template).toContain('echo "SONARI_WALRUS_CONTEXT=testnet"');
+        expect(template).toContain("walrus_context=$(cat <<'SONARI_WALRUS_CONTEXT'");
+        expect(template).toContain(`$${"{WalrusContext}"}`);
+        expect(template).toContain("printf 'SONARI_WALRUS_CONTEXT=%q\\n' \"$walrus_context\"");
+        expect(template).not.toContain('echo "SONARI_WALRUS_CONTEXT=testnet"');
         expect(template).toContain('echo "SONARI_WALRUS_EPOCHS=2"');
     });
 

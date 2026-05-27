@@ -25,6 +25,10 @@ Parameters:
   WalrusAggregatorUrl:
     Type: String
     Description: Walrus aggregator URL used by the production TEE process.
+  WalrusContext:
+    Type: String
+    Default: testnet
+    Description: Walrus client config context used by the production TEE process.
   TeeArtifactS3Bucket:
     Type: String
     Description: S3 bucket containing the development TEE artifact tar.gz.
@@ -191,15 +195,19 @@ Resources:
             ${WalrusAggregatorUrl}
             SONARI_WALRUS_URL
             )
+            walrus_context=$(cat <<'SONARI_WALRUS_CONTEXT'
+            ${WalrusContext}
+            SONARI_WALRUS_CONTEXT
+            )
             {
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key"
               echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
               echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml"
               echo "SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml"
-              echo "SONARI_WALRUS_CONTEXT=testnet"
               echo "SONARI_WALRUS_EPOCHS=2"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
+              printf 'SONARI_WALRUS_CONTEXT=%q\n' "$walrus_context"
               printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
             } >/opt/sonari/runner.env
             chown ec2-user:ec2-user /opt/sonari/runner.env

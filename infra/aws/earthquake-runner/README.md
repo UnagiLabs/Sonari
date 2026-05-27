@@ -176,6 +176,7 @@ SuiWalletConfigSecretArn
 SuiKeystoreSecretArn
 NitroEnclaveProcessCommand
 WalrusAggregatorUrl
+WalrusContext
 InstanceType
 AmiId
 LambdaCodeS3Bucket
@@ -236,10 +237,11 @@ aws cloudformation deploy \
     TeeArtifactSha256="$TEE_ARTIFACT_SHA256" \
     SuiWalletConfigSecretArn=<sui-wallet-config-secret-arn> \
     SuiKeystoreSecretArn=<sui-keystore-secret-arn> \
+    WalrusContext=testnet \
     NitroEnclaveProcessCommand="/opt/sonari/tee-artifact/bin/tee production"
 ```
 
-`NitroEnclaveProcessCommand` の既定値は `/opt/sonari/tee-artifact/bin/tee production` です。別の wrapper や enclave 起動 command を検証する場合だけ、この parameter を上書きします。
+`NitroEnclaveProcessCommand` の既定値は `/opt/sonari/tee-artifact/bin/tee production` です。別の wrapper や enclave 起動 command を検証する場合だけ、この parameter を上書きします。`WalrusContext` の既定値は `testnet` です。mainnet や独自 config を使う場合は、渡す Walrus config の context 名に合わせて上書きしてください。
 
 ## dev 用 Sui / Walrus secret の準備
 
