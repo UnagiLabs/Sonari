@@ -22,8 +22,10 @@ Rust、TypeScript、Moveは、必ず以下の順序で `AffectedCellLeaf` をBCS
 ## Leaf Hash
 
 ```txt
-leaf_hash = SHA3-256(0x00 || BCS(AffectedCellLeaf))
+leaf_hash = SHA-256(0x00 || BCS(AffectedCellLeaf))
 ```
+
+MVP中の破壊的変更として、`oracle_version = 1` のleaf / internal node digestはSHA-256へ再定義されています。pre-SHA-256のv1 Merkle artifactsは無効です。domain separator、BCS field order、enum値は変更しません。
 
 ## Sort And Merkle Rules
 
@@ -31,7 +33,7 @@ leaf_hash = SHA3-256(0x00 || BCS(AffectedCellLeaf))
 - 同一 `h3_index` が複数存在するaffected cells fileはinvalidです。
 - leaf hashには上記の全フィールドを含めます。
 - `affected_cells_root` は `cell_band >= 1` のClaim対象セルだけで作ります。Band 0セルと全ShakeMap領域の完全証明は含めません。
-- internal nodeのhashは `internal_hash = SHA3-256(0x01 || left_32 || right_32)` です。
+- internal nodeのhashは `internal_hash = SHA-256(0x01 || left_32 || right_32)` です。
 - 各Merkle levelでleaf数が奇数の場合、末尾leafは複製せず次段へそのまま昇格します。
 - Merkle proof stepの `direction` は、`LEFT` が sibling is left of current hash、`RIGHT` が sibling is right of current hashを意味します。
 - fixture testでは、同じaffected cells fileから各実装で同じ `affected_cells_root` が得られることを確認します。

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sonari.example/schemas/source_manifest.schema.json",
   "title": "Sonari Source Manifest",
-  "$comment": "source_set_hash = SHA3-256(canonical_source_manifest_json_bytes). Canonical JSON must emit keys in this schema order, with no whitespace, no trailing newline, and UTF-8 bytes. Hex hashes must be lowercase 0x plus 64 hex characters. sources must be sorted by name, event_id, product, product_version, updated_at_ms ascending.",
+  "$comment": "source_set_hash = SHA-256(canonical_source_manifest_json_bytes). Canonical JSON must emit keys in this schema order, with no whitespace, no trailing newline, and UTF-8 bytes. Hex hashes must be lowercase 0x plus 64 hex characters. sources must be sorted by name, event_id, product, product_version, updated_at_ms ascending.",
   "type": "object",
   "additionalProperties": false,
   "required": ["sources", "cells_generation_method", "oracle_version"],

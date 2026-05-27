@@ -541,7 +541,7 @@ PR4 の実装範囲:
 実装順:
 
 1. `AffectedCellLeaf` BCS decode を schema 順に実装する。
-2. leaf hash `SHA3-256(0x00 || BCS(AffectedCellLeaf))` を実装する。
+2. leaf hash `SHA-256(0x00 || BCS(AffectedCellLeaf))` を実装する。
 3. Merkle proof verification を実装する。
 4. root comparison と event uid / revision / h3 index / band validation を実装する。
 5. fixture proof を Move test で検証する。
