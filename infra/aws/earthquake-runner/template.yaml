@@ -387,6 +387,14 @@ Resources:
       Principal: "*"
       FunctionUrlAuthType: NONE
 
+  ManualWatcherFunctionInvokeUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ManualWatcherLambda
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
   RunnerControlLambda:
     Type: AWS::Lambda::Function
     Properties:

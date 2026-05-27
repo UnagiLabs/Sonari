@@ -1,7 +1,7 @@
-const USGS_SOURCE_EVENT_ID_PATTERN = /^[a-z]{2}[a-z0-9-]{6,32}$/;
+const USGS_SOURCE_EVENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{5,64}$/;
 
 export function isValidUsgsSourceEventId(sourceEventId: string): boolean {
-    return USGS_SOURCE_EVENT_ID_PATTERN.test(sourceEventId);
+    return USGS_SOURCE_EVENT_ID_PATTERN.test(sourceEventId) && !sourceEventId.includes("__");
 }
 
 export function assertValidUsgsSourceEventId(sourceEventId: string): void {

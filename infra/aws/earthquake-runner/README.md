@@ -217,6 +217,8 @@ sha256sum -c dist/aws/earthquake-tee-artifact.tar.gz.sha256
 
 `tar -tzf` の出力に `bin/tee` と `bin/walrus` が含まれていることを確認してください。checksum file は `sha256sum -c` で検証できる形式です。
 
+AWS 用 artifact の TEE binary は、既定で `x86_64-unknown-linux-musl` target の static binary として build します。host の glibc に依存した binary を AL2023 EC2 に配置すると、EC2 側の glibc version と合わず実行できないためです。local host に musl toolchain を入れられない場合は、Rust container などで `musl-tools` と `rustup target add x86_64-unknown-linux-musl` を用意して build し、`SONARI_TEE_BINARY=/path/to/static/tee pnpm build:aws-earthquake-tee-artifact` で package してください。
+
 S3 へ配置する例は次の通りです。
 
 ```bash
