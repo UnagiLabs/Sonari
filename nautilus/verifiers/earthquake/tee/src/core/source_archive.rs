@@ -477,7 +477,7 @@ fn parse_store_blob_id(stdout: &[u8]) -> Result<String, SourceArchiveError> {
     let value = serde_json::from_slice::<Value>(stdout).map_err(|error| {
         SourceArchiveError::StoreFailed(format!("walrus store JSON output is invalid: {error}"))
     })?;
-    let blob_ids = collect_blob_ids(&value);
+    let blob_ids = store_success_blob_ids(&value);
     let Some(blob_id) = single_unique_blob_id(&blob_ids)? else {
         return Err(SourceArchiveError::StoreFailed(
             "walrus store JSON missing blobId".to_owned(),
@@ -491,24 +491,27 @@ fn parse_store_blob_id(stdout: &[u8]) -> Result<String, SourceArchiveError> {
     Ok(blob_id)
 }
 
-fn collect_blob_ids(value: &Value) -> Vec<String> {
-    match value {
-        Value::Object(object) => {
-            let mut blob_ids = Vec::new();
-            for (key, child) in object {
-                if key == "blobId" {
-                    if let Some(blob_id) = child.as_str() {
-                        blob_ids.push(blob_id.to_owned());
-                    }
-                    continue;
-                }
-                blob_ids.extend(collect_blob_ids(child));
-            }
-            blob_ids
-        }
-        Value::Array(items) => items.iter().flat_map(collect_blob_ids).collect(),
-        _ => Vec::new(),
+fn store_success_blob_ids(value: &Value) -> Vec<String> {
+    const SUCCESS_BLOB_ID_PATHS: &[&[&str]] = &[
+        &["newlyCreated", "blobObject", "blobId"],
+        &["alreadyCertified", "blobId"],
+        &["blobStoreResult", "newlyCreated", "blobObject", "blobId"],
+        &["blobStoreResult", "alreadyCertified", "blobId"],
+    ];
+
+    SUCCESS_BLOB_ID_PATHS
+        .iter()
+        .filter_map(|path| string_at_path(value, path))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut current = value;
+    for segment in path {
+        current = current.as_object()?.get(*segment)?;
     }
+    current.as_str()
 }
 
 fn single_unique_blob_id(blob_ids: &[String]) -> Result<Option<String>, SourceArchiveError> {
@@ -865,6 +868,53 @@ mod tests {
 
         assert_eq!(stored.uri, "walrus://blob/blob-nested");
         assert_eq!(stored.walrus_blob_id, "blob-nested");
+    }
+
+    #[test]
+    fn walrus_cli_archive_accepts_nested_already_certified_store_response() {
+        let blob_id = parse_store_blob_id(
+            br#"{"blobStoreResult":{"alreadyCertified":{"blobId":"blob-nested-certified"}}}"#,
+        )
+        .expect("nested alreadyCertified store result should be accepted");
+
+        assert_eq!(blob_id, "blob-nested-certified");
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_error_store_blob_id() {
+        let error =
+            parse_store_blob_id(br#"{"blobStoreResult":{"error":{"blobId":"blob-error"}}}"#)
+                .expect_err("error variant blobId must not be accepted");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_marked_invalid_store_blob_id() {
+        let error = parse_store_blob_id(br#"{"markedInvalid":{"blobId":"blob-invalid"}}"#)
+            .expect_err("markedInvalid variant blobId must not be accepted");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_nested_marked_invalid_store_blob_id() {
+        let error = parse_store_blob_id(
+            br#"{"blobStoreResult":{"markedInvalid":{"blobId":"blob-invalid"}}}"#,
+        )
+        .expect_err("nested markedInvalid variant blobId must not be accepted");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_multiple_success_store_blob_ids() {
+        let error = parse_store_blob_id(
+            br#"{"newlyCreated":{"blobObject":{"blobId":"blob-new"}},"alreadyCertified":{"blobId":"blob-certified"}}"#,
+        )
+        .expect_err("multiple different success blobIds must fail closed");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
     }
 
     #[test]
