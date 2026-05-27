@@ -15,6 +15,7 @@ import {
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
 import type { RelayerAdapter } from "./relayer_preview.js";
+import { screenUsgsCandidate } from "./screening.js";
 import { isValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type RunnerQueueJob, type StateRepository } from "./state.js";
 import {
@@ -214,11 +215,14 @@ export async function scanCandidates(
         if (!isValidUsgsSourceEventId(candidate.source_event_id)) {
             continue;
         }
-        const resolverInput =
-            candidate.detail_url === undefined
-                ? { sourceEventId: candidate.source_event_id }
-                : { sourceEventId: candidate.source_event_id, detailUrl: candidate.detail_url };
-        const resolution = await resolveSourceEventId(resolverInput, options.resolveSourceEventId);
+        if (!options.bypassScreening && !screenUsgsCandidate(candidate).runnerEligible) {
+            await repository.upsertCandidate(candidate, nowMs, options);
+            continue;
+        }
+        const resolution = await resolveSourceEventId(
+            { sourceEventId: candidate.source_event_id },
+            options.resolveSourceEventId,
+        );
         if (resolution === null || !isValidUsgsSourceEventId(resolution.source_event_id)) {
             continue;
         }

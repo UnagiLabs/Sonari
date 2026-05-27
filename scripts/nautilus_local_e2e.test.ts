@@ -2,7 +2,7 @@ import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { HOUR_MS } from "../nautilus/verifiers/earthquake/watcher/src/index.js";
+import { HOUR_MS, usgsDetailUrl } from "../nautilus/verifiers/earthquake/watcher/src/index.js";
 import {
     E2E_FIXTURE_CASES,
     FixtureSourceClient,
@@ -187,27 +187,12 @@ describe("Nautilus local oracle E2E", () => {
         LOCAL_E2E_TEST_TIMEOUT_MS,
     );
 
-    it("fetches live USGS detail from the recent feed detail URL and prefers grid.xml.zip", async () => {
+    it("fetches live USGS detail from the deterministic detail URL and prefers grid.xml.zip", async () => {
         const requests: string[] = [];
         const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
             const url = String(input);
             requests.push(url);
-            if (url.endsWith("/all_hour.geojson")) {
-                return Response.json({
-                    features: [
-                        {
-                            id: "us7000sonari",
-                            properties: {
-                                type: "earthquake",
-                                time: 1_700_000_000_000,
-                                updated: 1_700_000_010_000,
-                                detail: "https://example.test/detail/us7000sonari.geojson",
-                            },
-                        },
-                    ],
-                });
-            }
-            if (url === "https://example.test/detail/us7000sonari.geojson") {
+            if (url === usgsDetailUrl("us7000sonari")) {
                 return Response.json(
                     detailWithContents("us7000sonari", {
                         "download/grid.xml": { url: "https://example.test/grid.xml" },
@@ -222,20 +207,18 @@ describe("Nautilus local oracle E2E", () => {
         };
         const sourceClient = new UsgsSourceClient({
             fetcher,
-            recentFeedUrl: "https://example.test/all_hour.geojson",
         });
 
         const artifacts = await sourceClient.getSourceArtifacts("us7000sonari");
 
         expect(requests).toEqual([
-            "https://example.test/all_hour.geojson",
-            "https://example.test/detail/us7000sonari.geojson",
+            usgsDetailUrl("us7000sonari"),
             "https://example.test/grid.xml.zip",
         ]);
         expect(artifacts).toMatchObject({
             case_id: "usgs-live/us7000sonari",
             source_event_id: "us7000sonari",
-            raw_detail_uri: "https://example.test/detail/us7000sonari.geojson",
+            raw_detail_uri: usgsDetailUrl("us7000sonari"),
             raw_grid_uri: "https://example.test/grid.xml.zip",
             raw_data_uri: "ipfs://sonari/live/us7000sonari/raw_data_manifest.json",
             affected_cells_uri: "ipfs://sonari/live/us7000sonari/affected_cells.json",
@@ -250,9 +233,6 @@ describe("Nautilus local oracle E2E", () => {
         const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
             const url = String(input);
             requests.push(url);
-            if (url.endsWith("/all_hour.geojson")) {
-                return Response.json({ features: [] });
-            }
             if (
                 url ===
                 "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000manual.geojson"
@@ -271,7 +251,6 @@ describe("Nautilus local oracle E2E", () => {
 
         const artifacts = await new UsgsSourceClient({
             fetcher,
-            recentFeedUrl: "https://example.test/all_hour.geojson",
         }).getSourceArtifacts("us7000manual");
 
         expect(requests).toContain(
@@ -286,17 +265,12 @@ describe("Nautilus local oracle E2E", () => {
         ["invalid detail JSON", new Response("{not json", { status: 200 })],
         ["id mismatch", Response.json(detailWithContents("other-event", {}))],
     ] as const)("maps %s to pending_source USGS_DETAIL_UNAVAILABLE", async (_name, response) => {
-        const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
-            const url = String(input);
-            if (url.endsWith("/all_hour.geojson")) {
-                return Response.json({ features: [] });
-            }
+        const fetcher = async (): Promise<Response> => {
             return response;
         };
         const runner = new LocalOracleCoreRunnerAdapter({
             sourceClient: new UsgsSourceClient({
                 fetcher,
-                recentFeedUrl: "https://example.test/all_hour.geojson",
             }),
         });
 
@@ -315,17 +289,12 @@ describe("Nautilus local oracle E2E", () => {
     });
 
     it("maps missing ShakeMap grid contents to pending_source SHAKEMAP_GRID_UNAVAILABLE", async () => {
-        const fetcher = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
-            const url = String(input);
-            if (url.endsWith("/all_hour.geojson")) {
-                return Response.json({ features: [] });
-            }
+        const fetcher = async (): Promise<Response> => {
             return Response.json(detailWithContents("us7000sonari", {}));
         };
         const runner = new LocalOracleCoreRunnerAdapter({
             sourceClient: new UsgsSourceClient({
                 fetcher,
-                recentFeedUrl: "https://example.test/all_hour.geojson",
             }),
         });
 

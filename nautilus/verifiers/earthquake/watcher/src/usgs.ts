@@ -7,7 +7,6 @@ export interface UsgsEarthquakeCandidate {
     summary_mmi: number | null;
     alert: UsgsAlertLevel | null;
     tsunami: boolean;
-    detail_url?: string;
 }
 
 export type UsgsAlertLevel = "green" | "yellow" | "orange" | "red";
@@ -19,7 +18,6 @@ export interface UsgsSourceEventIdResolution {
 
 export interface UsgsSourceEventIdResolverInput {
     sourceEventId: string;
-    detailUrl?: string;
 }
 
 export type UsgsSourceEventIdResolver = (
@@ -50,7 +48,7 @@ export async function resolveUsgsSourceEventId(
     const fallback = { source_event_id: input.sourceEventId };
     let response: Response;
     try {
-        response = await fetcher(input.detailUrl ?? usgsDetailUrl(input.sourceEventId));
+        response = await fetcher(usgsDetailUrl(input.sourceEventId));
     } catch {
         return fallback;
     }
@@ -119,10 +117,6 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
         alert: readAlert(feature.properties.alert),
         tsunami: feature.properties.tsunami === 1,
     };
-    const detailUrl = readNonEmptyString(feature.properties.detail);
-    if (detailUrl !== undefined) {
-        candidate.detail_url = detailUrl;
-    }
     return candidate;
 }
 
@@ -143,10 +137,6 @@ function usgsIdsContains(ids: string | undefined, sourceEventId: string): boolea
             .map((item) => item.trim())
             .some((item) => item === sourceEventId) ?? false
     );
-}
-
-function readNonEmptyString(input: unknown): string | undefined {
-    return typeof input === "string" && input.length > 0 ? input : undefined;
 }
 
 function readFiniteNumber(input: unknown): number | null {

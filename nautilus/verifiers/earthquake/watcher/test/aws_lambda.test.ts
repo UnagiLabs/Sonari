@@ -9,6 +9,7 @@ import {
     HOUR_MS,
     DynamoDbStateRepository,
     InMemoryStateRepository,
+    parseUsgsRecentFeed,
     startDueWorkflows,
     type EarthquakeEventRow,
     type WorkflowStarter,
@@ -145,6 +146,81 @@ describe("AWS Lambda watcher handlers", () => {
         await expect(repository.get("official20110311054624120_30")).resolves.toMatchObject({
             requested_source_event_id: "usc0001xgp",
         });
+    });
+
+    it("skips source ID resolution for scheduled candidates below the auto threshold", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const resolverInputs: unknown[] = [];
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            fetchCandidates: async () => [
+                candidate("us7000small", { magnitude: 5.1 }),
+                candidate("usc0001xgp", { magnitude: 6 }),
+            ],
+            resolveSourceEventId: async (input) => {
+                resolverInputs.push(input);
+                return input.sourceEventId === "usc0001xgp"
+                    ? {
+                          source_event_id: "official20110311054624120_30",
+                          requested_source_event_id: "usc0001xgp",
+                      }
+                    : { source_event_id: input.sourceEventId };
+            },
+        });
+
+        const result = await handler();
+
+        expect(result).toEqual({ scanned: 2, workflow_started: 1 });
+        expect(resolverInputs).toEqual([{ sourceEventId: "usc0001xgp" }]);
+        await expect(repository.get("us7000small")).resolves.toMatchObject({
+            status: "ignored_small",
+            error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+        });
+        await expect(repository.get("official20110311054624120_30")).resolves.toMatchObject({
+            requested_source_event_id: "usc0001xgp",
+        });
+    });
+
+    it("does not pass feed-provided detail URLs to scheduled source ID resolution", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const resolverInputs: unknown[] = [];
+        const handler = createScheduledHandler({
+            repository,
+            workflow,
+            now: () => baseNow,
+            fetchCandidates: async () =>
+                parseUsgsRecentFeed({
+                    features: [
+                        {
+                            id: "usc0001xgp",
+                            properties: {
+                                time: baseNow - 25 * 60 * 60 * 1000,
+                                updated: baseNow - 60 * 60 * 1000,
+                                type: "earthquake",
+                                detail: "http://169.254.169.254/latest/meta-data",
+                                mag: 6,
+                                mmi: null,
+                                alert: null,
+                                tsunami: 0,
+                            },
+                        },
+                    ],
+                }),
+            resolveSourceEventId: async (input) => {
+                resolverInputs.push(input);
+                return {
+                    source_event_id: input.sourceEventId,
+                };
+            },
+        });
+
+        await handler();
+
+        expect(resolverInputs).toEqual([{ sourceEventId: "usc0001xgp" }]);
     });
 
     it("defers scheduled candidates that are less than 24 hours old", async () => {

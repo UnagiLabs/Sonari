@@ -3,6 +3,7 @@ import {
     parseUsgsRecentFeed,
     resolveUsgsSourceEventId,
     USGS_RECENT_FEED_URL,
+    usgsDetailUrl,
 } from "../src/usgs.js";
 
 describe("USGS recent feed parser", () => {
@@ -12,15 +13,15 @@ describe("USGS recent feed parser", () => {
                 features: [
                     {
                         id: "us7000sonari",
-                properties: {
-                    time: 1_700_000_000_000,
-                    updated: 1_700_000_010_000,
-                    type: "earthquake",
-                    detail: "https://earthquake.usgs.gov/detail/us7000sonari.geojson",
-                    mag: 5.6,
-                    mmi: 6.2,
-                    alert: "orange",
-                    tsunami: 1,
+                        properties: {
+                            time: 1_700_000_000_000,
+                            updated: 1_700_000_010_000,
+                            type: "earthquake",
+                            detail: "http://169.254.169.254/latest/meta-data",
+                            mag: 5.6,
+                            mmi: 6.2,
+                            alert: "orange",
+                            tsunami: 1,
                         },
                     },
                 ],
@@ -34,7 +35,6 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: 6.2,
                 alert: "orange",
                 tsunami: true,
-                detail_url: "https://earthquake.usgs.gov/detail/us7000sonari.geojson",
             },
         ]);
     });
@@ -78,7 +78,6 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: null,
                 alert: null,
                 tsunami: false,
-                detail_url: undefined,
             },
             {
                 source_event_id: "us7000green",
@@ -88,7 +87,6 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: null,
                 alert: "green",
                 tsunami: false,
-                detail_url: undefined,
             },
         ]);
     });
@@ -123,6 +121,24 @@ describe("USGS recent feed parser", () => {
 });
 
 describe("USGS source event ID resolver", () => {
+    it("fetches the deterministic USGS detail URL derived from the source event ID", async () => {
+        const requestedUrls: string[] = [];
+        const fetcher = async (url: Parameters<typeof fetch>[0]) => {
+            requestedUrls.push(String(url));
+            return responseJson({
+                id: "usc0001xgp",
+                properties: {
+                    ids: ",usc0001xgp,",
+                },
+            });
+        };
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toEqual({ source_event_id: "usc0001xgp" });
+        expect(requestedUrls).toEqual([usgsDetailUrl("usc0001xgp")]);
+    });
+
     it("resolves alias detail responses to canonical IDs only when properties.ids contains an exact match", async () => {
         const fetcher = async () =>
             responseJson({
