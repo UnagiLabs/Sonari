@@ -247,7 +247,7 @@ export default function LandingPage() {
                             </div>
                         </div>
 
-                        <div className="stats-grid hero-stats-grid">
+                        <div className="metrics-strip hero-stats-grid">
                             {impactStats.map((stat) => (
                                 <StatCard
                                     key={stat.label}
@@ -310,16 +310,7 @@ export default function LandingPage() {
                             eyebrow="Top supporters"
                             title="People and partners keeping the reserve full."
                         />
-                        <div className="supporter-grid">
-                            <SupporterCard
-                                donors={individualDonors}
-                                title="Top individual donors"
-                            />
-                            <SupporterCard
-                                donors={corporateDonors}
-                                title="Top corporate sponsors"
-                            />
-                        </div>
+                        <SupporterList />
                     </section>
 
                     <section className="section" aria-labelledby="why-title">
@@ -329,7 +320,7 @@ export default function LandingPage() {
                         />
                         <div className="value-grid">
                             {values.map((value) => (
-                                <article className="value" key={value.title}>
+                                <article className="value-item" key={value.title}>
                                     <div className="icon-wrap">
                                         <Icon name={value.icon} size={22} />
                                     </div>
@@ -427,7 +418,7 @@ function SectionHeader({
 
 function StatCard({ label, meta, value }: { label: string; meta: string; value: string }) {
     return (
-        <article className="stat-card">
+        <article className="metric-item">
             <div className="label">{label}</div>
             <div className="value">{value}</div>
             <div className="meta">{meta}</div>
@@ -506,34 +497,38 @@ function PoolCard({ pool }: { pool: Pool }) {
     );
 }
 
-function SupporterCard({ donors, title }: { donors: Donor[]; title: string }) {
+function SupporterList() {
     return (
-        <article className="card supporter-card">
-            <div className="supporter-card-head">
-                <h3>{title}</h3>
-                <span className="tag tag-neutral">Preview</span>
-            </div>
-            <div className="row-list">
-                {donors.map((donor, index) => (
-                    <div className="row-item" key={donor.name}>
-                        <div className={`avatar ${donor.corporate ? "avatar-sq" : ""}`}>
-                            {donor.name
-                                .replace(/[^A-Za-z]/g, "")
-                                .slice(0, 2)
-                                .toUpperCase() || "?"}
-                        </div>
-                        <div>
-                            <div className="row-name">{donor.name}</div>
-                            <div className="row-meta">{donor.meta}</div>
-                        </div>
-                        <div className="row-amount">
-                            <span className="stat-num">{donor.amount}</span>
-                            <small>#{index + 1}</small>
-                        </div>
+        <div className="supporter-list">
+            <SupporterGroup donors={individualDonors} label="Individuals" />
+            <SupporterGroup donors={corporateDonors} label="Corporate sponsors" />
+        </div>
+    );
+}
+
+function SupporterGroup({ donors, label }: { donors: Donor[]; label: string }) {
+    return (
+        <section className="supporter-group" aria-label={label}>
+            <div className="supporter-group-label">{label}</div>
+            {donors.map((donor, index) => (
+                <div className="row-item" key={donor.name}>
+                    <div className={`avatar ${donor.corporate ? "avatar-sq" : ""}`}>
+                        {donor.name
+                            .replace(/[^A-Za-z]/g, "")
+                            .slice(0, 2)
+                            .toUpperCase() || "?"}
                     </div>
-                ))}
-            </div>
-        </article>
+                    <div>
+                        <div className="row-name">{donor.name}</div>
+                        <div className="row-meta">{donor.meta}</div>
+                    </div>
+                    <div className="row-amount">
+                        <span className="stat-num">{donor.amount}</span>
+                        <small>#{index + 1}</small>
+                    </div>
+                </div>
+            ))}
+        </section>
     );
 }
 
