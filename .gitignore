@@ -13,3 +13,6 @@ target/
 .wrangler/
 *.tsbuildinfo
 .antigravitycli/
+
+# Local AWS/Sonari dev secrets and generated wallet config.
+infra/aws/earthquake-runner/.local/
