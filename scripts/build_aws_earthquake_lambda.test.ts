@@ -43,7 +43,9 @@ describe("AWS earthquake Lambda artifact builder", () => {
 
         expect(lambdaJs).toContain("scheduledHandler");
         expect(lambdaJs).toContain("manualHandler");
+        expect(lambdaJs).toContain("createRequire(import.meta.url)");
         expect(runnerWorkflowJs).toContain("handler");
+        expect(runnerWorkflowJs).toContain("createRequire(import.meta.url)");
         expect(lambdaJs).not.toContain("@sonari/");
         expect(lambdaJs).not.toContain("workspace:");
         expect(runnerWorkflowJs).not.toContain("@sonari/");

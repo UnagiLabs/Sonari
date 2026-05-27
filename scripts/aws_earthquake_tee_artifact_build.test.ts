@@ -10,6 +10,9 @@ describe("AWS earthquake TEE artifact build script", () => {
 
         expect(script).toContain('path.join(workDir, "bin/walrus")');
         expect(script).toContain('process.env.SONARI_WALRUS_CLI ?? "walrus"');
+        expect(script).toContain('const DEFAULT_CARGO_TARGET = "x86_64-unknown-linux-musl"');
+        expect(script).toContain("process.env.SONARI_TEE_CARGO_TARGET ?? DEFAULT_CARGO_TARGET");
+        expect(script).toContain("process.env.SONARI_TEE_BINARY");
         expect(script).toContain('"bin/tee"');
         expect(script).toContain('"bin/walrus"');
     });

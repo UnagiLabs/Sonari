@@ -139,6 +139,17 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(template).toContain("autoscaling:SetDesiredCapacity");
     });
 
+    it("grants both permissions required for public Lambda Function URL invocation", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("ManualWatcherFunctionUrlPermission:");
+        expect(template).toContain("Action: lambda:InvokeFunctionUrl");
+        expect(template).toContain("FunctionUrlAuthType: NONE");
+        expect(template).toContain("ManualWatcherFunctionInvokeUrlPermission:");
+        expect(template).toContain("Action: lambda:InvokeFunction");
+        expect(template).toContain("InvokedViaFunctionUrl: true");
+    });
+
     it("points Lambda handlers at the TypeScript dist/src emit layout", async () => {
         const template = await readFile(templatePath, "utf8");
 
