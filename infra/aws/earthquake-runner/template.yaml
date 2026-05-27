@@ -12,6 +12,12 @@ Parameters:
     Type: String
   WalrusConfigSecretArn:
     Type: String
+  SuiWalletConfigSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing the Sui wallet client config for Walrus writes.
+  SuiKeystoreSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing the Sui keystore file referenced by the wallet config.
   NitroEnclaveProcessCommand:
     Type: String
     Default: /opt/sonari/tee-artifact/bin/tee production
@@ -19,6 +25,10 @@ Parameters:
   WalrusAggregatorUrl:
     Type: String
     Description: Walrus aggregator URL used by the production TEE process.
+  WalrusContext:
+    Type: String
+    Default: testnet
+    Description: Walrus client config context used by the production TEE process.
   TeeArtifactS3Bucket:
     Type: String
     Description: S3 bucket containing the development TEE artifact tar.gz.
@@ -110,6 +120,8 @@ Resources:
                   - !Ref RunnerTokenSecretArn
                   - !Ref TeeSigningKeySecretArn
                   - !Ref WalrusConfigSecretArn
+                  - !Ref SuiWalletConfigSecretArn
+                  - !Ref SuiKeystoreSecretArn
               - Effect: Allow
                 Action:
                   - s3:PutObject
@@ -152,7 +164,7 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euo pipefail
-            dnf install -y awscli amazon-ssm-agent git nodejs npm aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm aws-nitro-enclaves-cli
+            dnf install -y awscli amazon-ssm-agent git nodejs npm libstdc++ aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm libstdc++ aws-nitro-enclaves-cli
             systemctl enable --now amazon-ssm-agent || true
             usermod -aG ne ec2-user || true
             systemctl enable --now nitro-enclaves-allocator.service || true
@@ -164,14 +176,17 @@ Resources:
             mkdir -p /opt/sonari/tee-artifact
             tar -xzf "$tee_artifact_archive" -C /opt/sonari/tee-artifact
             test -x /opt/sonari/tee-artifact/bin/tee
+            test -x /opt/sonari/tee-artifact/bin/walrus
             chown -R ec2-user:ec2-user /opt/sonari/tee-artifact
             chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact
             rm -f "$tee_artifact_archive"
             aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
             aws secretsmanager get-secret-value --secret-id '${TeeSigningKeySecretArn}' --query SecretString --output text > /opt/sonari/tee-signing-key
-            aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-config.json
-            chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
-            chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json
+            aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-client-config.yaml
+            aws secretsmanager get-secret-value --secret-id '${SuiWalletConfigSecretArn}' --query SecretString --output text > /opt/sonari/sui_config.yaml
+            aws secretsmanager get-secret-value --secret-id '${SuiKeystoreSecretArn}' --query SecretString --output text > /opt/sonari/sui.keystore
+            chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore
+            chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore
             nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
             ${NitroEnclaveProcessCommand}
             SONARI_COMMAND
@@ -180,11 +195,19 @@ Resources:
             ${WalrusAggregatorUrl}
             SONARI_WALRUS_URL
             )
+            walrus_context=$(cat <<'SONARI_WALRUS_CONTEXT'
+            ${WalrusContext}
+            SONARI_WALRUS_CONTEXT
+            )
             {
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key"
-              echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-config.json"
+              echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
+              echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml"
+              echo "SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml"
+              echo "SONARI_WALRUS_EPOCHS=2"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
+              printf 'SONARI_WALRUS_CONTEXT=%q\n' "$walrus_context"
               printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
             } >/opt/sonari/runner.env
             chown ec2-user:ec2-user /opt/sonari/runner.env

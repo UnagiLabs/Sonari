@@ -19,10 +19,10 @@ describe("AWS earthquake runner CloudFormation template", () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).toContain(
-            "chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json",
+            "chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore",
         );
         expect(template).toContain(
-            "chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-config.json",
+            "chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore",
         );
     });
 
@@ -65,6 +65,35 @@ describe("AWS earthquake runner CloudFormation template", () => {
         );
         expect(template).toContain('tar -xzf "$tee_artifact_archive" -C /opt/sonari/tee-artifact');
         expect(template).toContain("test -x /opt/sonari/tee-artifact/bin/tee");
+        expect(template).toContain("test -x /opt/sonari/tee-artifact/bin/walrus");
+    });
+
+    it("places Sui wallet files and exports Walrus CLI runtime configuration", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("SuiWalletConfigSecretArn:");
+        expect(template).toContain("SuiKeystoreSecretArn:");
+        expect(template).toContain("WalrusContext:");
+        expect(template).toContain("Default: testnet");
+        expect(template).toContain(
+            `aws secretsmanager get-secret-value --secret-id '$${"{WalrusConfigSecretArn}"}' --query SecretString --output text > /opt/sonari/walrus-client-config.yaml`,
+        );
+        expect(template).toContain(
+            `aws secretsmanager get-secret-value --secret-id '$${"{SuiWalletConfigSecretArn}"}' --query SecretString --output text > /opt/sonari/sui_config.yaml`,
+        );
+        expect(template).toContain(
+            `aws secretsmanager get-secret-value --secret-id '$${"{SuiKeystoreSecretArn}"}' --query SecretString --output text > /opt/sonari/sui.keystore`,
+        );
+        expect(template).toContain('echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"');
+        expect(template).toContain(
+            'echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml"',
+        );
+        expect(template).toContain('echo "SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml"');
+        expect(template).toContain("walrus_context=$(cat <<'SONARI_WALRUS_CONTEXT'");
+        expect(template).toContain(`$${"{WalrusContext}"}`);
+        expect(template).toContain("printf 'SONARI_WALRUS_CONTEXT=%q\\n' \"$walrus_context\"");
+        expect(template).not.toContain('echo "SONARI_WALRUS_CONTEXT=testnet"');
+        expect(template).toContain('echo "SONARI_WALRUS_EPOCHS=2"');
     });
 
     it("allows the runner instance role to read exactly the configured TEE artifact object", async () => {

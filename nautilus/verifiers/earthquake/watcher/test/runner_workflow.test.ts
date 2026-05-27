@@ -133,8 +133,16 @@ describe("AWS runner workflow helper", () => {
             ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
         );
         expect(command).toContain("test -s \"$SONARI_WALRUS_CONFIG\"");
+        expect(command).toContain("test -s \"$SONARI_WALRUS_WALLET\"");
+        expect(command).toContain("test -x \"$SONARI_WALRUS_CLI\"");
         expect(command).toContain(
             ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
+        );
+        expect(command).toContain(
+            ': "${SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"',
+        );
+        expect(command).toContain(
+            ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
         );
         expect(command).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
     });
@@ -181,7 +189,19 @@ describe("AWS runner workflow helper", () => {
             ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CONFIG SONARI_WALRUS_AGGREGATOR_URL",
+            ': "${SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_WALRUS_WALLET:?SONARI_WALRUS_WALLET is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
         );
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[0]).not.toContain("latest.json");
