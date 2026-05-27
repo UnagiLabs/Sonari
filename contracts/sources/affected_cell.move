@@ -72,7 +72,7 @@ public fun leaf_hash(leaf: &AffectedCellLeaf): vector<u8> {
     bytes.push_back(leaf.cell_band);
     bytes.push_back(leaf.cells_generation_method);
     bytes.append(bcs::to_bytes(&leaf.oracle_version));
-    hash::sha3_256(bytes)
+    hash::sha2_256(bytes)
 }
 
 public fun verify_proof(
@@ -121,7 +121,7 @@ fun internal_hash(
         bytes.append(*current);
         bytes.append(*sibling_hash);
     };
-    hash::sha3_256(bytes)
+    hash::sha2_256(bytes)
 }
 
 fun assert_32_bytes(bytes: &vector<u8>) {

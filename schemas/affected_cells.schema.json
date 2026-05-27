@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sonari.example/schemas/affected_cells.schema.json",
   "title": "Sonari Affected Cells",
-  "$comment": "affected_cells_data_hash = SHA3-256(canonical_affected_cells_json_bytes). Canonical JSON must emit keys in this schema order, with no whitespace, no trailing newline, and UTF-8 bytes. event_uid and all hex hashes must be lowercase 0x plus 64 hex characters. affected_cells must be sorted by numeric h3_index ascending, duplicate h3_index values are invalid, and h3_index must be a decimal string without leading zero unless it is exactly \"0\".",
+  "$comment": "affected_cells_data_hash = SHA-256(canonical_affected_cells_json_bytes). Canonical JSON must emit keys in this schema order, with no whitespace, no trailing newline, and UTF-8 bytes. event_uid and all hex hashes must be lowercase 0x plus 64 hex characters. affected_cells must be sorted by numeric h3_index ascending, duplicate h3_index values are invalid, and h3_index must be a decimal string without leading zero unless it is exactly \"0\".",
   "type": "object",
   "additionalProperties": false,
   "required": [

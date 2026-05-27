@@ -13,7 +13,7 @@ use tee::{
     StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, cell_band, grid_xml_from_artifact,
     merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100, process_usgs,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
-    sha3_256_bytes,
+    sha256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
@@ -95,12 +95,12 @@ fn computes_p90_band_and_merkle_with_odd_leaf_promotion() {
     left_data.push(0x01);
     left_data.extend_from_slice(&leaves[0]);
     left_data.extend_from_slice(&leaves[1]);
-    let left = sha3_256_bytes(&left_data);
+    let left = sha256_bytes(&left_data);
     let mut root_data = Vec::new();
     root_data.push(0x01);
     root_data.extend_from_slice(&left);
     root_data.extend_from_slice(&leaves[2]);
-    let expected = sha3_256_bytes(&root_data);
+    let expected = sha256_bytes(&root_data);
     assert_eq!(promoted_root, expected);
 }
 
@@ -238,7 +238,7 @@ fn finalized_usgs_archives_raw_grid_zip_artifact_bytes_not_expanded_xml() {
         .iter()
         .find(|entry| entry.product == "shakemap_grid_xml")
         .expect("grid entry should exist");
-    let grid_zip_hash = format!("0x{}", hex::encode(sha3_256_bytes(&grid_zip)));
+    let grid_zip_hash = format!("0x{}", hex::encode(sha256_bytes(&grid_zip)));
     assert_eq!(
         grid_entry.source_uri,
         "https://example.test/download/grid.xml.zip"
@@ -511,7 +511,7 @@ fn low_level_cli_normalizes_grid_zip_artifact_with_raw_grid_uri() {
     let expected_raw_data_manifest = read_expected("raw_data_manifest.json");
     let expected_grid_hash = format!(
         "0x{}",
-        hex::encode(sha3_256_bytes(&fs::read(&grid_zip_path).unwrap()))
+        hex::encode(sha256_bytes(&fs::read(&grid_zip_path).unwrap()))
     );
     assert_eq!(
         raw_data_manifest["entries"][1]["uri"],

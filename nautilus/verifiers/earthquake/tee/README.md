@@ -36,7 +36,7 @@ tee/
 │   │   ├── bcs_payload.rs        ← BCSシリアライゼーション
 │   │   └── json.rs               ← カノニカルJSONバイト生成
 │   └── crypto/
-│       └── mod.rs                ← SHA3-256・Ed25519署名
+│       └── mod.rs                ← SHA-256・Ed25519署名
 └── tests/
     └── oracle_core.rs            ← フィクスチャベースの統合テスト
 ```
@@ -211,7 +211,7 @@ flowchart TD
 
 内部ノードのハッシュ計算：
 ```
-SHA3-256( 0x01 || 左ノード(32bytes) || 右ノード(32bytes) )
+SHA-256( 0x01 || 左ノード(32bytes) || 右ノード(32bytes) )
 ```
 
 `sample_proof()` は任意の1セルについてルートまでの証明経路（兄弟ハッシュの列）を生成します。スマートコントラクトは証明経路を使って、特定のセルが本当にこのOracleに含まれているかを効率的に検証できます。
@@ -227,12 +227,12 @@ SHA3-256( 0x01 || 左ノード(32bytes) || 右ノード(32bytes) )
 BCS（Binary Canonical Serialization）はSUIブロックチェーンのデータ形式です。同じデータを常に同じバイト列に変換できる（決定論的）特性があり、署名の検証に使えます。
 
 - `payload_bcs_bytes(payload)` → `PAYLOAD_V1_FIELD_ORDER` の順でペイロードをシリアライズ
-- `leaf_hashes(cells, event_uid_bytes)` → 各セルのBCSバイト列を計算してSHA3-256ハッシュ化
+- `leaf_hashes(cells, event_uid_bytes)` → 各セルのBCSバイト列を計算してSHA-256ハッシュ化
 - `event_uid_bytes(hazard_type, source, event_id, occurred_at_ms)` → イベントUIDのバイト列
 
 ### `crypto/mod.rs` — 暗号処理
 
-- `sha3_256_bytes(data)` → SHA3-256ハッシュ（32バイト）を計算
+- `sha256_bytes(data)` → SHA-256ハッシュ（32バイト）を計算
 - `to_hex(bytes)` → バイト列を `0x` プレフィックス付き16進文字列に変換
 - `PayloadSigner::sign_payload(bcs_bytes)` → Ed25519で署名
 

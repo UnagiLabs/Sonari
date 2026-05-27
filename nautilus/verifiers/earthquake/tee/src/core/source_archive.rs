@@ -1,6 +1,6 @@
 use crate::core::artifacts::StoredSourceRef;
 use crate::core::types::OracleError;
-use crate::crypto::{sha3_256_bytes, to_hex};
+use crate::crypto::{sha256_bytes, to_hex};
 use serde_json::Value;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
@@ -214,7 +214,7 @@ where
         bytes: &[u8],
     ) -> Result<StoredSourceRef, SourceArchiveError> {
         validate_walrus_config(&self.config)?;
-        let computed_source_hash = to_hex(&sha3_256_bytes(bytes));
+        let computed_source_hash = to_hex(&sha256_bytes(bytes));
         if computed_source_hash != source_hash {
             return Err(SourceArchiveError::BlobMismatch {
                 source_uri: source_uri.to_owned(),
@@ -246,7 +246,7 @@ where
                 self.config.command_timeout_ms,
             )
             .map_err(SourceArchiveError::FetchFailed)?;
-        let fetched_hash = to_hex(&sha3_256_bytes(&fetched_bytes));
+        let fetched_hash = to_hex(&sha256_bytes(&fetched_bytes));
         if fetched_hash != source_hash {
             return Err(SourceArchiveError::BlobMismatch {
                 source_uri: source_uri.to_owned(),
@@ -608,7 +608,7 @@ fn temp_source_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::{sha3_256_bytes, to_hex};
+    use crate::crypto::{sha256_bytes, to_hex};
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::ffi::OsString;
@@ -618,7 +618,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn source_hash(bytes: &[u8]) -> String {
-        to_hex(&sha3_256_bytes(bytes))
+        to_hex(&sha256_bytes(bytes))
     }
 
     fn archive<'a>(

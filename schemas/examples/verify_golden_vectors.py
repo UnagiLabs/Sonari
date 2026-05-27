@@ -5,7 +5,7 @@ import argparse
 import json
 import struct
 import sys
-from hashlib import sha3_256
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -60,8 +60,8 @@ def hx(data: bytes) -> str:
     return "0x" + data.hex()
 
 
-def sha3_hex(data: bytes) -> str:
-    return hx(sha3_256(data).digest())
+def sha256_hex(data: bytes) -> str:
+    return hx(sha256(data).digest())
 
 
 def hex_bytes(value: str) -> bytes:
@@ -131,7 +131,7 @@ def event_uid(hazard_type: int, primary_source: str, source_event_id: str, occur
         + source_id
         + bcs_u64(occurred_at_ms)
     )
-    return sha3_hex(data)
+    return sha256_hex(data)
 
 
 def leaf_bcs(affected: dict[str, Any], cell: dict[str, Any]) -> bytes:
@@ -161,7 +161,7 @@ def merkle_root(leaf_hashes: list[str]) -> str:
             if i + 1 == len(level):
                 nxt.append(level[i])
             else:
-                nxt.append(sha3_256(b"\x01" + level[i] + level[i + 1]).digest())
+                nxt.append(sha256(b"\x01" + level[i] + level[i + 1]).digest())
         level = nxt
     return hx(level[0])
 
@@ -171,9 +171,9 @@ def verify_proof(target_leaf_hash: str, proof: list[dict[str, str]], expected_ro
     for step in proof:
         sibling = hex_bytes(step["sibling_hash"])
         if step["direction"] == "LEFT":
-            current = sha3_256(b"\x01" + sibling + current).digest()
+            current = sha256(b"\x01" + sibling + current).digest()
         elif step["direction"] == "RIGHT":
-            current = sha3_256(b"\x01" + current + sibling).digest()
+            current = sha256(b"\x01" + current + sibling).digest()
         else:
             raise ValueError(f"bad proof direction {step['direction']!r}")
     return hx(current) == expected_root
@@ -254,7 +254,7 @@ def compute() -> dict[str, Any]:
     raw_source_hashes = []
     for entry in raw["entries"]:
         path = ROOT / entry["uri"]
-        content_hash = sha3_hex(path.read_bytes())
+        content_hash = sha256_hex(path.read_bytes())
         if content_hash != entry["content_hash"]:
             raise ValueError(f"content_hash mismatch for {entry['uri']}: {content_hash}")
         raw_source_hashes.append({"uri": entry["uri"], "content_hash": content_hash})
@@ -276,13 +276,13 @@ def compute() -> dict[str, Any]:
         if path.read_bytes() != expected_bytes:
             raise ValueError(f"{path.relative_to(ROOT)} is not canonical JSON bytes")
 
-    source_set_hash = sha3_hex(source_bytes)
-    raw_data_hash = sha3_hex(raw_bytes)
-    affected_cells_data_hash = sha3_hex(affected_bytes)
+    source_set_hash = sha256_hex(source_bytes)
+    raw_data_hash = sha256_hex(raw_bytes)
+    affected_cells_data_hash = sha256_hex(affected_bytes)
     leaf_hashes = [
         {
             "h3_index": cell["h3_index"],
-            "leaf_hash": sha3_hex(b"\x00" + leaf_bcs(affected, cell)),
+            "leaf_hash": sha256_hex(b"\x00" + leaf_bcs(affected, cell)),
         }
         for cell in cells
     ]

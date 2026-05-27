@@ -22,7 +22,7 @@ pub use core::source_archive::{
 pub use core::types::{
     OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,
 };
-pub use crypto::{LocalEd25519Signer, PayloadSigner, sha3_256_bytes};
+pub use crypto::{LocalEd25519Signer, PayloadSigner, sha256_bytes};
 pub use encoding::json::canonical_json_bytes;
 pub use source::usgs::grid_xml_from_artifact;
 
