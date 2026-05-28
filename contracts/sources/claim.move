@@ -22,8 +22,6 @@ const EUnverifiedMembership: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
 const EAccountCreatedAfterCutoff: u64 = 14;
 const EHomeCellRegisteredAfterCutoff: u64 = 15;
-const LEGACY_DISASTER_CONFIDENCE: u64 = 10_000;
-const LEGACY_DISASTER_RISK_BUCKET: u8 = 1;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
 const U64_MAX_AS_U128: u128 = 18_446_744_073_709_551_615;
 
@@ -204,13 +202,9 @@ public(package) fun claim_disaster_usdc(
     let amount = payout_policy::quote_usdc(
         policy,
         affected_cell::cell_band(&leaf),
-        membership::membership_pass_issued_at_ms(pass),
-        LEGACY_DISASTER_CONFIDENCE,
-        LEGACY_DISASTER_RISK_BUCKET,
         user_max_amount_usdc,
         payout_policy::campaign_budget_remaining_usdc(budget),
         total_available,
-        now_ms,
     );
     assert!(amount > 0, ENoPayableAmount);
 

@@ -102,50 +102,38 @@ fun available_usdc_saturates_at_u64_max() {
 }
 
 #[test]
-fun quote_confidence_zero_pays_zero_and_full_confidence_is_capped() {
+fun quote_uses_full_band_amount_without_identity_multipliers() {
     let mut scenario = test_scenario::begin(ADMIN);
     payout_policy::create_default_disaster_policy(scenario.ctx());
 
     scenario.next_tx(ADMIN);
     {
         let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        let zero_confidence = payout_policy::quote_usdc(
+        let band1 = payout_policy::quote_usdc(
             &policy,
             1,
-            0,
-            0,
-            1,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
+            300_000_000,
+            300_000_000,
+            300_000_000,
         );
-        let full_confidence = payout_policy::quote_usdc(
+        let band2 = payout_policy::quote_usdc(
             &policy,
-            1,
-            0,
-            10_000,
-            1,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
+            2,
+            300_000_000,
+            300_000_000,
+            300_000_000,
         );
-        let clamped_confidence = payout_policy::quote_usdc(
+        let band3 = payout_policy::quote_usdc(
             &policy,
-            1,
-            0,
-            20_000,
-            1,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
+            3,
+            300_000_000,
+            300_000_000,
+            300_000_000,
         );
 
-        assert!(zero_confidence == 0);
-        assert!(full_confidence == 50_000_000);
-        assert!(clamped_confidence == 50_000_000);
+        assert!(band1 == 50_000_000);
+        assert!(band2 == 150_000_000);
+        assert!(band3 == 300_000_000);
 
         test_scenario::return_shared(policy);
     };
@@ -154,102 +142,38 @@ fun quote_confidence_zero_pays_zero_and_full_confidence_is_capped() {
 }
 
 #[test]
-fun quote_risk_bucket_valid_values_are_applied() {
+fun quote_keeps_user_budget_and_pool_caps() {
     let mut scenario = test_scenario::begin(ADMIN);
     payout_policy::create_default_disaster_policy(scenario.ctx());
 
     scenario.next_tx(ADMIN);
     {
         let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        let low_risk = payout_policy::quote_usdc(
+        let user_cap = payout_policy::quote_usdc(
             &policy,
-            1,
-            0,
-            10_000,
-            1,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
-        );
-        let medium_risk = payout_policy::quote_usdc(
-            &policy,
-            1,
-            0,
-            10_000,
-            2,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
-        );
-        let high_risk = payout_policy::quote_usdc(
-            &policy,
-            1,
-            0,
-            10_000,
             3,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
+            125_000_000,
+            300_000_000,
+            300_000_000,
         );
-
-        assert!(low_risk == 50_000_000);
-        assert!(medium_risk == 25_000_000);
-        assert!(high_risk == 0);
-
-        test_scenario::return_shared(policy);
-    };
-
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = payout_policy::EInvalidRiskBucket)]
-fun quote_rejects_zero_risk_bucket() {
-    let mut scenario = test_scenario::begin(ADMIN);
-    payout_policy::create_default_disaster_policy(scenario.ctx());
-
-    scenario.next_tx(ADMIN);
-    {
-        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        payout_policy::quote_usdc(
+        let budget_cap = payout_policy::quote_usdc(
             &policy,
-            1,
-            0,
-            10_000,
-            0,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
+            3,
+            300_000_000,
+            175_000_000,
+            300_000_000,
         );
-
-        test_scenario::return_shared(policy);
-    };
-
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = payout_policy::EInvalidRiskBucket)]
-fun quote_rejects_unknown_risk_bucket() {
-    let mut scenario = test_scenario::begin(ADMIN);
-    payout_policy::create_default_disaster_policy(scenario.ctx());
-
-    scenario.next_tx(ADMIN);
-    {
-        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        payout_policy::quote_usdc(
+        let pool_cap = payout_policy::quote_usdc(
             &policy,
-            1,
-            0,
-            10_000,
-            4,
-            50_000_000,
-            50_000_000,
-            50_000_000,
-            NINETY_ONE_DAYS_MS,
+            3,
+            300_000_000,
+            300_000_000,
+            225_000_000,
         );
+
+        assert!(user_cap == 125_000_000);
+        assert!(budget_cap == 175_000_000);
+        assert!(pool_cap == 225_000_000);
 
         test_scenario::return_shared(policy);
     };
