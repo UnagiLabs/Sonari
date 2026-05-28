@@ -47,6 +47,10 @@ Parameters:
     Type: String
   LambdaCodeS3Key:
     Type: String
+  GitCommitSha:
+    Type: String
+    Default: unknown
+    Description: Git commit SHA deployed by this stack update.
   ScheduleExpression:
     Type: String
     Default: rate(5 minutes)
@@ -539,3 +543,21 @@ Outputs:
     Value: !GetAtt ManualWatcherFunctionUrl.FunctionUrl
   RunnerLogGroupName:
     Value: !Ref RunnerLogGroup
+  DeployedGitCommitSha:
+    Value: !Ref GitCommitSha
+  LambdaCodeS3KeyOutput:
+    Value: !Ref LambdaCodeS3Key
+  TeeArtifactS3KeyOutput:
+    Value: !Ref TeeArtifactS3Key
+  TeeArtifactSha256Output:
+    Value: !Ref TeeArtifactSha256
+  RunnerAutoScalingGroupName:
+    Value: !Ref RunnerAutoScalingGroup
+  WatcherScheduleName:
+    Value: !Ref WatcherSchedule
+  WatcherLambdaName:
+    Value: !Ref WatcherLambda
+  ManualWatcherLambdaName:
+    Value: !Ref ManualWatcherLambda
+  RunnerControlLambdaName:
+    Value: !Ref RunnerControlLambda
