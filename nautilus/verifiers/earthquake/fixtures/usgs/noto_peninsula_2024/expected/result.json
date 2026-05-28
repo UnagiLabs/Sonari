@@ -1,0 +1,10 @@
+{
+  "case_id": "usgs/noto_peninsula_2024",
+  "status": "finalized",
+  "source_event_id": "us6000m0xl",
+  "hazard_type": "EARTHQUAKE",
+  "primary_source": "USGS",
+  "geo_resolution": 7,
+  "error_code": null,
+  "expected_payload": "unsigned_payload_v1.json"
+}

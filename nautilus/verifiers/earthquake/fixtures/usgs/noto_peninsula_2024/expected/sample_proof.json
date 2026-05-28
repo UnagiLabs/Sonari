@@ -1,0 +1,57 @@
+{
+  "target_leaf": {
+    "h3_index": "608799883427577855",
+    "leaf_hash": "0xb5572314f54dd0309f9fa2976aa6bb0cd96606c75d64d19f90b6216a2de66e8f"
+  },
+  "proof": [
+    {
+      "direction": "LEFT",
+      "sibling_hash": "0xe1f0ccfe4290dc64190eb964c82bc94b8efce8202a39bedb77dc2e3438c0b72f"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x68fd5eb82a50c123d8fcf4ba56d6dfcc19a2f35e7aca0b9fc6baf8279340c154"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0xe40f073a49f3d9c54657750c30cba1b1db6a398f8eddbfe199404fbe56bf6cef"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0xf116c70b926b12268c49b59a967ba32807a4111c99995fe1eec3aa2dc8cdf216"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x66b3560ed3cc9b9fbc6cb04613992366b964deadb5889b4ccfbebca862cbc970"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x4c6ce274075c94cdc722dc8318ebfe90e4f58db1290bbd6f8ab17aa42b82e4bb"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0xc1d41bb8ccb794c4fcd8bf9a78132428e551061126815ba455e8e7960845c75f"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x7cd3c33dce78b7c489ccbf7c2c435cbf78dfbbaf52d73969f0846b5939db41f4"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x4e73d4f6ec6ca81fc6f8cc21b90ada53b0e8bf88ac7585aa92db342e2b99e9c1"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0xc4860117201194cca2a054d9cb2814a5204379d13ea3808ce39f41ba92e3d556"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x975e580e10f408da11632692533661c655428d61ad1752a085f3166fd3810307"
+    },
+    {
+      "direction": "RIGHT",
+      "sibling_hash": "0x44d34195562085bb0a31cca7ba5e0e38174947cf39711114e95e343f389ba420"
+    }
+  ],
+  "expected_root": "0x95196e304a12e8771e4bca09e024e0314f3c351b8ab5d024d5f820bba8646022"
+}

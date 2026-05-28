@@ -10,7 +10,7 @@
     "scripts": {
         "dev": "tsx src/cli.ts",
         "typecheck": "tsc -b --noEmit",
-        "test": "vitest run"
+        "test": "vitest run test"
     },
     "dependencies": {
         "@sonari/earthquake-relayer": "workspace:*",

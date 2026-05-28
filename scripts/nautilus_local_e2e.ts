@@ -39,6 +39,8 @@ const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
 export const E2E_FIXTURE_CASES = [
     "usgs/finalized_minimal",
+    "usgs/great_tohoku_2011",
+    "usgs/noto_peninsula_2024",
     "usgs/pending_source_no_shakemap",
     "usgs/pending_mmi_empty_grid",
     "usgs/rejected_cancelled_shakemap",
