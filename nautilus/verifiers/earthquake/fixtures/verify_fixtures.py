@@ -19,6 +19,16 @@ CASES = {
         "error_code": None,
         "grid_required": True,
     },
+    "usgs/great_tohoku_2011": {
+        "status": "finalized",
+        "error_code": None,
+        "grid_required": True,
+    },
+    "usgs/noto_peninsula_2024": {
+        "status": "finalized",
+        "error_code": None,
+        "grid_required": True,
+    },
     "usgs/pending_source_no_shakemap": {
         "status": "pending_source",
         "error_code": "SHAKEMAP_PRODUCT_MISSING",

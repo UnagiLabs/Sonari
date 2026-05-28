@@ -6,8 +6,8 @@
   "proof": [
     {
       "direction": "LEFT",
-      "sibling_hash": "0x8c91dac6cd4c206c4d8ac7cb0a99a4b0bdd7fefdf1205f1be3e26700aa1951a4"
+      "sibling_hash": "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f"
     }
   ],
-  "expected_root": "0x54d59943d5e2a17abce689271c3124d6971f42258924109da6673ab57198ca93"
+  "expected_root": "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f"
 }

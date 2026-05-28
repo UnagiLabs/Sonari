@@ -1,7 +1,7 @@
 use crate::compute::intensity::mmi_decimal_to_x100;
 use crate::core::types::OracleError;
 use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
@@ -20,6 +20,8 @@ pub(crate) struct UsgsDetail {
 pub(crate) struct UsgsProperties {
     pub(crate) time: u64,
     pub(crate) updated: u64,
+    #[serde(default)]
+    pub(crate) ids: Option<String>,
     pub(crate) products: UsgsProducts,
 }
 
@@ -66,6 +68,21 @@ pub(crate) struct GridPoint {
 
 pub(crate) fn parse_detail(detail_json: &[u8]) -> Result<UsgsDetail, OracleError> {
     serde_json::from_slice(detail_json).map_err(OracleError::from)
+}
+
+pub(crate) fn detail_matches_source_event_id(detail: &UsgsDetail, source_event_id: &str) -> bool {
+    detail.id == source_event_id || detail_aliases_contain(&detail.properties.ids, source_event_id)
+}
+
+fn detail_aliases_contain(ids: &Option<String>, source_event_id: &str) -> bool {
+    ids.as_ref()
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .any(|alias| alias == source_event_id)
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn select_preferred_shakemap_product(
@@ -162,8 +179,12 @@ pub(crate) fn parse_grid_points(grid_xml: &[u8]) -> Result<Vec<GridPoint>, Oracl
     reader.config_mut().trim_text(true);
     let mut inside_grid_data = false;
     let mut grid_text = String::new();
+    let mut grid_columns = GridColumns::default();
     loop {
         match reader.read_event()? {
+            Event::Empty(event) | Event::Start(event) if event.name().as_ref() == b"grid_field" => {
+                grid_columns.apply_event(&event)?;
+            }
             Event::Start(event) if event.name().as_ref() == b"grid_data" => {
                 inside_grid_data = true;
             }
@@ -185,30 +206,185 @@ pub(crate) fn parse_grid_points(grid_xml: &[u8]) -> Result<Vec<GridPoint>, Oracl
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
-    if tokens.len() % 3 != 0 {
+
+    let Some(columns) = grid_columns.to_resolved()? else {
+        if tokens.len() % 3 != 0 {
+            return Err(OracleError::InvalidGridPoint(
+                "grid_data must contain lon lat mmi triples".to_owned(),
+            ));
+        }
+        return tokens
+            .chunks_exact(3)
+            .map(|chunk| grid_point_from_fields(chunk[0], chunk[1], chunk[2]))
+            .collect();
+    };
+
+    if tokens.len() % columns.stride != 0 {
         return Err(OracleError::InvalidGridPoint(
-            "grid_data must contain lon lat mmi triples".to_owned(),
+            "grid_data field count does not match grid_field definitions".to_owned(),
         ));
     }
     tokens
-        .chunks_exact(3)
+        .chunks_exact(columns.stride)
         .map(|chunk| {
-            let lon = chunk[0].parse::<f64>().map_err(|_| {
-                OracleError::InvalidGridPoint(format!("invalid longitude {}", chunk[0]))
+            let lon = chunk.get(columns.lon).ok_or_else(|| {
+                OracleError::InvalidGridPoint("LON grid_field index is out of range".to_owned())
             })?;
-            let lat = chunk[1].parse::<f64>().map_err(|_| {
-                OracleError::InvalidGridPoint(format!("invalid latitude {}", chunk[1]))
+            let lat = chunk.get(columns.lat).ok_or_else(|| {
+                OracleError::InvalidGridPoint("LAT grid_field index is out of range".to_owned())
             })?;
-            if !lon.is_finite() || !lat.is_finite() {
-                return Err(OracleError::InvalidGridPoint(
-                    "coordinates must be finite".to_owned(),
-                ));
-            }
-            Ok(GridPoint {
-                lon: chunk[0].to_owned(),
-                lat: chunk[1].to_owned(),
-                mmi_x100: mmi_decimal_to_x100(chunk[2])?,
-            })
+            let mmi = chunk.get(columns.mmi).ok_or_else(|| {
+                OracleError::InvalidGridPoint("MMI grid_field index is out of range".to_owned())
+            })?;
+            grid_point_from_fields(lon, lat, mmi)
         })
         .collect()
+}
+
+#[derive(Debug, Default)]
+struct GridColumns {
+    lon: Option<usize>,
+    lat: Option<usize>,
+    mmi: Option<usize>,
+    max_index: usize,
+    saw_field: bool,
+}
+
+impl GridColumns {
+    fn apply_event(&mut self, event: &BytesStart<'_>) -> Result<(), OracleError> {
+        let mut index: Option<usize> = None;
+        let mut name: Option<String> = None;
+        for attribute in event.attributes() {
+            let attribute = attribute.map_err(|error| {
+                OracleError::InvalidGridPoint(format!("invalid grid_field attribute: {error}"))
+            })?;
+            match attribute.key.as_ref() {
+                b"index" => {
+                    let value = std::str::from_utf8(attribute.value.as_ref()).map_err(|error| {
+                        OracleError::InvalidGridPoint(format!(
+                            "invalid grid_field index encoding: {error}"
+                        ))
+                    })?;
+                    let parsed = value.parse::<usize>().map_err(|_| {
+                        OracleError::InvalidGridPoint(format!("invalid grid_field index {value}"))
+                    })?;
+                    if parsed == 0 {
+                        return Err(OracleError::InvalidGridPoint(
+                            "grid_field index must be one-based".to_owned(),
+                        ));
+                    }
+                    index = Some(parsed - 1);
+                    self.max_index = self.max_index.max(parsed);
+                }
+                b"name" => {
+                    let value = std::str::from_utf8(attribute.value.as_ref()).map_err(|error| {
+                        OracleError::InvalidGridPoint(format!(
+                            "invalid grid_field name encoding: {error}"
+                        ))
+                    })?;
+                    name = Some(value.to_owned());
+                }
+                _ => {}
+            }
+        }
+        let Some(index) = index else {
+            return Ok(());
+        };
+        let Some(name) = name else {
+            return Ok(());
+        };
+        self.saw_field = true;
+        if name.eq_ignore_ascii_case("LON") {
+            self.lon = Some(index);
+        } else if name.eq_ignore_ascii_case("LAT") {
+            self.lat = Some(index);
+        } else if name.eq_ignore_ascii_case("MMI") {
+            self.mmi = Some(index);
+        }
+        Ok(())
+    }
+
+    fn to_resolved(&self) -> Result<Option<ResolvedGridColumns>, OracleError> {
+        if !self.saw_field {
+            return Ok(None);
+        }
+        let lon = self.lon.ok_or_else(|| {
+            OracleError::InvalidGridPoint("grid_field LON column is required".to_owned())
+        })?;
+        let lat = self.lat.ok_or_else(|| {
+            OracleError::InvalidGridPoint("grid_field LAT column is required".to_owned())
+        })?;
+        let mmi = self.mmi.ok_or_else(|| {
+            OracleError::InvalidGridPoint("grid_field MMI column is required".to_owned())
+        })?;
+        let stride = self.max_index.max(lon + 1).max(lat + 1).max(mmi + 1);
+        Ok(Some(ResolvedGridColumns {
+            lon,
+            lat,
+            mmi,
+            stride,
+        }))
+    }
+}
+
+#[derive(Debug)]
+struct ResolvedGridColumns {
+    lon: usize,
+    lat: usize,
+    mmi: usize,
+    stride: usize,
+}
+
+fn grid_point_from_fields(
+    lon_raw: &str,
+    lat_raw: &str,
+    mmi_raw: &str,
+) -> Result<GridPoint, OracleError> {
+    let lon = lon_raw
+        .parse::<f64>()
+        .map_err(|_| OracleError::InvalidGridPoint(format!("invalid longitude {lon_raw}")))?;
+    let lat = lat_raw
+        .parse::<f64>()
+        .map_err(|_| OracleError::InvalidGridPoint(format!("invalid latitude {lat_raw}")))?;
+    if !lon.is_finite() || !lat.is_finite() {
+        return Err(OracleError::InvalidGridPoint(
+            "coordinates must be finite".to_owned(),
+        ));
+    }
+    Ok(GridPoint {
+        lon: lon_raw.to_owned(),
+        lat: lat_raw.to_owned(),
+        mmi_x100: mmi_decimal_to_x100(mmi_raw)?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_grid_points;
+
+    #[test]
+    fn parse_grid_points_uses_grid_field_indexes_for_multicolumn_shakemap() {
+        let grid_xml = br#"
+            <shakemap_grid>
+              <grid_field index="1" name="LON" units="dd" />
+              <grid_field index="2" name="LAT" units="dd" />
+              <grid_field index="3" name="MMI" units="intensity" />
+              <grid_field index="4" name="PGA" units="%g" />
+              <grid_data>
+                134.7333 45.1000 2.3 0.1836
+                134.7667 45.1000 2.4 0.1866
+              </grid_data>
+            </shakemap_grid>
+        "#;
+
+        let points = parse_grid_points(grid_xml).expect("multicolumn grid should parse");
+
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].lon, "134.7333");
+        assert_eq!(points[0].lat, "45.1000");
+        assert_eq!(points[0].mmi_x100, 230);
+        assert_eq!(points[1].lon, "134.7667");
+        assert_eq!(points[1].lat, "45.1000");
+        assert_eq!(points[1].mmi_x100, 240);
+    }
 }

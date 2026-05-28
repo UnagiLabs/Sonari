@@ -20,11 +20,10 @@ import {
     HOUR_MS,
     InMemoryStateRepository,
     type ProcessSummary,
-    parseUsgsRecentFeed,
     processDueEventsInlineForTests,
     scanCandidates,
-    USGS_RECENT_FEED_URL,
     type UsgsEarthquakeCandidate,
+    usgsDetailUrl,
 } from "../nautilus/verifiers/earthquake/watcher/src/index.js";
 import type { EarthquakeEventRow } from "../nautilus/verifiers/earthquake/watcher/src/state.js";
 import type { RunnerAdapter } from "../nautilus/verifiers/earthquake/watcher/src/trigger_tee.js";
@@ -40,6 +39,8 @@ const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
 export const E2E_FIXTURE_CASES = [
     "usgs/finalized_minimal",
+    "usgs/great_tohoku_2011",
+    "usgs/noto_peninsula_2024",
     "usgs/pending_source_no_shakemap",
     "usgs/pending_mmi_empty_grid",
     "usgs/rejected_cancelled_shakemap",
@@ -235,17 +236,15 @@ export class FixtureSourceClient implements SourceClient {
 
 export class UsgsSourceClient implements SourceClient {
     private readonly fetcher: typeof fetch;
-    private readonly recentFeedUrl: string;
 
-    constructor(options: { fetcher?: typeof fetch; recentFeedUrl?: string } = {}) {
+    constructor(options: { fetcher?: typeof fetch } = {}) {
         this.fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
-        this.recentFeedUrl = options.recentFeedUrl ?? USGS_RECENT_FEED_URL;
     }
 
     async getSourceArtifacts(sourceEventId: string): Promise<SourceArtifacts> {
         let temporaryDir: string | null = null;
         try {
-            const detailUrl = await this.resolveDetailUrl(sourceEventId);
+            const detailUrl = this.resolveDetailUrl(sourceEventId);
             const detail = await this.fetchDetail(sourceEventId, detailUrl);
             temporaryDir = await mkdtemp(path.join(tmpdir(), "sonari-usgs-live-"));
             const detailPath = path.join(temporaryDir, "usgs_detail.json");
@@ -271,20 +270,8 @@ export class UsgsSourceClient implements SourceClient {
         }
     }
 
-    private async resolveDetailUrl(sourceEventId: string): Promise<string> {
-        try {
-            const response = await this.fetcher(this.recentFeedUrl);
-            if (response.ok) {
-                const candidates = parseUsgsRecentFeed(await response.json());
-                const candidate = candidates.find((item) => item.source_event_id === sourceEventId);
-                if (candidate?.detail_url !== undefined) {
-                    return candidate.detail_url;
-                }
-            }
-        } catch {
-            // Fall back to USGS' deterministic detail URL. Manual submissions often only have an id.
-        }
-        return `https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/${sourceEventId}.geojson`;
+    private resolveDetailUrl(sourceEventId: string): string {
+        return usgsDetailUrl(sourceEventId);
     }
 
     private async fetchDetail(
@@ -587,9 +574,6 @@ function candidateFromDetail(input: unknown, detailPath: string): UsgsEarthquake
         alert: readAlert(detail.properties.alert),
         tsunami: detail.properties.tsunami === 1,
     };
-    if (typeof detail.properties.detail === "string" && detail.properties.detail.length > 0) {
-        candidate.detail_url = detail.properties.detail;
-    }
     return candidate;
 }
 

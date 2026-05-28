@@ -1,0 +1,10 @@
+{
+  "case_id": "usgs/great_tohoku_2011",
+  "status": "finalized",
+  "source_event_id": "official20110311054624120_30",
+  "hazard_type": "EARTHQUAKE",
+  "primary_source": "USGS",
+  "geo_resolution": 7,
+  "error_code": null,
+  "expected_payload": "unsigned_payload_v1.json"
+}

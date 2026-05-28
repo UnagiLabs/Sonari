@@ -9,7 +9,7 @@
     "types": "./src/index.ts",
     "scripts": {
         "typecheck": "tsc -b --noEmit",
-        "test": "vitest run"
+        "test": "vitest run test"
     },
     "dependencies": {
         "@aws-sdk/client-auto-scaling": "^3.948.0",

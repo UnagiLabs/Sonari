@@ -30,12 +30,13 @@ Use this checklist while running `gh-issue-implement`.
    - available `typecheck`
    - available `test`
    - available `build` when needed
-8. Fresh-context reviewer:
-   - `verification_reviewer` runs read-only
-   - reviewer explicitly uses `$code-review`
-   - gate review stays focused on blocking/high issues only
-   - no more than 3 findings
-   - no unresolved blocking items
+8. Codex `/review`:
+   - a clean-context subagent runs the default Codex CLI `/review` command
+   - `/review` uses PR-style comparison: implementation branch against `main`
+   - review context includes issue summary, implementation summary, validation results, changed files, current branch, base branch, and `git diff --stat main...HEAD`
+   - unresolved findings stop PR creation
+   - local verification is rerun after review fixes
+   - `/review` is repeated in a clean-context subagent until there are no findings
 9. PR:
    - issue link
    - test results

@@ -455,10 +455,20 @@ fn parse_blob_id_output(stdout: &[u8]) -> Result<String, SourceArchiveError> {
     let output = std::str::from_utf8(stdout).map_err(|error| {
         SourceArchiveError::StoreFailed(format!("walrus blob-id output is not UTF-8: {error}"))
     })?;
+    if let Some(blob_id) = output
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("Blob ID:").map(str::trim))
+        .filter(|blob_id| !blob_id.is_empty())
+    {
+        return Ok(blob_id.to_owned());
+    }
     output
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty())
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with("Success:"))
+        .next_back()
         .map(str::to_owned)
         .ok_or_else(|| SourceArchiveError::StoreFailed("walrus blob-id output is empty".to_owned()))
 }
@@ -467,22 +477,57 @@ fn parse_store_blob_id(stdout: &[u8]) -> Result<String, SourceArchiveError> {
     let value = serde_json::from_slice::<Value>(stdout).map_err(|error| {
         SourceArchiveError::StoreFailed(format!("walrus store JSON output is invalid: {error}"))
     })?;
-    let blob_id = value
-        .pointer("/newlyCreated/blobObject/blobId")
-        .or_else(|| value.pointer("/alreadyCertified/blobId"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            SourceArchiveError::StoreFailed(
-                "walrus store JSON missing newlyCreated.blobObject.blobId or alreadyCertified.blobId"
-                    .to_owned(),
-            )
-        })?;
+    let blob_ids = store_success_blob_ids(&value);
+    let Some(blob_id) = single_unique_blob_id(&blob_ids)? else {
+        return Err(SourceArchiveError::StoreFailed(
+            "walrus store JSON missing blobId".to_owned(),
+        ));
+    };
     if blob_id.is_empty() {
         return Err(SourceArchiveError::StoreFailed(
             "walrus store JSON blobId is empty".to_owned(),
         ));
     }
-    Ok(blob_id.to_owned())
+    Ok(blob_id)
+}
+
+fn store_success_blob_ids(value: &Value) -> Vec<String> {
+    const SUCCESS_BLOB_ID_PATHS: &[&[&str]] = &[
+        &["newlyCreated", "blobObject", "blobId"],
+        &["alreadyCertified", "blobId"],
+        &["blobStoreResult", "newlyCreated", "blobObject", "blobId"],
+        &["blobStoreResult", "alreadyCertified", "blobId"],
+    ];
+
+    SUCCESS_BLOB_ID_PATHS
+        .iter()
+        .filter_map(|path| string_at_path(value, path))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut current = value;
+    for segment in path {
+        current = current.as_object()?.get(*segment)?;
+    }
+    current.as_str()
+}
+
+fn single_unique_blob_id(blob_ids: &[String]) -> Result<Option<String>, SourceArchiveError> {
+    let mut unique: Vec<&str> = Vec::new();
+    for blob_id in blob_ids {
+        if !unique.iter().any(|existing| *existing == blob_id) {
+            unique.push(blob_id);
+        }
+    }
+    match unique.as_slice() {
+        [] => Ok(None),
+        [blob_id] => Ok(Some((*blob_id).to_owned())),
+        _ => Err(SourceArchiveError::StoreFailed(
+            "walrus store JSON contains multiple blobId values".to_owned(),
+        )),
+    }
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -688,6 +733,44 @@ mod tests {
     }
 
     #[test]
+    fn walrus_cli_archive_accepts_blob_id_success_prefix() {
+        let bytes = b"source".to_vec();
+        let hash = source_hash(&bytes);
+        let walrus = FakeWalrusCommandRunner::new([
+            Ok("Success: Blob from file '/tmp/source.bin' encoded successfully.\nblob-prefixed\n"),
+            Ok(r#"{"blobStoreResult":{"newlyCreated":{"blobObject":{"blobId":"blob-prefixed"}}}}"#),
+            Ok("blob-prefixed\n"),
+        ]);
+        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+
+        let stored = archive(&walrus, &fetcher)
+            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
+            .expect("blob-id output with success prefix should verify");
+
+        assert_eq!(stored.walrus_blob_id, "blob-prefixed");
+    }
+
+    #[test]
+    fn walrus_cli_archive_accepts_labeled_blob_id_output() {
+        let bytes = b"source".to_vec();
+        let hash = source_hash(&bytes);
+        let walrus = FakeWalrusCommandRunner::new([
+            Ok(
+                "Success: Blob from file '/tmp/source.bin' encoded successfully.\nBlob ID: blob-labeled\nEncoding type: RedStuff/Reed-Solomon\n",
+            ),
+            Ok(r#"{"alreadyCertified":{"blobId":"blob-labeled"}}"#),
+            Ok("blob-labeled\n"),
+        ]);
+        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+
+        let stored = archive(&walrus, &fetcher)
+            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
+            .expect("labeled blob-id output should verify");
+
+        assert_eq!(stored.walrus_blob_id, "blob-labeled");
+    }
+
+    #[test]
     fn walrus_cli_default_timeout_is_bounded() {
         assert_eq!(
             WalrusCliSourceArchiveConfig::default().command_timeout_ms,
@@ -766,6 +849,72 @@ mod tests {
 
         assert_eq!(stored.uri, "walrus://blob/blob-certified");
         assert_eq!(stored.walrus_blob_id, "blob-certified");
+    }
+
+    #[test]
+    fn walrus_cli_archive_accepts_nested_store_result_response() {
+        let bytes = b"source".to_vec();
+        let hash = source_hash(&bytes);
+        let walrus = FakeWalrusCommandRunner::new([
+            Ok("blob-nested\n"),
+            Ok(r#"{"blobStoreResult":{"newlyCreated":{"blobObject":{"blobId":"blob-nested"}}}}"#),
+            Ok("blob-nested\n"),
+        ]);
+        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+
+        let stored = archive(&walrus, &fetcher)
+            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
+            .expect("nested store result should verify");
+
+        assert_eq!(stored.uri, "walrus://blob/blob-nested");
+        assert_eq!(stored.walrus_blob_id, "blob-nested");
+    }
+
+    #[test]
+    fn walrus_cli_archive_accepts_nested_already_certified_store_response() {
+        let blob_id = parse_store_blob_id(
+            br#"{"blobStoreResult":{"alreadyCertified":{"blobId":"blob-nested-certified"}}}"#,
+        )
+        .expect("nested alreadyCertified store result should be accepted");
+
+        assert_eq!(blob_id, "blob-nested-certified");
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_error_store_blob_id() {
+        let error =
+            parse_store_blob_id(br#"{"blobStoreResult":{"error":{"blobId":"blob-error"}}}"#)
+                .expect_err("error variant blobId must not be accepted");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_marked_invalid_store_blob_id() {
+        let error = parse_store_blob_id(br#"{"markedInvalid":{"blobId":"blob-invalid"}}"#)
+            .expect_err("markedInvalid variant blobId must not be accepted");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_nested_marked_invalid_store_blob_id() {
+        let error = parse_store_blob_id(
+            br#"{"blobStoreResult":{"markedInvalid":{"blobId":"blob-invalid"}}}"#,
+        )
+        .expect_err("nested markedInvalid variant blobId must not be accepted");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
+    }
+
+    #[test]
+    fn walrus_cli_archive_rejects_multiple_success_store_blob_ids() {
+        let error = parse_store_blob_id(
+            br#"{"newlyCreated":{"blobObject":{"blobId":"blob-new"}},"alreadyCertified":{"blobId":"blob-certified"}}"#,
+        )
+        .expect_err("multiple different success blobIds must fail closed");
+
+        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
     }
 
     #[test]

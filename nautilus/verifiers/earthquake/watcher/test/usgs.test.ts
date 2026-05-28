@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseUsgsRecentFeed, USGS_RECENT_FEED_URL } from "../src/usgs.js";
+import {
+    parseUsgsRecentFeed,
+    resolveUsgsSourceEventId,
+    USGS_RECENT_FEED_URL,
+    usgsDetailUrl,
+} from "../src/usgs.js";
 
 describe("USGS recent feed parser", () => {
     it("extracts earthquake candidates with id, occurred time, and source update time", () => {
@@ -8,15 +13,15 @@ describe("USGS recent feed parser", () => {
                 features: [
                     {
                         id: "us7000sonari",
-                properties: {
-                    time: 1_700_000_000_000,
-                    updated: 1_700_000_010_000,
-                    type: "earthquake",
-                    detail: "https://earthquake.usgs.gov/detail/us7000sonari.geojson",
-                    mag: 5.6,
-                    mmi: 6.2,
-                    alert: "orange",
-                    tsunami: 1,
+                        properties: {
+                            time: 1_700_000_000_000,
+                            updated: 1_700_000_010_000,
+                            type: "earthquake",
+                            detail: "http://169.254.169.254/latest/meta-data",
+                            mag: 5.6,
+                            mmi: 6.2,
+                            alert: "orange",
+                            tsunami: 1,
                         },
                     },
                 ],
@@ -30,7 +35,6 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: 6.2,
                 alert: "orange",
                 tsunami: true,
-                detail_url: "https://earthquake.usgs.gov/detail/us7000sonari.geojson",
             },
         ]);
     });
@@ -74,7 +78,6 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: null,
                 alert: null,
                 tsunami: false,
-                detail_url: undefined,
             },
             {
                 source_event_id: "us7000green",
@@ -84,7 +87,6 @@ describe("USGS recent feed parser", () => {
                 summary_mmi: null,
                 alert: "green",
                 tsunami: false,
-                detail_url: undefined,
             },
         ]);
     });
@@ -117,3 +119,90 @@ describe("USGS recent feed parser", () => {
         );
     });
 });
+
+describe("USGS source event ID resolver", () => {
+    it("fetches the deterministic USGS detail URL derived from the source event ID", async () => {
+        const requestedUrls: string[] = [];
+        const fetcher = async (url: Parameters<typeof fetch>[0]) => {
+            requestedUrls.push(String(url));
+            return responseJson({
+                id: "usc0001xgp",
+                properties: {
+                    ids: ",usc0001xgp,",
+                },
+            });
+        };
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toEqual({ source_event_id: "usc0001xgp" });
+        expect(requestedUrls).toEqual([usgsDetailUrl("usc0001xgp")]);
+    });
+
+    it("resolves alias detail responses to canonical IDs only when properties.ids contains an exact match", async () => {
+        const fetcher = async () =>
+            responseJson({
+                id: "official20110311054624120_30",
+                properties: {
+                    ids: ",usc0001xgp,official20110311054624120_30,",
+                },
+            });
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toEqual({
+            source_event_id: "official20110311054624120_30",
+            requested_source_event_id: "usc0001xgp",
+        });
+    });
+
+    it("rejects USGS detail IDs that only substring-match the requested alias", async () => {
+        const fetcher = async () =>
+            responseJson({
+                id: "official20110311054624120_30",
+                properties: {
+                    ids: ",usc0001xgp-extra,official20110311054624120_30,",
+                },
+            });
+
+        await expect(
+            resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+        ).resolves.toBeNull();
+    });
+
+    it.each([
+        ["fetch failure", async () => Promise.reject(new Error("network unavailable"))],
+        ["non-OK response", async () => responseJson({ message: "unavailable" }, false)],
+        ["invalid JSON", async () => responseJsonFailure()],
+        ["invalid detail identity", async () => responseJson({ properties: {} })],
+    ] as const)(
+        "returns unavailable instead of falling back to the requested ID on %s",
+        async (_name, fetcher) => {
+            await expect(
+                resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
+            ).resolves.toEqual({
+                unavailable: true,
+                source_event_id: "usc0001xgp",
+                error_code: "USGS_DETAIL_UNAVAILABLE",
+            });
+        },
+    );
+});
+
+function responseJson(body: unknown, ok = true): Response {
+    return {
+        ok,
+        async json(): Promise<unknown> {
+            return body;
+        },
+    } as Response;
+}
+
+function responseJsonFailure(): Response {
+    return {
+        ok: true,
+        async json(): Promise<unknown> {
+            throw new Error("invalid json");
+        },
+    } as Response;
+}

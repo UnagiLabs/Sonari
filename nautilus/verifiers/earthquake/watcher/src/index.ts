@@ -15,14 +15,18 @@ import {
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
 import type { RelayerAdapter } from "./relayer_preview.js";
+import { screenUsgsCandidate } from "./screening.js";
 import { isValidUsgsSourceEventId } from "./source_event_id.js";
+import { DynamoDbStateRepository, type RunnerQueueJob, type StateRepository } from "./state.js";
 import {
-    DynamoDbStateRepository,
-    type RunnerQueueJob,
-    type StateRepository,
-    type UpsertCandidateOptions,
-} from "./state.js";
-import { fetchUsgsRecentCandidates, type UsgsEarthquakeCandidate } from "./usgs.js";
+    resolveUsgsSourceEventId as defaultResolveUsgsSourceEventId,
+    fetchUsgsRecentCandidates,
+    type UsgsEarthquakeCandidate,
+    type UsgsSourceEventIdResolution,
+    type UsgsSourceEventIdResolver,
+    type UsgsSourceEventIdResolverResult,
+    type UsgsSourceEventIdUnavailableResolution,
+} from "./usgs.js";
 
 export {
     DAY_MS,
@@ -52,7 +56,9 @@ export type { UsgsEarthquakeCandidate } from "./usgs.js";
 export {
     fetchUsgsRecentCandidates,
     parseUsgsRecentFeed,
+    resolveUsgsSourceEventId,
     USGS_RECENT_FEED_URL,
+    usgsDetailUrl,
 } from "./usgs.js";
 
 const INLINE_TEST_RUNNER_TIMEOUT_MS = 90_000;
@@ -98,6 +104,7 @@ export interface ScheduledHandlerOptions {
     workflow: WorkflowStarter;
     now?: () => number;
     fetchCandidates?: () => Promise<UsgsEarthquakeCandidate[]>;
+    resolveSourceEventId?: UsgsSourceEventIdResolver;
     dueLimit?: number;
 }
 
@@ -110,7 +117,9 @@ export function createScheduledHandler(options: ScheduledHandlerOptions) {
     return async function scheduledHandler(): Promise<ScheduledHandlerResult> {
         const nowMs = options.now?.() ?? Date.now();
         const candidates = await (options.fetchCandidates ?? fetchUsgsRecentCandidates)();
-        await scanCandidates(options.repository, candidates, nowMs);
+        await scanCandidates(options.repository, candidates, nowMs, {
+            resolveSourceEventId: options.resolveSourceEventId ?? defaultResolveUsgsSourceEventId,
+        });
         const started = await startDueWorkflows(
             options.repository,
             options.workflow,
@@ -131,6 +140,7 @@ export interface ManualHandlerOptions {
     workflow: WorkflowStarter;
     token: string;
     now?: () => number;
+    resolveSourceEventId?: UsgsSourceEventIdResolver;
 }
 
 export interface LambdaHttpResponse {
@@ -153,14 +163,36 @@ export function createManualHandler(options: ManualHandlerOptions) {
             return jsonResponse(400, { ok: false, message: "valid source_event_id is required" });
         }
         const nowMs = options.now?.() ?? Date.now();
-        await options.repository.upsertManualEvent(body.source_event_id, nowMs);
+        const resolution = await resolveSourceEventId(
+            {
+                sourceEventId: body.source_event_id,
+            },
+            options.resolveSourceEventId ?? defaultResolveUsgsSourceEventId,
+        );
+        if (resolution !== null && isUnavailableSourceEventIdResolution(resolution)) {
+            return jsonResponse(503, {
+                ok: false,
+                message: "USGS detail unavailable; retry later",
+            });
+        }
+        if (resolution === null || !isValidUsgsSourceEventId(resolution.source_event_id)) {
+            return jsonResponse(400, {
+                ok: false,
+                message: "source_event_id does not match USGS detail",
+            });
+        }
+        await options.repository.upsertManualEvent(resolution.source_event_id, nowMs, {
+            ...(resolution.requested_source_event_id === undefined
+                ? {}
+                : { requestedSourceEventId: resolution.requested_source_event_id }),
+        });
         const workflowStarted = await startDueWorkflows(
             options.repository,
             options.workflow,
             nowMs,
             1,
         );
-        return jsonResponse(200, { ok: true, workflow_started: workflowStarted });
+        return jsonResponse(200, manualSubmitResponse(workflowStarted, resolution));
     };
 }
 
@@ -173,33 +205,86 @@ export function buildEarthquakeVerifierRequest(sourceEventId: string): Earthquak
     };
 }
 
+interface ScanCandidatesOptions {
+    bypassScreening?: boolean;
+    resolveSourceEventId?: UsgsSourceEventIdResolver;
+}
+
 export async function scanCandidates(
     repository: StateRepository,
     candidates: UsgsEarthquakeCandidate[],
     nowMs: number,
-    options: UpsertCandidateOptions = {},
+    options: ScanCandidatesOptions = {},
 ): Promise<void> {
     const seen = new Set<string>();
     for (const candidate of candidates) {
         if (!isValidUsgsSourceEventId(candidate.source_event_id)) {
             continue;
         }
-        if (seen.has(candidate.source_event_id)) {
+        if (!options.bypassScreening && !screenUsgsCandidate(candidate).runnerEligible) {
+            await repository.upsertCandidate(candidate, nowMs, options);
             continue;
         }
-        seen.add(candidate.source_event_id);
-        await repository.upsertCandidate(candidate, nowMs, options);
+        const resolution = await resolveSourceEventId(
+            { sourceEventId: candidate.source_event_id },
+            options.resolveSourceEventId,
+        );
+        if (resolution !== null && isUnavailableSourceEventIdResolution(resolution)) {
+            continue;
+        }
+        if (resolution === null || !isValidUsgsSourceEventId(resolution.source_event_id)) {
+            continue;
+        }
+        if (seen.has(resolution.source_event_id)) {
+            continue;
+        }
+        seen.add(resolution.source_event_id);
+        const canonicalCandidate = {
+            ...candidate,
+            source_event_id: resolution.source_event_id,
+            ...(resolution.requested_source_event_id === undefined
+                ? {}
+                : { requested_source_event_id: resolution.requested_source_event_id }),
+        };
+        await repository.upsertCandidate(canonicalCandidate, nowMs, options);
         if (!options.bypassScreening && nowMs - candidate.occurred_at_ms < DAY_MS) {
-            const row = await repository.get(candidate.source_event_id);
+            const row = await repository.get(canonicalCandidate.source_event_id);
             if (row?.status === "new") {
                 await repository.deferUntil(
-                    candidate.source_event_id,
+                    canonicalCandidate.source_event_id,
                     candidate.occurred_at_ms + DAY_MS,
                     nowMs,
                 );
             }
         }
     }
+}
+
+async function resolveSourceEventId(
+    input: Parameters<UsgsSourceEventIdResolver>[0],
+    resolver: UsgsSourceEventIdResolver | undefined,
+): Promise<UsgsSourceEventIdResolverResult | null> {
+    return resolver === undefined ? { source_event_id: input.sourceEventId } : resolver(input);
+}
+
+function isUnavailableSourceEventIdResolution(
+    resolution: UsgsSourceEventIdResolverResult,
+): resolution is UsgsSourceEventIdUnavailableResolution {
+    return "unavailable" in resolution;
+}
+
+function manualSubmitResponse(
+    workflowStarted: number,
+    resolution: UsgsSourceEventIdResolution,
+): Record<string, unknown> {
+    return {
+        ok: true,
+        workflow_started: workflowStarted,
+        source_event_id: resolution.source_event_id,
+        ...(resolution.requested_source_event_id === undefined
+            ? {}
+            : { requested_source_event_id: resolution.requested_source_event_id }),
+    };
 }
 
 export async function startDueWorkflows(
@@ -403,6 +488,7 @@ export interface DefaultScheduledHandlerOptions {
     now?: () => number;
     dueLimit?: number;
     sfnClient?: StepFunctionsClientLike;
+    resolveSourceEventId?: UsgsSourceEventIdResolver;
 }
 
 export function createDefaultScheduledHandlerFromEnv(
@@ -423,6 +509,9 @@ export function createDefaultScheduledHandlerFromEnv(
     }
     if (options.dueLimit !== undefined) {
         scheduledOptions.dueLimit = options.dueLimit;
+    }
+    if (options.resolveSourceEventId !== undefined) {
+        scheduledOptions.resolveSourceEventId = options.resolveSourceEventId;
     }
     return createScheduledHandler(scheduledOptions);
 }

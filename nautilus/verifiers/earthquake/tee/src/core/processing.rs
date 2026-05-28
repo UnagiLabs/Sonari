@@ -12,7 +12,8 @@ use crate::crypto::{PayloadSigner, sha256_bytes, to_hex};
 use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_bytes};
 use crate::encoding::json::canonical_json_bytes;
 use crate::source::usgs::{
-    UsgsDetail, UsgsShakeMapProduct, grid_xml_from_artifact, parse_detail, parse_grid_points,
+    UsgsDetail, UsgsShakeMapProduct, detail_matches_source_event_id, grid_xml_from_artifact,
+    parse_detail, parse_grid_points,
 };
 use crate::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELL_METRIC_USGS_MMI,
@@ -271,7 +272,7 @@ pub fn process_usgs_from_worker_request(
     }
 
     let detail = parse_detail(&input.detail_json)?;
-    if detail.id != request.source_event_id {
+    if !detail_matches_source_event_id(&detail, &request.source_event_id) {
         return Err(OracleError::WorkerRequest(format!(
             "source_event_id {} does not match fetched USGS detail id {}",
             request.source_event_id, detail.id

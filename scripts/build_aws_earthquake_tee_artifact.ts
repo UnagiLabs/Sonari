@@ -8,6 +8,7 @@ const DEFAULT_OUTPUT_PATH = "dist/aws/earthquake-tee-artifact.tar.gz";
 const DEFAULT_WORK_DIR = ".build/aws-earthquake-tee-artifact";
 const CARGO_MANIFEST_PATH = "nautilus/verifiers/earthquake/tee/Cargo.toml";
 const CARGO_TARGET_DIR = "target";
+const DEFAULT_CARGO_TARGET = "x86_64-unknown-linux-musl";
 
 export interface BuildAwsEarthquakeTeeArtifactOptions {
     outPath?: string;
@@ -22,7 +23,10 @@ export async function buildAwsEarthquakeTeeArtifact(
     const outPath = path.resolve(options.outPath ?? DEFAULT_OUTPUT_PATH);
     const checksumPath = `${outPath}.sha256`;
     const workDir = path.resolve(DEFAULT_WORK_DIR);
-    const targetBinary = path.resolve(CARGO_TARGET_DIR, "release/tee");
+    const cargoTarget = process.env.SONARI_TEE_CARGO_TARGET ?? DEFAULT_CARGO_TARGET;
+    const targetBinary = path.resolve(
+        process.env.SONARI_TEE_BINARY ?? path.join(CARGO_TARGET_DIR, cargoTarget, "release/tee"),
+    );
     const artifactBinary = path.join(workDir, "bin/tee");
     const artifactWalrusBinary = path.join(workDir, "bin/walrus");
     const walrusSourceBinary = await resolveExecutable(process.env.SONARI_WALRUS_CLI ?? "walrus");
@@ -31,14 +35,18 @@ export async function buildAwsEarthquakeTeeArtifact(
     await mkdir(path.dirname(outPath), { recursive: true });
     await mkdir(path.dirname(artifactBinary), { recursive: true });
 
-    await run("cargo", [
-        "build",
-        "--release",
-        "--manifest-path",
-        CARGO_MANIFEST_PATH,
-        "--target-dir",
-        CARGO_TARGET_DIR,
-    ]);
+    if (process.env.SONARI_TEE_BINARY === undefined) {
+        await run("cargo", [
+            "build",
+            "--release",
+            "--target",
+            cargoTarget,
+            "--manifest-path",
+            CARGO_MANIFEST_PATH,
+            "--target-dir",
+            CARGO_TARGET_DIR,
+        ]);
+    }
     await copyFile(targetBinary, artifactBinary);
     await chmod(artifactBinary, 0o500);
     await copyFile(walrusSourceBinary, artifactWalrusBinary);

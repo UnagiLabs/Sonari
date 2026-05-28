@@ -9,6 +9,6 @@
     "types": "./src/index.ts",
     "scripts": {
         "typecheck": "tsc -b --noEmit",
-        "test": "vitest run"
+        "test": "vitest run src"
     }
 }

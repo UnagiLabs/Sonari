@@ -26,6 +26,7 @@ import type { UsgsEarthquakeCandidate } from "./usgs.js";
 
 export interface EarthquakeEventRow {
     source_event_id: string;
+    requested_source_event_id?: string | null;
     event_uid: string | null;
     status: OffchainStatus;
     retry_count: number;
@@ -88,6 +89,10 @@ export interface UpsertCandidateOptions {
     bypassScreening?: boolean;
 }
 
+export interface UpsertManualEventOptions {
+    requestedSourceEventId?: string;
+}
+
 export interface WorkflowStartInput {
     sourceEventId: string;
     executionName: string;
@@ -121,7 +126,11 @@ export interface StateRepository {
         nowMs: number,
         options?: UpsertCandidateOptions,
     ): Promise<void>;
-    upsertManualEvent(sourceEventId: string, nowMs: number): Promise<void>;
+    upsertManualEvent(
+        sourceEventId: string,
+        nowMs: number,
+        options?: UpsertManualEventOptions,
+    ): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
     hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean>;
@@ -246,6 +255,7 @@ export class InMemoryStateRepository implements StateRepository {
         const status = nextScreeningStatus(existing?.status, screening.status);
         const retryCount = existing?.retry_count ?? 0;
         const row = baseRow(candidate.source_event_id, nowMs, {
+            requested_source_event_id: candidate.requested_source_event_id ?? null,
             event_uid: existing?.event_uid ?? candidate.source_event_id,
             status,
             retry_count: retryCount,
@@ -265,10 +275,17 @@ export class InMemoryStateRepository implements StateRepository {
         this.rows.set(candidate.source_event_id, mergePreservingResult(existing, row, nowMs));
     }
 
-    async upsertManualEvent(sourceEventId: string, nowMs: number): Promise<void> {
+    async upsertManualEvent(
+        sourceEventId: string,
+        nowMs: number,
+        options: UpsertManualEventOptions = {},
+    ): Promise<void> {
         await this.upsertCandidate(
             {
                 source_event_id: sourceEventId,
+                ...(options.requestedSourceEventId === undefined
+                    ? {}
+                    : { requested_source_event_id: options.requestedSourceEventId }),
                 occurred_at_ms: nowMs,
                 source_updated_at_ms: nowMs,
                 magnitude: null,
@@ -723,10 +740,17 @@ export class DynamoDbStateRepository implements StateRepository {
         }
     }
 
-    async upsertManualEvent(sourceEventId: string, nowMs: number): Promise<void> {
+    async upsertManualEvent(
+        sourceEventId: string,
+        nowMs: number,
+        options: UpsertManualEventOptions = {},
+    ): Promise<void> {
         await this.upsertCandidate(
             {
                 source_event_id: sourceEventId,
+                ...(options.requestedSourceEventId === undefined
+                    ? {}
+                    : { requested_source_event_id: options.requestedSourceEventId }),
                 occurred_at_ms: nowMs,
                 source_updated_at_ms: nowMs,
                 magnitude: null,
@@ -1433,6 +1457,7 @@ export class DynamoDbStateRepository implements StateRepository {
                 ? { ":ignored_small_status": "ignored_small" }
                 : { ":new_status": "new", ":ignored_small_status": "ignored_small" };
         const row = baseRow(candidate.source_event_id, nowMs, {
+            requested_source_event_id: candidate.requested_source_event_id ?? null,
             event_uid: candidate.source_event_id,
             status: screening.status,
             retry_count: 0,
@@ -1453,7 +1478,8 @@ export class DynamoDbStateRepository implements StateRepository {
                 Key: { source_event_id: candidate.source_event_id },
                 ConditionExpression: conditionExpression,
                 UpdateExpression: [
-                    "SET #event_uid = :event_uid",
+                    "SET #requested_source_event_id = :requested_source_event_id",
+                    "#event_uid = :event_uid",
                     "#status = :status",
                     "#retry_count = :retry_count",
                     "#next_retry_at_ms = :next_retry_at_ms",
@@ -1761,6 +1787,7 @@ function baseRow(
 ): EarthquakeEventRow {
     return {
         source_event_id: sourceEventId,
+        requested_source_event_id: null,
         event_uid: null,
         status: "new",
         retry_count: 0,
@@ -1813,6 +1840,8 @@ function mergePreservingResult(
     }
     return {
         ...existing,
+        requested_source_event_id:
+            next.requested_source_event_id ?? existing.requested_source_event_id ?? null,
         event_uid: next.event_uid,
         status: next.status,
         next_retry_at_ms: next.next_retry_at_ms,
