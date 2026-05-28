@@ -528,9 +528,9 @@ Band 3 / 重度対象: $300
 Nautilus Earthquake Oracleでは、MVPの地震Bandを以下のように扱う。
 
 ```text
-Band 1: USGS MMI VII以上
-Band 2: USGS MMI VIII以上
-Band 3: USGS MMI IX以上
+Band 1: 7.0 <= USGS MMI < 7.5
+Band 2: 7.5 <= USGS MMI < 8.0
+Band 3: USGS MMI >= 8.0
 ```
 
 ### 11.2 会員状態による係数
