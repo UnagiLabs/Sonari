@@ -34,9 +34,14 @@ verifier output は最小限にする。
 
 ```text
 IdentityVerificationResult {
+  intent
+  verifier_family
+  verifier_version
+  registry_id
+  membership_id
+  owner
   provider
   verified
-  subject_binding_hash
   duplicate_key_hash
   evidence_hash
   issued_at_ms
@@ -50,6 +55,7 @@ IdentityVerificationResult {
 `verified` が `true` のときだけ、Membership SBT を verified にできる。
 
 `duplicate_key_hash` は provider 内の重複登録を防ぐために使う。
+すでに別 SBT に紐づく duplicate key は reject する。
 
 ```text
 kyc_duplicate_key = hash(kyc_provider_id, provider_user_unique_id)

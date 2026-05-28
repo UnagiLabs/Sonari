@@ -92,7 +92,7 @@ IdentityVerificationResult {
 provider は MVP では KYC または World ID のみである。
 `verified == true` の場合だけ、Membership SBT を本人確認済みにできる。
 
-provider 内 duplicate key が使用済みなら reject する。
+provider 内 duplicate key が別 SBT に使用済みなら reject する。
 KYC と World ID をまたぐ完全な重複排除は MVP 外である。
 その代わり、登録時と Claim 時に Sui wallet 署名済みの同意を要求する。
 
@@ -108,7 +108,7 @@ Disaster Claim は、次の条件をすべて検証する。
 | Time | `home_cell_registered_at_ms < disaster_cutoff_time` |
 | Area | `home_cell` が affected cells に含まれる |
 | Identity | `identity_verified == true` |
-| Identity | provider 内 duplicate key が未使用 |
+| Identity | duplicate key がこの Membership SBT に紐づく |
 | Recipient | 支払い先は Membership SBT owner の Sui address |
 | Duplicate Claim | 同じ campaign / event で未 Claim |
 
@@ -239,6 +239,7 @@ target API:
 | Claim | affected cell mismatch reject |
 | Claim | valid KYC verified full Claim |
 | Claim | valid World ID verified full Claim |
+| Claim | duplicate key bound to another SBT reject |
 | Claim | payout to SBT owner |
 | Donation | USDC only、Pool split、zero amount reject |
 | Admin | unauthorized reject、pause reject |

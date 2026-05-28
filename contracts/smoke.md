@@ -20,10 +20,11 @@
 5. User が災害前に home cell を登録済みである。
 6. Nautilus が KYC または World ID result を署名する。
 7. Membership SBT に `identity_verified == true` が反映される。
-8. User が affected cell proof を付けて Claim する。
-9. Move が cutoff、affected cell、本人確認を検証する。
-10. Earthquake Pool から SBT owner へ支払う。
-11. ClaimReceipt が作成される。
+8. IdentityRegistry が duplicate key とこの SBT の紐づきを持つ。
+9. User が affected cell proof を付けて Claim する。
+10. Move が cutoff、affected cell、本人確認を検証する。
+11. Earthquake Pool から SBT owner へ支払う。
+12. ClaimReceipt が作成される。
 
 ## 3. Reject cases
 
@@ -33,7 +34,8 @@
 - `home_cell_registered_at_ms` が cutoff 以後なら reject する。
 - home cell が affected cells に含まれなければ reject する。
 - `identity_verified == true` でなければ reject する。
-- provider 内 duplicate key が使用済みなら reject する。
+- provider 内 duplicate key が別 SBT に使用済みなら reject する。
+- Claim 時に duplicate key がこの SBT に紐づかなければ reject する。
 - 同じ campaign / event の二重 Claim は reject する。
 - paused 中の Claim は reject する。
 

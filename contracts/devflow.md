@@ -50,13 +50,14 @@ GPS history、detailed address は on-chain に出さない。
 
 - KYC duplicate key table を追加する。
 - World ID duplicate key table を追加する。
-- duplicate key 使用済みなら reject する。
+- duplicate key が別 SBT に使用済みなら reject する。
 - KYC と World ID をまたぐ完全判定は MVP 外にする。
 
 完了条件:
 
 - 同じ KYC key を 2 回使えない。
 - 同じ World ID key を 2 回使えない。
+- Claim 時は duplicate key がこの SBT に紐づくことを確認できる。
 - provider をまたぐ注意文への wallet 署名 hash を保存できる。
 
 ### PR C. Nautilus identity update
@@ -93,6 +94,7 @@ GPS history、detailed address は on-chain に出さない。
 - `home_cell_registered_at_ms` が cutoff より前か検証する。
 - affected cell proof と `home_cell` を照合する。
 - `identity_verified == true` を要求する。
+- duplicate key がこの SBT に紐づくことを確認する。
 - SBT owner へ支払う。
 
 完了条件:
