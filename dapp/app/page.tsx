@@ -28,6 +28,8 @@ type Pool = {
     delivered: string;
     percent: number;
     icon: IconName;
+    image: string;
+    imageAlt: string;
 };
 
 type Donor = {
@@ -68,6 +70,8 @@ const pools: Pool[] = [
         delivered: "$820K delivered",
         percent: 61,
         icon: "waves",
+        image: "/assets/donation_flood.webp",
+        imageAlt: "Community recovery aid after flooding",
     },
     {
         name: "Earthquake Relief Pool",
@@ -77,6 +81,8 @@ const pools: Pool[] = [
         delivered: "$337K delivered",
         percent: 66,
         icon: "bolt",
+        image: "/assets/donation_earthquake.png",
+        imageAlt: "Earthquake relief supplies",
     },
     {
         name: "Operations Pool",
@@ -86,6 +92,8 @@ const pools: Pool[] = [
         delivered: "$46K delivered",
         percent: 68,
         icon: "settings",
+        image: "/assets/donation_student.png",
+        imageAlt: "Students receiving continuity support",
     },
 ];
 
@@ -470,6 +478,14 @@ function SponsorRow({
 function PoolCard({ pool }: { pool: Pool }) {
     return (
         <a className="pool-card" href="/pools">
+            <figure className="pool-image">
+                <Image
+                    src={pool.image}
+                    alt={pool.imageAlt}
+                    fill
+                    sizes="(min-width: 920px) 33vw, 100vw"
+                />
+            </figure>
             <div className="header">
                 <div className="icon">
                     <Icon name={pool.icon} size={20} />

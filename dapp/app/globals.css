@@ -661,7 +661,8 @@ h4 {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 24px;
+  overflow: hidden;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -675,10 +676,28 @@ h4 {
   transform: translateY(-2px);
 }
 
+.pool-image {
+  position: relative;
+  margin: 0;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: var(--sage-100);
+}
+
+.pool-image img {
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+
+.pool-card:hover .pool-image img {
+  transform: scale(1.035);
+}
+
 .pool-card .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 0 24px;
 }
 
 .pool-card .icon {
@@ -693,6 +712,16 @@ h4 {
 
 .pool-card h3 {
   font-size: 18px;
+}
+
+.pool-card .header + div,
+.pool-card .header + div + div,
+.pool-card .header + div + div + div {
+  padding: 0 24px;
+}
+
+.pool-card > div:last-child {
+  padding-bottom: 24px;
 }
 
 .pool-card p {
