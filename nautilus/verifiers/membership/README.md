@@ -76,6 +76,28 @@ IdentityVerificationResult {
 `provider` は `kyc` または `world_id` である。
 `verified` が `true` のときだけ、Membership SBT を verified にできる。
 
+### Signed payload BCS layout
+
+Move に渡す signed payload は、次の順番で BCS bytes にする。
+この順番は contract-facing な契約として扱う。
+
+```text
+intent: vector<u8> UTF-8
+verifier_family: vector<u8> UTF-8, identity
+verifier_version: u64
+registry_id: 32-byte Sui object id
+membership_id: 32-byte Sui object id
+owner: 32-byte Sui address
+provider: u8, KYC = 1, World ID = 2
+verified: bool
+duplicate_key_hash: 32 bytes
+evidence_hash: 32 bytes
+issued_at_ms: u64
+expires_at_ms: u64
+terms_version: u64
+signed_statement_hash: 32 bytes
+```
+
 `duplicate_key_hash` は provider 内の重複登録を防ぐために使う。
 すでに別 SBT に紐づく duplicate key は reject する。
 

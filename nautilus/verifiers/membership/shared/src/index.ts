@@ -1,5 +1,29 @@
 export type IdentityProvider = "kyc" | "world_id";
 
+export const IDENTITY_RESULT_FIELD_ORDER = [
+    "intent",
+    "verifier_family",
+    "verifier_version",
+    "registry_id",
+    "membership_id",
+    "owner",
+    "provider",
+    "verified",
+    "duplicate_key_hash",
+    "evidence_hash",
+    "issued_at_ms",
+    "expires_at_ms",
+    "terms_version",
+    "signed_statement_hash",
+] as const;
+
+export const IDENTITY_PROVIDER_BCS = {
+    kyc: 1,
+    world_id: 2,
+} as const satisfies Record<IdentityProvider, number>;
+
+export type IdentityResultField = (typeof IDENTITY_RESULT_FIELD_ORDER)[number];
+
 export interface IdentityEvidenceSnapshot {
     readonly provider: IdentityProvider;
     readonly membership_id: string;
@@ -23,6 +47,183 @@ export interface IdentityVerificationResult {
     readonly expires_at_ms: number;
     readonly terms_version: number;
     readonly signed_statement_hash: string;
+}
+
+export function encodeIdentityVerificationResultBcsHex(input: unknown): string {
+    const result = parseIdentityVerificationResult(input);
+    const bytes = [
+        ...encodeBytes(utf8Bytes(result.intent)),
+        ...encodeBytes(utf8Bytes(result.verifier_family)),
+        ...encodeU64(result.verifier_version),
+        ...parseBytes32(result.registry_id, "registry_id"),
+        ...parseBytes32(result.membership_id, "membership_id"),
+        ...parseBytes32(result.owner, "owner"),
+        IDENTITY_PROVIDER_BCS[result.provider],
+        result.verified ? 1 : 0,
+        ...parseBytes32(result.duplicate_key_hash, "duplicate_key_hash"),
+        ...parseBytes32(result.evidence_hash, "evidence_hash"),
+        ...encodeU64(result.issued_at_ms),
+        ...encodeU64(result.expires_at_ms),
+        ...encodeU64(result.terms_version),
+        ...parseBytes32(result.signed_statement_hash, "signed_statement_hash"),
+    ];
+
+    return `0x${bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function parseIdentityVerificationResult(input: unknown): IdentityVerificationResult {
+    if (!isRecord(input)) {
+        throw new Error("Identity verification result must be an object");
+    }
+
+    const unexpectedKey = Object.keys(input).find(
+        (key) => !IDENTITY_RESULT_FIELD_ORDER.includes(key as IdentityResultField),
+    );
+    if (unexpectedKey !== undefined) {
+        throw new Error(`Unexpected identity result field: ${unexpectedKey}`);
+    }
+
+    const result = {
+        intent: parseString(input.intent, "intent"),
+        verifier_family: parseVerifierFamily(input.verifier_family),
+        verifier_version: parseU64(input.verifier_version, "verifier_version"),
+        registry_id: parseHexString(input.registry_id, "registry_id"),
+        membership_id: parseHexString(input.membership_id, "membership_id"),
+        owner: parseHexString(input.owner, "owner"),
+        provider: parseIdentityProvider(input.provider),
+        verified: parseBoolean(input.verified, "verified"),
+        duplicate_key_hash: parseHexString(input.duplicate_key_hash, "duplicate_key_hash"),
+        evidence_hash: parseHexString(input.evidence_hash, "evidence_hash"),
+        issued_at_ms: parseU64(input.issued_at_ms, "issued_at_ms"),
+        expires_at_ms: parseU64(input.expires_at_ms, "expires_at_ms"),
+        terms_version: parseU64(input.terms_version, "terms_version"),
+        signed_statement_hash: parseHexString(input.signed_statement_hash, "signed_statement_hash"),
+    };
+
+    parseBytes32(result.registry_id, "registry_id");
+    parseBytes32(result.membership_id, "membership_id");
+    parseBytes32(result.owner, "owner");
+    parseBytes32(result.duplicate_key_hash, "duplicate_key_hash");
+    parseBytes32(result.evidence_hash, "evidence_hash");
+    parseBytes32(result.signed_statement_hash, "signed_statement_hash");
+
+    return result;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function parseString(value: unknown, field: string): string {
+    if (typeof value !== "string" || value.length === 0) {
+        throw new Error(`${field} must be a non-empty string`);
+    }
+    return value;
+}
+
+function parseVerifierFamily(value: unknown): "identity" {
+    if (value !== "identity") {
+        throw new Error("verifier_family must be identity");
+    }
+    return value;
+}
+
+function parseIdentityProvider(value: unknown): IdentityProvider {
+    if (value !== "kyc" && value !== "world_id") {
+        throw new Error("provider must be kyc or world_id");
+    }
+    return value;
+}
+
+function parseBoolean(value: unknown, field: string): boolean {
+    if (typeof value !== "boolean") {
+        throw new Error(`${field} must be a boolean`);
+    }
+    return value;
+}
+
+function parseU64(value: unknown, field: string): number {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`${field} must be a safe unsigned integer`);
+    }
+    return value;
+}
+
+function parseHexString(value: unknown, field: string): string {
+    if (typeof value !== "string") {
+        throw new Error(`${field} must be a 0x-prefixed hex string`);
+    }
+    return value;
+}
+
+function parseBytes32(value: string, field: string): number[] {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+        throw new Error(`${field} must be a 32-byte 0x-prefixed hex string`);
+    }
+
+    const hex = value.slice(2);
+    const bytes: number[] = [];
+    for (let offset = 0; offset < hex.length; offset += 2) {
+        bytes.push(Number.parseInt(hex.slice(offset, offset + 2), 16));
+    }
+    return bytes;
+}
+
+function utf8Bytes(value: string): number[] {
+    const bytes: number[] = [];
+    for (const character of value) {
+        const codePoint = character.codePointAt(0);
+        if (codePoint === undefined) {
+            continue;
+        }
+        if (codePoint <= 0x7f) {
+            bytes.push(codePoint);
+        } else if (codePoint <= 0x7ff) {
+            bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
+        } else if (codePoint <= 0xffff) {
+            bytes.push(
+                0xe0 | (codePoint >> 12),
+                0x80 | ((codePoint >> 6) & 0x3f),
+                0x80 | (codePoint & 0x3f),
+            );
+        } else {
+            bytes.push(
+                0xf0 | (codePoint >> 18),
+                0x80 | ((codePoint >> 12) & 0x3f),
+                0x80 | ((codePoint >> 6) & 0x3f),
+                0x80 | (codePoint & 0x3f),
+            );
+        }
+    }
+    return bytes;
+}
+
+function encodeBytes(bytes: number[]): number[] {
+    return [...encodeUleb128(bytes.length), ...bytes];
+}
+
+function encodeU64(value: number): number[] {
+    let remaining = BigInt(value);
+    const bytes: number[] = [];
+    for (let index = 0; index < 8; index += 1) {
+        bytes.push(Number(remaining & 0xffn));
+        remaining >>= 8n;
+    }
+    return bytes;
+}
+
+function encodeUleb128(value: number): number[] {
+    let remaining = value;
+    const bytes: number[] = [];
+    do {
+        let byte = remaining & 0x7f;
+        remaining >>= 7;
+        if (remaining !== 0) {
+            byte |= 0x80;
+        }
+        bytes.push(byte);
+    } while (remaining !== 0);
+    return bytes;
 }
 
 export interface MembershipIdentityState {
