@@ -23,6 +23,10 @@ MVP では `land_allowlist_res7` を使う。
 
 MVP の preferred source は Natural Earth である。
 Natural Earth の land polygon から H3 resolution 7 の land allowlist を作る。
+選んだ Natural Earth land polygon と少しでも重なる H3 resolution 7 cell は
+`land_allowlist_res7` に含める。
+land polygon と重ならない ocean-only cell だけを除外する。
+cell 中心点だけが陸地かどうか、または cell 全体が陸地かどうかでは判定しない。
 
 OSM land polygons は将来候補である。
 OSM は coastline や島の detail を改善できる可能性があるが、
