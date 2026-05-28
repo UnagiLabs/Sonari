@@ -124,14 +124,10 @@ Disaster Claim は、次の条件をすべて検証する。
 | Recipient | 支払い先は Membership SBT owner の Sui address |
 | Duplicate Claim | 同じ campaign / event で未 Claim |
 
-`disaster_cutoff_time` は次の早い方である。
-
-- earthquake occurred time
-- Sonari candidate detected time
-
-災害発生時刻は cutoff の source の一例である。
-Claim timing の canonical term は `disaster_cutoff_time` である。
-finalized time は cutoff に使わない。
+地震 Claim の `disaster_cutoff_time` は、USGS が source として出す
+地震発生時刻を使う。オンチェーンでは `DisasterEvent.occurred_at_ms`
+として保存され、Membership の事前登録判定でもこの値を参照する。
+finalized time や Sonari candidate detected time は cutoff に使わない。
 発生後の駆け込み登録を防ぐためである。
 災害後の居住セル変更は、その災害の Claim eligibility に使えない。
 将来、より厳しくする場合は grace period を置き、
