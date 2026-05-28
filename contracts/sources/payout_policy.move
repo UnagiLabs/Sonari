@@ -4,8 +4,6 @@ use contracts::program::{Self, Campaign, Program};
 use sui::event;
 
 const BPS_DENOMINATOR: u64 = 10_000;
-const THIRTY_DAYS_MS: u64 = 2_592_000_000;
-const NINETY_DAYS_MS: u64 = 7_776_000_000;
 
 const DEFAULT_BAND_1_USDC: u64 = 50_000_000;
 const DEFAULT_BAND_2_USDC: u64 = 150_000_000;
@@ -17,17 +15,12 @@ const LIQUID_RESERVE_TARGET_BPS: u64 = 7_000;
 const MAIN_BACKSTOP_OF_LIQUID_BPS: u64 = 2_000;
 const DESIGNATED_BUDGET_BPS: u64 = 8_000;
 
-const RISK_BUCKET_LOW: u8 = 1;
-const RISK_BUCKET_MEDIUM: u8 = 2;
-const RISK_BUCKET_HIGH: u8 = 3;
-
 const EInvalidEligibilityTier: u64 = 0;
 const EBudgetProgramMismatch: u64 = 1;
 const EBudgetCampaignMismatch: u64 = 2;
 const EBudgetExceeded: u64 = 3;
 const EDesignatedPoolMismatch: u64 = 4;
 const EMainOnlyBudgetCannotUseDesignatedPool: u64 = 5;
-const EInvalidRiskBucket: u64 = 6;
 
 public struct PayoutPolicy has key {
     id: UID,
@@ -218,18 +211,11 @@ public(package) fun record_claim(
 public fun quote_usdc(
     policy: &PayoutPolicy,
     eligibility_tier: u8,
-    membership_issued_at_ms: u64,
-    confidence: u64,
-    risk_bucket: u8,
     user_max_amount_usdc: u64,
     budget_remaining_usdc: u64,
     pool_available_usdc: u64,
-    now_ms: u64,
 ): u64 {
     let mut amount = tier_amount_usdc(policy, eligibility_tier);
-    amount = apply_bps(amount, membership_age_multiplier_bps(membership_issued_at_ms, now_ms));
-    amount = apply_bps(amount, confidence_multiplier_bps(confidence));
-    amount = apply_bps(amount, risk_multiplier_bps(risk_bucket));
     amount = min_u64(amount, user_max_amount_usdc);
     amount = min_u64(amount, policy.policy_max_amount_usdc);
     amount = min_u64(amount, budget_remaining_usdc);
@@ -288,33 +274,6 @@ fun tier_amount_usdc(policy: &PayoutPolicy, eligibility_tier: u8): u64 {
         policy.tier3_amount_usdc
     } else {
         abort EInvalidEligibilityTier
-    }
-}
-
-fun membership_age_multiplier_bps(issued_at_ms: u64, now_ms: u64): u64 {
-    let age = if (now_ms > issued_at_ms) { now_ms - issued_at_ms } else { 0 };
-    if (age < THIRTY_DAYS_MS) {
-        0
-    } else if (age < NINETY_DAYS_MS) {
-        5_000
-    } else {
-        BPS_DENOMINATOR
-    }
-}
-
-fun confidence_multiplier_bps(confidence: u64): u64 {
-    min_u64(confidence, BPS_DENOMINATOR)
-}
-
-fun risk_multiplier_bps(risk_bucket: u8): u64 {
-    if (risk_bucket == RISK_BUCKET_LOW) {
-        BPS_DENOMINATOR
-    } else if (risk_bucket == RISK_BUCKET_MEDIUM) {
-        5_000
-    } else if (risk_bucket == RISK_BUCKET_HIGH) {
-        0
-    } else {
-        abort EInvalidRiskBucket
     }
 }
 

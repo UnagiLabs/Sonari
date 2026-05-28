@@ -6,6 +6,7 @@ use contracts::admin;
 use contracts::affected_cell::{Self, AffectedCellLeaf};
 use contracts::claim;
 use contracts::disaster_event;
+use contracts::identity_registry;
 use contracts::membership;
 use contracts::payload_v1;
 use contracts::payout_policy;
@@ -23,9 +24,13 @@ const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
 const NOW_BEFORE_FRESHNESS_DEADLINE_MS: u64 = 1_704_170_000_000;
 const H3_INDEX: u64 = 608_819_013_597_790_207;
+const KYC_DUPLICATE_KEY_HASH: vector<u8> =
+    x"4444444444444444444444444444444444444444444444444444444444444444";
+const WORLD_ID_DUPLICATE_KEY_HASH: vector<u8> =
+    x"9999999999999999999999999999999999999999999999999999999999999999";
 
-#[test, expected_failure(abort_code = claim::EDisasterClaimDisabled)]
-fun disaster_claim_fails_closed_until_identity_gate_is_connected() {
+#[test, expected_failure(abort_code = claim::EUnverifiedMembership)]
+fun disaster_claim_rejects_unverified_membership() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
@@ -34,120 +39,77 @@ fun disaster_claim_fails_closed_until_identity_gate_is_connected() {
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
+    execute_disaster_claim_with_clock(&mut scenario, &clock);
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test]
+fun kyc_verified_member_can_claim_full_disaster_payout() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_clock(&mut scenario, &clock);
+
     scenario.next_tx(MEMBER);
     {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut index = scenario.take_shared<claim::ClaimIndex>();
-        let registry = scenario.take_shared<membership::MembershipRegistry>();
-        let program = scenario.take_shared<program::Program>();
-        let campaign = scenario.take_shared<program::Campaign>();
-        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        let mut budget = scenario.take_shared<payout_policy::CampaignBudget>();
-        let binding = scenario.take_shared<disaster_event::DisasterCampaignBinding>();
-        let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
-        let pass = scenario.take_from_sender<membership::MembershipPass>();
-        let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        accessor::claim_disaster_usdc(
-            &pause_state,
-            &mut index,
-            &registry,
-            &program,
-            &campaign,
-            &policy,
-            &mut budget,
-            &binding,
-            &disaster_event,
-            &pass,
-            &clock,
-            affected_leaf(),
-            proof(),
-            &mut designated_pool,
-            &mut main_pool,
-            50_000_000,
-            scenario.ctx(),
-        );
+        let receipt = scenario.take_from_sender<claim::ClaimReceipt>();
+        let (_, _, _, amount, _, _, claimant, recipient) =
+            claim::claim_receipt_summary(&receipt);
+        assert!(amount == 50_000_000);
+        assert!(claimant == MEMBER);
+        assert!(recipient == MEMBER);
+        scenario.return_to_sender(receipt);
+    };
 
+    scenario.next_tx(ADMIN);
+    {
+        let budget = scenario.take_shared<payout_policy::CampaignBudget>();
+        let designated_pool = scenario.take_shared<pools::DesignatedPool>();
+        let main_pool = scenario.take_shared<pools::MainPool>();
         assert!(pools::designated_pool_balance_usdc(&designated_pool) == 4_000_000);
         assert!(pools::main_pool_balance_usdc(&main_pool) == 966_000_000);
         assert!(payout_policy::campaign_budget_claimed_usdc(&budget) == 50_000_000);
 
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(index);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(program);
-        test_scenario::return_shared(campaign);
-        test_scenario::return_shared(policy);
         test_scenario::return_shared(budget);
-        test_scenario::return_shared(binding);
-        test_scenario::return_shared(disaster_event);
         test_scenario::return_shared(designated_pool);
         test_scenario::return_shared(main_pool);
-        scenario.return_to_sender(pass);
     };
 
     scenario.end();
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = claim::EDisasterClaimDisabled)]
-fun disaster_claim_fails_closed_before_self_declared_home_cell_payout() {
+#[test]
+fun world_id_verified_member_can_claim_full_disaster_payout() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
-    register_member_with_home_cell(&mut scenario, 0);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_world_id(),
+        WORLD_ID_DUPLICATE_KEY_HASH,
+    );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
-    scenario.next_tx(MEMBER);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut index = scenario.take_shared<claim::ClaimIndex>();
-        let registry = scenario.take_shared<membership::MembershipRegistry>();
-        let program = scenario.take_shared<program::Program>();
-        let campaign = scenario.take_shared<program::Campaign>();
-        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        let mut budget = scenario.take_shared<payout_policy::CampaignBudget>();
-        let binding = scenario.take_shared<disaster_event::DisasterCampaignBinding>();
-        let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
-        let pass = scenario.take_from_sender<membership::MembershipPass>();
-        let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-
-        accessor::claim_disaster_usdc(
-            &pause_state,
-            &mut index,
-            &registry,
-            &program,
-            &campaign,
-            &policy,
-            &mut budget,
-            &binding,
-            &disaster_event,
-            &pass,
-            &clock,
-            affected_leaf(),
-            proof(),
-            &mut designated_pool,
-            &mut main_pool,
-            50_000_000,
-            scenario.ctx(),
-        );
-
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(index);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(program);
-        test_scenario::return_shared(campaign);
-        test_scenario::return_shared(policy);
-        test_scenario::return_shared(budget);
-        test_scenario::return_shared(binding);
-        test_scenario::return_shared(disaster_event);
-        test_scenario::return_shared(designated_pool);
-        test_scenario::return_shared(main_pool);
-        scenario.return_to_sender(pass);
-    };
+    execute_disaster_claim_with_identity(
+        &mut scenario,
+        identity_registry::provider_world_id(),
+        WORLD_ID_DUPLICATE_KEY_HASH,
+    );
 
     scenario.end();
     clock.destroy_for_testing();
@@ -246,6 +208,30 @@ fun disaster_claim_rejects_paused_main_pool_before_payout() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = admin::ETargetPaused)]
+fun disaster_claim_rejects_paused_identity_registry_before_payout() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let identity_registry_id = identity_registry_id(&mut scenario);
+
+    pause_target(
+        &mut scenario,
+        identity_registry::target_kind_identity_registry(),
+        identity_registry_id,
+    );
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
 #[test, expected_failure(abort_code = disaster_event::EDisasterCampaignBindingMismatch)]
 fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
     let mut scenario = initialized();
@@ -270,6 +256,162 @@ fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
         scenario.return_to_sender(cap);
         test_scenario::return_shared(disaster_registry);
     };
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = claim::EAccountCreatedAfterCutoff)]
+fun disaster_claim_rejects_account_created_after_cutoff() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let cutoff_ms = disaster_cutoff_ms(&mut scenario);
+    set_member_account_created_at_ms(&mut scenario, cutoff_ms + 1);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = claim::EAccountCreatedAfterCutoff)]
+fun disaster_claim_rejects_account_created_at_cutoff() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let cutoff_ms = disaster_cutoff_ms(&mut scenario);
+    set_member_account_created_at_ms(&mut scenario, cutoff_ms);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = claim::EHomeCellRegisteredAfterCutoff)]
+fun disaster_claim_rejects_home_cell_registered_after_cutoff() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let cutoff_ms = disaster_cutoff_ms(&mut scenario);
+    set_member_home_cell_registered_at_ms(&mut scenario, cutoff_ms + 1);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = claim::EHomeCellRegisteredAfterCutoff)]
+fun disaster_claim_rejects_home_cell_registered_at_cutoff() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let cutoff_ms = disaster_cutoff_ms(&mut scenario);
+    set_member_home_cell_registered_at_ms(&mut scenario, cutoff_ms);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = claim::EResidenceCellMismatch)]
+fun disaster_claim_rejects_affected_cell_mismatch() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member_with_home_cell(&mut scenario, 0);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityKeyNotBound)]
+fun disaster_claim_rejects_missing_duplicate_key_binding() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_identity(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        WORLD_ID_DUPLICATE_KEY_HASH,
+    );
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityKeyNotBound)]
+fun disaster_claim_rejects_duplicate_key_with_wrong_provider() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_identity(
+        &mut scenario,
+        identity_registry::provider_world_id(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityKeyAlreadyBound)]
+fun disaster_claim_rejects_duplicate_key_bound_to_other_sbt() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    mark_member_identity_verified_without_binding(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+    );
+    bind_duplicate_key_to_other_pass(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
 
     execute_disaster_claim(&mut scenario);
     scenario.end();
@@ -357,6 +499,110 @@ fun register_member_with_home_cell(scenario: &mut test_scenario::Scenario, home_
     };
 }
 
+fun verify_member_with_provider(
+    scenario: &mut test_scenario::Scenario,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+        identity_registry::bind_duplicate_key(
+            &mut identity_registry,
+            &pass,
+            provider,
+            duplicate_key_hash,
+        );
+        membership::apply_identity_verification(
+            &mut pass,
+            provider,
+            1,
+            CLAIM_WINDOW_END_MS + 1,
+            0,
+            b"",
+        );
+        test_scenario::return_shared(identity_registry);
+        scenario.return_to_sender(pass);
+    };
+}
+
+fun mark_member_identity_verified_without_binding(
+    scenario: &mut test_scenario::Scenario,
+    provider: u8,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::apply_identity_verification(
+            &mut pass,
+            provider,
+            1,
+            CLAIM_WINDOW_END_MS + 1,
+            0,
+            b"",
+        );
+        scenario.return_to_sender(pass);
+    };
+}
+
+fun bind_duplicate_key_to_other_pass(
+    scenario: &mut test_scenario::Scenario,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
+) {
+    scenario.next_tx(ADMIN);
+    {
+        let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+        let other_pass = membership::create_pass_for_testing(@0xC0FFEE, scenario.ctx());
+        identity_registry::bind_duplicate_key(
+            &mut identity_registry,
+            &other_pass,
+            provider,
+            duplicate_key_hash,
+        );
+        membership::destroy_pass_for_testing(other_pass);
+        test_scenario::return_shared(identity_registry);
+    };
+}
+
+fun disaster_cutoff_ms(scenario: &mut test_scenario::Scenario): u64 {
+    scenario.next_tx(ADMIN);
+    {
+        let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
+        let cutoff_ms = disaster_event::occurred_at_ms(&disaster_event);
+        test_scenario::return_shared(disaster_event);
+        cutoff_ms
+    }
+}
+
+fun set_member_account_created_at_ms(
+    scenario: &mut test_scenario::Scenario,
+    account_created_at_ms: u64,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_account_created_at_ms_for_testing(&mut pass, account_created_at_ms);
+        scenario.return_to_sender(pass);
+    };
+}
+
+fun set_member_home_cell_registered_at_ms(
+    scenario: &mut test_scenario::Scenario,
+    home_cell_registered_at_ms: u64,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_home_cell_registered_at_ms_for_testing(
+            &mut pass,
+            home_cell_registered_at_ms,
+        );
+        scenario.return_to_sender(pass);
+    };
+}
+
 fun execute_disaster_claim(scenario: &mut test_scenario::Scenario) {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
@@ -364,9 +610,39 @@ fun execute_disaster_claim(scenario: &mut test_scenario::Scenario) {
     clock.destroy_for_testing();
 }
 
+fun execute_disaster_claim_with_identity(
+    scenario: &mut test_scenario::Scenario,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
+) {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
+    execute_disaster_claim_with_clock_and_identity(
+        scenario,
+        &clock,
+        provider,
+        duplicate_key_hash,
+    );
+    clock.destroy_for_testing();
+}
+
 fun execute_disaster_claim_with_clock(
     scenario: &mut test_scenario::Scenario,
     clock: &clock::Clock,
+) {
+    execute_disaster_claim_with_clock_and_identity(
+        scenario,
+        clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+}
+
+fun execute_disaster_claim_with_clock_and_identity(
+    scenario: &mut test_scenario::Scenario,
+    clock: &clock::Clock,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
 ) {
     scenario.next_tx(MEMBER);
     {
@@ -383,6 +659,8 @@ fun execute_disaster_claim_with_clock(
             program,
             campaign,
             clock,
+            provider,
+            duplicate_key_hash,
         );
     };
 }
@@ -400,6 +678,14 @@ fun designated_pool_id(scenario: &mut test_scenario::Scenario): object::ID {
     let designated_pool = scenario.take_shared<pools::DesignatedPool>();
     let id = pools::designated_pool_id(&designated_pool);
     test_scenario::return_shared(designated_pool);
+    id
+}
+
+fun identity_registry_id(scenario: &mut test_scenario::Scenario): object::ID {
+    scenario.next_tx(ADMIN);
+    let identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+    let id = identity_registry::registry_id(&identity_registry);
+    test_scenario::return_shared(identity_registry);
     id
 }
 
@@ -426,11 +712,14 @@ fun execute_disaster_claim_with_objects(
     program: program::Program,
     campaign: program::Campaign,
     clock: &clock::Clock,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
 ) {
     let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
     let mut budget = scenario.take_shared<payout_policy::CampaignBudget>();
     let binding = scenario.take_shared<disaster_event::DisasterCampaignBinding>();
     let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
+    let identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
     let pass = scenario.take_from_sender<membership::MembershipPass>();
     let mut designated_pool = scenario.take_shared<pools::DesignatedPool>();
     let mut main_pool = scenario.take_shared<pools::MainPool>();
@@ -445,10 +734,13 @@ fun execute_disaster_claim_with_objects(
         &mut budget,
         &binding,
         &disaster_event,
+        &identity_registry,
         &pass,
         clock,
         affected_leaf(),
         proof(),
+        provider,
+        duplicate_key_hash,
         &mut designated_pool,
         &mut main_pool,
         50_000_000,
@@ -464,6 +756,7 @@ fun execute_disaster_claim_with_objects(
     test_scenario::return_shared(budget);
     test_scenario::return_shared(binding);
     test_scenario::return_shared(disaster_event);
+    test_scenario::return_shared(identity_registry);
     test_scenario::return_shared(designated_pool);
     test_scenario::return_shared(main_pool);
     scenario.return_to_sender(pass);

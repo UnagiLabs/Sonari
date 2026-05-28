@@ -16,6 +16,7 @@ const EIdentityKeyAlreadyBound: u64 = 1;
 const EIdentityRegistryMismatch: u64 = 2;
 const EMembershipIdMismatch: u64 = 3;
 const EOwnerMismatch: u64 = 4;
+const EIdentityKeyNotBound: u64 = 5;
 
 public struct IdentityRegistry has key {
     id: UID,
@@ -67,6 +68,26 @@ public(package) fun bind_duplicate_key(
         dynamic_field::add(&mut registry.id, key, pass_lineage_id);
         registry.binding_count = registry.binding_count + 1;
     };
+}
+
+public fun assert_duplicate_key_bound_to_pass(
+    registry: &IdentityRegistry,
+    pass: &MembershipPass,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
+) {
+    assert_known_provider(provider);
+    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
+    let key = IdentityKey {
+        provider,
+        duplicate_key_hash,
+    };
+    assert!(
+        dynamic_field::exists_with_type<IdentityKey, ID>(&registry.id, key),
+        EIdentityKeyNotBound,
+    );
+    let bound_pass_lineage_id = dynamic_field::borrow<IdentityKey, ID>(&registry.id, key);
+    assert!(*bound_pass_lineage_id == pass_lineage_id, EIdentityKeyAlreadyBound);
 }
 
 public(package) fun apply_identity_verification_result(

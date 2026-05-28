@@ -307,6 +307,19 @@ public fun set_status_for_testing(pass: &mut MembershipPass, status: u8) {
 }
 
 #[test_only]
+public fun set_account_created_at_ms_for_testing(pass: &mut MembershipPass, account_created_at_ms: u64) {
+    pass.account_created_at_ms = account_created_at_ms;
+}
+
+#[test_only]
+public fun set_home_cell_registered_at_ms_for_testing(
+    pass: &mut MembershipPass,
+    home_cell_registered_at_ms: u64,
+) {
+    pass.home_cell_registered_at_ms = home_cell_registered_at_ms;
+}
+
+#[test_only]
 public fun remove_membership_record_for_testing(
     registry: &mut MembershipRegistry,
     pass_lineage_id: ID,
