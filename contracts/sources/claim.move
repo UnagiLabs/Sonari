@@ -2,6 +2,7 @@ module contracts::claim;
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::disaster_event;
+use contracts::identity_registry::{Self, IdentityRegistry};
 use contracts::membership::{Self, MembershipPass, MembershipRegistry};
 use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
 use contracts::pools::{Self, DesignatedPool, MainPool};
@@ -17,8 +18,10 @@ const EInvalidAffectedCellProof: u64 = 7;
 const EDisasterEventMismatch: u64 = 8;
 const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
+const EUnverifiedMembership: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
-const EDisasterClaimDisabled: u64 = 13;
+const EAccountCreatedAfterCutoff: u64 = 14;
+const EHomeCellRegisteredAfterCutoff: u64 = 15;
 const LEGACY_DISASTER_CONFIDENCE: u64 = 10_000;
 const LEGACY_DISASTER_RISK_BUCKET: u8 = 1;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
@@ -154,10 +157,13 @@ public(package) fun claim_disaster_usdc(
     budget: &mut CampaignBudget,
     binding: &DisasterCampaignBinding,
     disaster_event: &DisasterEvent,
+    identity_registry: &IdentityRegistry,
     pass: &MembershipPass,
     clock: &Clock,
     leaf: AffectedCellLeaf,
     proof: vector<ProofStep>,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
     designated_pool: &mut DesignatedPool,
     main_pool: &mut MainPool,
     user_max_amount_usdc: u64,
@@ -170,13 +176,17 @@ public(package) fun claim_disaster_usdc(
     payout_policy::assert_designated_pool_matches(budget, designated_pool);
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
-    assert!(false, EDisasterClaimDisabled);
     assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof);
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        identity_registry,
+        pass,
+        identity_provider,
+        duplicate_key_hash,
+    );
 
-    let duplicate_key = ClaimKey {
-        pass_lineage_id: membership::membership_pass_lineage_id(pass),
-        campaign_id: program::campaign_id(campaign),
-    };
+    let (pass_lineage_id, campaign_id) =
+        membership::duplicate_claim_key(pass, program::campaign_id(campaign));
+    let duplicate_key = ClaimKey { pass_lineage_id, campaign_id };
     assert!(
         !dynamic_field::exists_with_type<ClaimKey, bool>(&index.id, duplicate_key),
         EDuplicateClaim,
@@ -256,7 +266,24 @@ fun assert_valid_disaster_eligibility(
         EClaimBandTooLow,
     );
 
-    let (_, home_cell, _, _, _, _, _, _, _) = membership::membership_pass_mvp_summary(pass);
+    let cutoff_ms = disaster_event::occurred_at_ms(disaster_event);
+    let (
+        account_created_at_ms,
+        home_cell,
+        home_cell_registered_at_ms,
+        identity_verified,
+        _identity_provider_mask,
+        _identity_verified_at_ms,
+        _identity_expires_at_ms,
+        _terms_version,
+        _signed_statement_hash,
+    ) = membership::membership_pass_mvp_summary(pass);
+    assert!(identity_verified, EUnverifiedMembership);
+    assert!(account_created_at_ms < cutoff_ms, EAccountCreatedAfterCutoff);
+    assert!(
+        home_cell_registered_at_ms < cutoff_ms,
+        EHomeCellRegisteredAfterCutoff,
+    );
     assert!(
         home_cell == affected_cell::h3_index(leaf),
         EResidenceCellMismatch,
