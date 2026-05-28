@@ -126,6 +126,36 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(template).toContain('DesiredCapacity: "0"');
     });
 
+    it("exposes deployment metadata and resource names as stack outputs", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("GitCommitSha:");
+        expect(template).toContain("Default: unknown");
+        expect(template).toContain("Description: Git commit SHA deployed by this stack update.");
+
+        expect(template).toContain("DeployedGitCommitSha:");
+        expect(template).toContain("Value: !Ref GitCommitSha");
+        expect(template).toContain("LambdaCodeS3KeyOutput:");
+        expect(template).toContain("Value: !Ref LambdaCodeS3Key");
+        expect(template).toContain("TeeArtifactS3KeyOutput:");
+        expect(template).toContain("Value: !Ref TeeArtifactS3Key");
+        expect(template).toContain("TeeArtifactSha256Output:");
+        expect(template).toContain("Value: !Ref TeeArtifactSha256");
+        expect(template).toContain("RunnerAutoScalingGroupName:");
+        expect(template).toContain("Value: !Ref RunnerAutoScalingGroup");
+        expect(template).toContain("WatcherScheduleName:");
+        expect(template).toContain("Value: !Ref WatcherSchedule");
+        expect(template).toContain("WatcherLambdaName:");
+        expect(template).toContain("Value: !Ref WatcherLambda");
+        expect(template).toContain("ManualWatcherLambdaName:");
+        expect(template).toContain("Value: !Ref ManualWatcherLambda");
+        expect(template).toContain("RunnerControlLambdaName:");
+        expect(template).toContain("Value: !Ref RunnerControlLambda");
+
+        expect(template).toContain("S3Bucket: !Ref LambdaCodeS3Bucket");
+        expect(template).toContain("S3Key: !Ref LambdaCodeS3Key");
+    });
+
     it("defines AWS-only orchestration resources", async () => {
         const template = await readFile(templatePath, "utf8");
 
