@@ -434,12 +434,23 @@ DonorPass records contribution history only. It does not provide claim rights, p
 
 ### 目的
 
-受取者が MembershipPass を発行し、居住セルを登録する。
+受取者が初期登録として MembershipPass SBT を発行し、居住セルを登録する。
+KYC / World ID は複数アカウント対策として payout 前に必要だが、初期登録ではスキップ可能にする。
+本人確認は会員ホームや Claim 導線からいつでも追加できる任意設定として扱う。
+
+### 画面フロー
+
+初期登録は 1 ステップ 1 ページで進める。
+
+| Step | Route | 必須 | 内容 |
+|---|---|---|---|
+| 1 | `/register` | 必須 | 1 wallet に対して 1 つの soulbound Membership SBT を発行する |
+| 2 | `/register/residence` | 必須 | Google Maps 風の地図 UI、住所・地域検索、現在地から H3 resolution 7 cell を選択する |
+| 3 | `/register/identity` | 任意 | KYC または World ID を登録する。いつでも登録でき、初期登録ではスキップ可能。Relief Cash を受け取る前に完了すればよい |
 
 ### 表示項目
 
 - Wallet Connect
-- Nickname
 - MembershipPass status
 - Registration status
 - Residence verification status
@@ -451,9 +462,13 @@ DonorPass records contribution history only. It does not provide claim rights, p
 
 ### 注意点
 
+- 1 wallet に対して active な Membership SBT は 1 つだけにする
+- Membership SBT は soulbound として扱い、譲渡できない前提を UI に明示する
+- KYC / World ID はいつでも登録できる任意設定として表示し、初期登録の必須項目として扱わない
+- payout 前には KYC または World ID のどちらかを完了している必要がある
 - H3 cell を直接入力させず、住所・地域検索、現在地、地図選択から選べるUIにする
 - H3 cell 手入力は開発者・テスター向けの Advanced option に限定する
-- nickname は表示用であり、Claim eligibility には使わない
+- nickname は会員ホームやプロフィールで後から設定できる表示用項目とし、Claim eligibility には使わない
 - raw address はオンチェーンに出さない
 - phone はオンチェーンに出さない
 - email はオンチェーンに出さない

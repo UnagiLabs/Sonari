@@ -1929,6 +1929,76 @@ h4 {
   padding: 28px;
 }
 
+.register-flow {
+  display: grid;
+  gap: 18px;
+}
+
+.register-step-page {
+  min-height: 560px;
+}
+
+.register-progress {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: oklch(1 0 0 / 0.58);
+}
+
+.progress-item {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-right: 1px solid var(--line);
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.progress-item:last-child {
+  border-right: 0;
+}
+
+.progress-item:hover {
+  background: var(--sage-50);
+}
+
+.progress-item span {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.progress-item strong {
+  color: var(--sage-900);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.progress-item.current {
+  background: var(--sage-100);
+  box-shadow: inset 0 3px 0 var(--sage-700);
+}
+
+.progress-item.done span,
+.progress-item.done strong {
+  color: var(--sage-700);
+}
+
+.progress-item.optional {
+  background: var(--cream-100);
+}
+
+.step-page-copy {
+  max-width: 720px;
+  color: var(--ink-muted);
+  font-size: 15px;
+}
+
 .register-stepper {
   display: grid;
   gap: 14px;
@@ -2056,6 +2126,62 @@ h4 {
   color: var(--sage-800);
   font-family: var(--font-mono);
   font-size: 13px;
+}
+
+.single-step-fields {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sbt-preview-band,
+.claim-requirement-band {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.claim-requirement-band {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sbt-preview-band div,
+.claim-requirement-band div {
+  min-width: 0;
+  padding: 18px 18px 18px 0;
+  border-right: 1px solid var(--line);
+}
+
+.sbt-preview-band div + div,
+.claim-requirement-band div + div {
+  padding-left: 18px;
+}
+
+.sbt-preview-band div:last-child,
+.claim-requirement-band div:last-child {
+  border-right: 0;
+}
+
+.sbt-preview-band span,
+.claim-requirement-band span {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sbt-preview-band strong,
+.claim-requirement-band strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--sage-900);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .pass-preview-panel {
@@ -2705,6 +2831,10 @@ h4 {
     grid-column: auto;
   }
 
+  .register-progress,
+  .single-step-fields,
+  .sbt-preview-band,
+  .claim-requirement-band,
   .register-stepper ol,
   .profile-fields,
   .residence-search-row,
@@ -2712,6 +2842,27 @@ h4 {
   .residence-fields,
   .pass-preview-panel {
     grid-template-columns: 1fr;
+  }
+
+  .progress-item,
+  .sbt-preview-band div,
+  .claim-requirement-band div,
+  .sbt-preview-band div + div,
+  .claim-requirement-band div + div {
+    padding: 14px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .progress-item {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .progress-item:last-child,
+  .sbt-preview-band div:last-child,
+  .claim-requirement-band div:last-child {
+    border-bottom: 0;
   }
 
   .residence-search-row .btn {
