@@ -516,10 +516,10 @@ DonorPass records contribution history only. It does not provide claim rights, p
 ### 表示項目
 
 - Event id
-- Source: USGS / JMA
+- Source: USGS
 - Status: candidate / finalized / expired
 - Magnitude
-- MMI / JMA intensity
+- MMI
 - Epicenter
 - Occurred at
 - Affected cells count
@@ -548,7 +548,7 @@ DonorPass records contribution history only. It does not provide claim rights, p
 - Map
 - Epicenter
 - Magnitude
-- MMI / JMA intensity
+- MMI
 - Source data
 - Nautilus proof summary
 - affected_cells_root
@@ -920,11 +920,10 @@ Oracle / Watcher / TEE / Relayer の状態確認。
 
     type DisasterEventSummary = {
       eventId: string;
-      source: "USGS" | "JMA";
+      source: "USGS";
       status: "candidate" | "finalized" | "expired";
       magnitude?: number;
       mmi?: number;
-      jmaIntensity?: string;
       occurredAtMs: number;
       affectedCellsCount: number;
       affectedCellsRoot: string;

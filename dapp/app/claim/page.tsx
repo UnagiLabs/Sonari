@@ -2,7 +2,7 @@ import Image from "next/image";
 
 type ClaimableEvent = {
     id: string;
-    source: "JMA" | "USGS";
+    source: "USGS";
     region: string;
     intensity: string;
     affectedCells: string;
@@ -26,10 +26,10 @@ const membershipPass = {
 
 const claimableEvents: ClaimableEvent[] = [
     {
-        id: "jma-2026-0521-184",
-        source: "JMA",
-        region: "Off Iwate Pref., Japan",
-        intensity: "M6.8 / JMA 6-",
+        id: "usgs-2026-0521-184",
+        source: "USGS",
+        region: "Offshore Iwate, Japan",
+        intensity: "M6.8 / MMI VIII",
         affectedCells: "1,284 affected cells",
         window: "Open until Jun 04",
         defaultChecked: true,
@@ -75,7 +75,7 @@ const eligibilityChecks: EligibilityCheck[] = [
 const claimPreview = [
     { label: "Estimated Relief Cash", value: "$280 USDC" },
     { label: "Pool source", value: "Earthquake Relief Pool" },
-    { label: "Campaign", value: "Japan Earthquake Relief" },
+    { label: "Campaign", value: "USGS Earthquake Relief" },
     { label: "Receipt", value: "Public, recipient reference anonymized" },
 ];
 

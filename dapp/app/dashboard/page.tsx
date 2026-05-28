@@ -73,11 +73,11 @@ const dashboardSnapshot = {
         },
     ],
     latestEvent: {
-        id: "jma-2026-0521-184",
-        source: "JMA",
+        id: "usgs-2026-0521-184",
+        source: "USGS",
         status: "finalized",
-        region: "Off Iwate Pref., Japan",
-        intensity: "M6.8 / JMA 6-",
+        region: "Offshore Iwate, Japan",
+        intensity: "M6.8 / MMI VIII",
         affectedCells: "1,284 cells",
         claimWindow: "Open until Jun 04",
     },
@@ -104,13 +104,13 @@ const dashboardSnapshot = {
     claims: [
         {
             label: "recipient · h3-xQzm",
-            meta: "jma-2026-0521-184 · 12 min ago",
+            meta: "usgs-2026-0521-184 · 12 min ago",
             amount: "$280",
             status: "finalized" as const,
         },
         {
             label: "recipient · h3-aBcd",
-            meta: "jma-2026-0521-184 · 18 min ago",
+            meta: "usgs-2026-0521-184 · 18 min ago",
             amount: "$280",
             status: "finalized" as const,
         },

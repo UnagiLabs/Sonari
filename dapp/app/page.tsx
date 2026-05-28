@@ -43,7 +43,7 @@ const impactStats = [
     { label: "Total donated", value: "$3.2M", meta: "+ $48,200 in 24h" },
     { label: "Relief delivered", value: "$1.2M", meta: "1,291 verified claims" },
     { label: "Active pools", value: "3", meta: "Main, earthquake, operations" },
-    { label: "Verified events", value: "14", meta: "USGS and JMA sources" },
+    { label: "Verified events", value: "14", meta: "USGS source data" },
 ];
 
 const sponsors: Sponsor[] = [
@@ -118,7 +118,7 @@ const steps = [
     {
         number: "02",
         title: "Disaster verified",
-        body: "USGS or JMA reports are re-fetched and signed only after the source data matches.",
+        body: "USGS reports are re-fetched and signed only after the source data matches.",
     },
     {
         number: "03",
