@@ -132,6 +132,38 @@ public fun identity_result_summary(
     )
 }
 
+public(package) fun registry_id(result: &IdentityVerificationResult): vector<u8> {
+    result.registry_id
+}
+
+public(package) fun membership_id(result: &IdentityVerificationResult): vector<u8> {
+    result.membership_id
+}
+
+public(package) fun owner(result: &IdentityVerificationResult): vector<u8> {
+    result.owner
+}
+
+public(package) fun provider(result: &IdentityVerificationResult): u8 {
+    result.provider
+}
+
+public(package) fun duplicate_key_hash(result: &IdentityVerificationResult): vector<u8> {
+    result.duplicate_key_hash
+}
+
+public(package) fun expires_at_ms(result: &IdentityVerificationResult): u64 {
+    result.expires_at_ms
+}
+
+public(package) fun terms_version(result: &IdentityVerificationResult): u64 {
+    result.terms_version
+}
+
+public(package) fun signed_statement_hash(result: &IdentityVerificationResult): vector<u8> {
+    result.signed_statement_hash
+}
+
 public fun provider_kyc(): u8 {
     PROVIDER_KYC
 }
