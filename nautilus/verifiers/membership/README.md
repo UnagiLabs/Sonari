@@ -1,107 +1,141 @@
-# Sonari 本人認証検証器
+# Sonari Identity Verifiers
 
 ## 概要
 
-本人認証検証器は、受取者側の eligibility に使う Membership Pass metadata を更新する検証器ファミリーです。地震検証器が地震 event の affected-cell root を作るのに対し、本人認証検証器は residence、student、migration など受取者側の metadata を扱います。
+Membership verifier は、Membership SBT の本人確認状態を更新する。
+MVP の provider は KYC と World ID の 2 つだけである。
 
-検証器ファミリーは次の通りです。
+地震 verifier は災害 event と affected cells を検証する。
+identity verifier は、受取者が本人確認済みかを検証する。
+この 2 つの責務は混ぜない。
 
-- `residence`: coarse H3 residence eligibility 用の `ResidenceMetadataUpdate` を生成する。
-- `student`: Student Aid campaign 用の `StudentMetadataUpdate` を生成する。
-- `migration`: 将来の pass lineage / wallet migration verification。
+## MVP provider
 
-コントラクトは Nautilus 署名済み metadata update だけを信頼し、dapp からの生 input は信頼しません。
+| Provider | 役割 |
+| --- | --- |
+| KYC | provider response と署名を検証する |
+| World ID | Sonari 専用 action の proof を検証する |
 
-## 責務
+KYC と World ID は、どちらも満額 Claim ルートである。
+未認証の Membership SBT は Claim できない。
 
-- private evidence を verifier execution 内で normalize / score する。
-- `pass_lineage_id` と owner wallet に bind された署名済み metadata update を生成する。
-- 生の個人 evidence を off-chain に留め、verifier output に含めない。
-- Campaign-specific payout policy が使う confidence と risk bucket を提供する。
+World ID action は Sonari 専用にする。
 
-本人認証検証器は地震 affected-cell root の作成、地震オラクル payload field order の更新、payout 実行を行いません。
+```text
+sonari_membership_register_v1
+```
 
-## 一括 Runner 方針
+signal には Sui address、nonce、domain separator を含める。
+これにより、proof の流用を防ぐ。
 
-Residence、student、migration verification は、dapp 申請ごとに EC2 を即時起動しません。dapp 申請はまず queued verification job を作成します。1日1回などの scheduled batch runner が queued job をまとめて処理します。
+## Verifier output
 
-Queued job が 0 件なら EC2 / Nitro Enclave は起動しません。Job がある場合だけ batch workflow が ASG を `0 -> 1 -> 0` に scale し、EC2 稼働時間を最小化します。将来、claim 期間中や大規模災害時には urgent priority と実行頻度増加を追加できる設計にします。
+verifier output は最小限にする。
+
+```text
+IdentityVerificationResult {
+  provider
+  verified
+  subject_binding_hash
+  duplicate_key_hash
+  evidence_hash
+  issued_at_ms
+  expires_at_ms
+  terms_version
+  signed_statement_hash
+}
+```
+
+`provider` は `kyc` または `world_id` である。
+`verified` が `true` のときだけ、Membership SBT を verified にできる。
+
+`duplicate_key_hash` は provider 内の重複登録を防ぐために使う。
+
+```text
+kyc_duplicate_key = hash(kyc_provider_id, provider_user_unique_id)
+world_duplicate_key = hash(world_app_id, action, nullifier)
+```
+
+KYC と World ID をまたぐ完全な同一人物判定は MVP 外である。
+登録時と Claim 時に、複数 SBT と複数 Claim を禁じる表示を出す。
+その内容に対して Sui wallet 署名を求める。
+
+## Privacy boundary
+
+verifier は raw personal data を output に含めない。
+
+出してはいけないもの:
+
+- KYC document image
+- KYC detail
+- World ID proof detail
+- raw credential data
+- detailed address
+- phone
+- device identifier
+- location history
+
+出してよいもの:
+
+- provider
+- verified flag
+- duplicate key hash
+- evidence hash
+- issued / expiry time
+- terms version
+- signed statement hash
+
+## Job model
+
+identity verification request は queued job として扱う。
+job があるときだけ batch workflow を起動する。
+job が 0 件なら EC2 / Nitro Enclave は起動しない。
 
 ```mermaid
 flowchart TD
-  Dapp[dapp verification 申請] --> Submit[SubmitVerification Lambda]
-  Submit --> Jobs[DynamoDB verification_jobs status=queued]
-  Submit --> Evidence[S3 暗号化 evidence snapshot]
-  Scheduler[EventBridge Scheduler 日次] --> Batch[BatchVerifier Lambda]
+  Dapp[dapp identity request] --> Submit[SubmitVerification Lambda]
+  Submit --> Jobs[DynamoDB verification_jobs]
+  Submit --> Evidence[Encrypted evidence snapshot]
+  Scheduler[EventBridge Scheduler] --> Batch[BatchVerifier Lambda]
   Batch --> Jobs
-  Batch --> Empty{queued job があるか}
-  Empty -->|いいえ| End[EC2 を起動せず終了]
-  Empty -->|はい| Workflow[Step Functions batch workflow]
-  Workflow --> ASG[ASG DesiredCapacity 0 -> 1]
-  ASG --> EC2[EC2 + Nitro Enclave]
-  EC2 --> Result[S3 verifier result]
-  Workflow --> Apply[DynamoDB 更新]
-  Apply --> Stop[ASG DesiredCapacity 1 -> 0]
+  Batch --> Empty{queued job exists}
+  Empty -->|no| End[do not start enclave]
+  Empty -->|yes| Workflow[Step Functions workflow]
+  Workflow --> Enclave[EC2 + Nitro Enclave]
+  Enclave --> Result[Signed identity result]
+  Result --> Apply[Apply to Membership SBT]
 ```
 
-## ジョブスキーマ
+## Job schema
 
-DynamoDB 項目の提案:
+Suggested fields:
 
 - `job_id`
-- `pass_lineage_id`
+- `membership_id`
 - `owner_wallet`
-- `verifier_family`: `residence | student | migration`
-- `status`: `queued | processing | finalized | rejected | failed | needs_user_action`
-- `priority`: `normal | urgent`
+- `provider`
+- `status`
+- `priority`
 - `submitted_at`
-- `scheduled_for`
 - `started_at`
 - `finished_at`
 - `attempt_count`
-- `evidence_snapshot_hash`
+- `evidence_hash`
 - `evidence_s3_key`
 - `result_s3_key`
-- `confidence`
-- `risk_bucket`
+- `duplicate_key_hash`
 - `error_code`
-
-## メタデータ出力
-
-Residence output は、`verified_residence_cell`、`residence_confidence`、`risk_bucket`、`evidence_snapshot_hash`、issued / expiry time、verifier version を含みます。
-
-Student output は、student status bucket、school region hash、confidence、risk bucket、`evidence_snapshot_hash`、issued / expiry time、verifier version を含みます。
-
-Migration output は、old owner、new owner、payout address、migration reason bucket、`pass_lineage_id` を bind します。
-
-## プライバシー / セキュリティ
-
-- 生の evidence は on-chain に書きません。
-- 生の evidence は必要な場合だけ暗号化 S3 に短期保存します。
-- 長期 audit state には生の evidence を復元できない `evidence_snapshot_hash` を残します。
-- 検証器の出力には raw phone、GPS history、detailed address、school email、student id、IP history、raw document image を含めません。
-- Signing key は検証器ファミリーごとに分けます。
-- dapp self-declaration は input にできますが、contract が trusted eligibility として扱ってはいけません。
 
 ## ディレクトリ構成
 
 ```txt
 nautilus/verifiers/membership/
   README.md
-  shared/              共有 TypeScript contract の placeholder
-  tee/                 将来の Nautilus / TEE 実装
-  fixtures/residence/  residence fixture のメモ
-  fixtures/student/    student fixture のメモ
-  verifiers/residence/ residence verifier のメモ
-  verifiers/student/   student verifier のメモ
+  shared/
+  tee/
+  fixtures/
 ```
 
-実装が必要になるまで空の `runner/` ディレクトリは追加しません。
-
-## 今後の作業
-
-- Fixture から deterministic residence / student dummy verifier を実装する。
-- 署名済み metadata update の canonical payload を定義する。
-- Encrypted evidence retention policy と deletion automation を追加する。
-- Metadata update verification の contract integration を追加する。
-- Active claim window 用の urgent priority scheduling を追加する。
+旧 residence / student verifier docs は target MVP から外す。
+将来の Program で必要になった場合は、本人確認 gate とは別の
+eligibility verifier として再設計する。

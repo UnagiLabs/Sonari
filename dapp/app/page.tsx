@@ -428,8 +428,8 @@ export default function LandingPage() {
                             <article className="trust-point">
                                 <h3>Verified, not assumed</h3>
                                 <p>
-                                    Recipients carry a Membership Pass SBT, so programs can check
-                                    eligibility before funds move.
+                                    Recipients carry a Membership SBT verified by KYC or World ID,
+                                    so programs can check eligibility before funds move.
                                 </p>
                             </article>
                             <article className="trust-point">
@@ -463,7 +463,7 @@ export default function LandingPage() {
                             </div>
                             <div className="trust-stat">
                                 <strong>Zero</strong>
-                                <span>Raw personal details stored on-chain</span>
+                                <span>Raw identity details stored on-chain</span>
                             </div>
                             <p className="trust-disclaimer">
                                 Sonari is donation infrastructure — it does not promise payouts.

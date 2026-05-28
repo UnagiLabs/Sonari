@@ -1,31 +1,31 @@
-export type ConfidenceLevel = "low" | "medium" | "high";
+export type IdentityProvider = "kyc" | "world_id";
 
-export type RiskBucket = "low" | "medium" | "high";
+export type IdentityVerificationStatus = "verified" | "rejected";
 
-export interface ResidenceEvidenceSnapshot {
-    readonly verifier: "residence";
-    readonly subjectId: string;
-    readonly confidence: ConfidenceLevel;
-    readonly riskBucket: RiskBucket;
+export interface IdentityEvidenceSnapshot {
+    readonly provider: IdentityProvider;
+    readonly subjectBindingHash: string;
+    readonly evidenceHash: string;
+    readonly submittedAtMs: number;
 }
 
-export interface ResidenceMetadataUpdate {
-    readonly verifier: "residence";
-    readonly subjectId: string;
-    readonly confidence: ConfidenceLevel;
-    readonly riskBucket: RiskBucket;
+export interface IdentityVerificationResult {
+    readonly provider: IdentityProvider;
+    readonly status: IdentityVerificationStatus;
+    readonly subjectBindingHash: string;
+    readonly duplicateKeyHash: string;
+    readonly evidenceHash: string;
+    readonly issuedAtMs: number;
+    readonly expiresAtMs: number;
+    readonly termsVersion: number;
+    readonly signedStatementHash: string;
 }
 
-export interface StudentEvidenceSnapshot {
-    readonly verifier: "student";
-    readonly subjectId: string;
-    readonly confidence: ConfidenceLevel;
-    readonly riskBucket: RiskBucket;
-}
-
-export interface StudentMetadataUpdate {
-    readonly verifier: "student";
-    readonly subjectId: string;
-    readonly confidence: ConfidenceLevel;
-    readonly riskBucket: RiskBucket;
+export interface MembershipIdentityState {
+    readonly identityVerified: boolean;
+    readonly identityProviderMask: number;
+    readonly identityVerifiedAtMs: number;
+    readonly identityExpiresAtMs: number;
+    readonly termsVersion: number;
+    readonly signedStatementHash: string;
 }
