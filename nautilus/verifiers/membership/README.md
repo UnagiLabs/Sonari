@@ -76,12 +76,43 @@ IdentityVerificationResult {
 `provider` は `kyc` または `world_id` である。
 `verified` が `true` のときだけ、Membership SBT を verified にできる。
 
+### Signed payload BCS layout
+
+Move に渡す signed payload は、次の順番で BCS bytes にする。
+この順番は contract-facing な契約として扱う。
+
+```text
+intent: vector<u8> UTF-8
+verifier_family: vector<u8> UTF-8, identity
+verifier_version: u64
+registry_id: 32-byte Sui object id
+membership_id: 32-byte Sui object id
+owner: 32-byte Sui address
+provider: u8, KYC = 1, World ID = 2
+verified: bool
+duplicate_key_hash: 32 bytes
+evidence_hash: 32 bytes
+issued_at_ms: u64
+expires_at_ms: u64
+terms_version: u64
+signed_statement_hash: 32 bytes
+```
+
 `duplicate_key_hash` は provider 内の重複登録を防ぐために使う。
 すでに別 SBT に紐づく duplicate key は reject する。
 
 ```text
 kyc_duplicate_key = hash(kyc_provider_id, provider_user_unique_id)
 world_duplicate_key = hash(world_app_id, action, nullifier)
+```
+
+実装では SHA-256 を使う。
+input は UTF-8 文字列を NUL byte で区切る。
+大文字小文字は暗黙に変換しない。
+
+```text
+KYC: sonari:kyc:v1\0{provider_id}\0{provider_user_unique_id}
+World ID: sonari:world_id:v1\0{world_app_id}\0{action}\0{nullifier}
 ```
 
 KYC と World ID をまたぐ完全な同一人物判定は MVP 外である。
