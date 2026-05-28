@@ -50,11 +50,11 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "AWS_EARTHQUAKE_RUNNER_DEV_ACCOUNT_ID",
             "AWS_EARTHQUAKE_RUNNER_DEV_STACK_NAME",
             "AWS_EARTHQUAKE_RUNNER_DEV_ARTIFACT_BUCKET",
-            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_URL",
-            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256",
             "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_URL",
             "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_SHA256",
         ]);
+        expect(workflow).not.toContain("AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_URL");
+        expect(workflow).not.toContain("AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256");
     });
 
     it("fails closed unless account, role, and stack are explicitly dev scoped", async () => {
@@ -82,17 +82,20 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "rustup toolchain install stable --profile minimal --component rustfmt",
             "rustup target add x86_64-unknown-linux-musl",
             "sudo apt-get install -y musl-tools unzip",
-            "Install pinned Sui and Walrus CLIs",
+            "actions/cache@v5",
+            "walrus-cli-$" + "{{ runner.os }}-$" + "{{ env.WALRUS_CLI_SHA256 }}",
+            "Install pinned Walrus CLI",
             "curl -fsSL",
             "sha256sum -c -",
-            "SUI_CLI_URL",
-            "SUI_CLI_SHA256",
             "WALRUS_CLI_URL",
             "WALRUS_CLI_SHA256",
             "SONARI_WALRUS_CLI",
-            '"$install_dir/$command_name" --version',
+            '"$install_dir/walrus" --version',
             "SONARI_WALRUS_CLI=$RUNNER_TEMP/sonari-bin/walrus",
         ]);
+        expect(workflow).not.toContain("SUI_CLI_URL");
+        expect(workflow).not.toContain("SUI_CLI_SHA256");
+        expect(workflow).not.toContain("install_cli sui");
     });
 
     it("runs required checks and builds both deployment artifacts", async () => {
@@ -101,11 +104,11 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         expectContainsAll(workflow, [
             "pnpm install --frozen-lockfile",
             "pnpm check",
-            "pnpm check:move",
             "pnpm test:oracle",
             "pnpm build:aws-earthquake-lambda",
             "pnpm build:aws-earthquake-tee-artifact",
         ]);
+        expect(workflow).not.toContain("pnpm check:move");
     });
 
     it("uploads commit-scoped artifacts and deploys disabled schedule parameters", async () => {
@@ -207,10 +210,10 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "WatcherLambdaName",
             "ManualWatcherLambdaName",
             "RunnerControlLambdaName",
-            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_URL",
-            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256",
             "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_URL",
             "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_SHA256",
+            "Move contract の build / test は通常 CI 側",
+            "Sui CLI は dev deploy workflow では使いません",
             "S3 には最新 deploy commit の 2 object だけを残します",
             "post-deploy guardrail 成功後",
             "Git revert",
@@ -227,5 +230,7 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         expect(rollbackSection).not.toContain("RunnerTokenSecretArn");
         expect(rollbackSection).not.toContain("SuiKeystoreSecretArn");
         expect(rollbackSection).not.toContain(".local");
+        expect(rollbackSection).not.toContain("AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_URL");
+        expect(rollbackSection).not.toContain("AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256");
     });
 });
