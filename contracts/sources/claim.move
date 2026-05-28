@@ -18,6 +18,7 @@ const EDisasterEventMismatch: u64 = 8;
 const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
 const EGenericClaimDisabled: u64 = 12;
+const EDisasterClaimDisabled: u64 = 13;
 const LEGACY_DISASTER_CONFIDENCE: u64 = 10_000;
 const LEGACY_DISASTER_RISK_BUCKET: u8 = 1;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
@@ -169,6 +170,7 @@ public(package) fun claim_disaster_usdc(
     payout_policy::assert_designated_pool_matches(budget, designated_pool);
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
+    assert!(false, EDisasterClaimDisabled);
     assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof);
 
     let duplicate_key = ClaimKey {

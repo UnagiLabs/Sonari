@@ -13,7 +13,6 @@ use contracts::pools;
 use contracts::program;
 use sui::clock;
 use sui::coin;
-use sui::event;
 use sui::test_scenario;
 use usdc::usdc::USDC;
 
@@ -25,8 +24,8 @@ const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
 const NOW_BEFORE_FRESHNESS_DEADLINE_MS: u64 = 1_704_170_000_000;
 const H3_INDEX: u64 = 608_819_013_597_790_207;
 
-#[test]
-fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
+#[test, expected_failure(abort_code = claim::EDisasterClaimDisabled)]
+fun disaster_claim_fails_closed_until_identity_gate_is_connected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
@@ -87,22 +86,12 @@ fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
         scenario.return_to_sender(pass);
     };
 
-    let paid_events = event::events_by_type<claim::ClaimPaid>();
-    assert!(paid_events.length() == 1);
-    let (_, _, _, amount, main_paid, designated_paid, recipient, claimed_at_ms, _) =
-        claim::claim_paid_event_fields(*paid_events.borrow(0));
-    assert!(amount == 50_000_000);
-    assert!(main_paid == 34_000_000);
-    assert!(designated_paid == 16_000_000);
-    assert!(recipient == MEMBER);
-    assert!(claimed_at_ms == NINETY_ONE_DAYS_MS);
-
     scenario.end();
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = claim::EResidenceCellMismatch)]
-fun disaster_claim_rejects_pass_residence_cell_mismatch() {
+#[test, expected_failure(abort_code = claim::EDisasterClaimDisabled)]
+fun disaster_claim_fails_closed_before_self_declared_home_cell_payout() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
