@@ -9,6 +9,28 @@ MVP の provider は KYC と World ID の 2 つだけである。
 identity verifier は、受取者が本人確認済みかを検証する。
 この 2 つの責務は混ぜない。
 
+residence cell validation は本人確認とは別の検証である。
+ユーザーが自己申告した居住セルが登録可能な陸地セルかを検証する。
+KYC / World ID の本人確認結果を作らない。
+地震 verifier の affected cells も作らない。
+
+MVP では、H3 resolution 7 の陸地 allowlist を使う。
+この allowlist は `land_allowlist_res7` として扱う。
+TEE / verifier は、申告された residence cell が `land_allowlist_res7` に含まれることを検証する。
+海のみの cell は reject する。
+検証に成功した場合、TEE は verified residence metadata result に署名する。
+dApp と relayer はその signed metadata result を配送するだけであり、意味を変更しない。
+Move / metadata verifier が signed result を検証して適用する。
+TEE が Membership SBT を直接 mutate するわけではない。
+
+dApp 側の validation は UX のための早期 feedback である。
+信頼境界として必須なのは TEE / verifier 側の validation である。
+
+MVP の陸地データは Natural Earth を優先 source とする。
+OSM land polygons は将来候補である。
+小さな無人島や複雑な海岸線の厳密な precision は MVP では要求しない。
+`land_allowlist_res7` の保存形式、差分形式、commitment の形式はこの段階では固定しない。
+
 ## MVP provider
 
 | Provider | 役割 |
