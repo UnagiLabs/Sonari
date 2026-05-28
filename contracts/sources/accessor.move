@@ -6,12 +6,6 @@ use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::membership;
-use contracts::metadata_verifier::{
-    Self,
-    ResidenceMetadataUpdateMessage,
-    StudentMetadataUpdateMessage,
-    VerifierRegistry,
-};
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
 use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
 use contracts::program::{Self, Campaign, Program};
@@ -123,62 +117,21 @@ public fun donate_operations_usdc_with_pass(
     );
 }
 
-public fun register_member_usdc(
+public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,
-    operations_pool: &mut OperationsPool,
-    fee: Coin<USDC>,
-    payout_address: address,
+    home_cell: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
     ctx: &mut TxContext,
 ) {
     admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
-    membership::register_member_usdc(registry, operations_pool, fee, payout_address, ctx);
-}
-
-public fun update_residence_metadata(
-    pause_state: &PauseState,
-    registry: &VerifierRegistry,
-    pass: &mut membership::MembershipPass,
-    clock: &Clock,
-    message: ResidenceMetadataUpdateMessage,
-    signature: vector<u8>,
-    public_key: vector<u8>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, metadata_verifier::registry_id(registry));
-    metadata_verifier::verify_and_update_residence_metadata(
+    membership::register_member(
         registry,
-        pass,
-        clock,
-        message,
-        signature,
-        public_key,
-        ctx,
-    );
-}
-
-public fun update_student_metadata(
-    pause_state: &PauseState,
-    registry: &VerifierRegistry,
-    pass: &mut membership::MembershipPass,
-    clock: &Clock,
-    message: StudentMetadataUpdateMessage,
-    signature: vector<u8>,
-    public_key: vector<u8>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, metadata_verifier::registry_id(registry));
-    metadata_verifier::verify_and_update_student_metadata(
-        registry,
-        pass,
-        clock,
-        message,
-        signature,
-        public_key,
+        home_cell,
+        terms_version,
+        signed_statement_hash,
         ctx,
     );
 }

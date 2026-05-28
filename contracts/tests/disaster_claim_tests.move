@@ -11,30 +11,26 @@ use contracts::payload_v1;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
-use sui::bcs;
 use sui::clock;
 use sui::coin;
-use sui::event;
 use sui::test_scenario;
 use usdc::usdc::USDC;
 
 const ADMIN: address = @0xA11CE;
 const MEMBER: address = @0x51A;
-const PAYOUT: address = @0xB0B;
 
 const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
 const NOW_BEFORE_FRESHNESS_DEADLINE_MS: u64 = 1_704_170_000_000;
 const H3_INDEX: u64 = 608_819_013_597_790_207;
 
-#[test]
-fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
+#[test, expected_failure(abort_code = claim::EDisasterClaimDisabled)]
+fun disaster_claim_fails_closed_until_identity_gate_is_connected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
@@ -90,28 +86,17 @@ fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
         scenario.return_to_sender(pass);
     };
 
-    let paid_events = event::events_by_type<claim::ClaimPaid>();
-    assert!(paid_events.length() == 1);
-    let (_, _, _, amount, main_paid, designated_paid, recipient, claimed_at_ms, _) =
-        claim::claim_paid_event_fields(*paid_events.borrow(0));
-    assert!(amount == 50_000_000);
-    assert!(main_paid == 34_000_000);
-    assert!(designated_paid == 16_000_000);
-    assert!(recipient == PAYOUT);
-    assert!(claimed_at_ms == NINETY_ONE_DAYS_MS);
-
     scenario.end();
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = claim::EResidenceCellMismatch)]
-fun disaster_claim_rejects_pass_residence_cell_mismatch() {
+#[test, expected_failure(abort_code = claim::EDisasterClaimDisabled)]
+fun disaster_claim_fails_closed_before_self_declared_home_cell_payout() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
-    register_member(&mut scenario);
-    apply_wrong_residence_metadata(&mut scenario);
+    register_member_with_home_cell(&mut scenario, 0);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
@@ -168,32 +153,6 @@ fun disaster_claim_rejects_pass_residence_cell_mismatch() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = claim::EResidenceMetadataAfterDisaster)]
-fun disaster_claim_rejects_residence_metadata_issued_after_disaster() {
-    let mut scenario = initialized();
-    fund_pools_directly(&mut scenario);
-    register_member(&mut scenario);
-    apply_residence_metadata_issued_at(&mut scenario, 1_704_067_200_001);
-    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
-    create_disaster_claim_objects(&mut scenario);
-
-    execute_disaster_claim(&mut scenario);
-    scenario.end();
-}
-
-#[test]
-fun disaster_claim_accepts_residence_metadata_issued_at_disaster_time() {
-    let mut scenario = initialized();
-    fund_pools_directly(&mut scenario);
-    register_member(&mut scenario);
-    apply_residence_metadata_issued_at(&mut scenario, 1_704_067_200_000);
-    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
-    create_disaster_claim_objects(&mut scenario);
-
-    execute_disaster_claim(&mut scenario);
-    scenario.end();
-}
-
 #[test, expected_failure(abort_code = program::EClaimWindowNotOpen)]
 fun disaster_claim_window_uses_clock_timestamp() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
@@ -201,27 +160,6 @@ fun disaster_claim_window_uses_clock_timestamp() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
-    create_disaster_claim_objects(&mut scenario);
-
-    execute_disaster_claim_with_clock(&mut scenario, &clock);
-    scenario.end();
-    clock.destroy_for_testing();
-}
-
-#[test, expected_failure(abort_code = claim::EResidenceMetadataExpired)]
-fun disaster_claim_residence_expiry_uses_clock_timestamp() {
-    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
-    clock.set_for_testing(2_000);
-    let mut scenario = initialized();
-    fund_pools_directly(&mut scenario);
-    register_member(&mut scenario);
-    let h3_index = H3_INDEX;
-    apply_residence_metadata_cell_with_expiry(
-        &mut scenario,
-        bcs::to_bytes(&h3_index),
-        1_000,
-    );
     create_disaster_claim_objects(&mut scenario);
 
     execute_disaster_claim_with_clock(&mut scenario, &clock);
@@ -234,7 +172,6 @@ fun disaster_claim_rejects_mismatched_designated_pool() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
@@ -254,7 +191,6 @@ fun disaster_claim_rejects_main_only_budget() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects_without_budget(&mut scenario);
 
@@ -285,7 +221,6 @@ fun disaster_claim_rejects_paused_designated_pool_before_payout() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
     let designated_pool_id = designated_pool_id(&mut scenario);
@@ -301,7 +236,6 @@ fun disaster_claim_rejects_paused_main_pool_before_payout() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
     let main_pool_id = main_pool_id(&mut scenario);
@@ -317,7 +251,6 @@ fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
-    apply_residence_metadata(&mut scenario);
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
@@ -403,92 +336,24 @@ fun fund_pools_directly(scenario: &mut test_scenario::Scenario) {
 }
 
 fun register_member(scenario: &mut test_scenario::Scenario) {
+    register_member_with_home_cell(scenario, H3_INDEX);
+}
+
+fun register_member_with_home_cell(scenario: &mut test_scenario::Scenario, home_cell: u64) {
     scenario.next_tx(MEMBER);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(1, scenario.ctx());
-        accessor::register_member_usdc(
+        accessor::register_member(
             &pause_state,
             &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
+            home_cell,
+            0u64,
+            b"",
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
-    };
-}
-
-fun apply_residence_metadata(scenario: &mut test_scenario::Scenario) {
-    let h3_index = H3_INDEX;
-    apply_residence_metadata_cell(scenario, bcs::to_bytes(&h3_index));
-}
-
-fun apply_residence_metadata_issued_at(
-    scenario: &mut test_scenario::Scenario,
-    issued_at_ms: u64,
-) {
-    let h3_index = H3_INDEX;
-    apply_residence_metadata_cell_with_issue_and_expiry(
-        scenario,
-        bcs::to_bytes(&h3_index),
-        issued_at_ms,
-        CLAIM_WINDOW_END_MS,
-    );
-}
-
-fun apply_wrong_residence_metadata(scenario: &mut test_scenario::Scenario) {
-    apply_residence_metadata_cell(scenario, bcs::to_bytes(&0u64));
-}
-
-fun apply_residence_metadata_cell(
-    scenario: &mut test_scenario::Scenario,
-    residence_cell: vector<u8>,
-) {
-    apply_residence_metadata_cell_with_expiry(scenario, residence_cell, CLAIM_WINDOW_END_MS);
-}
-
-fun apply_residence_metadata_cell_with_expiry(
-    scenario: &mut test_scenario::Scenario,
-    residence_cell: vector<u8>,
-    expires_at_ms: u64,
-) {
-    apply_residence_metadata_cell_with_issue_and_expiry(
-        scenario,
-        residence_cell,
-        0,
-        expires_at_ms,
-    );
-}
-
-fun apply_residence_metadata_cell_with_issue_and_expiry(
-    scenario: &mut test_scenario::Scenario,
-    residence_cell: vector<u8>,
-    issued_at_ms: u64,
-    expires_at_ms: u64,
-) {
-    scenario.next_tx(MEMBER);
-    {
-        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
-        membership::apply_residence_metadata_update(
-            &mut pass,
-            1,
-            residence_cell,
-            10_000,
-            1,
-            b"evidence",
-            issued_at_ms,
-            expires_at_ms,
-            1,
-            1,
-            scenario.ctx().epoch_timestamp_ms(),
-            scenario.ctx(),
-        );
-        scenario.return_to_sender(pass);
     };
 }
 

@@ -419,13 +419,11 @@ fun wrong_earthquake_oracle_key_family_is_rejected() {
     let mut scenario = initialized_disaster_registry();
     scenario.next_tx(ADMIN);
     {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
-            &cap,
+        metadata_verifier::add_verifier_key_unchecked_for_testing(
             &mut verifier_registry,
-            metadata_verifier::verifier_family_residence(),
+            1,
             metadata_verifier::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
@@ -439,7 +437,6 @@ fun wrong_earthquake_oracle_key_family_is_rejected() {
             oracle_public_key(),
             scenario.ctx(),
         );
-        scenario.return_to_sender(cap);
         test_scenario::return_shared(disaster_registry);
         test_scenario::return_shared(verifier_registry);
     };

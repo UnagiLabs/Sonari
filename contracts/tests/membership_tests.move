@@ -5,15 +5,15 @@ use contracts::accessor;
 use contracts::admin;
 use contracts::membership;
 use contracts::pools;
-use sui::coin;
 use sui::event;
 use sui::test_scenario;
-use usdc::usdc::USDC;
 
 const ADMIN: address = @0xA11CE;
 const MEMBER: address = @0x51A;
-const PAYOUT: address = @0xB0B;
 const OTHER: address = @0xC0FFEE;
+const HOME_CELL: u64 = 617700169958293503;
+const TERMS_VERSION: u64 = 2;
+const SIGNED_STATEMENT_HASH: vector<u8> = b"membership-statement-hash";
 
 #[test]
 fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
@@ -24,21 +24,15 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
         let registry_id = membership::registry_id(&registry);
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let operations_pool_id = pools::operations_pool_id(&operations_pool);
-        let fee = coin::mint_for_testing<USDC>(500_000, scenario.ctx());
 
-        accessor::register_member_usdc(
+        accessor::register_member(
             &pause_state,
             &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
+            HOME_CELL,
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
-
-        assert!(pools::operations_pool_balance_usdc(&operations_pool) == 500_000);
-        assert!(pools::operations_pool_total_received_usdc(&operations_pool) == 500_000);
 
         let issued_events = event::events_by_type<membership::MembershipPassIssued>();
         assert!(issued_events.length() == 1);
@@ -46,18 +40,12 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
             event_registry_id,
             event_pass_id,
             event_owner,
-            event_payout_address,
             event_pass_lineage_id,
-            event_operations_pool_id,
-            event_fee_amount,
             event_issued_at_ms,
             event_actor,
         ) = membership::membership_pass_issued_event_fields(*issued_events.borrow(0));
         assert!(event_registry_id == registry_id);
         assert!(event_owner == MEMBER);
-        assert!(event_payout_address == PAYOUT);
-        assert!(event_operations_pool_id == operations_pool_id);
-        assert!(event_fee_amount == 500_000);
         assert!(event_issued_at_ms == 0);
         assert!(event_actor == MEMBER);
 
@@ -65,7 +53,6 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
 
         scenario.next_tx(MEMBER);
         let pass = scenario.take_from_sender<membership::MembershipPass>();
@@ -73,11 +60,29 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         assert!(event_pass_id == pass_id);
         assert!(event_pass_lineage_id == pass_id);
         assert!(membership::membership_pass_owner(&pass) == MEMBER);
-        assert!(membership::membership_pass_payout_address(&pass) == PAYOUT);
         assert!(membership::membership_pass_lineage_id(&pass) == pass_id);
         assert!(membership::membership_pass_status(&pass) == membership::status_active());
         assert!(membership::membership_pass_issued_at_ms(&pass) == 0);
-        assert!(membership::membership_pass_last_metadata_update_ms(&pass) == 0);
+        let (
+            account_created_at_ms,
+            home_cell,
+            home_cell_registered_at_ms,
+            identity_verified,
+            identity_provider_mask,
+            identity_verified_at_ms,
+            identity_expires_at_ms,
+            terms_version,
+            signed_statement_hash,
+        ) = membership::membership_pass_mvp_summary(&pass);
+        assert!(account_created_at_ms == 0u64);
+        assert!(home_cell == HOME_CELL);
+        assert!(home_cell_registered_at_ms == 0u64);
+        assert!(!identity_verified);
+        assert!(identity_provider_mask == 0u8);
+        assert!(identity_verified_at_ms == 0u64);
+        assert!(identity_expires_at_ms == 0u64);
+        assert!(terms_version == TERMS_VERSION);
+        assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
         scenario.return_to_sender(pass);
     };
 
@@ -85,7 +90,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
 }
 
 #[test]
-fun verification_fee_only_deposits_to_operations_pool() {
+fun member_registration_does_not_deposit_to_operations_pool() {
     let mut scenario = initialized_with_pools();
 
     scenario.next_tx(MEMBER);
@@ -94,15 +99,14 @@ fun verification_fee_only_deposits_to_operations_pool() {
         let main_pool = scenario.take_shared<pools::MainPool>();
         let designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(42, scenario.ctx());
+        let operations_pool = scenario.take_shared<pools::OperationsPool>();
 
-        accessor::register_member_usdc(
+        accessor::register_member(
             &pause_state,
             &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
+            HOME_CELL,
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
 
@@ -110,68 +114,12 @@ fun verification_fee_only_deposits_to_operations_pool() {
         assert!(pools::main_pool_total_received_usdc(&main_pool) == 0);
         assert!(pools::designated_pool_balance_usdc(&designated_pool) == 0);
         assert!(pools::designated_pool_total_received_usdc(&designated_pool) == 0);
-        assert!(pools::operations_pool_balance_usdc(&operations_pool) == 42);
-        assert!(pools::operations_pool_total_received_usdc(&operations_pool) == 42);
+        assert!(pools::operations_pool_balance_usdc(&operations_pool) == 0);
+        assert!(pools::operations_pool_total_received_usdc(&operations_pool) == 0);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(main_pool);
         test_scenario::return_shared(designated_pool);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
-    };
-
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = membership::EInvalidPayoutAddress)]
-fun zero_payout_address_is_rejected() {
-    let mut scenario = initialized_with_pools();
-
-    scenario.next_tx(MEMBER);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(1, scenario.ctx());
-
-        accessor::register_member_usdc(
-            &pause_state,
-            &mut registry,
-            &mut operations_pool,
-            fee,
-            @0x0,
-            scenario.ctx(),
-        );
-
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
-    };
-
-    scenario.end();
-}
-
-#[test, expected_failure(abort_code = membership::EZeroVerificationFee)]
-fun zero_verification_fee_is_rejected() {
-    let mut scenario = initialized_with_pools();
-
-    scenario.next_tx(MEMBER);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(0, scenario.ctx());
-
-        accessor::register_member_usdc(
-            &pause_state,
-            &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
-            scenario.ctx(),
-        );
-
-        test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(operations_pool);
     };
@@ -192,12 +140,12 @@ fun global_pause_blocks_member_registration() {
         test_scenario::return_shared(pause_state);
     };
 
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = admin::ETargetPaused)]
-fun operations_pool_target_pause_blocks_member_registration() {
+#[test]
+fun operations_pool_target_pause_does_not_block_member_registration() {
     let mut scenario = initialized_with_pools();
     let operations_pool_id = operations_pool_id(&mut scenario);
 
@@ -216,7 +164,7 @@ fun operations_pool_target_pause_blocks_member_registration() {
         test_scenario::return_shared(pause_state);
     };
 
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
     scenario.end();
 }
 
@@ -240,22 +188,22 @@ fun membership_registry_target_pause_blocks_member_registration() {
         test_scenario::return_shared(pause_state);
     };
 
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
     scenario.end();
 }
 
 #[test, expected_failure(abort_code = membership::EMembershipPassAlreadyIssued)]
 fun duplicate_member_registration_for_same_owner_is_rejected() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
+    register_member(&mut scenario);
     scenario.end();
 }
 
 #[test]
 fun registry_current_pass_precheck_matches_pass_and_owner_index() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
@@ -271,7 +219,6 @@ fun registry_current_pass_precheck_matches_pass_and_owner_index() {
             record_lineage_id,
             current_pass_id,
             current_owner,
-            current_payout_address,
             status,
             issued_at_ms,
             updated_at_ms,
@@ -279,7 +226,6 @@ fun registry_current_pass_precheck_matches_pass_and_owner_index() {
         assert!(record_lineage_id == pass_lineage_id);
         assert!(current_pass_id == pass_id);
         assert!(current_owner == MEMBER);
-        assert!(current_payout_address == PAYOUT);
         assert!(status == membership::status_active());
         assert!(issued_at_ms == 0);
         assert!(updated_at_ms == 0);
@@ -294,7 +240,7 @@ fun registry_current_pass_precheck_matches_pass_and_owner_index() {
 #[test, expected_failure(abort_code = membership::ERegistryRecordNotFound)]
 fun current_pass_precheck_rejects_missing_registry_record() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
@@ -315,7 +261,7 @@ fun current_pass_precheck_rejects_missing_registry_record() {
 #[test, expected_failure(abort_code = membership::ERegistryPassMismatch)]
 fun current_pass_precheck_rejects_wrong_current_pass_id() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
     let wrong_pass_id = operations_pool_id(&mut scenario);
 
     scenario.next_tx(MEMBER);
@@ -340,7 +286,7 @@ fun current_pass_precheck_rejects_wrong_current_pass_id() {
 #[test, expected_failure(abort_code = membership::ERegistryOwnerMismatch)]
 fun current_pass_precheck_rejects_wrong_current_owner() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
@@ -361,34 +307,10 @@ fun current_pass_precheck_rejects_wrong_current_owner() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = membership::ERegistryPayoutMismatch)]
-fun current_pass_precheck_rejects_wrong_current_payout_address() {
-    let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
-
-    scenario.next_tx(MEMBER);
-    {
-        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let pass = scenario.take_from_sender<membership::MembershipPass>();
-        membership::set_current_payout_address_for_testing(
-            &mut registry,
-            membership::membership_pass_lineage_id(&pass),
-            OTHER,
-        );
-
-        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
-
-        test_scenario::return_shared(registry);
-        scenario.return_to_sender(pass);
-    };
-
-    scenario.end();
-}
-
 #[test, expected_failure(abort_code = membership::ERegistryRecordNotActive)]
 fun current_pass_precheck_rejects_inactive_registry_record_status() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
@@ -410,15 +332,14 @@ fun current_pass_precheck_rejects_inactive_registry_record_status() {
 }
 
 #[test]
-fun claim_precheck_allows_active_pass_owner_and_payout_address() {
+fun claim_precheck_allows_active_pass_owner() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         membership::assert_claim_precheck(&pass, MEMBER);
-        membership::assert_claim_precheck(&pass, PAYOUT);
         scenario.return_to_sender(pass);
     };
 
@@ -443,7 +364,7 @@ fun migrated_pass_fails_claim_precheck() {
 #[test, expected_failure(abort_code = membership::EClaimantNotAuthorized)]
 fun unrelated_claimant_fails_claim_precheck() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
@@ -458,7 +379,7 @@ fun unrelated_claimant_fails_claim_precheck() {
 #[test]
 fun duplicate_claim_key_uses_pass_lineage_id_and_campaign_id() {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
     let campaign_id = operations_pool_id(&mut scenario);
 
     scenario.next_tx(MEMBER);
@@ -487,26 +408,23 @@ fun initialized_with_pools(): test_scenario::Scenario {
     scenario
 }
 
-fun register_member(scenario: &mut test_scenario::Scenario, fee_amount: u64) {
+fun register_member(scenario: &mut test_scenario::Scenario) {
     scenario.next_tx(MEMBER);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(fee_amount, scenario.ctx());
 
-        accessor::register_member_usdc(
+        accessor::register_member(
             &pause_state,
             &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
+            HOME_CELL,
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
     };
 }
 
@@ -528,7 +446,7 @@ fun membership_registry_id(scenario: &mut test_scenario::Scenario): object::ID {
 
 fun run_inactive_status_precheck(status: u8) {
     let mut scenario = initialized_with_pools();
-    register_member(&mut scenario, 1);
+    register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {

@@ -3,6 +3,7 @@ module contracts::admin;
 use contracts::claim;
 use contracts::disaster_event;
 use contracts::donation;
+use contracts::identity_registry;
 use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::payout_policy;
@@ -22,6 +23,7 @@ const GENESIS_KIND_DONOR_REGISTRY: u8 = 5;
 const GENESIS_KIND_MEMBERSHIP_REGISTRY: u8 = 6;
 const GENESIS_KIND_VERIFIER_REGISTRY: u8 = 7;
 const GENESIS_KIND_CLAIM_INDEX: u8 = 8;
+const GENESIS_KIND_IDENTITY_REGISTRY: u8 = 9;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
@@ -92,6 +94,9 @@ fun initialize(ctx: &mut TxContext) {
 
     let claim_index_id = claim::create_claim_index(ctx);
     emit_genesis_object(claim_index_id, GENESIS_KIND_CLAIM_INDEX, true, ctx);
+
+    let identity_registry_id = identity_registry::create_identity_registry(ctx);
+    emit_genesis_object(identity_registry_id, GENESIS_KIND_IDENTITY_REGISTRY, true, ctx);
 }
 
 public fun create_designated_pool(
@@ -355,6 +360,10 @@ public fun genesis_kind_verifier_registry(): u8 {
 
 public fun genesis_kind_claim_index(): u8 {
     GENESIS_KIND_CLAIM_INDEX
+}
+
+public fun genesis_kind_identity_registry(): u8 {
+    GENESIS_KIND_IDENTITY_REGISTRY
 }
 
 fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxContext) {

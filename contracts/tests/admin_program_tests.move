@@ -5,6 +5,7 @@ use contracts::admin;
 use contracts::claim;
 use contracts::disaster_event;
 use contracts::donation;
+use contracts::identity_registry;
 use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::payout_policy;
@@ -48,12 +49,22 @@ fun init_creates_genesis_objects_and_tracking_events() {
         metadata_verifier::registry_created_event_fields(*verifier_events.borrow(0));
     assert!(verifier_registry_kind == metadata_verifier::registry_kind_verifier());
 
+    let identity_events = event::events_by_type<identity_registry::RegistryCreated>();
+    assert!(identity_events.length() == 1);
+    let (identity_registry_id_from_event, identity_registry_kind, _, _) =
+        identity_registry::registry_created_event_fields(*identity_events.borrow(0));
+    assert!(identity_registry_kind == identity_registry::registry_kind_identity());
+
     let genesis_events = event::events_by_type<admin::GenesisObjectCreated>();
-    assert!(genesis_events.length() == 8);
+    assert!(genesis_events.length() == 9);
     let (_, claim_index_kind, claim_index_shared, _, _) =
         admin::genesis_object_created_event_fields(*genesis_events.borrow(7));
     assert!(claim_index_kind == admin::genesis_kind_claim_index());
     assert!(claim_index_shared);
+    let (_, identity_registry_kind, identity_registry_shared, _, _) =
+        admin::genesis_object_created_event_fields(*genesis_events.borrow(8));
+    assert!(identity_registry_kind == admin::genesis_kind_identity_registry());
+    assert!(identity_registry_shared);
 
     scenario.next_tx(ADMIN);
     {
@@ -65,6 +76,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(test_scenario::has_most_recent_shared<membership::MembershipRegistry>());
         assert!(test_scenario::has_most_recent_shared<metadata_verifier::VerifierRegistry>());
         assert!(test_scenario::has_most_recent_shared<claim::ClaimIndex>());
+        assert!(test_scenario::has_most_recent_shared<identity_registry::IdentityRegistry>());
 
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let pause_state = scenario.take_shared<admin::PauseState>();
@@ -74,6 +86,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
         let claim_index = scenario.take_shared<claim::ClaimIndex>();
+        let identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
 
         assert!(!admin::is_global_paused(&pause_state));
         assert!(admin::paused_target_count(&pause_state) == 0);
@@ -85,6 +98,9 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(
             verifier_registry_id_from_event == metadata_verifier::registry_id(&verifier_registry),
         );
+        assert!(
+            identity_registry_id_from_event == identity_registry::registry_id(&identity_registry),
+        );
 
         scenario.return_to_sender(cap);
         test_scenario::return_shared(pause_state);
@@ -94,6 +110,7 @@ fun init_creates_genesis_objects_and_tracking_events() {
         test_scenario::return_shared(membership_registry);
         test_scenario::return_shared(verifier_registry);
         test_scenario::return_shared(claim_index);
+        test_scenario::return_shared(identity_registry);
     };
 
     scenario.end();
