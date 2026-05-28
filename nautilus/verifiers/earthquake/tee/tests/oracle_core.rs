@@ -101,8 +101,10 @@ fn computes_p90_band_and_merkle_with_odd_leaf_promotion() {
     );
     assert_eq!(cell_band(699), 0);
     assert_eq!(cell_band(700), 1);
-    assert_eq!(cell_band(800), 2);
-    assert_eq!(cell_band(900), 3);
+    assert_eq!(cell_band(749), 1);
+    assert_eq!(cell_band(750), 2);
+    assert_eq!(cell_band(799), 2);
+    assert_eq!(cell_band(800), 3);
 
     let leaves = vec![[1_u8; 32], [2_u8; 32], [3_u8; 32]];
     let promoted_root = merkle_root_from_leaf_hashes(&leaves).expect("non-empty tree");

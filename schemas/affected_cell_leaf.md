@@ -15,7 +15,7 @@ Rust、TypeScript、Moveは、必ず以下の順序で `AffectedCellLeaf` をBCS
 | 5 | `cell_metric` | `u8` | `USGS_MMI` |
 | 6 | `intensity_value` | `u16` | scale適用後の震度値 |
 | 7 | `intensity_scale` | `u8` | `MMI_X100` |
-| 8 | `cell_band` | `u8` | Claim対象セルのみなので `1..3` |
+| 8 | `cell_band` | `u8` | Claim対象セルのみなので `1..3`。MMI_X100のthresholdは下記参照 |
 | 9 | `cells_generation_method` | `u8` | Payloadと同じ生成方式 |
 | 10 | `oracle_version` | `u64` | Payloadと同じoracle version |
 
@@ -45,4 +45,5 @@ MVP中の破壊的変更として、`oracle_version = 1` のleaf / internal node
 - Leaf BCS内の `h3_index` は `u64` です。
 - JSON artifact内の `h3_index` はdecimal stringです。`u64` へ変換する際はleading zeroを禁止します。ただし `"0"` のみ許可します。
 - `intensity_value` は `intensity_scale` とセットで解釈します。MMI 7.23は `MMI_X100` で `723` です。
+- `cell_band` は `MMI_X100` の値で決定します: `band0` は `< 700`、`band1` は `700..=749`、`band2` は `750..=799`、`band3` は `>= 800` です。`band0` はClaim対象外で、leaf / Merkle rootには含めません。
 - `cells_generation_method` のMVP値は `SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1` です。
