@@ -428,8 +428,8 @@ export default function LandingPage() {
                             <article className="trust-point">
                                 <h3>Verified, not assumed</h3>
                                 <p>
-                                    Recipients carry a Membership SBT verified by KYC or World ID,
-                                    so programs can check eligibility before funds move.
+                                    Recipients carry a Membership SBT verified by KYC or World ID.
+                                    KYC and World ID follow the same full-support route.
                                 </p>
                             </article>
                             <article className="trust-point">
@@ -442,8 +442,8 @@ export default function LandingPage() {
                             <article className="trust-point">
                                 <h3>Privacy you can rely on</h3>
                                 <p>
-                                    Sensitive details stay private. Sonari uses only the proof each
-                                    program needs.
+                                    Sensitive details stay private. Support goes to the Membership
+                                    SBT owner under the program rules.
                                 </p>
                             </article>
                         </div>

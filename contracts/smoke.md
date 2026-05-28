@@ -26,6 +26,9 @@
 11. Earthquake Pool から SBT owner へ支払う。
 12. ClaimReceipt が作成される。
 
+KYC / World ID はどちらも満額 route である。
+本人確認 provider による支給率差は作らない。
+
 ## 3. Reject cases
 
 - DisasterEvent が finalized 済みでなければ reject する。
