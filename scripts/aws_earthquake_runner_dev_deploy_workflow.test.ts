@@ -50,6 +50,10 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "AWS_EARTHQUAKE_RUNNER_DEV_ACCOUNT_ID",
             "AWS_EARTHQUAKE_RUNNER_DEV_STACK_NAME",
             "AWS_EARTHQUAKE_RUNNER_DEV_ARTIFACT_BUCKET",
+            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_URL",
+            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256",
+            "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_URL",
+            "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_SHA256",
         ]);
     });
 
@@ -77,13 +81,17 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "corepack prepare pnpm@10.27.0 --activate",
             "rustup toolchain install stable --profile minimal --component rustfmt",
             "rustup target add x86_64-unknown-linux-musl",
-            "sudo apt-get install -y musl-tools",
-            "Validate Sui CLI",
-            "SUI_BIN",
-            "sui --version",
-            "Validate Walrus CLI",
+            "sudo apt-get install -y musl-tools unzip",
+            "Install pinned Sui and Walrus CLIs",
+            "curl -fsSL",
+            "sha256sum -c -",
+            "SUI_CLI_URL",
+            "SUI_CLI_SHA256",
+            "WALRUS_CLI_URL",
+            "WALRUS_CLI_SHA256",
             "SONARI_WALRUS_CLI",
-            'test -x "$resolved_walrus"',
+            '"$install_dir/$command_name" --version',
+            "SONARI_WALRUS_CLI=$RUNNER_TEMP/sonari-bin/walrus",
         ]);
     });
 
@@ -185,6 +193,10 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "WatcherLambdaName",
             "ManualWatcherLambdaName",
             "RunnerControlLambdaName",
+            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_URL",
+            "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256",
+            "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_URL",
+            "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_SHA256",
             "GitCommitSha",
             "LambdaCodeS3Key",
             "TeeArtifactS3Key",
