@@ -63,6 +63,18 @@ KYC + World ID = 3
 raw KYC data、World ID proof detail、credential detail、
 document image、phone、GPS history、detailed address は保存しない。
 
+`home_cell` は、ユーザーの自己申告による居住セルである。
+contract-facing な要件として、H3 resolution 7 のセルだけを扱う。
+1 つの active な Membership SBT は、同時に 1 つの active な
+`home_cell` だけを持つ。
+これは厳密な住所証明ではない。
+
+MVP の contract は、GPS、IP geolocation、VPN detection、住所証明、
+厳密な居住証明を Claim 条件として扱わない。
+海のみのセルなど、居住地として自然でないセルの制限は
+UI と verifier 側の入力検証で扱う。
+この文書変更だけでは、新しい Move 実装、source 追加、schema 変更を要求しない。
+
 ## 4. Identity verification
 
 本人確認結果は Nautilus が検証する。
@@ -117,8 +129,14 @@ Disaster Claim は、次の条件をすべて検証する。
 - earthquake occurred time
 - Sonari candidate detected time
 
+災害発生時刻は cutoff の source の一例である。
+Claim timing の canonical term は `disaster_cutoff_time` である。
 finalized time は cutoff に使わない。
 発生後の駆け込み登録を防ぐためである。
+災害後の居住セル変更は、その災害の Claim eligibility に使えない。
+将来、より厳しくする場合は grace period を置き、
+`last_changed_at_ms < disaster_cutoff_time - grace_period_ms` のように判定できる。
+MVP では grace period の具体値をまだ決めない。
 
 ## 6. Payout policy
 
