@@ -439,15 +439,21 @@ DonorPass records contribution history only. It does not provide claim rights, p
 ### 表示項目
 
 - Wallet Connect
+- Nickname
 - MembershipPass status
 - Registration status
 - Residence verification status
-- Registered H3 cell
+- Residence area search
+- Map-based residence cell selector
+- Selected H3 cell read-only display
 - Metadata refresh
 - Register button
 
 ### 注意点
 
+- H3 cell を直接入力させず、住所・地域検索、現在地、地図選択から選べるUIにする
+- H3 cell 手入力は開発者・テスター向けの Advanced option に限定する
+- nickname は表示用であり、Claim eligibility には使わない
 - raw address はオンチェーンに出さない
 - phone はオンチェーンに出さない
 - email はオンチェーンに出さない
