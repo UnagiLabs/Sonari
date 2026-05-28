@@ -22,7 +22,7 @@ GitHub issue を **Codex だけで完結**させる repo-local workflow。
   - `issue_planner`
   - `plan_reviewer`
   - `issue_step_worker`
-  - `verification_reviewer`
+  - clean-context `/review` subagent
 - scripts:
   - `.codex/hooks/manage-worktree.sh`
 - references:
@@ -31,7 +31,6 @@ GitHub issue を **Codex だけで完結**させる repo-local workflow。
 - supporting skills:
   - `$draft-commit-message`
   - `$prepare-pr`
-  - `$code-review`
 
 ## 前提
 
@@ -68,8 +67,8 @@ GitHub issue を **Codex だけで完結**させる repo-local workflow。
 6. worktree を作り、`issue_step_worker` で step 単位に実装する
 7. 各 step は完了直後に **その step 専用の 1 commit** を作る
 8. ローカル検証を実行
-9. `verification_reviewer` を fresh context で起動し、`$code-review` rubric で最終レビューする
-10. blocking 指摘を修正し、必要なら再検証する
+9. クリーンなコンテキストのサブエージェントに Codex CLI 標準の `/review` コマンドを実行させる
+10. 指摘事項を修正し、指摘がなくなるまで `/review` と再検証を繰り返す
 11. `$prepare-pr` の規約で PR を作成する
 12. worktree と作業ブランチを cleanup する
 13. cleanup 完了を確認してからユーザーへ完了報告する
@@ -218,27 +217,29 @@ npm test
 
 変更が広い場合や runtime/build 影響がある場合は `npm run build` まで実行する。
 
-## Phase 7: Read-only 最終レビュー
+## Phase 7: Codex /review 最終レビュー
 
-ローカル検証後、`verification_reviewer` を **fresh context の read-only subagent** として起動し、`$code-review` を明示的に使わせて **PR 前ゲートレビュー** を行う。
+ローカル検証後、クリーンなコンテキストのサブエージェントを起動し、Codex CLI 標準の `/review` コマンドで **PR 前ゲートレビュー** を行わせる。
 
-レビュー context には少なくとも次を含める:
+`/review` は PR 方式で、実装ブランチと `main` を比較する形で実行する。作業ツリー差分だけを対象にしてはならない。
+
+`/review` サブエージェントへ渡す context には少なくとも次を含める:
 
 - issue 要約
 - 実装サマリー
 - ローカル検証結果
 - 変更ファイル一覧
-- `git diff --stat <base>...HEAD`
+- current branch name
+- base branch は `main`
+- `git diff --stat main...HEAD`
 
 最終レビューのルール:
 
-- 出力は `Verdict`、`Blocking findings`、`Residual risk`、`Validation gaps` の 4 項目に絞る
-- `Blocking findings` は `blocking` / `high` 相当だけを最大 3 件まで返す
-- 指摘がない場合は `No blocking findings` を明示し、2 から 3 行で終える
-- `blocking` 指摘は必ず修正する
+- `/review` の結果を PR 前ゲートとして扱う
+- 指摘事項は severity に関係なく、解消するまで修正する
 - 修正後は影響範囲のローカル検証をやり直す
-- 修正が広範囲に波及した場合のみ、例外として `verification_reviewer` を 1 回だけ再実行してよい
-- `blocking` が解消できない場合は PR を作らず停止する
+- 指摘事項が 0 件になるまで、クリーンなコンテキストのサブエージェントで `/review` を再実行する
+- 指摘事項が解消できない場合は PR を作らず停止する
 
 ## Phase 8: PR 作成
 
@@ -285,16 +286,18 @@ cleanup で詰まりやすい例:
 - `gh` 認証失敗
 - 必須のローカル check が失敗し、解消できない
 - `plan_reviewer` の `blocking` 指摘が未解消
-- `verification_reviewer` の `blocking` 指摘が未解消
+- `/review` の指摘事項が未解消
 - PR 作成後の worktree cleanup が完了しない
 
 ## 重要事項
 
-- `plan_reviewer` と `verification_reviewer` はどちらも read-only で使う
-- 計画監査と最終レビューは、それぞれ fresh context の subagent で実行する
-- 最終レビューは **必ず `$code-review` を明示利用**した短い gate review として行う
+- `plan_reviewer` は read-only で使う
+- 計画監査は fresh context の subagent で実行する
+- 最終レビューは **必ずクリーンなコンテキストのサブエージェントに Codex CLI 標準の `/review` コマンドを実行させる**
+- `/review` は PR 方式で、実装ブランチと `main` を比較する
+- `/review` は指摘事項が 0 件になるまで繰り返す
 - 既存の未関連変更は巻き戻さない
-- `issue_planner` / `plan_reviewer` / `issue_step_worker` / `verification_reviewer` の役割をまたいで責務を混ぜない
+- `issue_planner` / `plan_reviewer` / `issue_step_worker` の役割をまたいで責務を混ぜない
 - 実装オーケストレーターは複数 step の変更を溜めてからまとめて commit してはならない
 - 各 step の終了条件には「専用 commit が 1 つ作られ、worktree が clean」が含まれる
 - step commit、review 対応 commit、finalizer commit を含む **すべての commit** で `$draft-commit-message` を先に使う
