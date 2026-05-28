@@ -11,7 +11,6 @@ use sui::test_scenario;
 
 const ADMIN: address = @0xA11CE;
 const MEMBER: address = @0x51A;
-const PAYOUT: address = @0xB0B;
 const OTHER: address = @0xC0FFEE;
 
 #[test]
@@ -563,7 +562,7 @@ fun global_pause_blocks_metadata_update_accessor() {
         test_scenario::return_shared(pause_state);
     };
 
-    let mut pass = membership::create_pass_for_testing(MEMBER, PAYOUT, scenario.ctx());
+    let mut pass = membership::create_pass_for_testing(MEMBER, scenario.ctx());
     scenario.next_tx(MEMBER);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
@@ -609,7 +608,7 @@ fun registry_target_pause_blocks_metadata_update_accessor() {
         test_scenario::return_shared(pause_state);
     };
 
-    let mut pass = membership::create_pass_for_testing(MEMBER, PAYOUT, scenario.ctx());
+    let mut pass = membership::create_pass_for_testing(MEMBER, scenario.ctx());
     scenario.next_tx(MEMBER);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
@@ -657,7 +656,7 @@ fun direct_initialized(): (
 ) {
     let mut ctx = tx_context::dummy();
     let registry = metadata_verifier::create_verifier_registry_for_testing(&mut ctx);
-    let pass = membership::create_pass_for_testing(MEMBER, PAYOUT, &mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
     let mut clock = clock::create_for_testing(&mut ctx);
     clock.set_for_testing(1_000);
     (registry, pass, clock, ctx)

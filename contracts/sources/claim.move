@@ -213,7 +213,7 @@ public(package) fun claim_disaster_usdc(
     index.claim_count = index.claim_count + 1;
     payout_policy::record_claim(budget, main_amount, designated_amount);
 
-    let recipient = membership::membership_pass_payout_address(pass);
+    let recipient = membership::membership_pass_owner(pass);
     let mut payout_coin = pools::withdraw_designated_usdc(designated_pool, designated_amount, ctx);
     let main_coin = pools::withdraw_main_usdc(main_pool, main_amount, ctx);
     coin::join(&mut payout_coin, main_coin);

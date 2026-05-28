@@ -16,7 +16,6 @@ use usdc::usdc::USDC;
 const ADMIN: address = @0xA11CE;
 const DONOR: address = @0xD0A0;
 const MEMBER: address = @0x51A;
-const PAYOUT: address = @0xB0B;
 
 const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
@@ -421,18 +420,12 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(1, scenario.ctx());
-        accessor::register_member_usdc(
+        accessor::register_member(
             &pause_state,
             &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
     };
 }

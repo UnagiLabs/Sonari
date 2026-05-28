@@ -20,7 +20,6 @@ use usdc::usdc::USDC;
 
 const ADMIN: address = @0xA11CE;
 const MEMBER: address = @0x51A;
-const PAYOUT: address = @0xB0B;
 
 const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
@@ -97,7 +96,7 @@ fun disaster_claim_uses_designated_budget_first_and_main_pool_backstop() {
     assert!(amount == 50_000_000);
     assert!(main_paid == 34_000_000);
     assert!(designated_paid == 16_000_000);
-    assert!(recipient == PAYOUT);
+    assert!(recipient == MEMBER);
     assert!(claimed_at_ms == NINETY_ONE_DAYS_MS);
 
     scenario.end();
@@ -407,19 +406,13 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let fee = coin::mint_for_testing<USDC>(1, scenario.ctx());
-        accessor::register_member_usdc(
+        accessor::register_member(
             &pause_state,
             &mut registry,
-            &mut operations_pool,
-            fee,
-            PAYOUT,
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
     };
 }
 

@@ -123,18 +123,14 @@ public fun donate_operations_usdc_with_pass(
     );
 }
 
-public fun register_member_usdc(
+public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,
-    operations_pool: &mut OperationsPool,
-    fee: Coin<USDC>,
-    payout_address: address,
     ctx: &mut TxContext,
 ) {
     admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
-    membership::register_member_usdc(registry, operations_pool, fee, payout_address, ctx);
+    membership::register_member(registry, ctx);
 }
 
 public fun update_residence_metadata(
