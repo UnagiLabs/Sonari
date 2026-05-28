@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import process from "node:process";
 
 const DEFAULT_PREFIX = "earthquake-runner";
@@ -13,33 +13,8 @@ const DEPLOY_PARAMETER_KEYS = [
     "GitCommitSha",
     "ScheduleState",
 ] as const;
-const ROLLBACK_KEYS = [
-    "GitCommitSha",
-    "LambdaCodeS3Key",
-    "TeeArtifactS3Key",
-    "TeeArtifactSha256",
-] as const;
-const OUTPUT_KEY_ALIASES: Readonly<Record<string, RollbackKey>> = {
-    DeployedGitCommitSha: "GitCommitSha",
-};
 
 type DeployParameterKey = (typeof DEPLOY_PARAMETER_KEYS)[number];
-type RollbackKey = (typeof ROLLBACK_KEYS)[number];
-
-export type AwsCloudFormationParameter = {
-    ParameterKey?: unknown;
-    ParameterValue?: unknown;
-};
-
-export type AwsCloudFormationOutput = {
-    OutputKey?: unknown;
-    OutputValue?: unknown;
-};
-
-export type AwsCloudFormationStackShape = {
-    Parameters?: unknown;
-    Outputs?: unknown;
-};
 
 export type BuildAwsEarthquakeRunnerDeployPlanInput = {
     commitSha: string;
@@ -47,13 +22,11 @@ export type BuildAwsEarthquakeRunnerDeployPlanInput = {
     teeBucket: string;
     teeArtifactSha256: string;
     prefix?: string;
-    existingStack?: unknown;
 };
 
 export type AwsEarthquakeRunnerDeployPlan = {
     parameterOverrides: Record<DeployParameterKey, string>;
     parameterOverrideArgs: string[];
-    rollback: Partial<Record<RollbackKey, string>>;
 };
 
 export function buildAwsEarthquakeRunnerDeployPlan(
@@ -77,7 +50,6 @@ export function buildAwsEarthquakeRunnerDeployPlan(
         parameterOverrideArgs: DEPLOY_PARAMETER_KEYS.map(
             (key) => `${key}=${parameterOverrides[key]}`,
         ),
-        rollback: buildRollback(input.existingStack),
     };
 }
 
@@ -115,101 +87,12 @@ function validateS3KeyPrefix(value: string): string {
     return prefix;
 }
 
-function buildRollback(existingStack: unknown): Partial<Record<RollbackKey, string>> {
-    const previousValues = normalizeStackValues(existingStack);
-    const rollback: Partial<Record<RollbackKey, string>> = {};
-
-    for (const key of ROLLBACK_KEYS) {
-        const value = previousValues.get(key);
-        if (value !== undefined) {
-            rollback[key] = value;
-        }
-    }
-
-    return rollback;
-}
-
-function normalizeStackValues(existingStack: unknown): Map<string, string> {
-    const values = new Map<string, string>();
-    if (!isRecord(existingStack)) {
-        return values;
-    }
-
-    for (const stack of extractStackRecords(existingStack)) {
-        addParameterValues(values, stack.Parameters);
-        addOutputValues(values, stack.Outputs);
-        addNormalizedValues(values, stack);
-    }
-
-    return values;
-}
-
-function extractStackRecords(existingStack: Record<string, unknown>): Record<string, unknown>[] {
-    if (Array.isArray(existingStack.Stacks)) {
-        return existingStack.Stacks.filter(isRecord);
-    }
-    return [existingStack];
-}
-
-function addParameterValues(values: Map<string, string>, parameters: unknown): void {
-    if (!Array.isArray(parameters)) {
-        return;
-    }
-
-    for (const parameter of parameters) {
-        if (!isRecord(parameter)) {
-            continue;
-        }
-        addStringValue(values, parameter.ParameterKey, parameter.ParameterValue);
-    }
-}
-
-function addOutputValues(values: Map<string, string>, outputs: unknown): void {
-    if (!Array.isArray(outputs)) {
-        return;
-    }
-
-    for (const output of outputs) {
-        if (!isRecord(output)) {
-            continue;
-        }
-        const outputKey = output.OutputKey;
-        if (typeof outputKey !== "string") {
-            continue;
-        }
-        const parameterKey =
-            OUTPUT_KEY_ALIASES[outputKey] ??
-            (outputKey.endsWith("Output") ? outputKey.slice(0, -"Output".length) : outputKey);
-        addStringValue(values, parameterKey, output.OutputValue);
-    }
-}
-
-function addNormalizedValues(
-    values: Map<string, string>,
-    existingStack: Record<string, unknown>,
-): void {
-    for (const key of ROLLBACK_KEYS) {
-        addStringValue(values, key, existingStack[key]);
-    }
-}
-
-function addStringValue(values: Map<string, string>, key: unknown, value: unknown): void {
-    if (typeof key === "string" && typeof value === "string") {
-        values.set(key, value);
-    }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 type CliOptions = {
     commitSha?: string;
     lambdaBucket?: string;
     teeBucket?: string;
     teeArtifactSha256?: string;
     prefix?: string;
-    stackJsonPath?: string;
     out?: string;
 };
 
@@ -222,20 +105,15 @@ async function main(): Promise<void> {
         options.teeArtifactSha256 === undefined
     ) {
         throw new Error(
-            "Usage: tsx scripts/aws_earthquake_runner_deploy_plan.ts --commit-sha <sha> --lambda-bucket <bucket> --tee-bucket <bucket> --tee-sha256 <sha256> [--prefix <prefix>] [--stack-json <path>] [--out <path>]",
+            "Usage: tsx scripts/aws_earthquake_runner_deploy_plan.ts --commit-sha <sha> --lambda-bucket <bucket> --tee-bucket <bucket> --tee-sha256 <sha256> [--prefix <prefix>] [--out <path>]",
         );
     }
 
-    const existingStack =
-        options.stackJsonPath === undefined
-            ? undefined
-            : JSON.parse(await readFile(options.stackJsonPath, "utf8"));
     const plan = buildAwsEarthquakeRunnerDeployPlan({
         commitSha: options.commitSha,
         lambdaBucket: options.lambdaBucket,
         teeBucket: options.teeBucket,
         teeArtifactSha256: options.teeArtifactSha256,
-        existingStack,
         ...(options.prefix === undefined ? {} : { prefix: options.prefix }),
     });
     const serialized = `${JSON.stringify(plan, null, 2)}\n`;
@@ -275,9 +153,6 @@ function parseArgs(args: string[]): CliOptions {
                 break;
             case "--prefix":
                 options.prefix = next;
-                break;
-            case "--stack-json":
-                options.stackJsonPath = next;
                 break;
             case "--out":
                 options.out = next;

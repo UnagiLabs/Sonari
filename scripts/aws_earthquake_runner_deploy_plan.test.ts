@@ -45,96 +45,16 @@ describe("AWS earthquake runner deploy plan", () => {
         expect(plan.parameterOverrides.ScheduleState).toBe("DISABLED");
     });
 
-    it("creates sanitized rollback JSON from previous stack parameters", () => {
+    it("does not expose rollback outputs or existing stack inputs", () => {
         const plan = buildAwsEarthquakeRunnerDeployPlan({
             commitSha: validCommitSha,
             lambdaBucket: "lambda-artifacts",
             teeBucket: "tee-artifacts",
             teeArtifactSha256: validTeeSha256,
-            existingStack: {
-                Parameters: [
-                    {
-                        ParameterKey: "GitCommitSha",
-                        ParameterValue: "fedcba9876543210fedcba9876543210fedcba98",
-                    },
-                    {
-                        ParameterKey: "LambdaCodeS3Key",
-                        ParameterValue: "earthquake-runner/old/earthquake-runner-lambda.zip",
-                    },
-                    {
-                        ParameterKey: "TeeArtifactS3Key",
-                        ParameterValue: "earthquake-runner/old/earthquake-tee-artifact.tar.gz",
-                    },
-                    { ParameterKey: "TeeArtifactSha256", ParameterValue: "b".repeat(64) },
-                    {
-                        ParameterKey: "RunnerTokenSecretArn",
-                        ParameterValue:
-                            "arn:aws:secretsmanager:us-east-1:123456789012:secret:runner-token",
-                    },
-                    {
-                        ParameterKey: "SuiKeystoreSecretArn",
-                        ParameterValue:
-                            "arn:aws:secretsmanager:us-east-1:123456789012:secret:sui-keystore",
-                    },
-                    {
-                        ParameterKey: "WalrusConfigPath",
-                        ParameterValue:
-                            "infra/aws/earthquake-runner/.local/walrus-client-config.yaml",
-                    },
-                    { ParameterKey: "ScheduleState", ParameterValue: "ENABLED" },
-                ],
-            },
         });
 
-        expect(plan.rollback).toEqual({
-            GitCommitSha: "fedcba9876543210fedcba9876543210fedcba98",
-            LambdaCodeS3Key: "earthquake-runner/old/earthquake-runner-lambda.zip",
-            TeeArtifactS3Key: "earthquake-runner/old/earthquake-tee-artifact.tar.gz",
-            TeeArtifactSha256: "b".repeat(64),
-        });
-        expect(JSON.stringify(plan.rollback)).not.toContain("secret");
-        expect(JSON.stringify(plan.rollback)).not.toContain(".local");
-        expect(JSON.stringify(plan.rollback)).not.toContain("ScheduleState");
-    });
-
-    it("creates rollback JSON from AWS describe-stacks outputs", () => {
-        const plan = buildAwsEarthquakeRunnerDeployPlan({
-            commitSha: validCommitSha,
-            lambdaBucket: "lambda-artifacts",
-            teeBucket: "tee-artifacts",
-            teeArtifactSha256: validTeeSha256,
-            existingStack: {
-                Stacks: [
-                    {
-                        Outputs: [
-                            {
-                                OutputKey: "DeployedGitCommitSha",
-                                OutputValue: "fedcba9876543210fedcba9876543210fedcba98",
-                            },
-                            {
-                                OutputKey: "LambdaCodeS3KeyOutput",
-                                OutputValue: "earthquake-runner/old/earthquake-runner-lambda.zip",
-                            },
-                            {
-                                OutputKey: "TeeArtifactS3KeyOutput",
-                                OutputValue: "earthquake-runner/old/earthquake-tee-artifact.tar.gz",
-                            },
-                            { OutputKey: "TeeArtifactSha256Output", OutputValue: "b".repeat(64) },
-                            {
-                                OutputKey: "RunnerAutoScalingGroupName",
-                                OutputValue: "runner-asg",
-                            },
-                        ],
-                    },
-                ],
-            },
-        });
-
-        expect(plan.rollback).toEqual({
-            GitCommitSha: "fedcba9876543210fedcba9876543210fedcba98",
-            LambdaCodeS3Key: "earthquake-runner/old/earthquake-runner-lambda.zip",
-            TeeArtifactS3Key: "earthquake-runner/old/earthquake-tee-artifact.tar.gz",
-            TeeArtifactSha256: "b".repeat(64),
-        });
+        expect(Object.keys(plan)).toEqual(["parameterOverrides", "parameterOverrideArgs"]);
+        expect(JSON.stringify(plan)).not.toContain("rollback");
+        expect(JSON.stringify(plan)).not.toContain("existingStack");
     });
 });

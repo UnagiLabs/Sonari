@@ -196,8 +196,8 @@ jobs:
           set -euo pipefail
           lambda_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-runner-lambda.zip"
           tee_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
-          aws s3 cp dist/aws/earthquake-runner-lambda.zip "s3://$ARTIFACT_BUCKET/earthquake-runner/${GITHUB_SHA}/earthquake-runner-lambda.zip"
-          aws s3 cp dist/aws/earthquake-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/earthquake-runner/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
+          aws s3 cp dist/aws/earthquake-runner-lambda.zip "s3://$ARTIFACT_BUCKET/$lambda_key"
+          aws s3 cp dist/aws/earthquake-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/$tee_key"
           tee_artifact_sha256=""
           if [[ -f dist/aws/earthquake-tee-artifact.tar.gz.sha256 ]]; then
             tee_artifact_sha256="$(awk '{print $1}' dist/aws/earthquake-tee-artifact.tar.gz.sha256)"
@@ -220,19 +220,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/aws
-          if ! aws cloudformation describe-stacks --stack-name "$STACK_NAME" > dist/aws/existing-stack.json 2> /dev/null; then
-            printf 'null\n' > dist/aws/existing-stack.json
-          fi
           pnpm tsx scripts/aws_earthquake_runner_deploy_plan.ts \
             --commit-sha "$GITHUB_SHA" \
             --lambda-bucket "$ARTIFACT_BUCKET" \
             --tee-bucket "$ARTIFACT_BUCKET" \
             --tee-sha256 "$TEE_ARTIFACT_SHA256" \
             --prefix "$S3_PREFIX" \
-            --stack-json dist/aws/existing-stack.json \
             --out dist/aws/earthquake-runner-deploy-plan.json
           node --input-type=module <<'NODE'
-          import { readFile, writeFile } from "node:fs/promises";
+          import { readFile } from "node:fs/promises";
 
           const plan = JSON.parse(
             await readFile("dist/aws/earthquake-runner-deploy-plan.json", "utf8"),
@@ -256,23 +252,7 @@ jobs:
           if (!plan.parameterOverrideArgs.includes("ScheduleState=DISABLED")) {
             throw new Error("deploy plan must keep ScheduleState=DISABLED");
           }
-          await writeFile(
-            "dist/aws/earthquake-runner-rollback.json",
-            `${JSON.stringify(plan.rollback, null, 2)}\n`,
-            "utf8",
-          );
           NODE
-
-      # Rollback artifact contains only previous commit/artifact metadata
-      # (GitCommitSha, LambdaCodeS3Key, TeeArtifactS3Key, TeeArtifactSha256).
-      # It excludes secret ARNs, runner tokens, keystore paths, and .local content.
-      - name: Upload rollback artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: earthquake-runner-dev-rollback
-          path: dist/aws/earthquake-runner-rollback.json
-          if-no-files-found: error
-          retention-days: 14
 
       - name: Deploy CloudFormation stack
         shell: bash
@@ -351,3 +331,62 @@ jobs:
           [[ "$lambda_code_s3_key" == "earthquake-runner/${GITHUB_SHA}/earthquake-runner-lambda.zip" ]]
           [[ "$tee_artifact_s3_key" == "earthquake-runner/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz" ]]
           [[ "$deployed_tee_artifact_sha256" == "$TEE_ARTIFACT_SHA256" ]]
+
+      - name: Cleanup old S3 artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          keep_lambda_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-runner-lambda.zip"
+          keep_tee_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
+          delete_batch=()
+          delete_count=0
+
+          flush_delete_batch() {
+            if ((${#delete_batch[@]} == 0)); then
+              return
+            fi
+            delete_file="$(mktemp)"
+            printf '%s\n' "${delete_batch[@]}" | node -e '
+              const fs = require("node:fs");
+              const keys = fs.readFileSync(0, "utf8").split(/\n/).filter(Boolean);
+              process.stdout.write(JSON.stringify({
+                Objects: keys.map((Key) => ({ Key })),
+                Quiet: true,
+              }));
+            ' > "$delete_file"
+            aws s3api delete-objects --bucket "$ARTIFACT_BUCKET" --delete "file://$delete_file"
+            rm -f "$delete_file"
+            delete_batch=()
+          }
+
+          while IFS= read -r key; do
+            if [[ "$key" == "$keep_lambda_key" ]]; then
+              continue
+            fi
+            if [[ "$key" == "$keep_tee_key" ]]; then
+              continue
+            fi
+            delete_batch+=("$key")
+            delete_count=$((delete_count + 1))
+            if ((${#delete_batch[@]} == 1000)); then
+              flush_delete_batch
+            fi
+          done < <(
+            aws s3api list-objects-v2 \
+              --bucket "$ARTIFACT_BUCKET" \
+              --prefix "${S3_PREFIX}/" \
+              --output json | node -e '
+                const fs = require("node:fs");
+                const response = JSON.parse(fs.readFileSync(0, "utf8"));
+                for (const object of response.Contents ?? []) {
+                  if (typeof object.Key === "string" && object.Key.length > 0) {
+                    console.log(object.Key);
+                  }
+                }
+              '
+          )
+
+          if ((delete_count == 0)); then
+            echo "No old S3 artifacts to delete."
+          fi
+          flush_delete_batch

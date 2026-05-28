@@ -111,10 +111,13 @@ describe("AWS earthquake runner dev deploy workflow", () => {
     it("uploads commit-scoped artifacts and deploys disabled schedule parameters", async () => {
         const workflow = await readWorkflow();
         const githubSha = "$" + "{GITHUB_SHA}";
+        const s3Prefix = "$" + "{S3_PREFIX}";
 
         expectContainsAll(workflow, [
-            `s3://$ARTIFACT_BUCKET/earthquake-runner/${githubSha}/earthquake-runner-lambda.zip`,
-            `s3://$ARTIFACT_BUCKET/earthquake-runner/${githubSha}/earthquake-tee-artifact.tar.gz`,
+            `lambda_key="${s3Prefix}/${githubSha}/earthquake-runner-lambda.zip"`,
+            `tee_key="${s3Prefix}/${githubSha}/earthquake-tee-artifact.tar.gz"`,
+            "s3://$ARTIFACT_BUCKET/$lambda_key",
+            "s3://$ARTIFACT_BUCKET/$tee_key",
             "scripts/aws_earthquake_runner_deploy_plan.ts",
             "--parameter-overrides",
             "LambdaCodeS3Bucket",
@@ -129,18 +132,13 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         ]);
     });
 
-    it("keeps rollback data as a GitHub Actions artifact", async () => {
+    it("does not keep rollback data as a GitHub Actions artifact", async () => {
         const workflow = await readWorkflow();
 
-        expectContainsAll(workflow, [
-            "Rollback artifact contains only previous commit/artifact metadata",
-            "GitCommitSha, LambdaCodeS3Key, TeeArtifactS3Key, TeeArtifactSha256",
-            "excludes secret ARNs, runner tokens, keystore paths, and .local content",
-            "earthquake-runner-dev-rollback",
-            "actions/upload-artifact",
-            "dist/aws/earthquake-runner-rollback.json",
-            "retention-days: 14",
-        ]);
+        expect(workflow).not.toContain("earthquake-runner-dev-rollback");
+        expect(workflow).not.toContain("actions/upload-artifact");
+        expect(workflow).not.toContain("dist/aws/earthquake-runner-rollback.json");
+        expect(workflow).not.toContain("--stack-json");
     });
 
     it("checks post-deploy dev guardrails before completing", async () => {
@@ -171,13 +169,29 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         ]);
     });
 
+    it("cleans old S3 artifacts only after post-deploy guardrails pass", async () => {
+        const workflow = await readWorkflow();
+
+        expect(workflow.indexOf("name: Cleanup old S3 artifacts")).toBeGreaterThan(
+            workflow.indexOf("name: Verify post-deploy guardrails"),
+        );
+        expectContainsAll(workflow, [
+            "aws s3api list-objects-v2",
+            "aws s3api delete-objects",
+            '--prefix "$' + '{S3_PREFIX}/"',
+            'if [[ "$key" == "$keep_lambda_key" ]]',
+            'if [[ "$key" == "$keep_tee_key" ]]',
+            "No old S3 artifacts to delete.",
+        ]);
+    });
+
     it("does not enable shell tracing", async () => {
         const workflow = await readWorkflow();
 
         expect(workflow).not.toContain("set -x");
     });
 
-    it("documents post-deploy verification and rollback with sanitized metadata", async () => {
+    it("documents post-deploy verification and Git revert rollback", async () => {
         const readme = await readReadme();
         const rollbackSection = readme.slice(readme.indexOf("## dev deploy の確認と rollback"));
 
@@ -197,16 +211,19 @@ describe("AWS earthquake runner dev deploy workflow", () => {
             "AWS_EARTHQUAKE_RUNNER_DEV_SUI_CLI_SHA256",
             "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_URL",
             "AWS_EARTHQUAKE_RUNNER_DEV_WALRUS_CLI_SHA256",
-            "GitCommitSha",
-            "LambdaCodeS3Key",
-            "TeeArtifactS3Key",
-            "TeeArtifactSha256",
+            "S3 には最新 deploy commit の 2 object だけを残します",
+            "post-deploy guardrail 成功後",
+            "Git revert",
+            "通常の CI deploy",
+            "s3:ListBucket",
+            "s3:DeleteObject",
             "DesiredCapacity",
             "DISABLED",
             "CodeSha256",
         ]);
-        expect(rollbackSection).toContain("GitCommitSha");
-        expect(rollbackSection).toContain("leaving `GitCommitSha` stale");
+        expect(rollbackSection).toContain("Git revert");
+        expect(rollbackSection).not.toContain("rollback JSON");
+        expect(rollbackSection).not.toContain("earthquake-runner-dev-rollback");
         expect(rollbackSection).not.toContain("RunnerTokenSecretArn");
         expect(rollbackSection).not.toContain("SuiKeystoreSecretArn");
         expect(rollbackSection).not.toContain(".local");
