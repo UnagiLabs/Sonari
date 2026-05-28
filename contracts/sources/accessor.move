@@ -5,11 +5,14 @@ use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
 use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
+use contracts::identity_registry;
+use contracts::identity_result_v1;
 use contracts::membership;
+use contracts::metadata_verifier;
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
 use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
 use contracts::program::{Self, Campaign, Program};
-use sui::clock::Clock;
+use sui::clock::{Self, Clock};
 use sui::coin::Coin;
 use usdc::usdc::USDC;
 
@@ -133,6 +136,52 @@ public fun register_member(
         terms_version,
         signed_statement_hash,
         ctx,
+    );
+}
+
+public fun update_identity_verification(
+    pause_state: &PauseState,
+    identity_registry: &mut identity_registry::IdentityRegistry,
+    membership_registry: &membership::MembershipRegistry,
+    verifier_registry: &metadata_verifier::VerifierRegistry,
+    pass: &mut membership::MembershipPass,
+    clock: &Clock,
+    payload_bcs: vector<u8>,
+    signature: vector<u8>,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    let _ = ctx;
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(
+        pause_state,
+        identity_registry::registry_id(identity_registry),
+    );
+    admin::assert_target_not_paused(
+        pause_state,
+        membership::registry_id(membership_registry),
+    );
+    admin::assert_target_not_paused(
+        pause_state,
+        metadata_verifier::registry_id(verifier_registry),
+    );
+
+    let now_ms = clock::timestamp_ms(clock);
+    metadata_verifier::assert_signed_bytes(
+        verifier_registry,
+        metadata_verifier::verifier_family_identity(),
+        metadata_verifier::verifier_version_v1(),
+        &payload_bcs,
+        &signature,
+        &public_key,
+    );
+    let result = identity_result_v1::decode_verified(payload_bcs, now_ms);
+    identity_registry::apply_identity_verification_result(
+        identity_registry,
+        membership_registry,
+        pass,
+        &result,
+        now_ms,
     );
 }
 

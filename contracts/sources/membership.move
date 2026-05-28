@@ -9,6 +9,8 @@ const STATUS_REVOKED: u8 = 3;
 const STATUS_MIGRATED: u8 = 4;
 const REGISTRY_KIND_MEMBERSHIP: u8 = 2;
 const TARGET_KIND_MEMBERSHIP_REGISTRY: u8 = 7;
+const IDENTITY_PROVIDER_KYC: u8 = 1;
+const IDENTITY_PROVIDER_WORLD_ID: u8 = 2;
 
 const EMembershipPassNotActive: u64 = 2;
 const EClaimantNotAuthorized: u64 = 3;
@@ -17,6 +19,10 @@ const ERegistryRecordNotFound: u64 = 6;
 const ERegistryPassMismatch: u64 = 7;
 const ERegistryOwnerMismatch: u64 = 8;
 const ERegistryRecordNotActive: u64 = 10;
+const EUnknownIdentityProvider: u64 = 11;
+const EIdentityProviderReplay: u64 = 12;
+const EIdentityTermsVersionMismatch: u64 = 13;
+const EIdentitySignedStatementHashMismatch: u64 = 14;
 
 public struct MembershipRegistry has key {
     id: UID,
@@ -161,6 +167,31 @@ public fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID): (ID, ID)
     (pass.pass_lineage_id, campaign_id)
 }
 
+public(package) fun apply_identity_verification(
+    pass: &mut MembershipPass,
+    provider: u8,
+    verified_at_ms: u64,
+    expires_at_ms: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
+) {
+    assert!(terms_version == pass.terms_version, EIdentityTermsVersionMismatch);
+    assert!(
+        signed_statement_hash == pass.signed_statement_hash,
+        EIdentitySignedStatementHashMismatch,
+    );
+    let provider_bit = identity_provider_bit(provider);
+    assert!(
+        pass.identity_provider_mask & provider_bit == 0,
+        EIdentityProviderReplay,
+    );
+
+    pass.identity_verified = true;
+    pass.identity_provider_mask = pass.identity_provider_mask + provider_bit;
+    pass.identity_verified_at_ms = verified_at_ms;
+    pass.identity_expires_at_ms = expires_at_ms;
+}
+
 public fun registry_id(registry: &MembershipRegistry): ID {
     object::id(registry)
 }
@@ -212,6 +243,14 @@ fun current_record(
         ERegistryRecordNotFound,
     );
     dynamic_field::borrow<ID, MembershipRecord>(&registry.id, pass_lineage_id)
+}
+
+fun identity_provider_bit(provider: u8): u8 {
+    assert!(
+        provider == IDENTITY_PROVIDER_KYC || provider == IDENTITY_PROVIDER_WORLD_ID,
+        EUnknownIdentityProvider,
+    );
+    provider
 }
 
 public fun membership_pass_owner(pass: &MembershipPass): address {
@@ -341,6 +380,66 @@ public fun create_pass_for_testing(
         terms_version: 0,
         signed_statement_hash: vector[],
     }
+}
+
+#[test_only]
+public fun create_registry_and_pass_for_testing(
+    owner: address,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
+    ctx: &mut TxContext,
+): (MembershipRegistry, MembershipPass) {
+    let mut registry = MembershipRegistry {
+        id: object::new(ctx),
+        issued_count: 0,
+    };
+    let id = object::new(ctx);
+    let pass_lineage_id = id.to_inner();
+    let issued_at_ms = ctx.epoch_timestamp_ms();
+    let pass = MembershipPass {
+        id,
+        owner,
+        pass_lineage_id,
+        status: STATUS_ACTIVE,
+        issued_at_ms,
+        account_created_at_ms: issued_at_ms,
+        home_cell: 0,
+        home_cell_registered_at_ms: issued_at_ms,
+        identity_verified: false,
+        identity_provider_mask: 0,
+        identity_verified_at_ms: 0,
+        identity_expires_at_ms: 0,
+        terms_version,
+        signed_statement_hash,
+    };
+    let record = MembershipRecord {
+        pass_lineage_id,
+        current_pass_id: object::id(&pass),
+        current_owner: owner,
+        status: STATUS_ACTIVE,
+        issued_at_ms,
+        updated_at_ms: issued_at_ms,
+    };
+
+    dynamic_field::add(&mut registry.id, owner, pass_lineage_id);
+    dynamic_field::add(&mut registry.id, pass_lineage_id, record);
+    registry.issued_count = 1;
+    (registry, pass)
+}
+
+#[test_only]
+public fun destroy_membership_registry_for_testing(
+    registry: MembershipRegistry,
+    owner: address,
+    pass_lineage_id: ID,
+) {
+    let MembershipRegistry { mut id, issued_count } = registry;
+    assert!(issued_count == 1);
+    let owner_lineage_id = dynamic_field::remove<address, ID>(&mut id, owner);
+    assert!(owner_lineage_id == pass_lineage_id);
+    let record = dynamic_field::remove<ID, MembershipRecord>(&mut id, pass_lineage_id);
+    assert!(record.pass_lineage_id == pass_lineage_id);
+    id.delete();
 }
 
 #[test_only]

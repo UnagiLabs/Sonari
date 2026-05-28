@@ -1,6 +1,8 @@
 module contracts::identity_registry;
 
+use contracts::identity_result_v1::{Self, IdentityVerificationResult};
 use contracts::membership::{Self, MembershipPass};
+use sui::address;
 use sui::dynamic_field;
 use sui::event;
 
@@ -11,6 +13,9 @@ const TARGET_KIND_IDENTITY_REGISTRY: u8 = 8;
 
 const EUnknownIdentityProvider: u64 = 0;
 const EIdentityKeyAlreadyBound: u64 = 1;
+const EIdentityRegistryMismatch: u64 = 2;
+const EMembershipIdMismatch: u64 = 3;
+const EOwnerMismatch: u64 = 4;
 
 public struct IdentityRegistry has key {
     id: UID,
@@ -62,6 +67,46 @@ public(package) fun bind_duplicate_key(
         dynamic_field::add(&mut registry.id, key, pass_lineage_id);
         registry.binding_count = registry.binding_count + 1;
     };
+}
+
+public(package) fun apply_identity_verification_result(
+    registry: &mut IdentityRegistry,
+    membership_registry: &membership::MembershipRegistry,
+    pass: &mut MembershipPass,
+    result: &IdentityVerificationResult,
+    applied_at_ms: u64,
+) {
+    let registry_id = object::id(registry);
+    assert!(
+        identity_result_v1::registry_id(result) == object::id_to_bytes(&registry_id),
+        EIdentityRegistryMismatch,
+    );
+    let pass_id = object::id(pass);
+    assert!(
+        identity_result_v1::membership_id(result) == object::id_to_bytes(&pass_id),
+        EMembershipIdMismatch,
+    );
+    let pass_owner = membership::membership_pass_owner(pass);
+    assert!(
+        identity_result_v1::owner(result) == address::to_bytes(pass_owner),
+        EOwnerMismatch,
+    );
+
+    membership::assert_current_pass_precheck(membership_registry, pass, pass_owner);
+    bind_duplicate_key(
+        registry,
+        pass,
+        identity_result_v1::provider(result),
+        identity_result_v1::duplicate_key_hash(result),
+    );
+    membership::apply_identity_verification(
+        pass,
+        identity_result_v1::provider(result),
+        applied_at_ms,
+        identity_result_v1::expires_at_ms(result),
+        identity_result_v1::terms_version(result),
+        identity_result_v1::signed_statement_hash(result),
+    );
 }
 
 public fun registry_id(registry: &IdentityRegistry): ID {
