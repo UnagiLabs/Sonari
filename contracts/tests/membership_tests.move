@@ -11,6 +11,9 @@ use sui::test_scenario;
 const ADMIN: address = @0xA11CE;
 const MEMBER: address = @0x51A;
 const OTHER: address = @0xC0FFEE;
+const HOME_CELL: u64 = 617700169958293503;
+const TERMS_VERSION: u64 = 2;
+const SIGNED_STATEMENT_HASH: vector<u8> = b"membership-statement-hash";
 
 #[test]
 fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
@@ -25,6 +28,9 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         accessor::register_member(
             &pause_state,
             &mut registry,
+            HOME_CELL,
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
 
@@ -58,6 +64,26 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         assert!(membership::membership_pass_status(&pass) == membership::status_active());
         assert!(membership::membership_pass_issued_at_ms(&pass) == 0);
         assert!(membership::membership_pass_last_metadata_update_ms(&pass) == 0);
+        let (
+            account_created_at_ms,
+            home_cell,
+            home_cell_registered_at_ms,
+            identity_verified,
+            identity_provider_mask,
+            identity_verified_at_ms,
+            identity_expires_at_ms,
+            terms_version,
+            signed_statement_hash,
+        ) = membership::membership_pass_mvp_summary(&pass);
+        assert!(account_created_at_ms == 0u64);
+        assert!(home_cell == HOME_CELL);
+        assert!(home_cell_registered_at_ms == 0u64);
+        assert!(!identity_verified);
+        assert!(identity_provider_mask == 0u8);
+        assert!(identity_verified_at_ms == 0u64);
+        assert!(identity_expires_at_ms == 0u64);
+        assert!(terms_version == TERMS_VERSION);
+        assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
         scenario.return_to_sender(pass);
     };
 
@@ -79,6 +105,9 @@ fun member_registration_does_not_deposit_to_operations_pool() {
         accessor::register_member(
             &pause_state,
             &mut registry,
+            HOME_CELL,
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
 
@@ -389,6 +418,9 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
         accessor::register_member(
             &pause_state,
             &mut registry,
+            HOME_CELL,
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
 

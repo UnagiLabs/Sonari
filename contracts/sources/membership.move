@@ -42,6 +42,15 @@ public struct MembershipPass has key {
     pass_lineage_id: ID,
     status: u8,
     issued_at_ms: u64,
+    account_created_at_ms: u64,
+    home_cell: u64,
+    home_cell_registered_at_ms: u64,
+    identity_verified: bool,
+    identity_provider_mask: u8,
+    identity_verified_at_ms: u64,
+    identity_expires_at_ms: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
     last_metadata_update_ms: u64,
     residence_last_update_id: u64,
     residence_cell: vector<u8>,
@@ -94,6 +103,9 @@ public struct PassMetadataUpdated has copy, drop {
 
 public(package) fun register_member(
     registry: &mut MembershipRegistry,
+    home_cell: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
     ctx: &mut TxContext,
 ) {
     assert!(
@@ -110,6 +122,15 @@ public(package) fun register_member(
         pass_lineage_id,
         status: STATUS_ACTIVE,
         issued_at_ms,
+        account_created_at_ms: issued_at_ms,
+        home_cell,
+        home_cell_registered_at_ms: issued_at_ms,
+        identity_verified: false,
+        identity_provider_mask: 0,
+        identity_verified_at_ms: 0,
+        identity_expires_at_ms: 0,
+        terms_version,
+        signed_statement_hash,
         last_metadata_update_ms: issued_at_ms,
         residence_last_update_id: 0,
         residence_cell: vector[],
@@ -269,6 +290,22 @@ public fun membership_pass_issued_at_ms(pass: &MembershipPass): u64 {
 
 public fun membership_pass_last_metadata_update_ms(pass: &MembershipPass): u64 {
     pass.last_metadata_update_ms
+}
+
+public fun membership_pass_mvp_summary(
+    pass: &MembershipPass,
+): (u64, u64, u64, bool, u8, u64, u64, u64, vector<u8>) {
+    (
+        pass.account_created_at_ms,
+        pass.home_cell,
+        pass.home_cell_registered_at_ms,
+        pass.identity_verified,
+        pass.identity_provider_mask,
+        pass.identity_verified_at_ms,
+        pass.identity_expires_at_ms,
+        pass.terms_version,
+        pass.signed_statement_hash,
+    )
 }
 
 public fun metadata_kind_residence(): u8 {
@@ -481,6 +518,15 @@ public fun create_pass_for_testing(
         pass_lineage_id,
         status: STATUS_ACTIVE,
         issued_at_ms,
+        account_created_at_ms: issued_at_ms,
+        home_cell: 0,
+        home_cell_registered_at_ms: issued_at_ms,
+        identity_verified: false,
+        identity_provider_mask: 0,
+        identity_verified_at_ms: 0,
+        identity_expires_at_ms: 0,
+        terms_version: 0,
+        signed_statement_hash: vector[],
         last_metadata_update_ms: issued_at_ms,
         residence_last_update_id: 0,
         residence_cell: vector[],
@@ -510,6 +556,15 @@ public fun destroy_pass_for_testing(pass: MembershipPass) {
         pass_lineage_id: _,
         status: _,
         issued_at_ms: _,
+        account_created_at_ms: _,
+        home_cell: _,
+        home_cell_registered_at_ms: _,
+        identity_verified: _,
+        identity_provider_mask: _,
+        identity_verified_at_ms: _,
+        identity_expires_at_ms: _,
+        terms_version: _,
+        signed_statement_hash: _,
         last_metadata_update_ms: _,
         residence_last_update_id: _,
         residence_cell: _,

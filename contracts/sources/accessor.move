@@ -126,11 +126,20 @@ public fun donate_operations_usdc_with_pass(
 public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,
+    home_cell: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
     ctx: &mut TxContext,
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
-    membership::register_member(registry, ctx);
+    membership::register_member(
+        registry,
+        home_cell,
+        terms_version,
+        signed_statement_hash,
+        ctx,
+    );
 }
 
 public fun update_residence_metadata(

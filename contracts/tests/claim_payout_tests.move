@@ -423,6 +423,9 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
         accessor::register_member(
             &pause_state,
             &mut registry,
+            0u64,
+            0u64,
+            b"",
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
