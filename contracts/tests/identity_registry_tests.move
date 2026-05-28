@@ -467,6 +467,90 @@ fun same_key_same_pass_is_idempotent() {
     cleanup(registry, pass, other_pass);
 }
 
+#[test]
+fun duplicate_key_binding_check_accepts_same_pass() {
+    let (mut registry, pass, other_pass) = setup();
+
+    identity_registry::bind_duplicate_key(
+        &mut registry,
+        &pass,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        &registry,
+        &pass,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+
+    identity_registry::remove_binding_for_testing(
+        &mut registry,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+    cleanup(registry, pass, other_pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityKeyNotBound)]
+fun duplicate_key_binding_check_rejects_missing_key() {
+    let (registry, pass, other_pass) = setup();
+
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        &registry,
+        &pass,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+
+    cleanup(registry, pass, other_pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityKeyAlreadyBound)]
+fun duplicate_key_binding_check_rejects_different_pass() {
+    let (mut registry, pass, other_pass) = setup();
+
+    identity_registry::bind_duplicate_key(
+        &mut registry,
+        &other_pass,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        &registry,
+        &pass,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+
+    cleanup(registry, pass, other_pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityKeyNotBound)]
+fun duplicate_key_binding_check_rejects_wrong_provider() {
+    let (mut registry, pass, other_pass) = setup();
+
+    identity_registry::bind_duplicate_key(
+        &mut registry,
+        &pass,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        &registry,
+        &pass,
+        identity_registry::provider_world_id(),
+        DUPLICATE_KEY_HASH,
+    );
+
+    identity_registry::remove_binding_for_testing(
+        &mut registry,
+        identity_registry::provider_kyc(),
+        DUPLICATE_KEY_HASH,
+    );
+    cleanup(registry, pass, other_pass);
+}
+
 fun setup(): (
     identity_registry::IdentityRegistry,
     membership::MembershipPass,
