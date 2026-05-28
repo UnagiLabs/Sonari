@@ -134,7 +134,7 @@ fn process_usgs_inner(
     }
 
     let event_revision = 1;
-    let observed_at_ms = detail.properties.updated;
+    let observed_at_ms = input.observed_at_ms;
     let source_updated_at_ms = detail.properties.updated;
     let event_uid_bytes = event_uid_bytes(
         HAZARD_TYPE_EARTHQUAKE,

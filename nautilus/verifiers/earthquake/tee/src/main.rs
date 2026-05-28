@@ -4,6 +4,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
     WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
@@ -175,6 +176,7 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
         None => None,
     };
     let source_event_id = canonical_source_event_id.to_owned();
+    let observed_at_ms = current_unix_time_ms()?;
     let raw_detail_uri = format!(
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{source_event_id}.geojson"
     );
@@ -183,6 +185,7 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
         detail_json,
         grid_xml: grid.as_ref().map(|item| item.grid_xml.clone()),
         raw_grid_bytes: grid.as_ref().map(|item| item.raw_grid_bytes.clone()),
+        observed_at_ms,
         raw_detail_uri,
         raw_grid_uri: grid.as_ref().map(|item| item.raw_grid_uri.clone()),
         raw_data_uri: format!("ipfs://sonari/live/{source_event_id}/raw_data_manifest.json"),
@@ -229,6 +232,15 @@ fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn s
     let mut bytes = Vec::new();
     io::stdin().read_to_end(&mut bytes)?;
     Ok(bytes)
+}
+
+fn current_unix_time_ms() -> Result<u64, Box<dyn std::error::Error>> {
+    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    Ok(elapsed
+        .as_secs()
+        .checked_mul(1_000)
+        .and_then(|millis| millis.checked_add(u64::from(elapsed.subsec_millis())))
+        .ok_or("current time is outside u64 millisecond range")?)
 }
 
 fn strict_signing_key_seed(
@@ -398,13 +410,16 @@ fn low_level_input(cli: Cli) -> Result<RunConfig, Box<dyn std::error::Error>> {
     let walrus_archive = walrus_archive_config(&cli)?;
     let signing_key_seed = signing_key_seed(false, cli.signing_key_seed)?;
     let detail_path = required(cli.detail, "--detail")?;
+    let detail_json = fs::read(detail_path)?;
+    let observed_at_ms = detail_updated_at_ms(&detail_json)?;
     let (grid_xml, raw_grid_bytes, raw_grid_uri) = grid_input(cli.grid, cli.raw_grid_uri)?;
     Ok(RunConfig {
         input: UsgsOracleInput {
             case_id: required(cli.case_id, "--case-id")?,
-            detail_json: fs::read(detail_path)?,
+            detail_json,
             grid_xml,
             raw_grid_bytes,
+            observed_at_ms,
             raw_detail_uri: required(cli.raw_detail_uri, "--raw-detail-uri")?,
             raw_grid_uri,
             raw_data_uri: required(cli.raw_data_uri, "--raw-data-uri")?,
@@ -420,6 +435,8 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
     let case_dir = args.fixtures_dir.join(&args.case);
     let input_dir = case_dir.join("input");
     let detail_path = input_dir.join("usgs_detail.json");
+    let detail_json = fs::read(&detail_path)?;
+    let observed_at_ms = detail_updated_at_ms(&detail_json)?;
     let grid_path = input_dir.join("usgs_grid.xml");
     let source_event_id = source_event_id(&detail_path)?;
     let output_dir = args.write_expected.then(|| case_dir.join("expected"));
@@ -433,9 +450,10 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
     Ok(RunConfig {
         input: UsgsOracleInput {
             case_id: args.case,
-            detail_json: fs::read(&detail_path)?,
+            detail_json,
             grid_xml,
             raw_grid_bytes,
+            observed_at_ms,
             raw_detail_uri: display_path(&detail_path),
             raw_grid_uri,
             raw_data_uri: format!(
@@ -449,6 +467,15 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
         signing_key_seed,
         walrus_archive: None,
     })
+}
+
+fn detail_updated_at_ms(detail_json: &[u8]) -> Result<u64, Box<dyn std::error::Error>> {
+    let detail: serde_json::Value = serde_json::from_slice(detail_json)?;
+    detail
+        .get("properties")
+        .and_then(|properties| properties.get("updated"))
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| "USGS detail properties.updated must be an integer".into())
 }
 
 fn grid_input(

@@ -24,11 +24,14 @@ fn read_fixture(path: impl AsRef<Path>) -> Vec<u8> {
 }
 
 fn finalized_input() -> UsgsOracleInput {
+    let detail_json = read_fixture(format!("{FIXTURE_DIR}/input/usgs_detail.json"));
+    let observed_at_ms = detail_updated_at_ms(&detail_json);
     UsgsOracleInput {
         case_id: "usgs/finalized_minimal".to_owned(),
-        detail_json: read_fixture(format!("{FIXTURE_DIR}/input/usgs_detail.json")),
+        detail_json,
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        observed_at_ms,
         raw_detail_uri:
             "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
                 .to_owned(),
@@ -49,11 +52,21 @@ fn input_with_detail_id_and_aliases(canonical_id: &str, aliases: &str) -> UsgsOr
     detail["properties"]["ids"] = serde_json::Value::String(aliases.to_owned());
     input.case_id = format!("usgs-live/{canonical_id}");
     input.detail_json = serde_json::to_vec(&detail).expect("detail JSON should serialize");
+    input.observed_at_ms = detail_updated_at_ms(&input.detail_json);
     input.raw_detail_uri =
         format!("https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{canonical_id}.geojson");
     input.raw_data_uri = format!("ipfs://sonari/live/{canonical_id}/raw_data_manifest.json");
     input.affected_cells_uri = format!("ipfs://sonari/live/{canonical_id}/affected_cells.json");
     input
+}
+
+fn detail_updated_at_ms(detail_json: &[u8]) -> u64 {
+    serde_json::from_slice::<serde_json::Value>(detail_json)
+        .expect("fixture detail should be valid JSON")
+        .get("properties")
+        .and_then(|properties| properties.get("updated"))
+        .and_then(serde_json::Value::as_u64)
+        .expect("fixture detail should include properties.updated")
 }
 
 fn read_expected(name: &str) -> serde_json::Value {
@@ -476,9 +489,11 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
     ] {
         let dir = format!("../fixtures/{case_id}");
         let grid_path = format!("{dir}/input/usgs_grid.xml");
+        let detail_json = read_fixture(format!("{dir}/input/usgs_detail.json"));
         let output = process_usgs(UsgsOracleInput {
             case_id: case_id.to_owned(),
-            detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
+            observed_at_ms: detail_updated_at_ms(&detail_json),
+            detail_json,
             grid_xml: Path::new(&grid_path)
                 .exists()
                 .then(|| read_fixture(&grid_path)),
@@ -784,6 +799,7 @@ fn selects_shakemap_products_deterministically_by_preferred_version_update_and_k
         detail_json: detail_json.to_vec(),
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        observed_at_ms: detail_updated_at_ms(detail_json),
         raw_detail_uri: "detail.json".to_owned(),
         raw_grid_uri: Some("grid.xml".to_owned()),
         raw_data_uri: "raw.json".to_owned(),
@@ -891,9 +907,11 @@ impl SourceArchive for MismatchingSourceArchive {
 fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
     let dir = format!("../fixtures/{case_id}");
     let grid_path = format!("{dir}/input/usgs_grid.xml");
+    let detail_json = read_fixture(format!("{dir}/input/usgs_detail.json"));
     UsgsOracleInput {
         case_id: case_id.to_owned(),
-        detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
+        observed_at_ms: detail_updated_at_ms(&detail_json),
+        detail_json,
         grid_xml: Path::new(&grid_path)
             .exists()
             .then(|| read_fixture(&grid_path)),
