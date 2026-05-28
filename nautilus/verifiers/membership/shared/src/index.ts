@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 export type IdentityProvider = "kyc" | "world_id";
 
+export const IDENTITY_RESULT_INTENT = "SONARI_IDENTITY_VERIFICATION_V1";
+
 export const IDENTITY_RESULT_FIELD_ORDER = [
     "intent",
     "verifier_family",
@@ -86,7 +88,7 @@ function parseIdentityVerificationResult(input: unknown): IdentityVerificationRe
     }
 
     const result = {
-        intent: parseString(input.intent, "intent"),
+        intent: parseIdentityResultIntent(input.intent),
         verifier_family: parseVerifierFamily(input.verifier_family),
         verifier_version: parseU64(input.verifier_version, "verifier_version"),
         registry_id: parseHexString(input.registry_id, "registry_id"),
@@ -116,9 +118,9 @@ function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
-function parseString(value: unknown, field: string): string {
-    if (typeof value !== "string" || value.length === 0) {
-        throw new Error(`${field} must be a non-empty string`);
+function parseIdentityResultIntent(value: unknown): typeof IDENTITY_RESULT_INTENT {
+    if (value !== IDENTITY_RESULT_INTENT) {
+        throw new Error(`intent must be ${IDENTITY_RESULT_INTENT}`);
     }
     return value;
 }

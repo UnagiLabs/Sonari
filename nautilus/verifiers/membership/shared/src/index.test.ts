@@ -5,11 +5,12 @@ import {
     computeWorldIdDuplicateKeyHash,
     encodeIdentityVerificationResultBcsHex,
     IDENTITY_RESULT_FIELD_ORDER,
+    IDENTITY_RESULT_INTENT,
     type IdentityVerificationResult,
 } from "./index.js";
 
 const identityResultFixture = {
-    intent: "SONARI_IDENTITY_VERIFICATION_V1",
+    intent: IDENTITY_RESULT_INTENT,
     verifier_family: "identity",
     verifier_version: 1,
     registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111",
@@ -68,6 +69,15 @@ describe("IdentityVerificationResult", () => {
                 duplicate_key_hash: "0x1234",
             }),
         ).toThrow("duplicate_key_hash must be a 32-byte 0x-prefixed hex string");
+    });
+
+    it("rejects non-identity signed payload intents", () => {
+        expect(() =>
+            encodeIdentityVerificationResultBcsHex({
+                ...identityResultFixture,
+                intent: "SONARI_EARTHQUAKE_ORACLE",
+            }),
+        ).toThrow(`intent must be ${IDENTITY_RESULT_INTENT}`);
     });
 
     it("rejects raw personal data fields", () => {
