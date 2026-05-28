@@ -1,0 +1,306 @@
+name: AWS Earthquake Runner Dev Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-dev:
+    name: Deploy dev stack
+    runs-on: ubuntu-latest
+    environment: aws-earthquake-runner-dev
+    timeout-minutes: 90
+    concurrency:
+      group: aws-earthquake-runner-dev-deploy
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_ROLE_ARN }}
+      EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_ACCOUNT_ID }}
+      STACK_NAME: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_STACK_NAME }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_ARTIFACT_BUCKET }}
+      S3_PREFIX: earthquake-runner
+      SUI_BIN: ${{ vars.SUI_BIN || 'sui' }}
+      SONARI_WALRUS_CLI: ${{ vars.SONARI_WALRUS_CLI || 'walrus' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate dev deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_names=(
+            AWS_REGION
+            AWS_ROLE_ARN
+            EXPECTED_AWS_ACCOUNT_ID
+            STACK_NAME
+            ARTIFACT_BUCKET
+          )
+          for name in "${required_names[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "$name is required for the dev deploy workflow" >&2
+              exit 1
+            fi
+          done
+
+          if [[ "$AWS_ROLE_ARN" == *":role/"*dev* ]]; then
+            :
+          else
+            echo "AWS_ROLE_ARN must reference a dev-scoped IAM role" >&2
+            exit 1
+          fi
+
+          if ! { [[ "$STACK_NAME" =~ (^|[-_])dev($|[-_]) ]] || [[ "$STACK_NAME" == "sonari-aws-earthquake-runner-dev" ]]; }; then
+            echo "STACK_NAME must be the explicit dev stack or contain a dev segment" >&2
+            exit 1
+          fi
+
+          if [[ ! "$EXPECTED_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "EXPECTED_AWS_ACCOUNT_ID must be a 12-digit AWS account id" >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_EARTHQUAKE_RUNNER_DEV_REGION }}
+
+      - name: Validate dev AWS account
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [[ "$actual_account_id" == "$EXPECTED_AWS_ACCOUNT_ID" ]]; then
+            exit 0
+          fi
+          echo "OIDC role resolved to an unexpected AWS account" >&2
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Validate Sui CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_sui="$(command -v "$SUI_BIN")"
+          test -x "$resolved_sui"
+          mkdir -p "$RUNNER_TEMP/sonari-bin"
+          ln -sf "$resolved_sui" "$RUNNER_TEMP/sonari-bin/sui"
+          echo "$RUNNER_TEMP/sonari-bin" >> "$GITHUB_PATH"
+          sui --version
+
+      - name: Validate Walrus CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_walrus="$(command -v "$SONARI_WALRUS_CLI")"
+          test -x "$resolved_walrus"
+          echo "SONARI_WALRUS_CLI=$resolved_walrus" >> "$GITHUB_ENV"
+          "$resolved_walrus" --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting, lint, and Rust
+        run: pnpm check
+
+      - name: Check Move contracts
+        run: pnpm check:move
+
+      - name: Test oracle packages
+        run: pnpm test:oracle
+
+      - name: Build Lambda artifact
+        run: pnpm build:aws-earthquake-lambda
+
+      - name: Build TEE artifact
+        run: pnpm build:aws-earthquake-tee-artifact
+
+      - name: Upload build artifacts to S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          lambda_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-runner-lambda.zip"
+          tee_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
+          aws s3 cp dist/aws/earthquake-runner-lambda.zip "s3://$ARTIFACT_BUCKET/earthquake-runner/${GITHUB_SHA}/earthquake-runner-lambda.zip"
+          aws s3 cp dist/aws/earthquake-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/earthquake-runner/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
+          tee_artifact_sha256=""
+          if [[ -f dist/aws/earthquake-tee-artifact.tar.gz.sha256 ]]; then
+            tee_artifact_sha256="$(awk '{print $1}' dist/aws/earthquake-tee-artifact.tar.gz.sha256)"
+          fi
+          if [[ ! "$tee_artifact_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            tee_artifact_sha256="$(sha256sum dist/aws/earthquake-tee-artifact.tar.gz | awk '{print $1}')"
+          fi
+          if [[ ! "$tee_artifact_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "TEE artifact SHA-256 is invalid" >&2
+            exit 1
+          fi
+          {
+            echo "LAMBDA_S3_KEY=$lambda_key"
+            echo "TEE_S3_KEY=$tee_key"
+            echo "TEE_ARTIFACT_SHA256=$tee_artifact_sha256"
+          } >> "$GITHUB_ENV"
+
+      - name: Create deploy plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/aws
+          if ! aws cloudformation describe-stacks --stack-name "$STACK_NAME" > dist/aws/existing-stack.json 2> /dev/null; then
+            printf 'null\n' > dist/aws/existing-stack.json
+          fi
+          pnpm tsx scripts/aws_earthquake_runner_deploy_plan.ts \
+            --commit-sha "$GITHUB_SHA" \
+            --lambda-bucket "$ARTIFACT_BUCKET" \
+            --tee-bucket "$ARTIFACT_BUCKET" \
+            --tee-sha256 "$TEE_ARTIFACT_SHA256" \
+            --prefix "$S3_PREFIX" \
+            --stack-json dist/aws/existing-stack.json \
+            --out dist/aws/earthquake-runner-deploy-plan.json
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+
+          const plan = JSON.parse(
+            await readFile("dist/aws/earthquake-runner-deploy-plan.json", "utf8"),
+          );
+          const requiredParameterKeys = [
+            "LambdaCodeS3Bucket",
+            "LambdaCodeS3Key",
+            "TeeArtifactS3Bucket",
+            "TeeArtifactS3Key",
+            "TeeArtifactSha256",
+            "GitCommitSha",
+            "ScheduleState",
+          ];
+          for (const key of requiredParameterKeys) {
+            if (
+              !plan.parameterOverrideArgs.some((value) => value.startsWith(`${key}=`))
+            ) {
+              throw new Error(`deploy plan is missing ${key}`);
+            }
+          }
+          if (!plan.parameterOverrideArgs.includes("ScheduleState=DISABLED")) {
+            throw new Error("deploy plan must keep ScheduleState=DISABLED");
+          }
+          await writeFile(
+            "dist/aws/earthquake-runner-rollback.json",
+            `${JSON.stringify(plan.rollback, null, 2)}\n`,
+            "utf8",
+          );
+          NODE
+
+      - name: Upload rollback artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthquake-runner-dev-rollback
+          path: dist/aws/earthquake-runner-rollback.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Deploy CloudFormation stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t parameter_overrides < <(
+            node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const plan = JSON.parse(
+            await readFile("dist/aws/earthquake-runner-deploy-plan.json", "utf8"),
+          );
+          for (const value of plan.parameterOverrideArgs) {
+            console.log(value);
+          }
+          NODE
+          )
+          aws cloudformation deploy \
+            --template-file infra/aws/earthquake-runner/template.yaml \
+            --stack-name "$STACK_NAME" \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides "${parameter_overrides[@]}" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify post-deploy guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          stack_output() {
+            aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue | [0]" \
+              --output text
+          }
+
+          asg_name="$(stack_output RunnerAutoScalingGroupName)"
+          schedule_name="$(stack_output WatcherScheduleName)"
+          watcher_lambda_name="$(stack_output WatcherLambdaName)"
+          manual_watcher_lambda_name="$(stack_output ManualWatcherLambdaName)"
+          runner_control_lambda_name="$(stack_output RunnerControlLambdaName)"
+          deployed_git_commit_sha="$(stack_output DeployedGitCommitSha)"
+          lambda_code_s3_key="$(stack_output LambdaCodeS3KeyOutput)"
+          tee_artifact_s3_key="$(stack_output TeeArtifactS3KeyOutput)"
+          deployed_tee_artifact_sha256="$(stack_output TeeArtifactSha256Output)"
+
+          desired_capacity="$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$asg_name" \
+            --query 'AutoScalingGroups[0].DesiredCapacity' \
+            --output text)"
+          [[ "$desired_capacity" == "0" ]]
+
+          schedule_state="$(aws scheduler get-schedule \
+            --name "$schedule_name" \
+            --query State \
+            --output text)"
+          [[ "$schedule_state" == "DISABLED" ]]
+
+          watcher_code_sha="$(aws lambda get-function \
+            --function-name "$watcher_lambda_name" \
+            --query 'Configuration.CodeSha256' \
+            --output text)"
+          manual_watcher_code_sha="$(aws lambda get-function \
+            --function-name "$manual_watcher_lambda_name" \
+            --query 'Configuration.CodeSha256' \
+            --output text)"
+          runner_control_code_sha="$(aws lambda get-function \
+            --function-name "$runner_control_lambda_name" \
+            --query 'Configuration.CodeSha256' \
+            --output text)"
+          [[ "$watcher_code_sha" != "None" ]]
+          [[ "$watcher_code_sha" == "$manual_watcher_code_sha" ]]
+          [[ "$watcher_code_sha" == "$runner_control_code_sha" ]]
+
+          [[ "$deployed_git_commit_sha" == "$GITHUB_SHA" ]]
+          [[ "$lambda_code_s3_key" == "earthquake-runner/${GITHUB_SHA}/earthquake-runner-lambda.zip" ]]
+          [[ "$tee_artifact_s3_key" == "earthquake-runner/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz" ]]
+          [[ "$deployed_tee_artifact_sha256" == "$TEE_ARTIFACT_SHA256" ]]
