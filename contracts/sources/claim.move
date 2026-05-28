@@ -6,7 +6,6 @@ use contracts::membership::{Self, MembershipPass, MembershipRegistry};
 use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
 use contracts::pools::{Self, DesignatedPool, MainPool};
 use contracts::program::{Self, Campaign, Program};
-use sui::bcs;
 use sui::clock::{Self, Clock};
 use sui::coin;
 use sui::dynamic_field;
@@ -18,9 +17,9 @@ const EInvalidAffectedCellProof: u64 = 7;
 const EDisasterEventMismatch: u64 = 8;
 const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
-const EResidenceMetadataExpired: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
-const EResidenceMetadataAfterDisaster: u64 = 13;
+const LEGACY_DISASTER_CONFIDENCE: u64 = 10_000;
+const LEGACY_DISASTER_RISK_BUCKET: u8 = 1;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
 const U64_MAX_AS_U128: u128 = 18_446_744_073_709_551_615;
 
@@ -170,7 +169,7 @@ public(package) fun claim_disaster_usdc(
     payout_policy::assert_designated_pool_matches(budget, designated_pool);
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
-    assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof, now_ms);
+    assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof);
 
     let duplicate_key = ClaimKey {
         pass_lineage_id: membership::membership_pass_lineage_id(pass),
@@ -190,14 +189,12 @@ public(package) fun claim_disaster_usdc(
         payout_policy::main_remaining_usdc(budget),
     );
     let total_available = available_usdc(designated_available, main_available);
-    let (_, _, confidence, risk_bucket, _, _, _, _) =
-        membership::residence_metadata_summary(pass);
     let amount = payout_policy::quote_usdc(
         policy,
         affected_cell::cell_band(&leaf),
         membership::membership_pass_issued_at_ms(pass),
-        confidence,
-        risk_bucket,
+        LEGACY_DISASTER_CONFIDENCE,
+        LEGACY_DISASTER_RISK_BUCKET,
         user_max_amount_usdc,
         payout_policy::campaign_budget_remaining_usdc(budget),
         total_available,
@@ -238,7 +235,6 @@ fun assert_valid_disaster_eligibility(
     pass: &MembershipPass,
     leaf: &AffectedCellLeaf,
     proof: vector<ProofStep>,
-    now_ms: u64,
 ) {
     assert!(
         affected_cell::event_uid(leaf) == disaster_event::event_uid(disaster_event)
@@ -258,23 +254,9 @@ fun assert_valid_disaster_eligibility(
         EClaimBandTooLow,
     );
 
-    let (
-        _update_id,
-        residence_cell,
-        _confidence,
-        _risk_bucket,
-        _evidence_hash,
-        residence_issued_at_ms,
-        expires_at_ms,
-        _verifier_version,
-    ) = membership::residence_metadata_summary(pass);
+    let (_, home_cell, _, _, _, _, _, _, _) = membership::membership_pass_mvp_summary(pass);
     assert!(
-        residence_issued_at_ms <= disaster_event::occurred_at_ms(disaster_event),
-        EResidenceMetadataAfterDisaster,
-    );
-    assert!(expires_at_ms > now_ms, EResidenceMetadataExpired);
-    assert!(
-        residence_cell == bcs::to_bytes(&affected_cell::h3_index(leaf)),
+        home_cell == affected_cell::h3_index(leaf),
         EResidenceCellMismatch,
     );
 }

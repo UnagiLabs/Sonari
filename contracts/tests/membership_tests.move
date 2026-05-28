@@ -63,7 +63,6 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         assert!(membership::membership_pass_lineage_id(&pass) == pass_id);
         assert!(membership::membership_pass_status(&pass) == membership::status_active());
         assert!(membership::membership_pass_issued_at_ms(&pass) == 0);
-        assert!(membership::membership_pass_last_metadata_update_ms(&pass) == 0);
         let (
             account_created_at_ms,
             home_cell,
