@@ -54,6 +54,31 @@ fun verifier_registry_adds_and_disables_key_with_events() {
     scenario.end();
 }
 
+#[test]
+fun identity_verifier_key_registration_is_allowed() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::add_verifier_key_for_testing(
+        &mut registry,
+        metadata_verifier::verifier_family_identity(),
+        metadata_verifier::verifier_version_v1(),
+        valid_public_key(),
+        &mut ctx,
+    );
+
+    let added_events = event::events_by_type<metadata_verifier::VerifierKeyAdded>();
+    assert!(added_events.length() == 1);
+    let (_, key, family, version, enabled, actor) =
+        metadata_verifier::verifier_key_added_event_fields(*added_events.borrow(0));
+    assert!(key == valid_public_key());
+    assert!(family == metadata_verifier::verifier_family_identity());
+    assert!(version == metadata_verifier::verifier_version_v1());
+    assert!(enabled);
+    assert!(actor == @0x0);
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
 #[test, expected_failure(abort_code = metadata_verifier::EVerifierKeyAlreadyDisabled)]
 fun disabling_already_disabled_key_is_rejected() {
     let (mut registry, mut ctx) = direct_initialized();

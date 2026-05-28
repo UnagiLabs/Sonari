@@ -5,6 +5,7 @@ use sui::event;
 use sui::vec_map::{Self, VecMap};
 
 const VERIFIER_FAMILY_EARTHQUAKE_ORACLE: u8 = 3;
+const VERIFIER_FAMILY_IDENTITY: u8 = 4;
 const VERIFIER_VERSION_V1: u64 = 1;
 const TARGET_KIND_VERIFIER_REGISTRY: u8 = 6;
 const REGISTRY_KIND_VERIFIER: u8 = 3;
@@ -125,6 +126,10 @@ public fun verifier_family_earthquake_oracle(): u8 {
     VERIFIER_FAMILY_EARTHQUAKE_ORACLE
 }
 
+public fun verifier_family_identity(): u8 {
+    VERIFIER_FAMILY_IDENTITY
+}
+
 public fun verifier_version_v1(): u64 {
     VERIFIER_VERSION_V1
 }
@@ -202,7 +207,8 @@ fun assert_signature_length(signature: &vector<u8>) {
 
 fun assert_allowed_verifier_family(verifier_family: u8) {
     assert!(
-        verifier_family == VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
+        verifier_family == VERIFIER_FAMILY_EARTHQUAKE_ORACLE
+            || verifier_family == VERIFIER_FAMILY_IDENTITY,
         EVerifierFamilyMismatch,
     );
 }
