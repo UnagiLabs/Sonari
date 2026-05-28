@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type IdentityProvider = "kyc" | "world_id";
 
 export const IDENTITY_RESULT_FIELD_ORDER = [
@@ -233,4 +235,45 @@ export interface MembershipIdentityState {
     readonly identity_expires_at_ms: number;
     readonly terms_version: number;
     readonly signed_statement_hash: string;
+}
+
+export interface KycDuplicateKeyInput {
+    readonly provider_id: string;
+    readonly provider_user_unique_id: string;
+}
+
+export interface WorldIdDuplicateKeyInput {
+    readonly world_app_id: string;
+    readonly action: string;
+    readonly nullifier: string;
+}
+
+export function computeKycDuplicateKeyHash(input: KycDuplicateKeyInput): string {
+    return sha256Hex(
+        joinDuplicateKeyParts(["sonari:kyc:v1", input.provider_id, input.provider_user_unique_id]),
+    );
+}
+
+export function computeWorldIdDuplicateKeyHash(input: WorldIdDuplicateKeyInput): string {
+    return sha256Hex(
+        joinDuplicateKeyParts([
+            "sonari:world_id:v1",
+            input.world_app_id,
+            input.action,
+            input.nullifier,
+        ]),
+    );
+}
+
+function joinDuplicateKeyParts(parts: readonly string[]): string {
+    for (const part of parts) {
+        if (part.length === 0 || part.includes("\0")) {
+            throw new Error("duplicate key input parts must be non-empty strings without NUL");
+        }
+    }
+    return parts.join("\0");
+}
+
+function sha256Hex(input: string): string {
+    return `0x${createHash("sha256").update(input, "utf8").digest("hex")}`;
 }
