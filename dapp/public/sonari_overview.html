@@ -1,1340 +1,355 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sonari / ソナリ 仕様書</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sonari Overview</title>
   <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5b6673;
+      --line: #d8e0e8;
+      --paper: #f7f9fb;
+      --panel: #ffffff;
+      --blue: #1769aa;
+      --green: #2f855a;
+      --gold: #9f6a10;
+    }
+
     * {
       box-sizing: border-box;
     }
 
-    :root {
-      color: #172033;
-      background: #f5f7fb;
-      font-family: "Noto Sans JP", "Segoe UI", Arial, sans-serif;
-      line-height: 1.75;
-      font-size: 16px;
-    }
-
     body {
       margin: 0;
-      min-height: 100vh;
-      background:
-        linear-gradient(180deg, rgba(246, 249, 252, 0.96), rgba(250, 252, 255, 0.98)),
-        radial-gradient(circle at 15% 0%, rgba(39, 111, 191, 0.14), transparent 30%),
-        radial-gradient(circle at 85% 4%, rgba(41, 152, 117, 0.16), transparent 28%);
+      color: var(--ink);
+      background: var(--paper);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
     }
 
-    .page-wrapper {
-      max-width: 1120px;
+    main,
+    header {
+      width: min(1080px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 32px 24px 48px;
     }
 
-    header.hero {
-      display: grid;
-      gap: 28px;
-      padding: 36px;
-      border-radius: 18px;
-      color: #f8fbff;
-      background:
-        linear-gradient(135deg, rgba(13, 35, 72, 0.96), rgba(19, 83, 103, 0.94)),
-        #0d2348;
-      box-shadow: 0 24px 56px rgba(25, 49, 91, 0.18);
+    header {
+      padding: 56px 0 28px;
     }
 
-    .hero-main {
-      max-width: 900px;
+    h1,
+    h2,
+    h3 {
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(2.3rem, 6vw, 4.8rem);
+    }
+
+    h2 {
+      margin: 0 0 18px;
+      font-size: clamp(1.55rem, 3vw, 2.3rem);
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 1.05rem;
+    }
+
+    p {
+      margin: 0 0 16px;
     }
 
     .eyebrow {
-      margin: 0 0 8px;
-      color: #2f6fed;
+      margin: 0 0 10px;
+      color: var(--blue);
       font-size: 0.78rem;
-      font-weight: 800;
-      letter-spacing: 0;
+      font-weight: 700;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
     }
 
-    header.hero .eyebrow {
-      color: #8dd9c1;
-    }
-
-    header.hero h1 {
-      margin: 0;
-      color: #ffffff;
-      font-size: 4rem;
-      line-height: 1.03;
-    }
-
-    .subtitle {
-      margin: 18px 0 0;
-      max-width: 820px;
-      color: #dcecff;
-      font-size: 1.26rem;
-      font-weight: 700;
-    }
-
-    .subtitle-ja {
-      margin: 6px 0 0;
-      color: #aee5d5;
-      font-size: 1.05rem;
-      font-weight: 700;
-    }
-
-    .hero-copy {
-      max-width: 860px;
-      color: #d9e8f6;
-    }
-
-    .hero-copy p {
-      margin: 0;
-    }
-
-    main {
-      margin-top: 36px;
+    .lead {
+      max-width: 780px;
+      color: var(--muted);
+      font-size: 1.14rem;
     }
 
     .section {
-      margin-bottom: 36px;
-    }
-
-    .section-heading {
-      margin-bottom: 16px;
-    }
-
-    .section h2 {
-      margin: 0 0 16px;
-      color: #10214f;
-      font-size: 1.68rem;
-      line-height: 1.35;
-    }
-
-    .section-heading h2 {
-      margin-bottom: 0;
-    }
-
-    .section h3 {
-      color: #13285b;
-    }
-
-    .section p,
-    .section ul,
-    .section ol {
-      margin: 0;
-      color: #3f4d68;
-    }
-
-    .section ul,
-    .section ol {
-      margin-top: 16px;
-      padding-left: 1.3rem;
-    }
-
-    .lead {
-      color: #15325d;
-      font-size: 1.2rem;
-      font-weight: 800;
-    }
-
-    .hero-statement {
-      padding: 26px;
-      border: 1px solid rgba(47, 111, 237, 0.16);
-      border-left: 6px solid #2f6fed;
-      border-radius: 12px;
-      background: #ffffff;
-      box-shadow: 0 16px 34px rgba(31, 62, 120, 0.06);
-    }
-
-    .hero-statement p + p {
-      margin-top: 10px;
-    }
-
-    .summary-grid {
-      display: grid;
-      gap: 16px;
-    }
-
-    .summary-card {
-      padding: 20px;
-      border: 1px solid rgba(18, 71, 153, 0.1);
+      margin: 20px 0;
+      padding: 28px;
+      background: var(--panel);
+      border: 1px solid var(--line);
       border-radius: 8px;
-      background: #ffffff;
-      box-shadow: 0 14px 26px rgba(31, 62, 120, 0.05);
     }
 
-    .summary-card strong {
-      display: block;
-      margin-bottom: 6px;
-      color: #10214f;
-      font-size: 1.08rem;
-    }
-
-    .cards {
+    .grid {
       display: grid;
-      gap: 20px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
     }
 
     .card {
-      padding: 24px;
-      border: 1px solid rgba(18, 71, 153, 0.08);
-      border-radius: 8px;
-      background: #ffffff;
-      box-shadow: 0 16px 30px rgba(31, 62, 120, 0.06);
-    }
-
-    .card h3 {
-      margin: 0 0 12px;
-      font-size: 1.18rem;
-    }
-
-    .card p + p {
-      margin-top: 12px;
-    }
-
-    .accent-blue {
-      border-top: 5px solid #2f6fed;
-    }
-
-    .accent-green {
-      border-top: 5px solid #2f9d78;
-    }
-
-    .grid-2 {
-      display: grid;
-      gap: 24px;
-    }
-
-    .grid-2 > div {
-      padding: 20px;
-      border: 1px solid rgba(17, 72, 123, 0.08);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.72);
-    }
-
-    .grid-2 h3 {
-      margin: 0 0 8px;
-      font-size: 1.06rem;
-    }
-
-    .funds-section {
-      padding: 26px;
-      border: 1px solid rgba(35, 105, 164, 0.12);
-      border-radius: 16px;
-      background: #ffffff;
-      box-shadow: 0 18px 34px rgba(31, 62, 120, 0.06);
-    }
-
-    .funds-layout {
-      display: grid;
-      gap: 18px;
-    }
-
-    .fund-card,
-    .fund-split > div {
-      padding: 20px;
-      border-radius: 10px;
-    }
-
-    .fund-card {
-      border: 1px solid rgba(47, 111, 237, 0.14);
-      background: #f8fbff;
-    }
-
-    .fund-card h3 {
-      margin: 10px 0 8px;
-      font-size: 1.18rem;
-    }
-
-    .relief-fund {
-      border-left: 5px solid #2f6fed;
-    }
-
-    .operations-fund {
-      border-left: 5px solid #2f9d78;
-    }
-
-    .operations-fund .node-label {
-      color: #116047;
-      background: #dff7ed;
-    }
-
-    .fund-split {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 12px;
-    }
-
-    .fund-split > div:first-child {
-      border: 1px solid rgba(47, 111, 237, 0.18);
-      background:
-        linear-gradient(90deg, rgba(47, 111, 237, 0.14) 70%, rgba(47, 111, 237, 0.04) 70%),
-        #f6f9ff;
-    }
-
-    .fund-split > div:nth-child(2) {
-      border: 1px solid rgba(47, 157, 120, 0.2);
-      background:
-        linear-gradient(90deg, rgba(47, 157, 120, 0.16) 15%, rgba(47, 157, 120, 0.04) 15%),
-        #f3fbf7;
-    }
-
-    .fund-split > div:nth-child(3) {
-      border: 1px solid rgba(205, 151, 45, 0.24);
-      background:
-        linear-gradient(90deg, rgba(205, 151, 45, 0.18) 15%, rgba(205, 151, 45, 0.05) 15%),
-        #fff9ec;
-    }
-
-    .fund-split strong {
-      display: block;
-      color: #10214f;
-      font-size: 2rem;
-      line-height: 1.05;
-    }
-
-    .fund-split span {
-      display: block;
-      margin: 8px 0 4px;
-      color: #13285b;
-      font-weight: 800;
-    }
-
-    .fund-split p {
-      font-size: 0.94rem;
-    }
-
-    .pool-section {
-      padding: 26px;
-      border: 1px solid rgba(35, 105, 164, 0.12);
-      border-radius: 16px;
-      background: #ffffff;
-      box-shadow: 0 18px 34px rgba(31, 62, 120, 0.06);
-    }
-
-    .pool-grid {
-      display: grid;
-      gap: 16px;
-    }
-
-    .pool-card {
-      padding: 20px;
-      border: 1px solid rgba(47, 111, 237, 0.14);
-      border-radius: 8px;
-      background: #f8fbff;
-    }
-
-    .pool-card h3 {
-      margin: 10px 0 8px;
-      font-size: 1.12rem;
-    }
-
-    .primary-pool {
-      border-left: 5px solid #2f6fed;
-    }
-
-    .pool-flow {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 10px;
-      align-items: center;
-      margin-top: 18px;
-    }
-
-    .pool-flow div {
-      display: grid;
-      min-height: 56px;
-      place-items: center;
-      padding: 12px;
-      border: 1px solid rgba(47, 157, 120, 0.16);
-      border-radius: 8px;
-      color: #10214f;
-      background: #f3fbf7;
-      font-weight: 800;
-      text-align: center;
-    }
-
-    .pool-flow span {
-      color: #697895;
-      font-size: 1.2rem;
-      font-weight: 800;
-      text-align: center;
-    }
-
-    .policy-section {
-      padding: 26px;
-      border: 1px solid rgba(35, 105, 164, 0.12);
-      border-radius: 16px;
-      background: #ffffff;
-      box-shadow: 0 18px 34px rgba(31, 62, 120, 0.06);
-    }
-
-    .policy-grid {
-      display: grid;
-      gap: 16px;
-    }
-
-    .policy-card {
-      padding: 20px;
-      border: 1px solid rgba(47, 111, 237, 0.14);
-      border-radius: 8px;
-      background: #f8fbff;
-    }
-
-    .policy-card h3 {
-      margin: 0 0 8px;
-      font-size: 1.1rem;
-    }
-
-    .amount-list {
-      display: grid;
-      gap: 10px;
-      margin-top: 14px;
-    }
-
-    .amount-list div {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 10px 12px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.78);
-      color: #10214f;
-      font-weight: 800;
-    }
-
-    .diagram-section {
-      padding: 26px;
-      border: 1px solid rgba(35, 105, 164, 0.12);
-      border-radius: 16px;
-      background: #ffffff;
-      box-shadow: 0 18px 34px rgba(31, 62, 120, 0.06);
-    }
-
-    .architecture-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: 12px;
-      align-items: stretch;
-    }
-
-    .node {
-      min-height: 128px;
       padding: 18px;
-      border: 1px solid rgba(47, 111, 237, 0.16);
-      border-radius: 12px;
-      background: #f8fbff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
     }
 
-    .node strong {
+    .card strong {
       display: block;
-      margin: 8px 0 6px;
-      color: #10214f;
-      font-size: 1.08rem;
-    }
-
-    .node p {
-      font-size: 0.94rem;
-    }
-
-    .node-label {
-      display: inline-flex;
-      align-items: center;
-      min-height: 26px;
-      padding: 2px 9px;
-      border-radius: 999px;
-      color: #1d4db0;
-      background: #e8f0ff;
-      font-size: 0.76rem;
-      font-weight: 800;
-    }
-
-    .nautilus-node {
-      border-color: rgba(47, 157, 120, 0.38);
-      background: #f0fbf7;
-    }
-
-    .nautilus-node .node-label {
-      color: #116047;
-      background: #dff7ed;
-    }
-
-    .sui-node {
-      border-color: rgba(33, 76, 156, 0.28);
-      background: #f3f7ff;
-    }
-
-    .connector,
-    .arrow {
-      display: grid;
-      min-height: 34px;
-      place-items: center;
-      color: #63728d;
-      font-size: 1.35rem;
-      font-weight: 800;
-    }
-
-    .table-wrap {
-      overflow-x: auto;
-      border: 1px solid rgba(18, 71, 153, 0.1);
-      border-radius: 12px;
-      background: #ffffff;
-      box-shadow: 0 16px 30px rgba(31, 62, 120, 0.05);
+      margin-bottom: 8px;
+      color: var(--blue);
     }
 
     table {
       width: 100%;
-      min-width: 760px;
       border-collapse: collapse;
+      overflow-wrap: anywhere;
     }
 
     th,
     td {
-      padding: 16px;
-      border-bottom: 1px solid rgba(18, 71, 153, 0.08);
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
       text-align: left;
       vertical-align: top;
     }
 
     th {
-      color: #10214f;
-      background: #eef4fb;
-      font-size: 0.94rem;
+      color: var(--muted);
+      font-size: 0.85rem;
     }
 
-    td {
-      color: #3f4d68;
+    code,
+    pre {
+      font-family: "SFMono-Regular", Consolas, monospace;
     }
 
-    tr:last-child td {
-      border-bottom: 0;
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border-radius: 8px;
+      background: #edf3f8;
     }
 
-    .flow-section {
-      padding: 26px;
-      border-radius: 16px;
-      background: #eef8f4;
-      border: 1px solid #cfeee1;
-    }
-
-    .flow-list {
+    .flow {
       display: grid;
-      gap: 14px;
-      padding-left: 0 !important;
-      list-style: none;
-    }
-
-    .flow-list li {
-      display: grid;
-      grid-template-columns: 56px minmax(0, 1fr);
-      gap: 14px;
-      padding: 18px;
-      border: 1px solid rgba(47, 157, 120, 0.18);
-      border-radius: 12px;
-      background: #ffffff;
-    }
-
-    .flow-list span {
-      display: grid;
-      width: 44px;
-      height: 44px;
-      place-items: center;
-      border-radius: 50%;
-      color: #ffffff;
-      background: #2f9d78;
-      font-size: 0.9rem;
-      font-weight: 800;
-    }
-
-    .flow-list h3 {
-      margin: 0 0 4px;
-      font-size: 1.04rem;
-    }
-
-    .ptb-diagram {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
       gap: 10px;
-      align-items: center;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: step;
     }
 
-    .ptb-step {
+    .flow li {
+      counter-increment: step;
       display: grid;
-      min-height: 58px;
-      place-items: center;
-      padding: 12px;
-      border: 1px solid rgba(47, 111, 237, 0.18);
-      border-radius: 10px;
-      color: #10214f;
-      background: #f8fbff;
-      font-weight: 800;
-      text-align: center;
+      grid-template-columns: 44px minmax(0, 1fr);
+      gap: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
     }
 
-    .ptb-arrow {
-      color: #697895;
-      font-size: 1.2rem;
+    .flow li::before {
+      content: counter(step, decimal-leading-zero);
+      color: var(--green);
       font-weight: 800;
-      text-align: center;
     }
 
     .note {
-      margin-top: 18px !important;
-      padding: 14px 16px;
-      border-left: 4px solid #2f6fed;
-      border-radius: 8px;
-      background: #f1f6ff;
-    }
-
-    .object-list {
-      display: grid;
-      gap: 12px;
-      padding-left: 0 !important;
-      list-style: none;
-    }
-
-    .object-list li {
-      display: grid;
-      gap: 4px;
-      padding: 12px;
-      border-radius: 10px;
-      background: #f8fbff;
-    }
-
-    .object-list strong {
-      color: #10214f;
-    }
-
-    .object-list span {
-      color: #3f4d68;
-    }
-
-    .sponsor-section {
-      padding: 26px;
-      border-radius: 16px;
-      background: #ffffff;
-      border: 1px solid rgba(18, 71, 153, 0.1);
-      box-shadow: 0 18px 34px rgba(31, 62, 120, 0.06);
-    }
-
-    .sponsor-grid {
-      display: grid;
-      gap: 16px;
-    }
-
-    .sponsor-panel {
-      padding: 20px;
-      border: 1px solid rgba(47, 111, 237, 0.14);
-      border-radius: 8px;
-      background: #f8fbff;
-    }
-
-    .sponsor-panel:nth-child(2) {
-      border-color: rgba(47, 157, 120, 0.2);
-      background: #f3fbf7;
-    }
-
-    .sponsor-panel:nth-child(3) {
-      border-color: rgba(205, 151, 45, 0.22);
-      background: #fff9ec;
-    }
-
-    .sponsor-panel h3 {
-      margin: 0 0 8px;
-      font-size: 1.1rem;
-    }
-
-    .adoption-section {
-      padding: 26px;
-      border-radius: 16px;
-      background: #f7f9fd;
-      border: 1px solid rgba(18, 71, 153, 0.08);
-    }
-
-    .adoption-grid {
-      display: grid;
-      gap: 18px;
-    }
-
-    .adoption-grid > div {
-      padding: 20px;
-      border-radius: 8px;
-      background: #ffffff;
-      border: 1px solid rgba(18, 71, 153, 0.08);
-    }
-
-    .adoption-grid h3 {
-      margin: 0 0 8px;
-      font-size: 1.1rem;
-    }
-
-    .mvp-section {
-      padding: 26px;
-      border-radius: 16px;
-      background: #f7f9fd;
-      border: 1px solid rgba(18, 71, 153, 0.08);
-    }
-
-    .demo-card,
-    .market-analysis,
-    .quote,
-    .core-message {
-      padding: 24px;
-      border-radius: 14px;
-    }
-
-    .demo-card {
-      background: #ffffff;
-      border: 1px solid rgba(18, 71, 153, 0.1);
-      box-shadow: 0 16px 30px rgba(31, 62, 120, 0.05);
-    }
-
-    .market-analysis {
-      background: #f2f6ff;
-      border: 1px solid #dce7ff;
-    }
-
-    .quote {
-      background: #fff6df;
-      border: 1px solid #f1dca2;
-    }
-
-    .quote p + p {
-      margin-top: 12px;
-    }
-
-    .core-message {
-      background: #e8f7ed;
-      border: 1px solid #b9dec6;
-    }
-
-    .core-message p {
-      margin: 0;
-      color: #1f5035;
-      font-size: 1.12rem;
-      font-weight: 800;
-    }
-
-    footer {
-      margin-top: 48px;
-      color: #55617b;
+      color: var(--muted);
       font-size: 0.95rem;
-      text-align: center;
     }
 
-@media (min-width: 760px) {
-  .cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .grid-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .summary-grid,
-  .sponsor-grid,
-  .adoption-grid,
-  .pool-grid,
-  .policy-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-    @media (min-width: 980px) {
-      header.hero {
-        grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-        align-items: end;
+    @media (max-width: 760px) {
+      .grid {
+        grid-template-columns: 1fr;
       }
 
-      .architecture-grid {
-        grid-template-columns: 1fr 34px 1fr 40px 1.08fr 40px 1fr 40px 1fr;
-      }
-
-      .connector,
-      .arrow {
-        min-height: 128px;
-      }
-
-      .ptb-diagram {
-        grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr 28px 1fr;
-      }
-
-      .pool-flow {
-        grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr;
-      }
-    }
-
-    @media (max-width: 700px) {
-      .page-wrapper {
-        padding: 22px 16px 36px;
-      }
-
-      header.hero,
-  .diagram-section,
-  .flow-section,
-  .funds-section,
-  .pool-section,
-  .policy-section,
-  .sponsor-section,
-  .adoption-section,
-  .mvp-section {
-        padding: 22px;
-      }
-
-      header.hero h1 {
-        font-size: 2.65rem;
-      }
-
-      .flow-list li {
-        grid-template-columns: 44px minmax(0, 1fr);
-        gap: 12px;
+      .section {
+        padding: 20px;
       }
     }
   </style>
 </head>
 <body>
-  <div class="page-wrapper">
-    <header class="hero">
-      <div class="hero-main">
-        <p class="eyebrow">DeFi & Payments Specification</p>
-        <h1>Sonari / ソナリ</h1>
-        <p class="subtitle">Privacy-preserving disaster relief oracle for programmable payments on Sui.</p>
-        <p class="subtitle-ja">災害支援を、秘匿性を保った検証とSui上の自動支払いに変える。</p>
+  <header>
+    <p class="eyebrow">Sonari MVP Specification</p>
+    <h1>Verified disaster relief on Sui</h1>
+    <p class="lead">
+      Sonari turns donation pools into programmable disaster relief.
+      Nautilus verifies disasters and identity status.
+      Sui Move pays verified Membership SBT owners under clear rules.
+    </p>
+  </header>
+
+  <main>
+    <section class="section">
+      <h2>1. まず伝えたい設計</h2>
+      <div class="grid">
+        <article class="card">
+          <strong>保険ではない</strong>
+          <p>Sonari は支払いを保証しません。寄付 Pool、災害条件、本人確認、予算上限に基づいて支援します。</p>
+        </article>
+        <article class="card">
+          <strong>KYC または World ID</strong>
+          <p>Membership SBT は、KYC または World ID のどちらかで確認済みになると Claim できます。</p>
+        </article>
+        <article class="card">
+          <strong>SBT owner に支払う</strong>
+          <p>MVP の受取先は Membership SBT owner の Sui address です。別の外部受取先は持ちません。</p>
+        </article>
       </div>
-      <div class="hero-copy">
-        <p>Sonariは、災害検知APIとユーザーの地域滞在情報をNautilus内で検証し、個人情報を公開せずに「支援対象であること」だけをSui上で証明します。Moveコントラクトはその証明、PoolPolicy、PayoutPolicyを使い、対象PoolからRelief Cashを自動分配します。寄付元本は支援Poolへ入り、Main Poolの透明なYield Reserveから生まれる利回りで運営費を賄います。</p>
-      </div>
-    </header>
+    </section>
 
-    <main>
-      <section class="section hero-statement">
-        <h2>Core Statement</h2>
-        <p class="lead">Sonari does not ask the blockchain to know who you are or where you are. It only asks Nautilus to prove that you are eligible for relief.</p>
-        <p>Sonariは、ブロックチェーンに「あなたが誰で、どこにいるか」を公開しません。Nautilusによって「支援対象であること」だけを証明します。</p>
-      </section>
+    <section class="section">
+      <h2>2. Claim 対象条件</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>分類</th>
+            <th>条件</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>災害</td>
+            <td>DisasterEvent が finalized 済みである</td>
+          </tr>
+          <tr>
+            <td>SBT</td>
+            <td>Membership SBT が active である</td>
+          </tr>
+          <tr>
+            <td>災害前条件</td>
+            <td><code>account_created_at_ms</code> と <code>home_cell_registered_at_ms</code> が cutoff より前である</td>
+          </tr>
+          <tr>
+            <td>地域</td>
+            <td>登録済み home cell が affected cells に含まれる</td>
+          </tr>
+          <tr>
+            <td>本人確認</td>
+            <td><code>identity_verified == true</code> である</td>
+          </tr>
+          <tr>
+            <td>重複防止</td>
+            <td>duplicate key がこの Membership SBT に紐づいている</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
-      <section class="section">
-        <div class="section-heading">
-          <p class="eyebrow">Readable Summary</p>
-          <h2>まず伝えたい設計</h2>
-        </div>
-        <div class="summary-grid">
-          <div class="summary-card">
-            <strong>保険ではなく支援アクセス</strong>
-            <p>ユーザーは一度きりのVerification FeeでWallet Address、地域、本人性を事前登録します。支払いは保証せず、災害条件とPool残高に基づきます。</p>
-          </div>
-          <div class="summary-card">
-            <strong>寄付はMain Poolと指定Poolへ</strong>
-            <p>未指定寄付はMain Poolへ。指定寄付は50%を指定Pool、50%をMain Poolへ入れ、指定Pool不足時はMain Poolが補填します。</p>
-          </div>
-          <div class="summary-card">
-            <strong>Poolを使い切らない</strong>
-            <p>1災害ごとにEvent Budget Capを設定し、Future Disaster Reserveを残します。不足時は早い者勝ちではなく比例配分します。</p>
-          </div>
-        </div>
-      </section>
+    <section class="section">
+      <h2>3. 支給率</h2>
+      <pre><code>未認証
+  -> Claim 不可
 
-      <section class="section">
-        <h2>1. プロダクト概要</h2>
-        <p>企業や個人の寄付をSui上の支援Poolで管理し、災害発生・対象地域・ユーザーの滞在証明・不正リスク・Pool残高を検証したうえで、対象地域の個人へ直接支援金を届けます。寄付は静的な送金ではなく、条件に応じて実行されるProgrammable Paymentになります。個人は平時に地域・電話番号・位置情報・受け取りAddressを登録し、一度きりのVerification Feeを支払って検証済み会員になります。</p>
-      </section>
+KYC verified
+  -> 100% Claim 可
 
-      <section class="section cards">
-        <article class="card accent-blue">
-          <h3>DeFi & Paymentsとの接続</h3>
-          <ul>
-            <li>寄付をMain PoolとDesignated PoolとしてSui上で管理</li>
-            <li>災害トリガーと適格性証明に応じて支払いを自動化</li>
-            <li>PTBで検証、支払い、レシート発行、Impact更新を一括実行</li>
-            <li>Dynamic SBTでスポンサーの支援実績を更新</li>
-          </ul>
-        </article>
+World ID verified
+  -> 100% Claim 可</code></pre>
+      <p>
+        KYC と World ID は同じ満額ルートです。
+        本人確認の種類で支払額を減らしません。
+      </p>
+    </section>
 
-        <article class="card accent-green">
-          <h3>Nautilusが強みになる理由</h3>
-          <ul>
-            <li>災害APIの情報をTEE内で検証できる</li>
-            <li>GPSやチェックイン履歴を公開せずに対象可否を計算できる</li>
-            <li>Moveコントラクトが署名済み結果だけを検証できる</li>
-            <li>支援判断の透明性と個人情報保護を両立できる</li>
-          </ul>
-        </article>
-      </section>
+    <section class="section">
+      <h2>4. Nautilus が検証するもの</h2>
+      <ul>
+        <li>Earthquake payload と affected cells</li>
+        <li>KYC provider response と署名</li>
+        <li>World ID の Sonari 専用 action</li>
+        <li>provider 内 duplicate key</li>
+        <li>evidence hash と expiry</li>
+      </ul>
+      <p class="note">
+        生の本人情報、credential の詳細、document image、World ID proof detail は
+        on-chain に出しません。
+      </p>
+    </section>
 
-      <section class="section funds-section">
-        <div class="section-heading">
-          <p class="eyebrow">Sustainable Operations</p>
-          <h2>2. 支援元本と運営費の分離</h2>
-        </div>
-        <div class="funds-layout">
-          <div class="fund-card relief-fund">
-            <span class="node-label">Relief Principal</span>
-            <h3>Relief Pools</h3>
-            <p>スポンサー・寄付者からの支援元本。MVPではMain Poolを中心にし、地震・洪水などのDesignated Poolを任意で追加できる構成にします。寄付元本は支援Poolへ入り、運営費はMain PoolのYield Reserveから生まれる利回りを中心に賄います。</p>
-          </div>
-          <div class="fund-split">
-            <div>
-              <strong>70%</strong>
-              <span>Liquid Relief Reserve</span>
-              <p>即時支払いとMain Pool補填用に保持</p>
-            </div>
-            <div>
-              <strong>15%</strong>
-              <span>SUI Native Staking</span>
-              <p>Suiネイティブ運用。報酬はOperations Poolへ</p>
-            </div>
-            <div>
-              <strong>15%</strong>
-              <span>Scallop Stablecoin Strategy</span>
-              <p>ステーブルコイン運用のデモ枠。MVPでは実入金しない</p>
-            </div>
-          </div>
-          <div class="fund-card operations-fund">
-            <span class="node-label">Operations</span>
-            <h3>Operations Pool</h3>
-            <p>一度きりのVerification FeeとYield Reserveの利回りで、Nautilus実行、検証、通知、インフラ、サポート費用を賄います。</p>
-          </div>
-        </div>
-        <p class="note">MVPではMain Poolを70% Liquid、15% SUI native staking、15% Scallop-style stablecoin strategyとして表示します。運用比率、運用先、利回り、Operations Poolへの送金額はダッシュボードで透明化します。</p>
-      </section>
-
-      <section class="section pool-section">
-        <div class="section-heading">
-          <p class="eyebrow">Pool Strategy</p>
-          <h2>3. Donation Pool設計</h2>
-        </div>
-        <div class="pool-grid">
-          <article class="pool-card primary-pool">
-            <span class="node-label">MVP Core</span>
-            <h3>Main Pool</h3>
-            <p>災害種別を限定しない共通支援Pool。未指定寄付の受け皿であり、Designated Pool不足時のバックストップになります。</p>
-          </article>
-
-          <article class="pool-card">
-            <span class="node-label">Designated</span>
-            <h3>Designated Pools</h3>
-            <p>寄付者や企業が用途を指定できるPoolです。MVPではEarthquake PoolとFlood Poolを例として見せます。指定寄付は50%を指定Pool、50%をMain Poolへ入れます。</p>
-          </article>
-
-          <article class="pool-card">
-            <span class="node-label">Policy</span>
-            <h3>Pool Policy</h3>
-            <p>対象災害、対象地域、最低流動性、Yield Reserve比率、Event Budget Cap、Future Disaster Reserveを定義します。</p>
-          </article>
-        </div>
-        <div class="pool-flow" aria-label="Donation pool allocation diagram">
-          <div>Donation</div>
-          <span>→</span>
-          <div>Main Pool</div>
-          <span>+</span>
-          <div>Designated Pool</div>
-          <span>→</span>
-          <div>PayoutPolicy</div>
-        </div>
-        <p class="note">戦争や紛争支援は法務・制裁・政治リスクが大きいため、ハッカソンMVPではnatural disasters firstとし、地震・洪水・台風など客観データで検証しやすい災害に絞ります。</p>
-      </section>
-
-      <section class="section diagram-section">
-        <div class="section-heading">
-          <p class="eyebrow">Architecture</p>
-          <h2>4. 全体アーキテクチャ</h2>
-        </div>
-        <div class="architecture-grid" aria-label="Sonari architecture diagram">
-          <div class="node">
-            <span class="node-label">Input</span>
-            <strong>災害検知API</strong>
-            <p>地震、台風、洪水、津波などの客観データ</p>
-          </div>
-          <div class="connector">+</div>
-          <div class="node">
-            <span class="node-label">Private Input</span>
-            <strong>ユーザー情報</strong>
-            <p>地域登録、チェックイン、端末・電話番号リスク</p>
-          </div>
-          <div class="arrow">→</div>
-          <div class="node nautilus-node">
-            <span class="node-label">Nautilus TEE</span>
-            <strong>秘匿検証</strong>
-            <p>災害条件、滞在条件、重複申請リスクを計算</p>
-          </div>
-          <div class="arrow">→</div>
-          <div class="node">
-            <span class="node-label">Proof Output</span>
-            <strong>Eligibility Proof</strong>
-            <p>対象可否、地域ID、支援ティア、支払い上限</p>
-          </div>
-          <div class="arrow">→</div>
-          <div class="node sui-node">
-            <span class="node-label">Sui Move</span>
-            <strong>自動支払い</strong>
-            <p>Donation PoolからRelief Cashを分配</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-heading">
-          <p class="eyebrow">Privacy Boundary</p>
-          <h2>5. 何を秘匿し、何を証明するか</h2>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>区分</th>
-                <th>データ</th>
-                <th>扱い</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>秘匿する情報</td>
-                <td>GPS履歴、チェックイン詳細、電話番号、端末情報、IP帯、Verification Feeの支払い手段、個別リスク要素</td>
-                <td>Nautilus内でのみ処理し、オンチェーンには出さない</td>
-              </tr>
-              <tr>
-                <td>検証する事実</td>
-                <td>対象地域に一定期間いた、災害条件を満たした、会員登録が災害前に完了していた、重複申請リスクが低い</td>
-                <td>TEE内でスコアリングし、支援対象かどうかを判定</td>
-              </tr>
-              <tr>
-                <td>オンチェーンに出す結果</td>
-                <td>eligible、region_id、disaster_id、member_since_bucket、relief_tier、max_amount、proof_hash</td>
-                <td>Moveコントラクトが署名済み結果を検証して支払いに使う</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="section flow-section">
-        <div class="section-heading">
-          <p class="eyebrow">Programmable Payment Flow</p>
-          <h2>6. 支払いフロー</h2>
-        </div>
-        <ol class="flow-list">
-          <li>
-            <span>01</span>
-            <div>
-              <h3>個人が会員登録</h3>
-              <p>地域、電話番号、位置情報、受け取りAddressを登録し、一度きりのVerification Feeを支払います。これは保険料ではなく、検証と重複受け取り防止の費用です。</p>
-            </div>
-          </li>
-          <li>
-            <span>02</span>
-            <div>
-              <h3>スポンサーが寄付</h3>
-              <p>Sui上のMain PoolまたはDesignated PoolへSUI、ステーブルコイン、またはハッカソン用テストトークンを入金します。支援元本は災害支払い専用です。</p>
-            </div>
-          </li>
-          <li>
-            <span>03</span>
-            <div>
-              <h3>災害APIを取得</h3>
-              <p>Nautilusが地震・台風・洪水などの災害データを取得し、閾値、地域、発生時刻を検証します。</p>
-            </div>
-          </li>
-          <li>
-            <span>04</span>
-            <div>
-              <h3>ユーザー適格性を秘匿検証</h3>
-              <p>登録期間、地域変更からの経過時間、チェックイン履歴、重複申請リスクをTEE内で評価し、生データは公開しません。</p>
-            </div>
-          </li>
-          <li>
-            <span>05</span>
-            <div>
-              <h3>Moveが証明を検証</h3>
-              <p>署名済みのEligibility ProofをMoveコントラクトが検証し、支払い条件を満たすか判断します。</p>
-            </div>
-          </li>
-          <li>
-            <span>06</span>
-            <div>
-              <h3>PTBで一括実行</h3>
-              <p>証明検証、Pool引き出し、受給者への送金、Relief Receipt発行、Sponsor Impact更新を1つの流れにまとめます。</p>
-            </div>
-          </li>
-        </ol>
-      </section>
-
-      <section class="section diagram-section">
-        <div class="section-heading">
-          <p class="eyebrow">PTB</p>
-          <h2>7. Programmable Transaction Blockで見せる価値</h2>
-        </div>
-        <div class="ptb-diagram">
-          <div class="ptb-step">Verify Nautilus Proof</div>
-          <div class="ptb-arrow">→</div>
-          <div class="ptb-step">Select Eligible Pool</div>
-          <div class="ptb-arrow">→</div>
-          <div class="ptb-step">Pay Relief Cash</div>
-          <div class="ptb-arrow">→</div>
-          <div class="ptb-step">Mint Relief Receipt</div>
-          <div class="ptb-arrow">→</div>
-          <div class="ptb-step">Update Sponsor Impact SBT</div>
-        </div>
-        <p class="note">審査向けには、「寄付金が人手を介さず、検証済み条件に応じて安全に動く」瞬間をデモで見せることが重要です。</p>
-      </section>
-
-      <section class="section policy-section">
-        <div class="section-heading">
-          <p class="eyebrow">Payout Policy</p>
-          <h2>8. 支払額と災害予算上限</h2>
-        </div>
-        <div class="policy-grid">
-          <article class="policy-card">
-            <h3>Band別の目安額</h3>
-            <p>Relief Cashは生活再建の全額補償ではなく、災害直後の一時支援です。</p>
-            <div class="amount-list">
-              <div><span>Band 1</span><span>$50</span></div>
-              <div><span>Band 2</span><span>$150</span></div>
-              <div><span>Band 3</span><span>$300</span></div>
-            </div>
-          </article>
-
-          <article class="policy-card">
-            <h3>会員期間とリスクで調整</h3>
-            <p>登録30日未満は対象外、30〜90日は50%、90日以上は100%。Medium riskは50%、High riskは対象外にします。</p>
-            <p class="note">Nautilusは詳細な個人情報を出さず、member_since_bucket、risk_tier、max_amountだけを証明します。</p>
-          </article>
-
-          <article class="policy-card">
-            <h3>Poolを使い切らない</h3>
-            <p>Designated Poolは1イベント最大80%、Main Pool補填はLiquid Reserveの最大20%。最低50%をFuture Disaster Reserveとして残します。</p>
-            <p class="note">不足時は `target_amount * event_budget / total_target` で比例配分します。</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="section cards">
-        <article class="card">
-          <h3>9. Sui Object設計案</h3>
-          <ul class="object-list">
-            <li><strong>MainPool / GeneralReliefPool</strong><span>災害種別を限定しない共通支援Pool。MVPの中心</span></li>
-            <li><strong>DesignatedReliefPool</strong><span>地震、洪水、地域、企業キャンペーンなど用途指定の支援プール</span></li>
-            <li><strong>PoolPolicy</strong><span>対象災害、流動性比率、Yield Reserve比率、Event Budget Capを定義</span></li>
-            <li><strong>PayoutPolicy</strong><span>Band別支払額、会員期間係数、リスク係数、按分ルールを定義</span></li>
-            <li><strong>ReliefLiquidPool</strong><span>即時支払い用に保持する流動性プール</span></li>
-            <li><strong>SuiStakingReserve</strong><span>Main Poolの最大15%をSUI native stakingへ配分する運用枠</span></li>
-            <li><strong>ScallopStablecoinStrategy</strong><span>Main Poolの最大15%をステーブルコイン運用として表示する戦略枠</span></li>
-            <li><strong>OperationsPool</strong><span>Verification FeeとYield Reserve利回りを受け取り、検証・インフラ費用を支払う</span></li>
-            <li><strong>MembershipPass</strong><span>保険証券ではなく、検証済み会員と受け取りAddressを示す権限</span></li>
-            <li><strong>DisasterEvent</strong><span>検証済み災害イベント。地域、種類、重大度、発生時刻を保持</span></li>
-            <li><strong>EligibilityProof</strong><span>Nautilusが署名した対象可否と支援ティア</span></li>
-            <li><strong>ReliefReceipt</strong><span>受給者に支払いが実行されたことを示すレシート</span></li>
-            <li><strong>SponsorImpactSBT</strong><span>スポンサーの支援実績を更新するDynamic SBT</span></li>
-            <li><strong>PartnerBadge</strong><span>多額または継続的な寄付を行う企業のパートナー認定</span></li>
-            <li><strong>SponsorProfile</strong><span>企業の寄付実績、支援地域、Impact Pageをまとめる紹介ページ</span></li>
-          </ul>
-        </article>
-
-        <article class="card">
-          <h3>10. 審査基準との対応</h3>
-          <ul>
-            <li><strong>Clear financial use case:</strong> 災害時の条件付き直接支援</li>
-            <li><strong>Correct asset ownership:</strong> Relief Pool、Pool Policy、支払いレシートをSui Objectとして扱う</li>
-            <li><strong>End-to-end flow:</strong> 寄付、検証、自動送金、証明更新までをデモ</li>
-            <li><strong>Novel PTB use:</strong> 証明検証と複数の金融処理を一括実行</li>
-            <li><strong>Real-world applicability:</strong> 災害支援、CSR/ESG、地域支援インフラに展開可能</li>
-          </ul>
-        </article>
-      </section>
-
-      <section class="section">
-        <h2>11. ユーザーと価値</h2>
-        <div class="grid-2">
+    <section class="section">
+      <h2>5. 支払いフロー</h2>
+      <ol class="flow">
+        <li>
           <div>
-            <h3>支援を受ける個人</h3>
-            <p>平時に地域、電話番号、位置情報、受け取りAddressを登録し、一度きりのVerification Feeを支払って検証済み会員になります。災害時に条件を満たすと支援対象になりますが、支払いは保証されません。</p>
+            <h3>スポンサーが寄付する</h3>
+            <p>寄付は Main Pool または Designated Relief Pool に入ります。</p>
           </div>
+        </li>
+        <li>
           <div>
-            <h3>企業スポンサー</h3>
-            <p>CSR・ESG・地域貢献を目的に寄付し、支援実績をDynamic SBTやImpact Pageで証明できます。共通プールに寄付して柔軟性を持たせることも、地震・洪水・地域などを指定して寄付することもできます。</p>
+            <h3>Nautilus が災害を検証する</h3>
+            <p>地震 event、発生時刻、affected cells root を検証します。</p>
           </div>
+        </li>
+        <li>
           <div>
-            <h3>個人寄付者</h3>
-            <p>寄付金がどの災害で、どの地域に、どれだけ届いたかを透明に確認できます。</p>
+            <h3>Nautilus が本人確認を検証する</h3>
+            <p>KYC または World ID の result を Membership SBT に反映します。</p>
           </div>
+        </li>
+        <li>
           <div>
-            <h3>地域パートナー</h3>
-            <p>避難所、学校、地域店舗、自治体、NPOなどが将来的に地域確認やコミュニティ証明を補助できます。</p>
+            <h3>ユーザーが Claim する</h3>
+            <p>Move が cutoff、home cell、本人確認、duplicate claim を検証します。</p>
           </div>
-        </div>
-      </section>
-
-      <section class="section sponsor-section">
-        <div class="section-heading">
-          <p class="eyebrow">Sponsor Growth Loop</p>
-          <h2>12. 企業スポンサー機能</h2>
-        </div>
-        <div class="sponsor-grid">
-          <article class="sponsor-panel">
-            <h3>企業寄付ランキング</h3>
-            <p>寄付総額、継続寄付回数、支援地域数、災害時の到達人数をもとにランキングを表示します。単なる広告枠ではなく、オンチェーン実績に基づく透明な貢献可視化にします。</p>
-            <ul>
-              <li>Total Relief Funded</li>
-              <li>Recurring Donation Streak</li>
-              <li>Regions Supported</li>
-              <li>People Reached</li>
-            </ul>
-          </article>
-
-          <article class="sponsor-panel">
-            <h3>パートナー認定</h3>
-            <p>多額の寄付、または定期的な寄付を行う企業にPartner Badgeを発行します。認定条件は公開し、スポンサーのImpact PageとDynamic SBTに反映します。</p>
-            <ul>
-              <li>Bronze Partner: 小口または単発寄付</li>
-              <li>Silver Partner: 継続寄付または複数地域支援</li>
-              <li>Gold Partner: 大口寄付または災害時即時支援</li>
-            </ul>
-          </article>
-
-          <article class="sponsor-panel">
-            <h3>企業紹介ページ</h3>
-            <p>スポンサーごとに紹介ページを生成し、寄付額、支援地域、支援回数、災害時の到達人数、Relief Receiptの集計を表示します。CSR/ESGレポートや採用広報にも使える証明ページにします。</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="section adoption-section">
-        <div class="section-heading">
-          <p class="eyebrow">Why It Gets Used</p>
-          <h2>13. ユーザー側・企業側のメリット</h2>
-        </div>
-        <div class="adoption-grid">
+        </li>
+        <li>
           <div>
-            <h3>ユーザー側</h3>
-            <ul>
-              <li>災害前に登録しておくだけで、災害時の申請負担を減らせる</li>
-              <li>個人情報をオンチェーン公開せずに支援対象であることを証明できる</li>
-              <li>寄付プールと支払い履歴が透明で、支援の信頼性を確認できる</li>
-              <li>地域変更クールダウンにより、災害後の駆け込み登録と競合しにくい</li>
-            </ul>
+            <h3>SBT owner へ支払う</h3>
+            <p>支払いと ClaimReceipt の作成を同じ流れで実行します。</p>
           </div>
-          <div>
-            <h3>企業側</h3>
-            <ul>
-              <li>支援実績をオンチェーンで証明でき、CSR/ESG資料に使いやすい</li>
-              <li>ランキング、Partner Badge、紹介ページにより広報価値がある</li>
-              <li>寄付がどの地域で何人に届いたかを追跡できる</li>
-              <li>単発寄付だけでなく、定期寄付による継続的なブランド接点を作れる</li>
-            </ul>
-          </div>
-          <div>
-            <h3>成立しやすい理由</h3>
-            <ul>
-              <li>ユーザーは一度きりのVerification Feeで災害前の備えを作れる</li>
-              <li>企業は寄付の透明性、広報、社会貢献証明を同時に得られる</li>
-              <li>運営費はVerification FeeとMain Poolの透明なYield Reserve利回りで支えられる</li>
-              <li>Sui上で資金配分、支援実績、スポンサー貢献を一体で見せられる</li>
-            </ul>
-          </div>
-        </div>
-      </section>
+        </li>
+      </ol>
+    </section>
 
-      <section class="section cards">
-        <article class="card">
-          <h3>14. 不正対策</h3>
-          <p>不正をゼロにするのではなく、不正コストを上げ、支援可否や支援額をリスクに応じて調整します。Verification Feeは大量登録や複数アカウント作成への経済的ハードルになります。登録直後、地域変更直後、災害発生後の登録は対象外または低ティアにします。</p>
-        </article>
+    <section class="section">
+      <h2>6. 二重利用への対応</h2>
+      <p>
+        KYC と World ID をまたいだ同一人物判定は、MVP では完全には行いません。
+        代わりに、登録時と Claim 時に明示的な確認を表示します。
+      </p>
+      <ul>
+        <li>他に有効な Sonari Membership SBT を持っていないこと</li>
+        <li>同じ災害で複数の Membership SBT から Claim しないこと</li>
+        <li>虚偽申告や複数 Claim は停止や返還請求の対象になり得ること</li>
+      </ul>
+      <p>この内容に対して Sui wallet 署名を求めます。</p>
+    </section>
 
-        <article class="card">
-          <h3>15. Relief Cash / Relief Credits</h3>
-          <p><strong>Relief Cash:</strong> 災害発生時に対象地域の個人へ直接送る現金・ステーブルコイン・SUIなど。</p>
-          <p><strong>Relief Credits:</strong> 通信、食料、宿泊、移動などに使える用途別クレジット。MVPではサブ機能として扱います。</p>
-        </article>
-      </section>
+    <section class="section">
+      <h2>7. MVP で作るもの</h2>
+      <ul>
+        <li>Donation Pool と透明な残高表示</li>
+        <li>Earthquake DisasterEvent の検証</li>
+        <li>KYC / World ID による Membership SBT verification</li>
+        <li>Membership SBT owner への Claim</li>
+        <li>ClaimReceipt と sponsor impact 表示</li>
+      </ul>
+    </section>
 
-      <section class="section mvp-section">
-        <h2>16. ハッカソンMVP</h2>
-        <div class="grid-2">
-          <div>
-            <h3>作るもの</h3>
-            <ul>
-              <li>個人会員登録と一度きりのVerification Fee支払い</li>
-              <li>スポンサー寄付画面</li>
-              <li>Main Poolへの寄付</li>
-              <li>Earthquake Pool / Flood Poolの指定寄付デモ</li>
-              <li>個人の地域チェックイン画面</li>
-              <li>災害トリガーデモ</li>
-              <li>Main Pool、Designated Pool、Liquid Reserve、Yield Reserve、Operations Poolの表示</li>
-              <li>70% / 15% / 15%の資金配分ダッシュボード</li>
-              <li>Event Budget Cap / Future Disaster Reserveの表示</li>
-              <li>PayoutPolicyとBand別支払額の表示</li>
-              <li>Nautilusによる災害API・適格性検証</li>
-              <li>Relief Pools on Sui</li>
-              <li>Eligibility Proof検証</li>
-              <li>PTBによるRelief Cash自動送金</li>
-              <li>Dynamic SBT / 企業ランキング / Partner Badge</li>
-              <li>スポンサー紹介ページ / Impact Page / 透明性ダッシュボード</li>
-            </ul>
-          </div>
-          <div>
-            <h3>作らないもの</h3>
-            <ul>
-              <li>専用BLEタグ</li>
-              <li>本格KYC</li>
-              <li>実災害APIの完全本番連携</li>
-              <li>本番法務対応</li>
-              <li>企業向け本格クレジット決済</li>
-              <li>実際の被災者への配布</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section class="section demo-card">
-        <h2>17. デモシナリオ</h2>
-        <ol>
-          <li>個人ユーザーが地域、電話番号、位置情報、受け取りAddressを登録し、一度きりのVerification Feeを支払う</li>
-          <li>企業スポンサーがMain Poolへ寄付する</li>
-          <li>別のスポンサーがEarthquake PoolまたはFlood Poolを指定して寄付する</li>
-          <li>指定寄付が50%指定Pool、50%Main Poolへ入ることを表示する</li>
-          <li>資金配分ダッシュボードで70% Liquid、15% SUI staking、15% Scallop strategyを表示する</li>
-          <li>Yield Reserveの利回りがOperations Poolへ入り、Nautilus実行やインフラ費用に使われることを表示する</li>
-          <li>災害APIから地震イベントを取得する</li>
-          <li>Nautilusが災害条件、対象地域、会員登録期間、地域変更クールダウンを検証する</li>
-          <li>MoveコントラクトがEligibility Proofを検証する</li>
-          <li>PayoutPolicyがBand、会員期間、リスク、Event Budget Capから支払額を計算する</li>
-          <li>PTBで対象Pool選択、Relief Cash送金、Relief Receipt発行、Sponsor Impact SBT更新を一括実行する</li>
-          <li>企業ランキング、Partner Badge、スポンサー紹介ページに寄付実績を反映する</li>
-          <li>Impact Pageで支援総額、対象地域、到達人数、スポンサー貢献、資金配分を表示する</li>
-        </ol>
-      </section>
-
-      <section class="section market-analysis">
-        <h2>18. 市場規模とSuiへのインパクト</h2>
-        <p>世界のフィランソロピー市場は年間5,000億ドルを超える巨大市場です。災害支援や緊急寄付だけでも数十億ドルから100億ドル規模の資金が動いており、企業CSR/ESGの需要が高まる中で、透明性と自動化を備えた支援インフラには大きな成長余地があります。</p>
-        <div class="grid-2">
-          <div>
-            <h3>寄付市場のポテンシャル</h3>
-            <p>Sonariは、支援の到達先と効果を可視化することで、寄付者・スポンサーの新規参加を促しやすい立ち位置にあります。企業にとっては、災害支援の透明性、社会的証明、広報価値を同時に得られる点が導入動機になります。</p>
-          </div>
-          <div>
-            <h3>SuiへのTVL増加見込み</h3>
-            <p>災害支援向け寄付プールは、従来のDeFiとは異なる実需型のTVL源です。成長シナリオでは20〜50百万ドル程度のTVL増加が見込める可能性があります。</p>
-          </div>
-        </div>
-      </section>
-
-      <section class="section quote">
-        <h2>Pitch</h2>
-        <p><strong>日本語:</strong> Sonariは、災害寄付を、Nautilusで秘匿検証された条件に応じて対象地域の人へ自動で届くProgrammable Paymentに変えるプロダクトです。指定寄付は50%を指定Pool、50%をMain Poolへ入れ、災害時は指定Poolから先に支払い、不足分をMain Poolが補填します。Main Poolは最低70%を即時支払い用に保持し、最大15%をSUI native staking、最大15%をScallop等のステーブルコイン戦略に配分できます。</p>
-        <p><strong>English:</strong> Sonari turns disaster donations into privacy-preserving programmable payments. Designated donations are split between the selected disaster pool and the Main Pool. When a verified disaster occurs, the matching pool pays first and the Main Pool acts as a backstop. At least 70% of the Main Pool stays liquid, while up to 15% can be allocated to SUI native staking and up to 15% to a Scallop-style stablecoin strategy.</p>
-        <p><strong>支払設計:</strong> 支払額は災害Band、会員登録期間、不正リスク、Pool残高に基づくPayoutPolicyで決まります。1回の災害でPoolを使い切らないようにEvent Budget CapとFuture Disaster Reserveを設定し、不足時は対象者全体に比例配分します。</p>
-      </section>
-
-      <section class="section core-message">
-        <h2>Core Message</h2>
-        <p>寄付を、もっと速く。支援を、もっと透明に。個人情報は守りながら、お金を本当に必要な人へ直接届ける。</p>
-      </section>
-    </main>
-
-    <footer>
-      <p>Sonari specification for Sui DeFi & Payments track</p>
-    </footer>
-  </div>
+    <section class="section">
+      <h2>8. MVP で作らないもの</h2>
+      <ul>
+        <li>別の外部受取先</li>
+        <li>銀行口座への送金</li>
+        <li>provider をまたぐ完全な同一人物判定</li>
+        <li>複雑な treasury strategy の実入金</li>
+        <li>本番法務運用</li>
+      </ul>
+    </section>
+  </main>
 </body>
 </html>
