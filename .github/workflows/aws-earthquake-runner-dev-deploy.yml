@@ -219,6 +219,9 @@ jobs:
           );
           NODE
 
+      # Rollback artifact contains only previous commit/artifact metadata
+      # (GitCommitSha, LambdaCodeS3Key, TeeArtifactS3Key, TeeArtifactSha256).
+      # It excludes secret ARNs, runner tokens, keystore paths, and .local content.
       - name: Upload rollback artifact
         uses: actions/upload-artifact@v4
         with:

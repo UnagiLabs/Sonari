@@ -6,9 +6,14 @@ const workflowPath = path.join(
     process.cwd(),
     ".github/workflows/aws-earthquake-runner-dev-deploy.yml",
 );
+const readmePath = path.join(process.cwd(), "infra/aws/earthquake-runner/README.md");
 
 async function readWorkflow(): Promise<string> {
     return readFile(workflowPath, "utf8");
+}
+
+async function readReadme(): Promise<string> {
+    return readFile(readmePath, "utf8");
 }
 
 function expectContainsAll(source: string, expected: readonly string[]): void {
@@ -120,6 +125,9 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         const workflow = await readWorkflow();
 
         expectContainsAll(workflow, [
+            "Rollback artifact contains only previous commit/artifact metadata",
+            "GitCommitSha, LambdaCodeS3Key, TeeArtifactS3Key, TeeArtifactSha256",
+            "excludes secret ARNs, runner tokens, keystore paths, and .local content",
             "earthquake-runner-dev-rollback",
             "actions/upload-artifact",
             "dist/aws/earthquake-runner-rollback.json",
@@ -159,5 +167,36 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         const workflow = await readWorkflow();
 
         expect(workflow).not.toContain("set -x");
+    });
+
+    it("documents post-deploy verification and rollback with sanitized metadata", async () => {
+        const readme = await readReadme();
+        const rollbackSection = readme.slice(readme.indexOf("## dev deploy の確認と rollback"));
+
+        expectContainsAll(readme, [
+            "## dev deploy の確認と rollback",
+            "aws cloudformation describe-stacks",
+            "DeployedGitCommitSha",
+            "LambdaCodeS3KeyOutput",
+            "TeeArtifactS3KeyOutput",
+            "TeeArtifactSha256Output",
+            "RunnerAutoScalingGroupName",
+            "WatcherScheduleName",
+            "WatcherLambdaName",
+            "ManualWatcherLambdaName",
+            "RunnerControlLambdaName",
+            "GitCommitSha",
+            "LambdaCodeS3Key",
+            "TeeArtifactS3Key",
+            "TeeArtifactSha256",
+            "DesiredCapacity",
+            "DISABLED",
+            "CodeSha256",
+        ]);
+        expect(rollbackSection).toContain("GitCommitSha");
+        expect(rollbackSection).toContain("leaving `GitCommitSha` stale");
+        expect(rollbackSection).not.toContain("RunnerTokenSecretArn");
+        expect(rollbackSection).not.toContain("SuiKeystoreSecretArn");
+        expect(rollbackSection).not.toContain(".local");
     });
 });
