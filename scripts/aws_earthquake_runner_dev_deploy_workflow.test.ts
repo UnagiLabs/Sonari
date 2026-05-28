@@ -63,6 +63,7 @@ describe("AWS earthquake runner dev deploy workflow", () => {
         expectContainsAll(workflow, [
             "Validate dev deployment inputs",
             "aws sts get-caller-identity",
+            "aws-actions/configure-aws-credentials@v6",
             "actual_account_id",
             "EXPECTED_AWS_ACCOUNT_ID",
             '[[ "$actual_account_id" == "$EXPECTED_AWS_ACCOUNT_ID" ]]',
