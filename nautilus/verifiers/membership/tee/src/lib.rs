@@ -199,6 +199,8 @@ mod tests {
             "provider": "kyc",
             "terms_version": 1_u64,
             "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+            "issued_at_ms": null,
+            "validity_ms": null,
             "world_id": null,
         })
     }

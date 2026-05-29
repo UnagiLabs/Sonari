@@ -811,6 +811,7 @@ version = "0.1.0"
 dependencies = [
  "bcs",
  "clap",
+ "ed25519-dalek",
  "hex",
  "reqwest",
  "serde",

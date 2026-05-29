@@ -83,7 +83,7 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
     }
 
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
-        if proof.app_id != self.app_id || proof.action != WORLD_ID_ACTION {
+        if proof.world_app_id != self.app_id || proof.action != WORLD_ID_ACTION {
             return rejected();
         }
         let request_body = match serde_json::to_vec(&WorldIdApiRequest::from(proof)) {
@@ -348,7 +348,7 @@ mod tests {
         let verifier =
             CloudWorldIdVerifier::new("https://developer.world.org", "app_staging_123").unwrap();
         let mut proof = world_id_proof();
-        proof.app_id = "app_attacker".to_owned();
+        proof.world_app_id = "app_attacker".to_owned();
 
         assert_eq!(
             verifier.verify_world_id(&proof),
@@ -475,7 +475,7 @@ mod tests {
 
     fn world_id_proof() -> WorldIdProofRequest {
         WorldIdProofRequest {
-            app_id: "app_staging_123".to_owned(),
+            world_app_id: "app_staging_123".to_owned(),
             nullifier_hash: "12345678901234567890".to_owned(),
             merkle_root: "987654321".to_owned(),
             proof: "0xproof".to_owned(),

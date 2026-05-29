@@ -133,7 +133,7 @@ fn world_id_request_matches_trusted_boundary(
     proof: &crate::WorldIdProofRequest,
     verifier: &impl WorldIdVerifier,
 ) -> Result<bool, IdentityError> {
-    if proof.app_id != verifier.expected_app_id() {
+    if proof.world_app_id != verifier.expected_app_id() {
         return Ok(false);
     }
     if proof.action != WORLD_ID_ACTION {
@@ -159,15 +159,26 @@ fn verified_output(
     issued_at_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
     let duplicate_key_hash =
-        compute_world_id_duplicate_key_hash(&proof.app_id, &proof.action, &proof.nullifier_hash)?;
+        compute_world_id_duplicate_key_hash(
+            &proof.world_app_id,
+            &proof.action,
+            &proof.nullifier_hash,
+        )?;
+    let issued_at_ms = request.issued_at_ms.unwrap_or(issued_at_ms);
     let evidence_hash = compute_identity_evidence_hash(
         IdentityProvider::WorldId,
         &duplicate_key_hash,
         &proof.verification_level,
         issued_at_ms,
     )?;
+    let validity_ms = request.validity_ms.unwrap_or(IDENTITY_RESULT_TTL_MS);
+    if validity_ms == 0 {
+        return Err(IdentityError::Request(
+            "validity_ms must be greater than 0".to_owned(),
+        ));
+    }
     let expires_at_ms = issued_at_ms
-        .checked_add(IDENTITY_RESULT_TTL_MS)
+        .checked_add(validity_ms)
         .ok_or_else(|| {
             IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
         })?;
@@ -420,7 +431,7 @@ mod tests {
     fn process_identity_rejects_noncanonical_app_id_before_signing() {
         let signer = CountingSigner::new();
         let mut request = world_id_request();
-        request.world_id.as_mut().unwrap().app_id = "app_attacker".to_owned();
+        request.world_id.as_mut().unwrap().world_app_id = "app_attacker".to_owned();
         let output = process_identity_with_verifier(
             request,
             &MockWorldIdVerifier {
@@ -579,7 +590,7 @@ mod tests {
         IdentityVerifyRequest {
             provider: IdentityProvider::WorldId,
             world_id: Some(WorldIdProofRequest {
-                app_id: "app_staging_123".to_owned(),
+                world_app_id: "app_staging_123".to_owned(),
                 nullifier_hash: "12345678901234567890".to_owned(),
                 merkle_root: "987654321".to_owned(),
                 proof: "0xproof".to_owned(),
@@ -603,6 +614,8 @@ mod tests {
             terms_version: 1,
             signed_statement_hash:
                 "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
+            issued_at_ms: None,
+            validity_ms: None,
             world_id: None,
         }
     }

@@ -20,13 +20,15 @@ pub struct IdentityVerifyRequest {
     pub terms_version: u64,
     #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub signed_statement_hash: String,
+    pub issued_at_ms: Option<u64>,
+    pub validity_ms: Option<u64>,
     pub world_id: Option<WorldIdProofRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldIdProofRequest {
-    pub app_id: String,
+    pub world_app_id: String,
     pub nullifier_hash: String,
     pub merkle_root: String,
     pub proof: String,
