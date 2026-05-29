@@ -1,6 +1,6 @@
-use crate::{IdentityError, WorldIdProofRequest};
+use crate::{IdentityError, WorldIdProofRequest, canonical_world_id_nullifier};
 use reqwest::{StatusCode, Url};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
@@ -102,6 +102,11 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
         };
 
         let status = response.status();
+        if status == StatusCode::OK {
+            let body = response.text().unwrap_or_default();
+            return classify_success_response(proof, &body);
+        }
+
         let body = if status == StatusCode::BAD_REQUEST {
             Some(response.text().unwrap_or_default())
         } else {
@@ -121,6 +126,13 @@ struct WorldIdApiRequest<'a> {
     action: &'a str,
     signal_hash: &'a str,
     max_age: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorldIdApiSuccessResponse {
+    success: bool,
+    action: String,
+    nullifier_hash: String,
 }
 
 impl<'a> From<&'a WorldIdProofRequest> for WorldIdApiRequest<'a> {
@@ -189,12 +201,32 @@ fn classify_bad_request(body: &str) -> WorldIdVerificationStatus {
     }
 }
 
+fn classify_success_response(proof: &WorldIdProofRequest, body: &str) -> WorldIdVerificationStatus {
+    let Ok(response) = serde_json::from_str::<WorldIdApiSuccessResponse>(body) else {
+        return pending_source();
+    };
+    if !response.success || response.action != proof.action {
+        return pending_source();
+    }
+    let Ok(response_nullifier) = canonical_world_id_nullifier(&response.nullifier_hash) else {
+        return pending_source();
+    };
+    let Ok(proof_nullifier) = canonical_world_id_nullifier(&proof.nullifier_hash) else {
+        return pending_source();
+    };
+    if response_nullifier != proof_nullifier {
+        return pending_source();
+    }
+
+    WorldIdVerificationStatus::Verified
+}
+
 fn classify_http_status(
     status: StatusCode,
     bad_request_body: Option<&str>,
 ) -> WorldIdVerificationStatus {
     if status.is_success() {
-        return WorldIdVerificationStatus::Verified;
+        return pending_source();
     }
     if status == StatusCode::BAD_REQUEST {
         return classify_bad_request(bad_request_body.unwrap_or(""));
@@ -233,7 +265,7 @@ mod tests {
         CloudWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
         WORLD_ID_APP_ID_ENV, WORLD_ID_MAX_AGE_SECONDS, WORLD_ID_USER_AGENT,
         WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest, WorldIdVerificationStatus,
-        WorldIdVerifier, classify_bad_request, classify_http_status,
+        WorldIdVerifier, classify_bad_request, classify_http_status, classify_success_response,
     };
     use crate::WorldIdProofRequest;
     use reqwest::StatusCode;
@@ -363,6 +395,48 @@ mod tests {
             status,
             WorldIdVerificationStatus::Rejected {
                 error_code: WORLD_ID_VERIFICATION_FAILED.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn world_id_200_success_body_must_match_proof() {
+        let proof = world_id_proof();
+        let status = classify_success_response(
+            &proof,
+            r#"{"success":true,"action":"sonari_membership_register_v1","nullifier_hash":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00"}"#,
+        );
+        assert_eq!(status, WorldIdVerificationStatus::Verified);
+
+        let mismatched_action = classify_success_response(
+            &proof,
+            r#"{"success":true,"action":"attacker_action","nullifier_hash":"12345678901234567890"}"#,
+        );
+        assert_eq!(
+            mismatched_action,
+            WorldIdVerificationStatus::PendingSource {
+                error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
+            }
+        );
+
+        let mismatched_nullifier = classify_success_response(
+            &proof,
+            r#"{"success":true,"action":"sonari_membership_register_v1","nullifier_hash":"123"}"#,
+        );
+        assert_eq!(
+            mismatched_nullifier,
+            WorldIdVerificationStatus::PendingSource {
+                error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn world_id_non_ok_success_status_is_pending_source() {
+        assert_eq!(
+            classify_http_status(StatusCode::ACCEPTED, None),
+            WorldIdVerificationStatus::PendingSource {
+                error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
             }
         );
     }
