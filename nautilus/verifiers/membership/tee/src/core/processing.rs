@@ -79,14 +79,15 @@ pub fn compute_world_id_signal_hash(
     membership_id: &str,
     signed_statement_hash: &str,
 ) -> Result<String, IdentityError> {
-    validate_lowercase_hex_32("owner", owner)?;
-    validate_lowercase_hex_32("membership_id", membership_id)?;
-    validate_lowercase_hex_32("signed_statement_hash", signed_statement_hash)?;
+    let owner = canonical_hex_32_lower("owner", owner)?;
+    let membership_id = canonical_hex_32_lower("membership_id", membership_id)?;
+    let signed_statement_hash =
+        canonical_hex_32_lower("signed_statement_hash", signed_statement_hash)?;
     let parts = [
         WORLD_ID_SIGNAL_HASH_PREFIX,
-        owner,
-        membership_id,
-        signed_statement_hash,
+        owner.as_str(),
+        membership_id.as_str(),
+        signed_statement_hash.as_str(),
     ];
     for part in parts {
         if part.is_empty() || part.contains('\0') {
@@ -144,7 +145,11 @@ fn world_id_request_matches_trusted_boundary(
         &request.signed_statement_hash,
     )?;
 
-    Ok(proof.signal_hash == expected_signal_hash)
+    let Ok(actual_signal_hash) = canonical_hex_32_lower("signal_hash", &proof.signal_hash) else {
+        return Ok(false);
+    };
+
+    Ok(actual_signal_hash == expected_signal_hash)
 }
 
 fn verified_output(
@@ -222,6 +227,21 @@ fn validate_lowercase_hex_32(field: &str, value: &str) -> Result<(), IdentityErr
         )));
     }
     Ok(())
+}
+
+fn canonical_hex_32_lower(field: &str, value: &str) -> Result<String, IdentityError> {
+    let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    else {
+        return Err(IdentityError::Request(format!(
+            "{field} must be a 0x-prefixed 32-byte hex string"
+        )));
+    };
+    let normalized = format!("0x{hex}");
+    hex_to_32(&normalized).map_err(IdentityError::from)?;
+
+    Ok(format!("0x{}", hex.to_ascii_lowercase()))
 }
 
 #[cfg(test)]
@@ -462,6 +482,37 @@ mod tests {
     }
 
     #[test]
+    fn process_identity_accepts_uppercase_hex_digits_in_signal_inputs() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.owner = upper_hex_digits(&request.owner);
+        request.membership_id = upper_hex_digits(&request.membership_id);
+        request.signed_statement_hash = upper_hex_digits(&request.signed_statement_hash);
+        request.world_id.as_mut().unwrap().signal_hash = upper_hex_digits(
+            &compute_world_id_signal_hash(
+                &request.owner,
+                &request.membership_id,
+                &request.signed_statement_hash,
+            )
+            .unwrap(),
+        );
+
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Verified);
+        assert!(output.result.is_some());
+        assert_eq!(signer.calls.get(), 1);
+    }
+
+    #[test]
     fn world_id_signal_hash_matches_fixed_formula() {
         let signal_hash = compute_world_id_signal_hash(
             "0x3333333333333333333333333333333333333333333333333333333333333333",
@@ -554,5 +605,9 @@ mod tests {
                 "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
             world_id: None,
         }
+    }
+
+    fn upper_hex_digits(value: &str) -> String {
+        format!("0x{}", value.trim_start_matches("0x").to_ascii_uppercase())
     }
 }

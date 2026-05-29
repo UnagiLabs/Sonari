@@ -1,5 +1,5 @@
 use crate::{IdentityError, WorldIdProofRequest};
-use reqwest::StatusCode;
+use reqwest::{StatusCode, Url};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -26,7 +26,7 @@ pub trait WorldIdVerifier {
 
 #[derive(Debug, Clone)]
 pub struct CloudWorldIdVerifier {
-    base_url: String,
+    base_url: Url,
     app_id: String,
     client: reqwest::blocking::Client,
 }
@@ -65,7 +65,15 @@ impl CloudWorldIdVerifier {
     }
 
     pub fn verification_url(&self) -> String {
-        format!("{}/api/v2/verify/{}", self.base_url, self.app_id)
+        let mut url = self.base_url.clone();
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .expect("HTTPS URL should support path segments");
+            segments.clear();
+            segments.extend(["api", "v2", "verify", &self.app_id]);
+        }
+        url.to_string()
     }
 }
 
@@ -129,26 +137,45 @@ impl<'a> From<&'a WorldIdProofRequest> for WorldIdApiRequest<'a> {
     }
 }
 
-fn normalize_base_url(base_url: String) -> Result<String, IdentityError> {
+fn normalize_base_url(base_url: String) -> Result<Url, IdentityError> {
     let trimmed = base_url.trim().trim_end_matches('/').to_owned();
     if trimmed.is_empty() {
         return Err(IdentityError::Request(format!(
             "{WORLD_ID_API_BASE_ENV} must be a non-empty URL"
         )));
     }
-    if !trimmed.starts_with("https://") {
+    let parsed = Url::parse(&trimmed).map_err(|error| {
+        IdentityError::Request(format!(
+            "{WORLD_ID_API_BASE_ENV} must be a valid URL: {error}"
+        ))
+    })?;
+    if parsed.scheme() != "https" {
         return Err(IdentityError::Request(format!(
             "{WORLD_ID_API_BASE_ENV} must start with https://"
         )));
     }
-    Ok(trimmed)
+    if parsed.host_str().is_none() {
+        return Err(IdentityError::Request(format!(
+            "{WORLD_ID_API_BASE_ENV} must include a host"
+        )));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(IdentityError::Request(format!(
+            "{WORLD_ID_API_BASE_ENV} must not include query or fragment"
+        )));
+    }
+    Ok(parsed)
 }
 
 fn normalize_app_id(app_id: String) -> Result<String, IdentityError> {
     let trimmed = app_id.trim().to_owned();
-    if trimmed.is_empty() || trimmed.contains('\0') {
+    if trimmed.is_empty()
+        || !trimmed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
         return Err(IdentityError::Request(format!(
-            "{WORLD_ID_APP_ID_ENV} must be a non-empty string without NUL"
+            "{WORLD_ID_APP_ID_ENV} must be a non-empty URL-safe app id"
         )));
     }
     Ok(trimmed)
@@ -264,6 +291,9 @@ mod tests {
         let error = CloudWorldIdVerifier::new("", "app_staging_123").unwrap_err();
         assert!(error.to_string().contains(WORLD_ID_API_BASE_ENV));
 
+        let error = CloudWorldIdVerifier::new("https://", "app_staging_123").unwrap_err();
+        assert!(error.to_string().contains("valid URL"));
+
         let error =
             CloudWorldIdVerifier::new("http://localhost:8080", "app_staging_123").unwrap_err();
         assert!(error.to_string().contains("https://"));
@@ -274,6 +304,10 @@ mod tests {
         let error = CloudWorldIdVerifier::new("https://developer.world.org", "").unwrap_err();
 
         assert!(error.to_string().contains(WORLD_ID_APP_ID_ENV));
+
+        let error =
+            CloudWorldIdVerifier::new("https://developer.world.org", "app/evil?x=1").unwrap_err();
+        assert!(error.to_string().contains("URL-safe app id"));
     }
 
     #[test]
