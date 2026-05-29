@@ -6,6 +6,7 @@
 
 STEP 1「AWS deploy と artifact を確認する」は完了です。
 STEP 2「Sui testnet の object 設定を確認する」も完了です。
+STEP 3「manual watcher から地震を投入する」も完了です。
 
 - ローカル worktree は編集前に `d83000d992616a56a769cdb0706acb919ee66b4e` で clean でした。
 - GitHub Actions の dev deploy run `26619377088` は success でした。
@@ -20,6 +21,9 @@ STEP 2「Sui testnet の object 設定を確認する」も完了です。
 - 新 package は `payload` module を含んでいます。
 - 新 `DisasterRegistry` を作成しました。
 - 新 `VerifierRegistry` に AWS TEE public key を登録しました。
+- manual watcher から `us6000m0xl` の fresh workflow を起動しました。
+- AWS runner は new schema の finalized result を S3 と DDB に残しました。
+- ASG は `Desired=0 / Instances=[]` に戻りました。
 
 ## 確認対象
 
@@ -37,6 +41,9 @@ STEP 2「Sui testnet の object 設定を確認する」も完了です。
 | New package ID | `0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea` |
 | DisasterRegistry ID | `0x98e90c54da1241b7ecda39dfd11365861f85429d14f0300a07063915ea654aa7` |
 | VerifierRegistry ID | `0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1` |
+| Source event ID | `us6000m0xl` |
+| Fresh runner job | `earthquake-us6000m0xl-3` |
+| Fresh result S3 key | `results/us6000m0xl/1780033873297.json` |
 
 ## 実行コマンドと結果
 
@@ -389,13 +396,177 @@ sui client \
 0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea::disaster_event::DisasterRegistry
 ```
 
+### 15. manual watcher の投入
+
+manual watcher token は Secrets Manager から取得しました。
+token の値は表示せず、report にも残していません。
+
+最初の投入では既存 terminal row が残っていました。
+
+```bash
+curl -X POST <ManualWatcherUrl> \
+  -H "Authorization: Bearer <redacted>" \
+  -H "Content-Type: application/json" \
+  --data '{"source_event_id":"us6000m0xl"}'
+```
+
+結果:
+
+```json
+{"ok":true,"workflow_started":0,"source_event_id":"us6000m0xl"}
+```
+
+DDB には古い `finalized` row がありました。
+その row は #76 前の payload shape でした。
+
+古い row の payload は次を含んでいませんでした。
+
+- `source_event_id`
+- `title`
+- `region`
+- `magnitude_x100`
+- `verified_at_ms`
+
+このため、dev 検証用に古い row を削除しました。
+削除前の row は local evidence JSON に保存しています。
+
+削除後の再投入では、過去の Step Functions 名と衝突しました。
+`earthquake-us6000m0xl-1` が既に存在したためです。
+
+failed row の `retry_count` を `2` に進めました。
+その後、attempt 3 として再投入しました。
+
+結果:
+
+```json
+{"ok":true,"workflow_started":1,"source_event_id":"us6000m0xl"}
+```
+
+### 16. Step Functions / SSM / ASG
+
+fresh workflow:
+
+```text
+arn:aws:states:ap-northeast-1:595103996064:execution:RunnerStateMachine-4UURFQ5vsBLp:earthquake-us6000m0xl-3
+```
+
+結果:
+
+| 項目 | 値 |
+| --- | --- |
+| status | `SUCCEEDED` |
+| startDate | `2026-05-29T05:49:04.170000+00:00` |
+| stopDate | `2026-05-29T05:51:45.461000+00:00` |
+| input | `{"source_event_id":"us6000m0xl","attempt":3}` |
+| output | `{"source_event_id":"us6000m0xl","attempt":3,"capacity":0}` |
+
+SSM command:
+
+| 項目 | 値 |
+| --- | --- |
+| command ID | `c702572a-e0c4-4840-b32a-118cfbaf99e9` |
+| instance ID | `i-01cbebbc88b015a03` |
+| Status | `Success` |
+| ResponseCode | `0` |
+| ExecutionStartDateTime | `2026-05-29T05:51:13.686Z` |
+| ExecutionEndDateTime | `2026-05-29T05:51:25.686Z` |
+
+ASG の最終状態:
+
+| 項目 | 値 |
+| --- | --- |
+| DesiredCapacity | `0` |
+| Instances | `[]` |
+
+### 17. DDB row と S3 result
+
+DDB row:
+
+| 項目 | 値 |
+| --- | --- |
+| status | `finalized` |
+| runner_phase | `complete` |
+| runner_attempt | `3` |
+| runner_job_id | `earthquake-us6000m0xl-3` |
+| runner_result_s3_key | `results/us6000m0xl/1780033873297.json` |
+| finalized_at_ms | `1780033904629` |
+| relayer_mode | `null` |
+| relayer_status | `null` |
+
+AWS 側 relayer env は未設定です。
+そのため `relayer_mode = null` は想定通りです。
+
+S3 result:
+
+```bash
+aws s3 cp \
+  s3://sonari-earthquake-runner-dev-runnerresultbucket-cwwjlbehqllc/results/us6000m0xl/1780033873297.json \
+  <local evidence path> \
+  --region ap-northeast-1
+```
+
+result summary:
+
+| 項目 | 値 |
+| --- | --- |
+| status | `finalized` |
+| public_key | `0xa359e982129c8bafcb05558c2e4f7e9ca0b2553710f6fd488041993d23ebdd72` |
+| signature length | `130` |
+| payload_bcs_hex length | `858` |
+| source_event_id | `us6000m0xl` |
+| title | `M 7.5 - 2024 Noto Peninsula, Japan Earthquake` |
+| region | `2024 Noto Peninsula, Japan Earthquake` |
+| magnitude_x100 | `750` |
+| raw_data_uri | `ipfs://sonari/live/us6000m0xl/raw_data_manifest.json` |
+| affected_cells_uri | `ipfs://sonari/live/us6000m0xl/affected_cells.json` |
+| affected_cell_count | `2176` |
+
+payload に含まれる主要 field:
+
+- `source_event_id`
+- `title`
+- `region`
+- `magnitude_x100`
+- `verified_at_ms`
+- `raw_data_hash`
+- `raw_data_uri`
+- `affected_cells_root`
+- `affected_cells_uri`
+- `affected_cells_data_hash`
+- `freshness_deadline_ms`
+
+これは #76 後の new schema です。
+
+### 18. AWS TEE public key の追加登録
+
+STEP 2 では、local `.local` seed から導出した public key を登録しました。
+fresh AWS result は別の public key で署名されていました。
+
+AWS result の public key:
+
+```text
+0xa359e982129c8bafcb05558c2e4f7e9ca0b2553710f6fd488041993d23ebdd72
+```
+
+この key を新 `VerifierRegistry` に追加登録しました。
+
+| 項目 | 値 |
+| --- | --- |
+| tx digest | `GLfKHC1A2d2muJFNULiRqs31NkyBc67uh8fFtcnXYo99` |
+| status | `success` |
+| verifier_family | `3` |
+| verifier_version | `1` |
+| enabled | `true` |
+| VerifierRegistry ID | `0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1` |
+
 ## Step 状態
 
 | Step | 状態 | メモ |
 | --- | --- | --- |
 | STEP 1: AWS deploy と artifact を確認する | 完了 | 本 report で evidence を記録 |
 | STEP 2: Sui testnet の object 設定を確認する | 完了 | 新 package / registry / verifier key を確定 |
-| STEP 3 以降 | 未着手 | この作業では実施しない |
+| STEP 3: manual watcher から地震を投入する | 完了 | fresh AWS result を生成 |
+| STEP 4 以降 | 未着手 | この作業では実施しない |
 
 ## 注意事項
 
@@ -403,4 +574,6 @@ sui client \
 - secret 値は report に記載していません。
 - `infra` 配下の Sui / Walrus 設定を使いました。
 - 既存 testnet package は古かったため、新 package を publish しました。
+- `us6000m0xl` の古い DDB row は dev 検証のため削除しました。
+- 削除前 row は local evidence に保存しています。
 - AWS credential や local MCP 設定は記載していません。
