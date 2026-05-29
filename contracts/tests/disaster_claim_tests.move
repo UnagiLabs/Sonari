@@ -8,7 +8,7 @@ use contracts::claim;
 use contracts::disaster_event;
 use contracts::identity_registry;
 use contracts::membership;
-use contracts::payload_v1;
+use contracts::payload;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
@@ -88,6 +88,59 @@ fun kyc_verified_member_can_claim_full_disaster_payout() {
 
     scenario.end();
     clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = claim::EClaimBandTooLow)]
+fun disaster_claim_rejects_affected_cell_below_policy_min_claim_band() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        payout_policy::set_min_claim_band_for_testing(&mut policy, 2);
+        test_scenario::return_shared(policy);
+    };
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = program::EPayoutPolicyMismatch)]
+fun disaster_claim_rejects_program_policy_mismatch() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut program = scenario.take_shared<program::Program>();
+        let designated_pool = scenario.take_shared<pools::DesignatedPool>();
+        program::set_payout_policy_id_for_testing(
+            &mut program,
+            option::some(pools::designated_pool_id(&designated_pool)),
+        );
+        test_scenario::return_shared(program);
+        test_scenario::return_shared(designated_pool);
+    };
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
 }
 
 #[test]
@@ -244,7 +297,7 @@ fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        let other_payload = payload_v1::decode_finalized(
+        let other_payload = payload::decode_finalized(
             other_event_payload_bcs(),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );
@@ -782,15 +835,15 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
+        let payout_policy_id = payout_policy::create_default_disaster_policy(scenario.ctx());
         program::create_program(
             1,
             1,
             1,
-            option::none(),
+            option::some(payout_policy_id),
             option::none(),
             scenario.ctx(),
         );
-        payout_policy::create_default_disaster_policy(scenario.ctx());
         disaster_event::create_disaster_registry(scenario.ctx());
         scenario.return_to_sender(cap);
     };
@@ -816,7 +869,7 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        let payload = payload_v1::decode_finalized(
+        let payload = payload::decode_finalized(
             finalized_payload_bcs(),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );
@@ -891,7 +944,7 @@ fun affected_leaf(): AffectedCellLeaf {
 fun proof(): vector<affected_cell::ProofStep> {
     vector[
         affected_cell::new_proof_step_left(
-            x"8c91dac6cd4c206c4d8ac7cb0a99a4b0bdd7fefdf1205f1be3e26700aa1951a4",
+            x"83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
         ),
     ]
 }
@@ -901,7 +954,7 @@ fun event_uid(): vector<u8> {
 }
 
 fun finalized_payload_bcs(): vector<u8> {
-    x"010100000000000000ab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd01030100000000f451c28c01000000b153c78c01000000b153c78c010000010206fc83f3519bc43798fb3e8a285445d3a2f267d79796d73cea1099e9de1333ad659a51caf0f12038b06e51fbff9f595663d2d4a76d530204b583582d5c896ab93a697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f7261775f646174615f6d616e69666573742e6a736f6e54d59943d5e2a17abce689271c3124d6971f42258924109da6673ab57198ca9337697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f61666665637465645f63656c6c732e6a736f6ee8f70b859ab72653f504e085728f6109885123065aefc623be0359311dcffb7d07010101010202000000000000000100489dc88c010000"
+    x"010100000000000000ab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd0103010000000c757337303030736f6e617269214d20372e31202d20536f6e61726920466978747572652045617274687175616b6515536f6e617269204669787475726520526567696f6e00f451c28c010000c60200000000000000b153c78c01000000b153c78c010000010306fc83f3519bc43798fb3e8a285445d3a2f267d79796d73cea1099e9de1333adecd638ae8aea66d2a8ee5b486c39dc8e71f9d342697549e66381397909a7b0a93a697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f7261775f646174615f6d616e69666573742e6a736f6e526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f37697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f61666665637465645f63656c6c732e6a736f6ec3bb6d3a0ba176465f91024bf73aa89c1ba45aaa4f739a93288f2cbcafdb30bc0200000000000000070101010100489dc88c010000"
 }
 
 fun other_event_payload_bcs(): vector<u8> {

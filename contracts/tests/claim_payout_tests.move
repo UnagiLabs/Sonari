@@ -102,6 +102,21 @@ fun available_usdc_saturates_at_u64_max() {
 }
 
 #[test]
+fun default_disaster_policy_min_claim_band_is_one() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    payout_policy::create_default_disaster_policy(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        assert!(payout_policy::min_claim_band(&policy) == 1);
+        test_scenario::return_shared(policy);
+    };
+
+    scenario.end();
+}
+
+#[test]
 fun quote_uses_full_band_amount_without_identity_multipliers() {
     let mut scenario = test_scenario::begin(ADMIN);
     payout_policy::create_default_disaster_policy(scenario.ctx());

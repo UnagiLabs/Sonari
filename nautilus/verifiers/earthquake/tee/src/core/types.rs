@@ -1,6 +1,6 @@
 use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, RawDataManifest, SampleProof, SignatureArtifact,
-    SourceManifest, UnsignedPayloadV1,
+    SourceManifest, UnsignedPayload,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -129,7 +129,7 @@ pub struct OracleOutput {
     pub affected_cells: Option<AffectedCellsArtifact>,
     pub expected_hashes: Option<ExpectedHashes>,
     pub sample_proof: Option<SampleProof>,
-    pub unsigned_payload: Option<UnsignedPayloadV1>,
+    pub unsigned_payload: Option<UnsignedPayload>,
     pub unsigned_bcs_payload: Option<Vec<u8>>,
     pub signature: Option<SignatureArtifact>,
 }

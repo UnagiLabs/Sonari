@@ -8,7 +8,7 @@ use tee::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
-    LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
+    LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
     PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive, SourceArchiveError,
     StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, cell_band, grid_xml_from_artifact,
     merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100, process_usgs,
@@ -60,6 +60,22 @@ fn input_with_detail_id_and_aliases(canonical_id: &str, aliases: &str) -> UsgsOr
     input
 }
 
+fn input_with_usgs_payload_metadata(
+    title: &str,
+    region: &str,
+    magnitude: serde_json::Value,
+) -> UsgsOracleInput {
+    let mut input = finalized_input();
+    let mut detail: serde_json::Value =
+        serde_json::from_slice(&input.detail_json).expect("fixture detail should be valid JSON");
+    detail["properties"]["title"] = serde_json::Value::String(title.to_owned());
+    detail["properties"]["place"] = serde_json::Value::String(region.to_owned());
+    detail["properties"]["mag"] = magnitude;
+    input.detail_json = serde_json::to_vec(&detail).expect("detail JSON should serialize");
+    input.observed_at_ms = detail_updated_at_ms(&input.detail_json);
+    input
+}
+
 fn detail_updated_at_ms(detail_json: &[u8]) -> u64 {
     serde_json::from_slice::<serde_json::Value>(detail_json)
         .expect("fixture detail should be valid JSON")
@@ -93,7 +109,6 @@ fn pins_bcs_numeric_enums_to_typescript_contract() {
 fn pins_mvp_default_contract_values() {
     assert_eq!(ORACLE_VERSION, 1);
     assert_eq!(GEO_RESOLUTION, 7);
-    assert_eq!(MIN_CLAIM_BAND, 1);
 }
 
 #[test]
@@ -103,6 +118,59 @@ fn converts_mmi_decimal_strings_to_x100_deterministically() {
     assert_eq!(mmi_decimal_to_x100("7.234").unwrap(), 723);
     assert_eq!(mmi_decimal_to_x100("7.235").unwrap(), 724);
     assert_eq!(mmi_decimal_to_x100("0.005").unwrap(), 1);
+}
+
+#[test]
+fn finalized_payload_maps_usgs_detail_fields_and_rounds_magnitude() {
+    for (magnitude, expected_x100) in [
+        (serde_json::json!(7.234), 723),
+        (serde_json::json!(7.235), 724),
+        (serde_json::json!("7.995"), 800),
+    ] {
+        let input =
+            input_with_usgs_payload_metadata("M 7.24 - Test Event", "Test Region", magnitude);
+        let verified_at_ms = input.observed_at_ms;
+        let output = process_usgs(input).expect("fixture should finalize");
+        let payload = output
+            .unsigned_payload
+            .as_ref()
+            .expect("payload should exist");
+
+        assert_eq!(payload.source_event_id, "us7000sonari");
+        assert_eq!(payload.title, "M 7.24 - Test Event");
+        assert_eq!(payload.region, "Test Region");
+        assert_eq!(payload.magnitude_x100, expected_x100);
+        assert_eq!(payload.verified_at_ms, verified_at_ms);
+        assert!(payload.freshness_deadline_ms > payload.verified_at_ms);
+    }
+}
+
+#[test]
+fn finalized_payload_rejects_malformed_current_contract_fields() {
+    for (title, region, magnitude, expected) in [
+        ("", "Test Region", serde_json::json!(7.1), "title"),
+        ("M 7.1 - Test Event", "", serde_json::json!(7.1), "region"),
+        (
+            "M 7.1 - Test Event",
+            "Test Region",
+            serde_json::json!(0.0),
+            "magnitude",
+        ),
+        (
+            "M 7.1 - Test Event",
+            "Test Region",
+            serde_json::json!(20.01),
+            "magnitude",
+        ),
+    ] {
+        let error = process_usgs(input_with_usgs_payload_metadata(title, region, magnitude))
+            .expect_err("malformed current payload fields must fail closed");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected} error, got: {error}"
+        );
+    }
 }
 
 #[test]
@@ -153,7 +221,7 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
     );
     assert_eq!(
         serde_json::to_value(output.unsigned_payload).unwrap(),
-        read_expected("unsigned_payload_v1.json")
+        read_expected("unsigned_payload.json")
     );
     assert_eq!(
         serde_json::to_value(output.expected_hashes).unwrap(),
@@ -780,6 +848,9 @@ fn selects_shakemap_products_deterministically_by_preferred_version_update_and_k
         "properties": {
             "time": 1704067200000,
             "updated": 1704151200000,
+            "mag": 7.1,
+            "title": "M 7.1 - Multi Product Fixture",
+            "place": "Multi Product Fixture Region",
             "products": {
                 "shakemap": [
                     {

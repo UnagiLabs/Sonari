@@ -68,7 +68,7 @@ usgs/<case_name>/
     ├── result.json           ← 期待される処理結果（全ケース必須）
     │
     ← finalized のみ以下が存在 →
-    ├── unsigned_payload_v1.json   ← 26フィールドのOracleペイロード
+    ├── unsigned_payload.json      ← current 28フィールドのOracleペイロード
     ├── affected_cells.json        ← 影響H3セル一覧
     ├── source_manifest.json       ← ソース記録（URL・バージョン等）
     ├── raw_data_manifest.json     ← 生データのハッシュ記録

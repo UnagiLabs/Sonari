@@ -76,7 +76,7 @@ flowchart TD
 
   merkle["ステップ 6: Merkleツリー構築<br/>leaf_hashes()<br/>merkle_root_from_leaf_hashes()"]
 
-  bcs["ステップ 7: BCSシリアライゼーション<br/>payload_bcs_bytes(unsigned_payload)<br/>PAYLOAD_V1_FIELD_ORDER の順で変換"]
+  bcs["ステップ 7: BCSシリアライゼーション<br/>payload_bcs_bytes(unsigned_payload)<br/>PAYLOAD_FIELD_ORDER の順で変換"]
 
   sign["ステップ 8: Ed25519署名<br/>signer.sign_payload(bcs_bytes)<br/>signature + public_key"]
 
@@ -226,7 +226,7 @@ SHA-256( 0x01 || 左ノード(32bytes) || 右ノード(32bytes) )
 
 BCS（Binary Canonical Serialization）はSUIブロックチェーンのデータ形式です。同じデータを常に同じバイト列に変換できる（決定論的）特性があり、署名の検証に使えます。
 
-- `payload_bcs_bytes(payload)` → `PAYLOAD_V1_FIELD_ORDER` の順でペイロードをシリアライズ
+- `payload_bcs_bytes(payload)` → `PAYLOAD_FIELD_ORDER` の順でペイロードをシリアライズ
 - `leaf_hashes(cells, event_uid_bytes)` → 各セルのBCSバイト列を計算してSHA-256ハッシュ化
 - `event_uid_bytes(hazard_type, source, event_id, occurred_at_ms)` → イベントUIDのバイト列
 
@@ -245,7 +245,7 @@ finalized（正常完了）時に生成される主要ファイル：
 | ファイル名 | 内容 |
 |---|---|
 | `result.json` | 処理結果サマリー（status, source_event_id など） |
-| `unsigned_payload_v1.json` | 26フィールドのOracleペイロード |
+| `unsigned_payload.json` | 28フィールドのOracleペイロード |
 | `affected_cells.json` | 影響H3セルの一覧 |
 | `source_manifest.json` | データソース記録 |
 | `raw_data_manifest.json` | 生データのハッシュ記録 |

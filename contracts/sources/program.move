@@ -17,6 +17,7 @@ const ECampaignBudgetAlreadyOpened: u64 = 4;
 const ECampaignDesignatedPoolRequired: u64 = 5;
 const ECampaignPoolMismatch: u64 = 6;
 const ECampaignDesignatedPoolNotConfigured: u64 = 7;
+const EPayoutPolicyMismatch: u64 = 8;
 
 public struct Program has key {
     id: UID,
@@ -166,6 +167,17 @@ public(package) fun assert_campaign_program_match(
     assert!(campaign.program_id == object::id(program), ECampaignProgramMismatch);
 }
 
+public(package) fun assert_payout_policy_matches(
+    program: &Program,
+    payout_policy_id: ID,
+) {
+    assert!(option::is_some(&program.payout_policy_id), EPayoutPolicyMismatch);
+    assert!(
+        *option::borrow(&program.payout_policy_id) == payout_policy_id,
+        EPayoutPolicyMismatch,
+    );
+}
+
 public(package) fun assert_no_effective_designated_pool(
     program: &Program,
     campaign: &Campaign,
@@ -209,6 +221,10 @@ public fun required_verifier_family(program: &Program): u8 {
     program.required_verifier_family
 }
 
+public fun payout_policy_id(program: &Program): Option<ID> {
+    program.payout_policy_id
+}
+
 public fun campaign_claim_start_ms(campaign: &Campaign): u64 {
     campaign.claim_start_ms
 }
@@ -245,6 +261,11 @@ public fun set_program_status_for_testing(program: &mut Program, status: u8) {
 #[test_only]
 public fun set_campaign_status_for_testing(campaign: &mut Campaign, status: u8) {
     campaign.status = status;
+}
+
+#[test_only]
+public fun set_payout_policy_id_for_testing(program: &mut Program, payout_policy_id: Option<ID>) {
+    program.payout_policy_id = payout_policy_id;
 }
 
 #[test_only]

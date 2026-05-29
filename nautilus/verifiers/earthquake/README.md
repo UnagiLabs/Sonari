@@ -86,7 +86,7 @@ TEE の出力は次のいずれかです。
 - `pending_source`: source または ShakeMap がまだ利用できない。
 - `pending_mmi`: source はあるが利用可能な MMI grid data がまだない。
 - `rejected`: source は検証済みだが claimable affected cells を生成できない。
-- `finalized`: affected cells root、artifact hash、BCS bytes、公開鍵、signature を含む署名済み地震オラクル v1 payload。
+- `finalized`: affected cells root、artifact hash、BCS bytes、公開鍵、signature を含む署名済み地震オラクル payload。
 
 Sui 投稿対象になるのは `finalized` 出力だけです。
 

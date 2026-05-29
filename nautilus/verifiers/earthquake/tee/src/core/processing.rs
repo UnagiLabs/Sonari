@@ -2,7 +2,7 @@ use crate::compute::geo::affected_cells_from_points;
 use crate::compute::merkle::{merkle_root_from_leaf_hashes, sample_proof};
 use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, LeafHash, RawDataEntry, RawDataManifest,
-    RawSourceContentHash, SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayloadV1,
+    RawSourceContentHash, SourceEntry, SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 use crate::core::source_archive::{SourceArchive, SourceArchiveError};
 use crate::core::types::{
@@ -19,8 +19,8 @@ use crate::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_NAME, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
     FRESHNESS_WINDOW_MS, GEO_RESOLUTION, HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100,
-    INTENSITY_SCALE_NAME, INTENT_SONARI_EARTHQUAKE_ORACLE, MIN_CLAIM_BAND,
-    ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, PRIMARY_SOURCE_USGS,
+    INTENSITY_SCALE_NAME, INTENT_SONARI_EARTHQUAKE_ORACLE, ONCHAIN_STATUS_FINALIZED,
+    ORACLE_VERSION, PRIMARY_SOURCE_USGS,
 };
 
 pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError> {
@@ -134,7 +134,7 @@ fn process_usgs_inner(
     }
 
     let event_revision = 1;
-    let observed_at_ms = input.observed_at_ms;
+    let verified_at_ms = input.observed_at_ms;
     let source_updated_at_ms = detail.properties.updated;
     let event_uid_bytes = event_uid_bytes(
         HAZARD_TYPE_EARTHQUAKE,
@@ -179,7 +179,7 @@ fn process_usgs_inner(
     let affected_cells_root =
         merkle_root_from_leaf_hashes(&leaf_hashes.iter().map(|item| item.1).collect::<Vec<_>>())
             .ok_or_else(|| OracleError::InvalidGridPoint("empty Merkle tree".to_owned()))?;
-    let max_cell_band = affected_artifact
+    let severity_band = affected_artifact
         .affected_cells
         .iter()
         .map(|cell| cell.cell_band)
@@ -187,38 +187,50 @@ fn process_usgs_inner(
         .unwrap_or(0);
 
     let freshness_deadline_ms =
-        observed_at_ms
+        verified_at_ms
             .checked_add(FRESHNESS_WINDOW_MS)
             .ok_or_else(|| {
                 OracleError::Overflow("freshness_deadline_ms exceeds u64 range".to_owned())
             })?;
 
-    let unsigned_payload = UnsignedPayloadV1 {
+    let title = detail.properties.title.clone().ok_or_else(|| {
+        OracleError::InvalidGridPoint("title is required for finalized payload".to_owned())
+    })?;
+    let region = detail.properties.region.clone().ok_or_else(|| {
+        OracleError::InvalidGridPoint("region is required for finalized payload".to_owned())
+    })?;
+    let magnitude_x100 = detail.properties.magnitude_x100.ok_or_else(|| {
+        OracleError::InvalidGridPoint("magnitude_x100 is required for finalized payload".to_owned())
+    })?;
+
+    let unsigned_payload = UnsignedPayload {
         intent: INTENT_SONARI_EARTHQUAKE_ORACLE,
         oracle_version: ORACLE_VERSION,
         event_uid: event_uid.clone(),
         hazard_type: HAZARD_TYPE_EARTHQUAKE,
         status: ONCHAIN_STATUS_FINALIZED,
         event_revision,
+        source_event_id: detail.id.clone(),
+        title,
+        region,
         occurred_at_ms: detail.properties.time,
-        observed_at_ms,
+        magnitude_x100,
+        verified_at_ms,
         source_updated_at_ms,
         primary_source: PRIMARY_SOURCE_USGS,
-        severity_band: max_cell_band,
+        severity_band,
         source_set_hash: to_hex(&source_set_hash),
         raw_data_hash: to_hex(&raw_data_hash),
         raw_data_uri: input.raw_data_uri,
         affected_cells_root: to_hex(&affected_cells_root),
         affected_cells_uri: input.affected_cells_uri,
         affected_cells_data_hash: to_hex(&affected_cells_data_hash),
+        affected_cell_count: affected_artifact.affected_cells.len() as u64,
         geo_resolution: GEO_RESOLUTION,
         cells_generation_method: CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
         cell_metric: CELL_METRIC_USGS_MMI,
         cell_aggregation: CELL_AGGREGATION_GRID_POINT_P90,
         intensity_scale: INTENSITY_SCALE_MMI_X100,
-        max_cell_band,
-        affected_cell_count: affected_artifact.affected_cells.len() as u64,
-        min_claim_band: MIN_CLAIM_BAND,
         freshness_deadline_ms,
     };
     let unsigned_bcs_payload = payload_bcs_bytes(&unsigned_payload)?;
@@ -249,11 +261,7 @@ fn process_usgs_inner(
     let sample_proof = sample_proof(&leaf_hashes_json, affected_cells_root);
 
     Ok(OracleOutput {
-        result: base_result(
-            OracleStatus::Finalized,
-            None,
-            Some("unsigned_payload_v1.json"),
-        ),
+        result: base_result(OracleStatus::Finalized, None, Some("unsigned_payload.json")),
         source_manifest: Some(source_manifest),
         raw_data_manifest: Some(raw_data_manifest),
         affected_cells: Some(affected_artifact),

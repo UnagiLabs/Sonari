@@ -29,7 +29,7 @@ flowchart TD
   input[
     入力: SignedFinalizedPayload<br/>
     status: finalized<br/>
-    payload: EarthquakeOraclePayloadV1（26フィールド）<br/>
+    payload: EarthquakeOraclePayload（28フィールド）<br/>
     payload_bcs_hex / signature / public_key
   ]
 

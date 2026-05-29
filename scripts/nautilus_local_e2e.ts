@@ -33,7 +33,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_CASE_ID = "usgs/finalized_minimal";
 const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/earthquake/fixtures";
 const LEGACY_FIXTURES_URI_DIR = "nautilus/verifiers/earthquake/fixtures";
-const DEFAULT_TARGET = "0x123::earthquake_oracle::submit_payload_v1";
+const DEFAULT_TARGET = "0x123::earthquake_oracle::submit_payload";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
@@ -466,7 +466,7 @@ async function runRustOracleCore(options: {
 
 async function readFinalizedResult(outputDir: string): Promise<SignedFinalizedPayload> {
     const payload = await readJson<Record<string, unknown>>(
-        path.join(outputDir, "unsigned_payload_v1.json"),
+        path.join(outputDir, "unsigned_payload.json"),
     );
     const hashes = await readJson<Record<string, unknown>>(
         path.join(outputDir, "expected_hashes.json"),

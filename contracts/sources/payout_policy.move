@@ -8,6 +8,7 @@ const BPS_DENOMINATOR: u64 = 10_000;
 const DEFAULT_BAND_1_USDC: u64 = 50_000_000;
 const DEFAULT_BAND_2_USDC: u64 = 150_000_000;
 const DEFAULT_BAND_3_USDC: u64 = 300_000_000;
+const DEFAULT_MIN_CLAIM_BAND: u8 = 1;
 
 const DEFAULT_POLICY_MAX_USDC: u64 = 300_000_000;
 const FUTURE_RESERVE_FLOOR_BPS: u64 = 5_000;
@@ -24,6 +25,7 @@ const EMainOnlyBudgetCannotUseDesignatedPool: u64 = 5;
 
 public struct PayoutPolicy has key {
     id: UID,
+    min_claim_band: u8,
     tier1_amount_usdc: u64,
     tier2_amount_usdc: u64,
     tier3_amount_usdc: u64,
@@ -68,9 +70,10 @@ public struct CampaignBudgetOpened has copy, drop {
     actor: address,
 }
 
-public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
+public(package) fun create_default_disaster_policy(ctx: &mut TxContext): ID {
     let policy = PayoutPolicy {
         id: object::new(ctx),
+        min_claim_band: DEFAULT_MIN_CLAIM_BAND,
         tier1_amount_usdc: DEFAULT_BAND_1_USDC,
         tier2_amount_usdc: DEFAULT_BAND_2_USDC,
         tier3_amount_usdc: DEFAULT_BAND_3_USDC,
@@ -94,6 +97,7 @@ public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
     });
 
     transfer::share_object(policy);
+    policy_id
 }
 
 public(package) fun open_campaign_budget_from_main(
@@ -265,6 +269,10 @@ public fun policy_id(policy: &PayoutPolicy): ID {
     object::id(policy)
 }
 
+public fun min_claim_band(policy: &PayoutPolicy): u8 {
+    policy.min_claim_band
+}
+
 fun tier_amount_usdc(policy: &PayoutPolicy, eligibility_tier: u8): u64 {
     if (eligibility_tier == 1) {
         policy.tier1_amount_usdc
@@ -308,4 +316,9 @@ public fun campaign_budget_opened_event_fields(
         main_backstop_budget_usdc,
         actor,
     )
+}
+
+#[test_only]
+public fun set_min_claim_band_for_testing(policy: &mut PayoutPolicy, min_claim_band: u8) {
+    policy.min_claim_band = min_claim_band;
 }

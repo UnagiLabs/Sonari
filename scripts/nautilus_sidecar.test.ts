@@ -30,7 +30,7 @@ describe("Nautilus sidecar relayer submit endpoint", () => {
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
                 input: loadFixtureRelayerSubmitInput("usgs/finalized_minimal"),
-                target: "0x123::earthquake_oracle::submit_payload_v1",
+                target: "0x123::earthquake_oracle::submit_payload",
                 registry: "0x456",
                 verifierRegistry: "0x654",
                 grpcUrl: "https://fullnode.testnet.sui.io:443",

@@ -368,7 +368,7 @@ enum TeeJsonResult {
         error_code: String,
     },
     Finalized {
-        payload: tee::UnsignedPayloadV1,
+        payload: tee::UnsignedPayload,
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
@@ -641,7 +641,7 @@ fn write_output(
     }
     if let Some(unsigned_payload) = &output.unsigned_payload {
         fs::write(
-            output_dir.join("unsigned_payload_v1.json"),
+            output_dir.join("unsigned_payload.json"),
             canonical_json_bytes(unsigned_payload)?,
         )?;
     }
