@@ -70,7 +70,6 @@ impl CloudWorldIdVerifier {
             let mut segments = url
                 .path_segments_mut()
                 .expect("HTTPS URL should support path segments");
-            segments.clear();
             segments.extend(["api", "v2", "verify", &self.app_id]);
         }
         url.to_string()
@@ -199,18 +198,11 @@ fn classify_http_status(
     if status == StatusCode::BAD_REQUEST {
         return classify_bad_request(bad_request_body.unwrap_or(""));
     }
-    if status.is_server_error() || is_retryable_client_status(status) {
+    if status.is_server_error() || status.is_client_error() {
         return pending_source();
     }
 
     rejected()
-}
-
-fn is_retryable_client_status(status: StatusCode) -> bool {
-    matches!(
-        status,
-        StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
-    )
 }
 
 fn world_id_error_code(body: &str) -> Option<String> {
@@ -273,11 +265,19 @@ mod tests {
     #[test]
     fn world_id_verifier_builds_required_verify_url() {
         let verifier =
-            CloudWorldIdVerifier::new("https://developer.world.org/", "app_staging_123").unwrap();
+            CloudWorldIdVerifier::new("https://developer.world.org", "app_staging_123").unwrap();
 
         assert_eq!(
             verifier.verification_url(),
             "https://developer.world.org/api/v2/verify/app_staging_123"
+        );
+
+        let verifier =
+            CloudWorldIdVerifier::new("https://proxy.example.com/world-id", "app_staging_123")
+                .unwrap();
+        assert_eq!(
+            verifier.verification_url(),
+            "https://proxy.example.com/world-id/api/v2/verify/app_staging_123"
         );
     }
 
@@ -368,7 +368,13 @@ mod tests {
 
     #[test]
     fn world_id_retryable_http_statuses_are_pending_source() {
-        for status in [StatusCode::REQUEST_TIMEOUT, StatusCode::TOO_MANY_REQUESTS] {
+        for status in [
+            StatusCode::REQUEST_TIMEOUT,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::NOT_FOUND,
+            StatusCode::TOO_MANY_REQUESTS,
+        ] {
             assert_eq!(
                 classify_http_status(status, None),
                 WorldIdVerificationStatus::PendingSource {
