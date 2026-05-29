@@ -58,7 +58,7 @@ export interface RelayerSubmitClient {
     signAndExecuteTransaction(input: {
         transaction: unknown;
         signer: RelayerSigner;
-        include: { effects: true; events: true };
+        include: { effects: true; events: true; objectTypes: true };
     }): Promise<RelayerExecutionResponse>;
 }
 
@@ -69,11 +69,14 @@ export interface RelayerTransactionResult {
     status?: RelayerExecutionStatus;
     effects?: RelayerTransactionEffects;
     events?: RelayerTransactionEvent[];
+    objectTypes?: Record<string, string>;
 }
 
 export interface RelayerTransactionEvent {
     type?: string;
+    eventType?: string;
     parsedJson?: unknown;
+    json?: unknown;
 }
 
 export type RelayerExecutionStatus =
@@ -97,6 +100,7 @@ interface NormalizedTransactionResult {
     digest?: string;
     effects: RelayerTransactionEffects;
     events?: RelayerTransactionEvent[];
+    objectTypes?: Record<string, string>;
 }
 
 export interface ParsedRelayerSubmitInput {
@@ -293,7 +297,7 @@ export async function submitRelayerPayload(
         const response = await client.signAndExecuteTransaction({
             transaction,
             signer: config.signer,
-            include: { effects: true, events: true },
+            include: { effects: true, events: true, objectTypes: true },
         });
         const result = normalizeTransactionResult(response);
         if (!result.ok) {
@@ -508,6 +512,9 @@ function normalizeTransactionResult(
         if (Array.isArray(transaction.events)) {
             value.events = transaction.events.filter(isRecord);
         }
+        if (isStringRecord(transaction.objectTypes)) {
+            value.objectTypes = transaction.objectTypes;
+        }
 
         return { ok: true, value };
     }
@@ -568,7 +575,7 @@ function readCreatedDisasterEventObjectId(result: NormalizedTransactionResult): 
             if (!isDisasterEventCreatedEvent(event)) {
                 return undefined;
             }
-            return readObjectIdFromParsedJson(event.parsedJson, "disaster_event_id");
+            return readObjectIdFromParsedJson(readEventJson(event), "disaster_event_id");
         })
         .find(isNonEmptyString);
     if (eventObjectId !== undefined) {
@@ -580,14 +587,25 @@ function readCreatedDisasterEventObjectId(result: NormalizedTransactionResult): 
         return undefined;
     }
 
-    return changedObjects.map(readCreatedObjectId).find(isNonEmptyString);
+    const createdObjectIds = changedObjects.map(readCreatedObjectId).filter(isNonEmptyString);
+    if (result.objectTypes !== undefined) {
+        return createdObjectIds.find((objectId) =>
+            result.objectTypes?.[objectId]?.endsWith("::disaster_event::DisasterEvent"),
+        );
+    }
+    return createdObjectIds.length === 1 ? createdObjectIds[0] : undefined;
 }
 
 function isDisasterEventCreatedEvent(event: RelayerTransactionEvent): boolean {
+    const eventType = typeof event.eventType === "string" ? event.eventType : event.type;
     return (
-        typeof event.type === "string" &&
-        event.type.endsWith("::disaster_event::DisasterEventCreated")
+        typeof eventType === "string" &&
+        eventType.endsWith("::disaster_event::DisasterEventCreated")
     );
+}
+
+function readEventJson(event: RelayerTransactionEvent): unknown {
+    return event.json ?? event.parsedJson;
 }
 
 function readObjectIdFromParsedJson(input: unknown, key: string): string | undefined {
@@ -608,9 +626,7 @@ function readCreatedObjectId(input: unknown): string | undefined {
     if (!isRecord(input)) {
         return undefined;
     }
-    const outputState = input.outputState;
-    const kind = isRecord(outputState) ? outputState.$kind : undefined;
-    if (kind !== "ObjectWrite") {
+    if (input.outputState !== "ObjectWrite" || input.idOperation !== "Created") {
         return undefined;
     }
     return typeof input.objectId === "string" ? input.objectId : undefined;
@@ -618,6 +634,13 @@ function readCreatedObjectId(input: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+    return (
+        isRecord(value) &&
+        Object.values(value).every((entry): entry is string => typeof entry === "string")
+    );
 }
 
 function cloneMoveArguments(

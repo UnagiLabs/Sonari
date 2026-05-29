@@ -56,8 +56,8 @@ function successfulTransactionResponse(effects = { status: { success: true, erro
             effects,
             events: [
                 {
-                    type: "0x123::disaster_event::DisasterEventCreated",
-                    parsedJson: {
+                    eventType: "0x123::disaster_event::DisasterEventCreated",
+                    json: {
                         disaster_event_id: "0xdisaster",
                     },
                 },
@@ -417,12 +417,12 @@ describe("relayer submit execution", () => {
             {
                 transaction,
                 signer,
-                include: { effects: true, events: true },
+                include: { effects: true, events: true, objectTypes: true },
             },
         ]);
     });
 
-    it("falls back to effects created objects when submit events do not contain the object ID", async () => {
+    it("falls back to typed effects created objects when events do not contain the object ID", async () => {
         const signer = Ed25519Keypair.generate();
 
         await expect(
@@ -444,11 +444,15 @@ describe("relayer submit execution", () => {
                                 changedObjects: [
                                     {
                                         objectId: "0xfallback",
-                                        outputState: { $kind: "ObjectWrite" },
+                                        outputState: "ObjectWrite",
+                                        idOperation: "Created",
                                     },
                                 ],
                             },
                             events: [],
+                            objectTypes: {
+                                "0xfallback": "0x123::disaster_event::DisasterEvent",
+                            },
                         },
                     }),
                 },
