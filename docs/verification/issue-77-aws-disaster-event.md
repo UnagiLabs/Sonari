@@ -7,6 +7,7 @@
 STEP 1「AWS deploy と artifact を確認する」は完了です。
 STEP 2「Sui testnet の object 設定を確認する」も完了です。
 STEP 3「manual watcher から地震を投入する」も完了です。
+STEP 4「relayer request と dry-run を確認する」も完了です。
 
 - ローカル worktree は編集前に `d83000d992616a56a769cdb0706acb919ee66b4e` で clean でした。
 - GitHub Actions の dev deploy run `26619377088` は success でした。
@@ -23,6 +24,8 @@ STEP 3「manual watcher から地震を投入する」も完了です。
 - 新 `VerifierRegistry` に AWS TEE public key を登録しました。
 - manual watcher から `us6000m0xl` の fresh workflow を起動しました。
 - AWS runner は new schema の finalized result を S3 と DDB に残しました。
+- relayer は AWS result から Move call request を組み立てられました。
+- Sui testnet の dry-run は `success` でした。
 - ASG は `Desired=0 / Instances=[]` に戻りました。
 
 ## 確認対象
@@ -44,6 +47,7 @@ STEP 3「manual watcher から地震を投入する」も完了です。
 | Source event ID | `us6000m0xl` |
 | Fresh runner job | `earthquake-us6000m0xl-3` |
 | Fresh result S3 key | `results/us6000m0xl/1780033873297.json` |
+| Relayer target | `0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea::disaster_event::create_from_signed_payload` |
 
 ## 実行コマンドと結果
 
@@ -559,6 +563,73 @@ AWS result の public key:
 | enabled | `true` |
 | VerifierRegistry ID | `0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1` |
 
+### 19. relayer build-request
+
+fresh AWS result を relayer input として使いました。
+
+```bash
+pnpm --silent --filter @sonari/earthquake-relayer cli -- build-request \
+  --input <local evidence path>/us6000m0xl-fresh-result.json \
+  --target 0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea::disaster_event::create_from_signed_payload \
+  --registry 0x98e90c54da1241b7ecda39dfd11365861f85429d14f0300a07063915ea654aa7 \
+  --verifier-registry 0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1
+```
+
+結果:
+
+| 項目 | 値 |
+| --- | --- |
+| ok | `true` |
+| clock | `0x0000000000000000000000000000000000000000000000000000000000000006` |
+| payload BCS byte length | `428` |
+| signature byte length | `64` |
+| public key byte length | `32` |
+
+relayer request は次の object を引数に含みます。
+
+| 引数 | 値 |
+| --- | --- |
+| DisasterRegistry | `0x98e90c54da1241b7ecda39dfd11365861f85429d14f0300a07063915ea654aa7` |
+| VerifierRegistry | `0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1` |
+| Clock | `0x0000000000000000000000000000000000000000000000000000000000000006` |
+
+### 20. relayer dry-run
+
+`infra` 配下の Sui config と同じ testnet fullnode を使いました。
+
+```bash
+pnpm --silent --filter @sonari/earthquake-relayer cli -- dry-run \
+  --input <local evidence path>/us6000m0xl-fresh-result.json \
+  --grpc-url https://fullnode.testnet.sui.io:443 \
+  --target 0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea::disaster_event::create_from_signed_payload \
+  --registry 0x98e90c54da1241b7ecda39dfd11365861f85429d14f0300a07063915ea654aa7 \
+  --verifier-registry 0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1 \
+  --sender 0x61771ffa71b0d4fc02ffb63d975f78573f844157b38a816c19bcce5b275c108b
+```
+
+結果:
+
+| 項目 | 値 |
+| --- | --- |
+| ok | `true` |
+| status | `success` |
+| transactionDigest | `6bzoQjgLHjxptRfqF2DpJ5jZSbgv7p19Y57qot5oeAxe` |
+| transaction byte length | `918` |
+| computationCost | `1000000` |
+| storageCost | `16028400` |
+| storageRebate | `2445300` |
+| nonRefundableStorageFee | `24700` |
+
+dry-run の created object:
+
+| object ID | メモ |
+| --- | --- |
+| `0xc842543c949f407242a324b831fc7e50441915ce722a313eaa7aa32a86de44ba` | dry-run only |
+| `0xd472b24155fd8ac4d21fe361b500af073a991fb7c5acc42e70128f1aec849555` | dry-run only |
+| `0xf76eeeb12e7f63a7cd1bbad689fde3a7020ffd709104d35bf74f3d634dbf06d7` | dry-run only |
+
+dry-run のため、これらの object は testnet に保存されていません。
+
 ## Step 状態
 
 | Step | 状態 | メモ |
@@ -566,7 +637,8 @@ AWS result の public key:
 | STEP 1: AWS deploy と artifact を確認する | 完了 | 本 report で evidence を記録 |
 | STEP 2: Sui testnet の object 設定を確認する | 完了 | 新 package / registry / verifier key を確定 |
 | STEP 3: manual watcher から地震を投入する | 完了 | fresh AWS result を生成 |
-| STEP 4 以降 | 未着手 | この作業では実施しない |
+| STEP 4: relayer request と dry-run を確認する | 完了 | request 作成と Sui dry-run が成功 |
+| STEP 5 以降 | 未着手 | submit と object 確認は次に実施 |
 
 ## 注意事項
 
