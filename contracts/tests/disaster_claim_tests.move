@@ -114,6 +114,35 @@ fun disaster_claim_rejects_affected_cell_below_policy_min_claim_band() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = program::EPayoutPolicyMismatch)]
+fun disaster_claim_rejects_program_policy_mismatch() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut program = scenario.take_shared<program::Program>();
+        let designated_pool = scenario.take_shared<pools::DesignatedPool>();
+        program::set_payout_policy_id_for_testing(
+            &mut program,
+            option::some(pools::designated_pool_id(&designated_pool)),
+        );
+        test_scenario::return_shared(program);
+        test_scenario::return_shared(designated_pool);
+    };
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
 #[test]
 fun world_id_verified_member_can_claim_full_disaster_payout() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
@@ -806,15 +835,15 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
+        let payout_policy_id = payout_policy::create_default_disaster_policy(scenario.ctx());
         program::create_program(
             1,
             1,
             1,
-            option::none(),
+            option::some(payout_policy_id),
             option::none(),
             scenario.ctx(),
         );
-        payout_policy::create_default_disaster_policy(scenario.ctx());
         disaster_event::create_disaster_registry(scenario.ctx());
         scenario.return_to_sender(cap);
     };

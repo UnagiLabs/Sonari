@@ -170,6 +170,7 @@ public(package) fun claim_disaster_usdc(
     let now_ms = clock::timestamp_ms(clock);
     program::assert_claim_precheck(program, campaign);
     program::assert_claim_window(campaign, now_ms);
+    program::assert_payout_policy_matches(program, payout_policy::policy_id(policy));
     payout_policy::assert_budget_matches(budget, program, campaign);
     payout_policy::assert_designated_pool_matches(budget, designated_pool);
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);

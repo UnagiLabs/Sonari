@@ -199,11 +199,11 @@ DisasterEvent affected_cells_root
 - Earthquake Oracle payload は署名済みである。
 - `AffectedCellLeaf` は `affected_cells_root` に含まれる。
 - leaf の h3 index は `MembershipSBT.home_cell` と一致する。
-- leaf の band は PayoutPolicy.min_claim_band 以上である。
+- leaf の band は Program に紐付く PayoutPolicy.min_claim_band 以上である。
 - Membership SBT の作成時刻と居住セル登録時刻は cutoff より前である。
 - Membership SBT は本人確認済みである。
 
-Earthquake Oracle payload の BCS field order、schema、golden vector は current contract として扱う。Claim に必要な minimum band は payload や DisasterEvent ではなく PayoutPolicy.min_claim_band で管理する。
+Earthquake Oracle payload の BCS field order、schema、golden vector は current contract として扱う。Move 側も schema と同じ freshness window（verified_at_ms + 21,600,000ms）を検証する。Claim に必要な minimum band は payload や DisasterEvent ではなく、Program に紐付く PayoutPolicy.min_claim_band で管理する。
 
 ## 9. External API surface
 

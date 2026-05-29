@@ -310,6 +310,24 @@ fun freshness_deadline_must_be_after_verified_at() {
     );
 }
 
+#[test, expected_failure(abort_code = payload::EInvalidFreshnessDeadline)]
+fun freshness_deadline_must_match_current_window() {
+    payload::decode_finalized(
+        current_payload_bcs(
+            b"us7000sonari",
+            b"M 7.1 - Sonari Fixture Earthquake",
+            b"Sonari Fixture Region",
+            raw_data_uri(),
+            affected_cells_uri(),
+            EVENT_REVISION,
+            MAGNITUDE_X100,
+            2,
+            FRESHNESS_DEADLINE_MS + 1,
+        ),
+        NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+    );
+}
+
 #[test, expected_failure(abort_code = payload::ETrailingBytes)]
 fun trailing_payload_bytes_are_rejected() {
     let mut payload = finalized_payload_bcs();

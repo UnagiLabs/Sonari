@@ -17,6 +17,8 @@ const MAX_REGION_BYTES: u64 = 160;
 const MAX_URI_BYTES: u64 = 512;
 const MAX_MAGNITUDE_X100: u64 = 2000;
 const MAX_AFFECTED_CELL_COUNT: u64 = 1_000_000;
+const FRESHNESS_WINDOW_MS: u64 = 21_600_000;
+const U64_MAX: u64 = 18_446_744_073_709_551_615;
 
 const EInvalidIntent: u64 = 0;
 const EUnsupportedVersion: u64 = 1;
@@ -140,8 +142,9 @@ fun assert_finalized(payload: &Payload, now_ms: u64) {
         EInvalidAffectedCellCount,
     );
     assert!(payload.geo_resolution == 7, EUnsupportedGeoResolution);
+    assert!(payload.verified_at_ms <= U64_MAX - FRESHNESS_WINDOW_MS, EInvalidFreshnessDeadline);
     assert!(
-        payload.freshness_deadline_ms > payload.verified_at_ms,
+        payload.freshness_deadline_ms == payload.verified_at_ms + FRESHNESS_WINDOW_MS,
         EInvalidFreshnessDeadline,
     );
     assert!(payload.freshness_deadline_ms > now_ms, EExpiredFreshness);

@@ -70,7 +70,7 @@ public struct CampaignBudgetOpened has copy, drop {
     actor: address,
 }
 
-public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
+public(package) fun create_default_disaster_policy(ctx: &mut TxContext): ID {
     let policy = PayoutPolicy {
         id: object::new(ctx),
         min_claim_band: DEFAULT_MIN_CLAIM_BAND,
@@ -97,6 +97,7 @@ public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
     });
 
     transfer::share_object(policy);
+    policy_id
 }
 
 public(package) fun open_campaign_budget_from_main(
