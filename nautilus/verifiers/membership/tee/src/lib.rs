@@ -1,12 +1,20 @@
 pub mod core;
 pub mod encoding;
 pub mod error;
+pub mod verify;
 
 pub use core::duplicate_key::{
     compute_kyc_duplicate_key_hash, compute_world_id_duplicate_key_hash,
 };
-pub use core::types::{IdentityProvider, IdentityTeeResult, IdentityVerifyRequest};
+pub use core::types::{
+    IdentityProvider, IdentityTeeResult, IdentityVerifyRequest, WorldIdProofRequest,
+};
 pub use error::IdentityError;
+pub use verify::kyc::{KYC_UNSUPPORTED, KycVerificationStatus, verify_kyc_unsupported};
+pub use verify::world_id::{
+    CloudWorldIdVerifier, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
+    WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifier,
+};
 
 pub const INTENT: &str = "SONARI_IDENTITY_VERIFICATION_V1";
 pub const VERIFIER_FAMILY: &str = "identity";
@@ -183,9 +191,9 @@ mod tests {
             "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
             "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
             "provider": "kyc",
-            "evidence_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
             "terms_version": 1_u64,
             "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+            "world_id": null,
         })
     }
 }

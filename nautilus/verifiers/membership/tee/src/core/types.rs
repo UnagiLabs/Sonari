@@ -17,11 +17,22 @@ pub struct IdentityVerifyRequest {
     #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub owner: String,
     pub provider: IdentityProvider,
-    #[serde(deserialize_with = "deserialize_hex_32_string")]
-    pub evidence_hash: String,
     pub terms_version: u64,
     #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub signed_statement_hash: String,
+    pub world_id: Option<WorldIdProofRequest>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldIdProofRequest {
+    pub app_id: String,
+    pub nullifier_hash: String,
+    pub merkle_root: String,
+    pub proof: String,
+    pub verification_level: String,
+    pub action: String,
+    pub signal_hash: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
