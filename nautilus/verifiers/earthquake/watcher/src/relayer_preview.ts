@@ -1,7 +1,12 @@
 import {
     buildRelayerRequestPreview,
     type RelayerRequestPreview as DirectRelayerRequestPreview,
+    type RelayerResult,
+    type RelayerSigner,
+    type RelayerSubmitConfig,
+    type RelayerSubmitSuccess,
     dryRunRelayerSubmit,
+    submitRelayerPayload,
     type SuiNetwork,
 } from "@sonari/earthquake-relayer";
 import {
@@ -35,6 +40,7 @@ export interface RelayerSuccess {
     mode: RelayerMode;
     request: RelayerRequestPreview;
     digest?: string;
+    objectId?: string;
 }
 
 export type RelayerRunResult =
@@ -66,6 +72,13 @@ export interface DirectRelayerConfig {
     network?: SuiNetwork;
     grpcUrl?: string;
     senderAddress?: string;
+    allowSubmit?: boolean;
+    configurationError?: string;
+    loadSigner?: () => Promise<RelayerSigner>;
+    submitPayload?: (
+        input: unknown,
+        config: RelayerSubmitConfig,
+    ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
 }
 
 type Fetcher = typeof fetch;
@@ -170,6 +183,9 @@ export class DirectRelayerAdapter implements RelayerAdapter {
             registry: this.config.registry,
             verifierRegistry: this.config.verifierRegistry,
         };
+        if (this.config.configurationError !== undefined) {
+            return relayerSubmitFailed(this.config.configurationError);
+        }
         if (this.mode === "preview") {
             const result = buildRelayerRequestPreview(validation.value, requestConfig);
             return result.ok
@@ -206,7 +222,40 @@ export class DirectRelayerAdapter implements RelayerAdapter {
                   }
                 : result;
         }
-        return relayerSubmitFailed("submit signer is not configured in the AWS Lambda runner");
+        if (this.config.allowSubmit !== true) {
+            return relayerSubmitFailed("submit requires RELAYER_ALLOW_SUBMIT=true");
+        }
+        if (this.config.network === undefined || this.config.grpcUrl === undefined) {
+            return relayerSubmitFailed("submit requires network and grpcUrl");
+        }
+        if (this.config.loadSigner === undefined) {
+            return relayerSubmitFailed("submit requires RELAYER_SIGNER_SECRET_ARN");
+        }
+        try {
+            const signer = await this.config.loadSigner();
+            const submit = this.config.submitPayload ?? submitRelayerPayload;
+            const result = await submit(validation.value, {
+                ...requestConfig,
+                network: this.config.network,
+                grpcUrl: this.config.grpcUrl,
+                signer,
+            });
+            return result.ok
+                ? {
+                      ok: true,
+                      value: {
+                          mode: this.mode,
+                          request: normalizeDirectRelayerRequest(result.value.request),
+                          ...(result.value.digest === undefined
+                              ? {}
+                              : { digest: result.value.digest }),
+                          objectId: result.value.objectId,
+                      },
+                  }
+                : result;
+        } catch (error) {
+            return relayerSubmitFailed(errorMessage(error));
+        }
     }
 }
 

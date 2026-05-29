@@ -11,6 +11,8 @@ import {
     SendCommandCommand,
     SSMClient,
 } from "@aws-sdk/client-ssm";
+import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import { createEd25519SuiSignerFromPrivateKey, type SuiNetwork } from "@sonari/earthquake-relayer";
 import {
     ERROR_CODES,
     type OracleErrorCode,
@@ -33,8 +35,12 @@ export interface RunnerWorkflowConfig {
         target: string;
         registry: string;
         verifierRegistry: string;
+        network?: SuiNetwork;
         grpcUrl?: string;
         senderAddress?: string;
+        allowSubmit?: boolean;
+        configurationError?: string;
+        loadSigner?: () => Promise<ReturnType<typeof createEd25519SuiSignerFromPrivateKey>>;
     };
 }
 
@@ -66,6 +72,10 @@ export interface SsmClientLike {
 
 export interface S3ClientLike {
     getObjectText(input: { bucket: string; key: string }): Promise<string>;
+}
+
+export interface RelayerSignerSecretReader {
+    getSecretString(secretArn: string): Promise<string>;
 }
 
 export type RunnerControlEvent =
@@ -559,8 +569,21 @@ class AwsS3Client implements S3ClientLike {
     }
 }
 
+class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
+    private readonly client = new SecretsManagerClient({});
+
+    async getSecretString(secretArn: string): Promise<string> {
+        const result = await this.client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+        const secret = result.SecretString?.trim();
+        if (secret === undefined || secret.length === 0) {
+            throw new Error(`${secretArn} did not contain SecretString`);
+        }
+        return secret;
+    }
+}
+
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
-    const relayer = readRelayerConfigFromEnv();
+    const relayer = readRelayerConfigFromEnv(new AwsRelayerSignerSecretReader());
     const config: RunnerWorkflowConfig = {
         autoScalingGroupName: requiredEnv("RUNNER_ASG_NAME"),
         resultBucket: requiredEnv("RESULT_BUCKET"),
@@ -895,7 +918,9 @@ function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | 
     return new DirectRelayerAdapter(config.relayer);
 }
 
-function readRelayerConfigFromEnv(): RunnerWorkflowConfig["relayer"] {
+export function readRelayerConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): RunnerWorkflowConfig["relayer"] {
     const mode = process.env.RELAYER_MODE;
     if (mode === undefined || mode.length === 0) {
         return undefined;
@@ -909,13 +934,35 @@ function readRelayerConfigFromEnv(): RunnerWorkflowConfig["relayer"] {
         registry: requiredEnv("RELAYER_REGISTRY"),
         verifierRegistry: requiredEnv("RELAYER_VERIFIER_REGISTRY"),
     };
+    if (mode === "dry_run" || mode === "submit") {
+        const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+        if (network === undefined) {
+            config.configurationError = "RELAYER_NETWORK is required";
+        } else {
+            config.network = network;
+        }
+    }
     if (process.env.RELAYER_GRPC_URL !== undefined) {
         config.grpcUrl = process.env.RELAYER_GRPC_URL;
     }
     if (process.env.RELAYER_SENDER_ADDRESS !== undefined) {
         config.senderAddress = process.env.RELAYER_SENDER_ADDRESS;
     }
+    if (mode === "submit") {
+        config.allowSubmit = process.env.RELAYER_ALLOW_SUBMIT === "true";
+        const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+        if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+            config.loadSigner = async () =>
+                createEd25519SuiSignerFromPrivateKey(
+                    await secretReader.getSecretString(signerSecretArn),
+                );
+        }
+    }
     return config;
+}
+
+function readSuiNetwork(value: string | undefined): SuiNetwork | undefined {
+    return value === "mainnet" || value === "testnet" || value === "devnet" ? value : undefined;
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {
