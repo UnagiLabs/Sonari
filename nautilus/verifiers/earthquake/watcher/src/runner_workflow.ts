@@ -5,13 +5,13 @@ import {
 } from "@aws-sdk/client-auto-scaling";
 import { DescribeInstancesCommand, EC2Client } from "@aws-sdk/client-ec2";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import {
     DescribeInstanceInformationCommand,
     GetCommandInvocationCommand,
     SendCommandCommand,
     SSMClient,
 } from "@aws-sdk/client-ssm";
-import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import {
     createEd25519SuiSignerFromPrivateKey,
     type RelayerResult,

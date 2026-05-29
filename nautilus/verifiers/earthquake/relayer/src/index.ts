@@ -562,9 +562,7 @@ function readExecutionErrorMessage(value: unknown): string | undefined {
     return undefined;
 }
 
-function readCreatedDisasterEventObjectId(
-    result: NormalizedTransactionResult,
-): string | undefined {
+function readCreatedDisasterEventObjectId(result: NormalizedTransactionResult): string | undefined {
     const eventObjectId = result.events
         ?.map((event) => {
             if (!isDisasterEventCreatedEvent(event)) {

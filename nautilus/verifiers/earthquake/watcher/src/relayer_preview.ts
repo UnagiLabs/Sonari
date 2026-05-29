@@ -1,13 +1,13 @@
 import {
     buildRelayerRequestPreview,
     type RelayerRequestPreview as DirectRelayerRequestPreview,
+    dryRunRelayerSubmit,
     type RelayerResult,
     type RelayerSigner,
     type RelayerSubmitConfig,
     type RelayerSubmitSuccess,
-    dryRunRelayerSubmit,
-    submitRelayerPayload,
     type SuiNetwork,
+    submitRelayerPayload,
 } from "@sonari/earthquake-relayer";
 import {
     type OracleErrorCode,

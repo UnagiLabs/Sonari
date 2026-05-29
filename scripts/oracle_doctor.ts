@@ -32,9 +32,7 @@ export async function runOracleDoctor(
     checks.push(checkRelayerMode(env.RELAYER_MODE));
     checks.push(checkRelayerNetwork(env.RELAYER_NETWORK, env.RELAYER_MODE));
     checks.push(checkBooleanFlag("RELAYER_ALLOW_SUBMIT", env.RELAYER_ALLOW_SUBMIT));
-    checks.push(
-        checkRelayerGrpcUrl(env.RELAYER_GRPC_URL, env.RELAYER_NETWORK, env.RELAYER_MODE),
-    );
+    checks.push(checkRelayerGrpcUrl(env.RELAYER_GRPC_URL, env.RELAYER_NETWORK, env.RELAYER_MODE));
     checks.push(
         checkRequiredForMode(
             "RELAYER_SENDER_ADDRESS",
@@ -43,11 +41,7 @@ export async function runOracleDoctor(
         ),
     );
     checks.push(
-        checkSubmitGuard(
-            env.RELAYER_MODE,
-            env.RELAYER_ALLOW_SUBMIT,
-            env.RELAYER_SIGNER_SECRET_ARN,
-        ),
+        checkSubmitGuard(env.RELAYER_MODE, env.RELAYER_ALLOW_SUBMIT, env.RELAYER_SIGNER_SECRET_ARN),
     );
     checks.push(checkOptionalSecretPair("MANUAL_SUBMIT_TOKEN", env.MANUAL_SUBMIT_TOKEN));
     checks.push(checkOptionalSecretPair("RUNNER_TOKEN_SECRET_ARN", env.RUNNER_TOKEN_SECRET_ARN));

@@ -203,7 +203,7 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(template).toContain("- testnet");
         expect(template).toContain("- devnet");
         expect(template).toContain("RelayerGrpcUrl:");
-        expect(template).toContain("Default: \"\"");
+        expect(template).toContain('Default: ""');
         expect(template).toContain("RELAYER_MODE: !Ref RelayerMode");
         expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
         expect(template).toContain("RELAYER_TARGET: !Ref RelayerTarget");
@@ -219,7 +219,7 @@ describe("AWS earthquake runner CloudFormation template", () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).toContain("HasRelayerSignerSecretArn:");
-        expect(template).toContain("!Not [!Equals [!Ref RelayerSignerSecretArn, \"\"]]");
+        expect(template).toContain('!Not [!Equals [!Ref RelayerSignerSecretArn, ""]]');
         expect(template).toContain("Action: secretsmanager:GetSecretValue");
         expect(template).toContain("Resource: !Ref RelayerSignerSecretArn");
         expect(template).not.toContain("RelayerSignerSecretArnOutput");
