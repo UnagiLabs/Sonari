@@ -1,5 +1,6 @@
 module contracts::membership;
 
+use std::string::{Self, String};
 use sui::dynamic_field;
 use sui::event;
 
@@ -43,12 +44,14 @@ public struct MembershipPass has key {
     owner: address,
     pass_lineage_id: ID,
     status: u8,
+    status_label: String,
     issued_at_ms: u64,
     account_created_at_ms: u64,
     home_cell: u64,
     home_cell_registered_at_ms: u64,
     identity_verified: bool,
     identity_provider_mask: u8,
+    provider_label: String,
     identity_verified_at_ms: u64,
     identity_expires_at_ms: u64,
     terms_version: u64,
@@ -91,12 +94,14 @@ public(package) fun register_member(
         owner: ctx.sender(),
         pass_lineage_id,
         status: STATUS_ACTIVE,
+        status_label: status_label(STATUS_ACTIVE),
         issued_at_ms,
         account_created_at_ms: issued_at_ms,
         home_cell,
         home_cell_registered_at_ms: issued_at_ms,
         identity_verified: false,
         identity_provider_mask: 0,
+        provider_label: provider_label(0),
         identity_verified_at_ms: 0,
         identity_expires_at_ms: 0,
         terms_version,
@@ -188,6 +193,7 @@ public(package) fun apply_identity_verification(
 
     pass.identity_verified = true;
     pass.identity_provider_mask = pass.identity_provider_mask + provider_bit;
+    pass.provider_label = provider_label(pass.identity_provider_mask);
     pass.identity_verified_at_ms = verified_at_ms;
     pass.identity_expires_at_ms = expires_at_ms;
 }
@@ -253,6 +259,34 @@ fun identity_provider_bit(provider: u8): u8 {
     provider
 }
 
+fun status_label(status: u8): String {
+    if (status == STATUS_ACTIVE) {
+        string::utf8(b"Active")
+    } else if (status == STATUS_SUSPENDED) {
+        string::utf8(b"Suspended")
+    } else if (status == STATUS_REVOKED) {
+        string::utf8(b"Revoked")
+    } else if (status == STATUS_MIGRATED) {
+        string::utf8(b"Migrated")
+    } else {
+        string::utf8(b"Unknown")
+    }
+}
+
+fun provider_label(provider_mask: u8): String {
+    if (provider_mask == 0) {
+        string::utf8(b"Unverified")
+    } else if (provider_mask == IDENTITY_PROVIDER_KYC) {
+        string::utf8(b"KYC")
+    } else if (provider_mask == IDENTITY_PROVIDER_WORLD_ID) {
+        string::utf8(b"World ID")
+    } else if (provider_mask == IDENTITY_PROVIDER_KYC + IDENTITY_PROVIDER_WORLD_ID) {
+        string::utf8(b"KYC + World ID")
+    } else {
+        string::utf8(b"Unknown")
+    }
+}
+
 public fun membership_pass_owner(pass: &MembershipPass): address {
     pass.owner
 }
@@ -267,6 +301,10 @@ public fun membership_pass_status(pass: &MembershipPass): u8 {
 
 public fun membership_pass_issued_at_ms(pass: &MembershipPass): u64 {
     pass.issued_at_ms
+}
+
+public fun membership_pass_display_labels(pass: &MembershipPass): (String, String) {
+    (pass.status_label, pass.provider_label)
 }
 
 public fun membership_pass_mvp_summary(
@@ -304,6 +342,7 @@ public fun status_migrated(): u8 {
 #[test_only]
 public fun set_status_for_testing(pass: &mut MembershipPass, status: u8) {
     pass.status = status;
+    pass.status_label = status_label(status);
 }
 
 #[test_only]
@@ -382,12 +421,14 @@ public fun create_pass_for_testing(
         owner,
         pass_lineage_id,
         status: STATUS_ACTIVE,
+        status_label: status_label(STATUS_ACTIVE),
         issued_at_ms,
         account_created_at_ms: issued_at_ms,
         home_cell: 0,
         home_cell_registered_at_ms: issued_at_ms,
         identity_verified: false,
         identity_provider_mask: 0,
+        provider_label: provider_label(0),
         identity_verified_at_ms: 0,
         identity_expires_at_ms: 0,
         terms_version: 0,
@@ -414,12 +455,14 @@ public fun create_registry_and_pass_for_testing(
         owner,
         pass_lineage_id,
         status: STATUS_ACTIVE,
+        status_label: status_label(STATUS_ACTIVE),
         issued_at_ms,
         account_created_at_ms: issued_at_ms,
         home_cell: 0,
         home_cell_registered_at_ms: issued_at_ms,
         identity_verified: false,
         identity_provider_mask: 0,
+        provider_label: provider_label(0),
         identity_verified_at_ms: 0,
         identity_expires_at_ms: 0,
         terms_version,
@@ -462,12 +505,14 @@ public fun destroy_pass_for_testing(pass: MembershipPass) {
         owner: _,
         pass_lineage_id: _,
         status: _,
+        status_label: _,
         issued_at_ms: _,
         account_created_at_ms: _,
         home_cell: _,
         home_cell_registered_at_ms: _,
         identity_verified: _,
         identity_provider_mask: _,
+        provider_label: _,
         identity_verified_at_ms: _,
         identity_expires_at_ms: _,
         terms_version: _,

@@ -7,6 +7,7 @@ use contracts::membership::{Self, MembershipPass, MembershipRegistry};
 use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
 use contracts::pools::{Self, DesignatedPool, MainPool};
 use contracts::program::{Self, Campaign, Program};
+use std::string::{Self, String};
 use sui::clock::{Self, Clock};
 use sui::coin;
 use sui::dynamic_field;
@@ -54,6 +55,7 @@ public struct ClaimReceipt has key {
     campaign_id: ID,
     pass_lineage_id: ID,
     eligibility_tier: u8,
+    tier_label: String,
     amount_usdc: u64,
     main_paid_usdc: u64,
     designated_paid_usdc: u64,
@@ -304,6 +306,7 @@ fun create_receipt_and_emit(
         campaign_id: program::campaign_id(campaign),
         pass_lineage_id: membership::membership_pass_lineage_id(pass),
         eligibility_tier,
+        tier_label: claim_tier_label(eligibility_tier),
         amount_usdc: amount,
         main_paid_usdc: main_amount,
         designated_paid_usdc: designated_amount,
@@ -355,6 +358,22 @@ public fun claim_receipt_summary(
         receipt.claimant,
         receipt.recipient,
     )
+}
+
+public fun claim_receipt_tier_label(receipt: &ClaimReceipt): String {
+    receipt.tier_label
+}
+
+fun claim_tier_label(tier: u8): String {
+    if (tier == 1) {
+        string::utf8(b"Tier 1")
+    } else if (tier == 2) {
+        string::utf8(b"Tier 2")
+    } else if (tier == 3) {
+        string::utf8(b"Tier 3")
+    } else {
+        string::utf8(b"Unknown")
+    }
 }
 
 fun min_u64(a: u64, b: u64): u64 {
