@@ -67,6 +67,57 @@ Parameters:
   ResultRetentionDays:
     Type: Number
     Default: 7
+  RelayerMode:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - dry_run
+      - submit
+    Description: Leave empty to skip the AWS relayer. Use dry_run or submit for finalized TEE results.
+  RelayerNetwork:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - mainnet
+      - testnet
+      - devnet
+    Description: Sui network for AWS relayer dry-run or submit.
+  RelayerTarget:
+    Type: String
+    Default: ""
+    Description: Move target for the relayer call, for example <package>::disaster_event::create_from_signed_payload.
+  RelayerRegistry:
+    Type: String
+    Default: ""
+    Description: DisasterRegistry object ID used by the relayer call.
+  RelayerVerifierRegistry:
+    Type: String
+    Default: ""
+    Description: VerifierRegistry object ID used by the relayer call.
+  RelayerGrpcUrl:
+    Type: String
+    Default: ""
+    Description: Sui gRPC URL for relayer dry-run or submit.
+  RelayerSenderAddress:
+    Type: String
+    Default: ""
+    Description: Sender address used for relayer dry-run transaction building.
+  RelayerSignerSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager ARN containing the Sui private key for relayer submit.
+  RelayerAllowSubmit:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "false"
+      - "true"
+    Description: Must be true before RELAYER_MODE=submit can send a Sui transaction.
+
+Conditions:
+  HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
 
 Resources:
   EventsTable:
@@ -304,6 +355,12 @@ Resources:
                   - dynamodb:UpdateItem
                   - dynamodb:DeleteItem
                 Resource: !GetAtt EventsTable.Arn
+              - !If
+                - HasRelayerSignerSecretArn
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref RelayerSignerSecretArn
+                - !Ref AWS::NoValue
 
   RunnerStateMachineRole:
     Type: AWS::IAM::Role
@@ -416,6 +473,15 @@ Resources:
           RUNNER_ASG_NAME: !Ref RunnerAutoScalingGroup
           RESULT_BUCKET: !Ref RunnerResultBucket
           NITRO_ENCLAVE_PROCESS_COMMAND: !Ref NitroEnclaveProcessCommand
+          RELAYER_MODE: !Ref RelayerMode
+          RELAYER_NETWORK: !Ref RelayerNetwork
+          RELAYER_TARGET: !Ref RelayerTarget
+          RELAYER_REGISTRY: !Ref RelayerRegistry
+          RELAYER_VERIFIER_REGISTRY: !Ref RelayerVerifierRegistry
+          RELAYER_GRPC_URL: !Ref RelayerGrpcUrl
+          RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
+          RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
+          RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
 
   RunnerStateMachine:
     Type: AWS::StepFunctions::StateMachine
