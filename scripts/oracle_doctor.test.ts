@@ -23,6 +23,7 @@ describe("oracle doctor", () => {
             const result = await runOracleDoctor({
                 env: {
                     RELAYER_MODE: "dry_run",
+                    RELAYER_NETWORK: "testnet",
                     RELAYER_ALLOW_SUBMIT: "false",
                     RELAYER_GRPC_URL: "https://fullnode.testnet.sui.io:443",
                     RELAYER_SENDER_ADDRESS: "0xabc",
@@ -41,10 +42,54 @@ describe("oracle doctor", () => {
             expect(result.checks).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({ name: "RELAYER_MODE", status: "ok" }),
+                    expect.objectContaining({ name: "RELAYER_NETWORK", status: "ok" }),
                     expect.objectContaining({ name: "RELAYER_ALLOW_SUBMIT", status: "warn" }),
                     expect.objectContaining({ name: "RUNNER_TOKEN_SECRET_ARN", status: "ok" }),
                     expect.objectContaining({ name: "EVENTS_TABLE_NAME", status: "ok" }),
                     expect.objectContaining({ name: "AWS_ONLY_TEMPLATE", status: "ok" }),
+                ]),
+            );
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("fails closed for invalid relayer network and submit guard configuration", async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), "sonari-doctor-test-"));
+        try {
+            const templatePath = path.join(dir, "template.yaml");
+            await writeFile(
+                templatePath,
+                [
+                    "Type: AWS::DynamoDB::Table",
+                    "Type: AWS::S3::Bucket",
+                    "Type: AWS::Lambda::Function",
+                    "Type: AWS::StepFunctions::StateMachine",
+                    "Type: AWS::Scheduler::Schedule",
+                ].join("\n"),
+            );
+
+            const result = await runOracleDoctor({
+                env: {
+                    RELAYER_MODE: "submit",
+                    RELAYER_NETWORK: "testnet",
+                    RELAYER_ALLOW_SUBMIT: "false",
+                    RELAYER_GRPC_URL: "https://fullnode.mainnet.sui.io:443",
+                },
+                templatePath,
+            });
+
+            expect(result.ok).toBe(false);
+            expect(result.checks).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        name: "RELAYER_GRPC_URL",
+                        status: "fail",
+                    }),
+                    expect.objectContaining({
+                        name: "RELAYER_SUBMIT_GUARD",
+                        status: "fail",
+                    }),
                 ]),
             );
         } finally {
