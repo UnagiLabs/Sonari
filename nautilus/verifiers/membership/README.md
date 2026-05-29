@@ -44,6 +44,7 @@ KYC と World ID は、どちらも満額 Claim ルートである。
 World ID action は Sonari 専用にする。
 TEE は、設定された World ID app id と次の action だけを受け付ける。
 request で別の app id や action が来た場合は reject する。
+World ID API base URL は HTTPS のみ許可する。
 
 ```text
 sonari_membership_register_v1
@@ -57,6 +58,10 @@ domain separator を含める。
 ```text
 sha256("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)
 ```
+
+World ID API には `max_age = 604800` を明示して送る。
+これは World ID が許す最大 7 日の root age である。
+queued job の遅延で、既定の 2 時間に依存しないためである。
 
 ## Verifier output
 

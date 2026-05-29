@@ -1,10 +1,12 @@
 use crate::{IdentityError, WorldIdProofRequest};
+use reqwest::StatusCode;
 use serde::Serialize;
 use std::time::Duration;
 
 pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
 pub const WORLD_ID_APP_ID_ENV: &str = "SONARI_WORLD_ID_APP_ID";
 pub const WORLD_ID_ACTION: &str = "sonari_membership_register_v1";
+pub const WORLD_ID_MAX_AGE_SECONDS: u64 = 604_800;
 pub const WORLD_ID_USER_AGENT: &str = "sonari-membership-tee/0.1";
 pub const WORLD_ID_VERIFICATION_FAILED: &str = "WORLD_ID_VERIFICATION_FAILED";
 pub const WORLD_ID_API_UNAVAILABLE: &str = "WORLD_ID_API_UNAVAILABLE";
@@ -92,20 +94,13 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
         };
 
         let status = response.status();
-        if status.is_success() {
-            return WorldIdVerificationStatus::Verified;
-        }
-        if status.is_server_error() {
-            return pending_source();
-        }
-        if status.as_u16() == 400 {
-            let body = response.text().unwrap_or_default();
-            return classify_bad_request(&body);
-        }
+        let body = if status == StatusCode::BAD_REQUEST {
+            Some(response.text().unwrap_or_default())
+        } else {
+            None
+        };
 
-        WorldIdVerificationStatus::Rejected {
-            error_code: WORLD_ID_VERIFICATION_FAILED.to_owned(),
-        }
+        classify_http_status(status, body.as_deref())
     }
 }
 
@@ -117,6 +112,7 @@ struct WorldIdApiRequest<'a> {
     verification_level: &'a str,
     action: &'a str,
     signal_hash: &'a str,
+    max_age: u64,
 }
 
 impl<'a> From<&'a WorldIdProofRequest> for WorldIdApiRequest<'a> {
@@ -128,6 +124,7 @@ impl<'a> From<&'a WorldIdProofRequest> for WorldIdApiRequest<'a> {
             verification_level: &value.verification_level,
             action: &value.action,
             signal_hash: &value.signal_hash,
+            max_age: WORLD_ID_MAX_AGE_SECONDS,
         }
     }
 }
@@ -139,9 +136,9 @@ fn normalize_base_url(base_url: String) -> Result<String, IdentityError> {
             "{WORLD_ID_API_BASE_ENV} must be a non-empty URL"
         )));
     }
-    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+    if !trimmed.starts_with("https://") {
         return Err(IdentityError::Request(format!(
-            "{WORLD_ID_API_BASE_ENV} must start with http:// or https://"
+            "{WORLD_ID_API_BASE_ENV} must start with https://"
         )));
     }
     Ok(trimmed)
@@ -163,6 +160,30 @@ fn classify_bad_request(body: &str) -> WorldIdVerificationStatus {
         Some("max_verifications_reached") => rejected(),
         _ => rejected(),
     }
+}
+
+fn classify_http_status(
+    status: StatusCode,
+    bad_request_body: Option<&str>,
+) -> WorldIdVerificationStatus {
+    if status.is_success() {
+        return WorldIdVerificationStatus::Verified;
+    }
+    if status == StatusCode::BAD_REQUEST {
+        return classify_bad_request(bad_request_body.unwrap_or(""));
+    }
+    if status.is_server_error() || is_retryable_client_status(status) {
+        return pending_source();
+    }
+
+    rejected()
+}
+
+fn is_retryable_client_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+    )
 }
 
 fn world_id_error_code(body: &str) -> Option<String> {
@@ -190,10 +211,12 @@ fn pending_source() -> WorldIdVerificationStatus {
 mod tests {
     use super::{
         CloudWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
-        WORLD_ID_APP_ID_ENV, WORLD_ID_USER_AGENT, WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest,
-        WorldIdVerificationStatus, WorldIdVerifier, classify_bad_request,
+        WORLD_ID_APP_ID_ENV, WORLD_ID_MAX_AGE_SECONDS, WORLD_ID_USER_AGENT,
+        WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest, WorldIdVerificationStatus,
+        WorldIdVerifier, classify_bad_request, classify_http_status,
     };
     use crate::WorldIdProofRequest;
+    use reqwest::StatusCode;
 
     #[test]
     fn world_id_request_serializes_exact_api_body_fields() {
@@ -207,6 +230,7 @@ mod tests {
             fields,
             vec![
                 "action",
+                "max_age",
                 "merkle_root",
                 "nullifier_hash",
                 "proof",
@@ -215,17 +239,18 @@ mod tests {
             ]
         );
         assert_eq!(json["nullifier_hash"], "12345678901234567890");
+        assert_eq!(json["max_age"], WORLD_ID_MAX_AGE_SECONDS);
         assert!(json.get("app_id").is_none());
     }
 
     #[test]
     fn world_id_verifier_builds_required_verify_url() {
         let verifier =
-            CloudWorldIdVerifier::new("http://127.0.0.1:8080/", "app_staging_123").unwrap();
+            CloudWorldIdVerifier::new("https://developer.world.org/", "app_staging_123").unwrap();
 
         assert_eq!(
             verifier.verification_url(),
-            "http://127.0.0.1:8080/api/v2/verify/app_staging_123"
+            "https://developer.world.org/api/v2/verify/app_staging_123"
         );
     }
 
@@ -239,13 +264,14 @@ mod tests {
         let error = CloudWorldIdVerifier::new("", "app_staging_123").unwrap_err();
         assert!(error.to_string().contains(WORLD_ID_API_BASE_ENV));
 
-        let error = CloudWorldIdVerifier::new("localhost:8080", "app_staging_123").unwrap_err();
-        assert!(error.to_string().contains("http:// or https://"));
+        let error =
+            CloudWorldIdVerifier::new("http://localhost:8080", "app_staging_123").unwrap_err();
+        assert!(error.to_string().contains("https://"));
     }
 
     #[test]
     fn world_id_verifier_rejects_missing_app_id() {
-        let error = CloudWorldIdVerifier::new("http://127.0.0.1:8080", "").unwrap_err();
+        let error = CloudWorldIdVerifier::new("https://developer.world.org", "").unwrap_err();
 
         assert!(error.to_string().contains(WORLD_ID_APP_ID_ENV));
     }
@@ -253,7 +279,7 @@ mod tests {
     #[test]
     fn world_id_verifier_rejects_noncanonical_app_or_action_before_http() {
         let verifier =
-            CloudWorldIdVerifier::new("http://127.0.0.1:8080", "app_staging_123").unwrap();
+            CloudWorldIdVerifier::new("https://developer.world.org", "app_staging_123").unwrap();
         let mut proof = world_id_proof();
         proof.app_id = "app_attacker".to_owned();
 
@@ -307,8 +333,20 @@ mod tests {
     }
 
     #[test]
+    fn world_id_retryable_http_statuses_are_pending_source() {
+        for status in [StatusCode::REQUEST_TIMEOUT, StatusCode::TOO_MANY_REQUESTS] {
+            assert_eq!(
+                classify_http_status(status, None),
+                WorldIdVerificationStatus::PendingSource {
+                    error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
+                }
+            );
+        }
+    }
+
+    #[test]
     fn world_id_unreachable_api_becomes_pending_source() {
-        let verifier = CloudWorldIdVerifier::new("http://127.0.0.1:9", "app_staging_123").unwrap();
+        let verifier = CloudWorldIdVerifier::new("https://127.0.0.1:9", "app_staging_123").unwrap();
 
         assert_eq!(
             verifier.verify_world_id(&world_id_proof()),
