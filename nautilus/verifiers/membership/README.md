@@ -89,6 +89,75 @@ IdentityVerificationResult {
 `provider` は `kyc` または `world_id` である。
 `verified` が `true` のときだけ、Membership SBT を verified にできる。
 
+## membership TEE CLI contract
+
+`membership-tee` は stdin で `IdentityVerifyRequest` JSON を受け取る。
+request は未知の field を拒否する。
+TEE は request の意味を変えず、検証結果だけを stdout に返す。
+
+```text
+membership-tee fixture [--world-id-status verified|rejected|pending-source]
+membership-tee production
+membership-tee --encode-only
+```
+
+fixture はローカル検証と golden vector 用である。
+`issued_at_ms` は fixture では必須である。
+`validity_ms` は fixture でだけ任意の有効期間として使える。
+`--world-app-id` は期待する World ID app id を固定する。
+request の `world_id.world_app_id` が一致しない場合は reject する。
+
+production は実運用の入口である。
+production は `SONARI_WORLD_ID_API_BASE` と `SONARI_WORLD_ID_APP_ID` を読む。
+World ID API base URL は HTTPS のみ許可する。
+署名鍵は `SONARI_TEE_SIGNING_KEY_SEED` または
+`SONARI_TEE_SIGNING_KEY_SEED_FILE` から読む。
+production では dev fallback を使わない。
+
+production では `issued_at_ms` と `validity_ms` を request から信頼しない。
+TEE が現在時刻を `issued_at_ms` に使う。
+有効期間も TEE 側の既定値を使う。
+これにより caller が署名済み result の寿命を延ばせない。
+
+成功時の stdout は `status: "verified"` と result fields を返す。
+署名対象は `payload_bcs_hex` の bytes そのものである。
+Sui intent prefix は付けない。
+
+```json
+{
+  "status": "verified",
+  "intent": "SONARI_IDENTITY_VERIFICATION_V1",
+  "verifier_family": "identity",
+  "verifier_version": 1,
+  "registry_id": "0x...",
+  "membership_id": "0x...",
+  "owner": "0x...",
+  "provider": "world_id",
+  "verified": true,
+  "duplicate_key_hash": "0x...",
+  "evidence_hash": "0x...",
+  "issued_at_ms": 1800000000000,
+  "expires_at_ms": 1831536000000,
+  "terms_version": 1,
+  "signed_statement_hash": "0x...",
+  "payload_bcs_hex": "0x...",
+  "signature": "0x...",
+  "public_key": "0x..."
+}
+```
+
+非成功時の stdout は `status` と `error_code` だけを返す。
+`rejected`、`pending_source`、`unsupported` には署名を付けない。
+payload BCS も返さない。
+
+```json
+{ "status": "rejected", "error_code": "WORLD_ID_VERIFICATION_FAILED" }
+```
+
+`--encode-only` は完成済み `IdentityTeeResult` JSON を stdin で受け取る。
+stdout には `payload_bcs_hex` だけを返す。
+`verified == false` の result は拒否する。
+
 ### Signed payload BCS layout
 
 Move に渡す signed payload は、次の順番で BCS bytes にする。
