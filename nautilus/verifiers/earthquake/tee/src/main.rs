@@ -177,20 +177,14 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     };
     let source_event_id = canonical_source_event_id.to_owned();
     let observed_at_ms = current_unix_time_ms()?;
-    let raw_detail_uri = format!(
-        "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{source_event_id}.geojson"
-    );
-    let input = UsgsOracleInput {
-        case_id: format!("usgs-live/{source_event_id}"),
+    let parts = ProductionInputParts {
+        source_event_id,
         detail_json,
         grid_xml: grid.as_ref().map(|item| item.grid_xml.clone()),
         raw_grid_bytes: grid.as_ref().map(|item| item.raw_grid_bytes.clone()),
-        observed_at_ms,
-        raw_detail_uri,
         raw_grid_uri: grid.as_ref().map(|item| item.raw_grid_uri.clone()),
-        raw_data_uri: format!("ipfs://sonari/live/{source_event_id}/raw_data_manifest.json"),
-        affected_cells_uri: format!("ipfs://sonari/live/{source_event_id}/affected_cells.json"),
     };
+    let input = build_production_input(parts, observed_at_ms);
     let preliminary = process_usgs_from_worker_request(request, input.clone())?;
     if preliminary.result.status != tee::OracleStatus::Finalized {
         return output_to_tee_json(preliminary);
@@ -200,6 +194,31 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
     let output = process_usgs_with_source_archive(input, &archive, &signer)?;
     output_to_tee_json(output)
+}
+
+struct ProductionInputParts {
+    source_event_id: String,
+    detail_json: Vec<u8>,
+    grid_xml: Option<Vec<u8>>,
+    raw_grid_bytes: Option<Vec<u8>>,
+    raw_grid_uri: Option<String>,
+}
+
+fn build_production_input(parts: ProductionInputParts, observed_at_ms: u64) -> UsgsOracleInput {
+    let id = &parts.source_event_id;
+    UsgsOracleInput {
+        case_id: format!("usgs-live/{id}"),
+        detail_json: parts.detail_json,
+        grid_xml: parts.grid_xml,
+        raw_grid_bytes: parts.raw_grid_bytes,
+        observed_at_ms,
+        raw_detail_uri: format!(
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{id}.geojson"
+        ),
+        raw_grid_uri: parts.raw_grid_uri,
+        raw_data_uri: format!("ipfs://sonari/live/{id}/raw_data_manifest.json"),
+        affected_cells_uri: format!("ipfs://sonari/live/{id}/affected_cells.json"),
+    }
 }
 
 fn canonical_usgs_detail_id_for_request<'a>(
@@ -645,4 +664,48 @@ fn write_pretty(
 ) -> Result<(), Box<dyn std::error::Error>> {
     fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_production_input_uses_injected_observed_at_ms() {
+        let properties_updated_ms = 1_700_000_000_000_u64;
+        let injected_observed_at_ms = 1_800_000_000_000_u64;
+        assert_ne!(
+            properties_updated_ms, injected_observed_at_ms,
+            "test must distinguish the injected clock from properties.updated"
+        );
+
+        let detail_json =
+            format!(r#"{{"id":"us7000abcd","properties":{{"updated":{properties_updated_ms}}}}}"#)
+                .into_bytes();
+        let parts = ProductionInputParts {
+            source_event_id: "us7000abcd".to_owned(),
+            detail_json,
+            grid_xml: None,
+            raw_grid_bytes: None,
+            raw_grid_uri: None,
+        };
+
+        let input = build_production_input(parts, injected_observed_at_ms);
+
+        assert_eq!(input.observed_at_ms, injected_observed_at_ms);
+        assert_ne!(input.observed_at_ms, properties_updated_ms);
+        assert_eq!(input.case_id, "usgs-live/us7000abcd");
+        assert_eq!(
+            input.raw_detail_uri,
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000abcd.geojson"
+        );
+        assert_eq!(
+            input.raw_data_uri,
+            "ipfs://sonari/live/us7000abcd/raw_data_manifest.json"
+        );
+        assert_eq!(
+            input.affected_cells_uri,
+            "ipfs://sonari/live/us7000abcd/affected_cells.json"
+        );
+    }
 }
