@@ -2,6 +2,7 @@ use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, RawDataManifest, SampleProof, SignatureArtifact,
     SourceManifest, UnsignedPayload,
 };
+use crate::crypto::HexError;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -27,6 +28,12 @@ pub enum OracleError {
     WorkerRequest(String),
     #[error("arithmetic overflow: {0}")]
     Overflow(String),
+}
+
+impl From<HexError> for OracleError {
+    fn from(error: HexError) -> Self {
+        Self::InvalidGridPoint(error.to_string())
+    }
 }
 
 #[derive(Debug, Clone)]

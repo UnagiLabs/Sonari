@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::Serialize;
+use sonari_tee_core::signing_key_seed_from_env;
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -11,9 +12,6 @@ use tee::{
     grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
-
-const DEV_SIGNING_KEY_SEED: &str =
-    "0x0707070707070707070707070707070707070707070707070707070707070707";
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate deterministic Sonari USGS oracle artifacts")]
@@ -265,10 +263,12 @@ fn current_unix_time_ms() -> Result<u64, Box<dyn std::error::Error>> {
 fn strict_signing_key_seed(
     explicit_seed: Option<String>,
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let seed = explicit_seed
-        .or_else(|| non_empty_env("SONARI_TEE_SIGNING_KEY_SEED"))
-        .ok_or("SONARI_TEE_SIGNING_KEY_SEED is required for production execution")?;
-    parse_seed(&seed)
+    Ok(signing_key_seed_from_env(
+        explicit_seed,
+        "SONARI_TEE_SIGNING_KEY_SEED",
+        "SONARI_TEE_SIGNING_KEY_SEED_FILE",
+        false,
+    )?)
 }
 
 struct FetchedGrid {
@@ -596,22 +596,15 @@ fn non_empty_env(name: &str) -> Option<String> {
 }
 
 fn signing_key_seed(
-    sign_dev: bool,
+    _sign_dev: bool,
     signing_key_seed: Option<String>,
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let seed = match (signing_key_seed, sign_dev) {
-        (Some(seed), _) => seed,
-        (None, true) | (None, false) => DEV_SIGNING_KEY_SEED.to_owned(),
-    };
-    parse_seed(&seed)
-}
-
-fn parse_seed(value: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let value = value.strip_prefix("0x").unwrap_or(value);
-    let bytes = hex::decode(value)?;
-    Ok(bytes
-        .try_into()
-        .map_err(|_| "signing key seed must be 32 bytes")?)
+    Ok(signing_key_seed_from_env(
+        signing_key_seed,
+        "SONARI_TEE_SIGNING_KEY_SEED",
+        "SONARI_TEE_SIGNING_KEY_SEED_FILE",
+        true,
+    )?)
 }
 
 fn write_output(
