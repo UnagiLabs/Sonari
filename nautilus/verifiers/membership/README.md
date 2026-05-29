@@ -119,6 +119,17 @@ KYC と World ID をまたぐ完全な同一人物判定は MVP 外である。
 登録時と Claim 時に、複数 SBT と複数 Claim を禁じる表示を出す。
 その内容に対して Sui wallet 署名を求める。
 
+`evidence_hash` は、verifier が結果 payload を組み立てる時に計算する。
+caller から受け取った値は使わない。
+raw PII や proof body も入れない。
+
+```text
+sha256("sonari:identity_evidence:v1" \0 provider \0 duplicate_key_hash_hex \0 verification_level \0 issued_at_ms_decimal)
+```
+
+`duplicate_key_hash_hex` は `0x` 付き小文字 hex である。
+`issued_at_ms_decimal` には、TEE が result を発行した時刻を 10 進数で入れる。
+
 ## Privacy boundary
 
 verifier は raw personal data を output に含めない。
