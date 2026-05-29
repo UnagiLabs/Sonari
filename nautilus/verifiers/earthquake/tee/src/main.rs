@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use sonari_tee_core::signing_key_seed_from_env;
+use sonari_tee_core::{DEV_SIGNING_KEY_SEED_HEX, parse_seed, signing_key_seed_from_env};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -599,12 +599,8 @@ fn signing_key_seed(
     _sign_dev: bool,
     signing_key_seed: Option<String>,
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    Ok(signing_key_seed_from_env(
-        signing_key_seed,
-        "SONARI_TEE_SIGNING_KEY_SEED",
-        "SONARI_TEE_SIGNING_KEY_SEED_FILE",
-        true,
-    )?)
+    let seed = signing_key_seed.unwrap_or_else(|| DEV_SIGNING_KEY_SEED_HEX.to_owned());
+    Ok(parse_seed(&seed)?)
 }
 
 fn write_output(
