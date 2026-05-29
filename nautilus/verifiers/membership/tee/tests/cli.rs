@@ -140,6 +140,42 @@ fn fixture_command_rejects_malformed_json_with_empty_stdout() {
 }
 
 #[test]
+fn fixture_command_rejects_top_level_unknown_field_with_empty_stdout() {
+    let mut request = world_id_request_json();
+    request["raw_personal_data"] = serde_json::json!("do-not-accept");
+    let output = run_with_stdin(membership_tee().arg("fixture"), &request.to_string());
+
+    assert!(
+        !output.status.success(),
+        "expected unknown top-level field to fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unknown field"),
+        "expected unknown field error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+}
+
+#[test]
+fn fixture_command_rejects_nested_world_id_unknown_field_with_empty_stdout() {
+    let mut request = world_id_request_json();
+    request["world_id"]["raw_proof_debug"] = serde_json::json!("do-not-accept");
+    let output = run_with_stdin(membership_tee().arg("fixture"), &request.to_string());
+
+    assert!(
+        !output.status.success(),
+        "expected unknown nested field to fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unknown field"),
+        "expected unknown field error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+}
+
+#[test]
 fn production_command_fails_closed_without_signing_seed() {
     let output = run_with_stdin(
         membership_tee()
@@ -184,6 +220,63 @@ fn production_command_returns_pending_source_from_unreachable_world_id_api() {
     assert_eq!(json["status"], "pending_source");
     assert_eq!(json["error_code"], "WORLD_ID_API_UNAVAILABLE");
     assert_non_verified_has_no_signature(&json);
+}
+
+#[test]
+fn encode_only_returns_payload_bcs_hex_for_full_verified_payload() {
+    let output = run_with_stdin(
+        membership_tee().arg("--encode-only"),
+        &verified_payload_json().to_string(),
+    );
+
+    assert!(
+        output.status.success(),
+        "expected encode-only to succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = stdout_json(&output.stdout);
+    let object = json.as_object().unwrap();
+    assert_eq!(object.len(), 1);
+    assert_eq!(
+        json["payload_bcs_hex"],
+        "0x1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000011111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222333333333333333333333333333333333333333333333333333333333333333302014444444444444444444444444444444444444444444444444444444444444444555555555555555555555555555555555555555555555555555555555555555500505c18a3010000007c0d70aa01000001000000000000006666666666666666666666666666666666666666666666666666666666666666"
+    );
+}
+
+#[test]
+fn encode_only_rejects_unverified_payload_with_empty_stdout() {
+    let mut payload = verified_payload_json();
+    payload["verified"] = serde_json::json!(false);
+    let output = run_with_stdin(membership_tee().arg("--encode-only"), &payload.to_string());
+
+    assert!(
+        !output.status.success(),
+        "expected encode-only unverified payload to fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("requires a verified"),
+        "expected verified requirement error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+}
+
+#[test]
+fn encode_only_rejects_unknown_field_with_empty_stdout() {
+    let mut payload = verified_payload_json();
+    payload["signature"] = serde_json::json!("0xshould-not-be-in-payload");
+    let output = run_with_stdin(membership_tee().arg("--encode-only"), &payload.to_string());
+
+    assert!(
+        !output.status.success(),
+        "expected encode-only unknown field to fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unknown field"),
+        "expected unknown field error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
 }
 
 fn run_with_stdin(command: &mut Command, stdin: &str) -> std::process::Output {
@@ -248,5 +341,24 @@ fn base_request_json() -> serde_json::Value {
         "issued_at_ms": 1_800_000_000_000_u64,
         "validity_ms": 3_600_000_u64,
         "world_id": null,
+    })
+}
+
+fn verified_payload_json() -> serde_json::Value {
+    serde_json::json!({
+        "intent": "SONARI_IDENTITY_VERIFICATION_V1",
+        "verifier_family": "identity",
+        "verifier_version": 1_u64,
+        "registry_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+        "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "provider": "world_id",
+        "verified": true,
+        "duplicate_key_hash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+        "evidence_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+        "issued_at_ms": 1_800_000_000_000_u64,
+        "expires_at_ms": 1_831_536_000_000_u64,
+        "terms_version": 1_u64,
+        "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
     })
 }

@@ -4,9 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{Parser, Subcommand, ValueEnum};
 use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityTeeCliResult,
-    IdentityVerifyRequest, WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED,
-    WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier, process_identity_with_verifier,
+    IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_UNAVAILABLE,
+    WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest, WorldIdVerificationStatus,
+    WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
 };
+use serde::Serialize;
 use sonari_tee_core::{LocalEd25519Signer, signing_key_seed_from_env, to_hex};
 
 const SIGNING_KEY_SEED_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED";
@@ -16,8 +18,10 @@ const SIGNING_KEY_SEED_FILE_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED_FILE";
 #[command(name = "membership-tee")]
 #[command(about = "Membership TEE verifier CLI")]
 struct Cli {
+    #[arg(long)]
+    encode_only: bool,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -49,14 +53,45 @@ struct ProductionArgs {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    if cli.encode_only {
+        let result = encode_only_result()?;
+        println!("{}", serde_json::to_string(&result)?);
+        return Ok(());
+    }
 
-    let result = match cli.command {
+    let command = cli.command.ok_or_else(|| {
+        membership_tee::IdentityError::Request(
+            "subcommand is required unless --encode-only is set".to_owned(),
+        )
+    })?;
+    let result = match command {
         Command::Fixture(args) => fixture_result(args)?,
         Command::Production(args) => production_result(args)?,
     };
     println!("{}", serde_json::to_string(&result)?);
 
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct EncodeOnlyResult {
+    payload_bcs_hex: String,
+}
+
+fn encode_only_result() -> Result<EncodeOnlyResult, Box<dyn std::error::Error>> {
+    let mut stdin = String::new();
+    io::stdin().read_to_string(&mut stdin)?;
+    let result: IdentityTeeResult = serde_json::from_str(&stdin)?;
+    if !result.verified {
+        return Err(membership_tee::IdentityError::Request(
+            "--encode-only requires a verified identity payload".to_owned(),
+        )
+        .into());
+    }
+
+    Ok(EncodeOnlyResult {
+        payload_bcs_hex: to_hex(&payload_bcs_bytes(&result)?),
+    })
 }
 
 fn fixture_result(args: FixtureArgs) -> Result<IdentityTeeCliResult, Box<dyn std::error::Error>> {
