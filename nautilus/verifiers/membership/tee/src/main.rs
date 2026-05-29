@@ -5,8 +5,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityTeeCliResult,
     IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_UNAVAILABLE,
-    WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest, WorldIdVerificationStatus,
-    WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
+    WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
+    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
 };
 use serde::Serialize;
 use sonari_tee_core::{LocalEd25519Signer, signing_key_seed_from_env, to_hex};

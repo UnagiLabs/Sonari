@@ -64,7 +64,12 @@ fn fixture_command_returns_verified_result_from_stdin() {
     assert!(json["payload_bcs_hex"].as_str().unwrap().starts_with("0x"));
     assert!(json["signature"].as_str().unwrap().starts_with("0x"));
     assert!(json["public_key"].as_str().unwrap().starts_with("0x"));
-    assert!(json["duplicate_key_hash"].as_str().unwrap().starts_with("0x"));
+    assert!(
+        json["duplicate_key_hash"]
+            .as_str()
+            .unwrap()
+            .starts_with("0x")
+    );
     assert_eq!(json["expires_at_ms"], 1_800_003_600_000_u64);
     assert!(json.get("algorithm").is_none());
 }
@@ -127,10 +132,7 @@ fn fixture_command_returns_unsupported_for_kyc_without_signature() {
 fn fixture_command_rejects_malformed_json_with_empty_stdout() {
     let output = run_with_stdin(membership_tee().arg("fixture"), "{not-json");
 
-    assert!(
-        !output.status.success(),
-        "expected malformed JSON to fail"
-    );
+    assert!(!output.status.success(), "expected malformed JSON to fail");
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("key must be a string"),
         "expected serde error, stderr: {}",

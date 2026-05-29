@@ -102,7 +102,10 @@ fn verified_request_round_trips_bcs_and_signs_payload_bytes() {
         VERIFIER_FAMILY
     );
     assert_eq!(decoded.verifier_version, VERIFIER_VERSION);
-    assert_eq!(decoded.registry_id, hex_to_32(&request.registry_id).unwrap());
+    assert_eq!(
+        decoded.registry_id,
+        hex_to_32(&request.registry_id).unwrap()
+    );
     assert_eq!(
         decoded.membership_id,
         hex_to_32(&request.membership_id).unwrap()
@@ -132,8 +135,8 @@ fn verified_request_round_trips_bcs_and_signs_payload_bytes() {
 
     let public_key = VerifyingKey::from_bytes(&hex_to_32(&signature.public_key).unwrap())
         .expect("public key should decode");
-    let signature_bytes = hex::decode(signature.signature.trim_start_matches("0x"))
-        .expect("signature should be hex");
+    let signature_bytes =
+        hex::decode(signature.signature.trim_start_matches("0x")).expect("signature should be hex");
     let signature = Signature::try_from(signature_bytes.as_slice()).expect("signature length");
 
     public_key

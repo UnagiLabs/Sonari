@@ -32,9 +32,8 @@ pub const PROVIDER_WORLD_ID: u8 = 2;
 #[cfg(test)]
 mod tests {
     use super::{
-        INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
-        IdentityTeeCliResult, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY,
-        VERIFIER_VERSION,
+        INTENT, IdentityError, IdentityProvider, IdentityTeeCliResult, IdentityTeeResult,
+        IdentityVerifyRequest, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
     };
 
     #[test]
@@ -107,8 +106,7 @@ mod tests {
             signature: "0xbbbb".to_owned(),
             public_key: "0xcccc".to_owned(),
             duplicate_key_hash:
-                "0x4444444444444444444444444444444444444444444444444444444444444444"
-                    .to_owned(),
+                "0x4444444444444444444444444444444444444444444444444444444444444444".to_owned(),
             expires_at_ms: 1_800_000_000_000,
         };
 
@@ -118,7 +116,10 @@ mod tests {
         assert_eq!(json["payload_bcs_hex"], "0xaaaa");
         assert_eq!(json["signature"], "0xbbbb");
         assert_eq!(json["public_key"], "0xcccc");
-        assert_eq!(json["duplicate_key_hash"], identity_result_json()["duplicate_key_hash"]);
+        assert_eq!(
+            json["duplicate_key_hash"],
+            identity_result_json()["duplicate_key_hash"]
+        );
         assert_eq!(json["expires_at_ms"], 1_800_000_000_000_u64);
         assert!(json.get("intent").is_none());
         assert!(json.get("algorithm").is_none());

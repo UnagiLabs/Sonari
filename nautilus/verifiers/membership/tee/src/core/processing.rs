@@ -158,12 +158,11 @@ fn verified_output(
     signer: &impl PayloadSigner,
     issued_at_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
-    let duplicate_key_hash =
-        compute_world_id_duplicate_key_hash(
-            &proof.world_app_id,
-            &proof.action,
-            &proof.nullifier_hash,
-        )?;
+    let duplicate_key_hash = compute_world_id_duplicate_key_hash(
+        &proof.world_app_id,
+        &proof.action,
+        &proof.nullifier_hash,
+    )?;
     let issued_at_ms = request.issued_at_ms.unwrap_or(issued_at_ms);
     let evidence_hash = compute_identity_evidence_hash(
         IdentityProvider::WorldId,
@@ -177,11 +176,9 @@ fn verified_output(
             "validity_ms must be greater than 0".to_owned(),
         ));
     }
-    let expires_at_ms = issued_at_ms
-        .checked_add(validity_ms)
-        .ok_or_else(|| {
-            IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
-        })?;
+    let expires_at_ms = issued_at_ms.checked_add(validity_ms).ok_or_else(|| {
+        IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
+    })?;
     let result = IdentityTeeResult {
         intent: INTENT.to_owned(),
         verifier_family: VERIFIER_FAMILY.to_owned(),
