@@ -1,7 +1,7 @@
 module contracts::disaster_event;
 
 use contracts::metadata_verifier::{Self, VerifierRegistry};
-use contracts::payload_v1::{Self, Payload};
+use contracts::payload::{Self, Payload};
 use contracts::program::{Self, Campaign};
 use std::hash;
 use sui::clock::{Self, Clock};
@@ -141,7 +141,7 @@ public fun create_from_signed_payload(
         &signature,
         &public_key,
     );
-    let payload = payload_v1::decode_finalized(payload_bcs, clock::timestamp_ms(clock));
+    let payload = payload::decode_finalized(payload_bcs, clock::timestamp_ms(clock));
     create_from_verified_payload(
         registry,
         payload,
@@ -210,8 +210,8 @@ fun create_from_verified_payload(
     verifier_registry_id: ID,
     ctx: &mut TxContext,
 ) {
-    let event_uid = payload_v1::event_uid(&payload);
-    let event_revision = payload_v1::event_revision(&payload);
+    let event_uid = payload::event_uid(&payload);
+    let event_revision = payload::event_revision(&payload);
     let key = DisasterEventKey {
         event_uid,
         event_revision,
@@ -244,30 +244,30 @@ fun create_from_verified_payload(
         id: object::new(ctx),
         event_uid,
         event_revision,
-        source_event_id: payload_v1::source_event_id(&payload),
-        title: payload_v1::title(&payload),
-        region: payload_v1::region(&payload),
-        occurred_at_ms: payload_v1::occurred_at_ms(&payload),
-        magnitude_x100: payload_v1::magnitude_x100(&payload),
-        primary_source: payload_v1::primary_source(&payload),
-        hazard_type: payload_v1::hazard_type(&payload),
-        oracle_version: payload_v1::oracle_version(&payload),
+        source_event_id: payload::source_event_id(&payload),
+        title: payload::title(&payload),
+        region: payload::region(&payload),
+        occurred_at_ms: payload::occurred_at_ms(&payload),
+        magnitude_x100: payload::magnitude_x100(&payload),
+        primary_source: payload::primary_source(&payload),
+        hazard_type: payload::hazard_type(&payload),
+        oracle_version: payload::oracle_version(&payload),
         payload_bcs_hash: hash::sha2_256(payload_bcs),
         payload_bcs,
         signature_scheme,
         verifier_public_key,
         signature,
         verifier_registry_id,
-        verified_at_ms: payload_v1::verified_at_ms(&payload),
-        source_updated_at_ms: payload_v1::source_updated_at_ms(&payload),
-        freshness_deadline_ms: payload_v1::freshness_deadline_ms(&payload),
-        source_set_hash: payload_v1::source_set_hash(&payload),
-        raw_data_hash: payload_v1::raw_data_hash(&payload),
-        raw_data_uri: payload_v1::raw_data_uri(&payload),
-        affected_cells_root: payload_v1::affected_cells_root(&payload),
-        affected_cells_data_hash: payload_v1::affected_cells_data_hash(&payload),
-        affected_cells_uri: payload_v1::affected_cells_uri(&payload),
-        affected_cell_count: payload_v1::affected_cell_count(&payload),
+        verified_at_ms: payload::verified_at_ms(&payload),
+        source_updated_at_ms: payload::source_updated_at_ms(&payload),
+        freshness_deadline_ms: payload::freshness_deadline_ms(&payload),
+        source_set_hash: payload::source_set_hash(&payload),
+        raw_data_hash: payload::raw_data_hash(&payload),
+        raw_data_uri: payload::raw_data_uri(&payload),
+        affected_cells_root: payload::affected_cells_root(&payload),
+        affected_cells_data_hash: payload::affected_cells_data_hash(&payload),
+        affected_cells_uri: payload::affected_cells_uri(&payload),
+        affected_cell_count: payload::affected_cell_count(&payload),
         created_at_ms: ctx.epoch_timestamp_ms(),
     };
     let disaster_event_id = object::id(&disaster_event);

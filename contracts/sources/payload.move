@@ -1,9 +1,9 @@
-module contracts::payload_v1;
+module contracts::payload;
 
 use sui::bcs::{Self, BCS};
 
-const INTENT_EARTHQUAKE_ORACLE_PAYLOAD_V1: u8 = 1;
-const ORACLE_VERSION_V1: u64 = 1;
+const INTENT_EARTHQUAKE_ORACLE_PAYLOAD: u8 = 1;
+const ORACLE_VERSION: u64 = 1;
 const HAZARD_TYPE_EARTHQUAKE: u8 = 1;
 const STATUS_FINALIZED: u8 = 3;
 const PRIMARY_SOURCE_USGS: u8 = 1;
@@ -111,8 +111,8 @@ public fun decode_finalized(bytes: vector<u8>, now_ms: u64): Payload {
 }
 
 fun assert_finalized(payload: &Payload, now_ms: u64) {
-    assert!(payload.intent == INTENT_EARTHQUAKE_ORACLE_PAYLOAD_V1, EInvalidIntent);
-    assert!(payload.oracle_version == ORACLE_VERSION_V1, EUnsupportedVersion);
+    assert!(payload.intent == INTENT_EARTHQUAKE_ORACLE_PAYLOAD, EInvalidIntent);
+    assert!(payload.oracle_version == ORACLE_VERSION, EUnsupportedVersion);
     assert!(payload.hazard_type == HAZARD_TYPE_EARTHQUAKE, EUnsupportedHazardType);
     assert!(payload.status == STATUS_FINALIZED, ENonFinalizedStatus);
     assert!(payload.event_revision > 0, EInvalidEventRevision);
@@ -285,8 +285,8 @@ public fun freshness_deadline_ms(payload: &Payload): u64 {
     payload.freshness_deadline_ms
 }
 
-public fun intent_earthquake_oracle_payload_v1(): u8 {
-    INTENT_EARTHQUAKE_ORACLE_PAYLOAD_V1
+public fun intent_earthquake_oracle_payload(): u8 {
+    INTENT_EARTHQUAKE_ORACLE_PAYLOAD
 }
 
 public fun hazard_type_earthquake(): u8 {

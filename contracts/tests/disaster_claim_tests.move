@@ -8,7 +8,7 @@ use contracts::claim;
 use contracts::disaster_event;
 use contracts::identity_registry;
 use contracts::membership;
-use contracts::payload_v1;
+use contracts::payload;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
@@ -268,7 +268,7 @@ fun disaster_claim_rejects_other_disaster_event_for_bound_campaign() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        let other_payload = payload_v1::decode_finalized(
+        let other_payload = payload::decode_finalized(
             other_event_payload_bcs(),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );
@@ -840,7 +840,7 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        let payload = payload_v1::decode_finalized(
+        let payload = payload::decode_finalized(
             finalized_payload_bcs(),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );

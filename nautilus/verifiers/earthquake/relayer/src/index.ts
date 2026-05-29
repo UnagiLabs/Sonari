@@ -130,7 +130,7 @@ export function loadFixtureRelayerSubmitInput(caseId: string): RelayerSubmitInpu
     }
 
     const fixtureRoot = new URL("../../fixtures/usgs/finalized_minimal/expected/", import.meta.url);
-    const payload = readJson(new URL("unsigned_payload_v1.json", fixtureRoot));
+    const payload = readJson(new URL("unsigned_payload.json", fixtureRoot));
     const hashes = readJson(new URL("expected_hashes.json", fixtureRoot));
     const signature = readJson(new URL("signature.json", fixtureRoot));
 

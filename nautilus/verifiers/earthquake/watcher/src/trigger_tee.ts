@@ -1,6 +1,6 @@
 import {
     BCS_ENUMS,
-    type EarthquakeOraclePayloadV1,
+    type EarthquakeOraclePayload,
     type EarthquakeVerifierRequest,
     ERROR_CODES,
     type OracleErrorCode,
@@ -186,15 +186,19 @@ export class AwsRunnerLifecycleAdapter implements RunnerLifecycleAdapter {
     }
 }
 
-const finalizedPayload: EarthquakeOraclePayloadV1 = {
+const finalizedPayload: EarthquakeOraclePayload = {
     intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
     oracle_version: 1,
-    event_uid: "us7000sonari",
+    event_uid: `0x${"aa".repeat(32)}`,
     hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
     status: BCS_ENUMS.onchainStatus.FINALIZED,
     event_revision: 3,
+    source_event_id: "us7000sonari",
+    title: "M 7.1 - Sonari Fixture Earthquake",
+    region: "Sonari Fixture Region",
     occurred_at_ms: 1_700_000_000_000,
-    observed_at_ms: 1_700_000_010_000,
+    magnitude_x100: 710,
+    verified_at_ms: 1_700_000_010_000,
     source_updated_at_ms: 1_700_000_010_000,
     primary_source: BCS_ENUMS.primarySource.USGS,
     severity_band: 2,
@@ -204,14 +208,12 @@ const finalizedPayload: EarthquakeOraclePayloadV1 = {
     affected_cells_root: `0x${"33".repeat(32)}`,
     affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json",
     affected_cells_data_hash: `0x${"44".repeat(32)}`,
+    affected_cell_count: 1,
     geo_resolution: 7,
     cells_generation_method: BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
     cell_metric: BCS_ENUMS.cellMetric.USGS_MMI,
     cell_aggregation: BCS_ENUMS.cellAggregation.GRID_POINT_P90,
     intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
-    max_cell_band: 2,
-    affected_cell_count: 1,
-    min_claim_band: 1,
     freshness_deadline_ms: 1_700_021_610_000,
 };
 

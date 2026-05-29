@@ -5,7 +5,7 @@ use contracts::admin;
 use contracts::affected_cell;
 use contracts::disaster_event;
 use contracts::metadata_verifier;
-use contracts::payload_v1;
+use contracts::payload;
 use sui::bcs;
 use sui::clock;
 use sui::event;
@@ -65,7 +65,7 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
 
-    let payload = payload_v1::decode_finalized(
+    let payload = payload::decode_finalized(
         finalized_payload_bcs(),
         NOW_BEFORE_FRESHNESS_DEADLINE_MS,
     );
@@ -86,13 +86,13 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         severity_band,
         affected_cells_root,
         affected_cell_count,
-    ) = payload_v1::payload_summary(&payload);
+    ) = payload::payload_summary(&payload);
 
-    assert!(intent == payload_v1::intent_earthquake_oracle_payload_v1());
+    assert!(intent == payload::intent_earthquake_oracle_payload());
     assert!(oracle_version == ORACLE_VERSION);
     assert!(event_uid == event_uid());
-    assert!(hazard_type == payload_v1::hazard_type_earthquake());
-    assert!(status == payload_v1::status_finalized());
+    assert!(hazard_type == payload::hazard_type_earthquake());
+    assert!(status == payload::status_finalized());
     assert!(event_revision == EVENT_REVISION);
     assert!(source_event_id == b"us7000sonari");
     assert!(title == b"M 7.1 - Sonari Fixture Earthquake");
@@ -188,7 +188,7 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         assert!(object_occurred_at_ms == OCCURRED_AT_MS);
         assert!(object_magnitude_x100 == MAGNITUDE_X100);
         assert!(object_primary_source == PRIMARY_SOURCE_USGS);
-        assert!(object_hazard_type == payload_v1::hazard_type_earthquake());
+        assert!(object_hazard_type == payload::hazard_type_earthquake());
         assert!(object_oracle_version == ORACLE_VERSION);
 
         let (
@@ -237,9 +237,9 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = payload_v1::EExpiredFreshness)]
+#[test, expected_failure(abort_code = payload::EExpiredFreshness)]
 fun stale_disaster_payload_is_rejected() {
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         finalized_payload_bcs(),
         FRESHNESS_DEADLINE_MS,
     );
@@ -256,9 +256,9 @@ fun oversized_signed_payload_bcs_is_rejected_before_signature_verification() {
     create_signed_event_with_payload(payload, oracle_signature());
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidSourceEventIdLength)]
+#[test, expected_failure(abort_code = payload::EInvalidSourceEventIdLength)]
 fun empty_source_event_id_is_rejected() {
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         current_payload_bcs(
             b"",
             b"M 7.1 - Sonari Fixture Earthquake",
@@ -274,9 +274,9 @@ fun empty_source_event_id_is_rejected() {
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidRawDataUriLength)]
+#[test, expected_failure(abort_code = payload::EInvalidRawDataUriLength)]
 fun oversized_raw_data_uri_is_rejected() {
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         current_payload_bcs(
             b"us7000sonari",
             b"M 7.1 - Sonari Fixture Earthquake",
@@ -292,9 +292,9 @@ fun oversized_raw_data_uri_is_rejected() {
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidFreshnessDeadline)]
+#[test, expected_failure(abort_code = payload::EInvalidFreshnessDeadline)]
 fun freshness_deadline_must_be_after_verified_at() {
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         current_payload_bcs(
             b"us7000sonari",
             b"M 7.1 - Sonari Fixture Earthquake",
@@ -310,76 +310,76 @@ fun freshness_deadline_must_be_after_verified_at() {
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::ETrailingBytes)]
+#[test, expected_failure(abort_code = payload::ETrailingBytes)]
 fun trailing_payload_bytes_are_rejected() {
     let mut payload = finalized_payload_bcs();
     payload.push_back(0);
-    payload_v1::decode_finalized(payload, NOW_BEFORE_FRESHNESS_DEADLINE_MS);
+    payload::decode_finalized(payload, NOW_BEFORE_FRESHNESS_DEADLINE_MS);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedPrimarySource)]
+#[test, expected_failure(abort_code = payload::EUnsupportedPrimarySource)]
 fun unsupported_primary_source_is_rejected() {
     assert_mutated_payload_is_rejected(148, 2);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidSeverityBand)]
+#[test, expected_failure(abort_code = payload::EInvalidSeverityBand)]
 fun severity_band_zero_is_rejected() {
     assert_mutated_payload_is_rejected(149, 0);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedCellsGenerationMethod)]
+#[test, expected_failure(abort_code = payload::EUnsupportedCellsGenerationMethod)]
 fun unsupported_cells_generation_method_is_rejected() {
     assert_mutated_payload_is_rejected(402, 3);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedCellMetric)]
+#[test, expected_failure(abort_code = payload::EUnsupportedCellMetric)]
 fun unsupported_cell_metric_is_rejected() {
     assert_mutated_payload_is_rejected(403, 2);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedCellAggregation)]
+#[test, expected_failure(abort_code = payload::EUnsupportedCellAggregation)]
 fun unsupported_cell_aggregation_is_rejected() {
     assert_mutated_payload_is_rejected(404, 2);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedIntensityScale)]
+#[test, expected_failure(abort_code = payload::EUnsupportedIntensityScale)]
 fun unsupported_intensity_scale_is_rejected() {
     assert_mutated_payload_is_rejected(405, 2);
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedHazardType)]
+#[test, expected_failure(abort_code = payload::EUnsupportedHazardType)]
 fun non_earthquake_disaster_payload_is_rejected() {
     let mut bytes = finalized_payload_bcs();
     *bytes.borrow_mut(41) = 2;
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         bytes,
         NOW_BEFORE_FRESHNESS_DEADLINE_MS,
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::EUnsupportedGeoResolution)]
+#[test, expected_failure(abort_code = payload::EUnsupportedGeoResolution)]
 fun wrong_geo_resolution_disaster_payload_is_rejected() {
     let mut bytes = finalized_payload_bcs();
     *bytes.borrow_mut(401) = 6;
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         bytes,
         NOW_BEFORE_FRESHNESS_DEADLINE_MS,
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidEventRevision)]
+#[test, expected_failure(abort_code = payload::EInvalidEventRevision)]
 fun zero_event_revision_is_rejected() {
     let mut bytes = finalized_payload_bcs();
     *bytes.borrow_mut(43) = 0;
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         bytes,
         NOW_BEFORE_FRESHNESS_DEADLINE_MS,
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidMagnitude)]
+#[test, expected_failure(abort_code = payload::EInvalidMagnitude)]
 fun zero_magnitude_is_rejected() {
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         current_payload_bcs(
             b"us7000sonari",
             b"M 7.1 - Sonari Fixture Earthquake",
@@ -395,9 +395,9 @@ fun zero_magnitude_is_rejected() {
     );
 }
 
-#[test, expected_failure(abort_code = payload_v1::EInvalidAffectedCellCount)]
+#[test, expected_failure(abort_code = payload::EInvalidAffectedCellCount)]
 fun zero_affected_cell_count_is_rejected() {
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         current_payload_bcs(
             b"us7000sonari",
             b"M 7.1 - Sonari Fixture Earthquake",
@@ -473,11 +473,11 @@ fun stale_disaster_event_revision_is_rejected_after_newer_revision() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
-        let revision_2_payload = payload_v1::decode_finalized(
+        let revision_2_payload = payload::decode_finalized(
             revision_payload_bcs(2),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );
-        let revision_1_payload = payload_v1::decode_finalized(
+        let revision_1_payload = payload::decode_finalized(
             revision_payload_bcs(1),
             NOW_BEFORE_FRESHNESS_DEADLINE_MS,
         );
@@ -547,7 +547,7 @@ fun relayer_without_admin_cap_can_submit_registered_signed_payload() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = payload_v1::EExpiredFreshness)]
+#[test, expected_failure(abort_code = payload::EExpiredFreshness)]
 fun signed_payload_freshness_uses_clock_timestamp() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(1_704_172_800_000);
@@ -760,7 +760,7 @@ fun create_signed_event_with_payload(payload_bcs: vector<u8>, signature: vector<
 fun assert_mutated_payload_is_rejected(offset: u64, value: u8) {
     let mut bytes = finalized_payload_bcs();
     *bytes.borrow_mut(offset) = value;
-    payload_v1::decode_finalized(
+    payload::decode_finalized(
         bytes,
         NOW_BEFORE_FRESHNESS_DEADLINE_MS,
     );
@@ -842,11 +842,11 @@ fun current_payload_bcs(
     let occurred_at_ms = OCCURRED_AT_MS;
     let verified_at_ms = VERIFIED_AT_MS;
     let source_updated_at_ms = SOURCE_UPDATED_AT_MS;
-    bytes.push_back(payload_v1::intent_earthquake_oracle_payload_v1());
+    bytes.push_back(payload::intent_earthquake_oracle_payload());
     bytes.append(bcs::to_bytes(&oracle_version));
     bytes.append(event_uid());
-    bytes.push_back(payload_v1::hazard_type_earthquake());
-    bytes.push_back(payload_v1::status_finalized());
+    bytes.push_back(payload::hazard_type_earthquake());
+    bytes.push_back(payload::status_finalized());
     bytes.append(bcs::to_bytes(&event_revision));
     bytes.append(bcs::to_bytes(&source_event_id));
     bytes.append(bcs::to_bytes(&title));
