@@ -13,6 +13,7 @@ use sonari_tee_core::{LocalEd25519Signer, signing_key_seed_from_env, to_hex};
 
 const SIGNING_KEY_SEED_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED";
 const SIGNING_KEY_SEED_FILE_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED_FILE";
+const FIXTURE_DEFAULT_ISSUED_AT_MS: u64 = 1_800_000_000_000;
 
 #[derive(Debug, Parser)]
 #[command(name = "membership-tee")]
@@ -46,10 +47,7 @@ enum FixtureWorldIdStatus {
 }
 
 #[derive(Debug, Parser)]
-struct ProductionArgs {
-    #[arg(long)]
-    signing_key_seed: Option<String>,
-}
+struct ProductionArgs {}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -96,11 +94,7 @@ fn encode_only_result() -> Result<EncodeOnlyResult, Box<dyn std::error::Error>> 
 
 fn fixture_result(args: FixtureArgs) -> Result<IdentityTeeCliResult, Box<dyn std::error::Error>> {
     let request = read_stdin_request()?;
-    let issued_at_ms = request.issued_at_ms.ok_or_else(|| {
-        membership_tee::IdentityError::Request(
-            "fixture request requires issued_at_ms for deterministic output".to_owned(),
-        )
-    })?;
+    let issued_at_ms = request.issued_at_ms.unwrap_or(FIXTURE_DEFAULT_ISSUED_AT_MS);
     let expected_app_id = request
         .world_id
         .as_ref()
@@ -123,16 +117,13 @@ fn fixture_result(args: FixtureArgs) -> Result<IdentityTeeCliResult, Box<dyn std
 }
 
 fn production_result(
-    args: ProductionArgs,
+    _args: ProductionArgs,
 ) -> Result<IdentityTeeCliResult, Box<dyn std::error::Error>> {
     let mut request = read_stdin_request()?;
     request.issued_at_ms = None;
-    let seed = signing_key_seed_from_env(
-        args.signing_key_seed,
-        SIGNING_KEY_SEED_ENV,
-        SIGNING_KEY_SEED_FILE_ENV,
-        false,
-    )?;
+    request.validity_ms = None;
+    let seed =
+        signing_key_seed_from_env(None, SIGNING_KEY_SEED_ENV, SIGNING_KEY_SEED_FILE_ENV, false)?;
     let verifier = CloudWorldIdVerifier::from_env()?;
     let signer = LocalEd25519Signer::new(seed);
     let output =

@@ -176,6 +176,11 @@ fn verified_output(
             "validity_ms must be greater than 0".to_owned(),
         ));
     }
+    if validity_ms > IDENTITY_RESULT_TTL_MS {
+        return Err(IdentityError::Request(format!(
+            "validity_ms must be less than or equal to {IDENTITY_RESULT_TTL_MS}"
+        )));
+    }
     let expires_at_ms = issued_at_ms.checked_add(validity_ms).ok_or_else(|| {
         IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
     })?;
@@ -575,6 +580,26 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("lowercase"));
+    }
+
+    #[test]
+    fn process_identity_rejects_validity_ms_above_max_ttl() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.validity_ms = Some(IDENTITY_RESULT_TTL_MS + 1);
+
+        let error = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("validity_ms"));
+        assert_eq!(signer.calls.get(), 0);
     }
 
     fn assert_non_verified_output(output: &super::IdentityProcessingOutput) {

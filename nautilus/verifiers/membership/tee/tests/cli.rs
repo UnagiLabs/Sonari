@@ -76,9 +76,11 @@ fn fixture_command_returns_verified_result_from_stdin() {
 
 #[test]
 fn fixture_command_returns_rejected_without_signature() {
+    let mut request = world_id_request_json();
+    request.as_object_mut().unwrap().remove("issued_at_ms");
     let output = run_with_stdin(
         membership_tee().args(["fixture", "--world-id-status", "rejected"]),
-        &world_id_request_json().to_string(),
+        &request.to_string(),
     );
 
     assert!(
@@ -94,9 +96,11 @@ fn fixture_command_returns_rejected_without_signature() {
 
 #[test]
 fn fixture_command_returns_pending_source_without_signature() {
+    let mut request = world_id_request_json();
+    request.as_object_mut().unwrap().remove("issued_at_ms");
     let output = run_with_stdin(
         membership_tee().args(["fixture", "--world-id-status", "pending-source"]),
-        &world_id_request_json().to_string(),
+        &request.to_string(),
     );
 
     assert!(
@@ -112,10 +116,9 @@ fn fixture_command_returns_pending_source_without_signature() {
 
 #[test]
 fn fixture_command_returns_unsupported_for_kyc_without_signature() {
-    let output = run_with_stdin(
-        membership_tee().arg("fixture"),
-        &kyc_request_json().to_string(),
-    );
+    let mut request = kyc_request_json();
+    request.as_object_mut().unwrap().remove("issued_at_ms");
+    let output = run_with_stdin(membership_tee().arg("fixture"), &request.to_string());
 
     assert!(
         output.status.success(),
@@ -194,6 +197,29 @@ fn production_command_fails_closed_without_signing_seed() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("SONARI_TEE_SIGNING_KEY_SEED"),
         "expected missing seed error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+}
+
+#[test]
+fn production_command_rejects_signing_key_seed_arg() {
+    let output = run_with_stdin(
+        membership_tee().args([
+            "production",
+            "--signing-key-seed",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        ]),
+        &world_id_request_json().to_string(),
+    );
+
+    assert!(
+        !output.status.success(),
+        "expected production argv seed to fail"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unexpected argument"),
+        "expected clap unexpected argument error, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "");
