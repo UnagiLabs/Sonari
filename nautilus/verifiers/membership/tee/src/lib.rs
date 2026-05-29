@@ -1,4 +1,5 @@
 pub mod core;
+pub mod encoding;
 pub mod error;
 
 pub use core::types::{IdentityProvider, IdentityTeeResult, IdentityVerifyRequest};
