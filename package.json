@@ -7,11 +7,11 @@
     "scripts": {
         "format": "pnpm format:ts && pnpm format:rust",
         "format:ts": "biome check --write .",
-        "format:rust": "cargo fmt --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml",
+        "format:rust": "cargo fmt --all",
         "check": "pnpm check:ts && pnpm check:rust",
         "check:move": "sui move build -p contracts --force --lint --warnings-are-errors && sui move test -p contracts",
         "check:ts": "biome check . && pnpm typecheck",
-        "check:rust": "cargo fmt --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml --check && cargo check --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml",
+        "check:rust": "cargo fmt --all --check && cargo check --workspace",
         "lint": "pnpm check",
         "typecheck": "pnpm typecheck:packages && pnpm typecheck:scripts",
         "typecheck:packages": "tsc -b --noEmit",
@@ -27,7 +27,8 @@
         "oracle:e2e:local": "tsx scripts/nautilus_local_e2e.ts",
         "oracle:e2e:fake-binding": "tsx scripts/nautilus_fake_binding_e2e.ts",
         "oracle:e2e:live": "tsx scripts/nautilus_live_e2e.ts",
-        "test:oracle": "pnpm --filter './nautilus/verifiers/earthquake/**' test && cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml"
+        "test:oracle": "pnpm --filter './nautilus/verifiers/earthquake/**' test && cargo test -p tee",
+        "test:identity": "cargo test -p membership-tee"
     },
     "devDependencies": {
         "@biomejs/biome": "^2.4.15",
