@@ -1,8 +1,9 @@
 use std::io::{self, Read};
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use membership_tee::{
-    IdentityProcessingOutput, IdentityProcessingStatus, IdentityTeeResult, IdentityVerifyRequest,
+    IdentityProcessingOutput, IdentityProcessingStatus, IdentityProvider, IdentityTeeResult,
+    IdentityVerifyRequest, WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED,
     WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
     process_identity_with_verifier,
 };
@@ -27,6 +28,16 @@ enum Command {
 struct FixtureArgs {
     #[arg(long)]
     signing_key_seed: Option<String>,
+    #[arg(long, value_enum, default_value = "verified")]
+    world_id_status: FixtureWorldIdStatus,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+enum FixtureWorldIdStatus {
+    Verified,
+    Rejected,
+    PendingSource,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -46,15 +57,21 @@ fn fixture_result(args: FixtureArgs) -> Result<TeeJsonResult, Box<dyn std::error
     let mut stdin = Vec::new();
     io::stdin().read_to_end(&mut stdin)?;
     let request: IdentityVerifyRequest = serde_json::from_slice(&stdin)?;
-    let issued_at_ms = request
-        .issued_at_ms
-        .ok_or("membership-tee fixture requires issued_at_ms")?;
-    let proof = request
+    let issued_at_ms = if request.provider == IdentityProvider::WorldId {
+        request
+            .issued_at_ms
+            .ok_or("membership-tee fixture requires issued_at_ms")?
+    } else {
+        request.issued_at_ms.unwrap_or(0)
+    };
+    let expected_app_id = request
         .world_id
         .as_ref()
-        .ok_or("membership-tee fixture requires world_id")?;
+        .map(|proof| proof.world_app_id.clone())
+        .unwrap_or_default();
     let verifier = FixtureWorldIdVerifier {
-        expected_app_id: proof.world_app_id.clone(),
+        expected_app_id,
+        status: args.world_id_status,
     };
     let seed = signing_key_seed_from_env(
         args.signing_key_seed,
@@ -71,6 +88,7 @@ fn fixture_result(args: FixtureArgs) -> Result<TeeJsonResult, Box<dyn std::error
 #[derive(Debug)]
 struct FixtureWorldIdVerifier {
     expected_app_id: String,
+    status: FixtureWorldIdStatus,
 }
 
 impl WorldIdVerifier for FixtureWorldIdVerifier {
@@ -79,7 +97,15 @@ impl WorldIdVerifier for FixtureWorldIdVerifier {
     }
 
     fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
-        WorldIdVerificationStatus::Verified
+        match self.status {
+            FixtureWorldIdStatus::Verified => WorldIdVerificationStatus::Verified,
+            FixtureWorldIdStatus::Rejected => WorldIdVerificationStatus::Rejected {
+                error_code: WORLD_ID_VERIFICATION_FAILED.to_owned(),
+            },
+            FixtureWorldIdStatus::PendingSource => WorldIdVerificationStatus::PendingSource {
+                error_code: WORLD_ID_API_UNAVAILABLE.to_owned(),
+            },
+        }
     }
 }
 
@@ -91,6 +117,15 @@ enum TeeJsonResult {
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
+    },
+    Rejected {
+        error_code: String,
+    },
+    PendingSource {
+        error_code: String,
+    },
+    Unsupported {
+        error_code: String,
     },
 }
 
@@ -119,7 +154,21 @@ fn output_to_tee_json(
                 public_key,
             })
         }
-        _ => Err("membership-tee fixture currently only supports verified output".into()),
+        IdentityProcessingStatus::Rejected => Ok(TeeJsonResult::Rejected {
+            error_code: output
+                .error_code
+                .ok_or("rejected output is missing error code")?,
+        }),
+        IdentityProcessingStatus::PendingSource => Ok(TeeJsonResult::PendingSource {
+            error_code: output
+                .error_code
+                .ok_or("pending_source output is missing error code")?,
+        }),
+        IdentityProcessingStatus::Unsupported => Ok(TeeJsonResult::Unsupported {
+            error_code: output
+                .error_code
+                .ok_or("unsupported output is missing error code")?,
+        }),
     }
 }
 

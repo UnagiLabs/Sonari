@@ -2,7 +2,10 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use membership_tee::{INTENT, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION};
+use membership_tee::{
+    INTENT, KYC_UNSUPPORTED, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
+    WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED,
+};
 use serde::Deserialize;
 
 fn membership_tee() -> Command {
@@ -53,41 +56,7 @@ fn production_help_exits_successfully() {
 
 #[test]
 fn fixture_command_returns_signed_verified_world_id_result() {
-    let request = serde_json::json!({
-        "registry_id": REGISTRY_ID,
-        "membership_id": MEMBERSHIP_ID,
-        "owner": OWNER,
-        "provider": "world_id",
-        "issued_at_ms": ISSUED_AT_MS,
-        "validity_ms": VALIDITY_MS,
-        "terms_version": TERMS_VERSION,
-        "signed_statement_hash": SIGNED_STATEMENT_HASH,
-        "world_id": {
-            "world_app_id": "app_staging_123",
-            "nullifier_hash": "12345678901234567890",
-            "merkle_root": "987654321",
-            "proof": "0xproof",
-            "verification_level": "orb",
-            "action": "sonari_membership_register_v1",
-            "signal_hash": "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268",
-        },
-    });
-    let mut child = membership_tee()
-        .arg("fixture")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn membership-tee fixture");
-    child
-        .stdin
-        .as_mut()
-        .expect("fixture stdin should be writable")
-        .write_all(serde_json::to_string(&request).unwrap().as_bytes())
-        .expect("failed to write fixture request");
-    let output = child
-        .wait_with_output()
-        .expect("failed to run membership-tee fixture");
+    let output = run_fixture(&[], &world_id_request());
 
     assert!(
         output.status.success(),
@@ -158,6 +127,68 @@ fn fixture_command_returns_signed_verified_world_id_result() {
 }
 
 #[test]
+fn fixture_command_returns_unsupported_for_kyc_without_signature_fields() {
+    let output = run_fixture(&[], &kyc_request());
+
+    assert_fixture_status_only(output, "unsupported", KYC_UNSUPPORTED);
+}
+
+#[test]
+fn fixture_command_returns_rejected_world_id_without_signature_fields() {
+    let output = run_fixture(&["--world-id-status", "rejected"], &world_id_request());
+
+    assert_fixture_status_only(output, "rejected", WORLD_ID_VERIFICATION_FAILED);
+}
+
+#[test]
+fn fixture_command_returns_pending_source_world_id_without_signature_fields() {
+    let output = run_fixture(
+        &["--world-id-status", "pending-source"],
+        &world_id_request(),
+    );
+
+    assert_fixture_status_only(output, "pending_source", WORLD_ID_API_UNAVAILABLE);
+}
+
+#[test]
+fn fixture_command_rejects_top_level_unknown_request_field() {
+    let mut request = world_id_request();
+    request["raw_personal_data"] = serde_json::json!("do-not-accept");
+
+    let output = run_fixture(&[], &request);
+
+    assert!(
+        !output.status.success(),
+        "expected unknown top-level field to fail, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unknown field"),
+        "expected serde unknown field error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn fixture_command_rejects_nested_world_id_unknown_request_field() {
+    let mut request = world_id_request();
+    request["world_id"]["raw_proof_context"] = serde_json::json!("do-not-accept");
+
+    let output = run_fixture(&[], &request);
+
+    assert!(
+        !output.status.success(),
+        "expected unknown nested field to fail, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("unknown field"),
+        "expected serde unknown field error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn production_command_fails_until_implemented() {
     let output = membership_tee()
         .arg("production")
@@ -216,4 +247,89 @@ fn decode_hex_field(result: &serde_json::Value, field: &str) -> Vec<u8> {
 
 fn hex_32(bytes: [u8; 32]) -> String {
     format!("0x{}", hex::encode(bytes))
+}
+
+fn run_fixture(args: &[&str], request: &serde_json::Value) -> std::process::Output {
+    let mut child = membership_tee()
+        .arg("fixture")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn membership-tee fixture");
+    child
+        .stdin
+        .as_mut()
+        .expect("fixture stdin should be writable")
+        .write_all(serde_json::to_string(request).unwrap().as_bytes())
+        .expect("failed to write fixture request");
+    child
+        .wait_with_output()
+        .expect("failed to run membership-tee fixture")
+}
+
+fn assert_fixture_status_only(
+    output: std::process::Output,
+    expected_status: &str,
+    expected_error_code: &str,
+) {
+    assert!(
+        output.status.success(),
+        "expected fixture command to succeed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("fixture stdout should be JSON");
+
+    assert_eq!(result["status"], expected_status);
+    assert_eq!(result["error_code"], expected_error_code);
+    let fields = result
+        .as_object()
+        .expect("fixture result should be an object");
+    assert_eq!(
+        fields.len(),
+        2,
+        "non-verified fixture result should only include status and error_code"
+    );
+    for field in ["payload", "payload_bcs_hex", "signature", "public_key"] {
+        assert!(
+            !fields.contains_key(field),
+            "non-verified fixture result must not include {field}"
+        );
+    }
+}
+
+fn world_id_request() -> serde_json::Value {
+    serde_json::json!({
+        "registry_id": REGISTRY_ID,
+        "membership_id": MEMBERSHIP_ID,
+        "owner": OWNER,
+        "provider": "world_id",
+        "issued_at_ms": ISSUED_AT_MS,
+        "validity_ms": VALIDITY_MS,
+        "terms_version": TERMS_VERSION,
+        "signed_statement_hash": SIGNED_STATEMENT_HASH,
+        "world_id": {
+            "world_app_id": "app_staging_123",
+            "nullifier_hash": "12345678901234567890",
+            "merkle_root": "987654321",
+            "proof": "0xproof",
+            "verification_level": "orb",
+            "action": "sonari_membership_register_v1",
+            "signal_hash": "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268",
+        },
+    })
+}
+
+fn kyc_request() -> serde_json::Value {
+    serde_json::json!({
+        "registry_id": REGISTRY_ID,
+        "membership_id": MEMBERSHIP_ID,
+        "owner": OWNER,
+        "provider": "kyc",
+        "terms_version": TERMS_VERSION,
+        "signed_statement_hash": SIGNED_STATEMENT_HASH,
+        "world_id": null,
+    })
 }
