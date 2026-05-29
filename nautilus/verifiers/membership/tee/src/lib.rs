@@ -12,7 +12,8 @@ pub use core::processing::{
     compute_world_id_signal_hash, process_identity_with_verifier,
 };
 pub use core::types::{
-    IdentityProvider, IdentityTeeResult, IdentityVerifyRequest, WorldIdProofRequest,
+    IdentityProvider, IdentityTeeCliResult, IdentityTeeResult, IdentityVerifyRequest,
+    WorldIdProofRequest,
 };
 pub use error::IdentityError;
 pub use verify::kyc::{KYC_UNSUPPORTED, KycVerificationStatus, verify_kyc_unsupported};
@@ -32,7 +33,8 @@ pub const PROVIDER_WORLD_ID: u8 = 2;
 mod tests {
     use super::{
         INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
-        PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
+        IdentityTeeCliResult, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY,
+        VERIFIER_VERSION,
     };
 
     #[test]
@@ -96,6 +98,76 @@ mod tests {
         assert_eq!(json["verifier_family"], "identity");
         assert_eq!(json["provider"], "kyc");
         assert_eq!(json["verified"], true);
+    }
+
+    #[test]
+    fn identity_cli_result_serializes_verified_envelope_without_payload_fields() {
+        let result = IdentityTeeCliResult::Verified {
+            payload_bcs_hex: "0xaaaa".to_owned(),
+            signature: "0xbbbb".to_owned(),
+            public_key: "0xcccc".to_owned(),
+            duplicate_key_hash:
+                "0x4444444444444444444444444444444444444444444444444444444444444444"
+                    .to_owned(),
+            expires_at_ms: 1_800_000_000_000,
+        };
+
+        let json = serde_json::to_value(result).unwrap();
+
+        assert_eq!(json["status"], "verified");
+        assert_eq!(json["payload_bcs_hex"], "0xaaaa");
+        assert_eq!(json["signature"], "0xbbbb");
+        assert_eq!(json["public_key"], "0xcccc");
+        assert_eq!(json["duplicate_key_hash"], identity_result_json()["duplicate_key_hash"]);
+        assert_eq!(json["expires_at_ms"], 1_800_000_000_000_u64);
+        assert!(json.get("intent").is_none());
+        assert!(json.get("algorithm").is_none());
+    }
+
+    #[test]
+    fn identity_cli_result_serializes_non_verified_without_signature_fields() {
+        for (result, status) in [
+            (
+                IdentityTeeCliResult::Rejected {
+                    error_code: "WORLD_ID_VERIFICATION_FAILED".to_owned(),
+                },
+                "rejected",
+            ),
+            (
+                IdentityTeeCliResult::PendingSource {
+                    error_code: "WORLD_ID_API_UNAVAILABLE".to_owned(),
+                },
+                "pending_source",
+            ),
+            (
+                IdentityTeeCliResult::Unsupported {
+                    error_code: "KYC_NOT_IMPLEMENTED".to_owned(),
+                },
+                "unsupported",
+            ),
+        ] {
+            let json = serde_json::to_value(result).unwrap();
+
+            assert_eq!(json["status"], status);
+            assert!(json.get("error_code").is_some());
+            assert!(json.get("payload_bcs_hex").is_none());
+            assert!(json.get("signature").is_none());
+            assert!(json.get("public_key").is_none());
+            assert!(json.get("duplicate_key_hash").is_none());
+            assert!(json.get("expires_at_ms").is_none());
+        }
+    }
+
+    #[test]
+    fn identity_cli_result_rejects_unknown_fields() {
+        let error = serde_json::from_value::<IdentityTeeCliResult>(serde_json::json!({
+            "status": "rejected",
+            "error_code": "WORLD_ID_VERIFICATION_FAILED",
+            "signature": "0xshould-not-exist",
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]

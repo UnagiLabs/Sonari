@@ -64,6 +64,27 @@ pub struct IdentityTeeResult {
     pub signed_statement_hash: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum IdentityTeeCliResult {
+    Verified {
+        payload_bcs_hex: String,
+        signature: String,
+        public_key: String,
+        duplicate_key_hash: String,
+        expires_at_ms: u64,
+    },
+    Rejected {
+        error_code: String,
+    },
+    PendingSource {
+        error_code: String,
+    },
+    Unsupported {
+        error_code: String,
+    },
+}
+
 fn deserialize_intent<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
