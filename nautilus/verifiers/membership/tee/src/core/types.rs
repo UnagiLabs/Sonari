@@ -10,12 +10,17 @@ pub enum IdentityProvider {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdentityVerifyRequest {
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub registry_id: String,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub membership_id: String,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub owner: String,
     pub provider: IdentityProvider,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub evidence_hash: String,
     pub terms_version: u64,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub signed_statement_hash: String,
 }
 
@@ -27,16 +32,22 @@ pub struct IdentityTeeResult {
     #[serde(deserialize_with = "deserialize_verifier_family")]
     pub verifier_family: String,
     pub verifier_version: u64,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub registry_id: String,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub membership_id: String,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub owner: String,
     pub provider: IdentityProvider,
     pub verified: bool,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub duplicate_key_hash: String,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub evidence_hash: String,
     pub issued_at_ms: u64,
     pub expires_at_ms: u64,
     pub terms_version: u64,
+    #[serde(deserialize_with = "deserialize_hex_32_string")]
     pub signed_statement_hash: String,
 }
 
@@ -70,4 +81,13 @@ where
             "{field} must be {expected}"
         )))
     }
+}
+
+fn deserialize_hex_32_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    sonari_tee_core::hex_to_32(&value).map_err(<D::Error as serde::de::Error>::custom)?;
+    Ok(value)
 }

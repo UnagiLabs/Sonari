@@ -13,8 +13,8 @@ pub const PROVIDER_WORLD_ID: u8 = 2;
 #[cfg(test)]
 mod tests {
     use super::{
-        INTENT, IdentityError, IdentityProvider, IdentityTeeResult, PROVIDER_KYC,
-        PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
+        INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
+        PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
     };
 
     #[test]
@@ -131,6 +131,29 @@ mod tests {
         assert!(error.to_string().contains("verifier_family must be"));
     }
 
+    #[test]
+    fn identity_result_rejects_malformed_hex_fields() {
+        let mut json = identity_result_json();
+        json["duplicate_key_hash"] = serde_json::json!("0x1234");
+
+        let error = serde_json::from_value::<IdentityTeeResult>(json).unwrap_err();
+
+        assert!(error.to_string().contains("expected 32-byte hex"));
+    }
+
+    #[test]
+    fn identity_request_rejects_unknown_or_malformed_fields() {
+        let mut unknown_field = identity_request_json();
+        unknown_field["raw_personal_data"] = serde_json::json!("do-not-accept");
+        let error = serde_json::from_value::<IdentityVerifyRequest>(unknown_field).unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
+
+        let mut malformed_owner = identity_request_json();
+        malformed_owner["owner"] = serde_json::json!("0x1234");
+        let error = serde_json::from_value::<IdentityVerifyRequest>(malformed_owner).unwrap_err();
+        assert!(error.to_string().contains("expected 32-byte hex"));
+    }
+
     fn identity_result_json() -> serde_json::Value {
         serde_json::json!({
             "intent": INTENT,
@@ -145,6 +168,18 @@ mod tests {
             "evidence_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
             "issued_at_ms": 1_700_000_000_000_u64,
             "expires_at_ms": 1_800_000_000_000_u64,
+            "terms_version": 1_u64,
+            "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+        })
+    }
+
+    fn identity_request_json() -> serde_json::Value {
+        serde_json::json!({
+            "registry_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "provider": "kyc",
+            "evidence_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
             "terms_version": 1_u64,
             "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
         })
