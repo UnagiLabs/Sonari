@@ -1,4 +1,4 @@
-pub const KYC_UNSUPPORTED: &str = "KYC_UNSUPPORTED";
+pub const KYC_UNSUPPORTED: &str = "KYC_NOT_IMPLEMENTED";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KycVerificationStatus {
