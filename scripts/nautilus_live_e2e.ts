@@ -137,7 +137,12 @@ class LocalRelayerAdapter implements RelayerAdapter {
                     message: "dry_run requires RELAYER_GRPC_URL and RELAYER_SENDER_ADDRESS",
                 };
             }
-            const result = await dryRunRelayerSubmit(input, { ...config, grpcUrl, senderAddress });
+            const result = await dryRunRelayerSubmit(input, {
+                ...config,
+                network: "testnet",
+                grpcUrl,
+                senderAddress,
+            });
             return result.ok
                 ? { ok: true, value: { mode: this.mode, request: result.value.request } }
                 : result;

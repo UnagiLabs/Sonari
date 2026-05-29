@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+    createEd25519SuiSignerFromPrivateKey,
+    loadFixtureRelayerSubmitInput,
+    type RelayerSubmitConfig,
+} from "@sonari/earthquake-relayer";
 import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
@@ -6,12 +11,23 @@ import {
     createRunnerControlHandler,
     type AutoScalingClientLike,
     type Ec2ClientLike,
+    readRelayerConfigFromEnv,
+    type RelayerSignerSecretReader,
     type S3ClientLike,
     type SsmClientLike,
 } from "../src/runner_workflow.js";
 import { InMemoryStateRepository } from "../src/state.js";
 
+const validEd25519SuiPrivateKey =
+    "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf";
+
 describe("AWS runner workflow helper", () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+        process.env = { ...originalEnv };
+    });
+
     it("scales the runner ASG up and down", async () => {
         const autoscaling = new RecordingAutoScalingClient();
         const handler = createRunnerControlHandler({
@@ -814,6 +830,244 @@ describe("AWS runner workflow helper", () => {
         });
         expect(relayer).toMatchObject({ relayer: "skipped" });
     });
+
+    it("marks dry-run relayer as failed when RELAYER_NETWORK is missing", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_002_000,
+            config: {
+                ...baseConfig(),
+                relayer: {
+                    mode: "dry_run",
+                    target: "0xtarget",
+                    registry: "0xregistry",
+                    verifierRegistry: "0xverifier",
+                    grpcUrl: "https://fullnode.testnet.sui.io:443",
+                    senderAddress: "0xsender",
+                    configurationError: "RELAYER_NETWORK is required",
+                },
+            },
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ relayer: "failed" });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            relayer_mode: "dry_run",
+            relayer_status: "failed",
+            relayer_error_code: "RELAYER_SUBMIT_FAILED",
+            relayer_error_message: "RELAYER_NETWORK is required",
+        });
+    });
+
+    it("fails submit relayer before signer access unless RELAYER_ALLOW_SUBMIT is true", async () => {
+        const relayer = readRelayerConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+        expect(relayer).toBeUndefined();
+
+        process.env.RELAYER_MODE = "submit";
+        process.env.RELAYER_NETWORK = "testnet";
+        process.env.RELAYER_TARGET = "0xtarget";
+        process.env.RELAYER_REGISTRY = "0xregistry";
+        process.env.RELAYER_VERIFIER_REGISTRY = "0xverifier";
+        process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+        process.env.RELAYER_ALLOW_SUBMIT = "false";
+        process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
+        const reader = new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey);
+        const config = readRelayerConfigFromEnv(reader);
+
+        expect(config).toMatchObject({
+            mode: "submit",
+            network: "testnet",
+            allowSubmit: false,
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+        });
+        expect(reader.secretReads).toEqual([]);
+    });
+
+    it("creates a lazy submit signer loader from RELAYER_SIGNER_SECRET_ARN", async () => {
+        process.env.RELAYER_MODE = "submit";
+        process.env.RELAYER_NETWORK = "testnet";
+        process.env.RELAYER_TARGET = "0xtarget";
+        process.env.RELAYER_REGISTRY = "0xregistry";
+        process.env.RELAYER_VERIFIER_REGISTRY = "0xverifier";
+        process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+        process.env.RELAYER_ALLOW_SUBMIT = "true";
+        process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
+        const reader = new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey);
+        const config = readRelayerConfigFromEnv(reader);
+
+        expect(config).toMatchObject({
+            mode: "submit",
+            network: "testnet",
+            allowSubmit: true,
+        });
+        expect(reader.secretReads).toEqual([]);
+        await expect(config?.loadSigner?.()).resolves.toMatchObject({
+            toSuiAddress: expect.any(Function),
+        });
+        expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
+    });
+
+    it("returns a relayer configuration error instead of throwing when required object IDs are missing", () => {
+        process.env.RELAYER_MODE = "dry_run";
+        process.env.RELAYER_NETWORK = "testnet";
+        process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+        process.env.RELAYER_SENDER_ADDRESS = "0xsender";
+
+        const config = readRelayerConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config).toMatchObject({
+            mode: "dry_run",
+            configurationError:
+                "RELAYER_TARGET, RELAYER_REGISTRY, RELAYER_VERIFIER_REGISTRY required for RELAYER_MODE=dry_run",
+        });
+    });
+
+    it("stores submit digest and object ID while moving the row to submitted", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_002_000,
+            config: {
+                ...baseConfig(),
+                relayer: {
+                    mode: "submit",
+                    target: "0xtarget",
+                    registry: "0xregistry",
+                    verifierRegistry: "0xverifier",
+                    network: "testnet",
+                    grpcUrl: "https://fullnode.testnet.sui.io:443",
+                    allowSubmit: true,
+                    loadSigner: async () =>
+                        createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey),
+                    submitPayload: async (input: unknown, config: RelayerSubmitConfig) => {
+                        expect(input).toEqual(result);
+                        expect(config.signer?.toSuiAddress()).toBe(
+                            "0xec4afbacb79ca9f456ff4ed20a2a63f1c325ed887f8581e066bd9bdf5fed2bd8",
+                        );
+                        const request = {
+                            target: config.target,
+                            registry: config.registry,
+                            verifierRegistry: config.verifierRegistry,
+                            clock: "0x6",
+                            arguments: [
+                                config.registry,
+                                config.verifierRegistry,
+                                "0x6",
+                                [],
+                                [],
+                                [],
+                            ] as [string, string, string, number[], number[], number[]],
+                            submitRequest: {
+                                target: config.target,
+                                registry: config.registry,
+                                verifierRegistry: config.verifierRegistry,
+                                clock: "0x6",
+                                arguments: [
+                                    config.registry,
+                                    config.verifierRegistry,
+                                    "0x6",
+                                    [],
+                                    [],
+                                    [],
+                                ] as [string, string, string, number[], number[], number[]],
+                            },
+                        };
+                        return {
+                            ok: true,
+                            value: {
+                                request,
+                                digest: "tx-digest",
+                                objectId: "0xdisaster",
+                                effects: {},
+                            },
+                        };
+                    },
+                },
+            },
+        });
+
+        const relayerResult = await handler({
+            action: "relayer_preview_or_dry_run",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result,
+        });
+        expect(relayerResult).toMatchObject({
+            relayer: "succeeded",
+            relayer_success: {
+                mode: "submit",
+                target: "0xtarget",
+                registry: "0xregistry",
+                verifierRegistry: "0xverifier",
+                digest: "tx-digest",
+                objectId: "0xdisaster",
+            },
+        });
+        if (!("relayer" in relayerResult) || relayerResult.relayer !== "succeeded") {
+            throw new Error("expected relayer success");
+        }
+        expect("request" in relayerResult.relayer_success).toBe(false);
+        expect(JSON.stringify(relayerResult.relayer_success).length).toBeLessThan(512);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            relayer_status: null,
+            relayer_digest: null,
+            relayer_object_id: null,
+        });
+
+        await expect(
+            handler({
+                action: "record_relayer_success",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+                relayer_success: relayerResult.relayer_success,
+            }),
+        ).resolves.toMatchObject({ relayer: "recorded" });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "submitted",
+            relayer_mode: "submit",
+            relayer_status: "succeeded",
+            relayer_digest: "tx-digest",
+            relayer_object_id: "0xdisaster",
+            relayer_submitted_at_ms: 1_800_000_002_000,
+        });
+    });
 });
 
 function baseConfig() {
@@ -941,6 +1195,17 @@ class RecordingS3Client implements S3ClientLike {
                 error_code: "SHAKEMAP_PRODUCT_MISSING",
             })
         );
+    }
+}
+
+class RecordingRelayerSignerSecretReader implements RelayerSignerSecretReader {
+    readonly secretReads: string[] = [];
+
+    constructor(private readonly secret: string) {}
+
+    async getSecretString(secretArn: string): Promise<string> {
+        this.secretReads.push(secretArn);
+        return this.secret;
     }
 }
 

@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
-import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
     buildRelayerRequestPreview,
+    createEd25519SuiSignerFromPrivateKey,
     dryRunRelayerSubmit,
     loadFixtureRelayerSubmitInput,
     submitRelayerPayload,
@@ -15,6 +14,7 @@ interface CliOptions {
     fixtureCase?: string;
     input?: string;
     grpcUrl?: string;
+    network?: "mainnet" | "testnet" | "devnet";
     target?: string;
     registry?: string;
     verifierRegistry?: string;
@@ -50,6 +50,7 @@ async function main(argv: string[]): Promise<number> {
             target: options.target ?? "",
             registry: options.registry ?? "",
             verifierRegistry: options.verifierRegistry ?? "",
+            network: options.network ?? "testnet",
             grpcUrl: options.grpcUrl ?? "",
             senderAddress: options.sender ?? "",
         });
@@ -59,6 +60,7 @@ async function main(argv: string[]): Promise<number> {
 
     if (
         !options.grpcUrl ||
+        !options.network ||
         !options.target ||
         !options.registry ||
         !options.verifierRegistry ||
@@ -73,11 +75,12 @@ async function main(argv: string[]): Promise<number> {
         return 1;
     }
 
-    const signer = loadEd25519Signer(options.signer);
+    const signer = createEd25519SuiSignerFromPrivateKey(options.signer);
     const result = await submitRelayerPayload(input.value, {
         target: options.target,
         registry: options.registry,
         verifierRegistry: options.verifierRegistry,
+        network: options.network,
         grpcUrl: options.grpcUrl,
         signer,
     });
@@ -109,6 +112,12 @@ function parseArgs(argv: string[]): CliOptions | undefined {
                 break;
             case "--grpc-url":
                 options.grpcUrl = value;
+                break;
+            case "--network":
+                if (value !== "mainnet" && value !== "testnet" && value !== "devnet") {
+                    return undefined;
+                }
+                options.network = value;
                 break;
             case "--target":
                 options.target = value;
@@ -147,15 +156,6 @@ function loadInput(
     return { ok: false, error: "Provide --fixture-case or --input" };
 }
 
-function loadEd25519Signer(value: string): Ed25519Keypair {
-    const decoded = decodeSuiPrivateKey(value);
-    if (decoded.scheme !== "ED25519") {
-        throw new Error("Only Ed25519 Sui private keys are supported for relayer submit");
-    }
-
-    return Ed25519Keypair.fromSecretKey(decoded.secretKey);
-}
-
 function printJson(value: unknown): void {
     process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -165,8 +165,8 @@ function printUsage(): void {
         [
             "Usage:",
             "  pnpm relayer -- build-request --fixture-case usgs/finalized_minimal --target <target> --registry <registry> --verifier-registry <registry>",
-            "  pnpm relayer -- dry-run --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --sender <address>",
-            "  pnpm relayer -- submit --input <payload.json> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --signer <sui-private-key>",
+            "  pnpm relayer -- dry-run --input <payload.json> --network <mainnet|testnet|devnet> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --sender <address>",
+            "  pnpm relayer -- submit --input <payload.json> --network <mainnet|testnet|devnet> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --signer <sui-private-key>",
         ].join("\n"),
     );
 }

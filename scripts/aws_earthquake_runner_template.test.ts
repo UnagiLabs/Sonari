@@ -191,6 +191,41 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(template).not.toContain("Handler: dist/runner_workflow.handler");
     });
 
+    it("passes relayer configuration to RunnerControl Lambda with safe defaults", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("RelayerMode:");
+        expect(template).toContain("AllowedValues:");
+        expect(template).toContain("- dry_run");
+        expect(template).toContain("- submit");
+        expect(template).toContain("RelayerNetwork:");
+        expect(template).toContain("- mainnet");
+        expect(template).toContain("- testnet");
+        expect(template).toContain("- devnet");
+        expect(template).toContain("RelayerGrpcUrl:");
+        expect(template).toContain('Default: ""');
+        expect(template).toContain("RELAYER_MODE: !Ref RelayerMode");
+        expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
+        expect(template).toContain("RELAYER_TARGET: !Ref RelayerTarget");
+        expect(template).toContain("RELAYER_REGISTRY: !Ref RelayerRegistry");
+        expect(template).toContain("RELAYER_VERIFIER_REGISTRY: !Ref RelayerVerifierRegistry");
+        expect(template).toContain("RELAYER_GRPC_URL: !Ref RelayerGrpcUrl");
+        expect(template).toContain("RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress");
+        expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
+        expect(template).toContain("RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn");
+    });
+
+    it("allows RunnerControl Lambda to read only the configured relayer signer secret", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("HasRelayerSignerSecretArn:");
+        expect(template).toContain('!Not [!Equals [!Ref RelayerSignerSecretArn, ""]]');
+        expect(template).toContain("Action: secretsmanager:GetSecretValue");
+        expect(template).toContain("Resource: !Ref RelayerSignerSecretArn");
+        expect(template).not.toContain("RelayerSignerSecretArnOutput");
+        expect(template).not.toContain("Value: !Ref RelayerSignerSecretArn");
+    });
+
     it("retries transient PollCommand Lambda or SSM lookup failures before failing the workflow", async () => {
         const template = await readFile(templatePath, "utf8");
 
@@ -206,6 +241,21 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(template).toContain('"FindReadyInstance": {');
         expect(template).toContain(
             '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }]',
+        );
+    });
+
+    it("records successful relayer submit results in a separate retryable step", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"RelayerResultComplete": {');
+        expect(template).toContain(
+            '{ "Variable": "$.relayer", "StringEquals": "succeeded", "Next": "RecordRelayerSuccess" }',
+        );
+        expect(template).toContain('"RecordRelayerSuccess": {');
+        expect(template).toContain('"action": "record_relayer_success"');
+        expect(template).toContain('"relayer_success.$": "$.relayer_success"');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }]',
         );
     });
 

@@ -226,6 +226,7 @@ async function handleRelayer(
             "target",
             "registry",
             "verifierRegistry",
+            "network",
             "grpcUrl",
             "senderAddress",
         ]) !== undefined
@@ -258,6 +259,7 @@ async function handleRelayer(
             ? buildRelayerRequestPreview(input.value, config)
             : await dryRunRelayerSubmit(input.value, {
                   ...config,
+                  network: readSuiNetwork(body.network) ?? "testnet",
                   grpcUrl: typeof body.grpcUrl === "string" ? body.grpcUrl : "",
                   senderAddress: typeof body.senderAddress === "string" ? body.senderAddress : "",
               });
@@ -492,4 +494,8 @@ function firstUnexpectedKey(
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function readSuiNetwork(input: unknown): "mainnet" | "testnet" | "devnet" | undefined {
+    return input === "mainnet" || input === "testnet" || input === "devnet" ? input : undefined;
 }

@@ -1,7 +1,9 @@
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
 import { describe, expect, it } from "vitest";
 import {
     buildRelayerRequestPreview,
+    createEd25519SuiSignerFromPrivateKey,
     dryRunRelayerSubmit,
     loadFixtureRelayerSubmitInput,
     submitRelayerPayload,
@@ -12,6 +14,7 @@ const registry = "0x456";
 const verifierRegistry = "0x654";
 const clock = "0x0000000000000000000000000000000000000000000000000000000000000006";
 const senderAddress = "0x789";
+const network = "testnet";
 const grpcUrl = "https://fullnode.testnet.sui.io:443";
 
 const fixtureInput = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
@@ -51,6 +54,14 @@ function successfulTransactionResponse(effects = { status: { success: true, erro
             digest: "abc",
             status: { success: true as const, error: null },
             effects,
+            events: [
+                {
+                    eventType: "0x123::disaster_event::DisasterEventCreated",
+                    json: {
+                        disaster_event_id: "0xdisaster",
+                    },
+                },
+            ],
         },
     };
 }
@@ -172,6 +183,16 @@ describe("relayer request preview", () => {
 });
 
 describe("relayer submit execution", () => {
+    it("creates an Ed25519 signer from a Sui private key string", () => {
+        const keypair = Ed25519Keypair.generate();
+        const signer = createEd25519SuiSignerFromPrivateKey(keypair.getSecretKey());
+
+        expect(signer.toSuiAddress()).toBe(keypair.toSuiAddress());
+        expect(() =>
+            createEd25519SuiSignerFromPrivateKey(Secp256k1Keypair.generate().getSecretKey()),
+        ).toThrow("Only Ed25519 Sui private keys are supported for relayer submit");
+    });
+
     it("maps dry-run and submit transaction failures to MOVE_REJECTED", async () => {
         const signer = Ed25519Keypair.generate();
         const client = {
@@ -184,6 +205,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress,
                 client,
@@ -196,6 +218,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 signer,
                 client,
@@ -210,6 +233,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress: "",
                 client: {
@@ -224,6 +248,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress,
                 client: {
@@ -238,6 +263,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress,
                 client: {
@@ -254,6 +280,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 client: {
                     signAndExecuteTransaction: async () => successfulTransactionResponse(),
@@ -261,6 +288,62 @@ describe("relayer submit execution", () => {
                 transaction: makeFakeTransaction(),
             }),
         ).resolves.toMatchObject({ ok: false, error_code: "RELAYER_SUBMIT_FAILED" });
+    });
+
+    it("fails closed for missing, invalid, or mismatched Sui network configuration", async () => {
+        const validDryRunConfig = {
+            target,
+            registry,
+            verifierRegistry,
+            grpcUrl,
+            senderAddress,
+            client: {
+                simulateTransaction: async () => successfulTransactionResponse(),
+            },
+            transaction: makeFakeTransaction(),
+        };
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "" as "testnet",
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Unsupported Sui network: ",
+        });
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "localnet" as "testnet",
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Unsupported Sui network: localnet",
+        });
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "testnet",
+                grpcUrl: "https://fullnode.mainnet.sui.io:443",
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message:
+                "RELAYER_GRPC_URL host fullnode.mainnet.sui.io does not match RELAYER_NETWORK=testnet",
+        });
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "testnet",
+            }),
+        ).resolves.toMatchObject({ ok: true });
     });
 
     it("dry-runs with simulateTransaction and built transaction bytes", async () => {
@@ -277,6 +360,7 @@ describe("relayer submit execution", () => {
             target,
             registry,
             verifierRegistry,
+            network,
             grpcUrl,
             senderAddress,
             client,
@@ -298,7 +382,7 @@ describe("relayer submit execution", () => {
         expect(client).not.toHaveProperty(["dryRun", "TransactionBlock"].join(""));
     });
 
-    it("submits with effects included and returns the current API digest and effects", async () => {
+    it("submits with effects and events included and returns digest, effects, and object ID", async () => {
         const effects = { status: { success: true, error: null }, transactionDigest: "abc" };
         const calls: unknown[] = [];
         const client = {
@@ -314,6 +398,7 @@ describe("relayer submit execution", () => {
             target,
             registry,
             verifierRegistry,
+            network,
             grpcUrl,
             signer,
             client,
@@ -324,6 +409,7 @@ describe("relayer submit execution", () => {
             ok: true,
             value: {
                 digest: "abc",
+                objectId: "0xdisaster",
                 effects,
             },
         });
@@ -331,9 +417,84 @@ describe("relayer submit execution", () => {
             {
                 transaction,
                 signer,
-                include: { effects: true },
+                include: { effects: true, events: true, objectTypes: true },
             },
         ]);
+    });
+
+    it("falls back to typed effects created objects when events do not contain the object ID", async () => {
+        const signer = Ed25519Keypair.generate();
+
+        await expect(
+            submitRelayerPayload(fixtureInput, {
+                target,
+                registry,
+                verifierRegistry,
+                network,
+                grpcUrl,
+                signer,
+                client: {
+                    signAndExecuteTransaction: async () => ({
+                        $kind: "Transaction" as const,
+                        Transaction: {
+                            digest: "abc",
+                            status: { success: true as const, error: null },
+                            effects: {
+                                status: { success: true, error: null },
+                                changedObjects: [
+                                    {
+                                        objectId: "0xfallback",
+                                        outputState: "ObjectWrite",
+                                        idOperation: "Created",
+                                    },
+                                ],
+                            },
+                            events: [],
+                            objectTypes: {
+                                "0xfallback": "0x123::disaster_event::DisasterEvent",
+                            },
+                        },
+                    }),
+                },
+                transaction: makeFakeTransaction(),
+            }),
+        ).resolves.toMatchObject({
+            ok: true,
+            value: {
+                objectId: "0xfallback",
+            },
+        });
+    });
+
+    it("fails closed when a successful submit response does not include an object ID", async () => {
+        const signer = Ed25519Keypair.generate();
+
+        await expect(
+            submitRelayerPayload(fixtureInput, {
+                target,
+                registry,
+                verifierRegistry,
+                network,
+                grpcUrl,
+                signer,
+                client: {
+                    signAndExecuteTransaction: async () => ({
+                        $kind: "Transaction" as const,
+                        Transaction: {
+                            digest: "abc",
+                            status: { success: true as const, error: null },
+                            effects: { status: { success: true, error: null } },
+                            events: [],
+                        },
+                    }),
+                },
+                transaction: makeFakeTransaction(),
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Sui response did not include created DisasterEvent object ID",
+        });
     });
 
     it("normalizes missing effects and unknown SDK response shapes to RELAYER_SUBMIT_FAILED", async () => {
@@ -355,6 +516,7 @@ describe("relayer submit execution", () => {
                     target,
                     registry,
                     verifierRegistry,
+                    network,
                     grpcUrl,
                     senderAddress,
                     client: {

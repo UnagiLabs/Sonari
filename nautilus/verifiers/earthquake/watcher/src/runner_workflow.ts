@@ -5,12 +5,22 @@ import {
 } from "@aws-sdk/client-auto-scaling";
 import { DescribeInstancesCommand, EC2Client } from "@aws-sdk/client-ec2";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import {
     DescribeInstanceInformationCommand,
     GetCommandInvocationCommand,
     SendCommandCommand,
     SSMClient,
 } from "@aws-sdk/client-ssm";
+import {
+    buildRelayerRequestPreview,
+    createEd25519SuiSignerFromPrivateKey,
+    type RelayerResult,
+    type RelayerSigner,
+    type RelayerSubmitConfig,
+    type RelayerSubmitSuccess,
+    type SuiNetwork,
+} from "@sonari/earthquake-relayer";
 import {
     ERROR_CODES,
     type OracleErrorCode,
@@ -19,7 +29,12 @@ import {
 } from "@sonari/earthquake-shared";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
-import { DirectRelayerAdapter, type RelayerAdapter, type RelayerMode } from "./relayer_preview.js";
+import {
+    DirectRelayerAdapter,
+    type RelayerAdapter,
+    type RelayerMode,
+    type RelayerSuccess,
+} from "./relayer_preview.js";
 import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
 
@@ -33,8 +48,16 @@ export interface RunnerWorkflowConfig {
         target: string;
         registry: string;
         verifierRegistry: string;
+        network?: SuiNetwork;
         grpcUrl?: string;
         senderAddress?: string;
+        allowSubmit?: boolean;
+        configurationError?: string;
+        loadSigner?: () => Promise<RelayerSigner>;
+        submitPayload?: (
+            input: unknown,
+            config: RelayerSubmitConfig,
+        ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
     };
 }
 
@@ -66,6 +89,19 @@ export interface SsmClientLike {
 
 export interface S3ClientLike {
     getObjectText(input: { bucket: string; key: string }): Promise<string>;
+}
+
+export interface RelayerSignerSecretReader {
+    getSecretString(secretArn: string): Promise<string>;
+}
+
+export interface RelayerRecordSuccessInput {
+    mode: RelayerMode;
+    target: string;
+    registry: string;
+    verifierRegistry: string;
+    digest?: string;
+    objectId?: string;
 }
 
 export type RunnerControlEvent =
@@ -103,6 +139,13 @@ export type RunnerControlEvent =
           source_event_id: string;
           attempt?: number | undefined;
           result: TeeCoreResult;
+      }
+    | {
+          action: "record_relayer_success";
+          source_event_id: string;
+          attempt?: number | undefined;
+          result: TeeCoreResult;
+          relayer_success: RelayerRecordSuccessInput;
       }
     | {
           action: "mark_failed";
@@ -143,7 +186,20 @@ export type RunnerControlResult =
     | {
           source_event_id: string;
           attempt?: number | undefined;
-          relayer: "skipped" | "succeeded" | "failed";
+          relayer: "skipped" | "failed";
+          result: TeeCoreResult;
+      }
+    | {
+          source_event_id: string;
+          attempt?: number | undefined;
+          relayer: "succeeded";
+          result: TeeCoreResult;
+          relayer_success: RelayerRecordSuccessInput;
+      }
+    | {
+          source_event_id: string;
+          attempt?: number | undefined;
+          relayer: "recorded";
           result: TeeCoreResult;
       }
     | { source_event_id: string; attempt?: number | undefined; failed: true };
@@ -338,25 +394,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const nowMs = options.now?.() ?? Date.now();
                 const result = await relayer.relay(event.result);
                 if (result.ok) {
-                    await requireCurrentWorkflowAttempt(options, event, {
-                        phase: "complete",
-                        nowMs,
-                        allowNonProcessing: true,
-                    });
-                    const marked = await repository.markRelayerSucceeded(
-                        event.source_event_id,
-                        result.value,
-                        nowMs,
-                        event.attempt,
-                    );
-                    if (!marked) {
-                        throw new Error("stale runner workflow attempt");
-                    }
                     return {
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "succeeded",
                         result: event.result,
+                        relayer_success: compactRelayerSuccess(result.value),
                     };
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
@@ -379,6 +422,30 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "failed",
+                    result: event.result,
+                };
+            }
+            case "record_relayer_success": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "complete",
+                    nowMs,
+                    allowNonProcessing: true,
+                });
+                const marked = await repository.markRelayerSucceeded(
+                    event.source_event_id,
+                    buildRelayerSuccessForRecord(event.relayer_success, event.result),
+                    nowMs,
+                    event.attempt,
+                );
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                return {
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    relayer: "recorded",
                     result: event.result,
                 };
             }
@@ -559,14 +626,31 @@ class AwsS3Client implements S3ClientLike {
     }
 }
 
+class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
+    private readonly client = new SecretsManagerClient({});
+
+    async getSecretString(secretArn: string): Promise<string> {
+        const result = await this.client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+        const secret = result.SecretString?.trim();
+        if (secret === undefined || secret.length === 0) {
+            throw new Error(`${secretArn} did not contain SecretString`);
+        }
+        return secret;
+    }
+}
+
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
-    const relayer = readRelayerConfigFromEnv();
     const config: RunnerWorkflowConfig = {
         autoScalingGroupName: requiredEnv("RUNNER_ASG_NAME"),
         resultBucket: requiredEnv("RESULT_BUCKET"),
         nitroEnclaveProcessCommand: requiredEnv("NITRO_ENCLAVE_PROCESS_COMMAND"),
-        ...(relayer === undefined ? {} : { relayer }),
     };
+    if (event.action === "relayer_preview_or_dry_run") {
+        const relayer = readRelayerConfigFromEnv(new AwsRelayerSignerSecretReader());
+        if (relayer !== undefined) {
+            config.relayer = relayer;
+        }
+    }
     return createRunnerControlHandler({
         autoscaling: new AwsAutoScalingClient(),
         ec2: new AwsEc2Client(),
@@ -895,27 +979,109 @@ function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | 
     return new DirectRelayerAdapter(config.relayer);
 }
 
-function readRelayerConfigFromEnv(): RunnerWorkflowConfig["relayer"] {
+function compactRelayerSuccess(success: RelayerSuccess): RelayerRecordSuccessInput {
+    return {
+        mode: success.mode,
+        target: success.request.target,
+        registry: success.request.registry,
+        verifierRegistry: success.request.verifierRegistry,
+        ...(success.digest === undefined ? {} : { digest: success.digest }),
+        ...(success.objectId === undefined ? {} : { objectId: success.objectId }),
+    };
+}
+
+function buildRelayerSuccessForRecord(
+    success: RelayerRecordSuccessInput,
+    result: TeeCoreResult,
+): RelayerSuccess {
+    const validation = validateRelayerSubmitInput(result);
+    if (!validation.ok) {
+        throw new Error(validation.message);
+    }
+    const request = buildRelayerRequestPreview(validation.value, {
+        target: success.target,
+        registry: success.registry,
+        verifierRegistry: success.verifierRegistry,
+    });
+    if (!request.ok) {
+        throw new Error(request.message);
+    }
+    return {
+        mode: success.mode,
+        request: request.value,
+        ...(success.digest === undefined ? {} : { digest: success.digest }),
+        ...(success.objectId === undefined ? {} : { objectId: success.objectId }),
+    };
+}
+
+export function readRelayerConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): RunnerWorkflowConfig["relayer"] {
     const mode = process.env.RELAYER_MODE;
     if (mode === undefined || mode.length === 0) {
         return undefined;
     }
     if (mode !== "preview" && mode !== "dry_run" && mode !== "submit") {
-        throw new Error(`Unsupported RELAYER_MODE: ${mode}`);
+        return {
+            mode: "preview",
+            target: "",
+            registry: "",
+            verifierRegistry: "",
+            configurationError: `Unsupported RELAYER_MODE: ${mode}`,
+        };
     }
+    const missingCoreFields = [
+        ["RELAYER_TARGET", process.env.RELAYER_TARGET],
+        ["RELAYER_REGISTRY", process.env.RELAYER_REGISTRY],
+        ["RELAYER_VERIFIER_REGISTRY", process.env.RELAYER_VERIFIER_REGISTRY],
+    ]
+        .filter(([, value]) => value === undefined || value.length === 0)
+        .map(([name]) => name);
     const config: NonNullable<RunnerWorkflowConfig["relayer"]> = {
         mode,
-        target: requiredEnv("RELAYER_TARGET"),
-        registry: requiredEnv("RELAYER_REGISTRY"),
-        verifierRegistry: requiredEnv("RELAYER_VERIFIER_REGISTRY"),
+        target: process.env.RELAYER_TARGET ?? "",
+        registry: process.env.RELAYER_REGISTRY ?? "",
+        verifierRegistry: process.env.RELAYER_VERIFIER_REGISTRY ?? "",
     };
+    if (missingCoreFields.length > 0) {
+        config.configurationError = `${missingCoreFields.join(", ")} required for RELAYER_MODE=${mode}`;
+    }
+    if (mode === "dry_run" || mode === "submit") {
+        const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+        if (network === undefined) {
+            config.configurationError = appendConfigurationError(
+                config.configurationError,
+                "RELAYER_NETWORK is required",
+            );
+        } else {
+            config.network = network;
+        }
+    }
     if (process.env.RELAYER_GRPC_URL !== undefined) {
         config.grpcUrl = process.env.RELAYER_GRPC_URL;
     }
     if (process.env.RELAYER_SENDER_ADDRESS !== undefined) {
         config.senderAddress = process.env.RELAYER_SENDER_ADDRESS;
     }
+    if (mode === "submit") {
+        config.allowSubmit = process.env.RELAYER_ALLOW_SUBMIT === "true";
+        const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+        if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+            config.loadSigner = async () =>
+                createEd25519SuiSignerFromPrivateKey(
+                    await secretReader.getSecretString(signerSecretArn),
+                );
+        }
+    }
     return config;
+}
+
+function appendConfigurationError(existing: string | undefined, next: string): string {
+    return existing === undefined ? next : `${existing}; ${next}`;
+}
+
+function readSuiNetwork(value: string | undefined): SuiNetwork | undefined {
+    return value === "mainnet" || value === "testnet" || value === "devnet" ? value : undefined;
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {
