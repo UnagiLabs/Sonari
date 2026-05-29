@@ -309,7 +309,7 @@ def compute() -> dict[str, Any]:
     source = load_json(source_path)
     raw = load_json(raw_path)
     affected = load_json(affected_path)
-    payload = load_json(EXAMPLES / "unsigned_payload_v1.json")
+    payload = load_json(EXAMPLES / "unsigned_payload.json")
     validate_payload_contract(payload)
 
     sorted_sources = sorted(

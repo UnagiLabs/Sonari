@@ -221,7 +221,7 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
     );
     assert_eq!(
         serde_json::to_value(output.unsigned_payload).unwrap(),
-        read_expected("unsigned_payload_v1.json")
+        read_expected("unsigned_payload.json")
     );
     assert_eq!(
         serde_json::to_value(output.expected_hashes).unwrap(),
@@ -848,6 +848,9 @@ fn selects_shakemap_products_deterministically_by_preferred_version_update_and_k
         "properties": {
             "time": 1704067200000,
             "updated": 1704151200000,
+            "mag": 7.1,
+            "title": "M 7.1 - Multi Product Fixture",
+            "place": "Multi Product Fixture Region",
             "products": {
                 "shakemap": [
                     {

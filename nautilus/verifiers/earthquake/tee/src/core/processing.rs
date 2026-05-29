@@ -261,11 +261,7 @@ fn process_usgs_inner(
     let sample_proof = sample_proof(&leaf_hashes_json, affected_cells_root);
 
     Ok(OracleOutput {
-        result: base_result(
-            OracleStatus::Finalized,
-            None,
-            Some("unsigned_payload_v1.json"),
-        ),
+        result: base_result(OracleStatus::Finalized, None, Some("unsigned_payload.json")),
         source_manifest: Some(source_manifest),
         raw_data_manifest: Some(raw_data_manifest),
         affected_cells: Some(affected_artifact),

@@ -9,7 +9,7 @@ pub use compute::merkle::merkle_root_from_leaf_hashes;
 pub use core::artifacts::{
     AffectedCellJson, AffectedCellsArtifact, ExpectedHashes, LeafHash, ProofStep, RawDataEntry,
     RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact, SourceEntry,
-    SourceManifest, StoredSourceRef, UnsignedPayloadV1,
+    SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 pub use core::processing::{
     process_usgs, process_usgs_from_worker_request, process_usgs_with_signer,

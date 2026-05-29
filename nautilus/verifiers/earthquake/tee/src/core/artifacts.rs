@@ -97,8 +97,6 @@ pub struct UnsignedPayload {
     pub freshness_deadline_ms: u64,
 }
 
-pub type UnsignedPayloadV1 = UnsignedPayload;
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExpectedHashes {
     pub event_uid: String,

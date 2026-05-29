@@ -53,7 +53,7 @@ CASES = {
 }
 
 FINALIZED_ONLY_FILES = {
-    "unsigned_payload_v1.json",
+    "unsigned_payload.json",
     "affected_cells.json",
     "sample_proof.json",
     "source_manifest.json",
@@ -522,15 +522,15 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
     missing = sorted(path for path in FINALIZED_ONLY_FILES if not (expected_dir / path).exists())
     if missing:
         fail(f"{case_id}: missing finalized expected files: {', '.join(missing)}")
-    if result.get("expected_payload") != "unsigned_payload_v1.json":
-        fail(f"{case_id}: finalized result must point expected_payload to unsigned_payload_v1.json")
+    if result.get("expected_payload") != "unsigned_payload.json":
+        fail(f"{case_id}: finalized result must point expected_payload to unsigned_payload.json")
 
     source = load_json(expected_dir / "source_manifest.json")
     raw_manifest = load_json(expected_dir / "raw_data_manifest.json")
     affected = load_json(expected_dir / "affected_cells.json")
     expected_hashes = load_json(expected_dir / "expected_hashes.json")
     sample_proof = load_json(expected_dir / "sample_proof.json")
-    payload = load_json(expected_dir / "unsigned_payload_v1.json")
+    payload = load_json(expected_dir / "unsigned_payload.json")
     detail = load_json(case_dir / "input" / "usgs_detail.json")
 
     validate_current_payload_contract(case_id, payload)
