@@ -107,4 +107,46 @@ mod tests {
 
         assert_eq!(json, "world_id");
     }
+
+    #[test]
+    fn identity_result_rejects_unexpected_fields() {
+        let mut json = identity_result_json();
+        json["kyc_document_image"] = serde_json::json!("ipfs://raw-document");
+
+        let error = serde_json::from_value::<IdentityTeeResult>(json).unwrap_err();
+
+        assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn identity_result_rejects_wrong_intent_or_family() {
+        let mut wrong_intent = identity_result_json();
+        wrong_intent["intent"] = serde_json::json!("SONARI_EARTHQUAKE_ORACLE");
+        let error = serde_json::from_value::<IdentityTeeResult>(wrong_intent).unwrap_err();
+        assert!(error.to_string().contains("intent must be"));
+
+        let mut wrong_family = identity_result_json();
+        wrong_family["verifier_family"] = serde_json::json!("earthquake");
+        let error = serde_json::from_value::<IdentityTeeResult>(wrong_family).unwrap_err();
+        assert!(error.to_string().contains("verifier_family must be"));
+    }
+
+    fn identity_result_json() -> serde_json::Value {
+        serde_json::json!({
+            "intent": INTENT,
+            "verifier_family": VERIFIER_FAMILY,
+            "verifier_version": VERIFIER_VERSION,
+            "registry_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "provider": "world_id",
+            "verified": true,
+            "duplicate_key_hash": "0x4444444444444444444444444444444444444444444444444444444444444444",
+            "evidence_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+            "issued_at_ms": 1_700_000_000_000_u64,
+            "expires_at_ms": 1_800_000_000_000_u64,
+            "terms_version": 1_u64,
+            "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+        })
+    }
 }

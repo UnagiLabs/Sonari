@@ -45,3 +45,39 @@ fn production_help_exits_successfully() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn fixture_command_fails_until_implemented() {
+    let output = membership_tee()
+        .arg("fixture")
+        .output()
+        .expect("failed to run membership-tee fixture");
+
+    assert!(
+        !output.status.success(),
+        "expected fixture command to fail until implemented"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not implemented yet"),
+        "expected not implemented error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn production_command_fails_until_implemented() {
+    let output = membership_tee()
+        .arg("production")
+        .output()
+        .expect("failed to run membership-tee production");
+
+    assert!(
+        !output.status.success(),
+        "expected production command to fail until implemented"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not implemented yet"),
+        "expected not implemented error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
