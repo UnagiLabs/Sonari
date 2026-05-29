@@ -50,6 +50,37 @@ AFFECTED_CELL_ORDER = ["h3_index", "intensity_value", "cell_band"]
 CELLS_GENERATION_METHOD = {"shakemap_gridxml_h3_grid_point_p90_v1": 1}
 CELL_METRIC = {"USGS_MMI": 1}
 INTENSITY_SCALE = {"MMI_X100": 1}
+FRESHNESS_WINDOW_MS = 21_600_000
+PAYLOAD_FIELD_ORDER = [
+    "intent",
+    "oracle_version",
+    "event_uid",
+    "hazard_type",
+    "status",
+    "event_revision",
+    "source_event_id",
+    "title",
+    "region",
+    "occurred_at_ms",
+    "magnitude_x100",
+    "verified_at_ms",
+    "source_updated_at_ms",
+    "primary_source",
+    "severity_band",
+    "source_set_hash",
+    "raw_data_hash",
+    "raw_data_uri",
+    "affected_cells_root",
+    "affected_cells_uri",
+    "affected_cells_data_hash",
+    "affected_cell_count",
+    "geo_resolution",
+    "cells_generation_method",
+    "cell_metric",
+    "cell_aggregation",
+    "intensity_scale",
+    "freshness_deadline_ms",
+]
 
 
 def load_json(path: Path) -> Any:
@@ -117,6 +148,62 @@ def bcs_u64(value: int) -> bytes:
 def bcs_vec_u8(value: str) -> bytes:
     data = value.encode("utf-8")
     return uleb128(len(data)) + data
+
+
+def require_utf8_len(payload: dict[str, Any], field: str, minimum: int, maximum: int) -> None:
+    value = payload.get(field)
+    if not isinstance(value, str):
+        raise ValueError(f"payload {field} must be a string")
+    length = len(value.encode("utf-8"))
+    if length < minimum or length > maximum:
+        raise ValueError(f"payload {field} must be {minimum}..{maximum} UTF-8 bytes")
+
+
+def require_int_range(payload: dict[str, Any], field: str, minimum: int, maximum: int) -> None:
+    value = payload.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum or value > maximum:
+        raise ValueError(f"payload {field} must be an integer in {minimum}..{maximum}")
+
+
+def validate_payload_contract(payload: dict[str, Any]) -> None:
+    if list(payload.keys()) != PAYLOAD_FIELD_ORDER:
+        raise ValueError("payload field order does not match current 28-field contract")
+    for field in [
+        "event_uid",
+        "source_set_hash",
+        "raw_data_hash",
+        "affected_cells_root",
+        "affected_cells_data_hash",
+    ]:
+        hex_bytes(payload[field])
+    expected_enums = {
+        "intent": 1,
+        "oracle_version": 1,
+        "hazard_type": 1,
+        "status": 3,
+        "primary_source": 1,
+        "geo_resolution": 7,
+        "cells_generation_method": 1,
+        "cell_metric": 1,
+        "cell_aggregation": 1,
+        "intensity_scale": 1,
+    }
+    for field, expected in expected_enums.items():
+        if payload.get(field) != expected:
+            raise ValueError(f"payload {field} must be {expected}")
+    require_int_range(payload, "event_revision", 1, 2**32 - 1)
+    require_utf8_len(payload, "source_event_id", 1, 96)
+    require_utf8_len(payload, "title", 1, 160)
+    require_utf8_len(payload, "region", 1, 160)
+    require_int_range(payload, "magnitude_x100", 1, 2000)
+    require_int_range(payload, "severity_band", 1, 3)
+    require_utf8_len(payload, "raw_data_uri", 1, 512)
+    require_utf8_len(payload, "affected_cells_uri", 1, 512)
+    require_int_range(payload, "affected_cell_count", 1, 1_000_000)
+    for field in ["occurred_at_ms", "verified_at_ms", "source_updated_at_ms", "freshness_deadline_ms"]:
+        require_int_range(payload, field, 0, 2**64 - 1)
+    if payload["freshness_deadline_ms"] != payload["verified_at_ms"] + FRESHNESS_WINDOW_MS:
+        raise ValueError("payload freshness_deadline_ms must equal verified_at_ms + freshness window")
 
 
 def event_uid(hazard_type: int, primary_source: str, source_event_id: str, occurred_at_ms: int) -> str:
@@ -188,8 +275,12 @@ def payload_bcs(payload: dict[str, Any]) -> str:
             bcs_u8(payload["hazard_type"]),
             bcs_u8(payload["status"]),
             bcs_u32(payload["event_revision"]),
+            bcs_vec_u8(payload["source_event_id"]),
+            bcs_vec_u8(payload["title"]),
+            bcs_vec_u8(payload["region"]),
             bcs_u64(payload["occurred_at_ms"]),
-            bcs_u64(payload["observed_at_ms"]),
+            bcs_u64(payload["magnitude_x100"]),
+            bcs_u64(payload["verified_at_ms"]),
             bcs_u64(payload["source_updated_at_ms"]),
             bcs_u8(payload["primary_source"]),
             bcs_u8(payload["severity_band"]),
@@ -199,14 +290,12 @@ def payload_bcs(payload: dict[str, Any]) -> str:
             hex_bytes(payload["affected_cells_root"]),
             bcs_vec_u8(payload["affected_cells_uri"]),
             hex_bytes(payload["affected_cells_data_hash"]),
+            bcs_u64(payload["affected_cell_count"]),
             bcs_u8(payload["geo_resolution"]),
             bcs_u8(payload["cells_generation_method"]),
             bcs_u8(payload["cell_metric"]),
             bcs_u8(payload["cell_aggregation"]),
             bcs_u8(payload["intensity_scale"]),
-            bcs_u8(payload["max_cell_band"]),
-            bcs_u64(payload["affected_cell_count"]),
-            bcs_u8(payload["min_claim_band"]),
             bcs_u64(payload["freshness_deadline_ms"]),
         ]
     )
@@ -221,6 +310,7 @@ def compute() -> dict[str, Any]:
     raw = load_json(raw_path)
     affected = load_json(affected_path)
     payload = load_json(EXAMPLES / "unsigned_payload_v1.json")
+    validate_payload_contract(payload)
 
     sorted_sources = sorted(
         source["sources"],
@@ -298,14 +388,8 @@ def compute() -> dict[str, Any]:
     ]:
         if payload[key] != value:
             raise ValueError(f"payload {key} mismatch: expected {value}, found {payload[key]}")
-    if payload["status"] != 3:
-        raise ValueError("finalized payload must use status = FINALIZED")
-    if not payload["affected_cells_uri"]:
-        raise ValueError("finalized payload must have non-empty affected_cells_uri")
-    if payload["affected_cell_count"] != len(cells) or payload["affected_cell_count"] <= 0:
+    if payload["affected_cell_count"] != len(cells):
         raise ValueError("payload affected_cell_count mismatch")
-    if payload["min_claim_band"] != 1:
-        raise ValueError("payload min_claim_band must be 1")
 
     return {
         "event_uid": uid,

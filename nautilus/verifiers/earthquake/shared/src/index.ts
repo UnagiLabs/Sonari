@@ -1,12 +1,16 @@
-export const PAYLOAD_V1_FIELD_ORDER = [
+export const PAYLOAD_FIELD_ORDER = [
     "intent",
     "oracle_version",
     "event_uid",
     "hazard_type",
     "status",
     "event_revision",
+    "source_event_id",
+    "title",
+    "region",
     "occurred_at_ms",
-    "observed_at_ms",
+    "magnitude_x100",
+    "verified_at_ms",
     "source_updated_at_ms",
     "primary_source",
     "severity_band",
@@ -16,14 +20,12 @@ export const PAYLOAD_V1_FIELD_ORDER = [
     "affected_cells_root",
     "affected_cells_uri",
     "affected_cells_data_hash",
+    "affected_cell_count",
     "geo_resolution",
     "cells_generation_method",
     "cell_metric",
     "cell_aggregation",
     "intensity_scale",
-    "max_cell_band",
-    "affected_cell_count",
-    "min_claim_band",
     "freshness_deadline_ms",
 ] as const;
 
@@ -71,8 +73,9 @@ export const BCS_ENUMS = {
 export const DEFAULT_ORACLE_CONTRACT = {
     oracle_version: 1,
     geo_resolution: 7,
-    min_claim_band: 1,
 } as const;
+
+export const FRESHNESS_WINDOW_MS = 21_600_000;
 
 export const OFFCHAIN_STATUSES = [
     "new",
@@ -112,20 +115,24 @@ export const ERROR_CODES = [
     "WATCHER_BELOW_AUTO_THRESHOLD",
 ] as const;
 
-export type PayloadV1Field = (typeof PAYLOAD_V1_FIELD_ORDER)[number];
+export type PayloadField = (typeof PAYLOAD_FIELD_ORDER)[number];
 export type AffectedCellLeafField = (typeof AFFECTED_CELL_LEAF_FIELD_ORDER)[number];
 export type OffchainStatus = (typeof OFFCHAIN_STATUSES)[number];
 export type OracleErrorCode = (typeof ERROR_CODES)[number];
 
-export interface EarthquakeOraclePayloadV1 {
+export interface EarthquakeOraclePayload {
     intent: number;
     oracle_version: number;
     event_uid: string;
     hazard_type: number;
     status: number;
     event_revision: number;
+    source_event_id: string;
+    title: string;
+    region: string;
     occurred_at_ms: number;
-    observed_at_ms: number;
+    magnitude_x100: number;
+    verified_at_ms: number;
     source_updated_at_ms: number;
     primary_source: number;
     severity_band: number;
@@ -135,14 +142,12 @@ export interface EarthquakeOraclePayloadV1 {
     affected_cells_root: string;
     affected_cells_uri: string;
     affected_cells_data_hash: string;
+    affected_cell_count: number;
     geo_resolution: number;
     cells_generation_method: number;
     cell_metric: number;
     cell_aggregation: number;
     intensity_scale: number;
-    max_cell_band: number;
-    affected_cell_count: number;
-    min_claim_band: number;
     freshness_deadline_ms: number;
 }
 
@@ -157,7 +162,7 @@ export type EarthquakeVerifierRequest = WorkerToTeeRequest;
 
 export interface SignedFinalizedPayload {
     status: "finalized";
-    payload: EarthquakeOraclePayloadV1 | Record<string, unknown>;
+    payload: EarthquakeOraclePayload | Record<string, unknown>;
     payload_bcs_hex: string;
     signature: string;
     public_key: string;
@@ -198,6 +203,9 @@ const WORKER_TO_TEE_KEYS = [
 ] as const;
 
 const U32_MAX = 0xffff_ffff;
+const ONE_MILLION = 1_000_000;
+const HASH_32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+const textEncoder = new TextEncoder();
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
@@ -214,22 +222,90 @@ function isNonEmptyString(value: unknown): value is string {
     return typeof value === "string" && value.length > 0;
 }
 
-function isSafeUint32(value: unknown): value is number {
-    return (
-        typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= U32_MAX
-    );
+function isUtf8BytesInRange(value: unknown, min: number, max: number): value is string {
+    if (typeof value !== "string") {
+        return false;
+    }
+    const byteLength = textEncoder.encode(value).length;
+    return byteLength >= min && byteLength <= max;
+}
+
+function isSafeIntegerInRange(value: unknown, min: number, max: number): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
 }
 
 function isSafeNonNegativeInteger(value: unknown): value is number {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function hasValidFinalizedPayloadMetadata(payload: Record<string, unknown>): boolean {
+function isHash32(value: unknown): value is string {
+    return typeof value === "string" && HASH_32_PATTERN.test(value);
+}
+
+function hasCurrentPayloadShape(payload: Record<string, unknown>): boolean {
+    const keys = Object.keys(payload);
     return (
-        isNonEmptyString(payload.event_uid) &&
-        isSafeUint32(payload.event_revision) &&
-        isSafeNonNegativeInteger(payload.source_updated_at_ms)
+        keys.length === PAYLOAD_FIELD_ORDER.length &&
+        PAYLOAD_FIELD_ORDER.every((field, index) => keys[index] === field)
     );
+}
+
+function hasValidFinalizedPayload(payload: Record<string, unknown>): boolean {
+    if (!hasCurrentPayloadShape(payload)) {
+        return false;
+    }
+
+    if (
+        payload.intent !== BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE ||
+        payload.oracle_version !== DEFAULT_ORACLE_CONTRACT.oracle_version ||
+        payload.hazard_type !== BCS_ENUMS.hazardType.EARTHQUAKE ||
+        payload.status !== BCS_ENUMS.onchainStatus.FINALIZED ||
+        payload.primary_source !== BCS_ENUMS.primarySource.USGS ||
+        payload.geo_resolution !== DEFAULT_ORACLE_CONTRACT.geo_resolution ||
+        payload.cells_generation_method !==
+            BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1 ||
+        payload.cell_metric !== BCS_ENUMS.cellMetric.USGS_MMI ||
+        payload.cell_aggregation !== BCS_ENUMS.cellAggregation.GRID_POINT_P90 ||
+        payload.intensity_scale !== BCS_ENUMS.intensityScale.MMI_X100
+    ) {
+        return false;
+    }
+
+    if (
+        !isHash32(payload.event_uid) ||
+        !isHash32(payload.source_set_hash) ||
+        !isHash32(payload.raw_data_hash) ||
+        !isHash32(payload.affected_cells_root) ||
+        !isHash32(payload.affected_cells_data_hash)
+    ) {
+        return false;
+    }
+
+    if (
+        !isSafeIntegerInRange(payload.event_revision, 1, U32_MAX) ||
+        !isUtf8BytesInRange(payload.source_event_id, 1, 96) ||
+        !isUtf8BytesInRange(payload.title, 1, 160) ||
+        !isUtf8BytesInRange(payload.region, 1, 160) ||
+        !isSafeNonNegativeInteger(payload.occurred_at_ms) ||
+        !isSafeIntegerInRange(payload.magnitude_x100, 1, 2000) ||
+        !isSafeNonNegativeInteger(payload.verified_at_ms) ||
+        !isSafeNonNegativeInteger(payload.source_updated_at_ms) ||
+        !isSafeIntegerInRange(payload.severity_band, 1, 3) ||
+        !isUtf8BytesInRange(payload.raw_data_uri, 1, 512) ||
+        !isUtf8BytesInRange(payload.affected_cells_uri, 1, 512) ||
+        !isSafeIntegerInRange(payload.affected_cell_count, 1, ONE_MILLION) ||
+        !isSafeNonNegativeInteger(payload.freshness_deadline_ms)
+    ) {
+        return false;
+    }
+
+    const verifiedAtMs = payload.verified_at_ms;
+    const freshnessDeadlineMs = payload.freshness_deadline_ms;
+    if (!isSafeNonNegativeInteger(verifiedAtMs) || !isSafeNonNegativeInteger(freshnessDeadlineMs)) {
+        return false;
+    }
+
+    return freshnessDeadlineMs === verifiedAtMs + FRESHNESS_WINDOW_MS;
 }
 
 export function validateWorkerToTeeRequest(input: unknown): ValidationResult<WorkerToTeeRequest> {
@@ -305,7 +381,7 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
         };
     }
 
-    if (!hasValidFinalizedPayloadMetadata(input.payload)) {
+    if (!hasValidFinalizedPayload(input.payload)) {
         return {
             ok: false,
             error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",

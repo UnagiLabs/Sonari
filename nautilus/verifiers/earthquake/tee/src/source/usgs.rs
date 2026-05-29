@@ -2,7 +2,7 @@ use crate::compute::intensity::mmi_decimal_to_x100;
 use crate::core::types::OracleError;
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
@@ -20,6 +20,16 @@ pub(crate) struct UsgsDetail {
 pub(crate) struct UsgsProperties {
     pub(crate) time: u64,
     pub(crate) updated: u64,
+    #[serde(
+        default,
+        rename = "mag",
+        deserialize_with = "deserialize_optional_magnitude_x100"
+    )]
+    pub(crate) magnitude_x100: Option<u64>,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(default, rename = "place")]
+    pub(crate) region: Option<String>,
     #[serde(default)]
     pub(crate) ids: Option<String>,
     pub(crate) products: UsgsProducts,
@@ -64,6 +74,54 @@ pub(crate) struct GridPoint {
     pub(crate) lon: String,
     pub(crate) lat: String,
     pub(crate) mmi_x100: u16,
+}
+
+fn deserialize_optional_magnitude_x100<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let raw = match value {
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::String(value) => value,
+        _ => {
+            return Err(serde::de::Error::custom(
+                "mag must be a JSON number or decimal string",
+            ));
+        }
+    };
+    magnitude_decimal_to_x100(&raw)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
+}
+
+fn magnitude_decimal_to_x100(input: &str) -> Result<u64, String> {
+    let value = input.trim();
+    if value.is_empty() {
+        return Err("magnitude is empty".to_owned());
+    }
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(format!("invalid magnitude decimal {input}"));
+    }
+    let whole = whole
+        .parse::<u64>()
+        .map_err(|_| format!("invalid magnitude decimal {input}"))?;
+    let mut digits = fraction.bytes().map(|byte| byte - b'0');
+    let first = u64::from(digits.next().unwrap_or(0));
+    let second = u64::from(digits.next().unwrap_or(0));
+    let third = digits.next().unwrap_or(0);
+    whole
+        .checked_mul(100)
+        .and_then(|base| base.checked_add(first * 10 + second))
+        .and_then(|base| base.checked_add(u64::from(third >= 5)))
+        .ok_or_else(|| format!("invalid magnitude decimal {input}"))
 }
 
 pub(crate) fn parse_detail(detail_json: &[u8]) -> Result<UsgsDetail, OracleError> {

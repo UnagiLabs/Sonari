@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
     AFFECTED_CELL_LEAF_FIELD_ORDER,
@@ -6,29 +5,57 @@ import {
     DEFAULT_ORACLE_CONTRACT,
     ERROR_CODES,
     OFFCHAIN_STATUSES,
-    PAYLOAD_V1_FIELD_ORDER,
+    PAYLOAD_FIELD_ORDER,
     validateRelayerSubmitInput,
     validateWorkerToTeeRequest,
 } from "./index.js";
 
-const unsignedPayload = JSON.parse(
-    readFileSync(
-        new URL("../../../../../schemas/examples/unsigned_payload_v1.json", import.meta.url),
-        "utf8",
-    ),
-) as Record<string, unknown>;
+const currentPayload = {
+    intent: 1,
+    oracle_version: 1,
+    event_uid: "0x1111111111111111111111111111111111111111111111111111111111111111",
+    hazard_type: 1,
+    status: 3,
+    event_revision: 1,
+    source_event_id: "us7000sonari",
+    title: "M 7.24 - Test Event",
+    region: "Test Region",
+    occurred_at_ms: 1_704_067_200_000,
+    magnitude_x100: 724,
+    verified_at_ms: 1_704_151_200_000,
+    source_updated_at_ms: 1_704_151_200_000,
+    primary_source: 1,
+    severity_band: 3,
+    source_set_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
+    raw_data_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
+    raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
+    affected_cells_root: "0x4444444444444444444444444444444444444444444444444444444444444444",
+    affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+    affected_cells_data_hash: "0x5555555555555555555555555555555555555555555555555555555555555555",
+    affected_cell_count: 2,
+    geo_resolution: 7,
+    cells_generation_method: 1,
+    cell_metric: 1,
+    cell_aggregation: 1,
+    intensity_scale: 1,
+    freshness_deadline_ms: 1_704_172_800_000,
+} as const satisfies Record<string, unknown>;
 
 describe("oracle schema contracts", () => {
-    it("keeps payload v1 field order aligned with the root schema", () => {
-        expect(PAYLOAD_V1_FIELD_ORDER).toEqual([
+    it("keeps current payload field order aligned with the root schema", () => {
+        expect(PAYLOAD_FIELD_ORDER).toEqual([
             "intent",
             "oracle_version",
             "event_uid",
             "hazard_type",
             "status",
             "event_revision",
+            "source_event_id",
+            "title",
+            "region",
             "occurred_at_ms",
-            "observed_at_ms",
+            "magnitude_x100",
+            "verified_at_ms",
             "source_updated_at_ms",
             "primary_source",
             "severity_band",
@@ -38,18 +65,16 @@ describe("oracle schema contracts", () => {
             "affected_cells_root",
             "affected_cells_uri",
             "affected_cells_data_hash",
+            "affected_cell_count",
             "geo_resolution",
             "cells_generation_method",
             "cell_metric",
             "cell_aggregation",
             "intensity_scale",
-            "max_cell_band",
-            "affected_cell_count",
-            "min_claim_band",
             "freshness_deadline_ms",
         ]);
-        expect(PAYLOAD_V1_FIELD_ORDER).toHaveLength(26);
-        expect(Object.keys(unsignedPayload)).toEqual(PAYLOAD_V1_FIELD_ORDER);
+        expect(PAYLOAD_FIELD_ORDER).toHaveLength(28);
+        expect(Object.keys(currentPayload)).toEqual(PAYLOAD_FIELD_ORDER);
     });
 
     it("keeps affected cell leaf field order aligned with the root schema", () => {
@@ -68,21 +93,20 @@ describe("oracle schema contracts", () => {
         expect(AFFECTED_CELL_LEAF_FIELD_ORDER).toHaveLength(10);
     });
 
-    it("pins numeric enum and default values used by BCS payload v1", () => {
-        expect(BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE).toBe(unsignedPayload.intent);
-        expect(BCS_ENUMS.hazardType.EARTHQUAKE).toBe(unsignedPayload.hazard_type);
-        expect(BCS_ENUMS.onchainStatus.FINALIZED).toBe(unsignedPayload.status);
-        expect(BCS_ENUMS.primarySource.USGS).toBe(unsignedPayload.primary_source);
+    it("pins numeric enum and default values used by the current BCS payload", () => {
+        expect(BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE).toBe(currentPayload.intent);
+        expect(BCS_ENUMS.hazardType.EARTHQUAKE).toBe(currentPayload.hazard_type);
+        expect(BCS_ENUMS.onchainStatus.FINALIZED).toBe(currentPayload.status);
+        expect(BCS_ENUMS.primarySource.USGS).toBe(currentPayload.primary_source);
         expect(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1).toBe(
-            unsignedPayload.cells_generation_method,
+            currentPayload.cells_generation_method,
         );
-        expect(BCS_ENUMS.cellMetric.USGS_MMI).toBe(unsignedPayload.cell_metric);
-        expect(BCS_ENUMS.cellAggregation.GRID_POINT_P90).toBe(unsignedPayload.cell_aggregation);
-        expect(BCS_ENUMS.intensityScale.MMI_X100).toBe(unsignedPayload.intensity_scale);
+        expect(BCS_ENUMS.cellMetric.USGS_MMI).toBe(currentPayload.cell_metric);
+        expect(BCS_ENUMS.cellAggregation.GRID_POINT_P90).toBe(currentPayload.cell_aggregation);
+        expect(BCS_ENUMS.intensityScale.MMI_X100).toBe(currentPayload.intensity_scale);
 
         expect(DEFAULT_ORACLE_CONTRACT.oracle_version).toBe(1);
         expect(DEFAULT_ORACLE_CONTRACT.geo_resolution).toBe(7);
-        expect(DEFAULT_ORACLE_CONTRACT.min_claim_band).toBe(1);
     });
 
     it("pins offchain status and error code contracts for offchain state", () => {
@@ -190,7 +214,7 @@ describe("oracle boundary validators", () => {
         expect(
             validateRelayerSubmitInput({
                 status: "finalized",
-                payload: unsignedPayload,
+                payload: currentPayload,
                 payload_bcs_hex: "0x01",
                 signature: "0xsig",
                 public_key: "0xpub",
@@ -199,7 +223,7 @@ describe("oracle boundary validators", () => {
             ok: true,
             value: {
                 status: "finalized",
-                payload: unsignedPayload,
+                payload: currentPayload,
                 payload_bcs_hex: "0x01",
                 signature: "0xsig",
                 public_key: "0xpub",
@@ -209,7 +233,7 @@ describe("oracle boundary validators", () => {
         expect(
             validateRelayerSubmitInput({
                 status: "pending_mmi",
-                payload: unsignedPayload,
+                payload: currentPayload,
                 payload_bcs_hex: "0x01",
                 signature: "0xsig",
                 public_key: "0xpub",
@@ -220,8 +244,25 @@ describe("oracle boundary validators", () => {
     it("rejects malformed finalized payload metadata", () => {
         for (const payloadPatch of [
             { event_uid: "" },
+            { event_revision: 0 },
+            { source_event_id: "" },
+            { source_event_id: "x".repeat(97) },
+            { title: "" },
+            { title: "x".repeat(161) },
+            { region: "" },
+            { region: "x".repeat(161) },
+            { magnitude_x100: 0 },
+            { magnitude_x100: 2001 },
+            { severity_band: 0 },
+            { severity_band: 4 },
+            { raw_data_uri: "" },
+            { raw_data_uri: "x".repeat(513) },
+            { affected_cells_uri: "" },
+            { affected_cells_uri: "x".repeat(513) },
+            { affected_cell_count: 0 },
+            { affected_cell_count: 1_000_001 },
+            { freshness_deadline_ms: currentPayload.verified_at_ms },
             { event_revision: 1.5 },
-            { event_revision: 0x1_0000_0000 },
             { event_revision: Number.MAX_SAFE_INTEGER + 1 },
             { source_updated_at_ms: 1_700_000_000_000.5 },
             { source_updated_at_ms: Number.MAX_SAFE_INTEGER + 1 },
@@ -229,7 +270,7 @@ describe("oracle boundary validators", () => {
             expect(
                 validateRelayerSubmitInput({
                     status: "finalized",
-                    payload: { ...unsignedPayload, ...payloadPatch },
+                    payload: { ...currentPayload, ...payloadPatch },
                     payload_bcs_hex: "0x01",
                     signature: "0xsig",
                     public_key: "0xpub",
