@@ -4,7 +4,8 @@ pub mod error;
 pub mod verify;
 
 pub use core::duplicate_key::{
-    compute_kyc_duplicate_key_hash, compute_world_id_duplicate_key_hash,
+    canonical_world_id_nullifier, compute_kyc_duplicate_key_hash,
+    compute_world_id_duplicate_key_hash,
 };
 pub use core::processing::{
     IdentityProcessingOutput, IdentityProcessingStatus, compute_identity_evidence_hash,

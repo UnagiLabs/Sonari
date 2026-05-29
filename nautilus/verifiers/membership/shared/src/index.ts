@@ -262,9 +262,24 @@ export function computeWorldIdDuplicateKeyHash(input: WorldIdDuplicateKeyInput):
             "sonari:world_id:v1",
             input.world_app_id,
             input.action,
-            input.nullifier,
+            canonicalWorldIdNullifier(input.nullifier),
         ]),
     );
+}
+
+export function canonicalWorldIdNullifier(nullifier: string): string {
+    if (nullifier.length === 0 || nullifier.includes("\0")) {
+        throw new Error(
+            "World ID nullifier must be a non-empty decimal or 0x-prefixed hex string without NUL",
+        );
+    }
+    if (/^0x[0-9a-fA-F]+$/.test(nullifier)) {
+        return BigInt(nullifier).toString(10);
+    }
+    if (/^[0-9]+$/.test(nullifier)) {
+        return BigInt(nullifier).toString(10);
+    }
+    throw new Error("World ID nullifier must be a decimal or 0x-prefixed hex string");
 }
 
 function joinDuplicateKeyParts(parts: readonly string[]): string {

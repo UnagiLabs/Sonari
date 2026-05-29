@@ -123,6 +123,10 @@ KYC: sonari:kyc:v1\0{provider_id}\0{provider_user_unique_id}
 World ID: sonari:world_id:v1\0{world_app_id}\0{action}\0{nullifier}
 ```
 
+World ID の `nullifier` は、hash 前に正規化する。
+decimal と `0x` hex は同じ 10 進文字列へ変換する。
+先頭の `0` や hex の大文字小文字では別 key にしない。
+
 KYC と World ID をまたぐ完全な同一人物判定は MVP 外である。
 登録時と Claim 時に、複数 SBT と複数 Claim を禁じる表示を出す。
 その内容に対して Sui wallet 署名を求める。
