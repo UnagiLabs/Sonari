@@ -25,6 +25,8 @@ pub enum OracleError {
     Zip(String),
     #[error("invalid Worker to TEE request: {0}")]
     WorkerRequest(String),
+    #[error("arithmetic overflow: {0}")]
+    Overflow(String),
 }
 
 #[derive(Debug, Clone)]

@@ -162,6 +162,20 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
 }
 
 #[test]
+fn finalized_fixture_rejects_observed_at_ms_that_overflows_freshness_deadline() {
+    let mut input = finalized_input();
+    input.observed_at_ms = u64::MAX;
+
+    let error = process_usgs(input)
+        .expect_err("observed_at_ms at u64::MAX must overflow freshness_deadline_ms");
+
+    assert!(
+        error.to_string().contains("overflow"),
+        "expected an arithmetic overflow error, got: {error}"
+    );
+}
+
+#[test]
 fn pre_tee_worker_scaffold_matches_pure_core_output_for_fixture_sources() {
     let request = WorkerToTeeRequest {
         source_event_id: "us7000sonari".to_owned(),
