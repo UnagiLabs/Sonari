@@ -2,6 +2,7 @@ import {
     buildRelayerRequestPreview,
     type RelayerRequestPreview as DirectRelayerRequestPreview,
     dryRunRelayerSubmit,
+    type SuiNetwork,
 } from "@sonari/earthquake-relayer";
 import {
     type OracleErrorCode,
@@ -52,6 +53,7 @@ export interface HttpRelayerPreviewConfig {
     registry: string;
     verifierRegistry: string;
     mode?: RelayerMode;
+    network?: SuiNetwork;
     grpcUrl?: string;
     senderAddress?: string;
 }
@@ -61,6 +63,7 @@ export interface DirectRelayerConfig {
     target: string;
     registry: string;
     verifierRegistry: string;
+    network?: SuiNetwork;
     grpcUrl?: string;
     senderAddress?: string;
 }
@@ -79,6 +82,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
         this.registry = config.registry;
         this.verifierRegistry = config.verifierRegistry;
         this.mode = config.mode ?? "preview";
+        this.network = config.network;
         this.grpcUrl = config.grpcUrl;
         this.senderAddress = config.senderAddress;
         this.bearerToken = config.bearerToken;
@@ -88,6 +92,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
     private readonly registry: string;
     private readonly verifierRegistry: string;
     readonly mode: RelayerMode;
+    private readonly network: SuiNetwork | undefined;
     private readonly grpcUrl: string | undefined;
     private readonly senderAddress: string | undefined;
     private readonly bearerToken: string | undefined;
@@ -115,6 +120,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
                     target: this.target,
                     registry: this.registry,
                     verifierRegistry: this.verifierRegistry,
+                    network: this.network,
                     grpcUrl: this.grpcUrl,
                     senderAddress: this.senderAddress,
                 }),
@@ -177,11 +183,16 @@ export class DirectRelayerAdapter implements RelayerAdapter {
                 : result;
         }
         if (this.mode === "dry_run") {
-            if (this.config.grpcUrl === undefined || this.config.senderAddress === undefined) {
-                return relayerSubmitFailed("dry_run requires grpcUrl and senderAddress");
+            if (
+                this.config.network === undefined ||
+                this.config.grpcUrl === undefined ||
+                this.config.senderAddress === undefined
+            ) {
+                return relayerSubmitFailed("dry_run requires network, grpcUrl, and senderAddress");
             }
             const result = await dryRunRelayerSubmit(validation.value, {
                 ...requestConfig,
+                network: this.config.network,
                 grpcUrl: this.config.grpcUrl,
                 senderAddress: this.config.senderAddress,
             });

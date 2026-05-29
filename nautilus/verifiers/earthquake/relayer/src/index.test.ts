@@ -12,6 +12,7 @@ const registry = "0x456";
 const verifierRegistry = "0x654";
 const clock = "0x0000000000000000000000000000000000000000000000000000000000000006";
 const senderAddress = "0x789";
+const network = "testnet";
 const grpcUrl = "https://fullnode.testnet.sui.io:443";
 
 const fixtureInput = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
@@ -184,6 +185,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress,
                 client,
@@ -196,6 +198,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 signer,
                 client,
@@ -210,6 +213,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress: "",
                 client: {
@@ -224,6 +228,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress,
                 client: {
@@ -238,6 +243,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 senderAddress,
                 client: {
@@ -254,6 +260,7 @@ describe("relayer submit execution", () => {
                 target,
                 registry,
                 verifierRegistry,
+                network,
                 grpcUrl,
                 client: {
                     signAndExecuteTransaction: async () => successfulTransactionResponse(),
@@ -261,6 +268,62 @@ describe("relayer submit execution", () => {
                 transaction: makeFakeTransaction(),
             }),
         ).resolves.toMatchObject({ ok: false, error_code: "RELAYER_SUBMIT_FAILED" });
+    });
+
+    it("fails closed for missing, invalid, or mismatched Sui network configuration", async () => {
+        const validDryRunConfig = {
+            target,
+            registry,
+            verifierRegistry,
+            grpcUrl,
+            senderAddress,
+            client: {
+                simulateTransaction: async () => successfulTransactionResponse(),
+            },
+            transaction: makeFakeTransaction(),
+        };
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "" as "testnet",
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Unsupported Sui network: ",
+        });
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "localnet" as "testnet",
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Unsupported Sui network: localnet",
+        });
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "testnet",
+                grpcUrl: "https://fullnode.mainnet.sui.io:443",
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message:
+                "RELAYER_GRPC_URL host fullnode.mainnet.sui.io does not match RELAYER_NETWORK=testnet",
+        });
+
+        await expect(
+            dryRunRelayerSubmit(fixtureInput, {
+                ...validDryRunConfig,
+                network: "testnet",
+            }),
+        ).resolves.toMatchObject({ ok: true });
     });
 
     it("dry-runs with simulateTransaction and built transaction bytes", async () => {
@@ -277,6 +340,7 @@ describe("relayer submit execution", () => {
             target,
             registry,
             verifierRegistry,
+            network,
             grpcUrl,
             senderAddress,
             client,
@@ -314,6 +378,7 @@ describe("relayer submit execution", () => {
             target,
             registry,
             verifierRegistry,
+            network,
             grpcUrl,
             signer,
             client,
@@ -355,6 +420,7 @@ describe("relayer submit execution", () => {
                     target,
                     registry,
                     verifierRegistry,
+                    network,
                     grpcUrl,
                     senderAddress,
                     client: {

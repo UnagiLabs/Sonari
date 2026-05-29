@@ -114,6 +114,7 @@ async function handleRelayer(
             "target",
             "registry",
             "verifierRegistry",
+            "network",
             "grpcUrl",
             "senderAddress",
         ]) !== undefined
@@ -122,7 +123,7 @@ async function handleRelayer(
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
             message:
-                "Relayer accepts only input, target, registry, verifierRegistry, grpcUrl, and senderAddress",
+                "Relayer accepts only input, target, registry, verifierRegistry, network, grpcUrl, and senderAddress",
         });
         return;
     }
@@ -152,6 +153,7 @@ async function handleRelayer(
     if (mode === "dry_run") {
         const result = await dryRunRelayerSubmit(inputValidation.value, {
             ...config,
+            network: readSuiNetwork(body.network) ?? "testnet",
             grpcUrl: typeof body.grpcUrl === "string" ? body.grpcUrl : "",
             senderAddress: typeof body.senderAddress === "string" ? body.senderAddress : "",
         });
@@ -256,6 +258,10 @@ function firstUnexpectedKey(
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function readSuiNetwork(input: unknown): "mainnet" | "testnet" | "devnet" | undefined {
+    return input === "mainnet" || input === "testnet" || input === "devnet" ? input : undefined;
 }
 
 function resolveFromCwd(input: string): string {

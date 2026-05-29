@@ -22,7 +22,10 @@ export interface RelayerRequestConfig {
     verifierRegistry: string;
 }
 
+export type SuiNetwork = "mainnet" | "testnet" | "devnet";
+
 export interface RelayerDryRunConfig extends RelayerRequestConfig {
+    network: SuiNetwork;
     grpcUrl: string;
     senderAddress: string;
     client?: RelayerDryRunClient;
@@ -30,6 +33,7 @@ export interface RelayerDryRunConfig extends RelayerRequestConfig {
 }
 
 export interface RelayerSubmitConfig extends RelayerRequestConfig {
+    network: SuiNetwork;
     grpcUrl: string;
     signer?: RelayerSigner;
     client?: RelayerSubmitClient;
@@ -203,12 +207,17 @@ export async function dryRunRelayerSubmit(
         return preview;
     }
 
-    if (!isNonEmptyString(config.grpcUrl) || !isNonEmptyString(config.senderAddress)) {
+    const networkValidation = validateSuiNetworkGrpcUrl(config.network, config.grpcUrl);
+    if (!networkValidation.ok) {
+        return networkValidation;
+    }
+
+    if (!isNonEmptyString(config.senderAddress)) {
         return relayerSubmitFailed("Dry-run requires grpcUrl and senderAddress");
     }
 
     try {
-        const client = config.client ?? createSuiGrpcClient(config.grpcUrl);
+        const client = config.client ?? createSuiGrpcClient(config.grpcUrl, config.network);
         const transaction = (config.transaction ??
             createSuiSubmitTransaction(preview.value, {
                 senderAddress: config.senderAddress,
@@ -245,7 +254,12 @@ export async function submitRelayerPayload(
         return preview;
     }
 
-    if (!isNonEmptyString(config.grpcUrl) || config.signer === undefined) {
+    const networkValidation = validateSuiNetworkGrpcUrl(config.network, config.grpcUrl);
+    if (!networkValidation.ok) {
+        return networkValidation;
+    }
+
+    if (config.signer === undefined) {
         return relayerSubmitFailed("Submit requires explicit grpcUrl and signer");
     }
 
@@ -255,7 +269,7 @@ export async function submitRelayerPayload(
     }
 
     try {
-        const client = config.client ?? createSuiGrpcClient(config.grpcUrl);
+        const client = config.client ?? createSuiGrpcClient(config.grpcUrl, config.network);
         const transaction =
             config.transaction ?? createSuiSubmitTransaction(preview.value, { senderAddress });
         const response = await client.signAndExecuteTransaction({
@@ -366,27 +380,46 @@ function validateRequestConfig(config: RelayerRequestConfig): RelayerResult<Rela
     };
 }
 
-function createSuiGrpcClient(grpcUrl: string): RelayerDryRunClient & RelayerSubmitClient {
+function createSuiGrpcClient(
+    grpcUrl: string,
+    network: SuiNetwork,
+): RelayerDryRunClient & RelayerSubmitClient {
     return new SuiGrpcClient({
-        network: inferSuiNetwork(grpcUrl),
+        network,
         baseUrl: grpcUrl,
     }) as unknown as RelayerDryRunClient & RelayerSubmitClient;
 }
 
-function inferSuiNetwork(grpcUrl: string): "mainnet" | "testnet" | "devnet" | "localnet" {
-    if (grpcUrl.includes("mainnet")) {
-        return "mainnet";
+function validateSuiNetworkGrpcUrl(network: unknown, grpcUrl: unknown): RelayerResult<SuiNetwork> {
+    if (network !== "mainnet" && network !== "testnet" && network !== "devnet") {
+        return relayerSubmitFailed(`Unsupported Sui network: ${String(network)}`);
+    }
+    if (!isNonEmptyString(grpcUrl)) {
+        return relayerSubmitFailed("RELAYER_GRPC_URL is required");
     }
 
-    if (grpcUrl.includes("devnet")) {
-        return "devnet";
+    let url: URL;
+    try {
+        url = new URL(grpcUrl);
+    } catch {
+        return relayerSubmitFailed("RELAYER_GRPC_URL must be a valid URL");
     }
 
-    if (grpcUrl.includes("127.0.0.1") || grpcUrl.includes("localhost")) {
-        return "localnet";
+    if (url.protocol !== "https:") {
+        return relayerSubmitFailed("RELAYER_GRPC_URL must use https");
+    }
+    if (url.username.length > 0 || url.password.length > 0) {
+        return relayerSubmitFailed("RELAYER_GRPC_URL must not include credentials");
     }
 
-    return "testnet";
+    const expectedHost = `fullnode.${network}.sui.io`;
+    if (url.hostname !== expectedHost) {
+        return relayerSubmitFailed(
+            `RELAYER_GRPC_URL host ${url.hostname} does not match RELAYER_NETWORK=${network}`,
+        );
+    }
+
+    return { ok: true, value: network };
 }
 
 function parseHexBytes(
