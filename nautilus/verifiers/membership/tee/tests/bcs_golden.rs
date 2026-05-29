@@ -1,7 +1,16 @@
 use membership_tee::{
-    INTENT, IdentityProvider, IdentityTeeResult, VERIFIER_FAMILY, VERIFIER_VERSION,
-    encoding::identity_bcs::payload_bcs_bytes,
+    INTENT, IdentityProvider, IdentityTeeResult, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY,
+    VERIFIER_VERSION, encoding::identity_bcs::payload_bcs_bytes,
 };
+
+#[test]
+fn pins_bcs_numeric_enums_to_typescript_contract() {
+    assert_eq!(INTENT, "SONARI_IDENTITY_VERIFICATION_V1");
+    assert_eq!(VERIFIER_FAMILY, "identity");
+    assert_eq!(VERIFIER_VERSION, 1);
+    assert_eq!(PROVIDER_KYC, 1);
+    assert_eq!(PROVIDER_WORLD_ID, 2);
+}
 
 #[test]
 fn bcs_golden_matches_typescript_reference() {
