@@ -140,6 +140,7 @@ fn production_result_with_verifier(
     issued_at_ms: u64,
 ) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
     request.issued_at_ms = None;
+    request.validity_ms = None;
     let output = process_identity_with_verifier(request, verifier, signer, issued_at_ms)?;
 
     output_to_tee_json(output)
@@ -254,6 +255,8 @@ mod tests {
     };
     use sonari_tee_core::{LocalEd25519Signer, signing_key_seed_from_env};
 
+    const DEFAULT_IDENTITY_RESULT_TTL_MS: u64 = 31_536_000_000;
+
     #[test]
     fn production_verified_output_uses_tee_issued_at_ms() {
         let signer = test_signer();
@@ -273,7 +276,36 @@ mod tests {
                 assert_eq!(payload.verifier_family, VERIFIER_FAMILY);
                 assert_eq!(payload.verifier_version, VERIFIER_VERSION);
                 assert_eq!(payload.issued_at_ms, 1_900_000_000_000);
-                assert_eq!(payload.expires_at_ms, 1_900_031_536_000);
+                assert_eq!(
+                    payload.expires_at_ms,
+                    1_900_000_000_000 + DEFAULT_IDENTITY_RESULT_TTL_MS
+                );
+            }
+            other => panic!("expected verified output, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn production_verified_output_ignores_request_validity_ms() {
+        let signer = test_signer();
+        let mut request = world_id_request(None);
+        request.validity_ms = Some(u64::MAX - 1);
+        let result = production_result_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            &signer,
+            1_900_000_000_000,
+        )
+        .unwrap();
+
+        match result {
+            TeeJsonResult::Verified { payload, .. } => {
+                assert_eq!(
+                    payload.expires_at_ms,
+                    1_900_000_000_000 + DEFAULT_IDENTITY_RESULT_TTL_MS
+                );
             }
             other => panic!("expected verified output, got {other:?}"),
         }
