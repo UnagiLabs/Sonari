@@ -5,6 +5,7 @@ use std::time::Duration;
 pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
 pub const WORLD_ID_APP_ID_ENV: &str = "SONARI_WORLD_ID_APP_ID";
 pub const WORLD_ID_ACTION: &str = "sonari_membership_register_v1";
+pub const WORLD_ID_USER_AGENT: &str = "sonari-membership-tee/0.1";
 pub const WORLD_ID_VERIFICATION_FAILED: &str = "WORLD_ID_VERIFICATION_FAILED";
 pub const WORLD_ID_API_UNAVAILABLE: &str = "WORLD_ID_API_UNAVAILABLE";
 
@@ -48,6 +49,7 @@ impl CloudWorldIdVerifier {
         let app_id = normalize_app_id(app_id.into())?;
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
+            .user_agent(WORLD_ID_USER_AGENT)
             .build()
             .map_err(|error| {
                 IdentityError::Request(format!("World ID HTTP client build failed: {error}"))
@@ -188,7 +190,7 @@ fn pending_source() -> WorldIdVerificationStatus {
 mod tests {
     use super::{
         CloudWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
-        WORLD_ID_APP_ID_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest,
+        WORLD_ID_APP_ID_ENV, WORLD_ID_USER_AGENT, WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest,
         WorldIdVerificationStatus, WorldIdVerifier, classify_bad_request,
     };
     use crate::WorldIdProofRequest;
@@ -225,6 +227,11 @@ mod tests {
             verifier.verification_url(),
             "http://127.0.0.1:8080/api/v2/verify/app_staging_123"
         );
+    }
+
+    #[test]
+    fn world_id_verifier_sets_required_user_agent_value() {
+        assert_eq!(WORLD_ID_USER_AGENT, "sonari-membership-tee/0.1");
     }
 
     #[test]

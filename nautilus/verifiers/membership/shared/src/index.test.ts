@@ -125,10 +125,17 @@ describe("IdentityVerificationResult", () => {
             action: "sonari_membership_register_v1",
             nullifier: "0xAB54A98CEB1F0AD2",
         });
+        const upperPrefixHex = computeWorldIdDuplicateKeyHash({
+            world_app_id: "app_staging_123",
+            action: "sonari_membership_register_v1",
+            nullifier: "0XAB54A98CEB1F0AD2",
+        });
 
         expect(decimalWithZeroes).toBe(decimal);
         expect(hex).toBe(decimal);
+        expect(upperPrefixHex).toBe(decimal);
         expect(canonicalWorldIdNullifier("0xAB54A98CEB1F0AD2")).toBe("12345678901234567890");
+        expect(canonicalWorldIdNullifier("0XAB54A98CEB1F0AD2")).toBe("12345678901234567890");
     });
 
     it("loads KYC and World ID success fixtures", () => {

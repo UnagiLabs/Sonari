@@ -211,11 +211,22 @@ mod tests {
             "0xAB54A98CEB1F0AD2",
         )
         .unwrap();
+        let upper_prefix_hex = compute_world_id_duplicate_key_hash(
+            "app_staging_123",
+            "sonari_membership_register_v1",
+            "0XAB54A98CEB1F0AD2",
+        )
+        .unwrap();
 
         assert_eq!(decimal, decimal_with_zeroes);
         assert_eq!(decimal, hex);
+        assert_eq!(decimal, upper_prefix_hex);
         assert_eq!(
             canonical_world_id_nullifier("0xAB54A98CEB1F0AD2").unwrap(),
+            "12345678901234567890"
+        );
+        assert_eq!(
+            canonical_world_id_nullifier("0XAB54A98CEB1F0AD2").unwrap(),
             "12345678901234567890"
         );
     }

@@ -273,7 +273,7 @@ export function canonicalWorldIdNullifier(nullifier: string): string {
             "World ID nullifier must be a non-empty decimal or 0x-prefixed hex string without NUL",
         );
     }
-    if (/^0x[0-9a-fA-F]+$/.test(nullifier)) {
+    if (/^0[xX][0-9a-fA-F]+$/.test(nullifier)) {
         return BigInt(nullifier).toString(10);
     }
     if (/^[0-9]+$/.test(nullifier)) {
