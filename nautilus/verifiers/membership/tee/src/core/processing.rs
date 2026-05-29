@@ -1,5 +1,7 @@
 use crate::verify::kyc::{KYC_UNSUPPORTED, verify_kyc_unsupported};
-use crate::verify::world_id::{WorldIdVerificationStatus, WorldIdVerifier};
+use crate::verify::world_id::{
+    WORLD_ID_ACTION, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifier,
+};
 use crate::{
     INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
     VERIFIER_FAMILY, VERIFIER_VERSION, compute_world_id_duplicate_key_hash,
@@ -8,6 +10,7 @@ use crate::{
 use sonari_tee_core::{PayloadSigner, SignatureArtifact, hex_to_32, sha256_bytes, to_hex};
 
 const IDENTITY_EVIDENCE_HASH_PREFIX: &str = "sonari:identity_evidence:v1";
+const WORLD_ID_SIGNAL_HASH_PREFIX: &str = "sonari:world_id_signal:v1";
 const IDENTITY_RESULT_TTL_MS: u64 = 31_536_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +43,12 @@ pub fn process_identity_with_verifier(
                     "world_id proof is required for World ID provider".to_owned(),
                 )
             })?;
+            if !world_id_request_matches_trusted_boundary(&request, &proof, verifier)? {
+                return Ok(status_only(
+                    IdentityProcessingStatus::Rejected,
+                    Some(WORLD_ID_VERIFICATION_FAILED.to_owned()),
+                ));
+            }
             Ok(match verifier.verify_world_id(&proof) {
                 WorldIdVerificationStatus::Verified => {
                     verified_output(request, &proof, signer, now_ms)?
@@ -65,18 +74,38 @@ pub fn process_identity_with_verifier(
     }
 }
 
+pub fn compute_world_id_signal_hash(
+    owner: &str,
+    membership_id: &str,
+    signed_statement_hash: &str,
+) -> Result<String, IdentityError> {
+    validate_lowercase_hex_32("owner", owner)?;
+    validate_lowercase_hex_32("membership_id", membership_id)?;
+    validate_lowercase_hex_32("signed_statement_hash", signed_statement_hash)?;
+    let parts = [
+        WORLD_ID_SIGNAL_HASH_PREFIX,
+        owner,
+        membership_id,
+        signed_statement_hash,
+    ];
+    for part in parts {
+        if part.is_empty() || part.contains('\0') {
+            return Err(IdentityError::Request(
+                "World ID signal hash inputs must be non-empty strings without NUL".to_owned(),
+            ));
+        }
+    }
+
+    Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
+}
+
 pub fn compute_identity_evidence_hash(
     provider: IdentityProvider,
     duplicate_key_hash_hex: &str,
     verification_level: &str,
     issued_at_ms: u64,
 ) -> Result<String, IdentityError> {
-    hex_to_32(duplicate_key_hash_hex)?;
-    if duplicate_key_hash_hex != duplicate_key_hash_hex.to_ascii_lowercase() {
-        return Err(IdentityError::Request(
-            "duplicate_key_hash_hex must be lowercase 0x-prefixed hex".to_owned(),
-        ));
-    }
+    validate_lowercase_hex_32("duplicate_key_hash_hex", duplicate_key_hash_hex)?;
 
     let issued_at_ms_decimal = issued_at_ms.to_string();
     let provider = provider_name(provider);
@@ -96,6 +125,26 @@ pub fn compute_identity_evidence_hash(
     }
 
     Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
+}
+
+fn world_id_request_matches_trusted_boundary(
+    request: &IdentityVerifyRequest,
+    proof: &crate::WorldIdProofRequest,
+    verifier: &impl WorldIdVerifier,
+) -> Result<bool, IdentityError> {
+    if proof.app_id != verifier.expected_app_id() {
+        return Ok(false);
+    }
+    if proof.action != WORLD_ID_ACTION {
+        return Ok(false);
+    }
+    let expected_signal_hash = compute_world_id_signal_hash(
+        &request.owner,
+        &request.membership_id,
+        &request.signed_statement_hash,
+    )?;
+
+    Ok(proof.signal_hash == expected_signal_hash)
 }
 
 fn verified_output(
@@ -165,16 +214,26 @@ fn provider_name(provider: IdentityProvider) -> &'static str {
     }
 }
 
+fn validate_lowercase_hex_32(field: &str, value: &str) -> Result<(), IdentityError> {
+    hex_to_32(value)?;
+    if value != value.to_ascii_lowercase() {
+        return Err(IdentityError::Request(format!(
+            "{field} must be lowercase 0x-prefixed hex"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         IDENTITY_RESULT_TTL_MS, IdentityProcessingStatus, compute_identity_evidence_hash,
-        process_identity_with_verifier,
+        compute_world_id_signal_hash, process_identity_with_verifier,
     };
     use crate::{
-        IdentityProvider, IdentityVerifyRequest, KYC_UNSUPPORTED, WORLD_ID_API_UNAVAILABLE,
-        WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest, WorldIdVerificationStatus,
-        WorldIdVerifier,
+        IdentityProvider, IdentityVerifyRequest, KYC_UNSUPPORTED, WORLD_ID_ACTION,
+        WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
+        WorldIdVerificationStatus, WorldIdVerifier,
     };
     use sonari_tee_core::{PayloadSigner, SignatureArtifact, to_hex};
     use std::cell::Cell;
@@ -184,6 +243,10 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
+        fn expected_app_id(&self) -> &str {
+            "app_staging_123"
+        }
+
         fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
             self.status.clone()
         }
@@ -334,6 +397,86 @@ mod tests {
     }
 
     #[test]
+    fn process_identity_rejects_noncanonical_app_id_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().app_id = "app_attacker".to_owned();
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_eq!(
+            output.error_code,
+            Some(WORLD_ID_VERIFICATION_FAILED.to_owned())
+        );
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn process_identity_rejects_noncanonical_action_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().action = "attacker_action".to_owned();
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn process_identity_rejects_mismatched_signal_hash_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().signal_hash =
+            "0x4444444444444444444444444444444444444444444444444444444444444444".to_owned();
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn world_id_signal_hash_matches_fixed_formula() {
+        let signal_hash = compute_world_id_signal_hash(
+            "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "0x6666666666666666666666666666666666666666666666666666666666666666",
+        )
+        .unwrap();
+
+        assert_eq!(
+            signal_hash,
+            "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
+        );
+    }
+
+    #[test]
     fn evidence_hash_matches_fixed_formula() {
         let evidence_hash = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
@@ -390,8 +533,9 @@ mod tests {
                 merkle_root: "987654321".to_owned(),
                 proof: "0xproof".to_owned(),
                 verification_level: "orb".to_owned(),
-                action: "sonari_membership_register_v1".to_owned(),
-                signal_hash: "0xsignal".to_owned(),
+                action: WORLD_ID_ACTION.to_owned(),
+                signal_hash: "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
+                    .to_owned(),
             }),
             ..base_request()
         }

@@ -42,13 +42,21 @@ KYC と World ID は、どちらも満額 Claim ルートである。
 未認証の Membership SBT は Claim できない。
 
 World ID action は Sonari 専用にする。
+TEE は、設定された World ID app id と次の action だけを受け付ける。
+request で別の app id や action が来た場合は reject する。
 
 ```text
 sonari_membership_register_v1
 ```
 
-signal には Sui address、nonce、domain separator を含める。
+signal hash は TEE が再計算して、request の値と一致するか確認する。
+signal には Sui address、membership id、署名済み statement hash、
+domain separator を含める。
 これにより、proof の流用を防ぐ。
+
+```text
+sha256("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)
+```
 
 ## Verifier output
 

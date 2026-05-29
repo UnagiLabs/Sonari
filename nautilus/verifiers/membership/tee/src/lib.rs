@@ -8,7 +8,7 @@ pub use core::duplicate_key::{
 };
 pub use core::processing::{
     IdentityProcessingOutput, IdentityProcessingStatus, compute_identity_evidence_hash,
-    process_identity_with_verifier,
+    compute_world_id_signal_hash, process_identity_with_verifier,
 };
 pub use core::types::{
     IdentityProvider, IdentityTeeResult, IdentityVerifyRequest, WorldIdProofRequest,
@@ -16,8 +16,8 @@ pub use core::types::{
 pub use error::IdentityError;
 pub use verify::kyc::{KYC_UNSUPPORTED, KycVerificationStatus, verify_kyc_unsupported};
 pub use verify::world_id::{
-    CloudWorldIdVerifier, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
-    WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifier,
+    CloudWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
+    WORLD_ID_APP_ID_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifier,
 };
 
 pub const INTENT: &str = "SONARI_IDENTITY_VERIFICATION_V1";
