@@ -7,7 +7,8 @@ pub use core::duplicate_key::{
     compute_kyc_duplicate_key_hash, compute_world_id_duplicate_key_hash,
 };
 pub use core::processing::{
-    IdentityProcessingOutput, IdentityProcessingStatus, process_identity_with_verifier,
+    IdentityProcessingOutput, IdentityProcessingStatus, compute_identity_evidence_hash,
+    process_identity_with_verifier,
 };
 pub use core::types::{
     IdentityProvider, IdentityTeeResult, IdentityVerifyRequest, WorldIdProofRequest,

@@ -1,7 +1,14 @@
 use crate::verify::kyc::{KYC_UNSUPPORTED, verify_kyc_unsupported};
 use crate::verify::world_id::{WorldIdVerificationStatus, WorldIdVerifier};
-use crate::{IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest};
-use sonari_tee_core::{PayloadSigner, SignatureArtifact};
+use crate::{
+    INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
+    VERIFIER_FAMILY, VERIFIER_VERSION, compute_world_id_duplicate_key_hash,
+    encoding::identity_bcs::payload_bcs_bytes,
+};
+use sonari_tee_core::{PayloadSigner, SignatureArtifact, hex_to_32, sha256_bytes, to_hex};
+
+const IDENTITY_EVIDENCE_HASH_PREFIX: &str = "sonari:identity_evidence:v1";
+const IDENTITY_RESULT_TTL_MS: u64 = 31_536_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdentityProcessingStatus {
@@ -23,19 +30,19 @@ pub struct IdentityProcessingOutput {
 pub fn process_identity_with_verifier(
     request: IdentityVerifyRequest,
     verifier: &impl WorldIdVerifier,
-    _signer: &impl PayloadSigner,
-    _now_ms: u64,
+    signer: &impl PayloadSigner,
+    now_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
     match request.provider {
         IdentityProvider::WorldId => {
-            let proof = request.world_id.as_ref().ok_or_else(|| {
+            let proof = request.world_id.clone().ok_or_else(|| {
                 IdentityError::Request(
                     "world_id proof is required for World ID provider".to_owned(),
                 )
             })?;
-            Ok(match verifier.verify_world_id(proof) {
+            Ok(match verifier.verify_world_id(&proof) {
                 WorldIdVerificationStatus::Verified => {
-                    status_only(IdentityProcessingStatus::Verified, None)
+                    verified_output(request, &proof, signer, now_ms)?
                 }
                 WorldIdVerificationStatus::Rejected { error_code } => {
                     status_only(IdentityProcessingStatus::Rejected, Some(error_code))
@@ -58,6 +65,86 @@ pub fn process_identity_with_verifier(
     }
 }
 
+pub fn compute_identity_evidence_hash(
+    provider: IdentityProvider,
+    duplicate_key_hash_hex: &str,
+    verification_level: &str,
+    issued_at_ms: u64,
+) -> Result<String, IdentityError> {
+    hex_to_32(duplicate_key_hash_hex)?;
+    if duplicate_key_hash_hex != duplicate_key_hash_hex.to_ascii_lowercase() {
+        return Err(IdentityError::Request(
+            "duplicate_key_hash_hex must be lowercase 0x-prefixed hex".to_owned(),
+        ));
+    }
+
+    let issued_at_ms_decimal = issued_at_ms.to_string();
+    let provider = provider_name(provider);
+    let parts = [
+        IDENTITY_EVIDENCE_HASH_PREFIX,
+        provider,
+        duplicate_key_hash_hex,
+        verification_level,
+        &issued_at_ms_decimal,
+    ];
+    for part in parts {
+        if part.is_empty() || part.contains('\0') {
+            return Err(IdentityError::Request(
+                "identity evidence hash inputs must be non-empty strings without NUL".to_owned(),
+            ));
+        }
+    }
+
+    Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
+}
+
+fn verified_output(
+    request: IdentityVerifyRequest,
+    proof: &crate::WorldIdProofRequest,
+    signer: &impl PayloadSigner,
+    issued_at_ms: u64,
+) -> Result<IdentityProcessingOutput, IdentityError> {
+    let duplicate_key_hash =
+        compute_world_id_duplicate_key_hash(&proof.app_id, &proof.action, &proof.nullifier_hash)?;
+    let evidence_hash = compute_identity_evidence_hash(
+        IdentityProvider::WorldId,
+        &duplicate_key_hash,
+        &proof.verification_level,
+        issued_at_ms,
+    )?;
+    let expires_at_ms = issued_at_ms
+        .checked_add(IDENTITY_RESULT_TTL_MS)
+        .ok_or_else(|| {
+            IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
+        })?;
+    let result = IdentityTeeResult {
+        intent: INTENT.to_owned(),
+        verifier_family: VERIFIER_FAMILY.to_owned(),
+        verifier_version: VERIFIER_VERSION,
+        registry_id: request.registry_id,
+        membership_id: request.membership_id,
+        owner: request.owner,
+        provider: IdentityProvider::WorldId,
+        verified: true,
+        duplicate_key_hash,
+        evidence_hash,
+        issued_at_ms,
+        expires_at_ms,
+        terms_version: request.terms_version,
+        signed_statement_hash: request.signed_statement_hash,
+    };
+    let unsigned_bcs_payload = payload_bcs_bytes(&result)?;
+    let signature = signer.sign_payload(&unsigned_bcs_payload);
+
+    Ok(IdentityProcessingOutput {
+        status: IdentityProcessingStatus::Verified,
+        error_code: None,
+        result: Some(result),
+        unsigned_bcs_payload: Some(unsigned_bcs_payload),
+        signature: Some(signature),
+    })
+}
+
 fn status_only(
     status: IdentityProcessingStatus,
     error_code: Option<String>,
@@ -71,9 +158,19 @@ fn status_only(
     }
 }
 
+fn provider_name(provider: IdentityProvider) -> &'static str {
+    match provider {
+        IdentityProvider::Kyc => "kyc",
+        IdentityProvider::WorldId => "world_id",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{IdentityProcessingStatus, process_identity_with_verifier};
+    use super::{
+        IDENTITY_RESULT_TTL_MS, IdentityProcessingStatus, compute_identity_evidence_hash,
+        process_identity_with_verifier,
+    };
     use crate::{
         IdentityProvider, IdentityVerifyRequest, KYC_UNSUPPORTED, WORLD_ID_API_UNAVAILABLE,
         WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest, WorldIdVerificationStatus,
@@ -118,22 +215,34 @@ mod tests {
     #[test]
     fn process_identity_with_verifier_returns_verified_for_success_mock() {
         let signer = CountingSigner::new();
+        let now_ms = 1_800_000_000_000;
         let output = process_identity_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
                 status: WorldIdVerificationStatus::Verified,
             },
             &signer,
-            1_800_000_000_000,
+            now_ms,
         )
         .unwrap();
 
         assert_eq!(output.status, IdentityProcessingStatus::Verified);
         assert_eq!(output.error_code, None);
-        assert_eq!(output.result, None);
-        assert_eq!(output.unsigned_bcs_payload, None);
-        assert_eq!(output.signature, None);
-        assert_eq!(signer.calls.get(), 0);
+        let result = output.result.as_ref().unwrap();
+        let payload = output.unsigned_bcs_payload.as_ref().unwrap();
+        let signature = output.signature.as_ref().unwrap();
+        assert_eq!(
+            result.duplicate_key_hash,
+            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74"
+        );
+        assert_eq!(
+            result.evidence_hash,
+            "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f"
+        );
+        assert_eq!(result.issued_at_ms, now_ms);
+        assert_eq!(result.expires_at_ms, now_ms + IDENTITY_RESULT_TTL_MS);
+        assert_eq!(signature.signature, to_hex(payload));
+        assert_eq!(signer.calls.get(), 1);
     }
 
     #[test]
@@ -222,6 +331,48 @@ mod tests {
         assert_eq!(output.error_code, Some(KYC_UNSUPPORTED.to_owned()));
         assert_non_verified_output(&output);
         assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn evidence_hash_matches_fixed_formula() {
+        let evidence_hash = compute_identity_evidence_hash(
+            IdentityProvider::WorldId,
+            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
+            "orb",
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(
+            evidence_hash,
+            "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f"
+        );
+    }
+
+    #[test]
+    fn evidence_hash_rejects_nul_inputs() {
+        let error = compute_identity_evidence_hash(
+            IdentityProvider::WorldId,
+            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
+            concat!("or", "\0", "b"),
+            1_800_000_000_000,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("without NUL"));
+    }
+
+    #[test]
+    fn evidence_hash_rejects_uppercase_duplicate_key_hex() {
+        let error = compute_identity_evidence_hash(
+            IdentityProvider::WorldId,
+            "0xB9DABCFC937C5422B28DDD2DB18466A02C1F9FADB5637D120A3A455E23E88A74",
+            "orb",
+            1_800_000_000_000,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("lowercase"));
     }
 
     fn assert_non_verified_output(output: &super::IdentityProcessingOutput) {
