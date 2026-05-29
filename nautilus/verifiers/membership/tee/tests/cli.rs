@@ -68,21 +68,15 @@ fn fixture_command_returns_signed_verified_world_id_result() {
         serde_json::from_slice(&output.stdout).expect("fixture stdout should be JSON");
 
     assert_eq!(result["status"], "verified");
-    assert_eq!(result["payload"]["registry_id"], REGISTRY_ID);
-    assert_eq!(result["payload"]["membership_id"], MEMBERSHIP_ID);
-    assert_eq!(result["payload"]["owner"], OWNER);
-    assert_eq!(result["payload"]["provider"], "world_id");
-    assert_eq!(result["payload"]["verified"], true);
-    assert_eq!(result["payload"]["issued_at_ms"], ISSUED_AT_MS);
-    assert_eq!(
-        result["payload"]["expires_at_ms"],
-        ISSUED_AT_MS + VALIDITY_MS
-    );
-    assert_eq!(result["payload"]["terms_version"], TERMS_VERSION);
-    assert_eq!(
-        result["payload"]["signed_statement_hash"],
-        SIGNED_STATEMENT_HASH
-    );
+    assert_eq!(result["registry_id"], REGISTRY_ID);
+    assert_eq!(result["membership_id"], MEMBERSHIP_ID);
+    assert_eq!(result["owner"], OWNER);
+    assert_eq!(result["provider"], "world_id");
+    assert_eq!(result["verified"], true);
+    assert_eq!(result["issued_at_ms"], ISSUED_AT_MS);
+    assert_eq!(result["expires_at_ms"], ISSUED_AT_MS + VALIDITY_MS);
+    assert_eq!(result["terms_version"], TERMS_VERSION);
+    assert_eq!(result["signed_statement_hash"], SIGNED_STATEMENT_HASH);
 
     let payload_bytes = decode_hex_field(&result, "payload_bcs_hex");
     let payload = bcs::from_bytes::<IdentityPayloadBcs>(&payload_bytes)
@@ -98,15 +92,15 @@ fn fixture_command_returns_signed_verified_world_id_result() {
     assert!(payload.verified);
     assert_eq!(
         hex_32(payload.duplicate_key_hash),
-        result["payload"]["duplicate_key_hash"]
+        result["duplicate_key_hash"]
             .as_str()
-            .expect("payload duplicate_key_hash should be a string")
+            .expect("duplicate_key_hash should be a string")
     );
     assert_eq!(
         hex_32(payload.evidence_hash),
-        result["payload"]["evidence_hash"]
+        result["evidence_hash"]
             .as_str()
-            .expect("payload evidence_hash should be a string")
+            .expect("evidence_hash should be a string")
     );
     assert_eq!(payload.issued_at_ms, ISSUED_AT_MS);
     assert_eq!(payload.expires_at_ms, ISSUED_AT_MS + VALIDITY_MS);

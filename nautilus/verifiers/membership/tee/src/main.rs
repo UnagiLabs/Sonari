@@ -187,6 +187,7 @@ struct EncodeOnlyJson {
 #[serde(tag = "status", rename_all = "snake_case")]
 enum TeeJsonResult {
     Verified {
+        #[serde(flatten)]
         payload: IdentityTeeResult,
         payload_bcs_hex: String,
         signature: String,
