@@ -144,12 +144,16 @@ export class HttpRelayerAdapter implements RelayerAdapter {
                 if (body.ok) {
                     const request = readRelayerRequest(body.value);
                     const digest = readRelayerDigest(body.value);
+                    const objectId = readRelayerObjectId(body.value);
                     const value: RelayerSuccess = {
                         mode: this.mode,
                         request,
                     };
                     if (digest !== undefined) {
                         value.digest = digest;
+                    }
+                    if (objectId !== undefined) {
+                        value.objectId = objectId;
                     }
                     return {
                         ok: true,
@@ -278,7 +282,9 @@ export class StaticFailingRelayerAdapter implements RelayerAdapter {
 type RelayerSidecarResult =
     | {
           ok: true;
-          value: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string };
+          value:
+              | RelayerRequestPreview
+              | { request: RelayerRequestPreview; digest?: string; objectId?: string };
       }
     | { ok: false; error_code: RelayerErrorCode; message: string };
 
@@ -330,7 +336,7 @@ function readOptionalString(input: unknown): string | undefined {
 }
 
 function readRelayerRequest(
-    input: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string },
+    input: RelayerRequestPreview | { request: RelayerRequestPreview },
 ): RelayerRequestPreview {
     return "request" in input ? input.request : input;
 }
@@ -339,6 +345,12 @@ function readRelayerDigest(
     input: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string },
 ): string | undefined {
     return "request" in input ? readOptionalString(input.digest) : undefined;
+}
+
+function readRelayerObjectId(
+    input: RelayerRequestPreview | { request: RelayerRequestPreview; objectId?: string },
+): string | undefined {
+    return "request" in input ? readOptionalString(input.objectId) : undefined;
 }
 
 function normalizeDirectRelayerRequest(input: DirectRelayerRequestPreview): RelayerRequestPreview {
