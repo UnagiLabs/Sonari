@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { loadFixtureRelayerSubmitInput } from "@sonari/earthquake-relayer";
+import {
+    createEd25519SuiSignerFromPrivateKey,
+    loadFixtureRelayerSubmitInput,
+    type RelayerSubmitConfig,
+} from "@sonari/earthquake-relayer";
 import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
@@ -922,6 +926,100 @@ describe("AWS runner workflow helper", () => {
             toSuiAddress: expect.any(Function),
         });
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
+    });
+
+    it("stores submit digest and object ID while moving the row to submitted", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_002_000,
+            config: {
+                ...baseConfig(),
+                relayer: {
+                    mode: "submit",
+                    target: "0xtarget",
+                    registry: "0xregistry",
+                    verifierRegistry: "0xverifier",
+                    network: "testnet",
+                    grpcUrl: "https://fullnode.testnet.sui.io:443",
+                    allowSubmit: true,
+                    loadSigner: async () =>
+                        createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey),
+                    submitPayload: async (input: unknown, config: RelayerSubmitConfig) => {
+                        expect(input).toEqual(result);
+                        expect(config.signer?.toSuiAddress()).toBe(
+                            "0xec4afbacb79ca9f456ff4ed20a2a63f1c325ed887f8581e066bd9bdf5fed2bd8",
+                        );
+                        const request = {
+                            target: config.target,
+                            registry: config.registry,
+                            verifierRegistry: config.verifierRegistry,
+                            clock: "0x6",
+                            arguments: [
+                                config.registry,
+                                config.verifierRegistry,
+                                "0x6",
+                                [],
+                                [],
+                                [],
+                            ] as [string, string, string, number[], number[], number[]],
+                            submitRequest: {
+                                target: config.target,
+                                registry: config.registry,
+                                verifierRegistry: config.verifierRegistry,
+                                clock: "0x6",
+                                arguments: [
+                                    config.registry,
+                                    config.verifierRegistry,
+                                    "0x6",
+                                    [],
+                                    [],
+                                    [],
+                                ] as [string, string, string, number[], number[], number[]],
+                            },
+                        };
+                        return {
+                            ok: true,
+                            value: {
+                                request,
+                                digest: "tx-digest",
+                                objectId: "0xdisaster",
+                                effects: {},
+                            },
+                        };
+                    },
+                },
+            },
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ relayer: "succeeded" });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "submitted",
+            relayer_mode: "submit",
+            relayer_status: "succeeded",
+            relayer_digest: "tx-digest",
+            relayer_object_id: "0xdisaster",
+            relayer_submitted_at_ms: 1_800_000_002_000,
+        });
     });
 });
 

@@ -40,6 +40,7 @@ export interface EarthquakeEventRow {
     relayer_status: RelayerStatus | null;
     relayer_request_json: string | null;
     relayer_digest: string | null;
+    relayer_object_id: string | null;
     relayer_error_code: RelayerErrorCode | null;
     relayer_error_message: string | null;
     relayer_updated_at_ms: number | null;
@@ -488,6 +489,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_status = "succeeded";
         row.relayer_request_json = JSON.stringify(success.request);
         row.relayer_digest = success.digest ?? null;
+        row.relayer_object_id = success.objectId ?? null;
         row.relayer_error_code = null;
         row.relayer_error_message = null;
         row.relayer_updated_at_ms = nowMs;
@@ -1078,6 +1080,7 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_status = "succeeded";
         row.relayer_request_json = JSON.stringify(success.request);
         row.relayer_digest = success.digest ?? null;
+        row.relayer_object_id = success.objectId ?? null;
         row.relayer_error_code = null;
         row.relayer_error_message = null;
         row.relayer_updated_at_ms = nowMs;
@@ -1492,6 +1495,7 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#relayer_status = :relayer_status",
                     "#relayer_request_json = :relayer_request_json",
                     "#relayer_digest = :relayer_digest",
+                    "#relayer_object_id = :relayer_object_id",
                     "#relayer_error_code = :relayer_error_code",
                     "#relayer_error_message = :relayer_error_message",
                     "#relayer_updated_at_ms = :relayer_updated_at_ms",
@@ -1801,6 +1805,7 @@ function baseRow(
         relayer_status: null,
         relayer_request_json: null,
         relayer_digest: null,
+        relayer_object_id: null,
         relayer_error_code: null,
         relayer_error_message: null,
         relayer_updated_at_ms: null,

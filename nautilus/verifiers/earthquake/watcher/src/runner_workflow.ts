@@ -12,7 +12,14 @@ import {
     SSMClient,
 } from "@aws-sdk/client-ssm";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
-import { createEd25519SuiSignerFromPrivateKey, type SuiNetwork } from "@sonari/earthquake-relayer";
+import {
+    createEd25519SuiSignerFromPrivateKey,
+    type RelayerResult,
+    type RelayerSigner,
+    type RelayerSubmitConfig,
+    type RelayerSubmitSuccess,
+    type SuiNetwork,
+} from "@sonari/earthquake-relayer";
 import {
     ERROR_CODES,
     type OracleErrorCode,
@@ -40,7 +47,11 @@ export interface RunnerWorkflowConfig {
         senderAddress?: string;
         allowSubmit?: boolean;
         configurationError?: string;
-        loadSigner?: () => Promise<ReturnType<typeof createEd25519SuiSignerFromPrivateKey>>;
+        loadSigner?: () => Promise<RelayerSigner>;
+        submitPayload?: (
+            input: unknown,
+            config: RelayerSubmitConfig,
+        ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
     };
 }
 
