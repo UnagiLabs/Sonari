@@ -171,6 +171,11 @@ fn verified_output(
         issued_at_ms,
     )?;
     let validity_ms = request.validity_ms.unwrap_or(IDENTITY_RESULT_TTL_MS);
+    if validity_ms == 0 {
+        return Err(IdentityError::Request(
+            "identity result validity_ms must be greater than zero".to_owned(),
+        ));
+    }
     let expires_at_ms = issued_at_ms.checked_add(validity_ms).ok_or_else(|| {
         IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
     })?;

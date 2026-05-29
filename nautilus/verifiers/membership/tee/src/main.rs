@@ -34,6 +34,8 @@ enum Command {
 struct FixtureArgs {
     #[arg(long)]
     signing_key_seed: Option<String>,
+    #[arg(long, default_value = "app_staging_123")]
+    world_app_id: String,
     #[arg(long, value_enum, default_value = "verified")]
     world_id_status: FixtureWorldIdStatus,
 }
@@ -98,13 +100,8 @@ fn fixture_result(args: FixtureArgs) -> Result<TeeJsonResult, Box<dyn std::error
     } else {
         request.issued_at_ms.unwrap_or(0)
     };
-    let expected_app_id = request
-        .world_id
-        .as_ref()
-        .map(|proof| proof.world_app_id.clone())
-        .unwrap_or_default();
     let verifier = FixtureWorldIdVerifier {
-        expected_app_id,
+        expected_app_id: args.world_app_id,
         status: args.world_id_status,
     };
     let seed = signing_key_seed_from_env(

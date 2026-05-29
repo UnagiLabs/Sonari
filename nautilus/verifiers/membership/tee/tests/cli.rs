@@ -146,6 +146,33 @@ fn fixture_command_returns_pending_source_world_id_without_signature_fields() {
 }
 
 #[test]
+fn fixture_command_rejects_mismatched_world_app_id_without_signature_fields() {
+    let mut request = world_id_request();
+    request["world_id"]["world_app_id"] = serde_json::json!("app_attacker");
+    let output = run_fixture(&[], &request);
+
+    assert_status_only(output, "rejected", WORLD_ID_VERIFICATION_FAILED);
+}
+
+#[test]
+fn fixture_command_rejects_zero_validity_before_signing() {
+    let mut request = world_id_request();
+    request["validity_ms"] = serde_json::json!(0);
+    let output = run_fixture(&[], &request);
+
+    assert!(
+        !output.status.success(),
+        "expected zero validity to fail, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("validity_ms"),
+        "expected validity_ms error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn fixture_command_rejects_top_level_unknown_request_field() {
     let mut request = world_id_request();
     request["raw_personal_data"] = serde_json::json!("do-not-accept");
