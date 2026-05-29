@@ -23,13 +23,15 @@ STEP 6「claim 互換性と後片付けを確認する」も完了です。
 - #76 後の contract を `infra` 配下の Sui config で publish しました。
 - 新 package は `payload` module を含んでいます。
 - 新 `DisasterRegistry` を作成しました。
-- 新 `VerifierRegistry` に AWS TEE public key を登録しました。
+- 新 `VerifierRegistry` に検証用 key を登録しました。
+- fresh AWS result の signer key は、STEP 18 で追加登録しました。
 - manual watcher から `us6000m0xl` の fresh workflow を起動しました。
 - AWS runner は new schema の finalized result を S3 と DDB に残しました。
 - relayer は AWS result から Move call request を組み立てられました。
 - Sui testnet の dry-run は `success` でした。
 - Sui testnet への submit は `success` でした。
 - `DisasterEvent` object は AWS result の主要 field と一致しました。
+- `payload_bcs`、`signature`、`public_key` も AWS result と一致しました。
 - `affected_cells_root` は AWS result と object で一致しました。
 - Move の claim / Merkle proof test は成功しました。
 - ASG は `Desired=0 / Instances=[]` に戻りました。
@@ -39,7 +41,7 @@ STEP 6「claim 互換性と後片付けを確認する」も完了です。
 | 項目 | 値 |
 | --- | --- |
 | Repository | `UnagiLabs/Sonari` |
-| Worktree | `/home/manji/github/Sonari/.codex/state/worktrees/issue-77-aws-disaster-event-verification` |
+| Worktree | `.codex/state/worktrees/issue-77-aws-disaster-event-verification` |
 | Branch | `feature/issue-77-aws-disaster-event-verification` |
 | Commit | `d83000d992616a56a769cdb0706acb919ee66b4e` |
 | GitHub Actions run | `26619377088` |
@@ -552,7 +554,7 @@ payload に含まれる主要 field:
 
 ### 18. AWS TEE public key の追加登録
 
-STEP 2 では、local `.local` seed から導出した public key を登録しました。
+STEP 2 では、`infra` 配下の検証用 seed から導出した public key を登録しました。
 fresh AWS result は別の public key で署名されていました。
 
 AWS result の public key:
@@ -571,6 +573,9 @@ AWS result の public key:
 | verifier_version | `1` |
 | enabled | `true` |
 | VerifierRegistry ID | `0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1` |
+
+この STEP 18 の key が、STEP 3 で得た fresh AWS result の
+実際の signer key です。
 
 ### 19. relayer build-request
 
@@ -593,6 +598,9 @@ pnpm --silent --filter @sonari/earthquake-relayer cli -- build-request \
 | payload BCS byte length | `428` |
 | signature byte length | `64` |
 | public key byte length | `32` |
+| payload_bcs matches AWS result | `true` |
+| signature matches AWS result | `true` |
+| public_key matches AWS result | `true` |
 
 relayer request は次の object を引数に含みます。
 
@@ -649,7 +657,7 @@ relayer build-request と同じ Move call を送信しました。
 
 ```bash
 sui client \
-  --client.config /home/manji/github/Sonari/infra/aws/earthquake-runner/.local/sonari-dev/sui_config.yaml \
+  --client.config infra/aws/earthquake-runner/.local/sonari-dev/sui_config.yaml \
   call \
   --package 0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea \
   --module disaster_event \
@@ -666,6 +674,29 @@ sui client \
 | status | `success` |
 | tx digest | `CvmxQt8yJ31etSg1eQohaGXo2UkTMknEQw9uWPcHwmW3` |
 | sender | `0x61771ffa71b0d4fc02ffb63d975f78573f844157b38a816c19bcce5b275c108b` |
+
+tx block も取得しました。
+
+```bash
+sui client \
+  --client.config infra/aws/earthquake-runner/.local/sonari-dev/sui_config.yaml \
+  tx-block CvmxQt8yJ31etSg1eQohaGXo2UkTMknEQw9uWPcHwmW3 \
+  --json
+```
+
+tx block の結果:
+
+| 項目 | 値 |
+| --- | --- |
+| digest | `CvmxQt8yJ31etSg1eQohaGXo2UkTMknEQw9uWPcHwmW3` |
+| status | `success` |
+| event type | `0x972abc4b8b18da735539f5deb3999b32420a343196c64aca07e6b6a32465c3ea::disaster_event::DisasterEventCreated` |
+| event disaster_event_id | `0xdee6ac17f05fba6ad1467ad2a1e495b0775d94eb77a611235652c7d38a69b4be` |
+| event source_event_id | `us6000m0xl` |
+| event title | `M 7.5 - 2024 Noto Peninsula, Japan Earthquake` |
+| event region | `2024 Noto Peninsula, Japan Earthquake` |
+| event affected_cell_count | `2176` |
+| event payload_bcs_hash | `N1hjfPNCWr9tNCbjR/nEo16V8754Lwlf+AG6OxlDTjM=` |
 
 created object:
 
@@ -686,7 +717,7 @@ mutated object:
 
 ```bash
 sui client \
-  --client.config /home/manji/github/Sonari/infra/aws/earthquake-runner/.local/sonari-dev/sui_config.yaml \
+  --client.config infra/aws/earthquake-runner/.local/sonari-dev/sui_config.yaml \
   object 0xdee6ac17f05fba6ad1467ad2a1e495b0775d94eb77a611235652c7d38a69b4be \
   --json
 ```
@@ -701,6 +732,10 @@ sui client \
 | prevTx | `CvmxQt8yJ31etSg1eQohaGXo2UkTMknEQw9uWPcHwmW3` |
 | verifier_registry_id | `0x9676df2dc8a4de782f51c7fae7b90186936d1e21889dee43ec2e5274240220a1` |
 | verifier_public_key | `o1npghKci6/LBVWMLk9+nKCyVTcQ9v1IgEGZPSPr3XI=` |
+| signature_scheme | `1` |
+| payload_bcs_hash | `N1hjfPNCWr9tNCbjR/nEo16V8754Lwlf+AG6OxlDTjM=` |
+| raw_data_hash | `6X2u3ALvP7Urf0AXi4Y12XHNyJ8glBtzxJvvUVt2Jh0=` |
+| affected_cells_data_hash | `o3YyhGSg7yQSlf9y6aiwuCkFanT85+DwYeiP0PmIWEs=` |
 
 AWS result の public key は次の値でした。
 
@@ -727,6 +762,23 @@ AWS result と `DisasterEvent` object の照合:
 | raw_data_uri | `ipfs://sonari/live/us6000m0xl/raw_data_manifest.json` | `ipfs://sonari/live/us6000m0xl/raw_data_manifest.json` |
 | affected_cells_uri | `ipfs://sonari/live/us6000m0xl/affected_cells.json` | `ipfs://sonari/live/us6000m0xl/affected_cells.json` |
 | affected_cell_count | `2176` | `2176` |
+| occurred_at_ms | `1704093009476` | `1704093009476` |
+
+byte-level 照合:
+
+| 項目 | 結果 |
+| --- | --- |
+| relayer request `payload_bcs` matches AWS result `payload_bcs_hex` | `true` |
+| relayer request `signature` matches AWS result `signature` | `true` |
+| relayer request `public_key` matches AWS result `public_key` | `true` |
+| object `payload_bcs` matches AWS result `payload_bcs_hex` | `true` |
+| object `signature` matches AWS result `signature` | `true` |
+| object `verifier_public_key` matches AWS result `public_key` | `true` |
+| object `payload_bcs_hash` matches SHA-256 of AWS result `payload_bcs_hex` | `true` |
+| object `raw_data_hash` matches AWS result `raw_data_hash` | `true` |
+| object `affected_cells_data_hash` matches AWS result `affected_cells_data_hash` | `true` |
+| object `affected_cells_root` matches AWS result `affected_cells_root` | `true` |
+| object `signature_scheme` is Ed25519 | `true` |
 
 ### 23. claim 互換性と Merkle proof
 
@@ -870,7 +922,7 @@ build-request、dry-run、Sui submit はすべて完了しています。
 | Step | 状態 | メモ |
 | --- | --- | --- |
 | STEP 1: AWS deploy と artifact を確認する | 完了 | 本 report で evidence を記録 |
-| STEP 2: Sui testnet の object 設定を確認する | 完了 | 新 package / registry / verifier key を確定 |
+| STEP 2: Sui testnet の object 設定を確認する | 完了 | 新 package / registry / 初期 verifier key を確定 |
 | STEP 3: manual watcher から地震を投入する | 完了 | fresh AWS result を生成 |
 | STEP 4: relayer request と dry-run を確認する | 完了 | request 作成と Sui dry-run が成功 |
 | STEP 5: Sui testnet に submit して object を確認する | 完了 | DisasterEvent object を作成して照合 |
@@ -881,6 +933,7 @@ build-request、dry-run、Sui submit はすべて完了しています。
 - production code は変更していません。
 - secret 値は report に記載していません。
 - `infra` 配下の Sui / Walrus 設定を使いました。
+- `infra` config は repo-relative path で記録し、絶対 path は記録していません。
 - 既存 testnet package は古かったため、新 package を publish しました。
 - `us6000m0xl` の古い DDB row は dev 検証のため削除しました。
 - 削除前 row は local evidence に保存しています。
