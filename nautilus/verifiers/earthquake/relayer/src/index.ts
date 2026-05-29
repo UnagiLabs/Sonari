@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import type { Signer } from "@mysten/sui/cryptography";
+import { decodeSuiPrivateKey, type Signer } from "@mysten/sui/cryptography";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 import { type RelayerSubmitInput, validateRelayerSubmitInput } from "@sonari/earthquake-shared";
@@ -57,7 +58,7 @@ export interface RelayerSubmitClient {
     signAndExecuteTransaction(input: {
         transaction: unknown;
         signer: RelayerSigner;
-        include: { effects: true };
+        include: { effects: true; events: true };
     }): Promise<RelayerExecutionResponse>;
 }
 
@@ -67,6 +68,12 @@ export interface RelayerTransactionResult {
     digest?: string;
     status?: RelayerExecutionStatus;
     effects?: RelayerTransactionEffects;
+    events?: RelayerTransactionEvent[];
+}
+
+export interface RelayerTransactionEvent {
+    type?: string;
+    parsedJson?: unknown;
 }
 
 export type RelayerExecutionStatus =
@@ -89,6 +96,7 @@ export type RelayerExecutionResponse =
 interface NormalizedTransactionResult {
     digest?: string;
     effects: RelayerTransactionEffects;
+    events?: RelayerTransactionEvent[];
 }
 
 export interface ParsedRelayerSubmitInput {
@@ -122,6 +130,7 @@ export interface RelayerDryRunSuccess {
 export interface RelayerSubmitSuccess {
     request: RelayerRequestPreview;
     digest?: string;
+    objectId: string;
     effects: RelayerTransactionEffects;
 }
 
@@ -153,6 +162,15 @@ export function loadFixtureRelayerSubmitInput(caseId: string): RelayerSubmitInpu
         signature: signature.signature,
         public_key: signature.public_key,
     };
+}
+
+export function createEd25519SuiSignerFromPrivateKey(value: string): Ed25519Keypair {
+    const decoded = decodeSuiPrivateKey(value);
+    if (decoded.scheme !== "ED25519") {
+        throw new Error("Only Ed25519 Sui private keys are supported for relayer submit");
+    }
+
+    return Ed25519Keypair.fromSecretKey(decoded.secretKey);
 }
 
 export function buildRelayerRequestPreview(
@@ -275,15 +293,22 @@ export async function submitRelayerPayload(
         const response = await client.signAndExecuteTransaction({
             transaction,
             signer: config.signer,
-            include: { effects: true },
+            include: { effects: true, events: true },
         });
         const result = normalizeTransactionResult(response);
         if (!result.ok) {
             return result;
         }
+        const objectId = readCreatedDisasterEventObjectId(result.value);
+        if (objectId === undefined) {
+            return relayerSubmitFailed(
+                "Sui response did not include created DisasterEvent object ID",
+            );
+        }
 
         const value: RelayerSubmitSuccess = {
             request: preview.value,
+            objectId,
             effects: result.value.effects,
         };
         if (result.value.digest !== undefined) {
@@ -480,6 +505,9 @@ function normalizeTransactionResult(
         if (typeof transaction.digest === "string") {
             value.digest = transaction.digest;
         }
+        if (Array.isArray(transaction.events)) {
+            value.events = transaction.events.filter(isRecord);
+        }
 
         return { ok: true, value };
     }
@@ -532,6 +560,62 @@ function readExecutionErrorMessage(value: unknown): string | undefined {
     }
 
     return undefined;
+}
+
+function readCreatedDisasterEventObjectId(
+    result: NormalizedTransactionResult,
+): string | undefined {
+    const eventObjectId = result.events
+        ?.map((event) => {
+            if (!isDisasterEventCreatedEvent(event)) {
+                return undefined;
+            }
+            return readObjectIdFromParsedJson(event.parsedJson, "disaster_event_id");
+        })
+        .find(isNonEmptyString);
+    if (eventObjectId !== undefined) {
+        return eventObjectId;
+    }
+
+    const changedObjects = result.effects.changedObjects;
+    if (!Array.isArray(changedObjects)) {
+        return undefined;
+    }
+
+    return changedObjects.map(readCreatedObjectId).find(isNonEmptyString);
+}
+
+function isDisasterEventCreatedEvent(event: RelayerTransactionEvent): boolean {
+    return (
+        typeof event.type === "string" &&
+        event.type.endsWith("::disaster_event::DisasterEventCreated")
+    );
+}
+
+function readObjectIdFromParsedJson(input: unknown, key: string): string | undefined {
+    if (!isRecord(input)) {
+        return undefined;
+    }
+    const value = input[key];
+    if (typeof value === "string") {
+        return value;
+    }
+    if (isRecord(value) && typeof value.id === "string") {
+        return value.id;
+    }
+    return undefined;
+}
+
+function readCreatedObjectId(input: unknown): string | undefined {
+    if (!isRecord(input)) {
+        return undefined;
+    }
+    const outputState = input.outputState;
+    const kind = isRecord(outputState) ? outputState.$kind : undefined;
+    if (kind !== "ObjectWrite") {
+        return undefined;
+    }
+    return typeof input.objectId === "string" ? input.objectId : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

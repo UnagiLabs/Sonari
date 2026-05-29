@@ -1,7 +1,9 @@
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
 import { describe, expect, it } from "vitest";
 import {
     buildRelayerRequestPreview,
+    createEd25519SuiSignerFromPrivateKey,
     dryRunRelayerSubmit,
     loadFixtureRelayerSubmitInput,
     submitRelayerPayload,
@@ -52,6 +54,14 @@ function successfulTransactionResponse(effects = { status: { success: true, erro
             digest: "abc",
             status: { success: true as const, error: null },
             effects,
+            events: [
+                {
+                    type: "0x123::disaster_event::DisasterEventCreated",
+                    parsedJson: {
+                        disaster_event_id: "0xdisaster",
+                    },
+                },
+            ],
         },
     };
 }
@@ -173,6 +183,16 @@ describe("relayer request preview", () => {
 });
 
 describe("relayer submit execution", () => {
+    it("creates an Ed25519 signer from a Sui private key string", () => {
+        const keypair = Ed25519Keypair.generate();
+        const signer = createEd25519SuiSignerFromPrivateKey(keypair.getSecretKey());
+
+        expect(signer.toSuiAddress()).toBe(keypair.toSuiAddress());
+        expect(() =>
+            createEd25519SuiSignerFromPrivateKey(Secp256k1Keypair.generate().getSecretKey()),
+        ).toThrow("Only Ed25519 Sui private keys are supported for relayer submit");
+    });
+
     it("maps dry-run and submit transaction failures to MOVE_REJECTED", async () => {
         const signer = Ed25519Keypair.generate();
         const client = {
@@ -362,7 +382,7 @@ describe("relayer submit execution", () => {
         expect(client).not.toHaveProperty(["dryRun", "TransactionBlock"].join(""));
     });
 
-    it("submits with effects included and returns the current API digest and effects", async () => {
+    it("submits with effects and events included and returns digest, effects, and object ID", async () => {
         const effects = { status: { success: true, error: null }, transactionDigest: "abc" };
         const calls: unknown[] = [];
         const client = {
@@ -389,6 +409,7 @@ describe("relayer submit execution", () => {
             ok: true,
             value: {
                 digest: "abc",
+                objectId: "0xdisaster",
                 effects,
             },
         });
@@ -396,9 +417,80 @@ describe("relayer submit execution", () => {
             {
                 transaction,
                 signer,
-                include: { effects: true },
+                include: { effects: true, events: true },
             },
         ]);
+    });
+
+    it("falls back to effects created objects when submit events do not contain the object ID", async () => {
+        const signer = Ed25519Keypair.generate();
+
+        await expect(
+            submitRelayerPayload(fixtureInput, {
+                target,
+                registry,
+                verifierRegistry,
+                network,
+                grpcUrl,
+                signer,
+                client: {
+                    signAndExecuteTransaction: async () => ({
+                        $kind: "Transaction" as const,
+                        Transaction: {
+                            digest: "abc",
+                            status: { success: true as const, error: null },
+                            effects: {
+                                status: { success: true, error: null },
+                                changedObjects: [
+                                    {
+                                        objectId: "0xfallback",
+                                        outputState: { $kind: "ObjectWrite" },
+                                    },
+                                ],
+                            },
+                            events: [],
+                        },
+                    }),
+                },
+                transaction: makeFakeTransaction(),
+            }),
+        ).resolves.toMatchObject({
+            ok: true,
+            value: {
+                objectId: "0xfallback",
+            },
+        });
+    });
+
+    it("fails closed when a successful submit response does not include an object ID", async () => {
+        const signer = Ed25519Keypair.generate();
+
+        await expect(
+            submitRelayerPayload(fixtureInput, {
+                target,
+                registry,
+                verifierRegistry,
+                network,
+                grpcUrl,
+                signer,
+                client: {
+                    signAndExecuteTransaction: async () => ({
+                        $kind: "Transaction" as const,
+                        Transaction: {
+                            digest: "abc",
+                            status: { success: true as const, error: null },
+                            effects: { status: { success: true, error: null } },
+                            events: [],
+                        },
+                    }),
+                },
+                transaction: makeFakeTransaction(),
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Sui response did not include created DisasterEvent object ID",
+        });
     });
 
     it("normalizes missing effects and unknown SDK response shapes to RELAYER_SUBMIT_FAILED", async () => {

@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
-import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
     buildRelayerRequestPreview,
+    createEd25519SuiSignerFromPrivateKey,
     dryRunRelayerSubmit,
     loadFixtureRelayerSubmitInput,
     submitRelayerPayload,
@@ -76,7 +75,7 @@ async function main(argv: string[]): Promise<number> {
         return 1;
     }
 
-    const signer = loadEd25519Signer(options.signer);
+    const signer = createEd25519SuiSignerFromPrivateKey(options.signer);
     const result = await submitRelayerPayload(input.value, {
         target: options.target,
         registry: options.registry,
@@ -155,15 +154,6 @@ function loadInput(
     }
 
     return { ok: false, error: "Provide --fixture-case or --input" };
-}
-
-function loadEd25519Signer(value: string): Ed25519Keypair {
-    const decoded = decodeSuiPrivateKey(value);
-    if (decoded.scheme !== "ED25519") {
-        throw new Error("Only Ed25519 Sui private keys are supported for relayer submit");
-    }
-
-    return Ed25519Keypair.fromSecretKey(decoded.secretKey);
 }
 
 function printJson(value: unknown): void {
