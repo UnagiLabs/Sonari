@@ -51,7 +51,8 @@ pub fn process_identity_with_verifier(
             }
             Ok(match verifier.verify_world_id(&proof) {
                 WorldIdVerificationStatus::Verified => {
-                    verified_output(request, &proof, signer, now_ms)?
+                    let issued_at_ms = request.issued_at_ms.unwrap_or(now_ms);
+                    verified_output(request, &proof, signer, issued_at_ms)?
                 }
                 WorldIdVerificationStatus::Rejected { error_code } => {
                     status_only(IdentityProcessingStatus::Rejected, Some(error_code))
@@ -133,7 +134,7 @@ fn world_id_request_matches_trusted_boundary(
     proof: &crate::WorldIdProofRequest,
     verifier: &impl WorldIdVerifier,
 ) -> Result<bool, IdentityError> {
-    if proof.app_id != verifier.expected_app_id() {
+    if proof.world_app_id != verifier.expected_app_id() {
         return Ok(false);
     }
     if proof.action != WORLD_ID_ACTION {
@@ -158,19 +159,21 @@ fn verified_output(
     signer: &impl PayloadSigner,
     issued_at_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
-    let duplicate_key_hash =
-        compute_world_id_duplicate_key_hash(&proof.app_id, &proof.action, &proof.nullifier_hash)?;
+    let duplicate_key_hash = compute_world_id_duplicate_key_hash(
+        &proof.world_app_id,
+        &proof.action,
+        &proof.nullifier_hash,
+    )?;
     let evidence_hash = compute_identity_evidence_hash(
         IdentityProvider::WorldId,
         &duplicate_key_hash,
         &proof.verification_level,
         issued_at_ms,
     )?;
-    let expires_at_ms = issued_at_ms
-        .checked_add(IDENTITY_RESULT_TTL_MS)
-        .ok_or_else(|| {
-            IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
-        })?;
+    let validity_ms = request.validity_ms.unwrap_or(IDENTITY_RESULT_TTL_MS);
+    let expires_at_ms = issued_at_ms.checked_add(validity_ms).ok_or_else(|| {
+        IdentityError::Request("identity result expires_at_ms exceeds u64 range".to_owned())
+    })?;
     let result = IdentityTeeResult {
         intent: INTENT.to_owned(),
         verifier_family: VERIFIER_FAMILY.to_owned(),
@@ -420,7 +423,7 @@ mod tests {
     fn process_identity_rejects_noncanonical_app_id_before_signing() {
         let signer = CountingSigner::new();
         let mut request = world_id_request();
-        request.world_id.as_mut().unwrap().app_id = "app_attacker".to_owned();
+        request.world_id.as_mut().unwrap().world_app_id = "app_attacker".to_owned();
         let output = process_identity_with_verifier(
             request,
             &MockWorldIdVerifier {
@@ -579,7 +582,7 @@ mod tests {
         IdentityVerifyRequest {
             provider: IdentityProvider::WorldId,
             world_id: Some(WorldIdProofRequest {
-                app_id: "app_staging_123".to_owned(),
+                world_app_id: "app_staging_123".to_owned(),
                 nullifier_hash: "12345678901234567890".to_owned(),
                 merkle_root: "987654321".to_owned(),
                 proof: "0xproof".to_owned(),
@@ -600,6 +603,8 @@ mod tests {
                 .to_owned(),
             owner: "0x3333333333333333333333333333333333333333333333333333333333333333".to_owned(),
             provider: IdentityProvider::WorldId,
+            issued_at_ms: None,
+            validity_ms: None,
             terms_version: 1,
             signed_statement_hash:
                 "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
