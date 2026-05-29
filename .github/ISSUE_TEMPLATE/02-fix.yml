@@ -1,0 +1,131 @@
+name: 修正
+description: バグ、不具合、分かりにくさ、運用上の問題を直すためのissue
+title: "fix: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        既存の問題を直すためのissueです。
+        今起きている問題、再現手順、期待する動き、完了条件が分かるように書いてください。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 一言でいうと
+      description: 何を直したいかを1から2文で書いてください。
+      placeholder: このissueは、◯◯で起きている問題を直す依頼です。
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: 今起きている問題
+      description: 今の状態と、困っていることを書いてください。
+      placeholder: |
+        今は◯◯です。
+
+        そのため、◯◯ができません。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 再現手順
+      description: 同じ問題をもう一度起こすための手順を書いてください。再現できない場合は「再現手順は要確認」と書いてください。
+      placeholder: |
+        1. ◯◯する
+        2. ◯◯する
+        3. ◯◯になる
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: 期待する動き
+      description: 本来どう動くべきかを書いてください。
+      placeholder: |
+        - ◯◯できる
+        - ◯◯の場合は◯◯になる
+        - 失敗した場合は◯◯になる
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: 流れ
+      description: 処理フローや画面遷移が関係する場合はMermaidや箇条書きで書いてください。なければ「処理フローの変更なし」と書いてください。
+      placeholder: |
+        ```mermaid
+        flowchart TD
+          A[開始] --> B[確認]
+          B --> C[期待する動き]
+          B --> D[失敗時の動き]
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: エラー、ログ、スクリーンショット
+      description: エラー文、ログ、スクリーンショット、動画があれば貼ってください。なければ「なし」と書いてください。
+      placeholder: |
+        - エラー:
+        - ログ:
+        - スクリーンショット:
+  - type: textarea
+    id: suspected_cause
+    attributes:
+      label: 原因の見立て
+      description: 原因の見立てがあれば書いてください。分からない場合は「不明」と書いてください。
+      placeholder: 原因は◯◯かもしれません。
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: 完了条件
+      description: このissueを完了にしてよい条件をチェックリストで書いてください。
+      placeholder: |
+        - [ ] 問題が再現しなくなる
+        - [ ] 期待する動きになる
+        - [ ] テストで再発を防げる
+    validations:
+      required: true
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: 影響範囲
+      description: 影響しそうな領域を選んでください。分からない場合は「要確認」を選んでください。
+      options:
+        - label: API
+        - label: DB / schema
+        - label: Move contract
+        - label: verifier / relayer / worker
+        - label: UI
+        - label: docs
+        - label: 要確認
+  - type: textarea
+    id: validation
+    attributes:
+      label: 確認方法
+      description: 修正後にどう確認するかを書いてください。
+      placeholder: |
+        - 再現手順をもう一度実行して確認する
+        - ◯◯のテストで確認する
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 参考情報
+      description: 関連issue、PR、docs、該当ファイルがあれば書いてください。
+      placeholder: |
+        - 関連issue:
+        - 関連PR:
+        - 該当ファイル:
+  - type: textarea
+    id: implementation_notes
+    attributes:
+      label: 実装メモ
+      description: 変更候補、注意点、使うべき既存実装があれば書いてください。
+      placeholder: |
+        - 変更候補: `path/to/file`
+        - 注意点: ◯◯
+        - 使うべき既存実装: ◯◯

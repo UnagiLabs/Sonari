@@ -29,6 +29,7 @@ GitHub issue を **Codex だけで完結**させる repo-local workflow。
   - `references/step-design.md`
   - `references/workflow-checklist.md`
 - supporting skills:
+  - `$prepare-issue`
   - `$draft-commit-message`
   - `$prepare-pr`
 
@@ -96,9 +97,14 @@ gh issue view <number> --repo <owner>/<repo> --json title,body,labels,assignees,
 取得後に短く整理する:
 
 - 目的
+- 期待する動き
 - 完了条件
+- 影響範囲
 - スコープ外
+- 再現手順（修正 issue の場合）
 - 不明点
+
+issue 本文が `$prepare-issue` または `.github/ISSUE_TEMPLATE` の構成で作られている場合は、その見出しを優先して要件を読む。特に `一言でいうと`、`なぜ必要か`、`期待する動き`、`完了条件`、`影響範囲`、`実装メモ` を計画の入力として扱う。
 
 ### 事前準備: `references_path` の算出
 

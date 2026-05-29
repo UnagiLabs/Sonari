@@ -1,0 +1,125 @@
+name: 新規実装
+description: 新しい機能や動きを追加するためのissue
+title: "feat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        新しい機能を実装するためのissueです。
+        何を作るか、なぜ必要か、完了条件が分かるように書いてください。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 一言でいうと
+      description: このissueで実現したいことを1から2文で書いてください。
+      placeholder: このissueは、◯◯を◯◯するための依頼です。
+    validations:
+      required: true
+  - type: textarea
+    id: target
+    attributes:
+      label: 作りたいもの
+      description: 利用者や運用者から見て、何ができるようになるかを書いてください。
+      placeholder: |
+        - ◯◯をできるようにする
+        - ◯◯の場合は◯◯になる
+        - 失敗した場合は◯◯になる
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: なぜ必要か
+      description: 今の状態と、困っていることを書いてください。
+      placeholder: |
+        今は◯◯です。
+
+        そのため、◯◯という問題があります。
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: 期待する動き
+      description: 成功時、分岐、失敗時の動きを分けて書いてください。
+      placeholder: |
+        - ◯◯できる
+        - ◯◯の場合は◯◯になる
+        - 失敗した場合は◯◯になる
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: 流れ
+      description: 処理フローや画面遷移がある場合はMermaidや箇条書きで書いてください。なければ「処理フローの変更なし」と書いてください。
+      placeholder: |
+        ```mermaid
+        flowchart TD
+          A[開始] --> B[確認]
+          B --> C[成功時の動き]
+          B --> D[失敗時の動き]
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: 完了条件
+      description: このissueを完了にしてよい条件をチェックリストで書いてください。
+      placeholder: |
+        - [ ] ◯◯できる
+        - [ ] ◯◯の場合にエラーになる
+        - [ ] テストで◯◯を確認できる
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: スコープ外
+      description: このissueでは扱わないことを書いてください。
+      placeholder: |
+        - ◯◯はこのissueでは扱わない
+    validations:
+      required: true
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: 影響範囲
+      description: 影響しそうな領域を選んでください。分からない場合は「要確認」を選んでください。
+      options:
+        - label: API
+        - label: DB / schema
+        - label: Move contract
+        - label: verifier / relayer / worker
+        - label: UI
+        - label: docs
+        - label: 要確認
+  - type: textarea
+    id: validation
+    attributes:
+      label: 確認方法
+      description: 実装後にどう確認するかを書いてください。
+      placeholder: |
+        - ◯◯を実行して確認する
+        - ◯◯のテストで確認する
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 参考情報
+      description: 関連issue、PR、docs、スクリーンショット、動画、ログがあれば添付してください。
+      placeholder: |
+        - 関連issue:
+        - 関連PR:
+        - 関連docs:
+  - type: textarea
+    id: implementation_notes
+    attributes:
+      label: 実装メモ
+      description: 変更候補、注意点、使うべき既存実装があれば書いてください。
+      placeholder: |
+        - 変更候補: `path/to/file`
+        - 注意点: ◯◯
+        - 使うべき既存実装: ◯◯
