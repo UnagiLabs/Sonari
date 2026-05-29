@@ -25,6 +25,8 @@ pub enum OracleError {
     Zip(String),
     #[error("invalid Worker to TEE request: {0}")]
     WorkerRequest(String),
+    #[error("arithmetic overflow: {0}")]
+    Overflow(String),
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +35,7 @@ pub struct UsgsOracleInput {
     pub detail_json: Vec<u8>,
     pub grid_xml: Option<Vec<u8>>,
     pub raw_grid_bytes: Option<Vec<u8>>,
+    pub observed_at_ms: u64,
     pub raw_detail_uri: String,
     pub raw_grid_uri: Option<String>,
     pub raw_data_uri: String,

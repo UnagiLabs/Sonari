@@ -492,6 +492,13 @@ fn parse_store_blob_id(stdout: &[u8]) -> Result<String, SourceArchiveError> {
 }
 
 fn store_success_blob_ids(value: &Value) -> Vec<String> {
+    if let Value::Array(items) = value {
+        return items
+            .iter()
+            .flat_map(store_success_blob_ids)
+            .collect::<Vec<_>>();
+    }
+
     const SUCCESS_BLOB_ID_PATHS: &[&[&str]] = &[
         &["newlyCreated", "blobObject", "blobId"],
         &["alreadyCertified", "blobId"],
@@ -868,6 +875,27 @@ mod tests {
 
         assert_eq!(stored.uri, "walrus://blob/blob-nested");
         assert_eq!(stored.walrus_blob_id, "blob-nested");
+    }
+
+    #[test]
+    fn walrus_cli_archive_accepts_array_wrapped_store_result_response() {
+        let bytes = b"source".to_vec();
+        let hash = source_hash(&bytes);
+        let walrus = FakeWalrusCommandRunner::new([
+            Ok("blob-array\n"),
+            Ok(
+                r#"[{"blobStoreResult":{"newlyCreated":{"blobObject":{"blobId":"blob-array"}}},"path":"/tmp/source"}]"#,
+            ),
+            Ok("blob-array\n"),
+        ]);
+        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+
+        let stored = archive(&walrus, &fetcher)
+            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
+            .expect("array-wrapped store result should verify");
+
+        assert_eq!(stored.uri, "walrus://blob/blob-array");
+        assert_eq!(stored.walrus_blob_id, "blob-array");
     }
 
     #[test]

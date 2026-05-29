@@ -134,7 +134,7 @@ fn process_usgs_inner(
     }
 
     let event_revision = 1;
-    let observed_at_ms = detail.properties.updated;
+    let observed_at_ms = input.observed_at_ms;
     let source_updated_at_ms = detail.properties.updated;
     let event_uid_bytes = event_uid_bytes(
         HAZARD_TYPE_EARTHQUAKE,
@@ -186,6 +186,13 @@ fn process_usgs_inner(
         .max()
         .unwrap_or(0);
 
+    let freshness_deadline_ms =
+        observed_at_ms
+            .checked_add(FRESHNESS_WINDOW_MS)
+            .ok_or_else(|| {
+                OracleError::Overflow("freshness_deadline_ms exceeds u64 range".to_owned())
+            })?;
+
     let unsigned_payload = UnsignedPayloadV1 {
         intent: INTENT_SONARI_EARTHQUAKE_ORACLE,
         oracle_version: ORACLE_VERSION,
@@ -212,7 +219,7 @@ fn process_usgs_inner(
         max_cell_band,
         affected_cell_count: affected_artifact.affected_cells.len() as u64,
         min_claim_band: MIN_CLAIM_BAND,
-        freshness_deadline_ms: observed_at_ms + FRESHNESS_WINDOW_MS,
+        freshness_deadline_ms,
     };
     let unsigned_bcs_payload = payload_bcs_bytes(&unsigned_payload)?;
     let leaf_hashes_json = leaf_hashes
