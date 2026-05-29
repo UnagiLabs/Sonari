@@ -37,9 +37,9 @@ GitHub issue を **Codex だけで完結**させる repo-local workflow。
 - `gh` CLI が認証済み
 - root `AGENTS.md` の repository instructions を守る
 
-## 計画書・PR 本文の文体方針
+## 計画書の文体方針
 
-この方針は issue に書き込む「実装計画」と、`$prepare-pr` で作る PR 本文の両方に適用する。
+この方針は issue に書き込む「実装計画」に適用する。PR 本文は `$prepare-pr` の規約に従う。
 
 - 読み手は「実装に関わらないチームメンバーや他部署の大人」を想定する
 - 基準は **中学生でも読み通せるレベル** にする
@@ -124,7 +124,7 @@ gh issue view <number> --repo <owner>/<repo> --json title,body,labels,assignees,
 - issue タイトル
 - issue 本文
 - `references_path`
-- この SKILL.md の「計画書・PR 本文の文体方針」
+- この SKILL.md の「計画書の文体方針」
 
 計画は一時ファイルに書き出し、`plan_reviewer` へ渡す。
 
@@ -247,7 +247,7 @@ npm test
 
 - push は Codex が行う
 - PR の宛先ブランチは常に `main` にする
-- PR タイトルと本文は `$prepare-pr` の規約に従い、この SKILL.md の「計画書・PR 本文の文体方針」も守る
+- PR タイトルと本文は `$prepare-pr` を必ず使用して作成する
 - issue を必ず関連付ける
 - テスト結果を本文に含める
 - PR 作成だけでは完了扱いにしない
