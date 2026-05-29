@@ -25,6 +25,9 @@ describe("oracle doctor", () => {
                     RELAYER_MODE: "dry_run",
                     RELAYER_NETWORK: "testnet",
                     RELAYER_ALLOW_SUBMIT: "false",
+                    RELAYER_TARGET: "0xtarget",
+                    RELAYER_REGISTRY: "0xregistry",
+                    RELAYER_VERIFIER_REGISTRY: "0xverifier",
                     RELAYER_GRPC_URL: "https://fullnode.testnet.sui.io:443",
                     RELAYER_SENDER_ADDRESS: "0xabc",
                     RUNNER_TOKEN_SECRET_ARN: "arn:aws:secretsmanager:runner-token",
@@ -42,6 +45,9 @@ describe("oracle doctor", () => {
             expect(result.checks).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({ name: "RELAYER_MODE", status: "ok" }),
+                    expect.objectContaining({ name: "RELAYER_TARGET", status: "ok" }),
+                    expect.objectContaining({ name: "RELAYER_REGISTRY", status: "ok" }),
+                    expect.objectContaining({ name: "RELAYER_VERIFIER_REGISTRY", status: "ok" }),
                     expect.objectContaining({ name: "RELAYER_NETWORK", status: "ok" }),
                     expect.objectContaining({ name: "RELAYER_ALLOW_SUBMIT", status: "warn" }),
                     expect.objectContaining({ name: "RUNNER_TOKEN_SECRET_ARN", status: "ok" }),
@@ -88,6 +94,18 @@ describe("oracle doctor", () => {
                     }),
                     expect.objectContaining({
                         name: "RELAYER_SUBMIT_GUARD",
+                        status: "fail",
+                    }),
+                    expect.objectContaining({
+                        name: "RELAYER_TARGET",
+                        status: "fail",
+                    }),
+                    expect.objectContaining({
+                        name: "RELAYER_REGISTRY",
+                        status: "fail",
+                    }),
+                    expect.objectContaining({
+                        name: "RELAYER_VERIFIER_REGISTRY",
                         status: "fail",
                     }),
                 ]),

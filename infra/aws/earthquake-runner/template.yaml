@@ -554,7 +554,22 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "RelayerResultComplete",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "RelayerResultComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.relayer", "StringEquals": "succeeded", "Next": "RecordRelayerSuccess" }
+              ],
+              "Default": "StopInstance"
+            },
+            "RecordRelayerSuccess": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result", "relayer_success.$": "$.relayer_success" },
               "Next": "StopInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "MarkFailed": {

@@ -928,6 +928,23 @@ describe("AWS runner workflow helper", () => {
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
     });
 
+    it("returns a relayer configuration error instead of throwing when required object IDs are missing", () => {
+        process.env.RELAYER_MODE = "dry_run";
+        process.env.RELAYER_NETWORK = "testnet";
+        process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+        process.env.RELAYER_SENDER_ADDRESS = "0xsender";
+
+        const config = readRelayerConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config).toMatchObject({
+            mode: "dry_run",
+            configurationError:
+                "RELAYER_TARGET, RELAYER_REGISTRY, RELAYER_VERIFIER_REGISTRY required for RELAYER_MODE=dry_run",
+        });
+    });
+
     it("stores submit digest and object ID while moving the row to submitted", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -1004,14 +1021,38 @@ describe("AWS runner workflow helper", () => {
             },
         });
 
+        const relayerResult = await handler({
+            action: "relayer_preview_or_dry_run",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result,
+        });
+        expect(relayerResult).toMatchObject({
+            relayer: "succeeded",
+            relayer_success: {
+                digest: "tx-digest",
+                objectId: "0xdisaster",
+            },
+        });
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            relayer_status: null,
+            relayer_digest: null,
+            relayer_object_id: null,
+        });
+        if (!("relayer" in relayerResult) || relayerResult.relayer !== "succeeded") {
+            throw new Error("expected relayer success");
+        }
+
         await expect(
             handler({
-                action: "relayer_preview_or_dry_run",
+                action: "record_relayer_success",
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
+                relayer_success: relayerResult.relayer_success,
             }),
-        ).resolves.toMatchObject({ relayer: "succeeded" });
+        ).resolves.toMatchObject({ relayer: "recorded" });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "submitted",
             relayer_mode: "submit",

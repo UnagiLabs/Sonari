@@ -30,6 +30,15 @@ export async function runOracleDoctor(
     const checks: DoctorCheck[] = [];
 
     checks.push(checkRelayerMode(env.RELAYER_MODE));
+    checks.push(checkRelayerCoreField("RELAYER_TARGET", env.RELAYER_TARGET, env.RELAYER_MODE));
+    checks.push(checkRelayerCoreField("RELAYER_REGISTRY", env.RELAYER_REGISTRY, env.RELAYER_MODE));
+    checks.push(
+        checkRelayerCoreField(
+            "RELAYER_VERIFIER_REGISTRY",
+            env.RELAYER_VERIFIER_REGISTRY,
+            env.RELAYER_MODE,
+        ),
+    );
     checks.push(checkRelayerNetwork(env.RELAYER_NETWORK, env.RELAYER_MODE));
     checks.push(checkBooleanFlag("RELAYER_ALLOW_SUBMIT", env.RELAYER_ALLOW_SUBMIT));
     checks.push(checkRelayerGrpcUrl(env.RELAYER_GRPC_URL, env.RELAYER_NETWORK, env.RELAYER_MODE));
@@ -106,6 +115,24 @@ function checkBooleanFlag(name: string, value: string | undefined): DoctorCheck 
         return { name, status: "warn", message: "not enabled" };
     }
     return { name, status: "fail", message: "must be true or false when set" };
+}
+
+function checkRelayerCoreField(
+    name: string,
+    value: string | undefined,
+    modeValue: string | undefined,
+): DoctorCheck {
+    const mode = modeValue ?? "";
+    if (mode.length === 0) {
+        return { name, status: "warn", message: "not required when relayer is disabled" };
+    }
+    if (!RELAYER_MODES.has(mode)) {
+        return { name, status: "warn", message: "RELAYER_MODE is invalid" };
+    }
+    if (value !== undefined && value.length > 0) {
+        return { name, status: "ok", message: "configured" };
+    }
+    return { name, status: "fail", message: `required for RELAYER_MODE=${mode}` };
 }
 
 function checkRequiredForMode(

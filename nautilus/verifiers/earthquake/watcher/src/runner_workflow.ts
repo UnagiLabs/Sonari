@@ -28,7 +28,12 @@ import {
 } from "@sonari/earthquake-shared";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
-import { DirectRelayerAdapter, type RelayerAdapter, type RelayerMode } from "./relayer_preview.js";
+import {
+    DirectRelayerAdapter,
+    type RelayerAdapter,
+    type RelayerMode,
+    type RelayerSuccess,
+} from "./relayer_preview.js";
 import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
 
@@ -126,6 +131,13 @@ export type RunnerControlEvent =
           result: TeeCoreResult;
       }
     | {
+          action: "record_relayer_success";
+          source_event_id: string;
+          attempt?: number | undefined;
+          result: TeeCoreResult;
+          relayer_success: RelayerSuccess;
+      }
+    | {
           action: "mark_failed";
           source_event_id: string;
           attempt?: number | undefined;
@@ -164,7 +176,20 @@ export type RunnerControlResult =
     | {
           source_event_id: string;
           attempt?: number | undefined;
-          relayer: "skipped" | "succeeded" | "failed";
+          relayer: "skipped" | "failed";
+          result: TeeCoreResult;
+      }
+    | {
+          source_event_id: string;
+          attempt?: number | undefined;
+          relayer: "succeeded";
+          result: TeeCoreResult;
+          relayer_success: RelayerSuccess;
+      }
+    | {
+          source_event_id: string;
+          attempt?: number | undefined;
+          relayer: "recorded";
           result: TeeCoreResult;
       }
     | { source_event_id: string; attempt?: number | undefined; failed: true };
@@ -359,25 +384,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const nowMs = options.now?.() ?? Date.now();
                 const result = await relayer.relay(event.result);
                 if (result.ok) {
-                    await requireCurrentWorkflowAttempt(options, event, {
-                        phase: "complete",
-                        nowMs,
-                        allowNonProcessing: true,
-                    });
-                    const marked = await repository.markRelayerSucceeded(
-                        event.source_event_id,
-                        result.value,
-                        nowMs,
-                        event.attempt,
-                    );
-                    if (!marked) {
-                        throw new Error("stale runner workflow attempt");
-                    }
                     return {
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "succeeded",
                         result: event.result,
+                        relayer_success: result.value,
                     };
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
@@ -400,6 +412,30 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "failed",
+                    result: event.result,
+                };
+            }
+            case "record_relayer_success": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "complete",
+                    nowMs,
+                    allowNonProcessing: true,
+                });
+                const marked = await repository.markRelayerSucceeded(
+                    event.source_event_id,
+                    event.relayer_success,
+                    nowMs,
+                    event.attempt,
+                );
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                return {
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    relayer: "recorded",
                     result: event.result,
                 };
             }
@@ -594,13 +630,17 @@ class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
 }
 
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
-    const relayer = readRelayerConfigFromEnv(new AwsRelayerSignerSecretReader());
     const config: RunnerWorkflowConfig = {
         autoScalingGroupName: requiredEnv("RUNNER_ASG_NAME"),
         resultBucket: requiredEnv("RESULT_BUCKET"),
         nitroEnclaveProcessCommand: requiredEnv("NITRO_ENCLAVE_PROCESS_COMMAND"),
-        ...(relayer === undefined ? {} : { relayer }),
     };
+    if (event.action === "relayer_preview_or_dry_run") {
+        const relayer = readRelayerConfigFromEnv(new AwsRelayerSignerSecretReader());
+        if (relayer !== undefined) {
+            config.relayer = relayer;
+        }
+    }
     return createRunnerControlHandler({
         autoscaling: new AwsAutoScalingClient(),
         ec2: new AwsEc2Client(),
@@ -937,18 +977,37 @@ export function readRelayerConfigFromEnv(
         return undefined;
     }
     if (mode !== "preview" && mode !== "dry_run" && mode !== "submit") {
-        throw new Error(`Unsupported RELAYER_MODE: ${mode}`);
+        return {
+            mode: "preview",
+            target: "",
+            registry: "",
+            verifierRegistry: "",
+            configurationError: `Unsupported RELAYER_MODE: ${mode}`,
+        };
     }
+    const missingCoreFields = [
+        ["RELAYER_TARGET", process.env.RELAYER_TARGET],
+        ["RELAYER_REGISTRY", process.env.RELAYER_REGISTRY],
+        ["RELAYER_VERIFIER_REGISTRY", process.env.RELAYER_VERIFIER_REGISTRY],
+    ]
+        .filter(([, value]) => value === undefined || value.length === 0)
+        .map(([name]) => name);
     const config: NonNullable<RunnerWorkflowConfig["relayer"]> = {
         mode,
-        target: requiredEnv("RELAYER_TARGET"),
-        registry: requiredEnv("RELAYER_REGISTRY"),
-        verifierRegistry: requiredEnv("RELAYER_VERIFIER_REGISTRY"),
+        target: process.env.RELAYER_TARGET ?? "",
+        registry: process.env.RELAYER_REGISTRY ?? "",
+        verifierRegistry: process.env.RELAYER_VERIFIER_REGISTRY ?? "",
     };
+    if (missingCoreFields.length > 0) {
+        config.configurationError = `${missingCoreFields.join(", ")} required for RELAYER_MODE=${mode}`;
+    }
     if (mode === "dry_run" || mode === "submit") {
         const network = readSuiNetwork(process.env.RELAYER_NETWORK);
         if (network === undefined) {
-            config.configurationError = "RELAYER_NETWORK is required";
+            config.configurationError = appendConfigurationError(
+                config.configurationError,
+                "RELAYER_NETWORK is required",
+            );
         } else {
             config.network = network;
         }
@@ -970,6 +1029,10 @@ export function readRelayerConfigFromEnv(
         }
     }
     return config;
+}
+
+function appendConfigurationError(existing: string | undefined, next: string): string {
+    return existing === undefined ? next : `${existing}; ${next}`;
 }
 
 function readSuiNetwork(value: string | undefined): SuiNetwork | undefined {

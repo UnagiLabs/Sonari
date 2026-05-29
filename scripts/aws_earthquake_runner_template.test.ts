@@ -244,6 +244,21 @@ describe("AWS earthquake runner CloudFormation template", () => {
         );
     });
 
+    it("records successful relayer submit results in a separate retryable step", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain('"RelayerResultComplete": {');
+        expect(template).toContain(
+            '{ "Variable": "$.relayer", "StringEquals": "succeeded", "Next": "RecordRelayerSuccess" }',
+        );
+        expect(template).toContain('"RecordRelayerSuccess": {');
+        expect(template).toContain('"action": "record_relayer_success"');
+        expect(template).toContain('"relayer_success.$": "$.relayer_success"');
+        expect(template).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }]',
+        );
+    });
+
     it("retries and records failure when StartInstance cannot scale runner capacity", async () => {
         const template = await readFile(templatePath, "utf8");
         const startInstanceBlock = template.slice(
