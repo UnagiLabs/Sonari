@@ -1,0 +1,8 @@
+[package]
+name = "sonari-tee-core"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "sonari_tee_core"
+path = "src/lib.rs"

@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "nautilus/verifiers/shared-tee",
+    "nautilus/verifiers/earthquake/tee",
+    "nautilus/verifiers/membership/tee",
+]
+resolver = "3"
