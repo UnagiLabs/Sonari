@@ -1,13 +1,110 @@
-pub fn crate_ready() -> bool {
-    true
-}
+pub mod core;
+pub mod error;
+
+pub use core::types::{IdentityProvider, IdentityTeeResult, IdentityVerifyRequest};
+pub use error::IdentityError;
+
+pub const INTENT: &str = "SONARI_IDENTITY_VERIFICATION_V1";
+pub const VERIFIER_FAMILY: &str = "identity";
+pub const VERIFIER_VERSION: u64 = 1;
+pub const PROVIDER_KYC: u8 = 1;
+pub const PROVIDER_WORLD_ID: u8 = 2;
 
 #[cfg(test)]
 mod tests {
-    use super::crate_ready;
+    use super::{
+        INTENT, IdentityError, IdentityProvider, IdentityTeeResult, PROVIDER_KYC,
+        PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
+    };
 
     #[test]
-    fn crate_is_ready() {
-        assert!(crate_ready());
+    fn exposes_identity_contract_constants() {
+        assert_eq!(INTENT, "SONARI_IDENTITY_VERIFICATION_V1");
+        assert_eq!(VERIFIER_FAMILY, "identity");
+        assert_eq!(VERIFIER_VERSION, 1);
+        assert_eq!(PROVIDER_KYC, 1);
+        assert_eq!(PROVIDER_WORLD_ID, 2);
+    }
+
+    #[test]
+    fn identity_result_serializes_to_shared_typescript_shape() {
+        let result = IdentityTeeResult {
+            intent: INTENT.to_owned(),
+            verifier_family: VERIFIER_FAMILY.to_owned(),
+            verifier_version: VERIFIER_VERSION,
+            registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111"
+                .to_owned(),
+            membership_id: "0x2222222222222222222222222222222222222222222222222222222222222222"
+                .to_owned(),
+            owner: "0x3333333333333333333333333333333333333333333333333333333333333333".to_owned(),
+            provider: IdentityProvider::Kyc,
+            verified: true,
+            duplicate_key_hash:
+                "0x4444444444444444444444444444444444444444444444444444444444444444".to_owned(),
+            evidence_hash: "0x5555555555555555555555555555555555555555555555555555555555555555"
+                .to_owned(),
+            issued_at_ms: 1_700_000_000_000,
+            expires_at_ms: 1_800_000_000_000,
+            terms_version: 1,
+            signed_statement_hash:
+                "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
+        };
+
+        let json = serde_json::to_value(result).unwrap();
+
+        let object = json.as_object().unwrap();
+        let mut fields = object.keys().map(String::as_str).collect::<Vec<_>>();
+        fields.sort_unstable();
+        let mut expected_fields = vec![
+            "duplicate_key_hash",
+            "evidence_hash",
+            "expires_at_ms",
+            "intent",
+            "issued_at_ms",
+            "membership_id",
+            "owner",
+            "provider",
+            "registry_id",
+            "signed_statement_hash",
+            "terms_version",
+            "verified",
+            "verifier_family",
+            "verifier_version",
+        ];
+        expected_fields.sort_unstable();
+
+        assert_eq!(fields, expected_fields);
+        assert_eq!(json["intent"], INTENT);
+        assert_eq!(json["verifier_family"], "identity");
+        assert_eq!(json["provider"], "kyc");
+        assert_eq!(json["verified"], true);
+    }
+
+    #[test]
+    fn identity_error_wraps_shared_tee_errors() {
+        let hex_error = sonari_tee_core::HexError::InvalidLength {
+            value: "0x12".to_owned(),
+        };
+        let identity_error = IdentityError::from(hex_error);
+        assert!(
+            identity_error
+                .to_string()
+                .contains("invalid identity hex input")
+        );
+
+        let seed_error = sonari_tee_core::SeedError::InvalidLength;
+        let identity_error = IdentityError::from(seed_error);
+        assert!(
+            identity_error
+                .to_string()
+                .contains("invalid identity signing seed")
+        );
+    }
+
+    #[test]
+    fn identity_provider_serializes_world_id_variant() {
+        let json = serde_json::to_value(IdentityProvider::WorldId).unwrap();
+
+        assert_eq!(json, "world_id");
     }
 }
