@@ -13,6 +13,7 @@ import {
     SSMClient,
 } from "@aws-sdk/client-ssm";
 import {
+    buildRelayerRequestPreview,
     createEd25519SuiSignerFromPrivateKey,
     type RelayerResult,
     type RelayerSigner,
@@ -94,6 +95,15 @@ export interface RelayerSignerSecretReader {
     getSecretString(secretArn: string): Promise<string>;
 }
 
+export interface RelayerRecordSuccessInput {
+    mode: RelayerMode;
+    target: string;
+    registry: string;
+    verifierRegistry: string;
+    digest?: string;
+    objectId?: string;
+}
+
 export type RunnerControlEvent =
     | { action: "start_instance"; source_event_id: string; attempt?: number | undefined }
     | { action: "find_ready_instance"; source_event_id: string; attempt?: number | undefined }
@@ -135,7 +145,7 @@ export type RunnerControlEvent =
           source_event_id: string;
           attempt?: number | undefined;
           result: TeeCoreResult;
-          relayer_success: RelayerSuccess;
+          relayer_success: RelayerRecordSuccessInput;
       }
     | {
           action: "mark_failed";
@@ -184,7 +194,7 @@ export type RunnerControlResult =
           attempt?: number | undefined;
           relayer: "succeeded";
           result: TeeCoreResult;
-          relayer_success: RelayerSuccess;
+          relayer_success: RelayerRecordSuccessInput;
       }
     | {
           source_event_id: string;
@@ -389,7 +399,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         attempt: event.attempt,
                         relayer: "succeeded",
                         result: event.result,
-                        relayer_success: result.value,
+                        relayer_success: compactRelayerSuccess(result.value),
                     };
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
@@ -425,7 +435,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 });
                 const marked = await repository.markRelayerSucceeded(
                     event.source_event_id,
-                    event.relayer_success,
+                    buildRelayerSuccessForRecord(event.relayer_success, event.result),
                     nowMs,
                     event.attempt,
                 );
@@ -967,6 +977,41 @@ function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | 
         return undefined;
     }
     return new DirectRelayerAdapter(config.relayer);
+}
+
+function compactRelayerSuccess(success: RelayerSuccess): RelayerRecordSuccessInput {
+    return {
+        mode: success.mode,
+        target: success.request.target,
+        registry: success.request.registry,
+        verifierRegistry: success.request.verifierRegistry,
+        ...(success.digest === undefined ? {} : { digest: success.digest }),
+        ...(success.objectId === undefined ? {} : { objectId: success.objectId }),
+    };
+}
+
+function buildRelayerSuccessForRecord(
+    success: RelayerRecordSuccessInput,
+    result: TeeCoreResult,
+): RelayerSuccess {
+    const validation = validateRelayerSubmitInput(result);
+    if (!validation.ok) {
+        throw new Error(validation.message);
+    }
+    const request = buildRelayerRequestPreview(validation.value, {
+        target: success.target,
+        registry: success.registry,
+        verifierRegistry: success.verifierRegistry,
+    });
+    if (!request.ok) {
+        throw new Error(request.message);
+    }
+    return {
+        mode: success.mode,
+        request: request.value,
+        ...(success.digest === undefined ? {} : { digest: success.digest }),
+        ...(success.objectId === undefined ? {} : { objectId: success.objectId }),
+    };
 }
 
 export function readRelayerConfigFromEnv(

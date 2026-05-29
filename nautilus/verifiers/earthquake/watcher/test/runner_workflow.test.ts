@@ -1030,19 +1030,25 @@ describe("AWS runner workflow helper", () => {
         expect(relayerResult).toMatchObject({
             relayer: "succeeded",
             relayer_success: {
+                mode: "submit",
+                target: "0xtarget",
+                registry: "0xregistry",
+                verifierRegistry: "0xverifier",
                 digest: "tx-digest",
                 objectId: "0xdisaster",
             },
         });
+        if (!("relayer" in relayerResult) || relayerResult.relayer !== "succeeded") {
+            throw new Error("expected relayer success");
+        }
+        expect("request" in relayerResult.relayer_success).toBe(false);
+        expect(JSON.stringify(relayerResult.relayer_success).length).toBeLessThan(512);
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "finalized",
             relayer_status: null,
             relayer_digest: null,
             relayer_object_id: null,
         });
-        if (!("relayer" in relayerResult) || relayerResult.relayer !== "succeeded") {
-            throw new Error("expected relayer success");
-        }
 
         await expect(
             handler({
