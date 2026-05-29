@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::Serialize;
+use sonari_tee_core::{DEV_SIGNING_KEY_SEED_HEX, parse_seed, signing_key_seed_from_env};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -11,9 +12,6 @@ use tee::{
     grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
-
-const DEV_SIGNING_KEY_SEED: &str =
-    "0x0707070707070707070707070707070707070707070707070707070707070707";
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate deterministic Sonari USGS oracle artifacts")]
@@ -265,10 +263,12 @@ fn current_unix_time_ms() -> Result<u64, Box<dyn std::error::Error>> {
 fn strict_signing_key_seed(
     explicit_seed: Option<String>,
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let seed = explicit_seed
-        .or_else(|| non_empty_env("SONARI_TEE_SIGNING_KEY_SEED"))
-        .ok_or("SONARI_TEE_SIGNING_KEY_SEED is required for production execution")?;
-    parse_seed(&seed)
+    Ok(signing_key_seed_from_env(
+        explicit_seed,
+        "SONARI_TEE_SIGNING_KEY_SEED",
+        "SONARI_TEE_SIGNING_KEY_SEED_FILE",
+        false,
+    )?)
 }
 
 struct FetchedGrid {
@@ -368,7 +368,7 @@ enum TeeJsonResult {
         error_code: String,
     },
     Finalized {
-        payload: tee::UnsignedPayload,
+        payload: Box<tee::UnsignedPayload>,
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
@@ -389,7 +389,7 @@ fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std
                 .signature
                 .ok_or("finalized output is missing signature")?;
             Ok(TeeJsonResult::Finalized {
-                payload,
+                payload: Box::new(payload),
                 payload_bcs_hex,
                 signature: signature.signature,
                 public_key: signature.public_key,
@@ -431,16 +431,16 @@ fn low_level_input(cli: Cli) -> Result<RunConfig, Box<dyn std::error::Error>> {
     let detail_path = required(cli.detail, "--detail")?;
     let detail_json = fs::read(detail_path)?;
     let observed_at_ms = detail_updated_at_ms(&detail_json)?;
-    let (grid_xml, raw_grid_bytes, raw_grid_uri) = grid_input(cli.grid, cli.raw_grid_uri)?;
+    let grid = grid_input(cli.grid, cli.raw_grid_uri)?;
     Ok(RunConfig {
         input: UsgsOracleInput {
             case_id: required(cli.case_id, "--case-id")?,
             detail_json,
-            grid_xml,
-            raw_grid_bytes,
+            grid_xml: grid.grid_xml,
+            raw_grid_bytes: grid.raw_grid_bytes,
             observed_at_ms,
             raw_detail_uri: required(cli.raw_detail_uri, "--raw-detail-uri")?,
-            raw_grid_uri,
+            raw_grid_uri: grid.raw_grid_uri,
             raw_data_uri: required(cli.raw_data_uri, "--raw-data-uri")?,
             affected_cells_uri: required(cli.affected_cells_uri, "--affected-cells-uri")?,
         },
@@ -460,21 +460,21 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
     let source_event_id = source_event_id(&detail_path)?;
     let output_dir = args.write_expected.then(|| case_dir.join("expected"));
     let signing_key_seed = signing_key_seed(args.sign_dev, args.signing_key_seed)?;
-    let (grid_xml, raw_grid_bytes, raw_grid_uri) = if grid_path.exists() {
+    let grid = if grid_path.exists() {
         grid_input(Some(grid_path), None)?
     } else {
-        (None, None, None)
+        GridInput::default()
     };
 
     Ok(RunConfig {
         input: UsgsOracleInput {
             case_id: args.case,
             detail_json,
-            grid_xml,
-            raw_grid_bytes,
+            grid_xml: grid.grid_xml,
+            raw_grid_bytes: grid.raw_grid_bytes,
             observed_at_ms,
             raw_detail_uri: display_path(&detail_path),
-            raw_grid_uri,
+            raw_grid_uri: grid.raw_grid_uri,
             raw_data_uri: format!(
                 "ipfs://sonari/examples/{source_event_id}/raw_data_manifest.json"
             ),
@@ -497,18 +497,29 @@ fn detail_updated_at_ms(detail_json: &[u8]) -> Result<u64, Box<dyn std::error::E
         .ok_or_else(|| "USGS detail properties.updated must be an integer".into())
 }
 
+#[derive(Debug, Default)]
+struct GridInput {
+    grid_xml: Option<Vec<u8>>,
+    raw_grid_bytes: Option<Vec<u8>>,
+    raw_grid_uri: Option<String>,
+}
+
 fn grid_input(
     grid_path: Option<PathBuf>,
     raw_grid_uri: Option<String>,
-) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>, Option<String>), Box<dyn std::error::Error>> {
+) -> Result<GridInput, Box<dyn std::error::Error>> {
     let Some(grid_path) = grid_path else {
-        return Ok((None, None, None));
+        return Ok(GridInput::default());
     };
 
     let raw_grid_uri = raw_grid_uri.unwrap_or_else(|| display_path(&grid_path));
     let grid_bytes = fs::read(&grid_path)?;
     let grid_xml = grid_xml_from_artifact(&raw_grid_uri, &grid_bytes)?;
-    Ok((Some(grid_xml), Some(grid_bytes), Some(raw_grid_uri)))
+    Ok(GridInput {
+        grid_xml: Some(grid_xml),
+        raw_grid_bytes: Some(grid_bytes),
+        raw_grid_uri: Some(raw_grid_uri),
+    })
 }
 
 fn source_event_id(detail_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
@@ -596,22 +607,11 @@ fn non_empty_env(name: &str) -> Option<String> {
 }
 
 fn signing_key_seed(
-    sign_dev: bool,
+    _sign_dev: bool,
     signing_key_seed: Option<String>,
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let seed = match (signing_key_seed, sign_dev) {
-        (Some(seed), _) => seed,
-        (None, true) | (None, false) => DEV_SIGNING_KEY_SEED.to_owned(),
-    };
-    parse_seed(&seed)
-}
-
-fn parse_seed(value: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let value = value.strip_prefix("0x").unwrap_or(value);
-    let bytes = hex::decode(value)?;
-    Ok(bytes
-        .try_into()
-        .map_err(|_| "signing key seed must be 32 bytes")?)
+    let seed = signing_key_seed.unwrap_or_else(|| DEV_SIGNING_KEY_SEED_HEX.to_owned());
+    Ok(parse_seed(&seed)?)
 }
 
 fn write_output(

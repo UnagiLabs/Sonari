@@ -1,4 +1,5 @@
 use serde::Serialize;
+pub use sonari_tee_core::SignatureArtifact;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourceManifest {
@@ -119,13 +120,6 @@ pub struct RawSourceContentHash {
 pub struct LeafHash {
     pub h3_index: String,
     pub leaf_hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SignatureArtifact {
-    pub algorithm: String,
-    pub public_key: String,
-    pub signature: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -782,6 +782,53 @@ fn low_level_cli_rejects_zero_walrus_timeout() {
 }
 
 #[test]
+fn low_level_cli_ignores_environment_signing_seed() {
+    let workspace = cli_test_workspace("low-level-ignores-env-seed");
+    let output_dir = workspace.join("output");
+    fs::create_dir_all(&workspace).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .args([
+            "--case-id",
+            "usgs/finalized_minimal",
+            "--detail",
+            &format!("{FIXTURE_DIR}/input/usgs_detail.json"),
+            "--grid",
+            &format!("{FIXTURE_DIR}/input/usgs_grid.xml"),
+            "--raw-detail-uri",
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            "--raw-grid-uri",
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
+            "--raw-data-uri",
+            "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
+            "--affected-cells-uri",
+            "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+            "--output-dir",
+        ])
+        .arg(&output_dir)
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0101010101010101010101010101010101010101010101010101010101010101",
+        )
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let signature = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(output_dir.join("signature.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(signature, read_expected("signature.json"));
+
+    fs::remove_dir_all(&workspace).unwrap();
+}
+
+#[test]
 fn production_cli_rejects_missing_signing_key_seed() {
     let workspace = cli_test_workspace("production-missing-signing-key");
     let input_path = workspace.join("worker_request.json");
