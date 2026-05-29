@@ -52,6 +52,7 @@ impl CloudWorldIdVerifier {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
             .user_agent(WORLD_ID_USER_AGENT)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| {
                 IdentityError::Request(format!("World ID HTTP client build failed: {error}"))
@@ -198,7 +199,7 @@ fn classify_http_status(
     if status == StatusCode::BAD_REQUEST {
         return classify_bad_request(bad_request_body.unwrap_or(""));
     }
-    if status.is_server_error() || status.is_client_error() {
+    if status.is_redirection() || status.is_server_error() || status.is_client_error() {
         return pending_source();
     }
 
@@ -369,6 +370,8 @@ mod tests {
     #[test]
     fn world_id_retryable_http_statuses_are_pending_source() {
         for status in [
+            StatusCode::TEMPORARY_REDIRECT,
+            StatusCode::PERMANENT_REDIRECT,
             StatusCode::REQUEST_TIMEOUT,
             StatusCode::UNAUTHORIZED,
             StatusCode::FORBIDDEN,
