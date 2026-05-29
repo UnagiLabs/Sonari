@@ -102,7 +102,7 @@ membership-tee --encode-only
 ```
 
 fixture はローカル検証と golden vector 用である。
-`issued_at_ms` は fixture では必須である。
+World ID の verified fixture では `issued_at_ms` が必須である。
 `validity_ms` は fixture でだけ任意の有効期間として使える。
 `--world-app-id` は期待する World ID app id を固定する。
 request の `world_id.world_app_id` が一致しない場合は reject する。
