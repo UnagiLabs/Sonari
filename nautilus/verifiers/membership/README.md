@@ -42,13 +42,26 @@ KYC と World ID は、どちらも満額 Claim ルートである。
 未認証の Membership SBT は Claim できない。
 
 World ID action は Sonari 専用にする。
+TEE は、設定された World ID app id と次の action だけを受け付ける。
+request で別の app id や action が来た場合は reject する。
+World ID API base URL は HTTPS のみ許可する。
 
 ```text
 sonari_membership_register_v1
 ```
 
-signal には Sui address、nonce、domain separator を含める。
+signal hash は TEE が再計算して、request の値と一致するか確認する。
+signal には Sui address、membership id、署名済み statement hash、
+domain separator を含める。
 これにより、proof の流用を防ぐ。
+
+```text
+sha256("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)
+```
+
+World ID API には `max_age = 604800` を明示して送る。
+これは World ID が許す最大 7 日の root age である。
+queued job の遅延で、既定の 2 時間に依存しないためである。
 
 ## Verifier output
 
@@ -115,9 +128,24 @@ KYC: sonari:kyc:v1\0{provider_id}\0{provider_user_unique_id}
 World ID: sonari:world_id:v1\0{world_app_id}\0{action}\0{nullifier}
 ```
 
+World ID の `nullifier` は、hash 前に正規化する。
+decimal と `0x` hex は同じ 10 進文字列へ変換する。
+先頭の `0` や hex の大文字小文字では別 key にしない。
+
 KYC と World ID をまたぐ完全な同一人物判定は MVP 外である。
 登録時と Claim 時に、複数 SBT と複数 Claim を禁じる表示を出す。
 その内容に対して Sui wallet 署名を求める。
+
+`evidence_hash` は、verifier が結果 payload を組み立てる時に計算する。
+caller から受け取った値は使わない。
+raw PII や proof body も入れない。
+
+```text
+sha256("sonari:identity_evidence:v1" \0 provider \0 duplicate_key_hash_hex \0 verification_level \0 issued_at_ms_decimal)
+```
+
+`duplicate_key_hash_hex` は `0x` 付き小文字 hex である。
+`issued_at_ms_decimal` には、TEE が result を発行した時刻を 10 進数で入れる。
 
 ## Privacy boundary
 

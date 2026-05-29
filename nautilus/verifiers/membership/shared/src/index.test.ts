@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+    canonicalWorldIdNullifier,
     computeKycDuplicateKeyHash,
     computeWorldIdDuplicateKeyHash,
     encodeIdentityVerificationResultBcsHex,
@@ -106,6 +107,35 @@ describe("IdentityVerificationResult", () => {
                 nullifier: "12345678901234567890",
             }),
         ).toBe("0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74");
+    });
+
+    it("canonicalizes equivalent World ID nullifier formats before hashing", () => {
+        const decimal = computeWorldIdDuplicateKeyHash({
+            world_app_id: "app_staging_123",
+            action: "sonari_membership_register_v1",
+            nullifier: "12345678901234567890",
+        });
+        const decimalWithZeroes = computeWorldIdDuplicateKeyHash({
+            world_app_id: "app_staging_123",
+            action: "sonari_membership_register_v1",
+            nullifier: "00012345678901234567890",
+        });
+        const hex = computeWorldIdDuplicateKeyHash({
+            world_app_id: "app_staging_123",
+            action: "sonari_membership_register_v1",
+            nullifier: "0xAB54A98CEB1F0AD2",
+        });
+        const upperPrefixHex = computeWorldIdDuplicateKeyHash({
+            world_app_id: "app_staging_123",
+            action: "sonari_membership_register_v1",
+            nullifier: "0XAB54A98CEB1F0AD2",
+        });
+
+        expect(decimalWithZeroes).toBe(decimal);
+        expect(hex).toBe(decimal);
+        expect(upperPrefixHex).toBe(decimal);
+        expect(canonicalWorldIdNullifier("0xAB54A98CEB1F0AD2")).toBe("12345678901234567890");
+        expect(canonicalWorldIdNullifier("0XAB54A98CEB1F0AD2")).toBe("12345678901234567890");
     });
 
     it("loads KYC and World ID success fixtures", () => {

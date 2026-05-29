@@ -8,7 +8,7 @@
     "provider": "world_id",
     "verified": true,
     "duplicate_key_hash": "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
-    "evidence_hash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "evidence_hash": "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f",
     "issued_at_ms": 1800000000000,
     "expires_at_ms": 1831536000000,
     "terms_version": 1,
