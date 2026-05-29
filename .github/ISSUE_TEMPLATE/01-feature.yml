@@ -82,6 +82,19 @@ body:
         - ◯◯はこのissueでは扱わない
     validations:
       required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依存関係
+      description: このissueを始める前に完了している必要があるissueや、後続issueを書いてください。なければ「なし」と書いてください。
+      placeholder: |
+        前提issue:
+        - なし
+
+        このissueに依存する後続issue:
+        - なし
+    validations:
+      required: true
   - type: checkboxes
     id: impact
     attributes:

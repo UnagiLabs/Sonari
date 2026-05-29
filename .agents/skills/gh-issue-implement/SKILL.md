@@ -61,18 +61,19 @@ GitHub issue を **Codex だけで完結**させる repo-local workflow。
 フロー:
 
 1. Codex が issue を取得
-2. `issue_planner` で phase / step 計画を固める
-3. `plan_reviewer` が別コンテキストで計画監査する
-4. blocking 指摘を反映後、ユーザー承認を 1 回だけ取る
-5. 承認済み計画を issue 本文へ追記する
-6. worktree を作り、`issue_step_worker` で step 単位に実装する
-7. 各 step は完了直後に **その step 専用の 1 commit** を作る
-8. ローカル検証を実行
-9. クリーンなコンテキストのサブエージェントに Codex CLI 標準の `/review` コマンドを実行させる
-10. 指摘事項を修正し、指摘がなくなるまで `/review` と再検証を繰り返す
-11. `$prepare-pr` の規約で PR を作成する
-12. worktree と作業ブランチを cleanup する
-13. cleanup 完了を確認してからユーザーへ完了報告する
+2. 前提 issue がある場合は完了状態を確認する
+3. `issue_planner` で phase / step 計画を固める
+4. `plan_reviewer` が別コンテキストで計画監査する
+5. blocking 指摘を反映後、ユーザー承認を 1 回だけ取る
+6. 承認済み計画を issue 本文へ追記する
+7. worktree を作り、`issue_step_worker` で step 単位に実装する
+8. 各 step は完了直後に **その step 専用の 1 commit** を作る
+9. ローカル検証を実行
+10. クリーンなコンテキストのサブエージェントに Codex CLI 標準の `/review` コマンドを実行させる
+11. 指摘事項を修正し、指摘がなくなるまで `/review` と再検証を繰り返す
+12. `$prepare-pr` の規約で PR を作成する
+13. worktree と作業ブランチを cleanup する
+14. cleanup 完了を確認してからユーザーへ完了報告する
 
 ## Preflight
 
@@ -100,17 +101,41 @@ gh issue view <number> --repo <owner>/<repo> --json title,body,labels,assignees,
 - 期待する動き
 - 完了条件
 - 影響範囲
+- 依存関係
 - スコープ外
 - 再現手順（修正 issue の場合）
 - 不明点
 
-issue 本文が `$prepare-issue` または `.github/ISSUE_TEMPLATE` の構成で作られている場合は、その見出しを優先して要件を読む。特に `一言でいうと`、`なぜ必要か`、`期待する動き`、`完了条件`、`影響範囲`、`実装メモ` を計画の入力として扱う。
+issue 本文が `$prepare-issue` または `.github/ISSUE_TEMPLATE` の構成で作られている場合は、その見出しを優先して要件を読む。特に `一言でいうと`、`なぜ必要か`、`期待する動き`、`完了条件`、`依存関係`、`影響範囲`、`実装メモ` を計画の入力として扱う。
 
 ### 事前準備: `references_path` の算出
 
 スキル起動時のベースディレクトリを基に、`<skill-dir>/references/step-design.md` を `references_path` として保持する。
 
 以降の計画立案と実装では、この絶対パスを planner / worker へ渡して共通フォーマットの基準にする。
+
+## Phase 0.5: 依存 issue の完了確認
+
+issue 本文に `依存関係`、`前提issue`、`依存するissue`、`blocked by`、`depends on` の見出しや記述がある場合は、計画立案や worktree 作成の前に必ず確認する。
+
+確認ルール:
+
+- `前提issue` に書かれた `#123`、`owner/repo#123`、GitHub issue URL を抽出する
+- 同じ repo の `#123` は `gh issue view 123 --json state,title,url,closedAt` で確認する
+- 他 repo の `owner/repo#123` は `gh issue view 123 --repo owner/repo --json state,title,url,closedAt` で確認する
+- 前提 issue は `state` が `CLOSED` の場合だけ完了扱いにする
+- 前提 issue が `OPEN`、取得不能、不明、または issue 番号未確定の場合は実装しない
+- 未完了または確認不能な前提 issue がある場合は、ユーザーに状況を報告して判断を尋ねる
+
+未完了時の停止メッセージには次を含める:
+
+- 現在実装しようとしている issue
+- 未完了または確認不能な前提 issue の一覧
+- 各 issue の `state`、title、URL
+- 実装を止めた理由
+- ユーザーに確認したい判断
+
+ユーザーが明示的に「未完了でも進める」と指示した場合だけ続行してよい。その場合でも、計画本文と PR 本文に前提未完了のまま進めたことを明記する。
 
 ## Phase 1: Codex 計画立案
 
