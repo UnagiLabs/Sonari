@@ -174,7 +174,7 @@ public(package) fun claim_disaster_usdc(
     payout_policy::assert_designated_pool_matches(budget, designated_pool);
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
-    assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof);
+    assert_valid_disaster_eligibility(disaster_event, policy, pass, &leaf, proof);
     identity_registry::assert_duplicate_key_bound_to_pass(
         identity_registry,
         pass,
@@ -238,6 +238,7 @@ public(package) fun claim_disaster_usdc(
 
 fun assert_valid_disaster_eligibility(
     disaster_event: &DisasterEvent,
+    policy: &PayoutPolicy,
     pass: &MembershipPass,
     leaf: &AffectedCellLeaf,
     proof: vector<ProofStep>,
@@ -256,7 +257,7 @@ fun assert_valid_disaster_eligibility(
         EInvalidAffectedCellProof,
     );
     assert!(
-        affected_cell::cell_band(leaf) >= disaster_event::min_claim_band(disaster_event),
+        affected_cell::cell_band(leaf) >= payout_policy::min_claim_band(policy),
         EClaimBandTooLow,
     );
 

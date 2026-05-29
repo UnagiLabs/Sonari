@@ -90,6 +90,30 @@ fun kyc_verified_member_can_claim_full_disaster_payout() {
     clock.destroy_for_testing();
 }
 
+#[test, expected_failure(abort_code = claim::EClaimBandTooLow)]
+fun disaster_claim_rejects_affected_cell_below_policy_min_claim_band() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut policy = scenario.take_shared<payout_policy::PayoutPolicy>();
+        payout_policy::set_min_claim_band_for_testing(&mut policy, 2);
+        test_scenario::return_shared(policy);
+    };
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+}
+
 #[test]
 fun world_id_verified_member_can_claim_full_disaster_payout() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());

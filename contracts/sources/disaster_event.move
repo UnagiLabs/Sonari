@@ -15,7 +15,6 @@ const EStaleDisasterEventRevision: u64 = 3;
 const EPayloadTooLarge: u64 = 4;
 const MAX_PAYLOAD_BCS_BYTES: u64 = 4096;
 const SIGNATURE_SCHEME_ED25519: u8 = 1;
-const MIN_CLAIM_BAND_COMPAT: u8 = 1;
 
 public struct DisasterRegistry has key {
     id: UID,
@@ -323,11 +322,6 @@ public fun event_uid(disaster_event: &DisasterEvent): vector<u8> {
 
 public fun event_revision(disaster_event: &DisasterEvent): u32 {
     disaster_event.event_revision
-}
-
-public fun min_claim_band(disaster_event: &DisasterEvent): u8 {
-    let _ = disaster_event;
-    MIN_CLAIM_BAND_COMPAT
 }
 
 public fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
