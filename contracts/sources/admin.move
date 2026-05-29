@@ -9,7 +9,10 @@ use contracts::metadata_verifier;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
+use std::string::{Self, String};
+use sui::display::{Self, Display};
 use sui::event;
+use sui::package::{Self, Publisher};
 use sui::vec_set::{Self, VecSet};
 
 const SCOPE_GLOBAL: u8 = 1;
@@ -27,6 +30,8 @@ const GENESIS_KIND_IDENTITY_REGISTRY: u8 = 9;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
+
+public struct ADMIN has drop {}
 
 public struct AdminCap has key {
     id: UID,
@@ -60,8 +65,8 @@ public struct GenesisObjectCreated has copy, drop {
     actor: address,
 }
 
-fun init(ctx: &mut TxContext) {
-    initialize(ctx);
+fun init(otw: ADMIN, ctx: &mut TxContext) {
+    initialize_with_displays(package::claim(otw, ctx), ctx);
 }
 
 fun initialize(ctx: &mut TxContext) {
@@ -97,6 +102,81 @@ fun initialize(ctx: &mut TxContext) {
 
     let identity_registry_id = identity_registry::create_identity_registry(ctx);
     emit_genesis_object(identity_registry_id, GENESIS_KIND_IDENTITY_REGISTRY, true, ctx);
+}
+
+#[allow(lint(self_transfer))]
+fun initialize_with_displays(publisher: Publisher, ctx: &mut TxContext) {
+    initialize(ctx);
+    create_initial_displays(&publisher, ctx);
+    transfer::public_transfer(publisher, ctx.sender());
+}
+
+#[allow(lint(self_transfer))]
+fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
+    let mut membership_display = display::new_with_fields<membership::MembershipPass>(
+        publisher,
+        display_field_keys(),
+        vector[
+            b"Sonari Passport".to_string(),
+            b"Status: {status_label}. Verified via {provider_label}.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/membership-pass.svg".to_string(),
+            b"https://app.sonari.xyz/passport/{id}".to_string(),
+        ],
+        ctx,
+    );
+    display::update_version(&mut membership_display);
+    transfer::public_transfer(membership_display, ctx.sender());
+
+    let mut donor_display = display::new_with_fields<donation::DonorPass>(
+        publisher,
+        display_field_keys(),
+        vector[
+            string::utf8(x"536f6e61726920446f6e6f72205061737320e28094207b746965725f6c6162656c7d"),
+            b"Total donated: {total_donated_usdc} USDC units across {donation_count} donations.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/donor-pass.svg".to_string(),
+            b"https://app.sonari.xyz/donor/{id}".to_string(),
+        ],
+        ctx,
+    );
+    display::update_version(&mut donor_display);
+    transfer::public_transfer(donor_display, ctx.sender());
+
+    let mut claim_display = display::new_with_fields<claim::ClaimReceipt>(
+        publisher,
+        display_field_keys(),
+        vector[
+            b"Sonari Relief Claim Receipt".to_string(),
+            b"Relief claim: {amount_usdc} USDC units. Tier: {tier_label}.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/claim-receipt.svg".to_string(),
+            b"https://app.sonari.xyz/claim/{id}".to_string(),
+        ],
+        ctx,
+    );
+    display::update_version(&mut claim_display);
+    transfer::public_transfer(claim_display, ctx.sender());
+
+    let mut disaster_display = display::new_with_fields<disaster_event::DisasterEvent>(
+        publisher,
+        display_field_keys(),
+        vector[
+            b"{title}".to_string(),
+            b"{hazard_label} in {region}. Verified disaster event.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/disaster-event.svg".to_string(),
+            b"https://app.sonari.xyz/disaster/{id}".to_string(),
+        ],
+        ctx,
+    );
+    display::update_version(&mut disaster_display);
+    transfer::public_transfer(disaster_display, ctx.sender());
+}
+
+fun display_field_keys(): vector<String> {
+    vector[
+        b"name".to_string(),
+        b"description".to_string(),
+        b"image_url".to_string(),
+        b"link".to_string(),
+    ]
 }
 
 public fun create_designated_pool(
@@ -166,6 +246,22 @@ public fun bind_disaster_campaign(
 ) {
     let _ = cap;
     disaster_event::bind_campaign(registry, campaign, disaster_event, ctx);
+}
+
+#[allow(lint(public_entry))]
+public entry fun update_display<T: key>(
+    _: &AdminCap,
+    display_object: &mut Display<T>,
+    name: String,
+    description: String,
+    image_url: String,
+    link: String,
+) {
+    display::edit(display_object, b"name".to_string(), name);
+    display::edit(display_object, b"description".to_string(), description);
+    display::edit(display_object, b"image_url".to_string(), image_url);
+    display::edit(display_object, b"link".to_string(), link);
+    display::update_version(display_object);
 }
 
 public fun open_campaign_budget_from_main(
@@ -379,6 +475,11 @@ fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxCo
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) {
     initialize(ctx);
+}
+
+#[test_only]
+public fun init_with_displays_for_testing(ctx: &mut TxContext) {
+    initialize_with_displays(package::test_claim(ADMIN {}, ctx), ctx);
 }
 
 #[test_only]
