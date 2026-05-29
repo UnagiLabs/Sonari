@@ -368,7 +368,7 @@ enum TeeJsonResult {
         error_code: String,
     },
     Finalized {
-        payload: tee::UnsignedPayload,
+        payload: Box<tee::UnsignedPayload>,
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
@@ -389,7 +389,7 @@ fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std
                 .signature
                 .ok_or("finalized output is missing signature")?;
             Ok(TeeJsonResult::Finalized {
-                payload,
+                payload: Box::new(payload),
                 payload_bcs_hex,
                 signature: signature.signature,
                 public_key: signature.public_key,
@@ -431,16 +431,16 @@ fn low_level_input(cli: Cli) -> Result<RunConfig, Box<dyn std::error::Error>> {
     let detail_path = required(cli.detail, "--detail")?;
     let detail_json = fs::read(detail_path)?;
     let observed_at_ms = detail_updated_at_ms(&detail_json)?;
-    let (grid_xml, raw_grid_bytes, raw_grid_uri) = grid_input(cli.grid, cli.raw_grid_uri)?;
+    let grid = grid_input(cli.grid, cli.raw_grid_uri)?;
     Ok(RunConfig {
         input: UsgsOracleInput {
             case_id: required(cli.case_id, "--case-id")?,
             detail_json,
-            grid_xml,
-            raw_grid_bytes,
+            grid_xml: grid.grid_xml,
+            raw_grid_bytes: grid.raw_grid_bytes,
             observed_at_ms,
             raw_detail_uri: required(cli.raw_detail_uri, "--raw-detail-uri")?,
-            raw_grid_uri,
+            raw_grid_uri: grid.raw_grid_uri,
             raw_data_uri: required(cli.raw_data_uri, "--raw-data-uri")?,
             affected_cells_uri: required(cli.affected_cells_uri, "--affected-cells-uri")?,
         },
@@ -460,21 +460,21 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
     let source_event_id = source_event_id(&detail_path)?;
     let output_dir = args.write_expected.then(|| case_dir.join("expected"));
     let signing_key_seed = signing_key_seed(args.sign_dev, args.signing_key_seed)?;
-    let (grid_xml, raw_grid_bytes, raw_grid_uri) = if grid_path.exists() {
+    let grid = if grid_path.exists() {
         grid_input(Some(grid_path), None)?
     } else {
-        (None, None, None)
+        GridInput::default()
     };
 
     Ok(RunConfig {
         input: UsgsOracleInput {
             case_id: args.case,
             detail_json,
-            grid_xml,
-            raw_grid_bytes,
+            grid_xml: grid.grid_xml,
+            raw_grid_bytes: grid.raw_grid_bytes,
             observed_at_ms,
             raw_detail_uri: display_path(&detail_path),
-            raw_grid_uri,
+            raw_grid_uri: grid.raw_grid_uri,
             raw_data_uri: format!(
                 "ipfs://sonari/examples/{source_event_id}/raw_data_manifest.json"
             ),
@@ -497,18 +497,29 @@ fn detail_updated_at_ms(detail_json: &[u8]) -> Result<u64, Box<dyn std::error::E
         .ok_or_else(|| "USGS detail properties.updated must be an integer".into())
 }
 
+#[derive(Debug, Default)]
+struct GridInput {
+    grid_xml: Option<Vec<u8>>,
+    raw_grid_bytes: Option<Vec<u8>>,
+    raw_grid_uri: Option<String>,
+}
+
 fn grid_input(
     grid_path: Option<PathBuf>,
     raw_grid_uri: Option<String>,
-) -> Result<(Option<Vec<u8>>, Option<Vec<u8>>, Option<String>), Box<dyn std::error::Error>> {
+) -> Result<GridInput, Box<dyn std::error::Error>> {
     let Some(grid_path) = grid_path else {
-        return Ok((None, None, None));
+        return Ok(GridInput::default());
     };
 
     let raw_grid_uri = raw_grid_uri.unwrap_or_else(|| display_path(&grid_path));
     let grid_bytes = fs::read(&grid_path)?;
     let grid_xml = grid_xml_from_artifact(&raw_grid_uri, &grid_bytes)?;
-    Ok((Some(grid_xml), Some(grid_bytes), Some(raw_grid_uri)))
+    Ok(GridInput {
+        grid_xml: Some(grid_xml),
+        raw_grid_bytes: Some(grid_bytes),
+        raw_grid_uri: Some(raw_grid_uri),
+    })
 }
 
 fn source_event_id(detail_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
