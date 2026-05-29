@@ -2,6 +2,9 @@ pub mod core;
 pub mod encoding;
 pub mod error;
 
+pub use core::duplicate_key::{
+    compute_kyc_duplicate_key_hash, compute_world_id_duplicate_key_hash,
+};
 pub use core::types::{IdentityProvider, IdentityTeeResult, IdentityVerifyRequest};
 pub use error::IdentityError;
 
