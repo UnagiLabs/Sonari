@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_ARTIFACT_PATH = "dist/aws/membership-identity-tee-artifact.tar.gz";
 const DEFAULT_EIF_PATH = "dist/aws/membership-identity-tee.eif";
 const DEFAULT_WORK_DIR = ".build/aws-membership-identity-eif";
+const DEFAULT_DOCKER_URI = "sonari/membership-identity-tee:local";
 const DEFAULT_CPU_COUNT = 2;
 const DEFAULT_MEMORY_MIB = 1024;
 const DEFAULT_ENCLAVE_CID = 16;
@@ -34,6 +35,7 @@ export interface AwsMembershipIdentityEifBuildPlan {
     artifactPath: string;
     eifPath: string;
     dockerContextDir: string;
+    dockerUri: string;
     teeCommand: readonly string[];
     buildEnclaveCommand: readonly string[];
     runEnclaveCommand: readonly string[];
@@ -58,10 +60,13 @@ export function createAwsMembershipIdentityEifBuildPlan(
         artifactPath,
         eifPath,
         dockerContextDir,
+        dockerUri: DEFAULT_DOCKER_URI,
         teeCommand: teeCommandFor({ teeMode, worldIdStatus, worldAppId }),
         buildEnclaveCommand: [
             "nitro-cli",
             "build-enclave",
+            "--docker-uri",
+            DEFAULT_DOCKER_URI,
             "--docker-dir",
             dockerContextDir,
             "--output-file",

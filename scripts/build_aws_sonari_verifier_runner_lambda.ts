@@ -51,7 +51,7 @@ const MEMBERSHIP_IDENTITY_VERIFIER_KIND = "membership_identity";
 type VerifierKind = typeof EARTHQUAKE_VERIFIER_KIND | typeof MEMBERSHIP_IDENTITY_VERIFIER_KIND;
 export type RunnerControlEvent = EarthquakeRunnerControlEvent | MembershipRunnerControlEvent;
 
-const leaseStore = new DynamoDbSharedRunnerLeaseStore(new DynamoDBClient({}));
+let leaseStore: SharedRunnerLeaseStore | undefined;
 
 export async function handler(event: RunnerControlEvent): Promise<unknown> {
     const verifierKind = parseVerifierKind((event as { verifier_kind?: unknown }).verifier_kind);
@@ -180,7 +180,7 @@ function copyWorkflowIdentifiers(
 
 async function acquireRunnerLease(owner: string): Promise<boolean> {
     try {
-        await acquireSharedRunnerLease(leaseStore, { owner });
+        await acquireSharedRunnerLease(runnerLeaseStore(), { owner });
         return true;
     } catch (error) {
         if (isConditionalCheckFailed(error)) {
@@ -191,7 +191,12 @@ async function acquireRunnerLease(owner: string): Promise<boolean> {
 }
 
 async function releaseRunnerLease(owner: string): Promise<boolean> {
-    return releaseSharedRunnerLease(leaseStore, owner);
+    return releaseSharedRunnerLease(runnerLeaseStore(), owner);
+}
+
+function runnerLeaseStore(): SharedRunnerLeaseStore {
+    leaseStore ??= new DynamoDbSharedRunnerLeaseStore(new DynamoDBClient({}));
+    return leaseStore;
 }
 
 class DynamoDbSharedRunnerLeaseStore implements SharedRunnerLeaseStore {

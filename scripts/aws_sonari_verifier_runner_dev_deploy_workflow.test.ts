@@ -68,6 +68,9 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             '[[ ! "$WALRUS_CLI_SHA256" =~ ^[0-9a-f]{64}$ ]]',
             '[[ ! "$NITRO_ENCLAVE_IMAGE_SHA384" =~ ^[0-9a-fA-F]{96}$ ]]',
             '[[ ! "$NITRO_ENCLAVE_PCR3" =~ ^[0-9a-fA-F]{96}$ ]]',
+            "expected_runner_role_arn",
+            'digest.update(b"\\0" * 48)',
+            '[[ "$' + '{NITRO_ENCLAVE_PCR3,,}" != "$expected_pcr3" ]]',
         ]);
     });
 
@@ -150,6 +153,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "--parameter-overrides",
             "aws cloudformation deploy",
             "--template-file infra/aws/sonari-verifier-runner/template.yaml",
+            "--capabilities CAPABILITY_NAMED_IAM",
             "--no-fail-on-empty-changeset",
         ]);
     });

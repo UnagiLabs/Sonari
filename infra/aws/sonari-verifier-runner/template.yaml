@@ -251,14 +251,6 @@ Resources:
               AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
             Action: kms:*
             Resource: "*"
-          - Sid: DenyUnattestedSigningMaterialDecrypt
-            Effect: Deny
-            Principal: "*"
-            Action: kms:Decrypt
-            Resource: "*"
-            Condition:
-              Null:
-                kms:RecipientAttestation:ImageSha384: "true"
           - Sid: DenyWrongSigningMaterialImage
             Effect: Deny
             Principal: "*"
@@ -296,6 +288,7 @@ Resources:
   RunnerRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub sonari-verifier-runner-${AWS::StackName}-runner
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -409,9 +402,9 @@ Resources:
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            : "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"
-            : "${SONARI_NITRO_RUN_ENCLAVE_ARGS:?SONARI_NITRO_RUN_ENCLAVE_ARGS is required}"
-            : "${SONARI_ENCLAVE_STDIO_BRIDGE:?SONARI_ENCLAVE_STDIO_BRIDGE is required}"
+            : "${!SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"
+            : "${!SONARI_NITRO_RUN_ENCLAVE_ARGS:?SONARI_NITRO_RUN_ENCLAVE_ARGS is required}"
+            : "${!SONARI_ENCLAVE_STDIO_BRIDGE:?SONARI_ENCLAVE_STDIO_BRIDGE is required}"
             test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
             exec "$SONARI_ENCLAVE_STDIO_BRIDGE" $SONARI_NITRO_RUN_ENCLAVE_ARGS
             SONARI_ENCLAVE_WRAPPER
@@ -419,7 +412,7 @@ Resources:
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
             #!/bin/bash
             set -euo pipefail
-            exec "${SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/tee-artifact/bin/tee production}"
+            exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/tee-artifact/bin/tee production}"
             SONARI_VERIFIER_DISPATCH
             chmod 0500 /opt/sonari/bin/run-sonari-verifier
             nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
@@ -848,7 +841,10 @@ Resources:
             "RunnerCapacityAvailable": {
               "Type": "Choice",
               "Choices": [
-                { "Variable": "$.capacity_busy", "BooleanEquals": true, "Next": "WaitForSharedRunnerLease" }
+                { "And": [
+                  { "Variable": "$.capacity_busy", "IsPresent": true },
+                  { "Variable": "$.capacity_busy", "BooleanEquals": true }
+                ], "Next": "WaitForSharedRunnerLease" }
               ],
               "Default": "WaitForInstance"
             },
@@ -975,7 +971,10 @@ Resources:
             "RunnerCapacityAvailable": {
               "Type": "Choice",
               "Choices": [
-                { "Variable": "$.capacity_busy", "BooleanEquals": true, "Next": "WaitForSharedRunnerLease" }
+                { "And": [
+                  { "Variable": "$.capacity_busy", "IsPresent": true },
+                  { "Variable": "$.capacity_busy", "BooleanEquals": true }
+                ], "Next": "WaitForSharedRunnerLease" }
               ],
               "Default": "WaitForInstance"
             },
@@ -1117,6 +1116,8 @@ Outputs:
     Value: !Ref RunnerAutoScalingGroup
   RunnerLaunchTemplateId:
     Value: !Ref RunnerLaunchTemplate
+  RunnerRoleArn:
+    Value: !GetAtt RunnerRole.Arn
   WatcherScheduleName:
     Value: !Ref WatcherSchedule
   BatchScheduleName:

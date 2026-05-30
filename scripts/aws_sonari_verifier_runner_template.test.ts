@@ -84,6 +84,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             )?.length ?? 0;
 
         expect(template).toContain('"$.capacity_busy"');
+        expect(template).toContain('"IsPresent": true');
         expect(template).toContain('"BooleanEquals": true');
         expect(capacityChoiceCount).toBe(2);
         expect(waitForLeaseCount).toBe(2);
@@ -127,7 +128,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SigningSeedCiphertextS3Bucket:");
         expect(template).toContain("SigningSeedCiphertextS3Key:");
         expect(template).toContain("SigningMaterialKmsKey:");
-        expect(template).toContain("DenyUnattestedSigningMaterialDecrypt");
+        expect(template).toContain(
+            "RoleName: !Sub sonari-verifier-runner-$" + "{AWS::StackName}-runner",
+        );
         expect(template).toContain("AllowNitroAttestedSigningMaterialDecrypt");
         expect(template).toContain("NitroEnclaveImageSha384:");
         expect(template).toContain("NitroEnclavePcr3:");
@@ -149,6 +152,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("MembershipRunnerStateMachineArn:");
         expect(template).toContain("RunnerAutoScalingGroupName:");
         expect(template).toContain("RunnerLaunchTemplateId:");
+        expect(template).toContain("RunnerRoleArn:");
         expect(template).toContain("WatcherScheduleName:");
         expect(template).toContain("BatchScheduleName:");
         expect(template).toContain("WatcherLambdaName:");

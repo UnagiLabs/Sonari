@@ -126,6 +126,22 @@ jobs:
             exit 1
           fi
 
+          expected_runner_role_arn="arn:aws:iam::${EXPECTED_AWS_ACCOUNT_ID}:role/sonari-verifier-runner-${STACK_NAME}-runner"
+          expected_pcr3="$(ROLE_ARN="$expected_runner_role_arn" python3 - <<'PY'
+          import hashlib
+          import os
+
+          digest = hashlib.sha384()
+          digest.update(b"\0" * 48)
+          digest.update(os.environ["ROLE_ARN"].encode("utf-8"))
+          print(digest.hexdigest())
+          PY
+          )"
+          if [[ "${NITRO_ENCLAVE_PCR3,,}" != "$expected_pcr3" ]]; then
+            echo "NITRO_ENCLAVE_PCR3 must match $expected_runner_role_arn" >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -441,7 +457,7 @@ jobs:
           aws cloudformation deploy \
             --template-file infra/aws/sonari-verifier-runner/template.yaml \
             --stack-name "$STACK_NAME" \
-            --capabilities CAPABILITY_IAM \
+            --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides "${deploy_plan_parameter_overrides[@]}" "${extra_parameter_overrides[@]}" \
             --no-fail-on-empty-changeset
 

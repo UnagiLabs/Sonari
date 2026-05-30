@@ -54,6 +54,10 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(runnerWorkflowJs).toContain("RUNNER_LEASE_TABLE_NAME");
         expect(runnerWorkflowJs).toContain("UpdateItemCommand");
         expect(runnerWorkflowJs).toContain("DeleteItemCommand");
+        expect(runnerWorkflowJs).toContain("function runnerLeaseStore()");
+        expect(runnerWorkflowJs).not.toContain(
+            "const leaseStore = new DynamoDbSharedRunnerLeaseStore",
+        );
         expect(runnerWorkflowJs).toContain("capacity_busy");
         expect(runnerWorkflowJs).toContain("verifier_kind: verifierKind");
         expect(runnerWorkflowJs).toContain("ConditionalCheckFailedException");

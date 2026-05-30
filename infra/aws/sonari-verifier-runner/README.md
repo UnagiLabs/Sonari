@@ -85,12 +85,28 @@ printf '%s\n' "${deploy_plan_parameter_overrides[@]}" | grep '^ScheduleState=DIS
 aws cloudformation deploy \
   --template-file infra/aws/sonari-verifier-runner/template.yaml \
   --stack-name "$STACK_NAME" \
-  --capabilities CAPABILITY_IAM \
+  --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides "${deploy_plan_parameter_overrides[@]}" \
   --no-fail-on-empty-changeset
 ```
 
 For first creation or any update that needs environment-specific stack parameters, use the reviewed account parameter source for this stack and append it to the same command. Keep artifact parameters from the deploy plan. Do not hand-write `LambdaCodeS3Key`, TEE keys, checksum values, `GitCommitSha`, or `ScheduleState`.
+
+`NitroEnclaveImageSha384` is the EIF `PCR0` measurement. `NitroEnclavePcr3` is the SHA-384 digest of 48 NUL bytes followed by the deterministic runner role ARN:
+
+```bash
+RUNNER_ROLE_ARN="arn:aws:iam::$EXPECTED_ACCOUNT_ID:role/sonari-verifier-runner-$STACK_NAME-runner"
+NITRO_ENCLAVE_PCR3="$(ROLE_ARN="$RUNNER_ROLE_ARN" python3 - <<'PY'
+import hashlib
+import os
+
+digest = hashlib.sha384()
+digest.update(b"\0" * 48)
+digest.update(os.environ["ROLE_ARN"].encode("utf-8"))
+print(digest.hexdigest())
+PY
+)"
+```
 
 Validate that the mainnet dummy proof guard rejects before deploy:
 
