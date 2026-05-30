@@ -123,6 +123,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.948.0
         version: 3.1053.0
+      '@aws-sdk/client-secrets-manager':
+        specifier: ^3.948.0
+        version: 3.1053.0
       '@aws-sdk/client-sfn':
         specifier: ^3.948.0
         version: 3.1053.0
@@ -132,6 +135,9 @@ importers:
       '@aws-sdk/lib-dynamodb':
         specifier: ^3.948.0
         version: 3.1053.0(@aws-sdk/client-dynamodb@3.1053.0)
+      '@mysten/sui':
+        specifier: ^2.16.3
+        version: 2.16.3(typescript@5.9.3)
       '@sonari/membership-verifier-shared':
         specifier: workspace:*
         version: link:../shared

@@ -5,6 +5,7 @@ import {
 } from "@aws-sdk/client-auto-scaling";
 import { DescribeInstancesCommand, EC2Client } from "@aws-sdk/client-ec2";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import {
     DescribeInstanceInformationCommand,
     GetCommandInvocationCommand,
@@ -20,11 +21,41 @@ import {
     type VerificationJobRepository,
     type VerificationJobRow,
 } from "./index.js";
+import {
+    createEd25519SuiSignerFromPrivateKey,
+    dryRunIdentityVerificationSubmit,
+    type IdentityVerificationDryRunSuccess,
+    type IdentityVerificationRelayerMode,
+    type IdentityVerificationSigner,
+    type IdentityVerificationSubmitConfig,
+    type IdentityVerificationSubmitSuccess,
+    type IdentityVerificationSuiResult,
+    type SuiNetwork,
+    submitIdentityVerificationPayload,
+} from "./sui_submission.js";
 
 export interface RunnerWorkflowConfig {
     readonly autoScalingGroupName: string;
     readonly resultBucket: string;
     readonly nitroEnclaveProcessCommand: string;
+    readonly suiSubmission?: RunnerSuiSubmissionConfig | undefined;
+}
+
+export interface RunnerSuiSubmissionConfig {
+    readonly mode: IdentityVerificationRelayerMode;
+    readonly packageId: string;
+    readonly pauseStateId: string;
+    readonly identityRegistryId: string;
+    readonly membershipRegistryId: string;
+    readonly verifierRegistryId: string;
+    readonly membershipPassId: string;
+    readonly clockId: string;
+    readonly network?: SuiNetwork | undefined;
+    readonly grpcUrl?: string | undefined;
+    readonly senderAddress?: string | undefined;
+    readonly allowSubmit?: boolean | undefined;
+    readonly configurationError?: string | undefined;
+    readonly loadSigner?: (() => Promise<IdentityVerificationSigner>) | undefined;
 }
 
 export interface AutoScalingClientLike {
@@ -55,6 +86,26 @@ export interface SsmClientLike {
 
 export interface S3ClientLike {
     getObjectText(input: { bucket: string; key: string }): Promise<string>;
+}
+
+export interface RelayerSignerSecretReader {
+    getSecretString(secretArn: string): Promise<string>;
+}
+
+export interface SignedIdentityPayloadForRelayer {
+    readonly status: "verified";
+    readonly payload_bcs_hex: string;
+    readonly signature: string;
+    readonly public_key: string;
+}
+
+export interface SuiSubmissionAdapter {
+    dryRun(
+        result: SignedIdentityPayloadForRelayer,
+    ): Promise<IdentityVerificationSuiResult<IdentityVerificationDryRunSuccess>>;
+    submit(
+        result: SignedIdentityPayloadForRelayer,
+    ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>>;
 }
 
 export type MembershipTeeResult = VerifiedMembershipTeeResult | StatusOnlyMembershipTeeResult;
@@ -119,6 +170,18 @@ export type RunnerControlEvent =
           result: MembershipTeeResult;
       }
     | {
+          action: "dry_run_sui_submission";
+          job_id: string;
+          attempt?: number | undefined;
+          result: MembershipTeeResult;
+      }
+    | {
+          action: "submit_sui_submission";
+          job_id: string;
+          attempt?: number | undefined;
+          result: MembershipTeeResult;
+      }
+    | {
           action: "mark_failed";
           job_id: string;
           attempt?: number | undefined;
@@ -154,6 +217,13 @@ export type RunnerControlResult =
           applied: true;
           result: MembershipTeeResult;
       }
+    | {
+          job_id: string;
+          attempt?: number | undefined;
+          sui_submission: "skipped" | "succeeded" | "failed";
+          result: MembershipTeeResult;
+          tx_digest?: string | undefined;
+      }
     | { job_id: string; attempt?: number | undefined; failed: true };
 
 export interface RunnerControlHandlerOptions {
@@ -162,6 +232,7 @@ export interface RunnerControlHandlerOptions {
     readonly ssm: SsmClientLike;
     readonly s3: S3ClientLike;
     readonly repository?: VerificationJobRepository | undefined;
+    readonly suiSubmission?: SuiSubmissionAdapter | undefined;
     readonly now?: (() => number) | undefined;
     readonly config: RunnerWorkflowConfig;
 }
@@ -307,6 +378,118 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     attempt: event.attempt,
                     applied: true,
                     result: event.result,
+                };
+            }
+            case "dry_run_sui_submission": {
+                await requireCurrentWorkflowAttempt(options, event, true);
+                if (event.result.status !== "verified") {
+                    return {
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "skipped",
+                        result: event.result,
+                    };
+                }
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                const submitter = options.suiSubmission ?? buildSuiSubmissionFromConfig(options);
+                if (submitter === undefined) {
+                    await markSuiSubmissionFailed(
+                        repository,
+                        event,
+                        nowMs,
+                        "RELAYER_SUBMIT_FAILED",
+                        "Sui submission config is required",
+                    );
+                    return {
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "failed",
+                        result: event.result,
+                    };
+                }
+                const result = await submitter.dryRun(signedPayloadForRelayer(event.result));
+                if (result.ok) {
+                    return {
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "succeeded",
+                        result: event.result,
+                    };
+                }
+                await markSuiSubmissionFailed(
+                    repository,
+                    event,
+                    nowMs,
+                    result.error_code,
+                    result.message,
+                );
+                return {
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    sui_submission: "failed",
+                    result: event.result,
+                };
+            }
+            case "submit_sui_submission": {
+                await requireCurrentWorkflowAttempt(options, event, true);
+                if (event.result.status !== "verified") {
+                    return {
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "skipped",
+                        result: event.result,
+                    };
+                }
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                const submitter = options.suiSubmission ?? buildSuiSubmissionFromConfig(options);
+                if (submitter === undefined) {
+                    await markSuiSubmissionFailed(
+                        repository,
+                        event,
+                        nowMs,
+                        "RELAYER_SUBMIT_FAILED",
+                        "Sui submission config is required",
+                    );
+                    return {
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "failed",
+                        result: event.result,
+                    };
+                }
+                const result = await submitter.submit(signedPayloadForRelayer(event.result));
+                if (!result.ok) {
+                    await markSuiSubmissionFailed(
+                        repository,
+                        event,
+                        nowMs,
+                        result.error_code,
+                        result.message,
+                    );
+                    return {
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "failed",
+                        result: event.result,
+                    };
+                }
+                const updated = await repository.markCompleted(
+                    event.job_id,
+                    nowMs,
+                    result.value.digest,
+                );
+                if (!updated) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                const row = await repository.get(event.job_id);
+                return {
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    sui_submission: "succeeded",
+                    result: event.result,
+                    tx_digest: row?.tx_digest ?? result.value.digest,
                 };
             }
             case "mark_failed": {
@@ -480,6 +663,18 @@ class AwsS3Client implements S3ClientLike {
     }
 }
 
+class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
+    private readonly client = new SecretsManagerClient({});
+
+    async getSecretString(secretArn: string): Promise<string> {
+        const result = await this.client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+        if (!isNonEmptyString(result.SecretString)) {
+            throw new Error("RELAYER_SIGNER_SECRET_ARN did not contain a string secret");
+        }
+        return result.SecretString;
+    }
+}
+
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
     return createRunnerControlHandler({
         autoscaling: new AwsAutoScalingClient(),
@@ -493,6 +688,7 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
             autoScalingGroupName: requiredEnv("RUNNER_ASG_NAME"),
             resultBucket: requiredEnv("RESULT_BUCKET"),
             nitroEnclaveProcessCommand: requiredEnv("NITRO_ENCLAVE_PROCESS_COMMAND"),
+            suiSubmission: readSuiSubmissionConfigFromEnv(new AwsRelayerSignerSecretReader()),
         },
     })(event);
 }
@@ -754,6 +950,187 @@ function readRunnerFailureErrorCode(errorCode: string | undefined): string {
         return "AWS_MEMBERSHIP_RUNNER_PROCESS_FAILED";
     }
     return errorCode;
+}
+
+class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
+    constructor(private readonly config: RunnerSuiSubmissionConfig) {}
+
+    async dryRun(
+        result: SignedIdentityPayloadForRelayer,
+    ): Promise<IdentityVerificationSuiResult<IdentityVerificationDryRunSuccess>> {
+        if (this.config.configurationError !== undefined) {
+            return relayerSubmitFailed(this.config.configurationError);
+        }
+        if (this.config.mode !== "dry_run") {
+            return relayerSubmitFailed("dry_run requires RELAYER_MODE=dry_run");
+        }
+        return dryRunIdentityVerificationSubmit(result, this.submitConfig());
+    }
+
+    async submit(
+        result: SignedIdentityPayloadForRelayer,
+    ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>> {
+        if (this.config.configurationError !== undefined) {
+            return relayerSubmitFailed(this.config.configurationError);
+        }
+        if (this.config.mode !== "submit") {
+            return relayerSubmitFailed("submit requires RELAYER_MODE=submit");
+        }
+        const signer = await this.config.loadSigner?.();
+        return submitIdentityVerificationPayload(result, {
+            ...this.submitConfig(),
+            ...(signer === undefined ? {} : { signer }),
+        });
+    }
+
+    private submitConfig(): IdentityVerificationSubmitConfig {
+        return {
+            packageId: this.config.packageId,
+            pauseStateId: this.config.pauseStateId,
+            identityRegistryId: this.config.identityRegistryId,
+            membershipRegistryId: this.config.membershipRegistryId,
+            verifierRegistryId: this.config.verifierRegistryId,
+            membershipPassId: this.config.membershipPassId,
+            clockId: this.config.clockId,
+            ...(this.config.network === undefined ? {} : { network: this.config.network }),
+            ...(this.config.grpcUrl === undefined ? {} : { grpcUrl: this.config.grpcUrl }),
+            ...(this.config.senderAddress === undefined
+                ? {}
+                : { senderAddress: this.config.senderAddress }),
+            ...(this.config.allowSubmit === undefined
+                ? {}
+                : { allowSubmit: this.config.allowSubmit }),
+        };
+    }
+}
+
+function signedPayloadForRelayer(
+    result: VerifiedMembershipTeeResult,
+): SignedIdentityPayloadForRelayer {
+    return {
+        status: "verified",
+        payload_bcs_hex: result.payload_bcs_hex,
+        signature: result.signature,
+        public_key: result.public_key,
+    };
+}
+
+function buildSuiSubmissionFromConfig(
+    options: RunnerControlHandlerOptions,
+): SuiSubmissionAdapter | undefined {
+    const config = options.config.suiSubmission;
+    return config === undefined ? undefined : new DirectSuiSubmissionAdapter(config);
+}
+
+export function readSuiSubmissionConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): RunnerSuiSubmissionConfig | undefined {
+    const mode = process.env.RELAYER_MODE;
+    if (mode === undefined || mode.length === 0) {
+        return undefined;
+    }
+    if (mode !== "dry_run" && mode !== "submit") {
+        return {
+            mode: "dry_run",
+            packageId: "",
+            pauseStateId: "",
+            identityRegistryId: "",
+            membershipRegistryId: "",
+            verifierRegistryId: "",
+            membershipPassId: "",
+            clockId: "0x6",
+            configurationError: `Unsupported RELAYER_MODE: ${mode}`,
+        };
+    }
+
+    const packageId = process.env.SONARI_IDENTITY_PACKAGE_ID ?? "";
+    const pauseStateId = process.env.SONARI_IDENTITY_PAUSE_STATE_ID ?? "";
+    const identityRegistryId = process.env.SONARI_IDENTITY_REGISTRY_ID ?? "";
+    const membershipRegistryId = process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "";
+    const verifierRegistryId = process.env.SONARI_VERIFIER_REGISTRY_ID ?? "";
+    const membershipPassId = process.env.SONARI_MEMBERSHIP_PASS_ID ?? "";
+    const clockId = process.env.SONARI_SUI_CLOCK_ID ?? "0x6";
+    let configurationError: string | undefined;
+    const missingObjectFields = (
+        [
+            ["SONARI_IDENTITY_PACKAGE_ID", packageId],
+            ["SONARI_IDENTITY_PAUSE_STATE_ID", pauseStateId],
+            ["SONARI_IDENTITY_REGISTRY_ID", identityRegistryId],
+            ["SONARI_MEMBERSHIP_REGISTRY_ID", membershipRegistryId],
+            ["SONARI_VERIFIER_REGISTRY_ID", verifierRegistryId],
+            ["SONARI_MEMBERSHIP_PASS_ID", membershipPassId],
+        ] satisfies Array<readonly [string, string]>
+    )
+        .filter(([, value]) => value.length === 0)
+        .map(([name]) => name);
+    if (missingObjectFields.length > 0) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            `${missingObjectFields.join(", ")} required for RELAYER_MODE=${mode}`,
+        );
+    }
+
+    const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+    if (network === undefined) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "RELAYER_NETWORK is required",
+        );
+    }
+    const grpcUrl = process.env.RELAYER_GRPC_URL;
+    const senderAddress = process.env.RELAYER_SENDER_ADDRESS;
+    const allowSubmit = mode === "submit" ? process.env.RELAYER_ALLOW_SUBMIT === "true" : undefined;
+    let loadSigner: (() => Promise<IdentityVerificationSigner>) | undefined;
+    if (mode === "submit") {
+        const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+        if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+            loadSigner = async () =>
+                createEd25519SuiSignerFromPrivateKey(
+                    await secretReader.getSecretString(signerSecretArn),
+                );
+        }
+    }
+    return {
+        mode,
+        packageId,
+        pauseStateId,
+        identityRegistryId,
+        membershipRegistryId,
+        verifierRegistryId,
+        membershipPassId,
+        clockId,
+        ...(configurationError === undefined ? {} : { configurationError }),
+        ...(network === undefined ? {} : { network }),
+        ...(grpcUrl === undefined ? {} : { grpcUrl }),
+        ...(senderAddress === undefined ? {} : { senderAddress }),
+        ...(allowSubmit === undefined ? {} : { allowSubmit }),
+        ...(loadSigner === undefined ? {} : { loadSigner }),
+    };
+}
+
+async function markSuiSubmissionFailed(
+    repository: VerificationJobRepository,
+    event: { job_id: string; attempt?: number | undefined },
+    nowMs: number,
+    errorCode: string,
+    message: string,
+): Promise<void> {
+    const updated = await repository.markFailed(event.job_id, nowMs, errorCode, message);
+    if (!updated) {
+        throw new Error("stale runner workflow attempt");
+    }
+}
+
+function relayerSubmitFailed<T = never>(message: string): IdentityVerificationSuiResult<T> {
+    return { ok: false, error_code: "RELAYER_SUBMIT_FAILED", message };
+}
+
+function appendConfigurationError(existing: string | undefined, next: string): string {
+    return existing === undefined ? next : `${existing}; ${next}`;
+}
+
+function readSuiNetwork(value: string | undefined): SuiNetwork | undefined {
+    return value === "mainnet" || value === "testnet" || value === "devnet" ? value : undefined;
 }
 
 function parseNitroEnclaveProcessCommand(command: string): string[] {

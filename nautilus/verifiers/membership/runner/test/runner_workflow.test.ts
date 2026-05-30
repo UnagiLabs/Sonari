@@ -9,6 +9,7 @@ import {
     type Ec2ClientLike,
     type S3ClientLike,
     type SsmClientLike,
+    type SuiSubmissionAdapter,
 } from "../src/runner_workflow.js";
 import { validRequest } from "./fixtures.js";
 
@@ -251,6 +252,140 @@ describe("membership runner workflow", () => {
         });
     });
 
+    it("skips Sui submission for status-only TEE output", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dry_run_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: { status: "pending_source", error_code: "WAIT" },
+            }),
+        ).resolves.toMatchObject({ sui_submission: "skipped" });
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: { status: "rejected", error_code: "NOPE" },
+            }),
+        ).resolves.toMatchObject({ sui_submission: "skipped" });
+        expect(submitter.dryRuns).toEqual([]);
+        expect(submitter.submits).toEqual([]);
+    });
+
+    it("fails closed when verified dry-run or submit configuration is missing", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        const submitJob = await repository.upsertRequest(
+            {
+                ...validRequest(),
+                signed_statement_hash: `0x${"88".repeat(32)}`,
+            },
+            baseNowMs,
+        );
+        await repository.claimNextDue(baseNowMs + 1);
+        await repository.claimNextDue(baseNowMs + 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dry_run_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "failed" });
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "failed",
+            error_code: "RELAYER_SUBMIT_FAILED",
+            error_message: "Sui submission config is required",
+        });
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: submitJob.row.job_id,
+                attempt: 1,
+                result: {
+                    ...verifiedTeeResult(),
+                    signed_statement_hash: `0x${"88".repeat(32)}`,
+                },
+            }),
+        ).resolves.toMatchObject({ sui_submission: "failed" });
+        await expect(repository.get(submitJob.row.job_id)).resolves.toMatchObject({
+            status: "failed",
+            error_code: "RELAYER_SUBMIT_FAILED",
+            error_message: "Sui submission config is required",
+        });
+    });
+
+    it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            submitDigest: "tx-original",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({
+            sui_submission: "succeeded",
+            tx_digest: "tx-original",
+        });
+        await repository.markCompleted(job.row.job_id, baseNowMs + 3, "tx-late-duplicate");
+
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "completed",
+            tx_digest: "tx-original",
+            completed_at_ms: baseNowMs + 2,
+        });
+        expect(submitter.submits).toEqual([
+            {
+                status: "verified",
+                payload_bcs_hex: "0x010203",
+                signature: `0x${"11".repeat(64)}`,
+                public_key: `0x${"22".repeat(32)}`,
+            },
+        ]);
+    });
+
     it("records explicit timeout failures", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
@@ -359,6 +494,29 @@ function neverResult(): never {
     throw new Error("expected read_result output");
 }
 
+function verifiedTeeResult() {
+    return {
+        status: "verified" as const,
+        payload_bcs_hex: "0x010203",
+        signature: `0x${"11".repeat(64)}`,
+        public_key: `0x${"22".repeat(32)}`,
+        intent: "SONARI_IDENTITY_VERIFICATION_V1",
+        verifier_family: "identity" as const,
+        verifier_version: 1,
+        registry_id: validRequest().registry_id,
+        membership_id: validRequest().membership_id,
+        owner: validRequest().owner,
+        provider: validRequest().provider,
+        verified: true,
+        duplicate_key_hash: `0x${"66".repeat(32)}`,
+        evidence_hash: `0x${"77".repeat(32)}`,
+        issued_at_ms: baseNowMs,
+        expires_at_ms: baseNowMs + 1,
+        terms_version: validRequest().terms_version,
+        signed_statement_hash: validRequest().signed_statement_hash,
+    };
+}
+
 class RecordingAutoScalingClient implements AutoScalingClientLike {
     readonly capacities: number[] = [];
 
@@ -425,4 +583,68 @@ class RecordingS3Client implements S3ClientLike {
         }
         return object;
     }
+}
+
+class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
+    readonly dryRuns: unknown[] = [];
+    readonly submits: unknown[] = [];
+
+    constructor(
+        private readonly options: {
+            dryRunDigest?: string;
+            submitDigest?: string;
+        } = {},
+    ) {}
+
+    async dryRun(result: unknown) {
+        this.dryRuns.push(result);
+        return {
+            ok: true as const,
+            value: {
+                mode: "dry_run" as const,
+                request: fakeSuiRequest(),
+                transactionBytes: [1, 2, 3],
+                effects: {
+                    digest: this.options.dryRunDigest,
+                },
+            },
+        };
+    }
+
+    async submit(result: unknown) {
+        this.submits.push(result);
+        return {
+            ok: true as const,
+            value: {
+                mode: "submit" as const,
+                request: fakeSuiRequest(),
+                digest: this.options.submitDigest ?? "tx-default",
+                effects: {},
+            },
+        };
+    }
+}
+
+function fakeSuiRequest() {
+    return {
+        target: "0xabc::accessor::update_identity_verification",
+        packageId: "0xabc",
+        pauseStateId: "0x111",
+        identityRegistryId: "0x222",
+        membershipRegistryId: "0x333",
+        verifierRegistryId: "0x444",
+        membershipPassId: "0x555",
+        clockId: "0x6",
+        arguments: [
+            "0x111",
+            "0x222",
+            "0x333",
+            "0x444",
+            "0x555",
+            "0x6",
+            [1, 2, 3],
+            Array.from({ length: 64 }, () => 0x11),
+            Array.from({ length: 32 }, () => 0x22),
+        ] as [string, string, string, string, string, string, number[], number[], number[]],
+    };
 }
