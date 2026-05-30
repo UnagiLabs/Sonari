@@ -841,10 +841,18 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
-              "Next": "WaitForInstance",
+              "Next": "RunnerCapacityAvailable",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
+            "RunnerCapacityAvailable": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.capacity_busy", "BooleanEquals": true, "Next": "WaitForSharedRunnerLease" }
+              ],
+              "Default": "WaitForInstance"
+            },
+            "WaitForSharedRunnerLease": { "Type": "Wait", "Seconds": 60, "Next": "StartInstance" },
             "WaitForInstance": { "Type": "Wait", "Seconds": 60, "Next": "FindReadyInstance" },
             "FindReadyInstance": {
               "Type": "Task",
@@ -960,10 +968,18 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
-              "Next": "WaitForInstance",
+              "Next": "RunnerCapacityAvailable",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
+            "RunnerCapacityAvailable": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.capacity_busy", "BooleanEquals": true, "Next": "WaitForSharedRunnerLease" }
+              ],
+              "Default": "WaitForInstance"
+            },
+            "WaitForSharedRunnerLease": { "Type": "Wait", "Seconds": 60, "Next": "StartInstance" },
             "WaitForInstance": { "Type": "Wait", "Seconds": 60, "Next": "FindReadyInstance" },
             "FindReadyInstance": {
               "Type": "Task",

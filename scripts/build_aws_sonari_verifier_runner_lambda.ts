@@ -58,7 +58,10 @@ export async function handler(event: RunnerControlEvent): Promise<unknown> {
     const action = readAction(event);
     const leaseOwner = buildLeaseOwner(verifierKind, event);
     if (action === "start_instance") {
-        await acquireRunnerLease(leaseOwner);
+        const acquired = await acquireRunnerLease(leaseOwner);
+        if (!acquired) {
+            return buildCapacityBusyResult(event);
+        }
         try {
             return await dispatchDomainHandler(verifierKind, event);
         } catch (error) {
@@ -67,11 +70,13 @@ export async function handler(event: RunnerControlEvent): Promise<unknown> {
         }
     }
     if (action === "stop_instance") {
-        const released = await releaseRunnerLease(leaseOwner);
-        if (!released) {
+        const ownsLease = await acquireRunnerLease(leaseOwner);
+        if (!ownsLease) {
             return buildStopNoopResult(event);
         }
-        return dispatchDomainHandler(verifierKind, event);
+        const stopResult = await dispatchDomainHandler(verifierKind, event);
+        await releaseRunnerLease(leaseOwner);
+        return stopResult;
     }
     return dispatchDomainHandler(verifierKind, event);
 }
@@ -139,6 +144,20 @@ function readAttempt(event: RunnerControlEvent): number {
 
 function buildStopNoopResult(event: RunnerControlEvent): Record<string, unknown> {
     const result: Record<string, unknown> = { capacity: 0 };
+    copyWorkflowIdentifiers(event, result);
+    return result;
+}
+
+function buildCapacityBusyResult(event: RunnerControlEvent): Record<string, unknown> {
+    const result: Record<string, unknown> = { capacity_busy: true };
+    copyWorkflowIdentifiers(event, result);
+    return result;
+}
+
+function copyWorkflowIdentifiers(
+    event: RunnerControlEvent,
+    result: Record<string, unknown>,
+): void {
     const attempt = (event as { attempt?: unknown }).attempt;
     if (typeof attempt === "number") {
         result.attempt = attempt;
@@ -151,15 +170,15 @@ function buildStopNoopResult(event: RunnerControlEvent): Record<string, unknown>
     if (typeof jobId === "string") {
         result.job_id = jobId;
     }
-    return result;
 }
 
-async function acquireRunnerLease(owner: string): Promise<void> {
+async function acquireRunnerLease(owner: string): Promise<boolean> {
     try {
         await acquireSharedRunnerLease(leaseStore, { owner });
+        return true;
     } catch (error) {
         if (isConditionalCheckFailed(error)) {
-            throw new Error("shared runner is already leased by another verifier workflow");
+            return false;
         }
         throw error;
     }

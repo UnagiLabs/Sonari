@@ -75,6 +75,20 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"verifier_kind": "membership_identity"');
     });
 
+    it("waits and retries when shared runner capacity is leased by another workflow", async () => {
+        const template = await readTemplate();
+        const capacityChoiceCount = template.match(/"RunnerCapacityAvailable": \{/g)?.length ?? 0;
+        const waitForLeaseCount =
+            template.match(
+                /"WaitForSharedRunnerLease": \{ "Type": "Wait", "Seconds": 60, "Next": "StartInstance" \}/g,
+            )?.length ?? 0;
+
+        expect(template).toContain('"$.capacity_busy"');
+        expect(template).toContain('"BooleanEquals": true');
+        expect(capacityChoiceCount).toBe(2);
+        expect(waitForLeaseCount).toBe(2);
+    });
+
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {
         const template = await readTemplate();
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;

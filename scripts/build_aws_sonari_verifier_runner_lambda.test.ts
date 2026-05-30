@@ -54,11 +54,39 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(runnerWorkflowJs).toContain("RUNNER_LEASE_TABLE_NAME");
         expect(runnerWorkflowJs).toContain("UpdateItemCommand");
         expect(runnerWorkflowJs).toContain("DeleteItemCommand");
-        expect(runnerWorkflowJs).toContain("shared runner is already leased");
+        expect(runnerWorkflowJs).toContain("capacity_busy");
         expect(runnerWorkflowJs).toContain("ConditionalCheckFailedException");
         expect(runnerWorkflowJs).toContain("createRequire(import.meta.url)");
         expect(lambdaJs).not.toContain("workspace:");
         expect(runnerWorkflowJs).not.toContain("workspace:");
+    });
+
+    it("keeps the shared lease held until owner stop completes", async () => {
+        const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-verifier-lambda-zip-"));
+        tempDirs.push(tempDir);
+        const outPath = path.join(tempDir, "custom", "sonari-verifier-runner-lambda.zip");
+
+        await execFileAsync("pnpm", [
+            "tsx",
+            "scripts/build_aws_sonari_verifier_runner_lambda.ts",
+            "--out",
+            outPath,
+        ]);
+
+        const entries = await readZipEntries(outPath);
+        const runnerWorkflowJs = entries.get("dist/src/runner_workflow.js")?.toString("utf8") ?? "";
+        const stopDispatchIndex = runnerWorkflowJs.indexOf(
+            "const stopResult = await dispatchDomainHandler",
+        );
+        const releaseAfterStopIndex = runnerWorkflowJs.indexOf(
+            "await releaseRunnerLease",
+            stopDispatchIndex,
+        );
+        const capacityBusyIndex = runnerWorkflowJs.indexOf("buildCapacityBusyResult");
+
+        expect(stopDispatchIndex).toBeGreaterThan(-1);
+        expect(releaseAfterStopIndex).toBeGreaterThan(stopDispatchIndex);
+        expect(capacityBusyIndex).toBeGreaterThan(-1);
     });
 
     it("accepts pnpm's argument separator through the root package script", async () => {
