@@ -1,0 +1,1100 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sonari verifier runner on AWS Lambda, Step Functions, and one shared EC2 Nitro Enclave capacity pool.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  InstanceType:
+    Type: String
+    Default: m6i.xlarge
+  AmiId:
+    Type: AWS::EC2::Image::Id
+  LambdaCodeS3Bucket:
+    Type: String
+  LambdaCodeS3Key:
+    Type: String
+  GitCommitSha:
+    Type: String
+    Default: unknown
+    Description: Git commit SHA deployed by this stack update.
+  ScheduleExpression:
+    Type: String
+    Default: rate(5 minutes)
+  MembershipScheduleExpression:
+    Type: String
+    Default: rate(1 minute)
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Keep DISABLED until both verifier workflows are manually verified in the target account.
+  LogsRetentionDays:
+    Type: Number
+    Default: 30
+  ResultRetentionDays:
+    Type: Number
+    Default: 7
+  RunnerTokenSecretArn:
+    Type: String
+  TeeSigningKeySecretArn:
+    Type: String
+  WalrusConfigSecretArn:
+    Type: String
+  SuiWalletConfigSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing the Sui wallet client config for Walrus writes.
+  SuiKeystoreSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing the Sui keystore file referenced by the wallet config.
+  WalrusAggregatorUrl:
+    Type: String
+    Description: Walrus aggregator URL used by the earthquake verifier process.
+  WalrusContext:
+    Type: String
+    Default: testnet
+    Description: Walrus client config context used by the earthquake verifier process.
+  NitroEnclaveProcessCommand:
+    Type: String
+    Default: /opt/sonari/bin/run-sonari-verifier
+    Description: Shared runner command. The packaged handler dispatches by verifier_kind.
+  EarthquakeNitroEnclaveProcessCommand:
+    Type: String
+    Default: /opt/sonari/tee-artifact/bin/tee production
+    Description: Earthquake verifier command made available to the shared runner environment.
+  MembershipNitroEnclaveProcessCommand:
+    Type: String
+    Default: /opt/sonari/bin/run-membership-identity-enclave
+    Description: Membership identity verifier command made available to the shared runner environment.
+  TeeArtifactS3Bucket:
+    Type: String
+    Description: S3 bucket containing the earthquake TEE artifact tar.gz.
+  TeeArtifactS3Key:
+    Type: String
+    Description: S3 object key for the earthquake TEE artifact tar.gz.
+  TeeArtifactSha256:
+    Type: String
+    Description: SHA-256 hex digest for the earthquake TEE artifact tar.gz.
+  MembershipTeeArtifactS3Bucket:
+    Type: String
+    Description: S3 bucket containing the membership identity TEE artifact tar.gz.
+  MembershipTeeArtifactS3Key:
+    Type: String
+    Description: S3 object key for the membership identity TEE artifact tar.gz.
+  MembershipTeeArtifactSha256:
+    Type: String
+    Description: SHA-256 hex digest for the membership identity TEE artifact tar.gz.
+  TeeEifS3Bucket:
+    Type: String
+    Description: S3 bucket containing the membership identity Nitro Enclave EIF.
+  TeeEifS3Key:
+    Type: String
+    Description: S3 object key for the membership identity Nitro Enclave EIF.
+  TeeEifSha256:
+    Type: String
+    Description: SHA-256 hex digest for the membership identity Nitro Enclave EIF.
+  NitroEnclaveCpuCount:
+    Type: Number
+    Default: 2
+  NitroEnclaveMemoryMiB:
+    Type: Number
+    Default: 1024
+  NitroEnclaveCid:
+    Type: Number
+    Default: 16
+  SigningSeedCiphertextS3Bucket:
+    Type: String
+    Description: S3 bucket containing the encrypted membership identity signing seed ciphertext.
+  SigningSeedCiphertextS3Key:
+    Type: String
+    Description: S3 object key for the encrypted membership identity signing seed ciphertext. The plaintext seed is never injected into Lambda or the EC2 host.
+  NitroEnclaveImageSha384:
+    Type: String
+    AllowedPattern: "^[0-9a-fA-F]{96}$"
+    Description: Nitro Enclave ImageSha384 measurement allowed to decrypt membership signing material with KMS Recipient attestation.
+  NitroEnclavePcr3:
+    Type: String
+    AllowedPattern: "^[0-9a-fA-F]{96}$"
+    Description: Nitro Enclave PCR3 measurement allowed to decrypt membership signing material with KMS Recipient attestation.
+  WorldIdAppId:
+    Type: String
+    Description: World ID app id passed as runtime configuration to the membership identity enclave process.
+  WorldIdApiBase:
+    Type: String
+    Default: https://developer.world.org
+    Description: World ID API base URL passed as runtime configuration to the membership identity enclave process.
+  RelayerMode:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - dry_run
+      - submit
+    Description: Leave empty to skip the AWS earthquake relayer. Use dry_run or submit for finalized TEE results.
+  RelayerNetwork:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - mainnet
+      - testnet
+      - devnet
+    Description: Sui network for AWS earthquake relayer dry-run or submit.
+  RelayerTarget:
+    Type: String
+    Default: ""
+    Description: Move target for the earthquake relayer call.
+  RelayerRegistry:
+    Type: String
+    Default: ""
+    Description: DisasterRegistry object ID used by the earthquake relayer call.
+  RelayerVerifierRegistry:
+    Type: String
+    Default: ""
+    Description: VerifierRegistry object ID used by the earthquake relayer call.
+  RelayerGrpcUrl:
+    Type: String
+    Default: ""
+    Description: Sui gRPC URL for earthquake relayer dry-run or submit.
+  RelayerSenderAddress:
+    Type: String
+    Default: ""
+    Description: Sender address used for earthquake relayer dry-run transaction building.
+  RelayerSignerSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager ARN containing the Sui private key for earthquake relayer submit.
+  RelayerAllowSubmit:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "false"
+      - "true"
+    Description: Must be true before RELAYER_MODE=submit can send a Sui transaction.
+
+Conditions:
+  HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
+
+Resources:
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: source_event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: source_event_id
+          KeyType: HASH
+
+  VerificationJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-verification_jobs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+
+  RunnerResultBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteRunnerResults
+            Status: Enabled
+            ExpirationInDays: !Ref ResultRetentionDays
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  RunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /sonari/verifier-runner/${AWS::StackName}
+      RetentionInDays: !Ref LogsRetentionDays
+
+  SigningMaterialKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Sonari membership identity signing material decrypt key gated by Nitro Enclave attestation.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+          - Sid: DenyUnattestedSigningMaterialDecrypt
+            Effect: Deny
+            Principal: "*"
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              Null:
+                kms:RecipientAttestation:ImageSha384: "true"
+          - Sid: DenyWrongSigningMaterialImage
+            Effect: Deny
+            Principal: "*"
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                kms:RecipientAttestation:ImageSha384: !Ref NitroEnclaveImageSha384
+          - Sid: DenyWrongSigningMaterialPcr3
+            Effect: Deny
+            Principal: "*"
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                kms:RecipientAttestation:PCR3: !Ref NitroEnclavePcr3
+          - Sid: AllowNitroAttestedSigningMaterialDecrypt
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:Decrypt
+            Resource: "*"
+            Condition:
+              StringEquals:
+                kms:CallerAccount: !Ref AWS::AccountId
+                kms:RecipientAttestation:ImageSha384: !Ref NitroEnclaveImageSha384
+                kms:RecipientAttestation:PCR3: !Ref NitroEnclavePcr3
+
+  SigningMaterialKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/sonari-verifier-runner-membership-${AWS::StackName}
+      TargetKeyId: !Ref SigningMaterialKmsKey
+
+  RunnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: ReadVerifierInputsAndWriteResults
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref RunnerTokenSecretArn
+                  - !Ref TeeSigningKeySecretArn
+                  - !Ref WalrusConfigSecretArn
+                  - !Ref SuiWalletConfigSecretArn
+                  - !Ref SuiKeystoreSecretArn
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${TeeArtifactS3Bucket}/${TeeArtifactS3Key}
+                  - !Sub arn:${AWS::Partition}:s3:::${MembershipTeeArtifactS3Bucket}/${MembershipTeeArtifactS3Key}
+                  - !Sub arn:${AWS::Partition}:s3:::${TeeEifS3Bucket}/${TeeEifS3Key}
+                  - !Sub arn:${AWS::Partition}:s3:::${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/results/*
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !GetAtt SigningMaterialKmsKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:RecipientAttestation:ImageSha384: !Ref NitroEnclaveImageSha384
+                    kms:RecipientAttestation:PCR3: !Ref NitroEnclavePcr3
+
+  RunnerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref RunnerRole
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sonari verifier runner instance with SSM-only control plane
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  RunnerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref AmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt RunnerInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref InstanceSecurityGroup
+        EnclaveOptions:
+          Enabled: true
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            dnf install -y awscli amazon-ssm-agent git nodejs npm libstdc++ aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm libstdc++ aws-nitro-enclaves-cli
+            systemctl enable --now amazon-ssm-agent || true
+            usermod -aG ne ec2-user || true
+            systemctl enable --now nitro-enclaves-allocator.service || true
+            mkdir -p /opt/sonari/bin
+            tee_artifact_archive=/tmp/sonari-earthquake-tee-artifact.tar.gz
+            aws s3 cp 's3://${TeeArtifactS3Bucket}/${TeeArtifactS3Key}' "$tee_artifact_archive"
+            printf '%s  %s\n' '${TeeArtifactSha256}' "$tee_artifact_archive" | sha256sum -c -
+            rm -rf /opt/sonari/tee-artifact
+            mkdir -p /opt/sonari/tee-artifact
+            tar -xzf "$tee_artifact_archive" -C /opt/sonari/tee-artifact
+            test -x /opt/sonari/tee-artifact/bin/tee
+            test -x /opt/sonari/tee-artifact/bin/walrus
+            rm -f "$tee_artifact_archive"
+            membership_artifact_archive=/tmp/sonari-membership-identity-tee-artifact.tar.gz
+            aws s3 cp 's3://${MembershipTeeArtifactS3Bucket}/${MembershipTeeArtifactS3Key}' "$membership_artifact_archive"
+            printf '%s  %s\n' '${MembershipTeeArtifactSha256}' "$membership_artifact_archive" | sha256sum -c -
+            rm -rf /opt/sonari/membership-tee-artifact
+            mkdir -p /opt/sonari/membership-tee-artifact
+            tar -xzf "$membership_artifact_archive" -C /opt/sonari/membership-tee-artifact
+            test -x /opt/sonari/membership-tee-artifact/bin/membership-tee
+            rm -f "$membership_artifact_archive"
+            tee_eif=/opt/sonari/membership-identity-tee.eif
+            aws s3 cp 's3://${TeeEifS3Bucket}/${TeeEifS3Key}' "$tee_eif"
+            printf '%s  %s\n' '${TeeEifSha256}' "$tee_eif" | sha256sum -c -
+            aws s3 cp 's3://${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}' /opt/sonari/signing-seed.ciphertext
+            aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
+            aws secretsmanager get-secret-value --secret-id '${TeeSigningKeySecretArn}' --query SecretString --output text > /opt/sonari/tee-signing-key
+            aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-client-config.yaml
+            aws secretsmanager get-secret-value --secret-id '${SuiWalletConfigSecretArn}' --query SecretString --output text > /opt/sonari/sui_config.yaml
+            aws secretsmanager get-secret-value --secret-id '${SuiKeystoreSecretArn}' --query SecretString --output text > /opt/sonari/sui.keystore
+            chown -R ec2-user:ec2-user /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
+            chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
+            chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            chmod 0400 /opt/sonari/runner-token /opt/sonari/tee-signing-key /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
+            #!/bin/bash
+            set -euo pipefail
+            : "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"
+            : "${SONARI_NITRO_RUN_ENCLAVE_ARGS:?SONARI_NITRO_RUN_ENCLAVE_ARGS is required}"
+            : "${SONARI_ENCLAVE_STDIO_BRIDGE:?SONARI_ENCLAVE_STDIO_BRIDGE is required}"
+            test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
+            exec "$SONARI_ENCLAVE_STDIO_BRIDGE" $SONARI_NITRO_RUN_ENCLAVE_ARGS
+            SONARI_ENCLAVE_WRAPPER
+            chmod 0500 /opt/sonari/bin/run-membership-identity-enclave
+            cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
+            #!/bin/bash
+            set -euo pipefail
+            exec "${SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/tee-artifact/bin/tee production}"
+            SONARI_VERIFIER_DISPATCH
+            chmod 0500 /opt/sonari/bin/run-sonari-verifier
+            nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
+            ${NitroEnclaveProcessCommand}
+            SONARI_COMMAND
+            )
+            earthquake_command=$(cat <<'SONARI_EARTHQUAKE_COMMAND'
+            ${EarthquakeNitroEnclaveProcessCommand}
+            SONARI_EARTHQUAKE_COMMAND
+            )
+            membership_command=$(cat <<'SONARI_MEMBERSHIP_COMMAND'
+            ${MembershipNitroEnclaveProcessCommand}
+            SONARI_MEMBERSHIP_COMMAND
+            )
+            walrus_aggregator_url=$(cat <<'SONARI_WALRUS_URL'
+            ${WalrusAggregatorUrl}
+            SONARI_WALRUS_URL
+            )
+            walrus_context=$(cat <<'SONARI_WALRUS_CONTEXT'
+            ${WalrusContext}
+            SONARI_WALRUS_CONTEXT
+            )
+            world_id_app_id=$(cat <<'SONARI_WORLD_ID_APP_ID'
+            ${WorldIdAppId}
+            SONARI_WORLD_ID_APP_ID
+            )
+            world_id_api_base=$(cat <<'SONARI_WORLD_ID_API_BASE'
+            ${WorldIdApiBase}
+            SONARI_WORLD_ID_API_BASE
+            )
+            world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
+            if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
+              echo "WorldIdApiBase must be an http(s) URL" >&2
+              exit 1
+            fi
+            vsock_proxy_path="$(command -v vsock-proxy || true)"
+            if [ -n "$vsock_proxy_path" ]; then
+              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
+            [Unit]
+            Description=Sonari World ID API vsock proxy for membership identity enclave
+            After=network-online.target nitro-enclaves-allocator.service
+            Wants=network-online.target nitro-enclaves-allocator.service
+
+            [Service]
+            Type=simple
+            Restart=always
+            RestartSec=2
+            ExecStart=$vsock_proxy_path 8000 $world_id_api_host 443
+
+            [Install]
+            WantedBy=multi-user.target
+            SONARI_VSOCK_PROXY
+              systemctl daemon-reload
+              systemctl enable --now sonari-world-id-vsock-proxy.service
+            fi
+            {
+              echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
+              echo "SONARI_TEE_SIGNING_KEY_SEED_FILE=/opt/sonari/tee-signing-key"
+              echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
+              echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml"
+              echo "SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml"
+              echo "SONARI_WALRUS_EPOCHS=2"
+              printf 'SONARI_WALRUS_CONTEXT=%q\n' "$walrus_context"
+              printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
+              echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
+              echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=${SigningMaterialKmsKey}"
+              echo "SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=$tee_eif"
+              echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
+              echo "SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
+              printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
+              printf 'SONARI_WORLD_ID_UPSTREAM_API_BASE=%q\n' "$world_id_api_base"
+              echo "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000"
+              printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
+              printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
+              printf 'SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$membership_command"
+            } >/opt/sonari/runner.env
+            chown ec2-user:ec2-user /opt/sonari/runner.env
+            chmod 0400 /opt/sonari/runner.env
+            test -x /opt/sonari/bin/run-sonari-verifier
+            test -x /opt/sonari/bin/run-membership-identity-enclave
+            systemctl is-active --quiet nitro-enclaves-allocator.service
+            touch /opt/sonari/bootstrap-complete
+
+  RunnerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: !Ref SubnetIds
+      MinSize: "0"
+      MaxSize: "1"
+      DesiredCapacity: "0"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref RunnerLaunchTemplate
+        Version: !GetAtt RunnerLaunchTemplate.LatestVersionNumber
+
+  WatcherLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WatcherStateAndWorkflow
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:TransactWriteItems
+                Resource: !GetAtt EventsTable.Arn
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref EarthquakeRunnerStateMachine
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref RunnerTokenSecretArn
+
+  SubmitVerificationLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WriteVerificationJobs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt VerificationJobsTable.Arn
+
+  BatchVerifierLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ClaimVerificationJobsAndStartWorkflow
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt VerificationJobsTable.Arn
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref MembershipRunnerStateMachine
+
+  RunnerControlLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ControlSharedVerifierRunner
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetDesiredCapacity
+                  - autoscaling:DescribeAutoScalingGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+              - Effect: Allow
+                Action: ssm:GetCommandInvocation
+                Resource: "*"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/results/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !GetAtt EventsTable.Arn
+                  - !GetAtt VerificationJobsTable.Arn
+              - !If
+                - HasRelayerSignerSecretArn
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref RelayerSignerSecretArn
+                - !Ref AWS::NoValue
+
+  RunnerStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeRunnerControl
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt RunnerControlLambda.Arn
+
+  WatcherScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeWatcherLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt WatcherLambda.Arn
+
+  BatchScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeBatchVerifier
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt BatchVerifierLambda.Arn
+
+  WatcherLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.scheduledHandler
+      Role: !GetAtt WatcherLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          RUNNER_STATE_MACHINE_ARN: !Ref EarthquakeRunnerStateMachine
+          RUNNER_TOKEN_SECRET_ARN: !Ref RunnerTokenSecretArn
+
+  ManualWatcherLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.manualHandler
+      Role: !GetAtt WatcherLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          RUNNER_STATE_MACHINE_ARN: !Ref EarthquakeRunnerStateMachine
+          RUNNER_TOKEN_SECRET_ARN: !Ref RunnerTokenSecretArn
+
+  ManualWatcherFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref ManualWatcherLambda
+
+  ManualWatcherFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref ManualWatcherLambda
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  ManualWatcherFunctionInvokeUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ManualWatcherLambda
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  SubmitVerificationLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.submitVerificationHandler
+      Role: !GetAtt SubmitVerificationLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+
+  BatchVerifierLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.batchVerifierHandler
+      Role: !GetAtt BatchVerifierLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+          RUNNER_STATE_MACHINE_ARN: !Ref MembershipRunnerStateMachine
+
+  RunnerControlLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/runner_workflow.handler
+      Role: !GetAtt RunnerControlLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          EVENTS_TABLE_NAME: !Ref EventsTable
+          VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+          RUNNER_ASG_NAME: !Ref RunnerAutoScalingGroup
+          RESULT_BUCKET: !Ref RunnerResultBucket
+          NITRO_ENCLAVE_PROCESS_COMMAND: !Ref NitroEnclaveProcessCommand
+          EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref EarthquakeNitroEnclaveProcessCommand
+          MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref MembershipNitroEnclaveProcessCommand
+          RELAYER_MODE: !Ref RelayerMode
+          RELAYER_NETWORK: !Ref RelayerNetwork
+          RELAYER_TARGET: !Ref RelayerTarget
+          RELAYER_REGISTRY: !Ref RelayerRegistry
+          RELAYER_VERIFIER_REGISTRY: !Ref RelayerVerifierRegistry
+          RELAYER_GRPC_URL: !Ref RelayerGrpcUrl
+          RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
+          RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
+          RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
+
+  EarthquakeRunnerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt RunnerStateMachineRole.Arn
+      StateMachineType: STANDARD
+      DefinitionString: !Sub |
+        {
+          "Comment": "Run Sonari earthquake verifier on shared EC2 Nitro Enclave capacity.",
+          "StartAt": "StartInstance",
+          "States": {
+            "StartInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "WaitForInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForInstance": { "Type": "Wait", "Seconds": 60, "Next": "FindReadyInstance" },
+            "FindReadyInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "DispatchTeeCommand",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DispatchTeeCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_tee_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Next": "WaitForCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForCommand": { "Type": "Wait", "Seconds": 30, "Next": "PollCommand" },
+            "PollCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "poll_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Next": "CommandComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "CommandComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.command_status", "StringEquals": "SUCCEEDED", "Next": "ReadResult" },
+                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" },
+                { "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }
+              ],
+              "Default": "WaitForCommand"
+            },
+            "ReadResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Next": "ApplyResult",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "ApplyResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "RelayerPreviewOrDryRun",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "RelayerPreviewOrDryRun": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "RelayerResultComplete",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "RelayerResultComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.relayer", "StringEquals": "succeeded", "Next": "RecordRelayerSuccess" }
+              ],
+              "Default": "StopInstance"
+            },
+            "RecordRelayerSuccess": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result", "relayer_success.$": "$.relayer_success" },
+              "Next": "StopInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "MarkFailed": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "MarkCommandPollingTimedOut": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "error_code": "AWS_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "StopInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "stop_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
+              "End": true
+            },
+            "StopInstanceFailed": {
+              "Type": "Fail",
+              "Error": "StopInstanceFailed",
+              "Cause": "Runner cleanup failed after retrying StopInstance"
+            }
+          }
+        }
+
+  MembershipRunnerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt RunnerStateMachineRole.Arn
+      StateMachineType: STANDARD
+      DefinitionString: !Sub |
+        {
+          "Comment": "Run Sonari membership identity verifier on shared EC2 Nitro Enclave capacity.",
+          "StartAt": "StartInstance",
+          "States": {
+            "StartInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Next": "WaitForInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForInstance": { "Type": "Wait", "Seconds": 60, "Next": "FindReadyInstance" },
+            "FindReadyInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Next": "DispatchTeeCommand",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DispatchTeeCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "Next": "WaitForCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForCommand": { "Type": "Wait", "Seconds": 30, "Next": "PollCommand" },
+            "PollCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Next": "CommandComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "CommandComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.command_status", "StringEquals": "SUCCEEDED", "Next": "ReadResult" },
+                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" },
+                { "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }
+              ],
+              "Default": "WaitForCommand"
+            },
+            "ReadResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Next": "ApplyResult",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "ApplyResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "MarkFailed": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "MarkCommandPollingTimedOut": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "error_code": "AWS_MEMBERSHIP_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "StopInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "stop_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
+              "End": true
+            },
+            "StopInstanceFailed": {
+              "Type": "Fail",
+              "Error": "StopInstanceFailed",
+              "Cause": "Membership identity runner cleanup failed after retrying StopInstance"
+            }
+          }
+        }
+
+  WatcherSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      ScheduleExpression: !Ref ScheduleExpression
+      State: !Ref ScheduleState
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !GetAtt WatcherLambda.Arn
+        RoleArn: !GetAtt WatcherScheduleRole.Arn
+        Input: '{"verifier_kind": "earthquake"}'
+
+  BatchSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      ScheduleExpression: !Ref MembershipScheduleExpression
+      State: !Ref ScheduleState
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !GetAtt BatchVerifierLambda.Arn
+        RoleArn: !GetAtt BatchScheduleRole.Arn
+        Input: '{"verifier_kind": "membership_identity"}'
+
+Outputs:
+  EventsTableName:
+    Value: !Ref EventsTable
+  VerificationJobsTableName:
+    Value: !Ref VerificationJobsTable
+  RunnerResultBucketName:
+    Value: !Ref RunnerResultBucket
+  RunnerLogGroupName:
+    Value: !Ref RunnerLogGroup
+  DeployedGitCommitSha:
+    Value: !Ref GitCommitSha
+  LambdaCodeS3KeyOutput:
+    Value: !Ref LambdaCodeS3Key
+  TeeArtifactS3KeyOutput:
+    Value: !Ref TeeArtifactS3Key
+  TeeArtifactSha256Output:
+    Value: !Ref TeeArtifactSha256
+  MembershipTeeArtifactS3KeyOutput:
+    Value: !Ref MembershipTeeArtifactS3Key
+  MembershipTeeArtifactSha256Output:
+    Value: !Ref MembershipTeeArtifactSha256
+  TeeEifS3KeyOutput:
+    Value: !Ref TeeEifS3Key
+  TeeEifSha256Output:
+    Value: !Ref TeeEifSha256
+  EarthquakeRunnerStateMachineArn:
+    Value: !Ref EarthquakeRunnerStateMachine
+  MembershipRunnerStateMachineArn:
+    Value: !Ref MembershipRunnerStateMachine
+  RunnerAutoScalingGroupName:
+    Value: !Ref RunnerAutoScalingGroup
+  RunnerLaunchTemplateId:
+    Value: !Ref RunnerLaunchTemplate
+  WatcherScheduleName:
+    Value: !Ref WatcherSchedule
+  BatchScheduleName:
+    Value: !Ref BatchSchedule
+  WatcherLambdaName:
+    Value: !Ref WatcherLambda
+  ManualWatcherLambdaName:
+    Value: !Ref ManualWatcherLambda
+  SubmitVerificationLambdaName:
+    Value: !Ref SubmitVerificationLambda
+  BatchVerifierLambdaName:
+    Value: !Ref BatchVerifierLambda
+  RunnerControlLambdaName:
+    Value: !Ref RunnerControlLambda
+  SigningMaterialKmsKeyId:
+    Value: !Ref SigningMaterialKmsKey
