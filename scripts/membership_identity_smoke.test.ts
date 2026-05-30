@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
     type MembershipIdentitySmokeOutput,
@@ -66,6 +68,21 @@ describe("membership identity smoke", () => {
         }
     });
 
+    it("confirms membership-tee encode-only rejects non-verified fixtures", async () => {
+        const rejectFixturePaths = [
+            "nautilus/verifiers/membership/fixtures/identity/kyc_reject.json",
+            "nautilus/verifiers/membership/fixtures/identity/world_id_reject.json",
+        ];
+
+        for (const fixturePath of rejectFixturePaths) {
+            const fixture = await readFile(fixturePath, "utf8");
+            const result = await runMembershipTeeEncodeOnly(fixture);
+
+            expect(result.code).not.toBe(0);
+            expect(result.stderr).toContain("requires a verified result");
+        }
+    }, 60_000);
+
     it("does not expose legacy registration fee, payout address, or confidence discount terms", async () => {
         const serialized = JSON.stringify(output);
 
@@ -88,3 +105,31 @@ describe("membership identity smoke", () => {
         }
     }, 60_000);
 });
+
+async function runMembershipTeeEncodeOnly(input: string): Promise<{
+    readonly code: number | null;
+    readonly stdout: string;
+    readonly stderr: string;
+}> {
+    return new Promise((resolve, reject) => {
+        const child = spawn("cargo", ["run", "-q", "-p", "membership-tee", "--", "--encode-only"], {
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdout += chunk;
+        });
+        child.stderr.on("data", (chunk: string) => {
+            stderr += chunk;
+        });
+        child.on("error", reject);
+        child.on("close", (code) => {
+            resolve({ code, stdout, stderr });
+        });
+        child.stdin.end(input);
+    });
+}
