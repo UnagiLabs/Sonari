@@ -21,6 +21,7 @@
         "@aws-sdk/client-ssm": "^3.948.0",
         "@aws-sdk/lib-dynamodb": "^3.948.0",
         "@sonari/earthquake-relayer": "workspace:*",
-        "@sonari/earthquake-shared": "workspace:*"
+        "@sonari/earthquake-shared": "workspace:*",
+        "@sonari/verifier-contracts": "workspace:*"
     }
 }

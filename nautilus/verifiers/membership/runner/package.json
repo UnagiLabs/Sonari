@@ -21,6 +21,7 @@
         "@aws-sdk/client-ssm": "^3.948.0",
         "@aws-sdk/lib-dynamodb": "^3.948.0",
         "@mysten/sui": "^2.16.3",
-        "@sonari/membership-verifier-shared": "workspace:*"
+        "@sonari/membership-verifier-shared": "workspace:*",
+        "@sonari/verifier-contracts": "workspace:*"
     }
 }

@@ -7,6 +7,7 @@ import {
     type SignedFinalizedPayload,
     type TeeCoreResult,
 } from "@sonari/earthquake-shared";
+import { EARTHQUAKE_VERIFIER_KIND } from "@sonari/verifier-contracts";
 import {
     DAY_MS,
     DEFAULT_DUE_LIMIT,
@@ -91,6 +92,7 @@ export class StepFunctionsWorkflowStarter implements WorkflowStarter {
                 stateMachineArn: this.stateMachineArn,
                 name: input.executionName,
                 input: JSON.stringify({
+                    verifier_kind: EARTHQUAKE_VERIFIER_KIND,
                     source_event_id: input.sourceEventId,
                     attempt: input.attempt ?? 1,
                 }),

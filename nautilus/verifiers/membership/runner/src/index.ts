@@ -9,6 +9,7 @@ import {
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import type { IdentityProvider } from "@sonari/membership-verifier-shared";
+import { MEMBERSHIP_IDENTITY_VERIFIER_KIND } from "@sonari/verifier-contracts";
 
 export type { IdentityProvider } from "@sonari/membership-verifier-shared";
 
@@ -151,6 +152,7 @@ export class StepFunctionsWorkflowStarter implements WorkflowStarter {
                 stateMachineArn: this.stateMachineArn,
                 name: input.executionName,
                 input: JSON.stringify({
+                    verifier_kind: MEMBERSHIP_IDENTITY_VERIFIER_KIND,
                     job_id: input.jobId,
                     attempt: input.attempt,
                 }),
