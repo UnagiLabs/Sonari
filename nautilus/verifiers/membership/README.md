@@ -94,6 +94,8 @@ IdentityVerificationResult {
 `membership-tee` は stdin で `IdentityVerifyRequest` JSON を受け取る。
 request は未知の field を拒否する。
 TEE は request の意味を変えず、検証結果だけを stdout に返す。
+TEE は 1 request = 1 JSON in / 1 JSON out の stateless な処理である。
+stateless とは、TEE が前の job 状態を持たないという意味である。
 
 ```text
 membership-tee fixture [--world-id-status verified|rejected|pending-source]
@@ -114,12 +116,29 @@ World ID API base URL は HTTPS のみ許可する。
 `SONARI_TEE_SIGNING_KEY_SEED_FILE` から読む。
 production では dev fallback を使わない。
 
+AWS 境界 interface として固定する env は次の 3 つである。
+これらは、外側の worker が TEE process に渡す値である。
+
+```text
+SONARI_TEE_SIGNING_KEY_SEED
+SONARI_TEE_SIGNING_KEY_SEED_FILE
+SONARI_WORLD_ID_API_BASE
+```
+
+`SONARI_WORLD_ID_APP_ID` は production の runtime config として必須である。
+ただし AWS 境界 interface の固定対象とは分けて扱う。
+#74 では deploy config から TEE process env に注入する。
+本番では KMS や Nitro attestation へ差し替える場合がある。
+その場合も stdin/stdout の JSON 契約は変えない。
+
 production では `issued_at_ms` と `validity_ms` を request から信頼しない。
 TEE が現在時刻を `issued_at_ms` に使う。
 有効期間も TEE 側の既定値を使う。
 これにより caller が署名済み result の寿命を延ばせない。
 
 成功時の stdout は `status: "verified"` と result fields を返す。
+この stdout は bare `IdentityTeeResult` ではない。
+`IdentityTeeResult` の fields に `payload_bcs_hex`、`signature`、`public_key` を足す。
 署名対象は `payload_bcs_hex` の bytes そのものである。
 Sui intent prefix は付けない。
 
@@ -149,6 +168,8 @@ Sui intent prefix は付けない。
 非成功時の stdout は `status` と `error_code` だけを返す。
 `rejected`、`pending_source`、`unsupported` には署名を付けない。
 payload BCS も返さない。
+非 verified stdout は `status` と `error_code` だけを返す。
+`pending_source` は earthquake と同じ再試行用の語である。
 
 ```json
 { "status": "rejected", "error_code": "WORLD_ID_VERIFICATION_FAILED" }
@@ -246,6 +267,7 @@ verifier は raw personal data を output に含めない。
 identity verification request は queued job として扱う。
 job があるときだけ batch workflow を起動する。
 job が 0 件なら EC2 / Nitro Enclave は起動しない。
+AWS on-demand interface の固定内容は `infra/aws/membership-identity-runner/README.md` に置く。
 
 ```mermaid
 flowchart TD

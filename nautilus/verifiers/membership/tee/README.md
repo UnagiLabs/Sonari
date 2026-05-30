@@ -27,6 +27,8 @@ Relayer や worker は、この crate が返した結果の意味を変えては
 | `--encode-only` | TS/Rust の BCS bytes 一致を確認する | 署名しない |
 
 `fixture` と `production` は、stdin から `IdentityVerifyRequest` JSON を 1 つ読みます。stdout には status 付き JSON を 1 つだけ返します。
+AWS interface では 1 request = 1 JSON in / 1 JSON out として固定します。
+TEE は stateless です。前の job 状態は持ちません。
 
 ## 入力 request
 
@@ -66,13 +68,17 @@ stdout の `status` は 4 種類です。
 `verified` の場合だけ、次を返します。
 
 ```text
-payload fields
+IdentityTeeResult fields
 payload_bcs_hex
 signature
 public_key
 ```
 
 `rejected`、`pending_source`、`unsupported` の場合は `error_code` だけを返します。payload、signature、public_key は返しません。
+verified stdout は bare `IdentityTeeResult` ではありません。
+`status: "verified"` と `IdentityTeeResult` fields に加えて、署名 fields を返します。
+非 verified stdout は `status` と `error_code` だけを返します。
+`pending_source` は earthquake と同じ再試行用の語です。
 
 ## 署名のルール
 
@@ -91,6 +97,20 @@ SONARI_TEE_SIGNING_KEY_SEED
 SONARI_TEE_SIGNING_KEY_SEED_FILE
 ```
 
+AWS 境界 interface として固定する env は次の 3 つです。
+
+```text
+SONARI_TEE_SIGNING_KEY_SEED
+SONARI_TEE_SIGNING_KEY_SEED_FILE
+SONARI_WORLD_ID_API_BASE
+```
+
+`SONARI_WORLD_ID_APP_ID` は production の runtime config として必須です。
+ただし AWS 境界 interface の固定対象とは分けて扱います。
+#74 では deploy config から TEE process env に注入します。
+本番では KMS や Nitro attestation へ差し替える場合があります。
+その場合も stdin/stdout の JSON 契約は変えないでください。
+
 request 由来の `issued_at_ms` と `validity_ms` は production では信頼しません。TEE 側の現在時刻と既定 TTL を使います。これは、caller が長すぎる有効期限を持つ署名済み payload を作らせないためです。
 
 ## fixture の使い方
@@ -105,7 +125,7 @@ membership-tee fixture --world-id-status rejected
 membership-tee fixture --world-id-status pending-source
 ```
 
-`provider` が `kyc` の場合は、現在は未対応として `unsupported` を返します。error code は `KYC_NOT_IMPLEMENTED` です。
+`provider` が `kyc` の場合は、現在は未対応として `unsupported` を返します。error code は `KYC_UNSUPPORTED` です。
 
 ## encode-only
 
