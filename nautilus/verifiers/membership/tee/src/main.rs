@@ -186,7 +186,7 @@ struct EncodeOnlyJson {
 enum TeeJsonResult {
     Verified {
         #[serde(flatten)]
-        payload: IdentityTeeResult,
+        payload: Box<IdentityTeeResult>,
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
@@ -221,7 +221,7 @@ fn output_to_tee_json(
                 .signature
                 .ok_or("verified output is missing signature")?;
             Ok(TeeJsonResult::Verified {
-                payload,
+                payload: Box::new(payload),
                 payload_bcs_hex,
                 signature,
                 public_key,
