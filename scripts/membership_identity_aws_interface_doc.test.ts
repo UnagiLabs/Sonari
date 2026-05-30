@@ -6,7 +6,11 @@ const membershipReadmePath = path.join(process.cwd(), "nautilus/verifiers/member
 const teeReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/tee/README.md");
 const awsReadmePath = path.join(process.cwd(), "infra/aws/membership-identity-runner/README.md");
 
-async function readDocs(): Promise<{ awsReadme: string; membershipReadme: string; teeReadme: string }> {
+async function readDocs(): Promise<{
+    awsReadme: string;
+    membershipReadme: string;
+    teeReadme: string;
+}> {
     const [awsReadme, membershipReadme, teeReadme] = await Promise.all([
         readFile(awsReadmePath, "utf8"),
         readFile(membershipReadmePath, "utf8"),
@@ -81,5 +85,26 @@ describe("membership identity AWS interface docs", () => {
         expect(awsReadme).toContain("worker は request 作成と状態管理");
         expect(awsReadme).toContain("TEE は検証、正規化、署名");
         expect(awsReadme).toContain("relayer は結果を配送するだけ");
+    });
+
+    it("freezes the membership identity TEE artifact build design", async () => {
+        const { awsReadme } = await readDocs();
+
+        for (const phrase of [
+            "scripts/build_aws_earthquake_tee_artifact.ts",
+            "scripts/build_aws_membership_identity_tee_artifact.ts",
+            "nautilus/verifiers/membership/tee/Cargo.toml",
+            "x86_64-unknown-linux-musl",
+            "dist/aws/membership-identity-tee-artifact.tar.gz",
+            ".sha256",
+            "bin/membership-tee production",
+        ]) {
+            expect(awsReadme).toContain(phrase);
+        }
+
+        expect(awsReadme).toContain("Walrus CLI を含めない");
+        expect(awsReadme).toContain("membership TEE は Walrus を呼ばない");
+        expect(awsReadme).toContain("Nitro Enclave image 化は後続");
+        expect(awsReadme).toContain("stdin/stdout 契約は変えない");
     });
 });

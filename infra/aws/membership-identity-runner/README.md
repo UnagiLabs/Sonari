@@ -94,6 +94,50 @@ SONARI_WORLD_ID_API_BASE
 本番では KMS や Nitro attestation へ差し替える場合がある。
 その場合も stdin/stdout の JSON 契約は変えない。
 
+## TEE artifact build design
+
+identity 版 artifact build は、地震版の設計を参考にする。
+参考元は `scripts/build_aws_earthquake_tee_artifact.ts` である。
+
+将来の script 名は次で固定する。
+
+```text
+scripts/build_aws_membership_identity_tee_artifact.ts
+```
+
+Cargo manifest は次を使う。
+
+```text
+nautilus/verifiers/membership/tee/Cargo.toml
+```
+
+既定 target は `x86_64-unknown-linux-musl` とする。
+AWS host の glibc version に依存しない static binary を作るためである。
+
+出力先は次で固定する。
+
+```text
+dist/aws/membership-identity-tee-artifact.tar.gz
+dist/aws/membership-identity-tee-artifact.tar.gz.sha256
+```
+
+checksum は `.sha256` file に書く。
+`sha256sum -c` で確認できる形式にする。
+
+artifact 内の実行 command は次で固定する。
+
+```bash
+bin/membership-tee production
+```
+
+identity artifact は Walrus CLI を含めない。
+membership TEE は Walrus を呼ばないためである。
+地震 TEE の Walrus archive 前提を identity 側に混ぜない。
+
+Nitro Enclave image 化は後続実装で行う。
+その時も stdin/stdout 契約は変えない。
+AWS 側の command wrapper は、この JSON 契約を保つ必要がある。
+
 ## Out of scope
 
 この issue では AWS template を作らない。
