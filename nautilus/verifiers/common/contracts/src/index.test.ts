@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { parseVerifierKind } from "./index.js";
+import {
+    dispatchRunnerCommand,
+    findReadyRunnerInstance,
+    parseExpectedVerifierKind,
+    parseVerifierKind,
+    pollRunnerCommand,
+    readRunnerResultText,
+    setRunnerDesiredCapacity,
+    withVerifierKind,
+} from "./index.js";
 
 describe("verifier kind contract", () => {
     it("accepts earthquake", () => {
@@ -15,4 +24,116 @@ describe("verifier kind contract", () => {
         expect(() => parseVerifierKind(undefined)).toThrow(/verifier_kind/);
         expect(() => parseVerifierKind({ verifier_kind: "earthquake" })).toThrow(/verifier_kind/);
     });
+
+    it("fails closed when a known kind reaches the wrong workflow boundary", () => {
+        expect(parseExpectedVerifierKind("earthquake", "earthquake")).toBe("earthquake");
+        expect(() => parseExpectedVerifierKind("membership_identity", "earthquake")).toThrow(
+            /verifier_kind/,
+        );
+    });
 });
+
+describe("common runner dispatcher", () => {
+    it("orchestrates EC2 capacity, SSM command lifecycle, and S3 result reads", async () => {
+        const autoscaling = new RecordingAutoScalingClient();
+        const ssm = new RecordingSsmClient();
+
+        await setRunnerDesiredCapacity(autoscaling, {
+            autoScalingGroupName: "runner-asg",
+            desiredCapacity: 1,
+        });
+        await expect(
+            findReadyRunnerInstance(new RecordingEc2Client(), ssm, {
+                autoScalingGroupName: "runner-asg",
+            }),
+        ).resolves.toBe("i-ready");
+        await expect(
+            dispatchRunnerCommand(ssm, {
+                workflowId: "job-1",
+                instanceId: "i-ready",
+                dispatchTimestampMs: 1_800_000_000_000,
+                buildShellCommand: (resultS3Key) => `run verifier > ${resultS3Key}`,
+            }),
+        ).resolves.toEqual({
+            commandId: "cmd-1",
+            resultS3Key: "results/job-1/1800000000000.json",
+            commandPollCount: 0,
+        });
+        await expect(
+            pollRunnerCommand(ssm, {
+                instanceId: "i-ready",
+                commandId: "cmd-1",
+                commandPollCount: 0,
+            }),
+        ).resolves.toEqual({ commandStatus: "SUCCEEDED", commandPollCount: 0 });
+        await expect(
+            readRunnerResultText(new RecordingS3Client(), {
+                bucket: "runner-results",
+                key: "results/job-1/1800000000000.json",
+            }),
+        ).resolves.toBe('{"status":"ok"}');
+
+        expect(autoscaling.capacities).toEqual([1]);
+        expect(ssm.commands).toEqual([
+            {
+                instanceId: "i-ready",
+                shellCommand: "run verifier > results/job-1/1800000000000.json",
+            },
+        ]);
+    });
+
+    it("retains verifier kind on dispatcher outputs only when the boundary provided one", () => {
+        expect(withVerifierKind("earthquake", { capacity: 1 })).toEqual({
+            verifier_kind: "earthquake",
+            capacity: 1,
+        });
+        expect(withVerifierKind(undefined, { capacity: 1 })).toEqual({ capacity: 1 });
+    });
+});
+
+class RecordingAutoScalingClient {
+    readonly capacities: number[] = [];
+
+    async setDesiredCapacity(input: { desiredCapacity: number }): Promise<void> {
+        this.capacities.push(input.desiredCapacity);
+    }
+}
+
+class RecordingEc2Client {
+    async listRunnerInstances(): Promise<Array<{ instanceId: string; state: string }>> {
+        return [
+            { instanceId: "i-stopped", state: "stopped" },
+            { instanceId: "i-ready", state: "running" },
+        ];
+    }
+}
+
+class RecordingSsmClient {
+    readonly commands: Array<{ instanceId: string; shellCommand: string }> = [];
+
+    async listOnlineManagedInstanceIds(): Promise<Set<string>> {
+        return new Set(["i-ready"]);
+    }
+
+    async checkRunnerBootstrapReady(instanceId: string): Promise<boolean> {
+        return instanceId === "i-ready";
+    }
+
+    async sendCommand(input: {
+        instanceId: string;
+        shellCommand: string;
+    }): Promise<{ commandId: string }> {
+        this.commands.push(input);
+        return { commandId: "cmd-1" };
+    }
+
+    async getCommandInvocation(): Promise<{ status: string }> {
+        return { status: "Success" };
+    }
+}
+
+class RecordingS3Client {
+    async getObjectText(): Promise<string> {
+        return '{"status":"ok"}';
+    }
+}

@@ -14,6 +14,16 @@ import {
 } from "@aws-sdk/client-ssm";
 import { encodeIdentityVerificationResultBcsHex } from "@sonari/membership-verifier-shared";
 import {
+    dispatchRunnerCommand,
+    findReadyRunnerInstance,
+    MEMBERSHIP_IDENTITY_VERIFIER_KIND,
+    parseExpectedVerifierKind,
+    pollRunnerCommand,
+    readRunnerResultText,
+    setRunnerDesiredCapacity,
+    withVerifierKind,
+} from "@sonari/verifier-contracts";
+import {
     DEFAULT_RETRY_BACKOFF_MS,
     DynamoDbVerificationJobRepository,
     type IdentityVerifyRequest,
@@ -139,92 +149,100 @@ interface IdentityVerificationResultFields {
     readonly signed_statement_hash: string;
 }
 
-export type RunnerControlEvent =
-    | { action: "start_instance"; job_id: string; attempt?: number | undefined }
-    | { action: "find_ready_instance"; job_id: string; attempt?: number | undefined }
-    | {
-          action: "dispatch_tee_command";
-          job_id: string;
-          attempt?: number | undefined;
-          instance_id: string;
-      }
-    | {
-          action: "poll_command";
-          job_id: string;
-          attempt?: number | undefined;
-          instance_id: string;
-          command_id: string;
-          result_s3_key?: string | undefined;
-          command_poll_count?: number | undefined;
-      }
-    | {
-          action: "read_result";
-          job_id: string;
-          attempt?: number | undefined;
-          result_s3_key: string;
-      }
-    | {
-          action: "apply_result";
-          job_id: string;
-          attempt?: number | undefined;
-          result: MembershipTeeResult;
-      }
-    | {
-          action: "dry_run_sui_submission";
-          job_id: string;
-          attempt?: number | undefined;
-          result: MembershipTeeResult;
-      }
-    | {
-          action: "submit_sui_submission";
-          job_id: string;
-          attempt?: number | undefined;
-          result: MembershipTeeResult;
-      }
-    | {
-          action: "mark_failed";
-          job_id: string;
-          attempt?: number | undefined;
-          error_code?: string | undefined;
-          message?: string | undefined;
-      }
-    | { action: "stop_instance"; job_id: string; attempt?: number | undefined };
+type RunnerControlVerifierKind = {
+    verifier_kind?: typeof MEMBERSHIP_IDENTITY_VERIFIER_KIND | undefined;
+};
 
-export type RunnerControlResult =
-    | { job_id: string; attempt?: number | undefined; capacity: number }
-    | { job_id: string; attempt?: number | undefined; instance_id: string }
-    | {
-          job_id: string;
-          attempt?: number | undefined;
-          instance_id: string;
-          command_id: string;
-          result_s3_key: string;
-          command_poll_count: number;
-      }
-    | {
-          job_id: string;
-          attempt?: number | undefined;
-          instance_id?: string | undefined;
-          command_id?: string | undefined;
-          result_s3_key?: string | undefined;
-          command_poll_count?: number | undefined;
-          command_status: "PENDING" | "SUCCEEDED" | "FAILED";
-      }
-    | { job_id: string; attempt?: number | undefined; result: MembershipTeeResult }
-    | {
-          job_id: string;
-          attempt?: number | undefined;
-          applied: true;
-          result: MembershipTeeResult;
-      }
-    | {
-          job_id: string;
-          attempt?: number | undefined;
-          sui_submission: "skipped" | "succeeded" | "failed";
-          result: MembershipTeeResult;
-          tx_digest?: string | undefined;
-      }
-    | { job_id: string; attempt?: number | undefined; failed: true };
+export type RunnerControlEvent = RunnerControlVerifierKind &
+    (
+        | { action: "start_instance"; job_id: string; attempt?: number | undefined }
+        | { action: "find_ready_instance"; job_id: string; attempt?: number | undefined }
+        | {
+              action: "dispatch_tee_command";
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+          }
+        | {
+              action: "poll_command";
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              command_id: string;
+              result_s3_key?: string | undefined;
+              command_poll_count?: number | undefined;
+          }
+        | {
+              action: "read_result";
+              job_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
+              action: "apply_result";
+              job_id: string;
+              attempt?: number | undefined;
+              result: MembershipTeeResult;
+          }
+        | {
+              action: "dry_run_sui_submission";
+              job_id: string;
+              attempt?: number | undefined;
+              result: MembershipTeeResult;
+          }
+        | {
+              action: "submit_sui_submission";
+              job_id: string;
+              attempt?: number | undefined;
+              result: MembershipTeeResult;
+          }
+        | {
+              action: "mark_failed";
+              job_id: string;
+              attempt?: number | undefined;
+              error_code?: string | undefined;
+              message?: string | undefined;
+          }
+        | { action: "stop_instance"; job_id: string; attempt?: number | undefined }
+    );
+
+export type RunnerControlResult = RunnerControlVerifierKind &
+    (
+        | { job_id: string; attempt?: number | undefined; capacity: number }
+        | { job_id: string; attempt?: number | undefined; instance_id: string }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              command_id: string;
+              result_s3_key: string;
+              command_poll_count: number;
+          }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id?: string | undefined;
+              command_id?: string | undefined;
+              result_s3_key?: string | undefined;
+              command_poll_count?: number | undefined;
+              command_status: "PENDING" | "SUCCEEDED" | "FAILED";
+          }
+        | { job_id: string; attempt?: number | undefined; result: MembershipTeeResult }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
+              applied: true;
+              result: MembershipTeeResult;
+          }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
+              sui_submission: "skipped" | "succeeded" | "failed";
+              result: MembershipTeeResult;
+              tx_digest?: string | undefined;
+          }
+        | { job_id: string; attempt?: number | undefined; failed: true }
+    );
 
 export interface RunnerControlHandlerOptions {
     readonly autoscaling: AutoScalingClientLike;
@@ -241,99 +259,102 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
     return async function runnerControlHandler(
         event: RunnerControlEvent,
     ): Promise<RunnerControlResult> {
+        const verifierKind = parseExpectedVerifierKind(
+            (event as { verifier_kind?: unknown }).verifier_kind,
+            MEMBERSHIP_IDENTITY_VERIFIER_KIND,
+        );
+        const retainVerifierKind = (output: RunnerControlResult): RunnerControlResult =>
+            withVerifierKind(verifierKind, output) as RunnerControlResult;
         switch (event.action) {
             case "start_instance":
                 await requireCurrentWorkflowAttempt(options, event, true);
-                await options.autoscaling.setDesiredCapacity({
+                await setRunnerDesiredCapacity(options.autoscaling, {
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 1,
                 });
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     capacity: 1,
-                };
+                });
             case "stop_instance":
-                await options.autoscaling.setDesiredCapacity({
+                await setRunnerDesiredCapacity(options.autoscaling, {
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 0,
                 });
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     capacity: 0,
-                };
+                });
             case "find_ready_instance": {
-                const instanceId = await findReadyInstance(
-                    options.ec2,
-                    options.ssm,
-                    options.config.autoScalingGroupName,
-                );
+                const instanceId = await findReadyRunnerInstance(options.ec2, options.ssm, {
+                    autoScalingGroupName: options.config.autoScalingGroupName,
+                    runnerLabel: "membership runner",
+                });
                 await requireCurrentWorkflowAttempt(options, event, true);
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     instance_id: instanceId,
-                };
+                });
             }
             case "dispatch_tee_command": {
                 const nowMs = options.now?.() ?? Date.now();
                 const row = await requireCurrentWorkflowAttempt(options, event, true);
                 const requestJson = readValidatedRequestJson(row);
-                const resultS3Key = `results/${event.job_id}/${nowMs}.json`;
-                const shellCommand = buildSsmShellCommand({
-                    jobId: event.job_id,
-                    requestJson,
-                    dispatchTimestampMs: nowMs,
-                    resultBucket: options.config.resultBucket,
-                    resultS3Key,
-                    nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
-                });
-                const sent = await options.ssm.sendCommand({
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.job_id,
                     instanceId: event.instance_id,
-                    shellCommand,
+                    dispatchTimestampMs: nowMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            jobId: event.job_id,
+                            requestJson,
+                            dispatchTimestampMs: nowMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                        }),
                 });
                 await requireCurrentWorkflowAttempt(options, event, true);
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     instance_id: event.instance_id,
-                    command_id: sent.commandId,
-                    result_s3_key: resultS3Key,
-                    command_poll_count: 0,
-                };
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
             }
             case "poll_command": {
                 await requireCurrentWorkflowAttempt(options, event, true);
-                const commandStatus = await pollCommandStatus(options.ssm, {
+                const polled = await pollRunnerCommand(options.ssm, {
                     instanceId: event.instance_id,
                     commandId: event.command_id,
+                    commandPollCount: event.command_poll_count,
                 });
-                const commandPollCount =
-                    commandStatus === "PENDING"
-                        ? (event.command_poll_count ?? 0) + 1
-                        : (event.command_poll_count ?? 0);
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     instance_id: event.instance_id,
                     command_id: event.command_id,
                     result_s3_key: event.result_s3_key,
-                    command_poll_count: commandPollCount,
-                    command_status: commandStatus,
-                };
+                    command_poll_count: polled.commandPollCount,
+                    command_status: polled.commandStatus,
+                });
             }
             case "read_result": {
                 const row = await requireCurrentWorkflowAttempt(options, event, true);
-                const text = await options.s3.getObjectText({
+                const text = await readRunnerResultText(options.s3, {
                     bucket: options.config.resultBucket,
                     key: event.result_s3_key,
                 });
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     result: parseTeeResult(text, readValidatedRequest(row)),
-                };
+                });
             }
             case "apply_result": {
                 const repository = requireRepository(options);
@@ -349,12 +370,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
                     }
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         applied: true,
                         result: event.result,
-                    };
+                    });
                 }
                 if (event.result.status === "rejected" || event.result.status === "unsupported") {
                     const updated = await repository.markFailed(
@@ -366,29 +387,29 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
                     }
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         applied: true,
                         result: event.result,
-                    };
+                    });
                 }
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     applied: true,
                     result: event.result,
-                };
+                });
             }
             case "dry_run_sui_submission": {
                 await requireCurrentWorkflowAttempt(options, event, true);
                 if (event.result.status !== "verified") {
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         sui_submission: "skipped",
                         result: event.result,
-                    };
+                    });
                 }
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
@@ -401,21 +422,21 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         "RELAYER_SUBMIT_FAILED",
                         "Sui submission config is required",
                     );
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         sui_submission: "failed",
                         result: event.result,
-                    };
+                    });
                 }
                 const result = await submitter.dryRun(signedPayloadForRelayer(event.result));
                 if (result.ok) {
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         sui_submission: "succeeded",
                         result: event.result,
-                    };
+                    });
                 }
                 await markSuiSubmissionFailed(
                     repository,
@@ -424,22 +445,22 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     result.error_code,
                     result.message,
                 );
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     sui_submission: "failed",
                     result: event.result,
-                };
+                });
             }
             case "submit_sui_submission": {
                 await requireCurrentWorkflowAttempt(options, event, true);
                 if (event.result.status !== "verified") {
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         sui_submission: "skipped",
                         result: event.result,
-                    };
+                    });
                 }
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
@@ -452,12 +473,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         "RELAYER_SUBMIT_FAILED",
                         "Sui submission config is required",
                     );
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         sui_submission: "failed",
                         result: event.result,
-                    };
+                    });
                 }
                 const result = await submitter.submit(signedPayloadForRelayer(event.result));
                 if (!result.ok) {
@@ -468,12 +489,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         result.error_code,
                         result.message,
                     );
-                    return {
+                    return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
                         sui_submission: "failed",
                         result: event.result,
-                    };
+                    });
                 }
                 const updated = await repository.markCompleted(
                     event.job_id,
@@ -484,13 +505,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     throw new Error("stale runner workflow attempt");
                 }
                 const row = await repository.get(event.job_id);
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     sui_submission: "succeeded",
                     result: event.result,
                     tx_digest: row?.tx_digest ?? result.value.digest,
-                };
+                });
             }
             case "mark_failed": {
                 const repository = requireRepository(options);
@@ -506,11 +527,11 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!updated) {
                     throw new Error("stale runner workflow attempt");
                 }
-                return {
+                return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     failed: true,
-                };
+                });
             }
         }
     };
@@ -601,14 +622,14 @@ class AwsSsmClient implements SsmClientLike {
             shellCommand: buildRunnerBootstrapReadinessShellCommand(),
         });
         for (let attempt = 0; attempt < 5; attempt += 1) {
-            const status = await pollCommandStatus(this, {
+            const { commandStatus } = await pollRunnerCommand(this, {
                 instanceId,
                 commandId: sent.commandId,
             });
-            if (status === "SUCCEEDED") {
+            if (commandStatus === "SUCCEEDED") {
                 return true;
             }
-            if (status === "FAILED") {
+            if (commandStatus === "FAILED") {
                 return false;
             }
             if (attempt < 4) {
@@ -676,6 +697,10 @@ class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
 }
 
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
+    parseExpectedVerifierKind(
+        (event as { verifier_kind?: unknown }).verifier_kind,
+        MEMBERSHIP_IDENTITY_VERIFIER_KIND,
+    );
     return createRunnerControlHandler({
         autoscaling: new AwsAutoScalingClient(),
         ec2: new AwsEc2Client(),
@@ -752,63 +777,6 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
 
 function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;
-}
-
-async function findReadyInstance(
-    ec2: Ec2ClientLike,
-    ssm: SsmClientLike,
-    autoScalingGroupName: string,
-): Promise<string> {
-    const instances = await ec2.listRunnerInstances({ autoScalingGroupName });
-    const runningIds = instances
-        .filter((instance) => instance.state === "running")
-        .map((instance) => instance.instanceId);
-    const onlineManagedInstanceIds = await ssm.listOnlineManagedInstanceIds({
-        instanceIds: runningIds,
-    });
-    for (const instanceId of runningIds) {
-        if (!onlineManagedInstanceIds.has(instanceId)) {
-            continue;
-        }
-        if (await ssm.checkRunnerBootstrapReady(instanceId)) {
-            return instanceId;
-        }
-    }
-    throw new Error("No running SSM-managed membership runner instance is bootstrap-ready");
-}
-
-async function pollCommandStatus(
-    ssm: SsmClientLike,
-    input: { instanceId: string; commandId: string },
-): Promise<"PENDING" | "SUCCEEDED" | "FAILED"> {
-    try {
-        const invocation = await ssm.getCommandInvocation(input);
-        return normalizeCommandStatus(invocation.status);
-    } catch (error) {
-        if (isTransientCommandInvocationLookupError(error)) {
-            return "PENDING";
-        }
-        throw error;
-    }
-}
-
-function normalizeCommandStatus(status: string): "PENDING" | "SUCCEEDED" | "FAILED" {
-    if (status === "Success") {
-        return "SUCCEEDED";
-    }
-    if (status === "Pending" || status === "InProgress" || status === "Delayed") {
-        return "PENDING";
-    }
-    return "FAILED";
-}
-
-function isTransientCommandInvocationLookupError(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "name" in error &&
-        error.name === "InvocationDoesNotExist"
-    );
 }
 
 function parseTeeResult(text: string, request: IdentityVerifyRequest): MembershipTeeResult {

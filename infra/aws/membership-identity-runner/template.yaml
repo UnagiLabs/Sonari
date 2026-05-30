@@ -541,7 +541,7 @@ Resources:
             "StartInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "start_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Next": "WaitForInstance",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -550,7 +550,7 @@ Resources:
             "FindReadyInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Next": "DispatchTeeCommand",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -558,7 +558,7 @@ Resources:
             "DispatchTeeCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
               "Next": "WaitForCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -566,7 +566,7 @@ Resources:
             "PollCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
               "Next": "CommandComplete",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -583,35 +583,35 @@ Resources:
             "ReadResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ApplyResult",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ApplyResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "MarkFailed": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "MarkCommandPollingTimedOut": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "error_code": "AWS_MEMBERSHIP_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "error_code": "AWS_MEMBERSHIP_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "StopInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "stop_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "stop_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
               "End": true
