@@ -12,8 +12,12 @@
         "test": "vitest run test"
     },
     "dependencies": {
+        "@aws-sdk/client-auto-scaling": "^3.948.0",
         "@aws-sdk/client-dynamodb": "^3.948.0",
+        "@aws-sdk/client-ec2": "^3.948.0",
+        "@aws-sdk/client-s3": "^3.948.0",
         "@aws-sdk/client-sfn": "^3.948.0",
+        "@aws-sdk/client-ssm": "^3.948.0",
         "@aws-sdk/lib-dynamodb": "^3.948.0",
         "@sonari/membership-verifier-shared": "workspace:*"
     }

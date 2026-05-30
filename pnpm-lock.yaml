@@ -111,10 +111,22 @@ importers:
 
   nautilus/verifiers/membership/runner:
     dependencies:
+      '@aws-sdk/client-auto-scaling':
+        specifier: ^3.948.0
+        version: 3.1053.0
       '@aws-sdk/client-dynamodb':
         specifier: ^3.948.0
         version: 3.1053.0
+      '@aws-sdk/client-ec2':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.948.0
+        version: 3.1053.0
       '@aws-sdk/client-sfn':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-ssm':
         specifier: ^3.948.0
         version: 3.1053.0
       '@aws-sdk/lib-dynamodb':

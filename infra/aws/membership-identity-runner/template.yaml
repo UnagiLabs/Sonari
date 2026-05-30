@@ -24,6 +24,24 @@ Parameters:
   TeeArtifactSha256:
     Type: String
     Description: SHA-256 hex digest for the membership identity TEE artifact tar.gz.
+  TeeEifS3Bucket:
+    Type: String
+    Description: S3 bucket containing the membership identity Nitro Enclave EIF.
+  TeeEifS3Key:
+    Type: String
+    Description: S3 object key for the membership identity Nitro Enclave EIF.
+  TeeEifSha256:
+    Type: String
+    Description: SHA-256 hex digest for the membership identity Nitro Enclave EIF.
+  NitroEnclaveCpuCount:
+    Type: Number
+    Default: 2
+  NitroEnclaveMemoryMiB:
+    Type: Number
+    Default: 1024
+  NitroEnclaveCid:
+    Type: Number
+    Default: 16
   SigningSeedCiphertextS3Bucket:
     Type: String
     Description: S3 bucket containing the encrypted signing seed ciphertext.
@@ -40,8 +58,8 @@ Parameters:
     Description: Nitro Enclave PCR3 measurement allowed to decrypt signing material with KMS Recipient attestation.
   NitroEnclaveProcessCommand:
     Type: String
-    Default: /opt/sonari/tee-artifact/bin/membership-tee production
-    Description: Command that reads IdentityVerifyRequest JSON from stdin and writes membership TEE result JSON to stdout inside the enclave.
+    Default: /opt/sonari/bin/run-membership-identity-enclave
+    Description: Host wrapper that bridges stdin/stdout to the membership identity Nitro Enclave.
   WorldIdAppId:
     Type: String
     Description: World ID app id passed as runtime configuration to the enclave process.
@@ -182,6 +200,9 @@ Resources:
                 Resource: !Sub arn:${AWS::Partition}:s3:::${TeeArtifactS3Bucket}/${TeeArtifactS3Key}
               - Effect: Allow
                 Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${TeeEifS3Bucket}/${TeeEifS3Key}
+              - Effect: Allow
+                Action: s3:GetObject
                 Resource: !Sub arn:${AWS::Partition}:s3:::${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}
               - Effect: Allow
                 Action: s3:PutObject
@@ -233,6 +254,7 @@ Resources:
             usermod -aG ne ec2-user || true
             systemctl enable --now nitro-enclaves-allocator.service || true
             mkdir -p /opt/sonari
+            mkdir -p /opt/sonari/bin
             tee_artifact_archive=/tmp/sonari-membership-identity-tee-artifact.tar.gz
             aws s3 cp 's3://${TeeArtifactS3Bucket}/${TeeArtifactS3Key}' "$tee_artifact_archive"
             printf '%s  %s\n' '${TeeArtifactSha256}' "$tee_artifact_archive" | sha256sum -c -
@@ -241,11 +263,26 @@ Resources:
             tar -xzf "$tee_artifact_archive" -C /opt/sonari/tee-artifact
             test -x /opt/sonari/tee-artifact/bin/membership-tee
             rm -f "$tee_artifact_archive"
+            tee_eif=/opt/sonari/membership-identity-tee.eif
+            aws s3 cp 's3://${TeeEifS3Bucket}/${TeeEifS3Key}' "$tee_eif"
+            printf '%s  %s\n' '${TeeEifSha256}' "$tee_eif" | sha256sum -c -
             aws s3 cp 's3://${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}' /opt/sonari/signing-seed.ciphertext
             chown -R ec2-user:ec2-user /opt/sonari/tee-artifact
             chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact
+            chown ec2-user:ec2-user "$tee_eif"
+            chmod 0400 "$tee_eif"
             chown ec2-user:ec2-user /opt/sonari/signing-seed.ciphertext
             chmod 0400 /opt/sonari/signing-seed.ciphertext
+            cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
+            #!/bin/bash
+            set -euo pipefail
+            : "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"
+            : "${SONARI_NITRO_RUN_ENCLAVE_ARGS:?SONARI_NITRO_RUN_ENCLAVE_ARGS is required}"
+            : "${SONARI_ENCLAVE_STDIO_BRIDGE:?SONARI_ENCLAVE_STDIO_BRIDGE is required}"
+            test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
+            exec "$SONARI_ENCLAVE_STDIO_BRIDGE" $SONARI_NITRO_RUN_ENCLAVE_ARGS
+            SONARI_ENCLAVE_WRAPPER
+            chmod 0500 /opt/sonari/bin/run-membership-identity-enclave
             nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
             ${NitroEnclaveProcessCommand}
             SONARI_COMMAND
@@ -258,16 +295,46 @@ Resources:
             ${WorldIdApiBase}
             SONARI_WORLD_ID_API_BASE
             )
+            world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
+            if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
+              echo "WorldIdApiBase must be an http(s) URL" >&2
+              exit 1
+            fi
+            vsock_proxy_path="$(command -v vsock-proxy)"
+            cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
+            [Unit]
+            Description=Sonari World ID API vsock proxy for membership identity enclave
+            After=network-online.target nitro-enclaves-allocator.service
+            Wants=network-online.target nitro-enclaves-allocator.service
+
+            [Service]
+            Type=simple
+            Restart=always
+            RestartSec=2
+            ExecStart=$vsock_proxy_path 8000 $world_id_api_host 443
+
+            [Install]
+            WantedBy=multi-user.target
+            SONARI_VSOCK_PROXY
+            systemctl daemon-reload
+            systemctl enable --now sonari-world-id-vsock-proxy.service
             {
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
               echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=${SigningMaterialKmsKey}"
+              echo "SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=$tee_eif"
+              echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
+              echo "SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
-              printf 'SONARI_WORLD_ID_API_BASE=%q\n' "$world_id_api_base"
+              printf 'SONARI_WORLD_ID_UPSTREAM_API_BASE=%q\n' "$world_id_api_base"
+              echo "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
             } >/opt/sonari/runner.env
             chown ec2-user:ec2-user /opt/sonari/runner.env
             chmod 0400 /opt/sonari/runner.env
+            test -x /opt/sonari/bin/run-membership-identity-enclave
+            test -x /usr/local/bin/sonari-enclave-stdio
             systemctl is-active --quiet nitro-enclaves-allocator.service
+            systemctl is-active --quiet sonari-world-id-vsock-proxy.service
             touch /opt/sonari/bootstrap-complete
 
   RunnerAutoScalingGroup:
@@ -585,6 +652,10 @@ Outputs:
     Value: !Ref TeeArtifactS3Key
   TeeArtifactSha256Output:
     Value: !Ref TeeArtifactSha256
+  TeeEifS3KeyOutput:
+    Value: !Ref TeeEifS3Key
+  TeeEifSha256Output:
+    Value: !Ref TeeEifSha256
   RunnerAutoScalingGroupName:
     Value: !Ref RunnerAutoScalingGroup
   SubmitVerificationLambdaName:
