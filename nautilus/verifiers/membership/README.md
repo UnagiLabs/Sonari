@@ -266,6 +266,7 @@ verifier は raw personal data を output に含めない。
 identity verification request は queued job として扱う。
 job があるときだけ batch workflow を起動する。
 job が 0 件なら EC2 / Nitro Enclave は起動しない。
+AWS on-demand interface の固定内容は `infra/aws/membership-identity-runner/README.md` に置く。
 
 ```mermaid
 flowchart TD

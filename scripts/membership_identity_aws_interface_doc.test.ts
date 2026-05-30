@@ -4,13 +4,15 @@ import { describe, expect, it } from "vitest";
 
 const membershipReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/README.md");
 const teeReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/tee/README.md");
+const awsReadmePath = path.join(process.cwd(), "infra/aws/membership-identity-runner/README.md");
 
-async function readDocs(): Promise<{ membershipReadme: string; teeReadme: string }> {
-    const [membershipReadme, teeReadme] = await Promise.all([
+async function readDocs(): Promise<{ awsReadme: string; membershipReadme: string; teeReadme: string }> {
+    const [awsReadme, membershipReadme, teeReadme] = await Promise.all([
+        readFile(awsReadmePath, "utf8"),
         readFile(membershipReadmePath, "utf8"),
         readFile(teeReadmePath, "utf8"),
     ]);
-    return { membershipReadme, teeReadme };
+    return { awsReadme, membershipReadme, teeReadme };
 }
 
 describe("membership identity AWS interface docs", () => {
@@ -53,5 +55,31 @@ describe("membership identity AWS interface docs", () => {
         expect(combined).toContain("KMS");
         expect(combined).toContain("Nitro attestation");
         expect(combined).toContain("JSON 契約は変えない");
+    });
+
+    it("freezes the AWS on-demand job model and trust boundaries", async () => {
+        const { awsReadme, membershipReadme } = await readDocs();
+
+        expect(membershipReadme).toContain("infra/aws/membership-identity-runner/README.md");
+
+        for (const phrase of [
+            "SubmitVerification Lambda",
+            "verification_jobs DynamoDB",
+            "BatchVerifier Lambda",
+            "Step Functions",
+            "EC2 + Nitro",
+        ]) {
+            expect(awsReadme).toContain(phrase);
+        }
+
+        expect(awsReadme).toContain(
+            "SubmitVerification Lambda -> verification_jobs DynamoDB -> BatchVerifier Lambda -> Step Functions -> EC2 + Nitro",
+        );
+        expect(awsReadme).toContain("TEE 境界契約");
+        expect(awsReadme).toContain("#74");
+        expect(awsReadme).toContain("AWS resource はこの issue では作らない");
+        expect(awsReadme).toContain("worker は request 作成と状態管理");
+        expect(awsReadme).toContain("TEE は検証、正規化、署名");
+        expect(awsReadme).toContain("relayer は結果を配送するだけ");
     });
 });
