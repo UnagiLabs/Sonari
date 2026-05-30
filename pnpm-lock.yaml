@@ -109,6 +109,21 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  nautilus/verifiers/membership/runner:
+    dependencies:
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-sfn':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/lib-dynamodb':
+        specifier: ^3.948.0
+        version: 3.1053.0(@aws-sdk/client-dynamodb@3.1053.0)
+      '@sonari/membership-verifier-shared':
+        specifier: workspace:*
+        version: link:../shared
+
   nautilus/verifiers/membership/shared: {}
 
 packages:
