@@ -15,5 +15,8 @@ target/
 *.tsbuildinfo
 .antigravitycli/
 
-# Local AWS/Sonari dev secrets and generated wallet config.
+# Local Sonari dev secrets and generated wallet config.
+.local/
+
+# Legacy local AWS/Sonari dev secrets path. Keep ignored during migration.
 infra/aws/earthquake-runner/.local/

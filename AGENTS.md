@@ -110,6 +110,8 @@ issue 作成では `.agents/skills/prepare-issue` を必ず使用してくださ
 
 secret、API key、private credential、local MCP auth、個人用 Codex 設定、ローカルマシン固有の path、不要な生成物はコミットしないでください。
 
+Sui / Walrus を使う開発では、repo 直下の `.local/sonari-dev/` を必ず使用してください。Sui wallet、keystore、Walrus client config、generated aliases、ローカル secret copy はこの配下に置き、`infra/aws/earthquake-runner/.local/` や package-local な ad hoc path には新規作成しないでください。
+
 project-shared な Codex / agent 設定は、repository workflow として共有する意図が明確な場合のみコミットしてください。個人用 override は untracked のままにしてください。
 
 ## 依存関係

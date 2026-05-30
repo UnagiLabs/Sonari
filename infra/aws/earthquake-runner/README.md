@@ -275,7 +275,7 @@ dev deploy 用 OIDC role には、通常の CloudFormation / EC2 / IAM / Lambda 
 
 ## dev 用 Sui / Walrus secret の準備
 
-ローカル検証用の Sui wallet / Walrus config は repo 内の `infra/aws/earthquake-runner/.local/` 配下に置きます。このディレクトリは gitignore 済みで、秘密鍵や keystore を含むファイルを commit してはいけません。
+ローカル検証用の Sui wallet / Walrus config は repo 直下の `.local/sonari-dev/` 配下に置きます。このディレクトリは gitignore 済みで、秘密鍵や keystore を含むファイルを commit してはいけません。Sui / Walrus は earthquake runner 以外の開発でも使うため、`infra/aws/earthquake-runner/.local/` ではなく repo 共通の `.local/` を使います。
 
 AWS Secrets Manager に入れるファイルは、EC2 上の path に合わせたコピーを使います。
 
