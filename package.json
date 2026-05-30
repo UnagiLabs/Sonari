@@ -28,6 +28,7 @@
         "oracle:e2e:fake-binding": "tsx scripts/nautilus_fake_binding_e2e.ts",
         "oracle:e2e:live": "tsx scripts/nautilus_live_e2e.ts",
         "identity:smoke": "tsx scripts/membership_identity_smoke.ts",
+        "identity:sidecar:local": "tsx scripts/membership_identity_sidecar.ts",
         "test:oracle": "pnpm --filter './nautilus/verifiers/earthquake/**' test && cargo test -p tee",
         "test:identity": "cargo test -p membership-tee"
     },
