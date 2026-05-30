@@ -24,7 +24,11 @@
             "nautilus/verifiers/earthquake/relayer/src/**/*.ts",
             "nautilus/verifiers/membership/shared/package.json",
             "nautilus/verifiers/membership/shared/tsconfig.json",
-            "nautilus/verifiers/membership/shared/src/**/*.ts"
+            "nautilus/verifiers/membership/shared/src/**/*.ts",
+            "nautilus/verifiers/membership/runner/package.json",
+            "nautilus/verifiers/membership/runner/tsconfig.json",
+            "nautilus/verifiers/membership/runner/src/**/*.ts",
+            "nautilus/verifiers/membership/runner/test/**/*.ts"
         ]
     },
     "formatter": {

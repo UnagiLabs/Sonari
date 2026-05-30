@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 const membershipReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/README.md");
 const teeReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/tee/README.md");
 const awsReadmePath = path.join(process.cwd(), "infra/aws/membership-identity-runner/README.md");
+const awsEvidenceTemplatePath = path.join(
+    process.cwd(),
+    "infra/aws/membership-identity-runner/evidence-template.md",
+);
 
 async function readDocs(): Promise<{
     awsReadme: string;
@@ -81,9 +85,10 @@ describe("membership identity AWS interface docs", () => {
         expect(awsReadme).toContain(
             "SubmitVerification Lambda -> verification_jobs DynamoDB -> BatchVerifier Lambda -> Step Functions -> EC2 + Nitro",
         );
-        expect(awsReadme).toContain("TEE 境界契約");
+        expect(awsReadme).toContain("Trust boundary");
         expect(awsReadme).toContain("#74");
-        expect(awsReadme).toContain("AWS resource はこの issue では作らない");
+        expect(awsReadme).toContain("Operator runbook");
+        expect(awsReadme).toContain("Credential absence means issue cannot be closed");
         expect(awsReadme).toContain("worker は request 作成と状態管理");
         expect(awsReadme).toContain("TEE は検証、正規化、署名");
         expect(awsReadme).toContain("relayer は結果を配送するだけ");
@@ -109,7 +114,8 @@ describe("membership identity AWS interface docs", () => {
 
         expect(awsReadme).toContain("Walrus CLI を含めない");
         expect(awsReadme).toContain("membership TEE は Walrus を呼ばない");
-        expect(awsReadme).toContain("Nitro Enclave image 化は後続");
+        expect(awsReadme).toContain("membership-identity-tee.eif");
+        expect(awsReadme).toContain("KMS/Nitro attestation measurements");
         expect(awsReadme).toContain("stdin/stdout 契約は変えない");
     });
 
@@ -118,5 +124,43 @@ describe("membership identity AWS interface docs", () => {
 
         expect(teeReadme).toContain("KYC_UNSUPPORTED");
         expect(teeReadme).not.toContain("KYC_NOT_IMPLEMENTED");
+    });
+
+    it("documents the operator runbook and evidence capture terms for issue 74 step 6", async () => {
+        const [{ awsReadme }, awsEvidenceTemplate] = await Promise.all([
+            readDocs(),
+            readFile(awsEvidenceTemplatePath, "utf8"),
+        ]);
+        const combined = `${awsReadme}\n${awsEvidenceTemplate}`;
+
+        for (const phrase of [
+            "Operator runbook",
+            "Required artifacts",
+            "membership-identity-tee-artifact.tar.gz",
+            "membership-identity-tee.eif",
+            "KMS/Nitro attestation measurements",
+            "ImageSha384",
+            "PCR3",
+            "encrypted signing material",
+            "World ID app/proof inputs",
+            "Stack parameters",
+            "Sui object IDs",
+            "Local unit tests",
+            "AWS deployment smoke",
+            "Nitro Enclave start",
+            "vsock-proxy World ID real API smoke",
+            "Sui dry-run",
+            "Sui submit",
+            "post-tx membership pass state readback",
+            "credential absence means issue cannot be closed",
+            "Stack name:",
+            "Artifact checksum:",
+            "EIF identity:",
+            "Public key:",
+            "Tx digest:",
+            "Post-tx readback:",
+        ]) {
+            expect(combined).toContain(phrase);
+        }
     });
 });

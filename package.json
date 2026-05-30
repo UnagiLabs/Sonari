@@ -20,6 +20,8 @@
         "test:local-e2e": "vitest run scripts",
         "build:aws-earthquake-lambda": "tsx scripts/build_aws_earthquake_lambda.ts",
         "build:aws-earthquake-tee-artifact": "tsx scripts/build_aws_earthquake_tee_artifact.ts",
+        "build:aws-membership-identity-tee-artifact": "tsx scripts/build_aws_membership_identity_tee_artifact.ts",
+        "build:aws-membership-identity-eif": "tsx scripts/build_aws_membership_identity_eif.ts",
         "test:relayer": "pnpm --filter @sonari/earthquake-relayer test",
         "relayer": "pnpm --filter @sonari/earthquake-relayer cli",
         "oracle:sidecar:local": "tsx scripts/nautilus_sidecar.ts",
@@ -30,6 +32,7 @@
         "identity:smoke": "tsx scripts/membership_identity_smoke.ts",
         "identity:sidecar:local": "tsx scripts/membership_identity_sidecar.ts",
         "identity:move-handoff": "tsx scripts/membership_identity_move_handoff.ts",
+        "identity:live-gate": "tsx scripts/membership_identity_live_gate.ts",
         "test:oracle": "pnpm --filter './nautilus/verifiers/earthquake/**' test && cargo test -p tee",
         "test:identity": "cargo test -p membership-tee"
     },
