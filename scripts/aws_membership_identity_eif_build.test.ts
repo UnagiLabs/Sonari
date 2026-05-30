@@ -44,6 +44,26 @@ describe("AWS membership identity EIF build script", () => {
         ]);
     });
 
+    it("can build a non-mainnet dummy World ID EIF with the fixture verifier", () => {
+        const plan = createAwsMembershipIdentityEifBuildPlan({
+            artifactPath: "dist/aws/membership-identity-tee-artifact.tar.gz",
+            eifPath: "dist/aws/membership-identity-tee-dummy.eif",
+            workDir: ".build/aws-membership-identity-eif-dummy",
+            teeMode: "fixture",
+            worldIdStatus: "verified",
+            worldAppId: "app_staging_dummy",
+        });
+
+        expect(plan.teeCommand).toEqual([
+            "/opt/sonari/tee-artifact/bin/membership-tee",
+            "fixture",
+            "--world-id-status",
+            "verified",
+            "--world-app-id",
+            "app_staging_dummy",
+        ]);
+    });
+
     it("documents that the EIF container runs membership-tee production without Walrus", async () => {
         const script = await readFile(
             path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),

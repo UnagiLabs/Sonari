@@ -35,7 +35,6 @@ const REQUIRED_ENV_NAMES = [
     "SIGNING_SEED_CIPHERTEXT_S3_BUCKET",
     "SIGNING_SEED_CIPHERTEXT_S3_KEY",
     "SONARI_WORLD_ID_APP_ID",
-    "SONARI_WORLD_ID_API_BASE",
     "SONARI_WORLD_ID_NULLIFIER_HASH",
     "SONARI_WORLD_ID_MERKLE_ROOT",
     "SONARI_WORLD_ID_PROOF",
@@ -57,6 +56,8 @@ const REQUIRED_ENV_NAMES = [
     "SONARI_LIVE_EVIDENCE_PATH",
 ] as const;
 
+type WorldIdProofMode = "real" | "dummy";
+
 const SHA256_ENV_NAMES = ["TEE_ARTIFACT_SHA256", "TEE_EIF_SHA256"] as const;
 const SHA384_ENV_NAMES = ["NITRO_ENCLAVE_IMAGE_SHA384", "NITRO_ENCLAVE_PCR3"] as const;
 const SUI_OBJECT_ID_ENV_NAMES = [
@@ -73,6 +74,7 @@ export async function validateMembershipIdentityLiveGate(
 ): Promise<MembershipIdentityLiveGateResult> {
     const env = options.env ?? process.env;
     const checks: LiveGateCheck[] = [];
+    const proofMode = resolveWorldIdProofMode(env.SONARI_WORLD_ID_PROOF_MODE, env.RELAYER_NETWORK);
 
     for (const name of REQUIRED_ENV_NAMES) {
         checks.push(checkRequired(name, env[name]));
@@ -88,8 +90,9 @@ export async function validateMembershipIdentityLiveGate(
         checks.push(checkSuiObjectId(name, env[name]));
     }
     checks.push(checkSuiObjectId("SONARI_SUI_CLOCK_ID", env.SONARI_SUI_CLOCK_ID ?? "0x6"));
+    checks.push(checkWorldIdProofMode(proofMode, env.RELAYER_NETWORK));
     checks.push(checkWorldIdAction(env.SONARI_WORLD_ID_ACTION));
-    checks.push(checkHttpsUrl("SONARI_WORLD_ID_API_BASE", env.SONARI_WORLD_ID_API_BASE));
+    checks.push(checkWorldIdApiBase(proofMode.value, env.SONARI_WORLD_ID_API_BASE));
     checks.push(checkRelayerNetwork(env.RELAYER_NETWORK));
     checks.push(checkRelayerGrpcUrl(env.RELAYER_NETWORK, env.RELAYER_GRPC_URL));
     checks.push(checkRelayerSubmitGuard(env.RELAYER_MODE, env.RELAYER_ALLOW_SUBMIT));
@@ -151,6 +154,68 @@ function checkWorldIdAction(value: string | undefined): LiveGateCheck {
         status: "fail",
         message: "SONARI_WORLD_ID_ACTION must be sonari_membership_register_v1",
     };
+}
+
+function resolveWorldIdProofMode(
+    value: string | undefined,
+    network: string | undefined,
+): { readonly value: WorldIdProofMode | "invalid"; readonly inferred: boolean } {
+    if (value === "real" || value === "dummy") {
+        return { value, inferred: false };
+    }
+    if (value !== undefined && value.length > 0) {
+        return { value: "invalid", inferred: false };
+    }
+    if (network === "testnet" || network === "devnet") {
+        return { value: "dummy", inferred: true };
+    }
+    return { value: "real", inferred: true };
+}
+
+function checkWorldIdProofMode(
+    mode: { readonly value: WorldIdProofMode | "invalid"; readonly inferred: boolean },
+    network: string | undefined,
+): LiveGateCheck {
+    if (mode.value === "invalid") {
+        return {
+            name: "SONARI_WORLD_ID_PROOF_MODE",
+            status: "fail",
+            message: "SONARI_WORLD_ID_PROOF_MODE must be real or dummy",
+        };
+    }
+    if (mode.value === "dummy") {
+        if (network === "testnet" || network === "devnet") {
+            return {
+                name: "SONARI_WORLD_ID_PROOF_MODE",
+                status: "ok",
+                message: `dummy allowed on ${network}`,
+            };
+        }
+        return {
+            name: "SONARI_WORLD_ID_PROOF_MODE",
+            status: "fail",
+            message: "dummy World ID proof mode is only allowed on testnet or devnet",
+        };
+    }
+    return {
+        name: "SONARI_WORLD_ID_PROOF_MODE",
+        status: "ok",
+        message: mode.inferred ? "real inferred" : "real",
+    };
+}
+
+function checkWorldIdApiBase(
+    mode: WorldIdProofMode | "invalid",
+    value: string | undefined,
+): LiveGateCheck {
+    if (mode === "dummy" && !isNonEmptyString(value)) {
+        return {
+            name: "SONARI_WORLD_ID_API_BASE",
+            status: "ok",
+            message: "not required for dummy proof mode",
+        };
+    }
+    return checkHttpsUrl("SONARI_WORLD_ID_API_BASE", value);
 }
 
 function checkHttpsUrl(name: string, value: string | undefined): LiveGateCheck {

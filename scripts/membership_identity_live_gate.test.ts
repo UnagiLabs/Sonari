@@ -30,7 +30,10 @@ describe("membership identity live gate", () => {
 
     it("passes dry validation when issue 74 live close-out inputs are present", async () => {
         const result = await validateMembershipIdentityLiveGate({
-            env: completeEnv(),
+            env: {
+                ...completeEnv(),
+                SONARI_WORLD_ID_PROOF_MODE: "real",
+            },
         });
 
         expect(result.ok).toBe(true);
@@ -49,8 +52,56 @@ describe("membership identity live gate", () => {
                     status: "ok",
                 }),
                 expect.objectContaining({
+                    name: "SONARI_WORLD_ID_PROOF_MODE",
+                    status: "ok",
+                    message: "real",
+                }),
+                expect.objectContaining({
                     name: "RELAYER_SUBMIT_GUARD",
                     status: "ok",
+                }),
+            ]),
+        );
+    });
+
+    it("allows same-shape dummy World ID proof only on non-mainnet Sui networks", async () => {
+        const result = await validateMembershipIdentityLiveGate({
+            env: {
+                ...completeEnv(),
+                RELAYER_NETWORK: "devnet",
+                RELAYER_GRPC_URL: "https://fullnode.devnet.sui.io:443",
+                SONARI_WORLD_ID_PROOF_MODE: "dummy",
+            },
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.checks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    name: "SONARI_WORLD_ID_PROOF_MODE",
+                    status: "ok",
+                    message: "dummy allowed on devnet",
+                }),
+            ]),
+        );
+    });
+
+    it("rejects dummy World ID proof mode on mainnet", async () => {
+        const result = await validateMembershipIdentityLiveGate({
+            env: {
+                ...completeEnv(),
+                RELAYER_NETWORK: "mainnet",
+                RELAYER_GRPC_URL: "https://fullnode.mainnet.sui.io:443",
+                SONARI_WORLD_ID_PROOF_MODE: "dummy",
+            },
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.checks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    name: "SONARI_WORLD_ID_PROOF_MODE",
+                    status: "fail",
                 }),
             ]),
         );

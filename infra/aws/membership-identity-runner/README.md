@@ -66,6 +66,17 @@ AWS passes one `IdentityVerifyRequest` JSON value on stdin. The TEE returns one
 JSON value on stdout. This 1 request = 1 JSON in / 1 JSON out contract does not
 change.
 
+For devnet and testnet smoke verification, build a dummy-proof EIF that keeps
+the same `IdentityVerifyRequest.world_id` shape but uses the fixture verifier:
+
+```bash
+pnpm build:aws-membership-identity-eif -- --tee-mode fixture --world-id-status verified --world-app-id app_staging_dummy --out dist/aws/membership-identity-tee-dummy.eif
+```
+
+Use this only with `SONARI_WORLD_ID_PROOF_MODE=dummy` and
+`RELAYER_NETWORK=devnet` or `RELAYER_NETWORK=testnet`. Mainnet must use
+`membership-tee production` with a real World ID proof.
+
 Statuses are fixed to:
 
 ```text
@@ -163,7 +174,7 @@ preventing decrypt of the encrypted signing material.
 
 ### World ID app/proof inputs
 
-Use real World ID proof inputs for the live smoke:
+Use real World ID proof inputs for mainnet live smoke:
 
 - `SONARI_WORLD_ID_APP_ID`
 - `SONARI_WORLD_ID_API_BASE`, normally the vsock-proxy endpoint inside the
@@ -178,6 +189,10 @@ Use real World ID proof inputs for the live smoke:
 
 The request must also include `registry_id`, `membership_id`, `owner`,
 `terms_version`, and `signed_statement_hash`.
+
+For devnet/testnet only, dummy proof mode may use experimental values with the
+same fields. Set `SONARI_WORLD_ID_PROOF_MODE=dummy`; the live gate rejects this
+mode when `RELAYER_NETWORK=mainnet`.
 
 ### Stack parameters
 

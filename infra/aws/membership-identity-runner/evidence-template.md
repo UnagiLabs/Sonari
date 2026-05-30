@@ -43,6 +43,7 @@ KMS/Nitro attestation measurements checked:
 
 ## World ID app/proof inputs
 
+World ID proof mode (real/dummy):
 World ID app id:
 World ID API base:
 World ID action:
