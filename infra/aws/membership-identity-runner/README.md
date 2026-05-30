@@ -1,20 +1,14 @@
-# Membership identity AWS runner
+# Membership identity AWS runner 運用手順
 
-This document is the operator runbook for issue #74 step 6. It covers the
-path from local artifact build through AWS deploy, World ID verification, Sui
-dry-run, Sui submit, and post-tx membership pass state readback.
+この文書は、issue #74 step 6 の運用 runbook です。local artifact build から AWS deploy、World ID verification、Sui dry-run、Sui submit、post-tx membership pass state readback までの手順を扱います。
 
-Credential absence means issue cannot be closed. If AWS credentials, World ID
-app/proof inputs, Sui object IDs, or Sui submit signer material are missing,
-stop at the matching gate and record that blocker in the evidence template.
+AWS credential、World ID app / proof input、Sui object ID、Sui submit signer material がない場合、この issue は close できません。不足がある場合は、該当 gate で止め、blocker を evidence template に記録してください。
 
-The evidence template is
-`infra/aws/membership-identity-runner/evidence-template.md`.
+Evidence template は `infra/aws/membership-identity-runner/evidence-template.md` です。
 
-## Job model
+## Job モデル
 
-Identity verification requests are queued jobs. When there are no due jobs,
-EC2 + Nitro capacity stays at zero.
+Identity verification request は queued job として扱います。処理対象 job がない場合、EC2 + Nitro capacity は zero のままです。
 
 ```text
 SubmitVerification Lambda -> verification_jobs DynamoDB -> BatchVerifier Lambda -> Step Functions -> EC2 + Nitro
@@ -41,43 +35,33 @@ flowchart TD
   Tee --> Result
 ```
 
-## Trust boundary
+## 信頼境界
 
-worker は request 作成と状態管理を担当する。
-worker は TEE stdout の意味を変えない。
+worker は request 作成と状態管理を担当します。worker は TEE stdout の意味を変えてはいけません。
 
-TEE は検証、正規化、署名を担当する。
-TEE は stdin の `IdentityVerifyRequest` を検証する。
-TEE は stdout に status 付き JSON を 1 つ返す。
+TEE は検証、正規化、署名を担当します。TEE は stdin の `IdentityVerifyRequest` を検証し、stdout に status 付き JSON を 1 つ返します。
 
-relayer は結果を配送するだけである。
-relayer は payload の意味を変更しない。
-Move contract は署名済み verified payload だけを信頼する。
+relayer は結果を配送するだけです。relayer は payload の意味を変更してはいけません。Move contract は署名済み verified payload だけを信頼します。
 
-## Fixed TEE interface
+## 固定 TEE interface
 
-AWS calls this command:
+AWS は次の command を呼び出します。
 
 ```bash
 membership-tee production
 ```
 
-AWS passes one `IdentityVerifyRequest` JSON value on stdin. The TEE returns one
-JSON value on stdout. This 1 request = 1 JSON in / 1 JSON out contract does not
-change.
+AWS は stdin に `IdentityVerifyRequest` JSON value を 1 つ渡します。TEE は stdout に JSON value を 1 つ返します。この 1 request = 1 JSON in / 1 JSON out の contract は変えません。
 
-For devnet and testnet smoke verification, build a dummy-proof EIF that keeps
-the same `IdentityVerifyRequest.world_id` shape but uses the fixture verifier:
+devnet と testnet の smoke verification では、同じ `IdentityVerifyRequest.world_id` shape を保ちつつ fixture verifier を使う dummy-proof EIF を build します。
 
 ```bash
 pnpm build:aws-membership-identity-eif -- --tee-mode fixture --world-id-status verified --world-app-id app_staging_dummy --out dist/aws/membership-identity-tee-dummy.eif
 ```
 
-Use this only with `SONARI_WORLD_ID_PROOF_MODE=dummy` and
-`RELAYER_NETWORK=devnet` or `RELAYER_NETWORK=testnet`. Mainnet must use
-`membership-tee production` with a real World ID proof.
+これは `SONARI_WORLD_ID_PROOF_MODE=dummy` かつ `RELAYER_NETWORK=devnet` または `RELAYER_NETWORK=testnet` の場合だけ使います。mainnet では real World ID proof を使った `membership-tee production` が必須です。
 
-Statuses are fixed to:
+Status は次の値に固定します。
 
 ```text
 verified
@@ -86,10 +70,9 @@ pending_source
 unsupported
 ```
 
-`pending_source` は earthquake verifier と同じ再試行用の語である。
-運用ツールは同じ語を見て retry や監視を組み立てられる。
+`pending_source` は earthquake verifier と同じ再試行用の語です。運用ツールは同じ語を見て retry や監視を組み立てられます。
 
-AWS 境界 interface として固定する env は次の 3 つである。
+AWS 境界 interface として固定する env は次の 3 つです。
 
 ```text
 SONARI_TEE_SIGNING_KEY_SEED
@@ -97,28 +80,20 @@ SONARI_TEE_SIGNING_KEY_SEED_FILE
 SONARI_WORLD_ID_API_BASE
 ```
 
-`SONARI_WORLD_ID_APP_ID` is production runtime config. In AWS it is injected from
-deploy config into the TEE process env. The signing seed must not be injected as
-plaintext in Lambda or on the EC2 host; production signing material is encrypted
-and decrypted only through KMS/Nitro attestation measurements.
+`SONARI_WORLD_ID_APP_ID` は production runtime config です。AWS では deploy config から TEE process env に注入します。Signing seed は Lambda や EC2 host に平文で注入してはいけません。本番 signing material は暗号化し、KMS / Nitro attestation measurement を通してのみ decrypt します。
 
-## Required artifacts
+## 必須 artifact
 
-Build and retain these before deploy:
+deploy 前に次を build し、保持します。
 
 - `dist/aws/membership-identity-tee-artifact.tar.gz`
 - `dist/aws/membership-identity-tee-artifact.tar.gz.sha256`
 - `dist/aws/membership-identity-tee.eif`
-- `dist/aws/membership-identity-tee.eif.sha256`, or the equivalent EIF checksum
-  captured from the build/deploy system
-- Lambda code bundle uploaded to S3 for `LambdaCodeS3Bucket` and
-  `LambdaCodeS3Key`
-- encrypted signing material uploaded to S3 for
-  `SigningSeedCiphertextS3Bucket` and `SigningSeedCiphertextS3Key`
+- `dist/aws/membership-identity-tee.eif.sha256`、または build / deploy system から取得した同等の EIF checksum
+- `LambdaCodeS3Bucket` と `LambdaCodeS3Key` 用に S3 upload した Lambda code bundle
+- `SigningSeedCiphertextS3Bucket` と `SigningSeedCiphertextS3Key` 用に S3 upload した encrypted signing material
 
-The membership artifact is built from
-`scripts/build_aws_membership_identity_tee_artifact.ts`, which follows the
-earthquake reference `scripts/build_aws_earthquake_tee_artifact.ts`.
+Membership artifact は `scripts/build_aws_membership_identity_tee_artifact.ts` から build します。この script は earthquake 側の reference である `scripts/build_aws_earthquake_tee_artifact.ts` に従います。
 
 ```bash
 pnpm build:aws-membership-identity-tee-artifact
@@ -144,21 +119,17 @@ Artifact command:
 bin/membership-tee production
 ```
 
-Walrus CLI を含めない。
-membership TEE は Walrus を呼ばない。
-stdin/stdout 契約は変えない。
+Walrus CLI を含めません。membership TEE は Walrus を呼びません。stdin/stdout 契約は変えません。
 
-## KMS/Nitro attestation measurements
+## KMS / Nitro attestation measurement の取得
 
-Capture the EIF identity before deploying the stack parameters:
+Stack parameter を deploy する前に、EIF identity を取得します。
 
 - EIF identity
 - ImageSha384
 - PCR3
 
-Use the measurements from `nitro-cli build-enclave` output or the available
-Nitro CLI inspection command in the target AMI. The CloudFormation template
-gates KMS decrypt on:
+Target AMI 上で `nitro-cli build-enclave` output、または利用可能な Nitro CLI inspection command から measurement を取得します。CloudFormation template は次の条件で KMS decrypt を gate します。
 
 ```text
 NitroEnclaveImageSha384
@@ -167,36 +138,31 @@ kms:RecipientAttestation:ImageSha384
 kms:RecipientAttestation:PCR3
 ```
 
-Do not deploy with placeholder measurements. A mismatch must fail closed by
-preventing decrypt of the encrypted signing material.
+Placeholder measurement で deploy してはいけません。不一致は encrypted signing material の decrypt を防ぎ、fail-closed になる必要があります。
 
-## Required operator inputs
+## 必須 operator input
 
-### World ID app/proof inputs
+### World ID app / proof input
 
-Use real World ID proof inputs for mainnet live smoke:
+mainnet live smoke では real World ID proof input を使います。
 
 - `SONARI_WORLD_ID_APP_ID`
-- `SONARI_WORLD_ID_API_BASE`, normally the vsock-proxy endpoint inside the
-  enclave path
+- `SONARI_WORLD_ID_API_BASE`: 通常は enclave path 内の vsock-proxy endpoint
 - `world_id.world_app_id`
 - `world_id.nullifier_hash`
 - `world_id.merkle_root`
 - `world_id.proof`
 - `world_id.verification_level`
-- `world_id.action`, expected `sonari_membership_register_v1`
+- `world_id.action`: 期待値は `sonari_membership_register_v1`
 - `world_id.signal_hash`
 
-The request must also include `registry_id`, `membership_id`, `owner`,
-`terms_version`, and `signed_statement_hash`.
+request には `registry_id`、`membership_id`、`owner`、`terms_version`、`signed_statement_hash` も含める必要があります。
 
-For devnet/testnet only, dummy proof mode may use experimental values with the
-same fields. Set `SONARI_WORLD_ID_PROOF_MODE=dummy`; the live gate rejects this
-mode when `RELAYER_NETWORK=mainnet`.
+devnet / testnet の場合のみ、dummy proof mode で同じ field を持つ experimental value を使えます。`SONARI_WORLD_ID_PROOF_MODE=dummy` を設定してください。`RELAYER_NETWORK=mainnet` の場合、live gate はこの mode を拒否します。
 
-### Stack parameters
+### Stack parameter
 
-The AWS deployment requires these stack parameters at minimum:
+AWS deployment には、少なくとも次の stack parameter が必要です。
 
 - `VpcId`
 - `SubnetIds`
@@ -222,9 +188,9 @@ The AWS deployment requires these stack parameters at minimum:
 - `ScheduleState`
 - `GitCommitSha`
 
-### Sui object IDs
+### Sui object ID
 
-Sui dry-run, Sui submit, and post-tx membership pass state readback require:
+Sui dry-run、Sui submit、post-tx membership pass state readback には次が必要です。
 
 - `SONARI_IDENTITY_PACKAGE_ID`
 - `SONARI_IDENTITY_PAUSE_STATE_ID`
@@ -232,19 +198,19 @@ Sui dry-run, Sui submit, and post-tx membership pass state readback require:
 - `SONARI_MEMBERSHIP_REGISTRY_ID`
 - `SONARI_VERIFIER_REGISTRY_ID`
 - `SONARI_MEMBERSHIP_PASS_ID`
-- `SONARI_SUI_CLOCK_ID`, default `0x6`
-- `RELAYER_NETWORK`, such as `testnet`
+- `SONARI_SUI_CLOCK_ID`: default は `0x6`
+- `RELAYER_NETWORK`: 例 `testnet`
 - `RELAYER_GRPC_URL`
 - `RELAYER_SENDER_ADDRESS`
-- `RELAYER_MODE`, first `dry_run`, then `submit`
-- `RELAYER_ALLOW_SUBMIT=true` for submit only
-- `RELAYER_SIGNER_SECRET_ARN` for submit only
+- `RELAYER_MODE`: 最初は `dry_run`、次に `submit`
+- `RELAYER_ALLOW_SUBMIT=true`: submit のみ
+- `RELAYER_SIGNER_SECRET_ARN`: submit のみ
 
-## Operator runbook
+## 運用 runbook
 
-### 1. Local unit tests
+### 1. Local unit test
 
-Run local unit tests before uploading artifacts:
+Artifact を upload する前に local unit test を実行します。
 
 ```bash
 pnpm exec vitest run scripts/membership_identity_aws_interface_doc.test.ts
@@ -253,12 +219,11 @@ pnpm --filter @sonari/membership-verifier-runner test
 cargo test -p membership-tee
 ```
 
-Record the command, exit code, and relevant log path in the evidence template.
+Command、exit code、関連 log path を evidence template に記録します。
 
-### 2. Build, checksum, and upload artifacts
+### 2. Artifact build、checksum、upload
 
-Build the tar and EIF, verify the tar checksum, and upload the required
-artifacts to S3.
+tar と EIF を build し、tar checksum を検証し、必須 artifact を S3 に upload します。
 
 ```bash
 pnpm build:aws-membership-identity-tee-artifact
@@ -266,13 +231,11 @@ pnpm build:aws-membership-identity-eif
 sha256sum -c dist/aws/membership-identity-tee-artifact.tar.gz.sha256
 ```
 
-Record the tar artifact checksum, EIF checksum, EIF identity, ImageSha384, and
-PCR3.
+tar artifact checksum、EIF checksum、EIF identity、ImageSha384、PCR3 を記録します。
 
-### 3. Deploy or update the AWS stack
+### 3. AWS stack の deploy または update
 
-Deploy with all stack parameters resolved from the evidence file or secure
-parameter storage.
+Evidence file または secure parameter storage からすべての stack parameter を解決して deploy します。
 
 ```bash
 aws cloudformation deploy \
@@ -302,7 +265,7 @@ aws cloudformation deploy \
 
 ### 4. AWS deployment smoke
 
-After deploy, read stack outputs and confirm the private control plane exists:
+Deploy 後、stack output を読み、private control plane が存在することを確認します。
 
 ```bash
 aws cloudformation describe-stacks --stack-name "$STACK_NAME"
@@ -312,12 +275,11 @@ aws lambda get-function --function-name "$BATCH_VERIFIER_LAMBDA_NAME"
 aws stepfunctions describe-state-machine --state-machine-arn "$RUNNER_STATE_MACHINE_ARN"
 ```
 
-Record stack name, output names, and smoke result.
+Stack name、output name、smoke result を記録します。
 
 ### 5. Nitro Enclave start
 
-Trigger one queued job and confirm the workflow starts EC2 capacity, starts the
-Nitro Enclave, and returns capacity to zero after completion or failure.
+Queued job を 1 つ trigger し、workflow が EC2 capacity を起動し、Nitro Enclave を起動し、完了または失敗後に capacity を zero に戻すことを確認します。
 
 ```bash
 aws autoscaling describe-auto-scaling-groups \
@@ -327,40 +289,35 @@ aws stepfunctions list-executions \
   --max-results 5
 ```
 
-On the instance, the runner command uses `nitro-cli run-enclave` with the
-configured CPU, memory, CID, and EIF path.
+Instance 上では、runner command が設定済み CPU、memory、CID、EIF path で `nitro-cli run-enclave` を使います。
 
 ### 6. vsock-proxy World ID real API smoke
 
-Submit a real World ID request and verify the enclave reaches the World ID API
-only through vsock-proxy. A proxy failure must produce a fail-closed error or
-`pending_source`; it must not fall back to direct host-side proof acceptance.
+Real World ID request を submit し、enclave が vsock-proxy 経由でのみ World ID API に到達することを確認します。Proxy failure は fail-closed error または `pending_source` を返す必要があります。host 側で直接 proof を受け入れる fallback があってはいけません。
 
-Record:
+記録するもの:
 
 - World ID app id
-- redacted proof request id or job id
+- redacted proof request id または job id
 - TEE stdout status
-- public key for verified output
+- verified output の public key
 - sanitized CloudWatch log location
 
 ### 7. Sui dry-run
 
-Set relayer mode to dry-run first:
+最初に relayer mode を dry-run にします。
 
 ```bash
 RELAYER_MODE=dry_run
 ```
 
-Run the workflow through `dry_run_sui_submission`. The dry-run must use the
-signed `payload_bcs_hex`, `signature`, and `public_key` without changing their
-meaning.
+Workflow を `dry_run_sui_submission` まで実行します。dry-run は、署名済み `payload_bcs_hex`、`signature`、`public_key` の意味を変えずに使う必要があります。
 
-Record the dry-run result and effects.
+Dry-run result と effects を記録します。
 
 ### 8. Sui submit
 
-Submit only after dry-run succeeds and the signer secret is configured:
+Dry-run が成功し、signer secret が設定された後にだけ submit します。
 
 ```bash
 RELAYER_MODE=submit
@@ -368,30 +325,26 @@ RELAYER_ALLOW_SUBMIT=true
 RELAYER_SIGNER_SECRET_ARN="$RELAYER_SIGNER_SECRET_ARN"
 ```
 
-The submit path calls `accessor::update_identity_verification` and stores the tx
-digest. Record the tx digest and do not overwrite it on duplicate completion.
+Submit path は `accessor::update_identity_verification` を呼び、tx digest を保存します。tx digest を記録し、duplicate completion で上書きしてはいけません。
 
-### 9. post-tx membership pass state readback
+### 9. Post-tx membership pass state readback
 
-Read `SONARI_MEMBERSHIP_PASS_ID` from the same Sui network after the tx digest
-is finalized. Confirm the membership pass identity verification fields reflect
-the submitted verified payload.
+Tx digest が finalized された後、同じ Sui network から `SONARI_MEMBERSHIP_PASS_ID` を読みます。Membership pass の identity verification field が submit した verified payload を反映していることを確認します。
 
-Record the post-tx membership pass state readback, including:
+記録するもの:
 
 - membership pass object id
 - identity verified flag
-- provider mask or provider field
-- verified/expires timestamps
+- provider mask または provider field
+- verified / expires timestamp
 - terms version
 - signed statement hash
 
-Issue #74 can close only after this readback matches the tx digest evidence.
+Issue #74 は、この readback が tx digest evidence と一致した後にだけ close できます。
 
 ## Evidence gate
 
-Fill `evidence-template.md` during the live run. The minimum close-out evidence
-is:
+Live run 中に `evidence-template.md` を埋めます。Close-out に必要な最小 evidence は次の通りです。
 
 - stack name
 - artifact checksum
@@ -402,4 +355,4 @@ is:
 - tx digest
 - post-tx readback
 
-credential absence means issue cannot be closed.
+Credential がない場合、この issue は close できません。

@@ -45,13 +45,13 @@ describe("AWS Sonari verifier runner README", () => {
         expectContainsAll(readme, [
             "earthquake manual workflow",
             "membership dummy proof smoke",
-            "devnet or testnet only",
-            "mainnet dummy proof is rejected before deploy",
-            "unresolved CloudWatch log errors",
+            "devnet または testnet 専用",
+            "mainnet dummy proof が deploy 前に拒否",
+            "未解決の CloudWatch log error",
             "RunnerAutoScalingGroupName",
             "DesiredCapacity",
             "InService",
-            "running EC2 instances: 0",
+            "running EC2 instances が `0`",
             "WatcherScheduleName",
             "BatchScheduleName",
             "DISABLED",
@@ -62,14 +62,14 @@ describe("AWS Sonari verifier runner README", () => {
         const readme = await readReadme();
 
         expectContainsAll(readme, [
-            "Only after the new stack smoke succeeds",
-            "resource inventory confirms idle",
-            "old S3 prefixes",
-            "old Lambda zip objects",
-            "old TEE tarball objects",
-            "old EIF objects",
-            "old SHA objects",
-            "Real old AWS stack deletion is a follow-up and out of scope",
+            "新 stack の smoke が成功",
+            "resource inventory で idle が確認",
+            "古い S3 prefix",
+            "古い Lambda zip object",
+            "古い TEE tarball object",
+            "古い EIF object",
+            "古い SHA object",
+            "実際の古い AWS stack 削除は follow-up",
         ]);
     });
 
@@ -78,18 +78,18 @@ describe("AWS Sonari verifier runner README", () => {
 
         expectContainsAll(readme, [
             "Cost Explorer",
-            "Cost Explorer can lag",
-            "before deploy",
-            "after cleanup",
+            "Cost Explorer は遅延",
+            "deploy 前",
+            "cleanup 後",
             "running EC2",
             "ASG desired/running",
-            "NAT gateways",
-            "Elastic IPs",
-            "load balancers",
-            "EventBridge schedules",
-            "CloudFormation stacks",
+            "NAT gateway",
+            "Elastic IP",
+            "load balancer",
+            "EventBridge schedule",
+            "CloudFormation stack",
             "S3 inventory",
-            "Rollback is Git revert plus redeploy",
+            "Rollback は Git revert と redeploy",
         ]);
         expect(readme).not.toContain("rollback to earthquake-runner");
         expect(readme).not.toContain("rollback to membership-identity-runner");

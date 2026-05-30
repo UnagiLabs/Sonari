@@ -1,10 +1,10 @@
-# Sonari verifier runner AWS runbook
+# Sonari verifier runner AWS 運用手順
 
-This stack runs earthquake verification and membership identity verification through one AWS runner capacity pool. Manual operations must use the validated deploy plan script for artifact parameters. Do not assemble artifact keys or checksum parameters by hand.
+この stack は、地震検証と membership identity 検証を 1 つの AWS runner capacity pool で実行します。手動運用では、artifact parameter に必ず検証済み deploy plan script を使ってください。artifact key や checksum parameter を手で組み立ててはいけません。
 
-## Required account
+## 必須 AWS account
 
-Run every AWS command from account `595103996064`.
+すべての AWS command は account `595103996064` から実行します。
 
 ```bash
 EXPECTED_ACCOUNT_ID=595103996064
@@ -12,15 +12,15 @@ ACTUAL_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 test "$ACTUAL_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 ```
 
-## Required artifact set
+## 必須 artifact set
 
-Each deploy uses the exact Git commit being deployed and uploads all artifacts under `sonari-verifier-runner/<commit>/`.
+各 deploy は、deploy 対象の Git commit をそのまま使い、すべての artifact を `sonari-verifier-runner/<commit>/` 配下へ upload します。
 
 - `sonari-verifier-runner-lambda.zip`
 - `earthquake-tee-artifact.tar.gz`
 - `membership-identity-tee-artifact.tar.gz`
 - `membership-identity-tee.eif`
-- checksum files or captured SHA-256 values for the TEE tarballs and EIF
+- TEE tarball と EIF の checksum file、または取得済み SHA-256 値
 
 ```bash
 COMMIT_SHA="$(git rev-parse HEAD)"
@@ -53,9 +53,9 @@ aws s3 cp \
   "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/membership-identity-tee.eif"
 ```
 
-## Manual deploy
+## 手動 deploy
 
-Create the deploy plan first. It validates the commit SHA, all SHA-256 values, the `sonari-verifier-runner/<commit>/` prefix, and the mainnet dummy World ID proof gate. The generated `parameterOverrideArgs` are the only artifact parameters to pass into CloudFormation.
+最初に deploy plan を作成します。deploy plan は commit SHA、すべての SHA-256 値、`sonari-verifier-runner/<commit>/` prefix、mainnet dummy World ID proof gate を検証します。生成された `parameterOverrideArgs` だけを CloudFormation に渡す artifact parameter として使います。
 
 ```bash
 EARTHQUAKE_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/earthquake-tee-artifact.tar.gz.sha256)"
@@ -90,9 +90,9 @@ aws cloudformation deploy \
   --no-fail-on-empty-changeset
 ```
 
-For first creation or any update that needs environment-specific stack parameters, use the reviewed account parameter source for this stack and append it to the same command. Keep artifact parameters from the deploy plan. Do not hand-write `LambdaCodeS3Key`, TEE keys, checksum values, `GitCommitSha`, or `ScheduleState`.
+初回作成、または environment-specific な stack parameter が必要な更新では、この stack 用に review 済みの account parameter source を使い、同じ command に追加します。artifact parameter は deploy plan の値を維持してください。`LambdaCodeS3Key`、TEE key、checksum 値、`GitCommitSha`、`ScheduleState` を手書きしてはいけません。
 
-`NitroEnclaveImageSha384` is the EIF `PCR0` measurement. `NitroEnclavePcr3` is the SHA-384 digest of 48 NUL bytes followed by the deterministic runner role ARN:
+`NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
 
 ```bash
 RUNNER_ROLE_ARN="arn:aws:iam::$EXPECTED_ACCOUNT_ID:role/sonari-verifier-runner-$STACK_NAME-runner"
@@ -108,7 +108,7 @@ PY
 )"
 ```
 
-Validate that the mainnet dummy proof guard rejects before deploy:
+mainnet dummy proof guard が deploy 前に拒否することを確認します。
 
 ```bash
 if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
@@ -127,9 +127,9 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
 fi
 ```
 
-## Runtime smoke
+## 実行時 smoke
 
-Read stack outputs once and reuse them for both verifier smoke checks.
+Stack output は一度だけ読み、地震と membership の両方の smoke check で再利用します。
 
 ```bash
 stack_output() {
@@ -149,7 +149,7 @@ submit_verification_lambda_name="$(stack_output SubmitVerificationLambdaName)"
 runner_log_group_name="$(stack_output RunnerLogGroupName)"
 ```
 
-Earthquake manual workflow:
+地震 manual workflow:
 
 ```bash
 manual_watcher_url="$(aws lambda get-function-url-config \
@@ -167,7 +167,7 @@ aws stepfunctions list-executions \
   --max-results 1
 ```
 
-Membership dummy proof smoke is devnet or testnet only. Use a dummy proof payload with the same request shape as `pnpm identity:smoke`, then invoke the submit Lambda and confirm the membership workflow succeeds.
+Membership dummy proof smoke は devnet または testnet 専用です。`pnpm identity:smoke` と同じ request shape の dummy proof payload を使い、submit Lambda を invoke して membership workflow が成功することを確認します。
 
 ```bash
 test "${RELAYER_NETWORK:-testnet}" != mainnet
@@ -183,17 +183,17 @@ aws stepfunctions list-executions \
   --max-results 1
 ```
 
-The required smoke result is:
+必須の smoke result:
 
-- earthquake manual workflow reaches Step Functions `SUCCEEDED`
-- membership dummy proof smoke succeeds on devnet or testnet only
-- mainnet dummy proof is rejected before deploy
-- no unresolved CloudWatch log errors remain in RunnerControl, Lambda, or Step Functions logs
-- `RunnerAutoScalingGroupName` has `DesiredCapacity=0`
-- ASG `InService` instances are `0`
-- running EC2 instances: 0
-- `WatcherScheduleName` is `DISABLED`
-- `BatchScheduleName` is `DISABLED`
+- earthquake manual workflow が Step Functions `SUCCEEDED` に到達する。
+- membership dummy proof smoke が devnet または testnet でのみ成功する。
+- mainnet dummy proof が deploy 前に拒否される。
+- RunnerControl、Lambda、Step Functions log に未解決の CloudWatch log error が残っていない。
+- `RunnerAutoScalingGroupName` の `DesiredCapacity=0`。
+- ASG の `InService` instance が `0`。
+- running EC2 instances が `0`。
+- `WatcherScheduleName` が `DISABLED`。
+- `BatchScheduleName` が `DISABLED`。
 
 ```bash
 aws logs filter-log-events \
@@ -213,9 +213,9 @@ aws scheduler get-schedule --name "$watcher_schedule_name" --query State --outpu
 aws scheduler get-schedule --name "$batch_schedule_name" --query State --output text
 ```
 
-## Old AWS-side file cleanup
+## 古い AWS 側 file cleanup
 
-Only after the new stack smoke succeeds and the resource inventory confirms idle, remove old AWS-side files. Cleanup scope is old S3 prefixes, old Lambda zip objects, old TEE tarball objects, old EIF objects, and old SHA objects only. Real old AWS stack deletion is a follow-up and out of scope.
+新 stack の smoke が成功し、resource inventory で idle が確認できた後にだけ、古い AWS 側 file を削除します。cleanup 対象は、古い S3 prefix、古い Lambda zip object、古い TEE tarball object、古い EIF object、古い SHA object だけです。実際の古い AWS stack 削除は follow-up であり、この手順の対象外です。
 
 ```bash
 aws s3 ls "s3://$ARTIFACT_BUCKET/earthquake-runner/" --recursive > /tmp/old-earthquake-runner-s3-before.txt
@@ -240,11 +240,11 @@ aws s3 ls "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/" --recursiv
 aws s3 ls "s3://$ARTIFACT_BUCKET/" --recursive --summarize > /tmp/sonari-verifier-runner-s3-after-cleanup.txt
 ```
 
-Do not remove `sonari-verifier-runner/$COMMIT_SHA/` artifacts during cleanup.
+cleanup 中に `sonari-verifier-runner/$COMMIT_SHA/` の artifact を削除してはいけません。
 
-## Cost and resource checks
+## Cost と resource 確認
 
-Use Cost Explorer before deploy and after cleanup. Cost Explorer can lag, so immediate checks must use live AWS resource inventory.
+Deploy 前と cleanup 後に Cost Explorer を確認します。Cost Explorer は遅延するため、直後の確認では live AWS resource inventory を使ってください。
 
 ```bash
 MONTH_START="$(date -u +%Y-%m-01)"
@@ -257,7 +257,7 @@ aws ce get-cost-and-usage \
   --group-by Type=DIMENSION,Key=SERVICE
 ```
 
-Run these immediate checks before deploy, after artifact upload, after deploy, after smoke, and after cleanup:
+次の immediate check を deploy 前、artifact upload 後、deploy 後、smoke 後、cleanup 後に実行します。
 
 ```bash
 aws ec2 describe-instances \
@@ -273,15 +273,15 @@ aws cloudformation describe-stacks --query 'Stacks[].{Name:StackName,Status:Stac
 aws s3 ls "s3://$ARTIFACT_BUCKET/" --recursive --summarize
 ```
 
-The expected idle state after smoke and cleanup is:
+Smoke と cleanup 後の期待 idle state:
 
-- running EC2 is `0`
-- ASG desired/running is `0/0`
-- NAT gateways, Elastic IPs, and load balancers have no unexplained always-on resource
-- EventBridge schedules stay `DISABLED`
-- CloudFormation stacks are in an expected completed state
-- S3 inventory contains only retained artifacts and runner results
+- running EC2 が `0`。
+- ASG desired/running が `0/0`。
+- NAT gateway、Elastic IP、load balancer に説明不能な常時稼働 resource がない。
+- EventBridge schedule が `DISABLED` のまま。
+- CloudFormation stack が期待する completed state にある。
+- S3 inventory に retained artifact と runner result だけが残っている。
 
-## Rollback
+## Rollback 手順
 
-Rollback is Git revert plus redeploy. Revert the bad commit, rebuild the artifact set from that reverted tree, upload it under `sonari-verifier-runner/<commit>/`, regenerate the deploy plan, and run the same CloudFormation deploy command. The old runner stacks are not a rollback dependency.
+Rollback は Git revert と redeploy で行います。問題の commit を revert し、その reverted tree から artifact set を rebuild し、`sonari-verifier-runner/<commit>/` に upload し、deploy plan を再生成して同じ CloudFormation deploy command を実行します。古い runner stack は rollback dependency ではありません。
