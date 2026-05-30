@@ -74,6 +74,73 @@ fun relayer_without_admin_cap_can_submit_signed_world_id_result() {
     clock.destroy_for_testing();
 }
 
+#[test]
+fun rust_fixture_signed_world_id_result_updates_identity_pass() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    add_identity_verifier_key_with_public_key(&mut scenario, rust_fixture_public_key());
+
+    scenario.next_tx(RELAYER);
+    {
+        assert!(!scenario.has_most_recent_for_sender<admin::AdminCap>());
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+        let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
+        let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        let mut pass = test_scenario::take_from_address<membership::MembershipPass>(
+            &scenario,
+            MEMBER,
+        );
+
+        accessor::update_identity_verification(
+            &pause_state,
+            &mut identity_registry,
+            &membership_registry,
+            &verifier_registry,
+            &mut pass,
+            &clock,
+            rust_fixture_payload_bcs(),
+            rust_fixture_signature(),
+            rust_fixture_public_key(),
+            scenario.ctx(),
+        );
+
+        let (
+            _account_created_at_ms,
+            _home_cell,
+            _home_cell_registered_at_ms,
+            identity_verified,
+            identity_provider_mask,
+            identity_verified_at_ms,
+            identity_expires_at_ms,
+            terms_version,
+            signed_statement_hash,
+        ) = membership::membership_pass_mvp_summary(&pass);
+        assert!(identity_verified);
+        assert!(identity_provider_mask == identity_registry::provider_world_id());
+        assert!(identity_verified_at_ms == NOW_MS);
+        assert!(identity_expires_at_ms == EXPIRES_AT_MS);
+        assert!(terms_version == TERMS_VERSION);
+        assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
+        identity_registry::assert_duplicate_key_bound_to_pass(
+            &identity_registry,
+            &pass,
+            identity_registry::provider_world_id(),
+            rust_fixture_world_id_duplicate_key_hash(),
+        );
+
+        test_scenario::return_to_address(MEMBER, pass);
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(identity_registry);
+        test_scenario::return_shared(membership_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
 #[test, expected_failure(abort_code = metadata_verifier::EInvalidSignature)]
 fun invalid_identity_result_signature_is_rejected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
@@ -604,6 +671,22 @@ fun world_id_signature(): vector<u8> {
 
 fun step5_public_key(): vector<u8> {
     x"9df8f695ea4e0815a362d3969ee9afbb80bc5b9982620ff8390f99a2ddd1469e"
+}
+
+fun rust_fixture_payload_bcs(): vector<u8> {
+    x"1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000075b6758a05e5945c492eb147dcfe2e58df886a71ff36c25b2ad07bec42cd407ad726ecf6f7036ee3557cd6c7b93a49b231070e8eecada9cfa157e40e3f02e5d3000000000000000000000000000000000000000000000000000000000000051a0201b9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a7468893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f00505c18a3010000007c0d70aa01000007000000000000006666666666666666666666666666666666666666666666666666666666666666"
+}
+
+fun rust_fixture_signature(): vector<u8> {
+    x"ad78ca7d3b21c21b2a701d9c22cb63a59307ecb1eb971ddb3fdd927962caed355752e835e11cf474804f2791f88b4bb821fbf62659736cb1648f555bf23c9607"
+}
+
+fun rust_fixture_public_key(): vector<u8> {
+    x"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+}
+
+fun rust_fixture_world_id_duplicate_key_hash(): vector<u8> {
+    x"b9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74"
 }
 
 fun step5_kyc_signature(): vector<u8> {
