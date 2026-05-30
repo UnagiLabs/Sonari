@@ -127,6 +127,7 @@ SONARI_WORLD_ID_API_BASE
 
 `SONARI_WORLD_ID_APP_ID` は production の runtime config として必須である。
 ただし AWS 境界 interface の固定対象とは分けて扱う。
+#74 では deploy config から TEE process env に注入する。
 本番では KMS や Nitro attestation へ差し替える場合がある。
 その場合も stdin/stdout の JSON 契約は変えない。
 

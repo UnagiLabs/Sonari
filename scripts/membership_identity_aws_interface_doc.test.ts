@@ -56,6 +56,8 @@ describe("membership identity AWS interface docs", () => {
         expect(combined).toContain("AWS 境界 interface");
         expect(combined).toContain("SONARI_WORLD_ID_APP_ID");
         expect(combined).toContain("runtime config");
+        expect(combined).toContain("deploy config");
+        expect(combined).toContain("TEE process env");
         expect(combined).toContain("KMS");
         expect(combined).toContain("Nitro attestation");
         expect(combined).toContain("JSON 契約は変えない");
@@ -85,6 +87,9 @@ describe("membership identity AWS interface docs", () => {
         expect(awsReadme).toContain("worker は request 作成と状態管理");
         expect(awsReadme).toContain("TEE は検証、正規化、署名");
         expect(awsReadme).toContain("relayer は結果を配送するだけ");
+        expect(awsReadme).toContain("SONARI_WORLD_ID_APP_ID");
+        expect(awsReadme).toContain("deploy config");
+        expect(awsReadme).toContain("TEE process env");
     });
 
     it("freezes the membership identity TEE artifact build design", async () => {
@@ -106,5 +111,12 @@ describe("membership identity AWS interface docs", () => {
         expect(awsReadme).toContain("membership TEE は Walrus を呼ばない");
         expect(awsReadme).toContain("Nitro Enclave image 化は後続");
         expect(awsReadme).toContain("stdin/stdout 契約は変えない");
+    });
+
+    it("keeps unsupported KYC error code documentation aligned with the TEE", async () => {
+        const { teeReadme } = await readDocs();
+
+        expect(teeReadme).toContain("KYC_UNSUPPORTED");
+        expect(teeReadme).not.toContain("KYC_NOT_IMPLEMENTED");
     });
 });

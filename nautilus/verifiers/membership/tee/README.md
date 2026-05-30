@@ -107,6 +107,7 @@ SONARI_WORLD_ID_API_BASE
 
 `SONARI_WORLD_ID_APP_ID` は production の runtime config として必須です。
 ただし AWS 境界 interface の固定対象とは分けて扱います。
+#74 では deploy config から TEE process env に注入します。
 本番では KMS や Nitro attestation へ差し替える場合があります。
 その場合も stdin/stdout の JSON 契約は変えないでください。
 
@@ -124,7 +125,7 @@ membership-tee fixture --world-id-status rejected
 membership-tee fixture --world-id-status pending-source
 ```
 
-`provider` が `kyc` の場合は、現在は未対応として `unsupported` を返します。error code は `KYC_NOT_IMPLEMENTED` です。
+`provider` が `kyc` の場合は、現在は未対応として `unsupported` を返します。error code は `KYC_UNSUPPORTED` です。
 
 ## encode-only
 
