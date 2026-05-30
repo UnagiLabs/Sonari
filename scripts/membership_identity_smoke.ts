@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,13 +13,29 @@ const FIXTURE_NAMES = ["kyc_success", "world_id_success", "kyc_reject", "world_i
 
 export type MembershipIdentitySmokeStatus = "verified" | "rejected";
 
-export interface MembershipIdentitySmokeCase {
+export type MembershipIdentitySmokeCase =
+    | MembershipIdentitySmokeVerifiedCase
+    | MembershipIdentitySmokeRejectedCase;
+
+export interface MembershipIdentitySmokeVerifiedCase {
     readonly name: (typeof FIXTURE_NAMES)[number];
     readonly provider: IdentityProvider;
-    readonly verified: boolean;
-    readonly result_status: MembershipIdentitySmokeStatus;
+    readonly verified: true;
+    readonly result_status: "verified";
     readonly payout_recipient: "membership_sbt_owner";
+    readonly bcs_match: true;
+    readonly ts_payload_bcs_hex: string;
+    readonly rust_payload_bcs_hex: string;
     readonly payload_bcs_hex: string;
+}
+
+export interface MembershipIdentitySmokeRejectedCase {
+    readonly name: (typeof FIXTURE_NAMES)[number];
+    readonly provider: IdentityProvider;
+    readonly verified: false;
+    readonly result_status: "rejected";
+    readonly payout_recipient: "membership_sbt_owner";
+    readonly skipped_reason: "not a verified payload";
 }
 
 export interface MembershipIdentitySmokeOutput {
@@ -51,22 +68,85 @@ async function readIdentityFixture(filePath: string): Promise<IdentityVerificati
     return JSON.parse(await readFile(filePath, "utf8")) as IdentityVerificationResult;
 }
 
-function buildSmokeCase(
+async function buildSmokeCase(
     name: MembershipIdentitySmokeCase["name"],
     result: IdentityVerificationResult,
-): MembershipIdentitySmokeCase {
+): Promise<MembershipIdentitySmokeCase> {
+    if (!result.verified) {
+        return {
+            name,
+            provider: result.provider,
+            verified: false,
+            result_status: "rejected",
+            payout_recipient: "membership_sbt_owner",
+            skipped_reason: "not a verified payload",
+        };
+    }
+
+    const tsPayloadBcsHex = encodeIdentityVerificationResultBcsHex(result);
+    const rustPayloadBcsHex = await encodeWithMembershipTee(result);
+    if (rustPayloadBcsHex !== tsPayloadBcsHex) {
+        throw new Error(
+            `${name} TS/Rust payload BCS mismatch: ts=${tsPayloadBcsHex} rust=${rustPayloadBcsHex}`,
+        );
+    }
+
     return {
         name,
         provider: result.provider,
-        verified: result.verified,
-        result_status: result.verified ? "verified" : "rejected",
+        verified: true,
+        result_status: "verified",
         payout_recipient: "membership_sbt_owner",
-        payload_bcs_hex: encodeIdentityVerificationResultBcsHex(result),
+        bcs_match: true,
+        ts_payload_bcs_hex: tsPayloadBcsHex,
+        rust_payload_bcs_hex: rustPayloadBcsHex,
+        payload_bcs_hex: tsPayloadBcsHex,
     };
+}
+
+async function encodeWithMembershipTee(result: IdentityVerificationResult): Promise<string> {
+    const stdout = await runMembershipTeeEncodeOnly(JSON.stringify(result));
+    const parsed = JSON.parse(stdout) as unknown;
+    if (!isRecord(parsed) || typeof parsed.payload_bcs_hex !== "string") {
+        throw new Error("membership-tee --encode-only returned an invalid payload");
+    }
+    return parsed.payload_bcs_hex;
+}
+
+async function runMembershipTeeEncodeOnly(input: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const child = spawn("cargo", ["run", "-q", "-p", "membership-tee", "--", "--encode-only"], {
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdout += chunk;
+        });
+        child.stderr.on("data", (chunk: string) => {
+            stderr += chunk;
+        });
+        child.on("error", reject);
+        child.on("close", (code) => {
+            if (code === 0) {
+                resolve(stdout);
+                return;
+            }
+            reject(new Error(`membership-tee --encode-only failed with ${code}: ${stderr}`));
+        });
+        child.stdin.end(input);
+    });
 }
 
 function resolveFromCwd(inputPath: string): string {
     return path.isAbsolute(inputPath) ? inputPath : path.resolve(process.cwd(), inputPath);
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
 async function main(): Promise<void> {
