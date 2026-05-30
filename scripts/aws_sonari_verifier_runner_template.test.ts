@@ -143,6 +143,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
         expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 

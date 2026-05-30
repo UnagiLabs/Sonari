@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { InMemoryVerificationJobRepository } from "../src/index.js";
 import {
@@ -543,7 +542,10 @@ describe("membership runner workflow", () => {
 
     it("bootstraps a fail-closed World ID vsock proxy in the membership AWS template", async () => {
         const template = await readFile(
-            path.resolve(process.cwd(), "infra/aws/membership-identity-runner/template.yaml"),
+            new URL(
+                "../../../../../infra/aws/membership-identity-runner/template.yaml",
+                import.meta.url,
+            ),
             "utf8",
         );
 
@@ -564,6 +566,7 @@ describe("membership runner workflow", () => {
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
         expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
         expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
         expect(template).toContain("systemctl enable --now sonari-world-id-vsock-proxy.service");
         expect(template).toContain(
