@@ -562,6 +562,8 @@ describe("membership runner workflow", () => {
             "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
         );
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
+        expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
         expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
         expect(template).toContain("systemctl enable --now sonari-world-id-vsock-proxy.service");
         expect(template).toContain(

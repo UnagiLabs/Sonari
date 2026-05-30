@@ -300,6 +300,15 @@ Resources:
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
             fi
+            if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
+              cat >/usr/local/bin/sonari-enclave-stdio <<'SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE'
+            #!/bin/bash
+            set -euo pipefail
+            : "${!SONARI_WORLD_ID_APP_ID:?SONARI_WORLD_ID_APP_ID is required}"
+            exec /opt/sonari/tee-artifact/bin/membership-tee fixture --world-id-status verified --world-app-id "$SONARI_WORLD_ID_APP_ID"
+            SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE
+              chmod 0500 /usr/local/bin/sonari-enclave-stdio
+            fi
             vsock_proxy_path="$(command -v vsock-proxy)"
             cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
             [Unit]
