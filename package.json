@@ -19,6 +19,7 @@
         "test": "pnpm -r test && pnpm test:local-e2e",
         "test:local-e2e": "vitest run scripts",
         "build:aws-earthquake-lambda": "tsx scripts/build_aws_earthquake_lambda.ts",
+        "build:aws-sonari-verifier-runner-lambda": "tsx scripts/build_aws_sonari_verifier_runner_lambda.ts",
         "build:aws-earthquake-tee-artifact": "tsx scripts/build_aws_earthquake_tee_artifact.ts",
         "build:aws-membership-identity-tee-artifact": "tsx scripts/build_aws_membership_identity_tee_artifact.ts",
         "build:aws-membership-identity-eif": "tsx scripts/build_aws_membership_identity_eif.ts",

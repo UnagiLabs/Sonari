@@ -1,0 +1,144 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { describe, expect, it } from "vitest";
+import { buildAwsSonariVerifierRunnerDeployPlan } from "./aws_sonari_verifier_runner_deploy_plan.js";
+
+const execFileAsync = promisify(execFile);
+const validCommitSha = "0123456789abcdef0123456789abcdef01234567";
+const validEarthquakeTeeSha256 = "a".repeat(64);
+const validMembershipTeeSha256 = "b".repeat(64);
+const validMembershipEifSha256 = "c".repeat(64);
+
+const validInput = {
+    commitSha: validCommitSha,
+    lambdaBucket: "lambda-artifacts",
+    earthquakeTeeBucket: "earthquake-tee-artifacts",
+    earthquakeTeeArtifactSha256: validEarthquakeTeeSha256,
+    membershipTeeBucket: "membership-tee-artifacts",
+    membershipTeeArtifactSha256: validMembershipTeeSha256,
+    membershipEifBucket: "membership-eif-artifacts",
+    membershipEifSha256: validMembershipEifSha256,
+    relayerNetwork: "testnet",
+    worldIdProofMode: "dummy",
+} as const;
+
+describe("AWS Sonari verifier runner deploy plan", () => {
+    it("fails closed when the commit SHA is not a full Git commit SHA", () => {
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                commitSha: "main",
+            }),
+        ).toThrow("Invalid commit SHA");
+    });
+
+    it("builds commit-scoped S3 keys for all artifacts", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan(validInput);
+
+        expect(plan.parameterOverrides.LambdaCodeS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/sonari-verifier-runner-lambda.zip`,
+        );
+        expect(plan.parameterOverrides.TeeArtifactS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/earthquake-tee-artifact.tar.gz`,
+        );
+        expect(plan.parameterOverrides.MembershipTeeArtifactS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/membership-identity-tee-artifact.tar.gz`,
+        );
+        expect(plan.parameterOverrides.TeeEifS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/membership-identity-tee.eif`,
+        );
+        expect(plan.parameterOverrides.GitCommitSha).toBe(validCommitSha);
+    });
+
+    it("validates every artifact SHA-256 value", () => {
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                earthquakeTeeArtifactSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid earthquake TEE artifact SHA-256");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                membershipTeeArtifactSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid membership TEE artifact SHA-256");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                membershipEifSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid membership EIF SHA-256");
+    });
+
+    it("keeps schedules disabled and emits CloudFormation parameter override args", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan(validInput);
+
+        expect(plan.parameterOverrides.ScheduleState).toBe("DISABLED");
+        expect(plan.parameterOverrideArgs).toEqual(
+            expect.arrayContaining([
+                `LambdaCodeS3Bucket=${validInput.lambdaBucket}`,
+                [
+                    "LambdaCodeS3Key=sonari-verifier-runner",
+                    `${validCommitSha}/sonari-verifier-runner-lambda.zip`,
+                ].join("/"),
+                `TeeArtifactS3Bucket=${validInput.earthquakeTeeBucket}`,
+                [
+                    "TeeArtifactS3Key=sonari-verifier-runner",
+                    `${validCommitSha}/earthquake-tee-artifact.tar.gz`,
+                ].join("/"),
+                `TeeArtifactSha256=${validEarthquakeTeeSha256}`,
+                `MembershipTeeArtifactS3Bucket=${validInput.membershipTeeBucket}`,
+                [
+                    "MembershipTeeArtifactS3Key=sonari-verifier-runner",
+                    `${validCommitSha}/membership-identity-tee-artifact.tar.gz`,
+                ].join("/"),
+                `MembershipTeeArtifactSha256=${validMembershipTeeSha256}`,
+                `TeeEifS3Bucket=${validInput.membershipEifBucket}`,
+                `TeeEifS3Key=sonari-verifier-runner/${validCommitSha}/membership-identity-tee.eif`,
+                `TeeEifSha256=${validMembershipEifSha256}`,
+                `GitCommitSha=${validCommitSha}`,
+                "ScheduleState=DISABLED",
+            ]),
+        );
+    });
+
+    it("fails closed before planning a mainnet deploy with dummy World ID proof mode", () => {
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                relayerNetwork: "mainnet",
+                worldIdProofMode: "dummy",
+            }),
+        ).toThrow("dummy World ID proof mode is not allowed on mainnet");
+    });
+
+    it("exposes CLI flags for the mainnet dummy World ID proof mode gate", async () => {
+        await expect(
+            execFileAsync("pnpm", [
+                "tsx",
+                "scripts/aws_sonari_verifier_runner_deploy_plan.ts",
+                "--commit-sha",
+                validCommitSha,
+                "--lambda-bucket",
+                validInput.lambdaBucket,
+                "--earthquake-tee-bucket",
+                validInput.earthquakeTeeBucket,
+                "--earthquake-tee-sha256",
+                validEarthquakeTeeSha256,
+                "--membership-tee-bucket",
+                validInput.membershipTeeBucket,
+                "--membership-tee-sha256",
+                validMembershipTeeSha256,
+                "--membership-eif-bucket",
+                validInput.membershipEifBucket,
+                "--membership-eif-sha256",
+                validMembershipEifSha256,
+                "--relayer-network",
+                "mainnet",
+                "--world-id-proof-mode",
+                "dummy",
+            ]),
+        ).rejects.toThrow("dummy World ID proof mode is not allowed on mainnet");
+    });
+});
