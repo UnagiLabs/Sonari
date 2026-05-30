@@ -314,6 +314,7 @@ describe("AWS Lambda watcher handlers", () => {
             name: "earthquake-us7000default-1",
         });
         expect(JSON.parse(String(readCommandInput(commands[0]).input))).toEqual({
+            verifier_kind: "earthquake",
             source_event_id: "us7000default",
             attempt: 1,
         });

@@ -19,6 +19,7 @@
         "test": "pnpm -r test && pnpm test:local-e2e",
         "test:local-e2e": "vitest run scripts",
         "build:aws-earthquake-lambda": "tsx scripts/build_aws_earthquake_lambda.ts",
+        "build:aws-sonari-verifier-runner-lambda": "tsx scripts/build_aws_sonari_verifier_runner_lambda.ts",
         "build:aws-earthquake-tee-artifact": "tsx scripts/build_aws_earthquake_tee_artifact.ts",
         "build:aws-membership-identity-tee-artifact": "tsx scripts/build_aws_membership_identity_tee_artifact.ts",
         "build:aws-membership-identity-eif": "tsx scripts/build_aws_membership_identity_eif.ts",
@@ -37,7 +38,9 @@
         "test:identity": "cargo test -p membership-tee"
     },
     "devDependencies": {
+        "@aws-sdk/client-dynamodb": "^3.948.0",
         "@biomejs/biome": "^2.4.15",
+        "@sonari/verifier-contracts": "workspace:*",
         "@types/node": "^24.10.2",
         "@types/yazl": "^3.3.1",
         "esbuild": "^0.28.0",

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     createBatchVerifierHandler,
     InMemoryVerificationJobRepository,
+    StepFunctionsWorkflowStarter,
     type WorkflowStarter,
 } from "../src/index.js";
 import { validRequest } from "./fixtures.js";
@@ -44,6 +45,32 @@ describe("BatchVerifier Lambda", () => {
             status: "processing",
             workflow_execution_name: `membership-${job.row.job_id}-1`,
             workflow_started_at_ms: baseNowMs + 1,
+        });
+    });
+
+    it("attaches membership_identity verifier kind to Step Functions input", async () => {
+        const commands: unknown[] = [];
+        const starter = new StepFunctionsWorkflowStarter("arn:aws:states:runner", {
+            async send(command: unknown): Promise<void> {
+                commands.push(command);
+            },
+        });
+
+        await starter.start({
+            jobId: "membership-job-1",
+            executionName: "membership-membership-job-1-1",
+            attempt: 1,
+        });
+
+        expect(commands).toHaveLength(1);
+        expect(readCommandInput(commands[0])).toMatchObject({
+            stateMachineArn: "arn:aws:states:runner",
+            name: "membership-membership-job-1-1",
+        });
+        expect(JSON.parse(String(readCommandInput(commands[0]).input))).toEqual({
+            verifier_kind: "membership_identity",
+            job_id: "membership-job-1",
+            attempt: 1,
         });
     });
 
@@ -147,4 +174,17 @@ class FailingWorkflowStarter implements WorkflowStarter {
     async start(): Promise<void> {
         throw new Error("Step Functions unavailable");
     }
+}
+
+function readCommandInput(command: unknown): Record<string, unknown> {
+    if (
+        typeof command === "object" &&
+        command !== null &&
+        "input" in command &&
+        typeof command.input === "object" &&
+        command.input !== null
+    ) {
+        return command.input as Record<string, unknown>;
+    }
+    throw new Error("missing command input");
 }

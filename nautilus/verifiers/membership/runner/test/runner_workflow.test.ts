@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { InMemoryVerificationJobRepository } from "../src/index.js";
 import {
@@ -7,6 +6,7 @@ import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     type Ec2ClientLike,
+    handler as runnerWorkflowHandler,
     type S3ClientLike,
     type SsmClientLike,
     type SuiSubmissionAdapter,
@@ -16,6 +16,100 @@ import { validRequest } from "./fixtures.js";
 const baseNowMs = 1_800_000_000_000;
 
 describe("membership runner workflow", () => {
+    it("retains membership verifier kind across common runner workflow actions", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({
+            onlineInstanceIds: ["i-ready"],
+            bootstrapReady: true,
+            commandId: "cmd-1",
+            invocationStatus: "Success",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client([{ instanceId: "i-ready", state: "running" }]),
+            ssm,
+            s3: new RecordingS3Client({
+                [`results/${job.row.job_id}/${baseNowMs + 2}.json`]: JSON.stringify({
+                    status: "pending_source",
+                    error_code: "WORLD_ID_API_UNAVAILABLE",
+                }),
+            }),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "start_instance",
+                verifier_kind: "membership_identity",
+                job_id: job.row.job_id,
+                attempt: 1,
+            } as never),
+        ).resolves.toMatchObject({ verifier_kind: "membership_identity", capacity: 1 });
+        await expect(
+            handler({
+                action: "find_ready_instance",
+                verifier_kind: "membership_identity",
+                job_id: job.row.job_id,
+                attempt: 1,
+            } as never),
+        ).resolves.toMatchObject({
+            verifier_kind: "membership_identity",
+            instance_id: "i-ready",
+        });
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                verifier_kind: "membership_identity",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-ready",
+            } as never),
+        ).resolves.toMatchObject({
+            verifier_kind: "membership_identity",
+            command_id: "cmd-1",
+            result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+        });
+        await expect(
+            handler({
+                action: "poll_command",
+                verifier_kind: "membership_identity",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-ready",
+                command_id: "cmd-1",
+                result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+                command_poll_count: 0,
+            } as never),
+        ).resolves.toMatchObject({
+            verifier_kind: "membership_identity",
+            command_status: "SUCCEEDED",
+        });
+        await expect(
+            handler({
+                action: "read_result",
+                verifier_kind: "membership_identity",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+            } as never),
+        ).resolves.toMatchObject({ verifier_kind: "membership_identity" });
+    });
+
+    it("fails closed before AWS setup for unknown verifier kind at the workflow boundary", async () => {
+        await expect(
+            runnerWorkflowHandler({
+                action: "start_instance",
+                verifier_kind: "earthquake",
+                job_id: "job-1",
+                attempt: 1,
+            } as never),
+        ).rejects.toThrow(/verifier_kind/);
+    });
+
     it("starts EC2 capacity and finds a bootstrap-ready SSM-managed runner", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
@@ -448,7 +542,10 @@ describe("membership runner workflow", () => {
 
     it("bootstraps a fail-closed World ID vsock proxy in the membership AWS template", async () => {
         const template = await readFile(
-            path.resolve("../../../../infra/aws/membership-identity-runner/template.yaml"),
+            new URL(
+                "../../../../../infra/aws/membership-identity-runner/template.yaml",
+                import.meta.url,
+            ),
             "utf8",
         );
 
@@ -462,11 +559,14 @@ describe("membership runner workflow", () => {
         expect(template).toContain("{TeeEifS3Bucket}/$");
         expect(template).toContain("{TeeEifS3Key}'");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
-        expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=$tee_eif");
+        expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
         expect(template).toContain(
             "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
         );
-        expect(template).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif");
+        expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
+        expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
         expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
         expect(template).toContain("systemctl enable --now sonari-world-id-vsock-proxy.service");
         expect(template).toContain(

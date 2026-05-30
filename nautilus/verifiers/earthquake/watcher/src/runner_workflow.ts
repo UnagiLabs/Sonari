@@ -27,6 +27,16 @@ import {
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
+import {
+    dispatchRunnerCommand,
+    EARTHQUAKE_VERIFIER_KIND,
+    findReadyRunnerInstance,
+    parseExpectedVerifierKind,
+    pollRunnerCommand,
+    readRunnerResultText,
+    setRunnerDesiredCapacity,
+    withVerifierKind,
+} from "@sonari/verifier-contracts";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
 import {
@@ -104,105 +114,113 @@ export interface RelayerRecordSuccessInput {
     objectId?: string;
 }
 
-export type RunnerControlEvent =
-    | { action: "start_instance"; source_event_id: string; attempt?: number | undefined }
-    | { action: "find_ready_instance"; source_event_id: string; attempt?: number | undefined }
-    | {
-          action: "dispatch_tee_command";
-          source_event_id: string;
-          attempt?: number | undefined;
-          instance_id: string;
-      }
-    | {
-          action: "poll_command";
-          source_event_id: string;
-          attempt?: number | undefined;
-          instance_id: string;
-          command_id: string;
-          result_s3_key?: string;
-          command_poll_count?: number | undefined;
-      }
-    | {
-          action: "read_result";
-          source_event_id: string;
-          attempt?: number | undefined;
-          result_s3_key: string;
-      }
-    | {
-          action: "apply_result";
-          source_event_id: string;
-          attempt?: number | undefined;
-          result: TeeCoreResult;
-      }
-    | {
-          action: "relayer_preview_or_dry_run";
-          source_event_id: string;
-          attempt?: number | undefined;
-          result: TeeCoreResult;
-      }
-    | {
-          action: "record_relayer_success";
-          source_event_id: string;
-          attempt?: number | undefined;
-          result: TeeCoreResult;
-          relayer_success: RelayerRecordSuccessInput;
-      }
-    | {
-          action: "mark_failed";
-          source_event_id: string;
-          attempt?: number | undefined;
-          error_code?: string;
-          message?: string;
-      }
-    | { action: "stop_instance"; source_event_id: string; attempt?: number | undefined };
+type RunnerControlVerifierKind = {
+    verifier_kind?: typeof EARTHQUAKE_VERIFIER_KIND | undefined;
+};
 
-export type RunnerControlResult =
-    | { source_event_id: string; attempt?: number | undefined; capacity: number }
-    | { source_event_id: string; attempt?: number | undefined; instance_id: string }
-    | {
-          source_event_id: string;
-          attempt?: number | undefined;
-          instance_id: string;
-          command_id: string;
-          result_s3_key: string;
-          command_poll_count: number;
-      }
-    | {
-          source_event_id: string;
-          attempt?: number | undefined;
-          instance_id?: string;
-          command_id?: string;
-          result_s3_key?: string;
-          command_poll_count?: number;
-          command_status: "PENDING" | "SUCCEEDED" | "FAILED";
-      }
-    | { source_event_id: string; attempt?: number | undefined; result: TeeCoreResult }
-    | {
-          source_event_id: string;
-          attempt?: number | undefined;
-          applied: true;
-          result: TeeCoreResult;
-      }
-    | {
-          source_event_id: string;
-          attempt?: number | undefined;
-          relayer: "skipped" | "failed";
-          result: TeeCoreResult;
-      }
-    | {
-          source_event_id: string;
-          attempt?: number | undefined;
-          relayer: "succeeded";
-          result: TeeCoreResult;
-          relayer_success: RelayerRecordSuccessInput;
-      }
-    | {
-          source_event_id: string;
-          attempt?: number | undefined;
-          relayer: "recorded";
-          result: TeeCoreResult;
-      }
-    | { source_event_id: string; attempt?: number | undefined; failed: true };
+export type RunnerControlEvent = RunnerControlVerifierKind &
+    (
+        | { action: "start_instance"; source_event_id: string; attempt?: number | undefined }
+        | { action: "find_ready_instance"; source_event_id: string; attempt?: number | undefined }
+        | {
+              action: "dispatch_tee_command";
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+          }
+        | {
+              action: "poll_command";
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              command_id: string;
+              result_s3_key?: string;
+              command_poll_count?: number | undefined;
+          }
+        | {
+              action: "read_result";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
+              action: "apply_result";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result: TeeCoreResult;
+          }
+        | {
+              action: "relayer_preview_or_dry_run";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result: TeeCoreResult;
+          }
+        | {
+              action: "record_relayer_success";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result: TeeCoreResult;
+              relayer_success: RelayerRecordSuccessInput;
+          }
+        | {
+              action: "mark_failed";
+              source_event_id: string;
+              attempt?: number | undefined;
+              error_code?: string;
+              message?: string;
+          }
+        | { action: "stop_instance"; source_event_id: string; attempt?: number | undefined }
+    );
+
+export type RunnerControlResult = RunnerControlVerifierKind &
+    (
+        | { source_event_id: string; attempt?: number | undefined; capacity: number }
+        | { source_event_id: string; attempt?: number | undefined; instance_id: string }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              command_id: string;
+              result_s3_key: string;
+              command_poll_count: number;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id?: string;
+              command_id?: string;
+              result_s3_key?: string;
+              command_poll_count?: number;
+              command_status: "PENDING" | "SUCCEEDED" | "FAILED";
+          }
+        | { source_event_id: string; attempt?: number | undefined; result: TeeCoreResult }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              applied: true;
+              result: TeeCoreResult;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              relayer: "skipped" | "failed";
+              result: TeeCoreResult;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              relayer: "succeeded";
+              result: TeeCoreResult;
+              relayer_success: RelayerRecordSuccessInput;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              relayer: "recorded";
+              result: TeeCoreResult;
+          }
+        | { source_event_id: string; attempt?: number | undefined; failed: true }
+    );
 
 export interface RunnerControlHandlerOptions {
     autoscaling: AutoScalingClientLike;
@@ -219,26 +237,32 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
     return async function runnerControlHandler(
         event: RunnerControlEvent,
     ): Promise<RunnerControlResult> {
+        const verifierKind = parseExpectedVerifierKind(
+            (event as { verifier_kind?: unknown }).verifier_kind,
+            EARTHQUAKE_VERIFIER_KIND,
+        );
+        const retainVerifierKind = (output: RunnerControlResult): RunnerControlResult =>
+            withVerifierKind(verifierKind, output) as RunnerControlResult;
         switch (event.action) {
             case "start_instance":
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "starting_instance",
                 });
-                await options.autoscaling.setDesiredCapacity({
+                await setRunnerDesiredCapacity(options.autoscaling, {
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 1,
                 });
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     capacity: 1,
-                };
+                });
             case "stop_instance":
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "stopping_instance",
                     allowNonProcessing: true,
                 });
-                await options.autoscaling.setDesiredCapacity({
+                await setRunnerDesiredCapacity(options.autoscaling, {
                     autoScalingGroupName: options.config.autoScalingGroupName,
                     desiredCapacity: 0,
                 });
@@ -252,26 +276,24 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         throw new Error("stale runner workflow attempt");
                     }
                 }
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     capacity: 0,
-                };
+                });
             case "find_ready_instance": {
-                const instanceId = await findReadyInstance(
-                    options.ec2,
-                    options.ssm,
-                    options.config.autoScalingGroupName,
-                );
+                const instanceId = await findReadyRunnerInstance(options.ec2, options.ssm, {
+                    autoScalingGroupName: options.config.autoScalingGroupName,
+                });
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "waiting_for_instance",
                     instanceId,
                 });
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     instance_id: instanceId,
-                };
+                });
             }
             case "dispatch_tee_command": {
                 assertValidUsgsSourceEventId(event.source_event_id);
@@ -281,44 +303,42 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     instanceId: event.instance_id,
                     nowMs: dispatchTimestampMs,
                 });
-                const resultS3Key = `results/${event.source_event_id}/${dispatchTimestampMs}.json`;
-                const command = buildSsmShellCommand({
-                    sourceEventId: event.source_event_id,
-                    dispatchTimestampMs,
-                    resultBucket: options.config.resultBucket,
-                    resultS3Key,
-                    nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
-                });
-                const sent = await options.ssm.sendCommand({
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.source_event_id,
                     instanceId: event.instance_id,
-                    shellCommand: command,
+                    dispatchTimestampMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            sourceEventId: event.source_event_id,
+                            dispatchTimestampMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                        }),
                 });
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "dispatching_command",
                     instanceId: event.instance_id,
-                    commandId: sent.commandId,
-                    resultS3Key,
+                    commandId: dispatched.commandId,
+                    resultS3Key: dispatched.resultS3Key,
                     nowMs: dispatchTimestampMs,
                 });
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     instance_id: event.instance_id,
-                    command_id: sent.commandId,
-                    result_s3_key: resultS3Key,
-                    command_poll_count: 0,
-                };
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
             }
             case "poll_command": {
                 const pollTimestampMs = options.now?.() ?? Date.now();
-                const commandStatus = await pollCommandStatus(options.ssm, {
+                const polled = await pollRunnerCommand(options.ssm, {
                     instanceId: event.instance_id,
                     commandId: event.command_id,
+                    commandPollCount: event.command_poll_count,
                 });
-                const commandPollCount =
-                    commandStatus === "PENDING"
-                        ? (event.command_poll_count ?? 0) + 1
-                        : (event.command_poll_count ?? 0);
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "polling_command",
                     instanceId: event.instance_id,
@@ -327,30 +347,30 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     lastPollAtMs: pollTimestampMs,
                     nowMs: pollTimestampMs,
                 });
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     instance_id: event.instance_id,
                     command_id: event.command_id,
                     result_s3_key: event.result_s3_key,
-                    command_poll_count: commandPollCount,
-                    command_status: commandStatus,
-                };
+                    command_poll_count: polled.commandPollCount,
+                    command_status: polled.commandStatus,
+                });
             }
             case "read_result": {
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "reading_result",
                     resultS3Key: event.result_s3_key,
                 });
-                const text = await options.s3.getObjectText({
+                const text = await readRunnerResultText(options.s3, {
                     bucket: options.config.resultBucket,
                     key: event.result_s3_key,
                 });
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     result: parseTeeResult(text, event.source_event_id),
-                };
+                });
             }
             case "apply_result": {
                 const repository = requireRepository(options);
@@ -369,23 +389,23 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!applied) {
                     throw new Error("stale runner workflow attempt");
                 }
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     applied: true,
                     result: event.result,
-                };
+                });
             }
             case "relayer_preview_or_dry_run": {
                 const repository = requireRepository(options);
                 const relayer = options.relayer ?? buildRelayerFromConfig(options.config);
                 if (relayer === undefined || event.result.status !== "finalized") {
-                    return {
+                    return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "skipped",
                         result: event.result,
-                    };
+                    });
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "complete",
@@ -394,13 +414,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const nowMs = options.now?.() ?? Date.now();
                 const result = await relayer.relay(event.result);
                 if (result.ok) {
-                    return {
+                    return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "succeeded",
                         result: event.result,
                         relayer_success: compactRelayerSuccess(result.value),
-                    };
+                    });
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "complete",
@@ -418,12 +438,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!marked) {
                     throw new Error("stale runner workflow attempt");
                 }
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "failed",
                     result: event.result,
-                };
+                });
             }
             case "record_relayer_success": {
                 const repository = requireRepository(options);
@@ -442,12 +462,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!marked) {
                     throw new Error("stale runner workflow attempt");
                 }
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "recorded",
                     result: event.result,
-                };
+                });
             }
             case "mark_failed": {
                 const repository = requireRepository(options);
@@ -469,11 +489,11 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!marked) {
                     throw new Error("stale runner workflow attempt");
                 }
-                return {
+                return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     failed: true,
-                };
+                });
             }
         }
     };
@@ -564,14 +584,14 @@ class AwsSsmClient implements SsmClientLike {
             shellCommand: buildRunnerBootstrapReadinessShellCommand(),
         });
         for (let attempt = 0; attempt < 5; attempt += 1) {
-            const status = await pollCommandStatus(this, {
+            const { commandStatus } = await pollRunnerCommand(this, {
                 instanceId,
                 commandId: sent.commandId,
             });
-            if (status === "SUCCEEDED") {
+            if (commandStatus === "SUCCEEDED") {
                 return true;
             }
-            if (status === "FAILED") {
+            if (commandStatus === "FAILED") {
                 return false;
             }
             if (attempt < 4) {
@@ -640,6 +660,10 @@ class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
 }
 
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
+    parseExpectedVerifierKind(
+        (event as { verifier_kind?: unknown }).verifier_kind,
+        EARTHQUAKE_VERIFIER_KIND,
+    );
     const config: RunnerWorkflowConfig = {
         autoScalingGroupName: requiredEnv("RUNNER_ASG_NAME"),
         resultBucket: requiredEnv("RESULT_BUCKET"),
@@ -810,43 +834,6 @@ function shellSingleQuote(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-async function findReadyInstance(
-    ec2: Ec2ClientLike,
-    ssm: SsmClientLike,
-    autoScalingGroupName: string,
-): Promise<string> {
-    const instances = await ec2.listRunnerInstances({ autoScalingGroupName });
-    const runningIds = instances
-        .filter((instance) => instance.state === "running")
-        .map((instance) => instance.instanceId);
-    const onlineManagedInstanceIds = await ssm.listOnlineManagedInstanceIds({
-        instanceIds: runningIds,
-    });
-    for (const instanceId of runningIds) {
-        if (!onlineManagedInstanceIds.has(instanceId)) {
-            continue;
-        }
-        if (await ssm.checkRunnerBootstrapReady(instanceId)) {
-            return instanceId;
-        }
-    }
-    const ready = undefined;
-    if (ready === undefined) {
-        throw new Error("No running SSM-managed runner instance is bootstrap-ready");
-    }
-    return ready;
-}
-
-function normalizeCommandStatus(status: string): "PENDING" | "SUCCEEDED" | "FAILED" {
-    if (status === "Success") {
-        return "SUCCEEDED";
-    }
-    if (status === "Pending" || status === "InProgress" || status === "Delayed") {
-        return "PENDING";
-    }
-    return "FAILED";
-}
-
 function readRunnerFailureErrorCode(errorCode: string | undefined): OracleErrorCode {
     if (errorCode === undefined) {
         return "AWS_RUNNER_PROCESS_FAILED";
@@ -855,30 +842,6 @@ function readRunnerFailureErrorCode(errorCode: string | undefined): OracleErrorC
         return errorCode as OracleErrorCode;
     }
     throw new Error(`invalid runner error_code: ${errorCode}`);
-}
-
-async function pollCommandStatus(
-    ssm: SsmClientLike,
-    input: { instanceId: string; commandId: string },
-): Promise<"PENDING" | "SUCCEEDED" | "FAILED"> {
-    try {
-        const invocation = await ssm.getCommandInvocation(input);
-        return normalizeCommandStatus(invocation.status);
-    } catch (error) {
-        if (isTransientCommandInvocationLookupError(error)) {
-            return "PENDING";
-        }
-        throw error;
-    }
-}
-
-function isTransientCommandInvocationLookupError(error: unknown): boolean {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "name" in error &&
-        error.name === "InvocationDoesNotExist"
-    );
 }
 
 function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreResult {

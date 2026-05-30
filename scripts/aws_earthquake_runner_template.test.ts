@@ -312,4 +312,17 @@ describe("AWS earthquake runner CloudFormation template", () => {
         expect(runnerTaskCount).toBeGreaterThan(0);
         expect(attemptParameterCount).toBe(runnerTaskCount);
     });
+
+    it("passes earthquake verifier kind through every runner control task", async () => {
+        const template = await readFile(templatePath, "utf8");
+        const runnerTaskCount =
+            template.match(/"Resource": "\$\{RunnerControlLambda\.Arn\}"/g)?.length ?? 0;
+        const verifierKindParameterCount =
+            template.match(/"Parameters": \{[^}]*"verifier_kind\.\$": "\$\.verifier_kind"/g)
+                ?.length ?? 0;
+
+        expect(template).toContain('"verifier_kind.$": "$.verifier_kind"');
+        expect(runnerTaskCount).toBeGreaterThan(0);
+        expect(verifierKindParameterCount).toBe(runnerTaskCount);
+    });
 });

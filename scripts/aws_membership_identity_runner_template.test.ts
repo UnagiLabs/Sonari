@@ -53,7 +53,10 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("NitroEnclaveCid:");
         expect(template).toContain("Default: /opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
-        expect(template).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif");
+        expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
+        expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
         expect(template).toContain(
             "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
         );
@@ -118,5 +121,18 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("TeeEifSha256Output:");
         expect(template).not.toContain("SigningSeedCiphertextS3KeyOutput");
         expect(template).not.toContain("SigningSeedCiphertextS3BucketOutput");
+    });
+
+    it("passes membership verifier kind through every runner control task", async () => {
+        const template = await readFile(templatePath, "utf8");
+        const runnerTaskCount =
+            template.match(/"Resource": "\$\{RunnerControlLambda\.Arn\}"/g)?.length ?? 0;
+        const verifierKindParameterCount =
+            template.match(/"Parameters": \{[^}]*"verifier_kind\.\$": "\$\.verifier_kind"/g)
+                ?.length ?? 0;
+
+        expect(template).toContain('"verifier_kind.$": "$.verifier_kind"');
+        expect(runnerTaskCount).toBeGreaterThan(0);
+        expect(verifierKindParameterCount).toBe(runnerTaskCount);
     });
 });

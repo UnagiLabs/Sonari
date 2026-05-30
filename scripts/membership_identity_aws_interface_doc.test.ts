@@ -85,10 +85,10 @@ describe("membership identity AWS interface docs", () => {
         expect(awsReadme).toContain(
             "SubmitVerification Lambda -> verification_jobs DynamoDB -> BatchVerifier Lambda -> Step Functions -> EC2 + Nitro",
         );
-        expect(awsReadme).toContain("Trust boundary");
+        expect(awsReadme).toContain("信頼境界");
         expect(awsReadme).toContain("#74");
-        expect(awsReadme).toContain("Operator runbook");
-        expect(awsReadme).toContain("Credential absence means issue cannot be closed");
+        expect(awsReadme).toContain("運用 runbook");
+        expect(awsReadme).toContain("Credential がない場合、この issue は close できません");
         expect(awsReadme).toContain("worker は request 作成と状態管理");
         expect(awsReadme).toContain("TEE は検証、正規化、署名");
         expect(awsReadme).toContain("relayer は結果を配送するだけ");
@@ -112,11 +112,11 @@ describe("membership identity AWS interface docs", () => {
             expect(awsReadme).toContain(phrase);
         }
 
-        expect(awsReadme).toContain("Walrus CLI を含めない");
-        expect(awsReadme).toContain("membership TEE は Walrus を呼ばない");
+        expect(awsReadme).toContain("Walrus CLI を含めません");
+        expect(awsReadme).toContain("membership TEE は Walrus を呼びません");
         expect(awsReadme).toContain("membership-identity-tee.eif");
-        expect(awsReadme).toContain("KMS/Nitro attestation measurements");
-        expect(awsReadme).toContain("stdin/stdout 契約は変えない");
+        expect(awsReadme).toContain("KMS / Nitro attestation measurement");
+        expect(awsReadme).toContain("stdin/stdout 契約は変えません");
     });
 
     it("keeps unsupported KYC error code documentation aligned with the TEE", async () => {
@@ -134,25 +134,25 @@ describe("membership identity AWS interface docs", () => {
         const combined = `${awsReadme}\n${awsEvidenceTemplate}`;
 
         for (const phrase of [
-            "Operator runbook",
-            "Required artifacts",
+            "運用 runbook",
+            "必須 artifact",
             "membership-identity-tee-artifact.tar.gz",
             "membership-identity-tee.eif",
-            "KMS/Nitro attestation measurements",
+            "KMS / Nitro attestation measurement",
             "ImageSha384",
             "PCR3",
             "encrypted signing material",
-            "World ID app/proof inputs",
-            "Stack parameters",
-            "Sui object IDs",
-            "Local unit tests",
+            "World ID app / proof input",
+            "Stack parameter",
+            "Sui object ID",
+            "Local unit test",
             "AWS deployment smoke",
             "Nitro Enclave start",
             "vsock-proxy World ID real API smoke",
             "Sui dry-run",
             "Sui submit",
-            "post-tx membership pass state readback",
-            "credential absence means issue cannot be closed",
+            "Post-tx membership pass state readback",
+            "Credential がない場合、この issue は close できません",
             "Stack name:",
             "Artifact checksum:",
             "EIF identity:",

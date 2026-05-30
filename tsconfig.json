@@ -1,6 +1,7 @@
 {
     "files": [],
     "references": [
+        { "path": "./nautilus/verifiers/common/contracts" },
         { "path": "./nautilus/verifiers/earthquake/shared" },
         { "path": "./nautilus/verifiers/earthquake/watcher" },
         { "path": "./nautilus/verifiers/earthquake/relayer" },

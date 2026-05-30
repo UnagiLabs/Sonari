@@ -9,6 +9,7 @@ import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
+    handler as runnerWorkflowHandler,
     type AutoScalingClientLike,
     type Ec2ClientLike,
     readRelayerConfigFromEnv,
@@ -26,6 +27,82 @@ describe("AWS runner workflow helper", () => {
 
     afterEach(() => {
         process.env = { ...originalEnv };
+    });
+
+    it("retains earthquake verifier kind across common runner workflow actions", async () => {
+        const ssm = new RecordingSsmClient({ invocationStatus: "Success" });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client({
+                instances: [{ instanceId: "i-ready", state: "running" }],
+            }),
+            ssm,
+            s3: new RecordingS3Client({
+                body: JSON.stringify({
+                    status: "pending_source",
+                    source_event_id: "us7000sonari",
+                    error_code: "SHAKEMAP_PRODUCT_MISSING",
+                }),
+            }),
+            now: () => 1_800_000_000_123,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "start_instance",
+                verifier_kind: "earthquake",
+                source_event_id: "us7000sonari",
+            } as never),
+        ).resolves.toMatchObject({ verifier_kind: "earthquake", capacity: 1 });
+        await expect(
+            handler({
+                action: "find_ready_instance",
+                verifier_kind: "earthquake",
+                source_event_id: "us7000sonari",
+            } as never),
+        ).resolves.toMatchObject({ verifier_kind: "earthquake", instance_id: "i-ready" });
+        await expect(
+            handler({
+                action: "dispatch_tee_command",
+                verifier_kind: "earthquake",
+                source_event_id: "us7000sonari",
+                instance_id: "i-ready",
+            } as never),
+        ).resolves.toMatchObject({
+            verifier_kind: "earthquake",
+            command_id: "cmd-123",
+            result_s3_key: "results/us7000sonari/1800000000123.json",
+        });
+        await expect(
+            handler({
+                action: "poll_command",
+                verifier_kind: "earthquake",
+                source_event_id: "us7000sonari",
+                instance_id: "i-ready",
+                command_id: "cmd-123",
+                result_s3_key: "results/us7000sonari/1800000000123.json",
+                command_poll_count: 0,
+            } as never),
+        ).resolves.toMatchObject({ verifier_kind: "earthquake", command_status: "SUCCEEDED" });
+        await expect(
+            handler({
+                action: "read_result",
+                verifier_kind: "earthquake",
+                source_event_id: "us7000sonari",
+                result_s3_key: "results/us7000sonari/1800000000123.json",
+            } as never),
+        ).resolves.toMatchObject({ verifier_kind: "earthquake" });
+    });
+
+    it("fails closed before AWS setup for unknown verifier kind at the workflow boundary", async () => {
+        await expect(
+            runnerWorkflowHandler({
+                action: "start_instance",
+                verifier_kind: "membership_identity",
+                source_event_id: "us7000sonari",
+            } as never),
+        ).rejects.toThrow(/verifier_kind/);
     });
 
     it("scales the runner ASG up and down", async () => {

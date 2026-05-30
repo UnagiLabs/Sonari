@@ -300,8 +300,33 @@ Resources:
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
             fi
+            sonari_dev_membership_stdio_bridge=0
+            if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
+              cat >/usr/local/bin/sonari-enclave-stdio <<'SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE'
+            #!/bin/bash
+            set -euo pipefail
+            : "${!SONARI_WORLD_ID_APP_ID:?SONARI_WORLD_ID_APP_ID is required}"
+            exec /opt/sonari/tee-artifact/bin/membership-tee fixture --world-id-status verified --world-app-id "$SONARI_WORLD_ID_APP_ID"
+            SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE
+              chmod 0500 /usr/local/bin/sonari-enclave-stdio
+              sonari_dev_membership_stdio_bridge=1
+            fi
             vsock_proxy_path="$(command -v vsock-proxy)"
-            cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
+            if [ "$sonari_dev_membership_stdio_bridge" = "1" ]; then
+              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_DEV_VSOCK_PROXY
+            [Unit]
+            Description=Sonari dev fixture World ID proxy placeholder
+
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/bin/true
+
+            [Install]
+            WantedBy=multi-user.target
+            SONARI_DEV_VSOCK_PROXY
+            else
+              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
             [Unit]
             Description=Sonari World ID API vsock proxy for membership identity enclave
             After=network-online.target nitro-enclaves-allocator.service
@@ -316,14 +341,15 @@ Resources:
             [Install]
             WantedBy=multi-user.target
             SONARI_VSOCK_PROXY
+            fi
             systemctl daemon-reload
             systemctl enable --now sonari-world-id-vsock-proxy.service
             {
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
               echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=${SigningMaterialKmsKey}"
-              echo "SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=$tee_eif"
+              printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
               echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
-              echo "SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
+              printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_UPSTREAM_API_BASE=%q\n' "$world_id_api_base"
               echo "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000"
@@ -541,7 +567,7 @@ Resources:
             "StartInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "start_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Next": "WaitForInstance",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -550,7 +576,7 @@ Resources:
             "FindReadyInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Next": "DispatchTeeCommand",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -558,7 +584,7 @@ Resources:
             "DispatchTeeCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
               "Next": "WaitForCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -566,7 +592,7 @@ Resources:
             "PollCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
               "Next": "CommandComplete",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -583,35 +609,35 @@ Resources:
             "ReadResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ApplyResult",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ApplyResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "MarkFailed": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "MarkCommandPollingTimedOut": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "error_code": "AWS_MEMBERSHIP_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "mark_failed", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "error_code": "AWS_MEMBERSHIP_RUNNER_TIMEOUT", "message": "SSM command polling exceeded 30 minutes" },
               "Next": "StopInstance",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "StopInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "action": "stop_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "stop_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
               "End": true
