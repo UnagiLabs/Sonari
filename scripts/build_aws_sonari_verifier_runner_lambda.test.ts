@@ -55,6 +55,7 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(runnerWorkflowJs).toContain("UpdateItemCommand");
         expect(runnerWorkflowJs).toContain("DeleteItemCommand");
         expect(runnerWorkflowJs).toContain("capacity_busy");
+        expect(runnerWorkflowJs).toContain("verifier_kind: verifierKind");
         expect(runnerWorkflowJs).toContain("ConditionalCheckFailedException");
         expect(runnerWorkflowJs).toContain("createRequire(import.meta.url)");
         expect(lambdaJs).not.toContain("workspace:");

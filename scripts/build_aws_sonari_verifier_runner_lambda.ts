@@ -60,7 +60,7 @@ export async function handler(event: RunnerControlEvent): Promise<unknown> {
     if (action === "start_instance") {
         const acquired = await acquireRunnerLease(leaseOwner);
         if (!acquired) {
-            return buildCapacityBusyResult(event);
+            return buildCapacityBusyResult(verifierKind, event);
         }
         try {
             return await dispatchDomainHandler(verifierKind, event);
@@ -148,8 +148,14 @@ function buildStopNoopResult(event: RunnerControlEvent): Record<string, unknown>
     return result;
 }
 
-function buildCapacityBusyResult(event: RunnerControlEvent): Record<string, unknown> {
-    const result: Record<string, unknown> = { capacity_busy: true };
+function buildCapacityBusyResult(
+    verifierKind: VerifierKind,
+    event: RunnerControlEvent,
+): Record<string, unknown> {
+    const result: Record<string, unknown> = {
+        capacity_busy: true,
+        verifier_kind: verifierKind,
+    };
     copyWorkflowIdentifiers(event, result);
     return result;
 }
