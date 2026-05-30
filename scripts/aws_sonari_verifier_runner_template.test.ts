@@ -139,6 +139,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SONARI_WORLD_ID_APP_ID");
         expect(template).toContain("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE");
         expect(template).toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
+        expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
+        expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 

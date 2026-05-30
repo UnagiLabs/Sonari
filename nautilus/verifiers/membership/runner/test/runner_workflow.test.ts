@@ -543,7 +543,7 @@ describe("membership runner workflow", () => {
 
     it("bootstraps a fail-closed World ID vsock proxy in the membership AWS template", async () => {
         const template = await readFile(
-            path.resolve("../../../../infra/aws/membership-identity-runner/template.yaml"),
+            path.resolve(process.cwd(), "infra/aws/membership-identity-runner/template.yaml"),
             "utf8",
         );
 
@@ -557,11 +557,11 @@ describe("membership runner workflow", () => {
         expect(template).toContain("{TeeEifS3Bucket}/$");
         expect(template).toContain("{TeeEifS3Key}'");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
-        expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=$tee_eif");
+        expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
         expect(template).toContain(
             "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
         );
-        expect(template).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif");
+        expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
         expect(template).toContain("systemctl enable --now sonari-world-id-vsock-proxy.service");
         expect(template).toContain(

@@ -53,7 +53,7 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("NitroEnclaveCid:");
         expect(template).toContain("Default: /opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
-        expect(template).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif");
+        expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).toContain(
             "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
         );

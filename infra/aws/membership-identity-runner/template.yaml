@@ -321,9 +321,9 @@ Resources:
             {
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
               echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=${SigningMaterialKmsKey}"
-              echo "SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=$tee_eif"
+              printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
               echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
-              echo "SONARI_NITRO_RUN_ENCLAVE_ARGS=--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
+              printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_UPSTREAM_API_BASE=%q\n' "$world_id_api_base"
               echo "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000"
