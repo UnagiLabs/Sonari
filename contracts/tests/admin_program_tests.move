@@ -127,12 +127,21 @@ fun init_creates_display_objects_for_explorer() {
     scenario.next_tx(ADMIN);
     {
         let publisher = scenario.take_from_sender<Publisher>();
+        assert!(!scenario.has_most_recent_for_sender<Display<membership::MembershipPass>>());
+        assert!(!scenario.has_most_recent_for_sender<Display<donation::DonorPass>>());
+        assert!(!scenario.has_most_recent_for_sender<Display<claim::ClaimReceipt>>());
+        assert!(!scenario.has_most_recent_for_sender<Display<disaster_event::DisasterEvent>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<membership::MembershipPass>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<donation::DonorPass>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<claim::ClaimReceipt>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<disaster_event::DisasterEvent>>());
+
         let membership_display =
-            scenario.take_from_sender<Display<membership::MembershipPass>>();
-        let donor_display = scenario.take_from_sender<Display<donation::DonorPass>>();
-        let claim_display = scenario.take_from_sender<Display<claim::ClaimReceipt>>();
+            scenario.take_immutable<Display<membership::MembershipPass>>();
+        let donor_display = scenario.take_immutable<Display<donation::DonorPass>>();
+        let claim_display = scenario.take_immutable<Display<claim::ClaimReceipt>>();
         let disaster_display =
-            scenario.take_from_sender<Display<disaster_event::DisasterEvent>>();
+            scenario.take_immutable<Display<disaster_event::DisasterEvent>>();
 
         assert_display_fields(
             &membership_display,
@@ -168,47 +177,10 @@ fun init_creates_display_objects_for_explorer() {
         );
 
         scenario.return_to_sender(publisher);
-        scenario.return_to_sender(membership_display);
-        scenario.return_to_sender(donor_display);
-        scenario.return_to_sender(claim_display);
-        scenario.return_to_sender(disaster_display);
-    };
-
-    scenario.end();
-}
-
-#[test]
-fun admin_can_update_display_fields_and_version() {
-    let mut scenario = test_scenario::begin(ADMIN);
-    admin::init_with_displays_for_testing(scenario.ctx());
-
-    scenario.next_tx(ADMIN);
-    {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
-        let mut membership_display =
-            scenario.take_from_sender<Display<membership::MembershipPass>>();
-
-        admin::update_display<membership::MembershipPass>(
-            &cap,
-            &mut membership_display,
-            b"Updated Passport".to_string(),
-            b"Updated description".to_string(),
-            b"https://example.com/passport.svg".to_string(),
-            b"https://example.com/passport/{id}".to_string(),
-        );
-
-        assert_display_fields(
-            &membership_display,
-            2,
-            b"Updated Passport".to_string(),
-            b"Updated description".to_string(),
-            b"https://example.com/passport.svg".to_string(),
-            b"https://example.com/passport/{id}".to_string(),
-        );
-        assert!(display::version(&membership_display) == 2);
-
-        scenario.return_to_sender(cap);
-        scenario.return_to_sender(membership_display);
+        test_scenario::return_immutable(membership_display);
+        test_scenario::return_immutable(donor_display);
+        test_scenario::return_immutable(claim_display);
+        test_scenario::return_immutable(disaster_display);
     };
 
     scenario.end();

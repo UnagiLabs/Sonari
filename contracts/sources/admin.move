@@ -10,7 +10,7 @@ use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
 use std::string::{Self, String};
-use sui::display::{Self, Display};
+use sui::display;
 use sui::event;
 use sui::package::{Self, Publisher};
 use sui::vec_set::{Self, VecSet};
@@ -111,7 +111,6 @@ fun initialize_with_displays(publisher: Publisher, ctx: &mut TxContext) {
     transfer::public_transfer(publisher, ctx.sender());
 }
 
-#[allow(lint(self_transfer))]
 fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
     let mut membership_display = display::new_with_fields<membership::MembershipPass>(
         publisher,
@@ -125,7 +124,7 @@ fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
         ctx,
     );
     display::update_version(&mut membership_display);
-    transfer::public_transfer(membership_display, ctx.sender());
+    transfer::public_freeze_object(membership_display);
 
     let mut donor_display = display::new_with_fields<donation::DonorPass>(
         publisher,
@@ -139,7 +138,7 @@ fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
         ctx,
     );
     display::update_version(&mut donor_display);
-    transfer::public_transfer(donor_display, ctx.sender());
+    transfer::public_freeze_object(donor_display);
 
     let mut claim_display = display::new_with_fields<claim::ClaimReceipt>(
         publisher,
@@ -153,7 +152,7 @@ fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
         ctx,
     );
     display::update_version(&mut claim_display);
-    transfer::public_transfer(claim_display, ctx.sender());
+    transfer::public_freeze_object(claim_display);
 
     let mut disaster_display = display::new_with_fields<disaster_event::DisasterEvent>(
         publisher,
@@ -167,7 +166,7 @@ fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
         ctx,
     );
     display::update_version(&mut disaster_display);
-    transfer::public_transfer(disaster_display, ctx.sender());
+    transfer::public_freeze_object(disaster_display);
 }
 
 fun display_field_keys(): vector<String> {
@@ -246,22 +245,6 @@ public fun bind_disaster_campaign(
 ) {
     let _ = cap;
     disaster_event::bind_campaign(registry, campaign, disaster_event, ctx);
-}
-
-#[allow(lint(public_entry))]
-public entry fun update_display<T: key>(
-    _: &AdminCap,
-    display_object: &mut Display<T>,
-    name: String,
-    description: String,
-    image_url: String,
-    link: String,
-) {
-    display::edit(display_object, b"name".to_string(), name);
-    display::edit(display_object, b"description".to_string(), description);
-    display::edit(display_object, b"image_url".to_string(), image_url);
-    display::edit(display_object, b"link".to_string(), link);
-    display::update_version(display_object);
 }
 
 public fun open_campaign_budget_from_main(
