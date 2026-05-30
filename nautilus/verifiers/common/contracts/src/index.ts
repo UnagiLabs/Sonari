@@ -69,6 +69,52 @@ export function withVerifierKind<T extends object>(
     return { verifier_kind: verifierKind, ...output };
 }
 
+export interface SharedRunnerLeaseStore {
+    acquire(input: {
+        leaseId: string;
+        owner: string;
+        nowSeconds: number;
+        expiresAtSeconds: number;
+    }): Promise<void>;
+    release(input: { leaseId: string; owner: string }): Promise<boolean>;
+}
+
+export function buildSharedRunnerLeaseOwner(input: {
+    verifierKind: VerifierKind;
+    workflowId: string;
+    attempt?: number | undefined;
+}): string {
+    if (input.workflowId.length === 0) {
+        throw new Error("workflowId is required for shared runner lease");
+    }
+    return [input.verifierKind, input.workflowId, String(input.attempt ?? 1)].join(":");
+}
+
+export async function acquireSharedRunnerLease(
+    store: SharedRunnerLeaseStore,
+    input: {
+        owner: string;
+        nowMs?: number | undefined;
+        leaseTtlSeconds?: number | undefined;
+    },
+): Promise<void> {
+    const nowSeconds = Math.floor((input.nowMs ?? Date.now()) / 1000);
+    const leaseTtlSeconds = input.leaseTtlSeconds ?? 60 * 60;
+    await store.acquire({
+        leaseId: "shared-runner",
+        owner: input.owner,
+        nowSeconds,
+        expiresAtSeconds: nowSeconds + leaseTtlSeconds,
+    });
+}
+
+export async function releaseSharedRunnerLease(
+    store: SharedRunnerLeaseStore,
+    owner: string,
+): Promise<boolean> {
+    return store.release({ leaseId: "shared-runner", owner });
+}
+
 export async function setRunnerDesiredCapacity(
     autoscaling: RunnerAutoScalingClientLike,
     input: {

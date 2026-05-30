@@ -51,6 +51,11 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(runnerWorkflowJs).toContain("membership_identity");
         expect(runnerWorkflowJs).toContain("EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND");
         expect(runnerWorkflowJs).toContain("MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND");
+        expect(runnerWorkflowJs).toContain("RUNNER_LEASE_TABLE_NAME");
+        expect(runnerWorkflowJs).toContain("UpdateItemCommand");
+        expect(runnerWorkflowJs).toContain("DeleteItemCommand");
+        expect(runnerWorkflowJs).toContain("shared runner is already leased");
+        expect(runnerWorkflowJs).toContain("ConditionalCheckFailedException");
         expect(runnerWorkflowJs).toContain("createRequire(import.meta.url)");
         expect(lambdaJs).not.toContain("workspace:");
         expect(runnerWorkflowJs).not.toContain("workspace:");

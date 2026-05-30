@@ -202,6 +202,21 @@ Resources:
         - AttributeName: job_id
           KeyType: HASH
 
+  RunnerLeaseTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-runner_lease
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: lease_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: lease_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: lease_expires_at
+        Enabled: true
+
   RunnerResultBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -629,6 +644,7 @@ Resources:
                 Resource:
                   - !GetAtt EventsTable.Arn
                   - !GetAtt VerificationJobsTable.Arn
+                  - !GetAtt RunnerLeaseTable.Arn
               - !If
                 - HasRelayerSignerSecretArn
                 - Effect: Allow
@@ -795,6 +811,7 @@ Resources:
         Variables:
           EVENTS_TABLE_NAME: !Ref EventsTable
           VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+          RUNNER_LEASE_TABLE_NAME: !Ref RunnerLeaseTable
           RUNNER_ASG_NAME: !Ref RunnerAutoScalingGroup
           RESULT_BUCKET: !Ref RunnerResultBucket
           NITRO_ENCLAVE_PROCESS_COMMAND: !Ref NitroEnclaveProcessCommand
@@ -1054,6 +1071,8 @@ Outputs:
     Value: !Ref EventsTable
   VerificationJobsTableName:
     Value: !Ref VerificationJobsTable
+  RunnerLeaseTableName:
+    Value: !Ref RunnerLeaseTable
   RunnerResultBucketName:
     Value: !Ref RunnerResultBucket
   RunnerLogGroupName:

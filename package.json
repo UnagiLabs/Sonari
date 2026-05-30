@@ -38,7 +38,9 @@
         "test:identity": "cargo test -p membership-tee"
     },
     "devDependencies": {
+        "@aws-sdk/client-dynamodb": "^3.948.0",
         "@biomejs/biome": "^2.4.15",
+        "@sonari/verifier-contracts": "workspace:*",
         "@types/node": "^24.10.2",
         "@types/yazl": "^3.3.1",
         "esbuild": "^0.28.0",

@@ -8,9 +8,15 @@ importers:
 
   .:
     devDependencies:
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.948.0
+        version: 3.1053.0
       '@biomejs/biome':
         specifier: ^2.4.15
         version: 2.4.15
+      '@sonari/verifier-contracts':
+        specifier: workspace:*
+        version: link:nautilus/verifiers/common/contracts
       '@types/node':
         specifier: ^24.10.2
         version: 24.12.4

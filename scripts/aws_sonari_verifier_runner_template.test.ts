@@ -38,6 +38,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("Handler: dist/src/lambda.manualHandler");
 
         expect(template).toContain("VerificationJobsTable:");
+        expect(template).toContain("RunnerLeaseTable:");
+        expect(template).toContain("TableName: !Sub $" + "{AWS::StackName}-runner_lease");
+        expect(template).toContain("AttributeName: lease_expires_at");
+        expect(template).toContain("TimeToLiveSpecification:");
         expect(template).toContain("SubmitVerificationLambda:");
         expect(template).toContain("BatchVerifierLambda:");
         expect(template).toContain("BatchSchedule:");
@@ -46,6 +50,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
 
         expect(template).toContain("RunnerControlLambda:");
         expect(template).toContain("Handler: dist/src/runner_workflow.handler");
+        expect(template).toContain("RUNNER_LEASE_TABLE_NAME: !Ref RunnerLeaseTable");
+        expect(template).toContain("!GetAtt RunnerLeaseTable.Arn");
         expect(template).toContain(
             "EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref EarthquakeNitroEnclaveProcessCommand",
         );
@@ -124,6 +130,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
 
         expect(template).toContain("EventsTableName:");
         expect(template).toContain("VerificationJobsTableName:");
+        expect(template).toContain("RunnerLeaseTableName:");
         expect(template).toContain("EarthquakeRunnerStateMachineArn:");
         expect(template).toContain("MembershipRunnerStateMachineArn:");
         expect(template).toContain("RunnerAutoScalingGroupName:");

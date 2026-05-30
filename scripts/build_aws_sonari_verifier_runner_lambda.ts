@@ -26,6 +26,17 @@ export {
 
 const UNIFIED_RUNNER_WORKFLOW_ENTRYPOINT = `
 import {
+    DeleteItemCommand,
+    DynamoDBClient,
+    UpdateItemCommand,
+} from "@aws-sdk/client-dynamodb";
+import {
+    acquireSharedRunnerLease,
+    buildSharedRunnerLeaseOwner,
+    releaseSharedRunnerLease,
+    type SharedRunnerLeaseStore,
+} from "@sonari/verifier-contracts";
+import {
     handler as earthquakeRunnerControlHandler,
     type RunnerControlEvent as EarthquakeRunnerControlEvent,
 } from "./nautilus/verifiers/earthquake/watcher/src/runner_workflow.js";
@@ -40,8 +51,35 @@ const MEMBERSHIP_IDENTITY_VERIFIER_KIND = "membership_identity";
 type VerifierKind = typeof EARTHQUAKE_VERIFIER_KIND | typeof MEMBERSHIP_IDENTITY_VERIFIER_KIND;
 export type RunnerControlEvent = EarthquakeRunnerControlEvent | MembershipRunnerControlEvent;
 
+const leaseStore = new DynamoDbSharedRunnerLeaseStore(new DynamoDBClient({}));
+
 export async function handler(event: RunnerControlEvent): Promise<unknown> {
     const verifierKind = parseVerifierKind((event as { verifier_kind?: unknown }).verifier_kind);
+    const action = readAction(event);
+    const leaseOwner = buildLeaseOwner(verifierKind, event);
+    if (action === "start_instance") {
+        await acquireRunnerLease(leaseOwner);
+        try {
+            return await dispatchDomainHandler(verifierKind, event);
+        } catch (error) {
+            await releaseRunnerLease(leaseOwner);
+            throw error;
+        }
+    }
+    if (action === "stop_instance") {
+        const released = await releaseRunnerLease(leaseOwner);
+        if (!released) {
+            return buildStopNoopResult(event);
+        }
+        return dispatchDomainHandler(verifierKind, event);
+    }
+    return dispatchDomainHandler(verifierKind, event);
+}
+
+async function dispatchDomainHandler(
+    verifierKind: VerifierKind,
+    event: RunnerControlEvent,
+): Promise<unknown> {
     return withDomainNitroCommand(verifierKind, async () => {
         if (verifierKind === EARTHQUAKE_VERIFIER_KIND) {
             return earthquakeRunnerControlHandler(event as EarthquakeRunnerControlEvent);
@@ -50,11 +88,149 @@ export async function handler(event: RunnerControlEvent): Promise<unknown> {
     });
 }
 
+function readAction(event: RunnerControlEvent): string {
+    const action = (event as { action?: unknown }).action;
+    if (typeof action !== "string" || action.length === 0) {
+        throw new Error("runner action is required");
+    }
+    return action;
+}
+
 function parseVerifierKind(input: unknown): VerifierKind {
     if (input === EARTHQUAKE_VERIFIER_KIND || input === MEMBERSHIP_IDENTITY_VERIFIER_KIND) {
         return input;
     }
     throw new Error("verifier_kind must be earthquake or membership_identity");
+}
+
+function buildLeaseOwner(verifierKind: VerifierKind, event: RunnerControlEvent): string {
+    if (verifierKind === EARTHQUAKE_VERIFIER_KIND) {
+        const sourceEventId = (event as { source_event_id?: unknown }).source_event_id;
+        if (typeof sourceEventId !== "string" || sourceEventId.length === 0) {
+            throw new Error("source_event_id is required for earthquake runner lease");
+        }
+        return buildSharedRunnerLeaseOwner({
+            verifierKind,
+            workflowId: sourceEventId,
+            attempt: readAttempt(event),
+        });
+    }
+    const jobId = (event as { job_id?: unknown }).job_id;
+    if (typeof jobId !== "string" || jobId.length === 0) {
+        throw new Error("job_id is required for membership runner lease");
+    }
+    return buildSharedRunnerLeaseOwner({
+        verifierKind,
+        workflowId: jobId,
+        attempt: readAttempt(event),
+    });
+}
+
+function readAttempt(event: RunnerControlEvent): number {
+    const attempt = (event as { attempt?: unknown }).attempt;
+    if (attempt === undefined) {
+        return 1;
+    }
+    if (!Number.isInteger(attempt) || attempt < 1) {
+        throw new Error("attempt must be a positive integer");
+    }
+    return attempt;
+}
+
+function buildStopNoopResult(event: RunnerControlEvent): Record<string, unknown> {
+    const result: Record<string, unknown> = { capacity: 0 };
+    const attempt = (event as { attempt?: unknown }).attempt;
+    if (typeof attempt === "number") {
+        result.attempt = attempt;
+    }
+    const sourceEventId = (event as { source_event_id?: unknown }).source_event_id;
+    if (typeof sourceEventId === "string") {
+        result.source_event_id = sourceEventId;
+    }
+    const jobId = (event as { job_id?: unknown }).job_id;
+    if (typeof jobId === "string") {
+        result.job_id = jobId;
+    }
+    return result;
+}
+
+async function acquireRunnerLease(owner: string): Promise<void> {
+    try {
+        await acquireSharedRunnerLease(leaseStore, { owner });
+    } catch (error) {
+        if (isConditionalCheckFailed(error)) {
+            throw new Error("shared runner is already leased by another verifier workflow");
+        }
+        throw error;
+    }
+}
+
+async function releaseRunnerLease(owner: string): Promise<boolean> {
+    return releaseSharedRunnerLease(leaseStore, owner);
+}
+
+class DynamoDbSharedRunnerLeaseStore implements SharedRunnerLeaseStore {
+    constructor(private readonly dynamo: DynamoDBClient) {}
+
+    async acquire(input: {
+        leaseId: string;
+        owner: string;
+        nowSeconds: number;
+        expiresAtSeconds: number;
+    }): Promise<void> {
+        await this.dynamo.send(
+            new UpdateItemCommand({
+                TableName: readLeaseTableName(),
+                Key: { lease_id: { S: input.leaseId } },
+                UpdateExpression: "SET lease_owner = :owner, lease_expires_at = :expires_at",
+                ConditionExpression:
+                    "attribute_not_exists(lease_id) OR lease_owner = :owner OR lease_expires_at < :now",
+                ExpressionAttributeValues: {
+                    ":owner": { S: input.owner },
+                    ":expires_at": { N: String(input.expiresAtSeconds) },
+                    ":now": { N: String(input.nowSeconds) },
+                },
+            }),
+        );
+    }
+
+    async release(input: { leaseId: string; owner: string }): Promise<boolean> {
+    try {
+        await this.dynamo.send(
+            new DeleteItemCommand({
+                TableName: readLeaseTableName(),
+                Key: { lease_id: { S: input.leaseId } },
+                ConditionExpression: "lease_owner = :owner",
+                ExpressionAttributeValues: {
+                    ":owner": { S: input.owner },
+                },
+            }),
+        );
+        return true;
+    } catch (error) {
+        if (isConditionalCheckFailed(error)) {
+            return false;
+        }
+        throw error;
+    }
+}
+}
+
+function readLeaseTableName(): string {
+    const value = process.env.RUNNER_LEASE_TABLE_NAME;
+    if (value === undefined || value.length === 0) {
+        throw new Error("RUNNER_LEASE_TABLE_NAME is required");
+    }
+    return value;
+}
+
+function isConditionalCheckFailed(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "ConditionalCheckFailedException"
+    );
 }
 
 async function withDomainNitroCommand<T>(

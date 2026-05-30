@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+    acquireSharedRunnerLease,
+    buildSharedRunnerLeaseOwner,
     dispatchRunnerCommand,
     findReadyRunnerInstance,
     parseExpectedVerifierKind,
     parseVerifierKind,
     pollRunnerCommand,
     readRunnerResultText,
+    releaseSharedRunnerLease,
+    type SharedRunnerLeaseStore,
     setRunnerDesiredCapacity,
     withVerifierKind,
 } from "./index.js";
@@ -89,6 +93,30 @@ describe("common runner dispatcher", () => {
         });
         expect(withVerifierKind(undefined, { capacity: 1 })).toEqual({ capacity: 1 });
     });
+
+    it("serializes shared runner leases across verifier kinds", async () => {
+        const store = new InMemorySharedRunnerLeaseStore();
+        const earthquakeOwner = buildSharedRunnerLeaseOwner({
+            verifierKind: "earthquake",
+            workflowId: "us7000sonari",
+            attempt: 1,
+        });
+        const membershipOwner = buildSharedRunnerLeaseOwner({
+            verifierKind: "membership_identity",
+            workflowId: "membership-job-1",
+            attempt: 1,
+        });
+
+        await acquireSharedRunnerLease(store, { owner: earthquakeOwner, nowMs: 1_800_000_000_000 });
+        await expect(
+            acquireSharedRunnerLease(store, { owner: membershipOwner, nowMs: 1_800_000_001_000 }),
+        ).rejects.toThrow(/already leased/);
+        await expect(releaseSharedRunnerLease(store, membershipOwner)).resolves.toBe(false);
+        await expect(releaseSharedRunnerLease(store, earthquakeOwner)).resolves.toBe(true);
+        await expect(
+            acquireSharedRunnerLease(store, { owner: membershipOwner, nowMs: 1_800_000_002_000 }),
+        ).resolves.toBeUndefined();
+    });
 });
 
 class RecordingAutoScalingClient {
@@ -135,5 +163,38 @@ class RecordingSsmClient {
 class RecordingS3Client {
     async getObjectText(): Promise<string> {
         return '{"status":"ok"}';
+    }
+}
+
+class InMemorySharedRunnerLeaseStore implements SharedRunnerLeaseStore {
+    private lease:
+        | {
+              owner: string;
+              expiresAtSeconds: number;
+          }
+        | undefined;
+
+    async acquire(input: {
+        leaseId: string;
+        owner: string;
+        nowSeconds: number;
+        expiresAtSeconds: number;
+    }): Promise<void> {
+        if (
+            this.lease !== undefined &&
+            this.lease.owner !== input.owner &&
+            this.lease.expiresAtSeconds >= input.nowSeconds
+        ) {
+            throw new Error("shared runner is already leased by another verifier workflow");
+        }
+        this.lease = { owner: input.owner, expiresAtSeconds: input.expiresAtSeconds };
+    }
+
+    async release(input: { leaseId: string; owner: string }): Promise<boolean> {
+        if (this.lease?.owner !== input.owner) {
+            return false;
+        }
+        this.lease = undefined;
+        return true;
     }
 }
