@@ -11,7 +11,10 @@ use contracts::metadata_verifier;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
+use sui::display::{Self, Display};
 use sui::event;
+use sui::package::Publisher;
+use std::string::{Self, String};
 use sui::test_scenario;
 
 const ADMIN: address = @0xA11CE;
@@ -111,6 +114,73 @@ fun init_creates_genesis_objects_and_tracking_events() {
         test_scenario::return_shared(verifier_registry);
         test_scenario::return_shared(claim_index);
         test_scenario::return_shared(identity_registry);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun init_creates_display_objects_for_explorer() {
+    let mut scenario = test_scenario::begin(ADMIN);
+    admin::init_with_displays_for_testing(scenario.ctx());
+
+    scenario.next_tx(ADMIN);
+    {
+        let publisher = scenario.take_from_sender<Publisher>();
+        assert!(!scenario.has_most_recent_for_sender<Display<membership::MembershipPass>>());
+        assert!(!scenario.has_most_recent_for_sender<Display<donation::DonorPass>>());
+        assert!(!scenario.has_most_recent_for_sender<Display<claim::ClaimReceipt>>());
+        assert!(!scenario.has_most_recent_for_sender<Display<disaster_event::DisasterEvent>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<membership::MembershipPass>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<donation::DonorPass>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<claim::ClaimReceipt>>());
+        assert!(test_scenario::has_most_recent_immutable<Display<disaster_event::DisasterEvent>>());
+
+        let membership_display =
+            scenario.take_immutable<Display<membership::MembershipPass>>();
+        let donor_display = scenario.take_immutable<Display<donation::DonorPass>>();
+        let claim_display = scenario.take_immutable<Display<claim::ClaimReceipt>>();
+        let disaster_display =
+            scenario.take_immutable<Display<disaster_event::DisasterEvent>>();
+
+        assert_display_fields(
+            &membership_display,
+            1,
+            b"Sonari Passport".to_string(),
+            b"Status: {status_label}. Verified via {provider_label}.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/membership-pass.svg".to_string(),
+            b"https://app.sonari.xyz/passport/{id}".to_string(),
+        );
+        assert_display_fields(
+            &donor_display,
+            1,
+            string::utf8(x"536f6e61726920446f6e6f72205061737320e28094207b746965725f6c6162656c7d"),
+            b"Total donated: {total_donated_usdc} USDC units across {donation_count} donations.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/donor-pass.svg".to_string(),
+            b"https://app.sonari.xyz/donor/{id}".to_string(),
+        );
+        assert_display_fields(
+            &claim_display,
+            1,
+            b"Sonari Relief Claim Receipt".to_string(),
+            b"Relief claim: {amount_usdc} USDC units. Tier: {tier_label}.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/claim-receipt.svg".to_string(),
+            b"https://app.sonari.xyz/claim/{id}".to_string(),
+        );
+        assert_display_fields(
+            &disaster_display,
+            1,
+            b"{title}".to_string(),
+            b"{hazard_label} in {region}. Verified disaster event.".to_string(),
+            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/disaster-event.svg".to_string(),
+            b"https://app.sonari.xyz/disaster/{id}".to_string(),
+        );
+
+        scenario.return_to_sender(publisher);
+        test_scenario::return_immutable(membership_display);
+        test_scenario::return_immutable(donor_display);
+        test_scenario::return_immutable(claim_display);
+        test_scenario::return_immutable(disaster_display);
     };
 
     scenario.end();
@@ -777,6 +847,25 @@ fun initialized(): test_scenario::Scenario {
     admin::init_for_testing(scenario.ctx());
     scenario.next_tx(ADMIN);
     scenario
+}
+
+fun assert_display_fields<T: key>(
+    display_object: &Display<T>,
+    expected_version: u16,
+    name: String,
+    description: String,
+    image_url: String,
+    link: String,
+) {
+    let fields = display::fields(display_object);
+    assert!(fields.length() == 4);
+    assert!(fields[&b"name".to_string()] == name);
+    assert!(fields[&b"description".to_string()] == description);
+    assert!(fields[&b"image_url".to_string()] == image_url);
+    assert!(fields[&b"link".to_string()] == link);
+    assert!(!fields.contains(&b"project_url".to_string()));
+    assert!(!fields.contains(&b"creator".to_string()));
+    assert!(display::version(display_object) == expected_version);
 }
 
 fun create_program(scenario: &mut test_scenario::Scenario, program_type: u8): object::ID {

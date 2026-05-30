@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Sonari Donor Pass</title>
+  <desc id="desc">Static display image for a Sonari donor pass.</desc>
+  <rect width="1200" height="630" fill="#111827"/>
+  <rect x="78" y="78" width="1044" height="474" rx="24" fill="#fff7ed"/>
+  <path d="M170 380c0-82 66-148 148-148 39 0 75 15 101 40 27-25 63-40 102-40 82 0 148 66 148 148 0 34-12 65-31 90H201c-20-25-31-56-31-90z" fill="#f97316"/>
+  <circle cx="420" cy="300" r="44" fill="#fef3c7"/>
+  <text x="720" y="230" text-anchor="middle" fill="#111827" font-family="Inter, Arial, sans-serif" font-size="64" font-weight="700">Sonari Donor Pass</text>
+  <text x="720" y="316" text-anchor="middle" fill="#7c2d12" font-family="Inter, Arial, sans-serif" font-size="34">Donation history and tier</text>
+  <text x="720" y="424" text-anchor="middle" fill="#c2410c" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">Funding disaster relief</text>
+</svg>

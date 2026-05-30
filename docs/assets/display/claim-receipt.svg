@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Sonari Relief Claim Receipt</title>
+  <desc id="desc">Static display image for a Sonari claim receipt.</desc>
+  <rect width="1200" height="630" fill="#0b1220"/>
+  <rect x="112" y="66" width="976" height="498" rx="18" fill="#ecfeff"/>
+  <path d="M218 170h764v74H218zM218 306h764v38H218zM218 390h520v38H218zM218 474h640v38H218z" fill="#0891b2"/>
+  <circle cx="920" cy="444" r="74" fill="#0f766e"/>
+  <path d="M884 444l25 25 52-62" fill="none" stroke="#ecfeff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="600" y="148" text-anchor="middle" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="54" font-weight="700">Relief Claim Receipt</text>
+  <text x="600" y="272" text-anchor="middle" fill="#155e75" font-family="Inter, Arial, sans-serif" font-size="32">Payout amount and eligibility tier</text>
+</svg>

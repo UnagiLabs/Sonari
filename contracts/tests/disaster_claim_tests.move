@@ -66,7 +66,9 @@ fun kyc_verified_member_can_claim_full_disaster_payout() {
         let receipt = scenario.take_from_sender<claim::ClaimReceipt>();
         let (_, _, _, amount, _, _, claimant, recipient) =
             claim::claim_receipt_summary(&receipt);
+        let tier_label = claim::claim_receipt_tier_label(&receipt);
         assert!(amount == 50_000_000);
+        assert!(tier_label == b"Tier 1".to_string());
         assert!(claimant == MEMBER);
         assert!(recipient == MEMBER);
         scenario.return_to_sender(receipt);

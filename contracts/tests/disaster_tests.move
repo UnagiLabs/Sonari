@@ -149,18 +149,22 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         created_title,
         created_region,
         created_payload_hash,
+        created_raw_data_uri,
         affected_root,
+        created_affected_cells_uri,
         affected_count,
         actor,
     ) =
         disaster_event::disaster_event_created_event_fields(*events.borrow(0));
     assert!(created_event_uid == event_uid());
     assert!(revision == EVENT_REVISION);
-    assert!(created_source_event_id == b"us7000sonari");
-    assert!(created_title == b"M 7.1 - Sonari Fixture Earthquake");
-    assert!(created_region == b"Sonari Fixture Region");
+    assert!(created_source_event_id == b"us7000sonari".to_string());
+    assert!(created_title == b"M 7.1 - Sonari Fixture Earthquake".to_string());
+    assert!(created_region == b"Sonari Fixture Region".to_string());
     assert!(created_payload_hash == payload_bcs_hash());
+    assert!(created_raw_data_uri == raw_data_uri().to_string());
     assert!(affected_root == affected_cells_root());
+    assert!(created_affected_cells_uri == affected_cells_uri().to_string());
     assert!(affected_count == 2);
     assert!(actor == ADMIN);
 
@@ -178,17 +182,19 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
             object_magnitude_x100,
             object_primary_source,
             object_hazard_type,
+            object_hazard_label,
             object_oracle_version,
         ) = disaster_event::certificate_identity_for_testing(&disaster_event);
         assert!(object_event_uid == event_uid());
         assert!(object_event_revision == EVENT_REVISION);
-        assert!(object_source_event_id == b"us7000sonari");
-        assert!(object_title == b"M 7.1 - Sonari Fixture Earthquake");
-        assert!(object_region == b"Sonari Fixture Region");
+        assert!(object_source_event_id == b"us7000sonari".to_string());
+        assert!(object_title == b"M 7.1 - Sonari Fixture Earthquake".to_string());
+        assert!(object_region == b"Sonari Fixture Region".to_string());
         assert!(object_occurred_at_ms == OCCURRED_AT_MS);
         assert!(object_magnitude_x100 == MAGNITUDE_X100);
         assert!(object_primary_source == PRIMARY_SOURCE_USGS);
         assert!(object_hazard_type == payload::hazard_type_earthquake());
+        assert!(object_hazard_label == b"Earthquake".to_string());
         assert!(object_oracle_version == ORACLE_VERSION);
 
         let (
@@ -223,10 +229,10 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         assert!(object_freshness_deadline_ms == FRESHNESS_DEADLINE_MS);
         assert!(object_source_set_hash == source_set_hash());
         assert!(object_raw_data_hash == raw_data_hash());
-        assert!(object_raw_data_uri == raw_data_uri());
+        assert!(object_raw_data_uri == raw_data_uri().to_string());
         assert!(object_affected_cells_root == affected_cells_root());
         assert!(object_affected_cells_data_hash == affected_cells_data_hash());
-        assert!(object_affected_cells_uri == affected_cells_uri());
+        assert!(object_affected_cells_uri == affected_cells_uri().to_string());
         assert!(object_affected_cell_count == 2);
 
         test_scenario::return_shared(disaster_event);
@@ -557,7 +563,7 @@ fun relayer_without_admin_cap_can_submit_registered_signed_payload() {
     };
 
     let events = event::events_by_type<disaster_event::DisasterEventCreated>();
-    let (_, _, _, _, _, _, _, _, actor) =
+    let (_, _, _, _, _, _, _, _, _, _, actor) =
         disaster_event::disaster_event_created_event_fields(*events.borrow(0));
     assert!(actor == RELAYER);
 

@@ -4,6 +4,7 @@ use contracts::metadata_verifier::{Self, VerifierRegistry};
 use contracts::payload::{Self, Payload};
 use contracts::program::{Self, Campaign};
 use std::hash;
+use std::string::{Self, String};
 use sui::clock::{Self, Clock};
 use sui::dynamic_field;
 use sui::event;
@@ -25,13 +26,14 @@ public struct DisasterEvent has key {
     id: UID,
     event_uid: vector<u8>,
     event_revision: u32,
-    source_event_id: vector<u8>,
-    title: vector<u8>,
-    region: vector<u8>,
+    source_event_id: String,
+    title: String,
+    region: String,
     occurred_at_ms: u64,
     magnitude_x100: u64,
     primary_source: u8,
     hazard_type: u8,
+    hazard_label: String,
     oracle_version: u64,
     payload_bcs_hash: vector<u8>,
     payload_bcs: vector<u8>,
@@ -44,10 +46,10 @@ public struct DisasterEvent has key {
     freshness_deadline_ms: u64,
     source_set_hash: vector<u8>,
     raw_data_hash: vector<u8>,
-    raw_data_uri: vector<u8>,
+    raw_data_uri: String,
     affected_cells_root: vector<u8>,
     affected_cells_data_hash: vector<u8>,
-    affected_cells_uri: vector<u8>,
+    affected_cells_uri: String,
     affected_cell_count: u64,
     created_at_ms: u64,
 }
@@ -84,15 +86,16 @@ public struct DisasterEventCreated has copy, drop {
     disaster_event_id: ID,
     event_uid: vector<u8>,
     event_revision: u32,
-    source_event_id: vector<u8>,
-    title: vector<u8>,
-    region: vector<u8>,
+    source_event_id: String,
+    title: String,
+    region: String,
     hazard_type: u8,
+    hazard_label: String,
     oracle_version: u64,
     payload_bcs_hash: vector<u8>,
-    raw_data_uri: vector<u8>,
+    raw_data_uri: String,
     affected_cells_root: vector<u8>,
-    affected_cells_uri: vector<u8>,
+    affected_cells_uri: String,
     affected_cell_count: u64,
     created_at_ms: u64,
     actor: address,
@@ -244,13 +247,14 @@ fun create_from_verified_payload(
         id: object::new(ctx),
         event_uid,
         event_revision,
-        source_event_id: payload::source_event_id(&payload),
-        title: payload::title(&payload),
-        region: payload::region(&payload),
+        source_event_id: string::utf8(payload::source_event_id(&payload)),
+        title: string::utf8(payload::title(&payload)),
+        region: string::utf8(payload::region(&payload)),
         occurred_at_ms: payload::occurred_at_ms(&payload),
         magnitude_x100: payload::magnitude_x100(&payload),
         primary_source: payload::primary_source(&payload),
         hazard_type: payload::hazard_type(&payload),
+        hazard_label: hazard_label(payload::hazard_type(&payload)),
         oracle_version: payload::oracle_version(&payload),
         payload_bcs_hash: hash::sha2_256(payload_bcs),
         payload_bcs,
@@ -263,10 +267,10 @@ fun create_from_verified_payload(
         freshness_deadline_ms: payload::freshness_deadline_ms(&payload),
         source_set_hash: payload::source_set_hash(&payload),
         raw_data_hash: payload::raw_data_hash(&payload),
-        raw_data_uri: payload::raw_data_uri(&payload),
+        raw_data_uri: string::utf8(payload::raw_data_uri(&payload)),
         affected_cells_root: payload::affected_cells_root(&payload),
         affected_cells_data_hash: payload::affected_cells_data_hash(&payload),
-        affected_cells_uri: payload::affected_cells_uri(&payload),
+        affected_cells_uri: string::utf8(payload::affected_cells_uri(&payload)),
         affected_cell_count: payload::affected_cell_count(&payload),
         created_at_ms: ctx.epoch_timestamp_ms(),
     };
@@ -280,6 +284,7 @@ fun create_from_verified_payload(
         title: disaster_event.title,
         region: disaster_event.region,
         hazard_type: disaster_event.hazard_type,
+        hazard_label: disaster_event.hazard_label,
         oracle_version: disaster_event.oracle_version,
         payload_bcs_hash: disaster_event.payload_bcs_hash,
         raw_data_uri: disaster_event.raw_data_uri,
@@ -342,11 +347,13 @@ public fun disaster_event_created_event_fields(
 ): (
     vector<u8>,
     u32,
+    String,
+    String,
+    String,
     vector<u8>,
+    String,
     vector<u8>,
-    vector<u8>,
-    vector<u8>,
-    vector<u8>,
+    String,
     u64,
     address,
 ) {
@@ -358,11 +365,12 @@ public fun disaster_event_created_event_fields(
         title,
         region,
         hazard_type: _,
+        hazard_label: _,
         oracle_version: _,
         payload_bcs_hash,
-        raw_data_uri: _,
+        raw_data_uri,
         affected_cells_root,
-        affected_cells_uri: _,
+        affected_cells_uri,
         affected_cell_count,
         created_at_ms: _,
         actor,
@@ -374,7 +382,9 @@ public fun disaster_event_created_event_fields(
         title,
         region,
         payload_bcs_hash,
+        raw_data_uri,
         affected_cells_root,
+        affected_cells_uri,
         affected_cell_count,
         actor,
     )
@@ -383,7 +393,7 @@ public fun disaster_event_created_event_fields(
 #[test_only]
 public fun certificate_identity_for_testing(
     disaster_event: &DisasterEvent,
-): (vector<u8>, u32, vector<u8>, vector<u8>, vector<u8>, u64, u64, u8, u8, u64) {
+): (vector<u8>, u32, String, String, String, u64, u64, u8, u8, String, u64) {
     (
         disaster_event.event_uid,
         disaster_event.event_revision,
@@ -394,6 +404,7 @@ public fun certificate_identity_for_testing(
         disaster_event.magnitude_x100,
         disaster_event.primary_source,
         disaster_event.hazard_type,
+        disaster_event.hazard_label,
         disaster_event.oracle_version,
     )
 }
@@ -421,10 +432,10 @@ public fun certificate_evidence_for_testing(
     u64,
     vector<u8>,
     vector<u8>,
+    String,
     vector<u8>,
     vector<u8>,
-    vector<u8>,
-    vector<u8>,
+    String,
     u64,
 ) {
     (
@@ -441,4 +452,12 @@ public fun certificate_evidence_for_testing(
         disaster_event.affected_cells_uri,
         disaster_event.affected_cell_count,
     )
+}
+
+fun hazard_label(hazard_type: u8): String {
+    if (hazard_type == payload::hazard_type_earthquake()) {
+        string::utf8(b"Earthquake")
+    } else {
+        string::utf8(b"Unknown")
+    }
 }

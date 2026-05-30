@@ -63,6 +63,9 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         assert!(membership::membership_pass_lineage_id(&pass) == pass_id);
         assert!(membership::membership_pass_status(&pass) == membership::status_active());
         assert!(membership::membership_pass_issued_at_ms(&pass) == 0);
+        let (status_label, provider_label) = membership::membership_pass_display_labels(&pass);
+        assert!(status_label == b"Active".to_string());
+        assert!(provider_label == b"Unverified".to_string());
         let (
             account_created_at_ms,
             home_cell,

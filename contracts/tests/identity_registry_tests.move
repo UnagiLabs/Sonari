@@ -65,6 +65,8 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
     assert!(identity_expires_at_ms == EXPIRES_AT_MS);
     assert!(terms_version == TERMS_VERSION);
     assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
+    let (_, provider_label) = membership::membership_pass_display_labels(&pass);
+    assert!(provider_label == b"KYC".to_string());
     assert!(identity_registry::binding_count_for_testing(&registry) == 1);
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
@@ -122,6 +124,8 @@ fun decoded_world_id_result_accumulates_provider_mask() {
         identity_provider_mask ==
             identity_result_v1::provider_kyc() + identity_result_v1::provider_world_id(),
     );
+    let (_, provider_label) = membership::membership_pass_display_labels(&pass);
+    assert!(provider_label == b"KYC + World ID".to_string());
     assert!(identity_verified_at_ms == APPLY_TIME_MS + 1);
     assert!(identity_registry::binding_count_for_testing(&registry) == 2);
 
