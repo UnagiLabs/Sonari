@@ -1,35 +1,35 @@
-# Residence Cells Data
+# Residence Cells データ
 
-This directory owns local data tooling for the residence-cell allowlist.
-It is not part of the Nautilus verifier runtime.
+このディレクトリは、residence-cell allowlist のためのローカルデータツールを管理します。
+Nautilus verifier ランタイムの一部ではありません。
 
-The tool generates an H3 resolution 7 land allowlist from the pinned Natural
-Earth land GeoJSON. The generated allowlist body is a local/S3 artifact. The
-contract-facing value is the resulting Merkle root and related metadata.
+このツールは、pin 留めされた Natural Earth land GeoJSON から H3 解像度 7 の
+land allowlist を生成します。生成された allowlist 本体はローカル/S3 のアーティファクトです。
+コントラクトが参照する値は、その結果として得られる Merkle root と関連メタデータです。
 
-## Setup
+## セットアップ
 
-Use `uv` from the repository root:
+リポジトリのルートから `uv` を使います:
 
 ```bash
 uv sync --project data/residence_cells
 ```
 
-## Source
+## ソース
 
-The pinned MVP source is:
+pin 留めされた MVP ソースは以下です:
 
 ```text
 https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson
 ```
 
-Expected SHA-256:
+期待される SHA-256:
 
 ```text
 1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416
 ```
 
-Download it outside git, under `.build/residence-cells/`:
+git の外、`.build/residence-cells/` 配下にダウンロードします:
 
 ```bash
 mkdir -p .build/residence-cells
@@ -38,7 +38,7 @@ curl -L \
   -o .build/residence-cells/ne_10m_land.geojson
 ```
 
-## Generate And Verify
+## 生成と検証
 
 ```bash
 uv run --project data/residence_cells residence-allowlist generate \
@@ -67,14 +67,15 @@ uv run --project data/residence_cells residence-allowlist verify-local \
   --source .build/residence-cells/ne_10m_land.geojson
 ```
 
-`root`, `proof`, and `verify-local` do not trust artifact metadata alone.
-They re-read the pinned source and regenerate H3 indexes before emitting a
-root, proof, or verified result.
+`root`、`proof`、`verify-local` は、アーティファクトのメタデータだけを信頼することはしません。
+root・proof・検証結果を出力する前に、pin 留めされたソースを読み直し、H3 インデックスを
+再生成します。
 
-## S3 Artifact
+## S3 アーティファクト
 
-The full allowlist body should not be committed to git. Upload the gzipped
-artifact to the bucket named by `SONARI_RESIDENCE_CELLS_BUCKET`:
+allowlist 本体の全量を git にコミットしてはいけません。gzip 圧縮した
+アーティファクトを `SONARI_RESIDENCE_CELLS_BUCKET` で指定されたバケットに
+アップロードします:
 
 ```bash
 gzip -c .build/residence-cells/allowed_residence_cells.v1.res7.json \
@@ -84,6 +85,6 @@ aws s3 cp \
   "s3://${SONARI_RESIDENCE_CELLS_BUCKET}/residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz"
 ```
 
-After upload, update `allowed_residence_cells_manifest.v1.res7.json` with the
-artifact SHA-256, byte size, H3 count, Merkle root, generated timestamp, and
-S3 version ID if the bucket has versioning enabled.
+アップロード後、`allowed_residence_cells_manifest.v1.res7.json` を、アーティファクトの
+SHA-256、バイトサイズ、H3 カウント、Merkle root、生成タイムスタンプ、および
+バケットでバージョニングが有効な場合は S3 バージョン ID で更新します。
