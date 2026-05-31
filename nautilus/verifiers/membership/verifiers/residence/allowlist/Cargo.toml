@@ -1,0 +1,16 @@
+[package]
+name = "residence-allowlist"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "residence_allowlist"
+path = "src/lib.rs"
+
+[dependencies]
+bcs = "0.1"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+hex = "0.4"
