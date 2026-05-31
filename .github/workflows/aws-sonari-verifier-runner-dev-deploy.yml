@@ -285,6 +285,8 @@ jobs:
           fi
 
           "$nitro_cli" --version
+          sudo mkdir -p /var/log/nitro_enclaves
+          sudo chown "$(id -u):$(id -g)" /var/log/nitro_enclaves
           echo "$install_dir/usr/bin" >> "$GITHUB_PATH"
           echo "NITRO_CLI_BLOBS=$blobs_dir" >> "$GITHUB_ENV"
 

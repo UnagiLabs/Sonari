@@ -92,6 +92,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "https://github.com/aws/aws-nitro-enclaves-cli",
             "cargo build",
             '--manifest-path "$source_dir/Cargo.toml"',
+            "sudo mkdir -p /var/log/nitro_enclaves",
+            'sudo chown "$(id -u):$(id -g)" /var/log/nitro_enclaves',
             "NITRO_CLI_BLOBS=$blobs_dir",
         ]);
     });
