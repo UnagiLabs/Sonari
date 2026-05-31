@@ -43,12 +43,16 @@ struct GenerateArgs {
 struct RootArgs {
     #[arg(long)]
     allowlist: PathBuf,
+    #[arg(long)]
+    source: PathBuf,
 }
 
 #[derive(Debug, Parser)]
 struct ProofArgs {
     #[arg(long)]
     allowlist: PathBuf,
+    #[arg(long)]
+    source: PathBuf,
     #[arg(long)]
     h3_index: u64,
 }
@@ -259,7 +263,7 @@ fn generate(args: GenerateArgs) -> Result<(), CliError> {
 }
 
 fn print_root(args: RootArgs) -> Result<(), CliError> {
-    let allowlist = load_valid_allowlist(args.allowlist)?;
+    let allowlist = load_verified_allowlist(args.allowlist, args.source)?;
     let root = root_for_valid_allowlist(&allowlist)?;
     let output = RootOutput {
         merkle_root: prefixed_hex(&root),
@@ -273,7 +277,7 @@ fn print_root(args: RootArgs) -> Result<(), CliError> {
 }
 
 fn print_proof(args: ProofArgs) -> Result<(), CliError> {
-    let allowlist = load_valid_allowlist(args.allowlist)?;
+    let allowlist = load_verified_allowlist(args.allowlist, args.source)?;
     let Some(proof) = generate_proof_for_h3_index(&allowlist.leaves, args.h3_index)? else {
         return Err(CliError::InvalidArtifact(format!(
             "h3_index {} is not in the residence allowlist",
@@ -291,10 +295,10 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
     validate_manifest_metadata(&manifest)?;
     let allowlist_bytes = fs::read(&args.allowlist)?;
     let allowlist = parse_valid_allowlist(&allowlist_bytes)?;
-    let source_bytes = fs::read(&args.source)?;
+    let source = fs::read_to_string(&args.source)?;
     let root = root_for_valid_allowlist(&allowlist)?;
     let sha256 = prefixed_hex(&Sha256::digest(&allowlist_bytes));
-    let source_sha256 = Sha256::digest(&source_bytes);
+    let source_sha256 = Sha256::digest(source.as_bytes());
     let source_sha256_raw = hex_bytes(&source_sha256);
     let source_sha256_prefixed = prefixed_hex(&source_sha256);
     let byte_size = allowlist_bytes.len() as u64;
@@ -339,13 +343,9 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
     assert_manifest_u64(
         "allowlist source.byte_length",
         Some(allowlist.artifact.source.byte_length),
-        source_bytes.len() as u64,
+        source.len() as u64,
     )?;
-    if source_sha256_raw != NATURAL_EARTH_LAND_SOURCE.sha256 {
-        return Err(CliError::InvalidArtifact(
-            "local source file does not match pinned Natural Earth source".to_owned(),
-        ));
-    }
+    validate_allowlist_matches_source(&allowlist, &source)?;
 
     let output = VerifyLocalOutput {
         status: "verified".to_owned(),
@@ -358,8 +358,14 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
     Ok(())
 }
 
-fn load_valid_allowlist(path: PathBuf) -> Result<ValidatedAllowlist, CliError> {
-    parse_valid_allowlist(&fs::read(path)?)
+fn load_verified_allowlist(
+    allowlist_path: PathBuf,
+    source_path: PathBuf,
+) -> Result<ValidatedAllowlist, CliError> {
+    let allowlist = parse_valid_allowlist(&fs::read(allowlist_path)?)?;
+    let source = fs::read_to_string(source_path)?;
+    validate_allowlist_matches_source(&allowlist, &source)?;
+    Ok(allowlist)
 }
 
 fn parse_valid_allowlist(bytes: &[u8]) -> Result<ValidatedAllowlist, CliError> {
@@ -452,6 +458,43 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), CliError> {
             }
         }
         previous = Some(current);
+    }
+
+    Ok(())
+}
+
+fn validate_allowlist_matches_source(
+    allowlist: &ValidatedAllowlist,
+    source: &str,
+) -> Result<(), CliError> {
+    let source_sha256 = Sha256::digest(source.as_bytes());
+    let source_sha256_raw = hex_bytes(&source_sha256);
+    let source_sha256_prefixed = prefixed_hex(&source_sha256);
+
+    if source_sha256_raw != NATURAL_EARTH_LAND_SOURCE.sha256 {
+        return Err(CliError::InvalidArtifact(
+            "local source file does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
+    if allowlist.artifact.source.sha256 != source_sha256_prefixed {
+        return Err(CliError::InvalidArtifact(
+            "allowlist source.sha256 does not match local source file".to_owned(),
+        ));
+    }
+    assert_manifest_u64(
+        "allowlist source.byte_length",
+        Some(allowlist.artifact.source.byte_length),
+        source.len() as u64,
+    )?;
+
+    let generated_indexes = generate_candidate_h3_indexes_from_geojson(source)?
+        .into_iter()
+        .map(|index| index.to_string())
+        .collect::<Vec<_>>();
+    if generated_indexes != allowlist.artifact.h3_indexes {
+        return Err(CliError::InvalidArtifact(
+            "allowlist h3_indexes do not match the pinned Natural Earth source".to_owned(),
+        ));
     }
 
     Ok(())

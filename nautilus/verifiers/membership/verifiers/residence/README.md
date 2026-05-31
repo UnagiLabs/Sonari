@@ -93,9 +93,11 @@ cargo run -p residence-allowlist -- generate \
   --source .build/residence-cells/ne_10m_land.geojson \
   --output .build/residence-cells/land_allowlist_res7.json
 cargo run -p residence-allowlist -- root \
-  --allowlist .build/residence-cells/land_allowlist_res7.json
+  --allowlist .build/residence-cells/land_allowlist_res7.json \
+  --source .build/residence-cells/ne_10m_land.geojson
 cargo run -p residence-allowlist -- proof \
   --allowlist .build/residence-cells/land_allowlist_res7.json \
+  --source .build/residence-cells/ne_10m_land.geojson \
   --h3-index 608819013513904127
 cargo run -p residence-allowlist -- verify-local \
   --manifest data/residence_cells/allowed_residence_cells_manifest.v1.res7.json \
@@ -106,10 +108,13 @@ cargo run -p residence-allowlist -- verify-local \
 The generated JSON stores schema/version metadata, local source metadata,
 resolution, allowlist version, and sorted unique decimal H3 indexes.
 `root` and `proof` reject malformed artifacts instead of inferring missing
-or mismatched metadata.
+or mismatched metadata. They also re-read the pinned Natural Earth source and
+confirm that the artifact's H3 indexes match the source-derived candidates
+before emitting a root or proof.
 `verify-local` checks source SHA-256, source byte size, allowlist file
 SHA-256, allowlist byte size, H3 count, resolution, allowlist version, and
-Merkle root against the manifest.
+Merkle root against the manifest. It also regenerates the H3 indexes from the
+local source file and compares them with the artifact.
 
 The committed manifest is a production placeholder until full generation and
 S3 upload are performed. After generation, fill in `artifact.sha256`,

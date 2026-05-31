@@ -275,27 +275,25 @@ fn fixture_allowlist_is_deterministic_sorted_allowlist_json() {
 }
 
 #[test]
-fn root_output_matches_library_root() {
+fn root_rejects_unpinned_source_file_before_emitting_root() {
     let dir = test_dir("root");
     let allowlist_path = dir.join("allowlist.json");
-    let allowlist = fixture_allowlist(&allowlist_path);
+    fixture_allowlist(&allowlist_path);
 
     let output = run(&[
         "root",
         "--allowlist",
         allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        COMPACT_LAND_PATH,
     ]);
 
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
     assert!(
-        output.status.success(),
-        "root stderr: {}",
         String::from_utf8_lossy(&output.stderr)
+            .contains("local source file does not match pinned Natural Earth source")
     );
-    let root: Value = serde_json::from_slice(&output.stdout).expect("root stdout is JSON");
-    assert_eq!(root["merkle_root"], expected_root_hex(&allowlist));
-    assert_eq!(root["count"], h3_indexes(&allowlist).len());
-    assert_eq!(root["geo_resolution"], 7);
-    assert_eq!(root["allowlist_version"], 42);
 }
 
 #[test]
@@ -308,6 +306,8 @@ fn root_rejects_unpinned_source_metadata() {
         "root",
         "--allowlist",
         allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        COMPACT_LAND_PATH,
     ]);
 
     assert!(!output.status.success());
@@ -316,7 +316,7 @@ fn root_rejects_unpinned_source_metadata() {
 }
 
 #[test]
-fn proof_succeeds_for_allowed_h3_index_and_fails_for_non_allowed_index() {
+fn proof_rejects_unpinned_source_file_before_emitting_proof() {
     let dir = test_dir("proof");
     let allowlist_path = dir.join("allowlist.json");
     let allowlist = fixture_allowlist(&allowlist_path);
@@ -329,28 +329,25 @@ fn proof_succeeds_for_allowed_h3_index_and_fails_for_non_allowed_index() {
         "proof",
         "--allowlist",
         allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        COMPACT_LAND_PATH,
         "--h3-index",
         &allowed_h3_index,
     ]);
+
+    assert!(!allowed.status.success());
+    assert!(allowed.stdout.is_empty());
     assert!(
-        allowed.status.success(),
-        "proof stderr: {}",
         String::from_utf8_lossy(&allowed.stderr)
-    );
-    let proof: Value = serde_json::from_slice(&allowed.stdout).expect("proof stdout is JSON");
-    assert_eq!(proof["target_h3_index"], allowed_h3_index);
-    assert_eq!(proof["expected_root"], expected_root_hex(&allowlist));
-    assert!(
-        proof["target_leaf_hash"]
-            .as_str()
-            .expect("target_leaf_hash")
-            .starts_with("0x")
+            .contains("local source file does not match pinned Natural Earth source")
     );
 
     let non_allowed = run(&[
         "proof",
         "--allowlist",
         allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        COMPACT_LAND_PATH,
         "--h3-index",
         "1",
     ]);
@@ -402,7 +399,13 @@ fn malformed_allowlists_are_rejected() {
             serde_json::to_vec_pretty(&malformed).expect("malformed JSON serializes"),
         )
         .expect("malformed allowlist is written");
-        let output = run(&["root", "--allowlist", path.to_str().expect("path is utf8")]);
+        let output = run(&[
+            "root",
+            "--allowlist",
+            path.to_str().expect("path is utf8"),
+            "--source",
+            COMPACT_LAND_PATH,
+        ]);
 
         assert!(!output.status.success(), "{name} should fail");
         assert!(output.stdout.is_empty(), "{name} should not emit JSON");
