@@ -86,6 +86,13 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "pnpm build:aws-earthquake-tee-artifact",
             "pnpm build:aws-membership-identity-tee-artifact",
             "pnpm build:aws-membership-identity-eif",
+            "NITRO_CLI_TAG: v1.4.4",
+            "Cache Nitro CLI build",
+            "Install pinned Nitro CLI",
+            "https://github.com/aws/aws-nitro-enclaves-cli",
+            "cargo build",
+            '--manifest-path "$source_dir/Cargo.toml"',
+            "NITRO_CLI_BLOBS=$blobs_dir",
         ]);
     });
 

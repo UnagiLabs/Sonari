@@ -12,6 +12,16 @@ ACTUAL_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 test "$ACTUAL_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 ```
 
+## GitHub Actions dev environment
+
+自動 deploy は GitHub environment `aws-sonari-verifier-runner-dev` の Actions variables を使います。この environment に必須値がない場合、workflow は AWS credential 設定前の `Validate dev deployment inputs` で fail-closed します。
+
+既存 stack を正として復旧する場合は、`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` の `required_names` と job-level `env` を source of truth にし、`aws cloudformation describe-stacks --stack-name sonari-verifier-runner-dev` の Parameters から stack 固有値を同期します。Walrus CLI と OIDC role は `aws-earthquake-runner-dev` environment の既存 variables に合わせます。GitHub variables には AWS 側 resource ARN だけを設定し、credential material は入れません。
+
+共有 OIDC role の trust policy は、`repo:UnagiLabs/Sonari:environment:aws-earthquake-runner-dev` と `repo:UnagiLabs/Sonari:environment:aws-sonari-verifier-runner-dev` の両方を許可します。片方だけの場合、AWS credential 設定で `sts:AssumeRoleWithWebIdentity` が拒否されます。
+
+devnet / testnet の dummy World ID proof では、任意 variables として World ID proof mode を `dummy`、relayer network を `testnet` に設定します。`NITRO_ENCLAVE_PCR3` は runner role ARN から下記の手順で再計算し、stack parameter と一致させてください。
+
 ## 必須 artifact set
 
 各 deploy は、deploy 対象の Git commit をそのまま使い、すべての artifact を `sonari-verifier-runner/<commit>/` 配下へ upload します。

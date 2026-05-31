@@ -53,6 +53,7 @@ jobs:
       RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
       RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
       RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}
+      NITRO_CLI_TAG: v1.4.4
       S3_PREFIX: sonari-verifier-runner
 
     steps:
@@ -252,6 +253,40 @@ jobs:
 
           echo "$RUNNER_TEMP/sonari-bin" >> "$GITHUB_PATH"
           echo "SONARI_WALRUS_CLI=$RUNNER_TEMP/sonari-bin/walrus" >> "$GITHUB_ENV"
+
+      - name: Cache Nitro CLI build
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/sonari/cli-artifacts/nitro/${{ env.NITRO_CLI_TAG }}
+          key: nitro-cli-${{ runner.os }}-${{ env.NITRO_CLI_TAG }}
+
+      - name: Install pinned Nitro CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install_dir="$HOME/.cache/sonari/cli-artifacts/nitro/$NITRO_CLI_TAG/install"
+          nitro_cli="$install_dir/usr/bin/nitro-cli"
+          blobs_dir="$install_dir/usr/share/nitro_enclaves/blobs"
+
+          if [[ ! -x "$nitro_cli" || ! -d "$blobs_dir" ]]; then
+            rm -rf "$install_dir"
+            source_dir="$RUNNER_TEMP/aws-nitro-enclaves-cli"
+            rm -rf "$source_dir"
+            git clone --depth 1 --branch "$NITRO_CLI_TAG" \
+              https://github.com/aws/aws-nitro-enclaves-cli "$source_dir"
+            cargo build \
+              --release \
+              --manifest-path "$source_dir/Cargo.toml" \
+              --target-dir "$source_dir/build/nitro_cli"
+            install -D -m 0755 "$source_dir/build/nitro_cli/release/nitro-cli" "$nitro_cli"
+            mkdir -p "$blobs_dir"
+            cp -R "$source_dir/blobs/$(uname -m)/." "$blobs_dir/"
+          fi
+
+          "$nitro_cli" --version
+          echo "$install_dir/usr/bin" >> "$GITHUB_PATH"
+          echo "NITRO_CLI_BLOBS=$blobs_dir" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
