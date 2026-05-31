@@ -396,6 +396,29 @@ fun disaster_claim_rejects_home_cell_registered_at_cutoff() {
     scenario.end();
 }
 
+#[test, expected_failure(abort_code = claim::EHomeCellRegisteredAfterCutoff)]
+fun disaster_claim_rejects_home_cell_changed_after_disaster_cutoff() {
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member_with_home_cell(&mut scenario, PROMOTED_H3_INDEX);
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+    let cutoff_ms = disaster_cutoff_ms(&mut scenario);
+    let mut update_clock = clock::create_for_testing(&mut tx_context::dummy());
+    update_clock.set_for_testing(cutoff_ms + 1);
+
+    update_member_home_cell_with_clock(&mut scenario, &update_clock, H3_INDEX);
+
+    execute_disaster_claim(&mut scenario);
+    scenario.end();
+    update_clock.destroy_for_testing();
+}
+
 #[test, expected_failure(abort_code = claim::EResidenceCellMismatch)]
 fun disaster_claim_rejects_affected_cell_mismatch() {
     let mut scenario = initialized();
@@ -671,6 +694,35 @@ fun set_member_home_cell_registered_at_ms(
             &mut pass,
             home_cell_registered_at_ms,
         );
+        scenario.return_to_sender(pass);
+    };
+}
+
+fun update_member_home_cell_with_clock(
+    scenario: &mut test_scenario::Scenario,
+    clock: &clock::Clock,
+    home_cell: u64,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+        accessor::update_member_home_cell(
+            &pause_state,
+            &registry,
+            &residence_registry,
+            &mut pass,
+            clock,
+            home_cell,
+            residence_proof(home_cell),
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(residence_registry);
         scenario.return_to_sender(pass);
     };
 }
