@@ -78,6 +78,9 @@ struct AllowlistArtifact {
 #[serde(deny_unknown_fields)]
 struct SourceMetadata {
     kind: String,
+    name: String,
+    version: String,
+    url: String,
     sha256: String,
     byte_length: u64,
 }
@@ -224,6 +227,12 @@ fn main() -> Result<(), CliError> {
 
 fn generate(args: GenerateArgs) -> Result<(), CliError> {
     let source = fs::read_to_string(&args.source)?;
+    let source_sha256 = Sha256::digest(source.as_bytes());
+    if hex_bytes(&source_sha256) != NATURAL_EARTH_LAND_SOURCE.sha256 {
+        return Err(CliError::InvalidArtifact(
+            "source file does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
     let h3_indexes = generate_candidate_h3_indexes_from_geojson(&source)?
         .into_iter()
         .map(|index| index.to_string())
@@ -233,7 +242,10 @@ fn generate(args: GenerateArgs) -> Result<(), CliError> {
         schema_version: ALLOWLIST_SCHEMA_VERSION,
         source: SourceMetadata {
             kind: LOCAL_GEOJSON_SOURCE_KIND.to_owned(),
-            sha256: prefixed_hex(&Sha256::digest(source.as_bytes())),
+            name: NATURAL_EARTH_LAND_SOURCE.source_name.to_owned(),
+            version: NATURAL_EARTH_LAND_SOURCE.version.to_owned(),
+            url: NATURAL_EARTH_LAND_SOURCE.url.to_owned(),
+            sha256: prefixed_hex(&source_sha256),
             byte_length: source.len() as u64,
         },
         geo_resolution: NATURAL_EARTH_LAND_SOURCE.resolution,
@@ -392,6 +404,15 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), CliError> {
         return Err(CliError::InvalidArtifact(format!(
             "allowlist source.kind must be {LOCAL_GEOJSON_SOURCE_KIND}"
         )));
+    }
+    if artifact.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
+        || artifact.source.version != NATURAL_EARTH_LAND_SOURCE.version
+        || artifact.source.url != NATURAL_EARTH_LAND_SOURCE.url
+        || artifact.source.sha256 != format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256)
+    {
+        return Err(CliError::InvalidArtifact(
+            "allowlist source metadata does not match pinned Natural Earth source".to_owned(),
+        ));
     }
     if !is_lower_prefixed_hex(&artifact.source.sha256, 32) {
         return Err(CliError::InvalidArtifact(

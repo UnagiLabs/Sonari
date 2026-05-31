@@ -1,4 +1,6 @@
-use residence_allowlist::{ResidenceCellLeaf, merkle_root_from_leaves};
+use residence_allowlist::{
+    ResidenceCellLeaf, generate_candidate_h3_indexes_from_geojson, merkle_root_from_leaves,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -50,26 +52,7 @@ fn run(args: &[&str]) -> Output {
     binary().args(args).output().expect("CLI runs")
 }
 
-fn generate(output_path: &Path) -> Value {
-    let output = run(&[
-        "generate",
-        "--source",
-        COMPACT_LAND_PATH,
-        "--output",
-        output_path.to_str().expect("path is utf8"),
-        "--allowlist-version",
-        "42",
-    ]);
-    assert!(
-        output.status.success(),
-        "generate stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&fs::read(output_path).expect("allowlist file exists"))
-        .expect("allowlist file is JSON")
-}
-
-fn generate_from_source(source_path: &Path, output_path: &Path) -> Value {
+fn generate_fails_for_source(source_path: &Path, output_path: &Path) -> Output {
     let output = run(&[
         "generate",
         "--source",
@@ -79,13 +62,60 @@ fn generate_from_source(source_path: &Path, output_path: &Path) -> Value {
         "--allowlist-version",
         "42",
     ]);
-    assert!(
-        output.status.success(),
-        "generate stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&fs::read(output_path).expect("allowlist file exists"))
-        .expect("allowlist file is JSON")
+    assert!(!output.status.success());
+    output
+}
+
+fn fixture_allowlist(output_path: &Path) -> Value {
+    let source = fs::read_to_string(COMPACT_LAND_PATH).expect("fixture source exists");
+    let indexes = generate_candidate_h3_indexes_from_geojson(&source)
+        .expect("fixture candidates are generated")
+        .into_iter()
+        .map(|index| index.to_string())
+        .collect::<Vec<_>>();
+    let allowlist = json!({
+        "schema": "sonari.residence.allowlist.v1",
+        "schema_version": 1,
+        "source": {
+            "kind": "local_geojson",
+            "name": "Natural Earth ne_10m_land",
+            "version": "v5.1.2",
+            "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson",
+            "sha256": format!("0x{PINNED_NATURAL_EARTH_SHA256}"),
+            "byte_length": source.len()
+        },
+        "geo_resolution": 7,
+        "allowlist_version": 42,
+        "h3_indexes": indexes
+    });
+    write_json(output_path, &allowlist);
+    allowlist
+}
+
+fn unpinned_fixture_allowlist(source_path: &Path, output_path: &Path) -> Value {
+    let source = fs::read_to_string(source_path).expect("fixture source exists");
+    let indexes = generate_candidate_h3_indexes_from_geojson(&source)
+        .expect("fixture candidates are generated")
+        .into_iter()
+        .map(|index| index.to_string())
+        .collect::<Vec<_>>();
+    let allowlist = json!({
+        "schema": "sonari.residence.allowlist.v1",
+        "schema_version": 1,
+        "source": {
+            "kind": "local_geojson",
+            "name": "test land source",
+            "version": "fixture",
+            "url": source_path.to_str().expect("source path is utf8"),
+            "sha256": format!("0x{}", source_sha256(source_path)),
+            "byte_length": source.len()
+        },
+        "geo_resolution": 7,
+        "allowlist_version": 42,
+        "h3_indexes": indexes
+    });
+    write_json(output_path, &allowlist);
+    allowlist
 }
 
 fn h3_indexes(allowlist: &Value) -> Vec<String> {
@@ -184,13 +214,6 @@ fn write_json(path: &Path, value: &Value) {
     .expect("JSON file is written");
 }
 
-fn write_pinned_source_allowlist(path: &Path, allowlist: &Value) -> Value {
-    let mut pinned = allowlist.clone();
-    pinned["source"]["sha256"] = Value::String(format!("0x{PINNED_NATURAL_EARTH_SHA256}"));
-    write_json(path, &pinned);
-    pinned
-}
-
 #[test]
 fn help_succeeds() {
     let output = run(&["--help"]);
@@ -203,13 +226,28 @@ fn help_succeeds() {
 }
 
 #[test]
-fn generate_writes_deterministic_sorted_allowlist_json() {
+fn generate_rejects_unpinned_fixture_source() {
     let dir = test_dir("generate");
+    let output_path = dir.join("allowlist.json");
+
+    let output = generate_fails_for_source(Path::new(COMPACT_LAND_PATH), &output_path);
+
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("source file does not match pinned Natural Earth source")
+    );
+    assert!(!output_path.exists());
+}
+
+#[test]
+fn fixture_allowlist_is_deterministic_sorted_allowlist_json() {
+    let dir = test_dir("fixture-allowlist");
     let first_path = dir.join("first.json");
     let second_path = dir.join("second.json");
 
-    let first = generate(&first_path);
-    let second = generate(&second_path);
+    let first = fixture_allowlist(&first_path);
+    let second = fixture_allowlist(&second_path);
 
     assert_eq!(
         fs::read(&first_path).expect("first output exists"),
@@ -219,11 +257,11 @@ fn generate_writes_deterministic_sorted_allowlist_json() {
     assert_eq!(first["schema"], "sonari.residence.allowlist.v1");
     assert_eq!(first["schema_version"], 1);
     assert_eq!(first["source"]["kind"], "local_geojson");
-    assert!(
-        first["source"]["sha256"]
-            .as_str()
-            .expect("sha256")
-            .starts_with("0x")
+    assert_eq!(first["source"]["name"], "Natural Earth ne_10m_land");
+    assert_eq!(first["source"]["version"], "v5.1.2");
+    assert_eq!(
+        first["source"]["sha256"],
+        format!("0x{PINNED_NATURAL_EARTH_SHA256}")
     );
     assert_eq!(first["geo_resolution"], 7);
     assert_eq!(first["allowlist_version"], 42);
@@ -240,7 +278,7 @@ fn generate_writes_deterministic_sorted_allowlist_json() {
 fn root_output_matches_library_root() {
     let dir = test_dir("root");
     let allowlist_path = dir.join("allowlist.json");
-    let allowlist = generate(&allowlist_path);
+    let allowlist = fixture_allowlist(&allowlist_path);
 
     let output = run(&[
         "root",
@@ -261,10 +299,27 @@ fn root_output_matches_library_root() {
 }
 
 #[test]
+fn root_rejects_unpinned_source_metadata() {
+    let dir = test_dir("root-source-pin");
+    let allowlist_path = dir.join("allowlist.json");
+    let allowlist = unpinned_fixture_allowlist(Path::new(COMPACT_LAND_PATH), &allowlist_path);
+
+    let output = run(&[
+        "root",
+        "--allowlist",
+        allowlist_path.to_str().expect("path is utf8"),
+    ]);
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert_eq!(allowlist["source"]["name"], "test land source");
+}
+
+#[test]
 fn proof_succeeds_for_allowed_h3_index_and_fails_for_non_allowed_index() {
     let dir = test_dir("proof");
     let allowlist_path = dir.join("allowlist.json");
-    let allowlist = generate(&allowlist_path);
+    let allowlist = fixture_allowlist(&allowlist_path);
     let allowed_h3_index = h3_indexes(&allowlist)
         .first()
         .expect("fixture has at least one h3_index")
@@ -307,7 +362,7 @@ fn proof_succeeds_for_allowed_h3_index_and_fails_for_non_allowed_index() {
 fn malformed_allowlists_are_rejected() {
     let dir = test_dir("malformed");
     let valid_path = dir.join("valid.json");
-    let valid = generate(&valid_path);
+    let valid = fixture_allowlist(&valid_path);
 
     let cases = [
         ("bad-decimal.json", {
@@ -377,8 +432,7 @@ fn verify_local_rejects_allowlist_from_unpinned_source_even_with_matching_artifa
             .replace("compact_land", "alternate_land"),
     )
     .expect("alternate source is written");
-    let generated = generate_from_source(&source_path, &allowlist_path);
-    let allowlist = write_pinned_source_allowlist(&allowlist_path, &generated);
+    let allowlist = fixture_allowlist(&allowlist_path);
     let manifest = pinned_manifest_for(&allowlist_path, &allowlist);
     write_json(&manifest_path, &manifest);
 
@@ -409,7 +463,7 @@ fn verify_local_rejects_self_consistent_unpinned_manifest_by_default() {
             .replace("compact_land", "self_consistent_alternate_land"),
     )
     .expect("alternate source is written");
-    let allowlist = generate_from_source(&source_path, &allowlist_path);
+    let allowlist = unpinned_fixture_allowlist(&source_path, &allowlist_path);
     let manifest = manifest_for(&source_path, &allowlist_path, &allowlist);
     write_json(&manifest_path, &manifest);
 
