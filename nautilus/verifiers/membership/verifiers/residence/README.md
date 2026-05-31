@@ -80,6 +80,30 @@ JSON、binary set、Merkle tree、hash commitment などの候補を残す。
 ただし、TEE / verifier と Move / metadata verifier が同じ対象を検証できる
 形式でなければならない。
 
+## Local allowlist artifact CLI
+
+Allowlist artifact generation is local-file based in this step.
+Network fetch, upload, and remote verification are outside this CLI boundary.
+
+Intended large local outputs should be written under `.build/residence-cells/`:
+
+```bash
+mkdir -p .build/residence-cells
+cargo run -p residence-allowlist -- generate \
+  --source .build/residence-cells/ne_10m_land.geojson \
+  --output .build/residence-cells/land_allowlist_res7.json
+cargo run -p residence-allowlist -- root \
+  --allowlist .build/residence-cells/land_allowlist_res7.json
+cargo run -p residence-allowlist -- proof \
+  --allowlist .build/residence-cells/land_allowlist_res7.json \
+  --h3-index 608819013513904127
+```
+
+The generated JSON stores schema/version metadata, local source metadata,
+resolution, allowlist version, and sorted unique decimal H3 indexes.
+`root` and `proof` reject malformed artifacts instead of inferring missing
+or mismatched metadata.
+
 ## Rejection rules
 
 次の入力は reject する。

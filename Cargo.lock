@@ -1328,11 +1328,13 @@ name = "residence-allowlist"
 version = "0.1.0"
 dependencies = [
  "bcs",
+ "clap",
  "geo",
  "geojson",
  "h3o",
  "hex",
  "serde",
+ "serde_json",
  "sha2",
 ]
 
