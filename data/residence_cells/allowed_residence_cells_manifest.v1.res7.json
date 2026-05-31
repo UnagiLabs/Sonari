@@ -30,10 +30,10 @@
   "s3": {
     "bucket_env": "SONARI_RESIDENCE_CELLS_BUCKET",
     "object_key": "residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz",
-    "version_id": null
+    "version_id": "jWHASqrOpmesmtlvaXc.nVKT0ujGOFgZ"
   },
   "artifact": {
-    "status": "generated_local_pending_s3_upload",
+    "status": "uploaded_s3",
     "generated_at": "2026-05-31T09:37:11Z",
     "sha256": "0x4e47e035541b6915f9afb2d87237e1d8562063a1946e5ec91618bd1b260f2108",
     "byte_size": 732556200,
