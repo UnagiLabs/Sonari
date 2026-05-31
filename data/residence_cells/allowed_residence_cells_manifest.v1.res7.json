@@ -10,11 +10,11 @@
     "sha256": "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416"
   },
   "generation_command": [
-    "cargo",
+    "uv",
     "run",
-    "-p",
+    "--project",
+    "data/residence_cells",
     "residence-allowlist",
-    "--",
     "generate",
     "--source",
     ".build/residence-cells/ne_10m_land.geojson",

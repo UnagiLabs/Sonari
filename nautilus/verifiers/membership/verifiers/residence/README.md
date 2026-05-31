@@ -80,63 +80,6 @@ JSON、binary set、Merkle tree、hash commitment などの候補を残す。
 ただし、TEE / verifier と Move / metadata verifier が同じ対象を検証できる
 形式でなければならない。
 
-## Local allowlist artifact CLI
-
-Allowlist artifact generation is local-file based in this step.
-Network fetch, upload, and remote verification are outside this CLI boundary.
-
-Intended large local outputs should be written under `.build/residence-cells/`:
-
-```bash
-mkdir -p .build/residence-cells
-cargo run -p residence-allowlist -- generate \
-  --source .build/residence-cells/ne_10m_land.geojson \
-  --output .build/residence-cells/land_allowlist_res7.json
-cargo run -p residence-allowlist -- root \
-  --allowlist .build/residence-cells/land_allowlist_res7.json \
-  --source .build/residence-cells/ne_10m_land.geojson
-cargo run -p residence-allowlist -- proof \
-  --allowlist .build/residence-cells/land_allowlist_res7.json \
-  --source .build/residence-cells/ne_10m_land.geojson \
-  --h3-index 608819013513904127
-cargo run -p residence-allowlist -- verify-local \
-  --manifest data/residence_cells/allowed_residence_cells_manifest.v1.res7.json \
-  --allowlist .build/residence-cells/land_allowlist_res7.json \
-  --source .build/residence-cells/ne_10m_land.geojson
-```
-
-The generated JSON stores schema/version metadata, local source metadata,
-resolution, allowlist version, and sorted unique decimal H3 indexes.
-`root` and `proof` reject malformed artifacts instead of inferring missing
-or mismatched metadata. They also re-read the pinned Natural Earth source and
-confirm that the artifact's H3 indexes match the source-derived candidates
-before emitting a root or proof.
-`verify-local` checks source SHA-256, source byte size, allowlist file
-SHA-256, allowlist byte size, H3 count, resolution, allowlist version, and
-Merkle root against the manifest. It also regenerates the H3 indexes from the
-local source file and compares them with the artifact.
-
-The committed manifest is a production placeholder until full generation and
-S3 upload are performed. After generation, fill in `artifact.sha256`,
-`artifact.byte_size`, `artifact.h3_count`, `artifact.merkle_root`, and
-`artifact.generated_at`.
-
-Optional S3 upload uses the bucket from `SONARI_RESIDENCE_CELLS_BUCKET`.
-This keeps the bucket name out of git:
-
-```bash
-gzip -c .build/residence-cells/land_allowlist_res7.json \
-  > .build/residence-cells/allowed_residence_cells.v1.res7.json.gz
-aws s3 cp \
-  .build/residence-cells/allowed_residence_cells.v1.res7.json.gz \
-  "s3://${SONARI_RESIDENCE_CELLS_BUCKET}/residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz"
-aws s3api head-object \
-  --bucket "${SONARI_RESIDENCE_CELLS_BUCKET}" \
-  --key residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz
-```
-
-Live S3 upload was not performed when this repository support was added.
-
 ## Rejection rules
 
 次の入力は reject する。

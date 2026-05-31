@@ -3,6 +3,5 @@ members = [
     "nautilus/verifiers/shared-tee",
     "nautilus/verifiers/earthquake/tee",
     "nautilus/verifiers/membership/tee",
-    "nautilus/verifiers/membership/verifiers/residence/allowlist",
 ]
 resolver = "3"
