@@ -1,0 +1,104 @@
+{
+  "schema": "sonari.residence_cell_allowlist.v1",
+  "leaf_field_order": [
+    {
+      "name": "h3_index",
+      "type": "u64"
+    },
+    {
+      "name": "geo_resolution",
+      "type": "u8"
+    },
+    {
+      "name": "allowlist_version",
+      "type": "u64"
+    }
+  ],
+  "hash_rules": {
+    "leaf": "SHA-256(0x00 || BCS(ResidenceCellLeaf))",
+    "internal": "SHA-256(0x01 || left_32 || right_32)"
+  },
+  "sort_rule": "Sort leaves by numeric h3_index ascending before building the Merkle tree.",
+  "proof_direction_mapping": {
+    "LEFT": {
+      "meaning": "sibling is left of current hash",
+      "sibling_on_left": true
+    },
+    "RIGHT": {
+      "meaning": "sibling is right of current hash",
+      "sibling_on_left": false
+    }
+  },
+  "leaves": [
+    {
+      "h3_index": "608819013513904127",
+      "geo_resolution": 7,
+      "allowlist_version": 1,
+      "bcs_hex": "0xffffffc8aaf57208070100000000000000",
+      "leaf_hash": "0x07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569"
+    },
+    {
+      "h3_index": "608819013597790207",
+      "geo_resolution": 7,
+      "allowlist_version": 1,
+      "bcs_hex": "0xffffffcdaaf57208070100000000000000",
+      "leaf_hash": "0xfa0172aedc1751590d58bd2c91d8e37aca3b9c4b4a330c7330440b5203806c4e"
+    },
+    {
+      "h3_index": "608819013681676287",
+      "geo_resolution": 7,
+      "allowlist_version": 1,
+      "bcs_hex": "0xffffffd2aaf57208070100000000000000",
+      "leaf_hash": "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7"
+    }
+  ],
+  "merkle_levels": [
+    [
+      "0x07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569",
+      "0xfa0172aedc1751590d58bd2c91d8e37aca3b9c4b4a330c7330440b5203806c4e",
+      "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7"
+    ],
+    [
+      "0x312e3863ccf00e446423342e1acebdab8e7119ee19dae854904de693225c2678",
+      "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7"
+    ],
+    [
+      "0xa26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+    ]
+  ],
+  "merkle_root": "0xa26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020",
+  "proofs": [
+    {
+      "target_h3_index": "608819013597790207",
+      "target_leaf_hash": "0xfa0172aedc1751590d58bd2c91d8e37aca3b9c4b4a330c7330440b5203806c4e",
+      "steps": [
+        {
+          "direction": "LEFT",
+          "sibling_on_left": true,
+          "sibling_hash": "0x07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569"
+        },
+        {
+          "direction": "RIGHT",
+          "sibling_on_left": false,
+          "sibling_hash": "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7"
+        }
+      ],
+      "expected_root": "0xa26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+    },
+    {
+      "target_h3_index": "608819013681676287",
+      "target_leaf_hash": "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7",
+      "promoted_without_sibling_at_levels": [
+        0
+      ],
+      "steps": [
+        {
+          "direction": "LEFT",
+          "sibling_on_left": true,
+          "sibling_hash": "0x312e3863ccf00e446423342e1acebdab8e7119ee19dae854904de693225c2678"
+        }
+      ],
+      "expected_root": "0xa26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+    }
+  ]
+}
