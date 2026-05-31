@@ -242,11 +242,13 @@ fun admin_can_create_allowed_residence_cell_registry() {
     scenario.next_tx(ADMIN);
     {
         let registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
-        assert!(allowed_residence_cell::root(&registry) == root_a());
-        assert!(allowed_residence_cell::geo_resolution(&registry) == 7u8);
-        assert!(allowed_residence_cell::allowlist_version(&registry) == 1u64);
-        assert!(allowed_residence_cell::source_hash(&registry) == source_hash_a());
-        assert!(allowed_residence_cell::updated_at_ms(&registry) == 0u64);
+        let (_, root, geo_resolution, allowlist_version, source_hash, updated_at_ms) =
+            allowed_residence_cell::registry_fields_for_testing(&registry);
+        assert!(root == root_a());
+        assert!(geo_resolution == 7u8);
+        assert!(allowlist_version == 1u64);
+        assert!(source_hash == source_hash_a());
+        assert!(updated_at_ms == 0u64);
         test_scenario::return_shared(registry);
     };
 
@@ -261,7 +263,8 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
-        let registry_id = allowed_residence_cell::registry_id(&registry);
+        let (registry_id, _, _, _, _, _) =
+            allowed_residence_cell::registry_fields_for_testing(&registry);
         admin::update_allowed_residence_cell_root(
             &cap,
             &mut registry,
@@ -273,12 +276,20 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
         );
         scenario.return_to_sender(cap);
 
-        assert!(allowed_residence_cell::registry_id(&registry) == registry_id);
-        assert!(allowed_residence_cell::root(&registry) == root_b());
-        assert!(allowed_residence_cell::geo_resolution(&registry) == 7u8);
-        assert!(allowed_residence_cell::allowlist_version(&registry) == 2u64);
-        assert!(allowed_residence_cell::source_hash(&registry) == source_hash_b());
-        assert!(allowed_residence_cell::updated_at_ms(&registry) == ALLOWLIST_UPDATE_MS);
+        let (
+            updated_registry_id,
+            updated_root,
+            updated_geo_resolution,
+            updated_allowlist_version,
+            updated_source_hash,
+            updated_at_ms,
+        ) = allowed_residence_cell::registry_fields_for_testing(&registry);
+        assert!(updated_registry_id == registry_id);
+        assert!(updated_root == root_b());
+        assert!(updated_geo_resolution == 7u8);
+        assert!(updated_allowlist_version == 2u64);
+        assert!(updated_source_hash == source_hash_b());
+        assert!(updated_at_ms == ALLOWLIST_UPDATE_MS);
         test_scenario::return_shared(registry);
 
         let events = event::events_by_type<allowed_residence_cell::AllowedResidenceCellRootUpdated>();

@@ -145,6 +145,18 @@ public fun register_member(
     );
 }
 
+public fun new_residence_proof_step_left(
+    sibling_hash: vector<u8>,
+): allowed_residence_cell::ProofStep {
+    allowed_residence_cell::new_proof_step_left(sibling_hash)
+}
+
+public fun new_residence_proof_step_right(
+    sibling_hash: vector<u8>,
+): allowed_residence_cell::ProofStep {
+    allowed_residence_cell::new_proof_step_right(sibling_hash)
+}
+
 public fun update_member_home_cell(
     pause_state: &PauseState,
     registry: &membership::MembershipRegistry,
@@ -272,17 +284,8 @@ fun assert_valid_residence_cell_proof(
     home_cell: u64,
     proof: vector<allowed_residence_cell::ProofStep>,
 ) {
-    let leaf = allowed_residence_cell::new_leaf(
-        home_cell,
-        allowed_residence_cell::geo_resolution(registry),
-        allowed_residence_cell::allowlist_version(registry),
-    );
     assert!(
-        allowed_residence_cell::verify_proof(
-            &leaf,
-            proof,
-            allowed_residence_cell::root(registry),
-        ),
+        allowed_residence_cell::is_valid_home_cell(registry, home_cell, proof),
         EInvalidResidenceCellProof,
     );
 }

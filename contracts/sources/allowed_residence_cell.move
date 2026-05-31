@@ -83,7 +83,7 @@ public(package) fun update_root(
     emit_root_updated(registry, ctx);
 }
 
-public fun new_leaf(
+fun new_leaf(
     h3_index: u64,
     geo_resolution: u8,
     allowlist_version: u64,
@@ -95,23 +95,23 @@ public fun new_leaf(
     }
 }
 
-public fun new_proof_step_left(sibling_hash: vector<u8>): ProofStep {
+public(package) fun new_proof_step_left(sibling_hash: vector<u8>): ProofStep {
     assert_32_bytes(&sibling_hash);
     ProofStep { sibling_hash, sibling_on_left: true }
 }
 
-public fun new_proof_step_right(sibling_hash: vector<u8>): ProofStep {
+public(package) fun new_proof_step_right(sibling_hash: vector<u8>): ProofStep {
     assert_32_bytes(&sibling_hash);
     ProofStep { sibling_hash, sibling_on_left: false }
 }
 
-public fun leaf_hash(leaf: &ResidenceCellLeaf): vector<u8> {
+fun leaf_hash(leaf: &ResidenceCellLeaf): vector<u8> {
     let mut bytes = vector[0x00];
     bytes.append(bcs::to_bytes(leaf));
     hash::sha2_256(bytes)
 }
 
-public fun verify_proof(
+fun verify_proof(
     leaf: &ResidenceCellLeaf,
     proof: vector<ProofStep>,
     expected_root: vector<u8>,
@@ -128,28 +128,17 @@ public fun verify_proof(
     current == expected_root
 }
 
-public fun registry_id(registry: &AllowedResidenceCellRegistry): ID {
-    object::id(registry)
-}
-
-public fun root(registry: &AllowedResidenceCellRegistry): vector<u8> {
-    registry.root
-}
-
-public fun geo_resolution(registry: &AllowedResidenceCellRegistry): u8 {
-    registry.geo_resolution
-}
-
-public fun allowlist_version(registry: &AllowedResidenceCellRegistry): u64 {
-    registry.allowlist_version
-}
-
-public fun source_hash(registry: &AllowedResidenceCellRegistry): vector<u8> {
-    registry.source_hash
-}
-
-public fun updated_at_ms(registry: &AllowedResidenceCellRegistry): u64 {
-    registry.updated_at_ms
+public(package) fun is_valid_home_cell(
+    registry: &AllowedResidenceCellRegistry,
+    home_cell: u64,
+    proof: vector<ProofStep>,
+): bool {
+    let leaf = new_leaf(
+        home_cell,
+        registry.geo_resolution,
+        registry.allowlist_version,
+    );
+    verify_proof(&leaf, proof, registry.root)
 }
 
 fun emit_root_updated(registry: &AllowedResidenceCellRegistry, ctx: &TxContext) {
@@ -186,6 +175,41 @@ fun assert_32_bytes(bytes: &vector<u8>) {
 
 fun assert_supported_geo_resolution(geo_resolution: u8) {
     assert!(geo_resolution == GEO_RESOLUTION_RES7, EUnsupportedGeoResolution);
+}
+
+#[test_only]
+public fun leaf_hash_for_testing(
+    h3_index: u64,
+    geo_resolution: u8,
+    allowlist_version: u64,
+): vector<u8> {
+    leaf_hash(&new_leaf(h3_index, geo_resolution, allowlist_version))
+}
+
+#[test_only]
+public fun verify_proof_for_testing(
+    h3_index: u64,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    proof: vector<ProofStep>,
+    expected_root: vector<u8>,
+): bool {
+    let leaf = new_leaf(h3_index, geo_resolution, allowlist_version);
+    verify_proof(&leaf, proof, expected_root)
+}
+
+#[test_only]
+public fun registry_fields_for_testing(
+    registry: &AllowedResidenceCellRegistry,
+): (ID, vector<u8>, u8, u64, vector<u8>, u64) {
+    (
+        object::id(registry),
+        registry.root,
+        registry.geo_resolution,
+        registry.allowlist_version,
+        registry.source_hash,
+        registry.updated_at_ms,
+    )
 }
 
 #[test_only]

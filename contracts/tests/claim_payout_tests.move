@@ -397,10 +397,10 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
 
 fun residence_proof(): vector<allowed_residence_cell::ProofStep> {
     vector[
-        allowed_residence_cell::new_proof_step_left(
+        accessor::new_residence_proof_step_left(
             x"07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569",
         ),
-        allowed_residence_cell::new_proof_step_right(
+        accessor::new_residence_proof_step_right(
             x"8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7",
         ),
     ]
