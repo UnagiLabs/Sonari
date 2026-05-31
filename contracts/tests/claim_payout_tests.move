@@ -3,6 +3,7 @@ module contracts::claim_payout_tests;
 
 use contracts::accessor;
 use contracts::admin;
+use contracts::allowed_residence_cell;
 use contracts::claim;
 use contracts::donation;
 use contracts::membership;
@@ -19,6 +20,9 @@ const MEMBER: address = @0x51A;
 
 const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
+const HOME_CELL: u64 = 608_819_013_597_790_207;
+const GEO_RESOLUTION: u8 = 7;
+const ALLOWLIST_VERSION: u64 = 1;
 
 #[test, expected_failure(abort_code = claim::EGenericClaimDisabled)]
 fun generic_claim_rejects_self_created_eligibility() {
@@ -200,6 +204,20 @@ fun initialized(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
     scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_allowed_residence_cell_registry(
+            &cap,
+            residence_root(),
+            GEO_RESOLUTION,
+            ALLOWLIST_VERSION,
+            source_hash(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+    };
+
+    scenario.next_tx(ADMIN);
     scenario
 }
 
@@ -359,15 +377,39 @@ fun register_member(scenario: &mut test_scenario::Scenario) {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         accessor::register_member(
             &pause_state,
             &mut registry,
-            0u64,
+            &residence_registry,
+            HOME_CELL,
+            residence_proof(),
             0u64,
             b"",
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(residence_registry);
     };
+}
+
+fun residence_proof(): vector<allowed_residence_cell::ProofStep> {
+    vector[
+        allowed_residence_cell::new_proof_step_left(
+            x"07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569",
+        ),
+        allowed_residence_cell::new_proof_step_right(
+            x"8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7",
+        ),
+    ]
+}
+
+fun residence_root(): vector<u8> {
+    x"a26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+}
+
+fun source_hash(): vector<u8> {
+    x"1111111111111111111111111111111111111111111111111111111111111111"
 }

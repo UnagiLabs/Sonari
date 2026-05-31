@@ -2,6 +2,7 @@ module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
+use contracts::allowed_residence_cell;
 use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
@@ -15,6 +16,8 @@ use contracts::program::{Self, Campaign, Program};
 use sui::clock::{Self, Clock};
 use sui::coin::Coin;
 use usdc::usdc::USDC;
+
+const EInvalidResidenceCellProof: u64 = 0;
 
 public fun donate_general_usdc(
     pause_state: &PauseState,
@@ -123,13 +126,28 @@ public fun donate_operations_usdc_with_pass(
 public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,
+    residence_registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
     home_cell: u64,
+    proof: vector<allowed_residence_cell::ProofStep>,
     terms_version: u64,
     signed_statement_hash: vector<u8>,
     ctx: &mut TxContext,
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
+    let leaf = allowed_residence_cell::new_leaf(
+        home_cell,
+        allowed_residence_cell::geo_resolution(residence_registry),
+        allowed_residence_cell::allowlist_version(residence_registry),
+    );
+    assert!(
+        allowed_residence_cell::verify_proof(
+            &leaf,
+            proof,
+            allowed_residence_cell::root(residence_registry),
+        ),
+        EInvalidResidenceCellProof,
+    );
     membership::register_member(
         registry,
         home_cell,

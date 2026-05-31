@@ -4,6 +4,7 @@ module contracts::disaster_claim_tests;
 use contracts::accessor;
 use contracts::admin;
 use contracts::affected_cell::{Self, AffectedCellLeaf};
+use contracts::allowed_residence_cell;
 use contracts::claim;
 use contracts::disaster_event;
 use contracts::identity_registry;
@@ -24,6 +25,9 @@ const NINETY_ONE_DAYS_MS: u64 = 7_862_400_000;
 const CLAIM_WINDOW_END_MS: u64 = 20_000_000_000;
 const NOW_BEFORE_FRESHNESS_DEADLINE_MS: u64 = 1_704_170_000_000;
 const H3_INDEX: u64 = 608_819_013_597_790_207;
+const PROMOTED_H3_INDEX: u64 = 608_819_013_681_676_287;
+const GEO_RESOLUTION: u8 = 7;
+const ALLOWLIST_VERSION: u64 = 1;
 const KYC_DUPLICATE_KEY_HASH: vector<u8> =
     x"4444444444444444444444444444444444444444444444444444444444444444";
 const WORLD_ID_DUPLICATE_KEY_HASH: vector<u8> =
@@ -396,7 +400,7 @@ fun disaster_claim_rejects_home_cell_registered_at_cutoff() {
 fun disaster_claim_rejects_affected_cell_mismatch() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
-    register_member_with_home_cell(&mut scenario, 0);
+    register_member_with_home_cell(&mut scenario, PROMOTED_H3_INDEX);
     verify_member_with_provider(
         &mut scenario,
         identity_registry::provider_kyc(),
@@ -507,6 +511,14 @@ fun initialized(): test_scenario::Scenario {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         admin::create_designated_pool(&cap, option::none(), scenario.ctx());
+        admin::create_allowed_residence_cell_registry(
+            &cap,
+            residence_root(),
+            GEO_RESOLUTION,
+            ALLOWLIST_VERSION,
+            source_hash(),
+            scenario.ctx(),
+        );
         scenario.return_to_sender(cap);
     };
 
@@ -541,16 +553,21 @@ fun register_member_with_home_cell(scenario: &mut test_scenario::Scenario, home_
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         accessor::register_member(
             &pause_state,
             &mut registry,
+            &residence_registry,
             home_cell,
+            residence_proof(home_cell),
             0u64,
             b"",
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
+        test_scenario::return_shared(residence_registry);
     };
 }
 
@@ -949,6 +966,41 @@ fun proof(): vector<affected_cell::ProofStep> {
             x"83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
         ),
     ]
+}
+
+fun residence_proof(home_cell: u64): vector<allowed_residence_cell::ProofStep> {
+    if (home_cell == PROMOTED_H3_INDEX) {
+        promoted_residence_proof()
+    } else {
+        target_residence_proof()
+    }
+}
+
+fun target_residence_proof(): vector<allowed_residence_cell::ProofStep> {
+    vector[
+        allowed_residence_cell::new_proof_step_left(
+            x"07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569",
+        ),
+        allowed_residence_cell::new_proof_step_right(
+            x"8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7",
+        ),
+    ]
+}
+
+fun promoted_residence_proof(): vector<allowed_residence_cell::ProofStep> {
+    vector[
+        allowed_residence_cell::new_proof_step_left(
+            x"312e3863ccf00e446423342e1acebdab8e7119ee19dae854904de693225c2678",
+        ),
+    ]
+}
+
+fun residence_root(): vector<u8> {
+    x"a26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+}
+
+fun source_hash(): vector<u8> {
+    x"1111111111111111111111111111111111111111111111111111111111111111"
 }
 
 fun event_uid(): vector<u8> {
