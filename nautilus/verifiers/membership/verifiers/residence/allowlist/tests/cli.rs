@@ -123,17 +123,21 @@ fn file_sha256(path: &Path) -> String {
     format!("0x{}", hex::encode(Sha256::digest(bytes)))
 }
 
-fn manifest_for(allowlist_path: &Path, allowlist: &Value) -> Value {
+fn source_sha256(path: &Path) -> String {
+    hex::encode(Sha256::digest(fs::read(path).expect("source exists")))
+}
+
+fn manifest_for(source_path: &Path, allowlist_path: &Path, allowlist: &Value) -> Value {
     json!({
         "schema": "sonari.residence.allowlist.manifest.v1",
         "schema_version": 1,
         "allowlist_version": allowlist["allowlist_version"],
         "geo_resolution": allowlist["geo_resolution"],
         "source": {
-            "name": "Natural Earth ne_10m_land",
-            "version": "v5.1.2",
-            "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson",
-            "sha256": "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416"
+            "name": "test land source",
+            "version": "fixture",
+            "url": source_path.to_str().expect("source path is utf8"),
+            "sha256": source_sha256(source_path)
         },
         "generation_command": [
             "cargo",
@@ -173,6 +177,15 @@ fn write_pinned_source_allowlist(path: &Path, allowlist: &Value) -> Value {
     pinned["source"]["sha256"] = Value::String(format!("0x{PINNED_NATURAL_EARTH_SHA256}"));
     write_json(path, &pinned);
     pinned
+}
+
+fn rewrite_allowlist_source(path: &Path, allowlist: &Value, source_path: &Path) -> Value {
+    let mut value = allowlist.clone();
+    value["source"]["sha256"] = Value::String(format!("0x{}", source_sha256(source_path)));
+    value["source"]["byte_length"] =
+        Value::from(fs::metadata(source_path).expect("source metadata").len());
+    write_json(path, &value);
+    value
 }
 
 #[test]
@@ -344,8 +357,12 @@ fn verify_local_accepts_matching_manifest_and_allowlist() {
     let allowlist_path = dir.join("allowlist.json");
     let manifest_path = dir.join("manifest.json");
     let generated = generate(&allowlist_path);
-    let allowlist = write_pinned_source_allowlist(&allowlist_path, &generated);
-    write_json(&manifest_path, &manifest_for(&allowlist_path, &allowlist));
+    let allowlist =
+        rewrite_allowlist_source(&allowlist_path, &generated, Path::new(COMPACT_LAND_PATH));
+    write_json(
+        &manifest_path,
+        &manifest_for(Path::new(COMPACT_LAND_PATH), &allowlist_path, &allowlist),
+    );
 
     let output = run(&[
         "verify-local",
@@ -353,6 +370,8 @@ fn verify_local_accepts_matching_manifest_and_allowlist() {
         manifest_path.to_str().expect("path is utf8"),
         "--allowlist",
         allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        COMPACT_LAND_PATH,
     ]);
 
     assert!(
@@ -370,21 +389,26 @@ fn verify_local_accepts_matching_manifest_and_allowlist() {
 fn verify_local_rejects_mismatched_manifest_values() {
     let dir = test_dir("verify-local-mismatch");
     let allowlist_path = dir.join("allowlist.json");
-    let allowlist = generate(&allowlist_path);
+    let generated = generate(&allowlist_path);
+    let allowlist =
+        rewrite_allowlist_source(&allowlist_path, &generated, Path::new(COMPACT_LAND_PATH));
 
     let cases = [
         ("bad-sha.json", {
-            let mut manifest = manifest_for(&allowlist_path, &allowlist);
+            let mut manifest =
+                manifest_for(Path::new(COMPACT_LAND_PATH), &allowlist_path, &allowlist);
             manifest["artifact"]["sha256"] = Value::String(format!("0x{}", "00".repeat(32)));
             manifest
         }),
         ("bad-root.json", {
-            let mut manifest = manifest_for(&allowlist_path, &allowlist);
+            let mut manifest =
+                manifest_for(Path::new(COMPACT_LAND_PATH), &allowlist_path, &allowlist);
             manifest["artifact"]["merkle_root"] = Value::String(format!("0x{}", "11".repeat(32)));
             manifest
         }),
         ("bad-count.json", {
-            let mut manifest = manifest_for(&allowlist_path, &allowlist);
+            let mut manifest =
+                manifest_for(Path::new(COMPACT_LAND_PATH), &allowlist_path, &allowlist);
             manifest["artifact"]["h3_count"] = Value::from(999_999);
             manifest
         }),
@@ -399,6 +423,8 @@ fn verify_local_rejects_mismatched_manifest_values() {
             manifest_path.to_str().expect("path is utf8"),
             "--allowlist",
             allowlist_path.to_str().expect("path is utf8"),
+            "--source",
+            COMPACT_LAND_PATH,
         ]);
 
         assert!(!output.status.success(), "{name} should fail");
@@ -419,8 +445,9 @@ fn verify_local_rejects_allowlist_from_unpinned_source_even_with_matching_artifa
             .replace("compact_land", "alternate_land"),
     )
     .expect("alternate source is written");
-    let allowlist = generate_from_source(&source_path, &allowlist_path);
-    let manifest = manifest_for(&allowlist_path, &allowlist);
+    let generated = generate_from_source(&source_path, &allowlist_path);
+    let allowlist = write_pinned_source_allowlist(&allowlist_path, &generated);
+    let manifest = manifest_for(Path::new(COMPACT_LAND_PATH), &allowlist_path, &allowlist);
     write_json(&manifest_path, &manifest);
 
     let output = run(&[
@@ -429,6 +456,8 @@ fn verify_local_rejects_allowlist_from_unpinned_source_even_with_matching_artifa
         manifest_path.to_str().expect("path is utf8"),
         "--allowlist",
         allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        source_path.to_str().expect("path is utf8"),
     ]);
 
     assert!(!output.status.success());

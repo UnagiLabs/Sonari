@@ -59,6 +59,8 @@ struct VerifyLocalArgs {
     manifest: PathBuf,
     #[arg(long)]
     allowlist: PathBuf,
+    #[arg(long)]
+    source: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -277,8 +279,12 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
     validate_manifest_metadata(&manifest)?;
     let allowlist_bytes = fs::read(&args.allowlist)?;
     let allowlist = parse_valid_allowlist(&allowlist_bytes)?;
+    let source_bytes = fs::read(&args.source)?;
     let root = root_for_valid_allowlist(&allowlist)?;
     let sha256 = prefixed_hex(&Sha256::digest(&allowlist_bytes));
+    let source_sha256 = Sha256::digest(&source_bytes);
+    let source_sha256_raw = hex_bytes(&source_sha256);
+    let source_sha256_prefixed = prefixed_hex(&source_sha256);
     let byte_size = allowlist_bytes.len() as u64;
     let h3_count = allowlist.leaves.len();
     let merkle_root = prefixed_hex(&root);
@@ -308,17 +314,21 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
             manifest.allowlist_version, allowlist.artifact.allowlist_version
         )));
     }
-    let pinned_source_sha256 = format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256);
-    if allowlist.artifact.source.sha256 != pinned_source_sha256 {
+    if manifest.source.sha256 != source_sha256_raw {
         return Err(CliError::InvalidArtifact(
-            "allowlist source.sha256 does not match pinned Natural Earth source".to_owned(),
+            "manifest source.sha256 does not match local source file".to_owned(),
         ));
     }
-    if manifest.source.sha256 != NATURAL_EARTH_LAND_SOURCE.sha256 {
+    if allowlist.artifact.source.sha256 != source_sha256_prefixed {
         return Err(CliError::InvalidArtifact(
-            "manifest source.sha256 does not match pinned Natural Earth source".to_owned(),
+            "allowlist source.sha256 does not match local source file".to_owned(),
         ));
     }
+    assert_manifest_u64(
+        "allowlist source.byte_length",
+        Some(allowlist.artifact.source.byte_length),
+        source_bytes.len() as u64,
+    )?;
 
     let output = VerifyLocalOutput {
         status: "verified".to_owned(),
@@ -432,13 +442,17 @@ fn validate_manifest_metadata(manifest: &AllowlistManifest) -> Result<(), CliErr
             "manifest schema_version must be 1".to_owned(),
         ));
     }
-    if manifest.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
-        || manifest.source.version != NATURAL_EARTH_LAND_SOURCE.version
-        || manifest.source.url != NATURAL_EARTH_LAND_SOURCE.url
-        || manifest.source.sha256 != NATURAL_EARTH_LAND_SOURCE.sha256
+    if manifest.source.name.is_empty()
+        || manifest.source.version.is_empty()
+        || manifest.source.url.is_empty()
     {
         return Err(CliError::InvalidArtifact(
-            "manifest source metadata does not match pinned Natural Earth source".to_owned(),
+            "manifest source name, version, and url must not be empty".to_owned(),
+        ));
+    }
+    if !is_lower_hex(&manifest.source.sha256, 32) {
+        return Err(CliError::InvalidArtifact(
+            "manifest source.sha256 must be a lowercase SHA-256 hash".to_owned(),
         ));
     }
     if manifest.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {
@@ -563,6 +577,12 @@ fn proof_output(proof: ResidenceMerkleProof) -> ProofOutput {
 fn prefixed_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(2 + (bytes.len() * 2));
     output.push_str("0x");
+    output.push_str(&hex_bytes(bytes));
+    output
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         output.push_str(&format!("{byte:02x}"));
     }
@@ -573,6 +593,10 @@ fn is_lower_prefixed_hex(value: &str, byte_len: usize) -> bool {
     let Some(hex) = value.strip_prefix("0x") else {
         return false;
     };
+    is_lower_hex(hex, byte_len)
+}
+
+fn is_lower_hex(hex: &str, byte_len: usize) -> bool {
     hex.len() == byte_len * 2
         && hex
             .bytes()

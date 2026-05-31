@@ -99,15 +99,17 @@ cargo run -p residence-allowlist -- proof \
   --h3-index 608819013513904127
 cargo run -p residence-allowlist -- verify-local \
   --manifest data/residence_cells/allowed_residence_cells_manifest.v1.res7.json \
-  --allowlist .build/residence-cells/land_allowlist_res7.json
+  --allowlist .build/residence-cells/land_allowlist_res7.json \
+  --source .build/residence-cells/ne_10m_land.geojson
 ```
 
 The generated JSON stores schema/version metadata, local source metadata,
 resolution, allowlist version, and sorted unique decimal H3 indexes.
 `root` and `proof` reject malformed artifacts instead of inferring missing
 or mismatched metadata.
-`verify-local` checks file SHA-256, byte size, H3 count, resolution,
-allowlist version, and Merkle root against the manifest.
+`verify-local` checks source SHA-256, source byte size, allowlist file
+SHA-256, allowlist byte size, H3 count, resolution, allowlist version, and
+Merkle root against the manifest.
 
 The committed manifest is a production placeholder until full generation and
 S3 upload are performed. After generation, fill in `artifact.sha256`,
