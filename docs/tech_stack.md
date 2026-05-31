@@ -32,7 +32,7 @@ Verifier-specific details live with each verifier implementation.
 
 - Earthquake verifier: `nautilus/verifiers/earthquake/README.md`
 - Membership verifier: `nautilus/verifiers/membership/README.md`
-- Earthquake AWS runner: `infra/aws/earthquake-runner/README.md`
+- Sonari verifier AWS runner: `infra/aws/sonari-verifier-runner/README.md`
 
 ## ディレクトリ別役割
 
@@ -46,7 +46,7 @@ Verifier-specific details live with each verifier implementation.
 | `docs/` | プロジェクト全体の仕様、説明資料、提出用ドキュメント。 | Markdown、HTML |
 | `schemas/` | repository root の共通仕様。Payload、Merkle leaf、manifest、affected cells の言語横断契約を定義する。 | Markdown、JSON Schema |
 | `scripts/` | ローカル実行、デプロイ、登録、補助作業用スクリプト。 | shell、TypeScript |
-| `infra/` | AWS などの共有インフラテンプレート。Verifier 固有 template は verifier 名を含むディレクトリへ置く。 | CloudFormation |
+| `infra/` | AWS などの共有インフラテンプレート。Verifier runner は統合 runner 名のディレクトリへ置く。 | CloudFormation |
 
 ## 採用方針
 

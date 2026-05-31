@@ -1,10 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const workflowPath = path.join(
     process.cwd(),
     ".github/workflows/aws-sonari-verifier-runner-dev-deploy.yml",
+);
+const legacyEarthquakeWorkflowPath = path.join(
+    process.cwd(),
+    ".github/workflows/aws-earthquake-runner-dev-deploy.yml",
 );
 
 async function readWorkflow(): Promise<string> {
@@ -18,6 +22,10 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
 }
 
 describe("AWS Sonari verifier runner dev deploy workflow", () => {
+    it("does not keep the legacy earthquake runner deploy workflow", async () => {
+        await expect(access(legacyEarthquakeWorkflowPath)).rejects.toThrow();
+    });
+
     it("runs only for main pushes and manual dev retries with dev-scoped names", async () => {
         const workflow = await readWorkflow();
 

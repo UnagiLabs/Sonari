@@ -42,7 +42,7 @@ AWS は処理対象がある時だけ地震検証器を起動します。
 
 通常時は `DesiredCapacity = 0` です。Relayer は preview / dry-run を既定とし、実 submit は明示設定がある場合だけ有効にします。Signer 設定がない場合は fail-closed にします。
 
-CloudFormation テンプレートは `infra/aws/earthquake-runner/README.md` を参照してください。
+CloudFormation テンプレートは `infra/aws/sonari-verifier-runner/README.md` を参照してください。
 
 ## ローカル開発
 

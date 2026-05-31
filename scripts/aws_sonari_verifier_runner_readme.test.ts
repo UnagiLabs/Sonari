@@ -69,7 +69,7 @@ describe("AWS Sonari verifier runner README", () => {
             "古い TEE tarball object",
             "古い EIF object",
             "古い SHA object",
-            "実際の古い AWS stack 削除は follow-up",
+            "旧単独 earthquake runner stack と GitHub environment",
         ]);
     });
 
