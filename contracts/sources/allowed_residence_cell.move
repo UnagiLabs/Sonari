@@ -1,9 +1,19 @@
 module contracts::allowed_residence_cell;
 
 use std::hash;
+use sui::event;
 use sui::bcs;
 
 const EInvalidHashLength: u64 = 0;
+
+public struct AllowedResidenceCellRegistry has key {
+    id: UID,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    updated_at_ms: u64,
+}
 
 public struct ResidenceCellLeaf has copy, drop, store {
     h3_index: u64,
@@ -14,6 +24,59 @@ public struct ResidenceCellLeaf has copy, drop, store {
 public struct ProofStep has copy, drop, store {
     sibling_hash: vector<u8>,
     sibling_on_left: bool,
+}
+
+public struct AllowedResidenceCellRootUpdated has copy, drop {
+    registry_id: ID,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    updated_at_ms: u64,
+    actor: address,
+}
+
+public(package) fun create_registry(
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    ctx: &mut TxContext,
+): ID {
+    assert_32_bytes(&root);
+    assert_32_bytes(&source_hash);
+
+    let registry = AllowedResidenceCellRegistry {
+        id: object::new(ctx),
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        updated_at_ms: ctx.epoch_timestamp_ms(),
+    };
+    let registry_id = object::id(&registry);
+    emit_root_updated(&registry, ctx);
+    transfer::share_object(registry);
+    registry_id
+}
+
+public(package) fun update_root(
+    registry: &mut AllowedResidenceCellRegistry,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    ctx: &TxContext,
+) {
+    assert_32_bytes(&root);
+    assert_32_bytes(&source_hash);
+
+    registry.root = root;
+    registry.geo_resolution = geo_resolution;
+    registry.allowlist_version = allowlist_version;
+    registry.source_hash = source_hash;
+    registry.updated_at_ms = ctx.epoch_timestamp_ms();
+    emit_root_updated(registry, ctx);
 }
 
 public fun new_leaf(
@@ -61,6 +124,42 @@ public fun verify_proof(
     current == expected_root
 }
 
+public fun registry_id(registry: &AllowedResidenceCellRegistry): ID {
+    object::id(registry)
+}
+
+public fun root(registry: &AllowedResidenceCellRegistry): vector<u8> {
+    registry.root
+}
+
+public fun geo_resolution(registry: &AllowedResidenceCellRegistry): u8 {
+    registry.geo_resolution
+}
+
+public fun allowlist_version(registry: &AllowedResidenceCellRegistry): u64 {
+    registry.allowlist_version
+}
+
+public fun source_hash(registry: &AllowedResidenceCellRegistry): vector<u8> {
+    registry.source_hash
+}
+
+public fun updated_at_ms(registry: &AllowedResidenceCellRegistry): u64 {
+    registry.updated_at_ms
+}
+
+fun emit_root_updated(registry: &AllowedResidenceCellRegistry, ctx: &TxContext) {
+    event::emit(AllowedResidenceCellRootUpdated {
+        registry_id: object::id(registry),
+        root: registry.root,
+        geo_resolution: registry.geo_resolution,
+        allowlist_version: registry.allowlist_version,
+        source_hash: registry.source_hash,
+        updated_at_ms: registry.updated_at_ms,
+        actor: ctx.sender(),
+    });
+}
+
 fun internal_hash(
     current: &vector<u8>,
     sibling_hash: &vector<u8>,
@@ -79,4 +178,28 @@ fun internal_hash(
 
 fun assert_32_bytes(bytes: &vector<u8>) {
     assert!(bytes.length() == 32, EInvalidHashLength);
+}
+
+#[test_only]
+public fun root_updated_event_fields(
+    event: AllowedResidenceCellRootUpdated,
+): (ID, vector<u8>, u8, u64, vector<u8>, u64, address) {
+    let AllowedResidenceCellRootUpdated {
+        registry_id,
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        updated_at_ms,
+        actor,
+    } = event;
+    (
+        registry_id,
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        updated_at_ms,
+        actor,
+    )
 }

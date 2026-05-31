@@ -1,6 +1,7 @@
 module contracts::admin;
 
 use contracts::claim;
+use contracts::allowed_residence_cell;
 use contracts::disaster_event;
 use contracts::donation;
 use contracts::identity_registry;
@@ -311,6 +312,42 @@ public fun disable_verifier_key(
     ctx: &mut TxContext,
 ) {
     metadata_verifier::disable_verifier_key(registry, public_key, ctx);
+}
+
+public fun create_allowed_residence_cell_registry(
+    _: &AdminCap,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    ctx: &mut TxContext,
+): ID {
+    allowed_residence_cell::create_registry(
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        ctx,
+    )
+}
+
+public fun update_allowed_residence_cell_root(
+    _: &AdminCap,
+    registry: &mut allowed_residence_cell::AllowedResidenceCellRegistry,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    allowed_residence_cell::update_root(
+        registry,
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        ctx,
+    );
 }
 
 public fun pause_global(
