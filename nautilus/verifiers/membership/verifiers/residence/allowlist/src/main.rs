@@ -61,6 +61,8 @@ struct VerifyLocalArgs {
     allowlist: PathBuf,
     #[arg(long)]
     source: PathBuf,
+    #[arg(long, hide = true)]
+    allow_unpinned_source: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -276,7 +278,7 @@ fn print_proof(args: ProofArgs) -> Result<(), CliError> {
 
 fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
     let manifest: AllowlistManifest = serde_json::from_slice(&fs::read(args.manifest)?)?;
-    validate_manifest_metadata(&manifest)?;
+    validate_manifest_metadata(&manifest, !args.allow_unpinned_source)?;
     let allowlist_bytes = fs::read(&args.allowlist)?;
     let allowlist = parse_valid_allowlist(&allowlist_bytes)?;
     let source_bytes = fs::read(&args.source)?;
@@ -329,6 +331,11 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
         Some(allowlist.artifact.source.byte_length),
         source_bytes.len() as u64,
     )?;
+    if !args.allow_unpinned_source && source_sha256_raw != NATURAL_EARTH_LAND_SOURCE.sha256 {
+        return Err(CliError::InvalidArtifact(
+            "local source file does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
 
     let output = VerifyLocalOutput {
         status: "verified".to_owned(),
@@ -431,7 +438,10 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), CliError> {
     Ok(())
 }
 
-fn validate_manifest_metadata(manifest: &AllowlistManifest) -> Result<(), CliError> {
+fn validate_manifest_metadata(
+    manifest: &AllowlistManifest,
+    require_pinned_source: bool,
+) -> Result<(), CliError> {
     if manifest.schema != "sonari.residence.allowlist.manifest.v1" {
         return Err(CliError::InvalidArtifact(
             "manifest schema must be sonari.residence.allowlist.manifest.v1".to_owned(),
@@ -453,6 +463,16 @@ fn validate_manifest_metadata(manifest: &AllowlistManifest) -> Result<(), CliErr
     if !is_lower_hex(&manifest.source.sha256, 32) {
         return Err(CliError::InvalidArtifact(
             "manifest source.sha256 must be a lowercase SHA-256 hash".to_owned(),
+        ));
+    }
+    if require_pinned_source
+        && (manifest.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
+            || manifest.source.version != NATURAL_EARTH_LAND_SOURCE.version
+            || manifest.source.url != NATURAL_EARTH_LAND_SOURCE.url
+            || manifest.source.sha256 != NATURAL_EARTH_LAND_SOURCE.sha256)
+    {
+        return Err(CliError::InvalidArtifact(
+            "manifest source metadata does not match pinned Natural Earth source".to_owned(),
         ));
     }
     if manifest.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {

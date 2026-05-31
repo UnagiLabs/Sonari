@@ -372,6 +372,7 @@ fn verify_local_accepts_matching_manifest_and_allowlist() {
         allowlist_path.to_str().expect("path is utf8"),
         "--source",
         COMPACT_LAND_PATH,
+        "--allow-unpinned-source",
     ]);
 
     assert!(
@@ -425,6 +426,7 @@ fn verify_local_rejects_mismatched_manifest_values() {
             allowlist_path.to_str().expect("path is utf8"),
             "--source",
             COMPACT_LAND_PATH,
+            "--allow-unpinned-source",
         ]);
 
         assert!(!output.status.success(), "{name} should fail");
@@ -448,6 +450,37 @@ fn verify_local_rejects_allowlist_from_unpinned_source_even_with_matching_artifa
     let generated = generate_from_source(&source_path, &allowlist_path);
     let allowlist = write_pinned_source_allowlist(&allowlist_path, &generated);
     let manifest = manifest_for(Path::new(COMPACT_LAND_PATH), &allowlist_path, &allowlist);
+    write_json(&manifest_path, &manifest);
+
+    let output = run(&[
+        "verify-local",
+        "--manifest",
+        manifest_path.to_str().expect("path is utf8"),
+        "--allowlist",
+        allowlist_path.to_str().expect("path is utf8"),
+        "--source",
+        source_path.to_str().expect("path is utf8"),
+    ]);
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn verify_local_rejects_self_consistent_unpinned_manifest_by_default() {
+    let dir = test_dir("verify-local-strict-source-pin");
+    let source_path = dir.join("alternate-source.geojson");
+    let allowlist_path = dir.join("allowlist.json");
+    let manifest_path = dir.join("manifest.json");
+    fs::write(
+        &source_path,
+        fs::read_to_string(COMPACT_LAND_PATH)
+            .expect("fixture source exists")
+            .replace("compact_land", "self_consistent_alternate_land"),
+    )
+    .expect("alternate source is written");
+    let allowlist = generate_from_source(&source_path, &allowlist_path);
+    let manifest = manifest_for(&source_path, &allowlist_path, &allowlist);
     write_json(&manifest_path, &manifest);
 
     let output = run(&[
