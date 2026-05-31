@@ -1,0 +1,40 @@
+{
+  "schema": "sonari.residence.allowlist.manifest.v1",
+  "schema_version": 1,
+  "allowlist_version": 1,
+  "geo_resolution": 7,
+  "source": {
+    "name": "Natural Earth ne_10m_land",
+    "version": "v5.1.2",
+    "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson",
+    "sha256": "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416"
+  },
+  "generation_command": [
+    "cargo",
+    "run",
+    "-p",
+    "residence-allowlist",
+    "--",
+    "generate",
+    "--source",
+    ".build/residence-cells/ne_10m_land.geojson",
+    "--output",
+    ".build/residence-cells/allowed_residence_cells.v1.res7.json",
+    "--allowlist-version",
+    "1"
+  ],
+  "local_artifact_path": ".build/residence-cells/allowed_residence_cells.v1.res7.json",
+  "s3": {
+    "bucket_env": "SONARI_RESIDENCE_CELLS_BUCKET",
+    "object_key": "residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz",
+    "version_id": null
+  },
+  "artifact": {
+    "status": "pending_full_generation_and_s3_upload",
+    "generated_at": null,
+    "sha256": null,
+    "byte_size": null,
+    "h3_count": null,
+    "merkle_root": null
+  }
+}

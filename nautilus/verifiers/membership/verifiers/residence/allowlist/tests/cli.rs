@@ -1,5 +1,6 @@
 use residence_allowlist::{ResidenceCellLeaf, merkle_root_from_leaves};
-use serde_json::Value;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -9,6 +10,10 @@ use std::{
 
 const COMPACT_LAND_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/compact_land.geojson");
+const COMMITTED_MANIFEST_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../../../../data/residence_cells/allowed_residence_cells_manifest.v1.res7.json"
+);
 
 fn binary() -> Command {
     if let Some(path) = std::env::var_os("CARGO_BIN_EXE_residence-allowlist") {
@@ -90,6 +95,56 @@ fn expected_root_hex(allowlist: &Value) -> String {
         .expect("generated allowlist is valid")
         .expect("generated allowlist is non-empty");
     format!("0x{}", hex::encode(root))
+}
+
+fn file_sha256(path: &Path) -> String {
+    let bytes = fs::read(path).expect("file exists");
+    format!("0x{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn manifest_for(allowlist_path: &Path, allowlist: &Value) -> Value {
+    json!({
+        "schema": "sonari.residence.allowlist.manifest.v1",
+        "schema_version": 1,
+        "allowlist_version": allowlist["allowlist_version"],
+        "geo_resolution": allowlist["geo_resolution"],
+        "source": {
+            "name": "Natural Earth ne_10m_land",
+            "version": "v5.1.2",
+            "url": "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson",
+            "sha256": "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416"
+        },
+        "generation_command": [
+            "cargo",
+            "run",
+            "-p",
+            "residence-allowlist",
+            "--",
+            "generate"
+        ],
+        "local_artifact_path": ".build/residence-cells/allowed_residence_cells.v1.res7.json",
+        "s3": {
+            "bucket_env": "SONARI_RESIDENCE_CELLS_BUCKET",
+            "object_key": "residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz",
+            "version_id": null
+        },
+        "artifact": {
+            "status": "local_test_fixture",
+            "generated_at": null,
+            "sha256": file_sha256(allowlist_path),
+            "byte_size": fs::metadata(allowlist_path).expect("metadata").len(),
+            "h3_count": h3_indexes(allowlist).len(),
+            "merkle_root": expected_root_hex(allowlist)
+        }
+    })
+}
+
+fn write_json(path: &Path, value: &Value) {
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(value).expect("JSON serializes"),
+    )
+    .expect("JSON file is written");
 }
 
 #[test]
@@ -253,4 +308,99 @@ fn malformed_allowlists_are_rejected() {
         assert!(!output.status.success(), "{name} should fail");
         assert!(output.stdout.is_empty(), "{name} should not emit JSON");
     }
+}
+
+#[test]
+fn verify_local_accepts_matching_manifest_and_allowlist() {
+    let dir = test_dir("verify-local");
+    let allowlist_path = dir.join("allowlist.json");
+    let manifest_path = dir.join("manifest.json");
+    let allowlist = generate(&allowlist_path);
+    write_json(&manifest_path, &manifest_for(&allowlist_path, &allowlist));
+
+    let output = run(&[
+        "verify-local",
+        "--manifest",
+        manifest_path.to_str().expect("path is utf8"),
+        "--allowlist",
+        allowlist_path.to_str().expect("path is utf8"),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "verify-local stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let verified: Value = serde_json::from_slice(&output.stdout).expect("verify output is JSON");
+    assert_eq!(verified["status"], "verified");
+    assert_eq!(verified["sha256"], file_sha256(&allowlist_path));
+    assert_eq!(verified["merkle_root"], expected_root_hex(&allowlist));
+}
+
+#[test]
+fn verify_local_rejects_mismatched_manifest_values() {
+    let dir = test_dir("verify-local-mismatch");
+    let allowlist_path = dir.join("allowlist.json");
+    let allowlist = generate(&allowlist_path);
+
+    let cases = [
+        ("bad-sha.json", {
+            let mut manifest = manifest_for(&allowlist_path, &allowlist);
+            manifest["artifact"]["sha256"] = Value::String(format!("0x{}", "00".repeat(32)));
+            manifest
+        }),
+        ("bad-root.json", {
+            let mut manifest = manifest_for(&allowlist_path, &allowlist);
+            manifest["artifact"]["merkle_root"] = Value::String(format!("0x{}", "11".repeat(32)));
+            manifest
+        }),
+        ("bad-count.json", {
+            let mut manifest = manifest_for(&allowlist_path, &allowlist);
+            manifest["artifact"]["h3_count"] = Value::from(999_999);
+            manifest
+        }),
+    ];
+
+    for (name, manifest) in cases {
+        let manifest_path = dir.join(name);
+        write_json(&manifest_path, &manifest);
+        let output = run(&[
+            "verify-local",
+            "--manifest",
+            manifest_path.to_str().expect("path is utf8"),
+            "--allowlist",
+            allowlist_path.to_str().expect("path is utf8"),
+        ]);
+
+        assert!(!output.status.success(), "{name} should fail");
+        assert!(output.stdout.is_empty(), "{name} should not emit JSON");
+    }
+}
+
+#[test]
+fn committed_manifest_keeps_pending_production_artifact_metadata() {
+    let manifest: Value = serde_json::from_slice(
+        &fs::read(COMMITTED_MANIFEST_PATH).expect("committed manifest exists"),
+    )
+    .expect("committed manifest is JSON");
+
+    assert_eq!(manifest["schema"], "sonari.residence.allowlist.manifest.v1");
+    assert_eq!(manifest["schema_version"], 1);
+    assert_eq!(manifest["geo_resolution"], 7);
+    assert_eq!(manifest["source"]["name"], "Natural Earth ne_10m_land");
+    assert_eq!(manifest["source"]["version"], "v5.1.2");
+    assert_eq!(
+        manifest["source"]["sha256"],
+        "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416",
+    );
+    assert_eq!(
+        manifest["s3"]["bucket_env"],
+        "SONARI_RESIDENCE_CELLS_BUCKET"
+    );
+    assert_eq!(
+        manifest["artifact"]["status"],
+        "pending_full_generation_and_s3_upload"
+    );
+    assert!(manifest["artifact"]["sha256"].is_null());
+    assert!(manifest["artifact"]["merkle_root"].is_null());
 }

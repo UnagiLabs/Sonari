@@ -97,12 +97,38 @@ cargo run -p residence-allowlist -- root \
 cargo run -p residence-allowlist -- proof \
   --allowlist .build/residence-cells/land_allowlist_res7.json \
   --h3-index 608819013513904127
+cargo run -p residence-allowlist -- verify-local \
+  --manifest data/residence_cells/allowed_residence_cells_manifest.v1.res7.json \
+  --allowlist .build/residence-cells/land_allowlist_res7.json
 ```
 
 The generated JSON stores schema/version metadata, local source metadata,
 resolution, allowlist version, and sorted unique decimal H3 indexes.
 `root` and `proof` reject malformed artifacts instead of inferring missing
 or mismatched metadata.
+`verify-local` checks file SHA-256, byte size, H3 count, resolution,
+allowlist version, and Merkle root against the manifest.
+
+The committed manifest is a production placeholder until full generation and
+S3 upload are performed. After generation, fill in `artifact.sha256`,
+`artifact.byte_size`, `artifact.h3_count`, `artifact.merkle_root`, and
+`artifact.generated_at`.
+
+Optional S3 upload uses the bucket from `SONARI_RESIDENCE_CELLS_BUCKET`.
+This keeps the bucket name out of git:
+
+```bash
+gzip -c .build/residence-cells/land_allowlist_res7.json \
+  > .build/residence-cells/allowed_residence_cells.v1.res7.json.gz
+aws s3 cp \
+  .build/residence-cells/allowed_residence_cells.v1.res7.json.gz \
+  "s3://${SONARI_RESIDENCE_CELLS_BUCKET}/residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz"
+aws s3api head-object \
+  --bucket "${SONARI_RESIDENCE_CELLS_BUCKET}" \
+  --key residence-cells/v1/res7/allowed_residence_cells.v1.res7.json.gz
+```
+
+Live S3 upload was not performed when this repository support was added.
 
 ## Rejection rules
 

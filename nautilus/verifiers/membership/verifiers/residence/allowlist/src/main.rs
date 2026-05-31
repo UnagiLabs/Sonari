@@ -26,6 +26,7 @@ enum Command {
     Generate(GenerateArgs),
     Root(RootArgs),
     Proof(ProofArgs),
+    VerifyLocal(VerifyLocalArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -50,6 +51,14 @@ struct ProofArgs {
     allowlist: PathBuf,
     #[arg(long)]
     h3_index: u64,
+}
+
+#[derive(Debug, Parser)]
+struct VerifyLocalArgs {
+    #[arg(long)]
+    manifest: PathBuf,
+    #[arg(long)]
+    allowlist: PathBuf,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -99,6 +108,57 @@ struct ProofStepOutput {
     direction: ProofDirection,
     sibling_on_left: bool,
     sibling_hash: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AllowlistManifest {
+    schema: String,
+    schema_version: u64,
+    allowlist_version: u64,
+    geo_resolution: u8,
+    source: ManifestSource,
+    generation_command: Vec<String>,
+    local_artifact_path: String,
+    s3: ManifestS3,
+    artifact: ManifestArtifact,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestSource {
+    name: String,
+    version: String,
+    url: String,
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestS3 {
+    bucket_env: String,
+    object_key: String,
+    version_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestArtifact {
+    status: String,
+    generated_at: Option<String>,
+    sha256: Option<String>,
+    byte_size: Option<u64>,
+    h3_count: Option<usize>,
+    merkle_root: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VerifyLocalOutput {
+    status: String,
+    sha256: String,
+    byte_size: u64,
+    h3_count: usize,
+    merkle_root: String,
 }
 
 #[derive(Debug)]
@@ -156,6 +216,7 @@ fn main() -> Result<(), CliError> {
         Command::Generate(args) => generate(args),
         Command::Root(args) => print_root(args),
         Command::Proof(args) => print_proof(args),
+        Command::VerifyLocal(args) => verify_local(args),
     }
 }
 
@@ -185,11 +246,7 @@ fn generate(args: GenerateArgs) -> Result<(), CliError> {
 
 fn print_root(args: RootArgs) -> Result<(), CliError> {
     let allowlist = load_valid_allowlist(args.allowlist)?;
-    let Some(root) = merkle_root_from_leaves(&allowlist.leaves)? else {
-        return Err(CliError::InvalidArtifact(
-            "allowlist must contain at least one h3_index".to_owned(),
-        ));
-    };
+    let root = root_for_valid_allowlist(&allowlist)?;
     let output = RootOutput {
         merkle_root: prefixed_hex(&root),
         count: allowlist.leaves.len(),
@@ -215,8 +272,60 @@ fn print_proof(args: ProofArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
+    let manifest: AllowlistManifest = serde_json::from_slice(&fs::read(args.manifest)?)?;
+    validate_manifest_metadata(&manifest)?;
+    let allowlist_bytes = fs::read(&args.allowlist)?;
+    let allowlist = parse_valid_allowlist(&allowlist_bytes)?;
+    let root = root_for_valid_allowlist(&allowlist)?;
+    let sha256 = prefixed_hex(&Sha256::digest(&allowlist_bytes));
+    let byte_size = allowlist_bytes.len() as u64;
+    let h3_count = allowlist.leaves.len();
+    let merkle_root = prefixed_hex(&root);
+
+    assert_manifest_field(
+        "artifact.sha256",
+        manifest.artifact.sha256.as_deref(),
+        &sha256,
+    )?;
+    assert_manifest_field(
+        "artifact.merkle_root",
+        manifest.artifact.merkle_root.as_deref(),
+        &merkle_root,
+    )?;
+    assert_manifest_u64("artifact.byte_size", manifest.artifact.byte_size, byte_size)?;
+    assert_manifest_usize("artifact.h3_count", manifest.artifact.h3_count, h3_count)?;
+
+    if manifest.geo_resolution != allowlist.artifact.geo_resolution {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest geo_resolution {} does not match allowlist {}",
+            manifest.geo_resolution, allowlist.artifact.geo_resolution
+        )));
+    }
+    if manifest.allowlist_version != allowlist.artifact.allowlist_version {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest allowlist_version {} does not match allowlist {}",
+            manifest.allowlist_version, allowlist.artifact.allowlist_version
+        )));
+    }
+
+    let output = VerifyLocalOutput {
+        status: "verified".to_owned(),
+        sha256,
+        byte_size,
+        h3_count,
+        merkle_root,
+    };
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 fn load_valid_allowlist(path: PathBuf) -> Result<ValidatedAllowlist, CliError> {
-    let artifact: AllowlistArtifact = serde_json::from_slice(&fs::read(path)?)?;
+    parse_valid_allowlist(&fs::read(path)?)
+}
+
+fn parse_valid_allowlist(bytes: &[u8]) -> Result<ValidatedAllowlist, CliError> {
+    let artifact: AllowlistArtifact = serde_json::from_slice(bytes)?;
     validate_artifact(&artifact)?;
     let leaves = artifact
         .h3_indexes
@@ -231,6 +340,15 @@ fn load_valid_allowlist(path: PathBuf) -> Result<ValidatedAllowlist, CliError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(ValidatedAllowlist { artifact, leaves })
+}
+
+fn root_for_valid_allowlist(allowlist: &ValidatedAllowlist) -> Result<[u8; 32], CliError> {
+    let Some(root) = merkle_root_from_leaves(&allowlist.leaves)? else {
+        return Err(CliError::InvalidArtifact(
+            "allowlist must contain at least one h3_index".to_owned(),
+        ));
+    };
+    Ok(root)
 }
 
 fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), CliError> {
@@ -289,6 +407,100 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), CliError> {
         previous = Some(current);
     }
 
+    Ok(())
+}
+
+fn validate_manifest_metadata(manifest: &AllowlistManifest) -> Result<(), CliError> {
+    if manifest.schema != "sonari.residence.allowlist.manifest.v1" {
+        return Err(CliError::InvalidArtifact(
+            "manifest schema must be sonari.residence.allowlist.manifest.v1".to_owned(),
+        ));
+    }
+    if manifest.schema_version != 1 {
+        return Err(CliError::InvalidArtifact(
+            "manifest schema_version must be 1".to_owned(),
+        ));
+    }
+    if manifest.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
+        || manifest.source.version != NATURAL_EARTH_LAND_SOURCE.version
+        || manifest.source.url != NATURAL_EARTH_LAND_SOURCE.url
+        || manifest.source.sha256 != NATURAL_EARTH_LAND_SOURCE.sha256
+    {
+        return Err(CliError::InvalidArtifact(
+            "manifest source metadata does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
+    if manifest.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest geo_resolution must be {}",
+            NATURAL_EARTH_LAND_SOURCE.resolution
+        )));
+    }
+    if manifest.s3.bucket_env != "SONARI_RESIDENCE_CELLS_BUCKET" {
+        return Err(CliError::InvalidArtifact(
+            "manifest s3.bucket_env must be SONARI_RESIDENCE_CELLS_BUCKET".to_owned(),
+        ));
+    }
+    if manifest.s3.object_key.is_empty() {
+        return Err(CliError::InvalidArtifact(
+            "manifest s3.object_key must not be empty".to_owned(),
+        ));
+    }
+    if manifest.generation_command.is_empty() {
+        return Err(CliError::InvalidArtifact(
+            "manifest generation_command must not be empty".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn assert_manifest_field(
+    field: &str,
+    actual: Option<&str>,
+    expected: &str,
+) -> Result<(), CliError> {
+    let Some(actual) = actual else {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest {field} is required for local verification"
+        )));
+    };
+    if actual != expected {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest {field} {actual} does not match computed {expected}"
+        )));
+    }
+    Ok(())
+}
+
+fn assert_manifest_u64(field: &str, actual: Option<u64>, expected: u64) -> Result<(), CliError> {
+    let Some(actual) = actual else {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest {field} is required for local verification"
+        )));
+    };
+    if actual != expected {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest {field} {actual} does not match computed {expected}"
+        )));
+    }
+    Ok(())
+}
+
+fn assert_manifest_usize(
+    field: &str,
+    actual: Option<usize>,
+    expected: usize,
+) -> Result<(), CliError> {
+    let Some(actual) = actual else {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest {field} is required for local verification"
+        )));
+    };
+    if actual != expected {
+        return Err(CliError::InvalidArtifact(format!(
+            "manifest {field} {actual} does not match computed {expected}"
+        )));
+    }
     Ok(())
 }
 
