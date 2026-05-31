@@ -1,0 +1,23 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "fixture": "compact_land"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [-74.0200, 40.7000],
+            [-73.9300, 40.7000],
+            [-73.9300, 40.8200],
+            [-74.0200, 40.8200],
+            [-74.0200, 40.7000]
+          ]
+        ]
+      }
+    }
+  ]
+}

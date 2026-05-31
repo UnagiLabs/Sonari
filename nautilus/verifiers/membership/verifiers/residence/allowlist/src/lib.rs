@@ -1,6 +1,31 @@
+use geo::{Geometry as GeoGeometry, Polygon};
+use geojson::{Feature, GeoJson};
+use h3o::{
+    Resolution,
+    geom::{ContainmentMode, TilerBuilder},
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LandSourceManifest {
+    pub source_name: &'static str,
+    pub version: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub resolution: u8,
+    pub containment_mode: &'static str,
+}
+
+pub const NATURAL_EARTH_LAND_SOURCE: LandSourceManifest = LandSourceManifest {
+    source_name: "Natural Earth ne_10m_land",
+    version: "v5.1.2",
+    url: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson",
+    sha256: "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416",
+    resolution: 7,
+    containment_mode: "h3o::geom::ContainmentMode::Covers",
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ResidenceCellLeaf {
@@ -12,6 +37,8 @@ pub struct ResidenceCellLeaf {
 #[derive(Debug)]
 pub enum ResidenceAllowlistError {
     DuplicateH3Index(u64),
+    InvalidLandGeometry(String),
+    MalformedLandSource(String),
     LeafEncoding(bcs::Error),
 }
 
@@ -24,6 +51,12 @@ impl fmt::Display for ResidenceAllowlistError {
                     "duplicate h3_index in residence allowlist: {h3_index}"
                 )
             }
+            Self::InvalidLandGeometry(error) => {
+                write!(formatter, "invalid residence land geometry: {error}")
+            }
+            Self::MalformedLandSource(error) => {
+                write!(formatter, "malformed residence land source: {error}")
+            }
             Self::LeafEncoding(error) => {
                 write!(formatter, "failed to encode residence leaf: {error}")
             }
@@ -35,6 +68,7 @@ impl std::error::Error for ResidenceAllowlistError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::DuplicateH3Index(_) => None,
+            Self::InvalidLandGeometry(_) | Self::MalformedLandSource(_) => None,
             Self::LeafEncoding(error) => Some(error),
         }
     }
@@ -44,6 +78,103 @@ impl From<bcs::Error> for ResidenceAllowlistError {
     fn from(error: bcs::Error) -> Self {
         Self::LeafEncoding(error)
     }
+}
+
+pub fn load_land_polygons_from_geojson(
+    source: &str,
+) -> Result<Vec<Polygon>, ResidenceAllowlistError> {
+    let geojson = source
+        .parse::<GeoJson>()
+        .map_err(|error| ResidenceAllowlistError::MalformedLandSource(error.to_string()))?;
+    let mut polygons = Vec::new();
+
+    match geojson {
+        GeoJson::FeatureCollection(collection) => {
+            if collection.features.is_empty() {
+                return Err(ResidenceAllowlistError::MalformedLandSource(
+                    "feature collection is empty".to_string(),
+                ));
+            }
+            for feature in collection.features {
+                append_feature_polygons(feature, &mut polygons)?;
+            }
+        }
+        GeoJson::Feature(feature) => {
+            append_feature_polygons(feature, &mut polygons)?;
+        }
+        GeoJson::Geometry(geometry) => {
+            append_geometry_polygons(geometry, &mut polygons)?;
+        }
+    }
+
+    if polygons.is_empty() {
+        return Err(ResidenceAllowlistError::MalformedLandSource(
+            "land source contains no Polygon or MultiPolygon geometry".to_string(),
+        ));
+    }
+
+    Ok(polygons)
+}
+
+pub fn generate_candidate_h3_indexes_from_geojson(
+    source: &str,
+) -> Result<Vec<u64>, ResidenceAllowlistError> {
+    let polygons = load_land_polygons_from_geojson(source)?;
+    generate_candidate_h3_indexes(&polygons)
+}
+
+pub fn generate_candidate_h3_indexes(
+    polygons: &[Polygon],
+) -> Result<Vec<u64>, ResidenceAllowlistError> {
+    // Covers includes cells whose boundary intersects land, plus cells covering tiny polygons.
+    let mut tiler = TilerBuilder::new(Resolution::Seven)
+        .containment_mode(ContainmentMode::Covers)
+        .build();
+    tiler
+        .add_batch(polygons.iter().cloned())
+        .map_err(|error| ResidenceAllowlistError::InvalidLandGeometry(error.to_string()))?;
+
+    let mut indexes = tiler.into_coverage().map(u64::from).collect::<Vec<_>>();
+    indexes.sort_unstable();
+    indexes.dedup();
+    Ok(indexes)
+}
+
+fn append_feature_polygons(
+    feature: Feature,
+    polygons: &mut Vec<Polygon>,
+) -> Result<(), ResidenceAllowlistError> {
+    let Some(geometry) = feature.geometry else {
+        return Err(ResidenceAllowlistError::MalformedLandSource(
+            "feature is missing geometry".to_string(),
+        ));
+    };
+    append_geometry_polygons(geometry, polygons)
+}
+
+fn append_geometry_polygons(
+    geometry: geojson::Geometry,
+    polygons: &mut Vec<Polygon>,
+) -> Result<(), ResidenceAllowlistError> {
+    let geometry = GeoGeometry::try_from(geometry)
+        .map_err(|error| ResidenceAllowlistError::MalformedLandSource(error.to_string()))?;
+    append_geo_polygons(geometry, polygons)
+}
+
+fn append_geo_polygons(
+    geometry: GeoGeometry,
+    polygons: &mut Vec<Polygon>,
+) -> Result<(), ResidenceAllowlistError> {
+    match geometry {
+        GeoGeometry::Polygon(polygon) => polygons.push(polygon),
+        GeoGeometry::MultiPolygon(multipolygon) => polygons.extend(multipolygon.0),
+        _ => {
+            return Err(ResidenceAllowlistError::MalformedLandSource(
+                "land source geometry must be Polygon or MultiPolygon".to_string(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
