@@ -14,6 +14,8 @@ const COMMITTED_MANIFEST_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../../../../data/residence_cells/allowed_residence_cells_manifest.v1.res7.json"
 );
+const PINNED_NATURAL_EARTH_SHA256: &str =
+    "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416";
 
 fn binary() -> Command {
     if let Some(path) = std::env::var_os("CARGO_BIN_EXE_residence-allowlist") {
@@ -53,6 +55,25 @@ fn generate(output_path: &Path) -> Value {
         "generate",
         "--source",
         COMPACT_LAND_PATH,
+        "--output",
+        output_path.to_str().expect("path is utf8"),
+        "--allowlist-version",
+        "42",
+    ]);
+    assert!(
+        output.status.success(),
+        "generate stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&fs::read(output_path).expect("allowlist file exists"))
+        .expect("allowlist file is JSON")
+}
+
+fn generate_from_source(source_path: &Path, output_path: &Path) -> Value {
+    let output = run(&[
+        "generate",
+        "--source",
+        source_path.to_str().expect("path is utf8"),
         "--output",
         output_path.to_str().expect("path is utf8"),
         "--allowlist-version",
@@ -145,6 +166,13 @@ fn write_json(path: &Path, value: &Value) {
         serde_json::to_vec_pretty(value).expect("JSON serializes"),
     )
     .expect("JSON file is written");
+}
+
+fn write_pinned_source_allowlist(path: &Path, allowlist: &Value) -> Value {
+    let mut pinned = allowlist.clone();
+    pinned["source"]["sha256"] = Value::String(format!("0x{PINNED_NATURAL_EARTH_SHA256}"));
+    write_json(path, &pinned);
+    pinned
 }
 
 #[test]
@@ -315,7 +343,8 @@ fn verify_local_accepts_matching_manifest_and_allowlist() {
     let dir = test_dir("verify-local");
     let allowlist_path = dir.join("allowlist.json");
     let manifest_path = dir.join("manifest.json");
-    let allowlist = generate(&allowlist_path);
+    let generated = generate(&allowlist_path);
+    let allowlist = write_pinned_source_allowlist(&allowlist_path, &generated);
     write_json(&manifest_path, &manifest_for(&allowlist_path, &allowlist));
 
     let output = run(&[
@@ -378,6 +407,35 @@ fn verify_local_rejects_mismatched_manifest_values() {
 }
 
 #[test]
+fn verify_local_rejects_allowlist_from_unpinned_source_even_with_matching_artifact_fields() {
+    let dir = test_dir("verify-local-source-pin");
+    let source_path = dir.join("alternate-source.geojson");
+    let allowlist_path = dir.join("allowlist.json");
+    let manifest_path = dir.join("manifest.json");
+    fs::write(
+        &source_path,
+        fs::read_to_string(COMPACT_LAND_PATH)
+            .expect("fixture source exists")
+            .replace("compact_land", "alternate_land"),
+    )
+    .expect("alternate source is written");
+    let allowlist = generate_from_source(&source_path, &allowlist_path);
+    let manifest = manifest_for(&allowlist_path, &allowlist);
+    write_json(&manifest_path, &manifest);
+
+    let output = run(&[
+        "verify-local",
+        "--manifest",
+        manifest_path.to_str().expect("path is utf8"),
+        "--allowlist",
+        allowlist_path.to_str().expect("path is utf8"),
+    ]);
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
 fn committed_manifest_keeps_pending_production_artifact_metadata() {
     let manifest: Value = serde_json::from_slice(
         &fs::read(COMMITTED_MANIFEST_PATH).expect("committed manifest exists"),
@@ -389,10 +447,7 @@ fn committed_manifest_keeps_pending_production_artifact_metadata() {
     assert_eq!(manifest["geo_resolution"], 7);
     assert_eq!(manifest["source"]["name"], "Natural Earth ne_10m_land");
     assert_eq!(manifest["source"]["version"], "v5.1.2");
-    assert_eq!(
-        manifest["source"]["sha256"],
-        "1ac90796408bc6ad6911d69448485d3c4dbf2190370080368a09976e1c9f7416",
-    );
+    assert_eq!(manifest["source"]["sha256"], PINNED_NATURAL_EARTH_SHA256,);
     assert_eq!(
         manifest["s3"]["bucket_env"],
         "SONARI_RESIDENCE_CELLS_BUCKET"

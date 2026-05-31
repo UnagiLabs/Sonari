@@ -308,6 +308,17 @@ fn verify_local(args: VerifyLocalArgs) -> Result<(), CliError> {
             manifest.allowlist_version, allowlist.artifact.allowlist_version
         )));
     }
+    let pinned_source_sha256 = format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256);
+    if allowlist.artifact.source.sha256 != pinned_source_sha256 {
+        return Err(CliError::InvalidArtifact(
+            "allowlist source.sha256 does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
+    if manifest.source.sha256 != NATURAL_EARTH_LAND_SOURCE.sha256 {
+        return Err(CliError::InvalidArtifact(
+            "manifest source.sha256 does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
 
     let output = VerifyLocalOutput {
         status: "verified".to_owned(),
