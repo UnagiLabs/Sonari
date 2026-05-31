@@ -135,7 +135,10 @@ public fun register_member(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
-    assert_valid_residence_cell_proof(residence_registry, home_cell, proof);
+    assert!(
+        allowed_residence_cell::is_valid_home_cell(residence_registry, home_cell, proof),
+        EInvalidResidenceCellProof,
+    );
     membership::register_member(
         registry,
         home_cell,
@@ -169,7 +172,10 @@ public fun update_member_home_cell(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
-    assert_valid_residence_cell_proof(residence_registry, home_cell, proof);
+    assert!(
+        allowed_residence_cell::is_valid_home_cell(residence_registry, home_cell, proof),
+        EInvalidResidenceCellProof,
+    );
     membership::update_home_cell(
         registry,
         pass,
@@ -276,17 +282,6 @@ public fun claim_disaster_usdc(
         main_pool,
         user_max_amount_usdc,
         ctx,
-    );
-}
-
-fun assert_valid_residence_cell_proof(
-    registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
-    home_cell: u64,
-    proof: vector<allowed_residence_cell::ProofStep>,
-) {
-    assert!(
-        allowed_residence_cell::is_valid_home_cell(registry, home_cell, proof),
-        EInvalidResidenceCellProof,
     );
 }
 
