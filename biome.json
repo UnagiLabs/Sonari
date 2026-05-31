@@ -16,6 +16,7 @@
             "tsconfig.json",
             "tsconfig.scripts.json",
             "tsconfig.base.json",
+            "vitest.config.ts",
             "biome.json",
             "scripts/**/*.ts",
             "nautilus/verifiers/common/contracts/package.json",
