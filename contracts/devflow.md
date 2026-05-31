@@ -105,6 +105,32 @@ GPS history、detailed address は on-chain に出さない。
 - KYC verified SBT は満額 Claim できる。
 - World ID verified SBT は満額 Claim できる。
 
+### PR D2. Residence cell allowlist proof
+
+目的:
+
+- 海のみのセルを居住セルとして登録できないようにする。
+- Move 側で許可居住セル root と proof を検証する。
+- 居住セル変更後の駆け込み Claim を cutoff で防ぐ。
+
+実装:
+
+- 許可居住セル root を持つ shared object を追加する。
+- admin だけが root を作成・更新できるようにする。
+- root 更新 event を emit する。
+- Membership 登録時に居住セル proof を必須にする。
+- current pass owner だけが居住セルを変更できるようにする。
+- 居住セル変更時も proof を検証する。
+- 変更時刻は `Clock` から取得する。
+
+完了条件:
+
+- 正しい proof だけが Membership 登録を通る。
+- root 更新後、旧 proof は無効になる。
+- 正しい proof だけが居住セル変更を通る。
+- 他人の MemberPass と current pass でない pass は変更できない。
+- 災害後に変更した居住セルは、過去災害の Claim に使えない。
+
 ### PR E. PayoutPolicy simplification
 
 目的:

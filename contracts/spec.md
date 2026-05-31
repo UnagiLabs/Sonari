@@ -71,9 +71,14 @@ contract-facing な要件として、H3 resolution 7 のセルだけを扱う。
 
 MVP の contract は、GPS、IP geolocation、VPN detection、住所証明、
 厳密な居住証明を Claim 条件として扱わない。
-海のみのセルなど、居住地として自然でないセルの制限は
-UI と verifier 側の入力検証で扱う。
-この文書変更だけでは、新しい Move 実装、source 追加、schema 変更を要求しない。
+ただし、登録できる `home_cell` は Move 側で許可居住セルの
+Merkle proof を検証する。
+許可居住セル root は admin が作成し、更新できる。
+root 更新後は、古い root 用の proof は使えない。
+
+居住セルはユーザーが後から変更できる。
+変更時も現在の許可居住セル root に対する proof を検証する。
+変更時刻は `Clock` から取得し、`home_cell_registered_at_ms` に保存する。
 
 ## 4. Identity verification
 
@@ -130,6 +135,7 @@ Disaster Claim は、次の条件をすべて検証する。
 finalized time や Sonari candidate detected time は cutoff に使わない。
 発生後の駆け込み登録を防ぐためである。
 災害後の居住セル変更は、その災害の Claim eligibility に使えない。
+変更自体は許可するが、変更時刻が cutoff 以後なら Claim で reject する。
 将来、より厳しくする場合は grace period を置き、
 `last_changed_at_ms < disaster_cutoff_time - grace_period_ms` のように判定できる。
 MVP では grace period の具体値をまだ決めない。
@@ -215,6 +221,8 @@ target API:
 | API | 処理概要 |
 | --- | --- |
 | donation functions | USDC donation を Pool へ入れる |
+| member registration | 許可居住セル proof を検証して Membership SBT を作る |
+| home cell update | current pass owner だけが proof 付きで居住セルを変更する |
 | identity update | Nautilus 署名済み本人確認 result を反映する |
 | disaster submit | Nautilus 署名済み災害 payload を保存する |
 | disaster claim | Membership SBT と affected cell を検証して支払う |
