@@ -621,10 +621,10 @@ fun initialized_with_pools(): test_scenario::Scenario {
     admin::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ADMIN);
-    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
     admin::create_designated_pool(&cap, option::none(), scenario.ctx());
     admin::create_allowed_residence_cell_registry(
-        &cap,
+        &mut cap,
         residence_root(),
         GEO_RESOLUTION,
         ALLOWLIST_VERSION,

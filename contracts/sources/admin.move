@@ -31,11 +31,13 @@ const GENESIS_KIND_IDENTITY_REGISTRY: u8 = 9;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
+const EAllowedResidenceCellRegistryAlreadyCreated: u64 = 2;
 
 public struct ADMIN has drop {}
 
 public struct AdminCap has key {
     id: UID,
+    allowed_residence_cell_registry_id: Option<ID>,
 }
 
 public struct PauseState has key {
@@ -71,7 +73,10 @@ fun init(otw: ADMIN, ctx: &mut TxContext) {
 }
 
 fun initialize(ctx: &mut TxContext) {
-    let admin_cap = AdminCap { id: object::new(ctx) };
+    let admin_cap = AdminCap {
+        id: object::new(ctx),
+        allowed_residence_cell_registry_id: option::none(),
+    };
     emit_genesis_object(object::id(&admin_cap), GENESIS_KIND_ADMIN_CAP, false, ctx);
     transfer::transfer(admin_cap, ctx.sender());
 
@@ -315,20 +320,26 @@ public fun disable_verifier_key(
 }
 
 public fun create_allowed_residence_cell_registry(
-    _: &AdminCap,
+    cap: &mut AdminCap,
     root: vector<u8>,
     geo_resolution: u8,
     allowlist_version: u64,
     source_hash: vector<u8>,
     ctx: &mut TxContext,
 ): ID {
-    allowed_residence_cell::create_registry(
+    assert!(
+        !option::is_some(&cap.allowed_residence_cell_registry_id),
+        EAllowedResidenceCellRegistryAlreadyCreated,
+    );
+    let registry_id = allowed_residence_cell::create_registry(
         root,
         geo_resolution,
         allowlist_version,
         source_hash,
         ctx,
-    )
+    );
+    cap.allowed_residence_cell_registry_id = option::some(registry_id);
+    registry_id
 }
 
 public fun update_allowed_residence_cell_root(

@@ -208,9 +208,9 @@ fun admin_can_create_allowed_residence_cell_registry() {
     let mut scenario = initialized();
 
     {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut cap = scenario.take_from_sender<admin::AdminCap>();
         let registry_id = admin::create_allowed_residence_cell_registry(
-            &cap,
+            &mut cap,
             root_a(),
             7,
             1,
@@ -266,7 +266,7 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
             &cap,
             &mut registry,
             root_b(),
-            8,
+            7,
             2,
             source_hash_b(),
             scenario.ctx(),
@@ -275,7 +275,7 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
 
         assert!(allowed_residence_cell::registry_id(&registry) == registry_id);
         assert!(allowed_residence_cell::root(&registry) == root_b());
-        assert!(allowed_residence_cell::geo_resolution(&registry) == 8u8);
+        assert!(allowed_residence_cell::geo_resolution(&registry) == 7u8);
         assert!(allowed_residence_cell::allowlist_version(&registry) == 2u64);
         assert!(allowed_residence_cell::source_hash(&registry) == source_hash_b());
         assert!(allowed_residence_cell::updated_at_ms(&registry) == ALLOWLIST_UPDATE_MS);
@@ -294,7 +294,7 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
         ) = allowed_residence_cell::root_updated_event_fields(*events.borrow(0));
         assert!(event_registry_id == registry_id);
         assert!(event_root == root_b());
-        assert!(event_geo_resolution == 8u8);
+        assert!(event_geo_resolution == 7u8);
         assert!(event_allowlist_version == 2u64);
         assert!(event_source_hash == source_hash_b());
         assert!(event_updated_at_ms == ALLOWLIST_UPDATE_MS);
@@ -308,9 +308,9 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
 fun create_allowed_residence_cell_registry_rejects_invalid_root_length() {
     let mut scenario = initialized();
 
-    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
     admin::create_allowed_residence_cell_registry(
-        &cap,
+        &mut cap,
         vector[0],
         7,
         1,
@@ -326,13 +326,49 @@ fun create_allowed_residence_cell_registry_rejects_invalid_root_length() {
 fun create_allowed_residence_cell_registry_rejects_invalid_source_hash_length() {
     let mut scenario = initialized();
 
-    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
     admin::create_allowed_residence_cell_registry(
-        &cap,
+        &mut cap,
         root_a(),
         7,
         1,
         vector[0],
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EUnsupportedGeoResolution)]
+fun create_allowed_residence_cell_registry_rejects_non_res7_root() {
+    let mut scenario = initialized();
+
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        root_a(),
+        8,
+        1,
+        source_hash_a(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = admin::EAllowedResidenceCellRegistryAlreadyCreated)]
+fun create_allowed_residence_cell_registry_rejects_second_registry() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        root_b(),
+        7,
+        2,
+        source_hash_b(),
         scenario.ctx(),
     );
     scenario.return_to_sender(cap);
@@ -350,7 +386,7 @@ fun update_allowed_residence_cell_registry_rejects_invalid_root_length() {
         &cap,
         &mut registry,
         vector[0],
-        8,
+        7,
         2,
         source_hash_b(),
         scenario.ctx(),
@@ -371,9 +407,30 @@ fun update_allowed_residence_cell_registry_rejects_invalid_source_hash_length() 
         &cap,
         &mut registry,
         root_b(),
-        8,
+        7,
         2,
         vector[0],
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+    test_scenario::return_shared(registry);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EUnsupportedGeoResolution)]
+fun update_allowed_residence_cell_registry_rejects_non_res7_root() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+    admin::update_allowed_residence_cell_root(
+        &cap,
+        &mut registry,
+        root_b(),
+        8,
+        2,
+        source_hash_b(),
         scenario.ctx(),
     );
     scenario.return_to_sender(cap);
@@ -1033,9 +1090,9 @@ fun initialized(): test_scenario::Scenario {
 
 fun initialized_with_allowed_residence_cell_registry(): test_scenario::Scenario {
     let mut scenario = initialized();
-    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
     admin::create_allowed_residence_cell_registry(
-        &cap,
+        &mut cap,
         root_a(),
         7,
         1,

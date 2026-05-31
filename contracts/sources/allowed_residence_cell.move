@@ -5,6 +5,8 @@ use sui::event;
 use sui::bcs;
 
 const EInvalidHashLength: u64 = 0;
+const EUnsupportedGeoResolution: u64 = 1;
+const GEO_RESOLUTION_RES7: u8 = 7;
 
 public struct AllowedResidenceCellRegistry has key {
     id: UID,
@@ -45,6 +47,7 @@ public(package) fun create_registry(
 ): ID {
     assert_32_bytes(&root);
     assert_32_bytes(&source_hash);
+    assert_supported_geo_resolution(geo_resolution);
 
     let registry = AllowedResidenceCellRegistry {
         id: object::new(ctx),
@@ -70,6 +73,7 @@ public(package) fun update_root(
 ) {
     assert_32_bytes(&root);
     assert_32_bytes(&source_hash);
+    assert_supported_geo_resolution(geo_resolution);
 
     registry.root = root;
     registry.geo_resolution = geo_resolution;
@@ -178,6 +182,10 @@ fun internal_hash(
 
 fun assert_32_bytes(bytes: &vector<u8>) {
     assert!(bytes.length() == 32, EInvalidHashLength);
+}
+
+fun assert_supported_geo_resolution(geo_resolution: u8) {
+    assert!(geo_resolution == GEO_RESOLUTION_RES7, EUnsupportedGeoResolution);
 }
 
 #[test_only]
