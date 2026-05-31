@@ -135,25 +135,35 @@ public fun register_member(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
-    let leaf = allowed_residence_cell::new_leaf(
-        home_cell,
-        allowed_residence_cell::geo_resolution(residence_registry),
-        allowed_residence_cell::allowlist_version(residence_registry),
-    );
-    assert!(
-        allowed_residence_cell::verify_proof(
-            &leaf,
-            proof,
-            allowed_residence_cell::root(residence_registry),
-        ),
-        EInvalidResidenceCellProof,
-    );
+    assert_valid_residence_cell_proof(residence_registry, home_cell, proof);
     membership::register_member(
         registry,
         home_cell,
         terms_version,
         signed_statement_hash,
         ctx,
+    );
+}
+
+public fun update_member_home_cell(
+    pause_state: &PauseState,
+    registry: &membership::MembershipRegistry,
+    residence_registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
+    pass: &mut membership::MembershipPass,
+    clock: &Clock,
+    home_cell: u64,
+    proof: vector<allowed_residence_cell::ProofStep>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
+    assert_valid_residence_cell_proof(residence_registry, home_cell, proof);
+    membership::update_home_cell(
+        registry,
+        pass,
+        ctx.sender(),
+        home_cell,
+        clock::timestamp_ms(clock),
     );
 }
 
@@ -254,6 +264,26 @@ public fun claim_disaster_usdc(
         main_pool,
         user_max_amount_usdc,
         ctx,
+    );
+}
+
+fun assert_valid_residence_cell_proof(
+    registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
+    home_cell: u64,
+    proof: vector<allowed_residence_cell::ProofStep>,
+) {
+    let leaf = allowed_residence_cell::new_leaf(
+        home_cell,
+        allowed_residence_cell::geo_resolution(registry),
+        allowed_residence_cell::allowlist_version(registry),
+    );
+    assert!(
+        allowed_residence_cell::verify_proof(
+            &leaf,
+            proof,
+            allowed_residence_cell::root(registry),
+        ),
+        EInvalidResidenceCellProof,
     );
 }
 

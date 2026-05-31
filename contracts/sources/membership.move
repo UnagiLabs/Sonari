@@ -134,6 +134,18 @@ public(package) fun register_member(
     transfer::transfer(pass, ctx.sender());
 }
 
+public(package) fun update_home_cell(
+    registry: &MembershipRegistry,
+    pass: &mut MembershipPass,
+    claimant: address,
+    home_cell: u64,
+    registered_at_ms: u64,
+) {
+    assert_current_pass_precheck(registry, pass, claimant);
+    pass.home_cell = home_cell;
+    pass.home_cell_registered_at_ms = registered_at_ms;
+}
+
 public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
     let registry = MembershipRegistry {
         id: object::new(ctx),

@@ -6,6 +6,7 @@ use contracts::admin;
 use contracts::allowed_residence_cell;
 use contracts::membership;
 use contracts::pools;
+use sui::clock;
 use sui::event;
 use sui::test_scenario;
 
@@ -18,6 +19,7 @@ const GEO_RESOLUTION: u8 = 7;
 const ALLOWLIST_VERSION: u64 = 1;
 const TERMS_VERSION: u64 = 2;
 const SIGNED_STATEMENT_HASH: vector<u8> = b"membership-statement-hash";
+const HOME_CELL_UPDATED_AT_MS: u64 = 12_345;
 
 #[test]
 fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
@@ -172,6 +174,178 @@ fun new_residence_proof_is_valid_after_root_update() {
     update_residence_root_to_promoted_single_leaf(&mut scenario);
     register_member_with_proof(&mut scenario, OTHER, PROMOTED_HOME_CELL, vector[]);
     scenario.end();
+}
+
+#[test]
+fun valid_residence_proof_updates_member_home_cell_at_clock_time() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+
+    update_member_home_cell_with_proof(
+        &mut scenario,
+        &clock,
+        MEMBER,
+        PROMOTED_HOME_CELL,
+        promoted_proof(),
+    );
+
+    scenario.next_tx(MEMBER);
+    {
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        let (
+            _account_created_at_ms,
+            home_cell,
+            home_cell_registered_at_ms,
+            _identity_verified,
+            _identity_provider_mask,
+            _identity_verified_at_ms,
+            _identity_expires_at_ms,
+            _terms_version,
+            _signed_statement_hash,
+        ) = membership::membership_pass_mvp_summary(&pass);
+        assert!(home_cell == PROMOTED_HOME_CELL);
+        assert!(home_cell_registered_at_ms == HOME_CELL_UPDATED_AT_MS);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = accessor::EInvalidResidenceCellProof)]
+fun invalid_residence_proof_rejects_member_home_cell_update() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+
+    update_member_home_cell_with_proof(
+        &mut scenario,
+        &clock,
+        MEMBER,
+        PROMOTED_HOME_CELL,
+        vector[],
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = membership::EClaimantNotAuthorized)]
+fun unrelated_sender_cannot_update_member_home_cell() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+
+    update_member_home_cell_with_proof(
+        &mut scenario,
+        &clock,
+        OTHER,
+        PROMOTED_HOME_CELL,
+        promoted_proof(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = membership::ERegistryPassMismatch)]
+fun current_pass_mismatch_rejects_member_home_cell_update() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+    let wrong_pass_id = operations_pool_id(&mut scenario);
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        membership::set_current_pass_id_for_testing(
+            &mut registry,
+            membership::membership_pass_lineage_id(&pass),
+            wrong_pass_id,
+        );
+        test_scenario::return_shared(registry);
+        scenario.return_to_sender(pass);
+    };
+
+    update_member_home_cell_with_proof(
+        &mut scenario,
+        &clock,
+        MEMBER,
+        PROMOTED_HOME_CELL,
+        promoted_proof(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = admin::EGlobalPaused)]
+fun global_pause_blocks_member_home_cell_update() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut pause_state = scenario.take_shared<admin::PauseState>();
+        admin::pause_global(&cap, &mut pause_state, scenario.ctx());
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(pause_state);
+    };
+
+    update_member_home_cell_with_proof(
+        &mut scenario,
+        &clock,
+        MEMBER,
+        PROMOTED_HOME_CELL,
+        promoted_proof(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = admin::ETargetPaused)]
+fun membership_registry_target_pause_blocks_member_home_cell_update() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+    let registry_id = membership_registry_id(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut pause_state = scenario.take_shared<admin::PauseState>();
+        admin::pause_target(
+            &cap,
+            &mut pause_state,
+            membership::target_kind_membership_registry(),
+            registry_id,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(pause_state);
+    };
+
+    update_member_home_cell_with_proof(
+        &mut scenario,
+        &clock,
+        MEMBER,
+        PROMOTED_HOME_CELL,
+        promoted_proof(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
 }
 
 #[test, expected_failure(abort_code = admin::EGlobalPaused)]
@@ -497,6 +671,42 @@ fun register_member_with_proof(
     };
 }
 
+fun update_member_home_cell_with_proof(
+    scenario: &mut test_scenario::Scenario,
+    clock: &clock::Clock,
+    sender: address,
+    home_cell: u64,
+    proof: vector<allowed_residence_cell::ProofStep>,
+) {
+    scenario.next_tx(sender);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+        let mut pass = test_scenario::take_from_address<membership::MembershipPass>(
+            scenario,
+            MEMBER,
+        );
+
+        accessor::update_member_home_cell(
+            &pause_state,
+            &registry,
+            &residence_registry,
+            &mut pass,
+            clock,
+            home_cell,
+            proof,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_to_address(MEMBER, pass);
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(residence_registry);
+    };
+}
+
 fun update_residence_root_to_promoted_single_leaf(scenario: &mut test_scenario::Scenario) {
     scenario.next_tx(ADMIN);
     {
@@ -555,6 +765,14 @@ fun target_proof(): vector<allowed_residence_cell::ProofStep> {
         ),
         allowed_residence_cell::new_proof_step_right(
             x"8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7",
+        ),
+    ]
+}
+
+fun promoted_proof(): vector<allowed_residence_cell::ProofStep> {
+    vector[
+        allowed_residence_cell::new_proof_step_left(
+            x"312e3863ccf00e446423342e1acebdab8e7119ee19dae854904de693225c2678",
         ),
     ]
 }
