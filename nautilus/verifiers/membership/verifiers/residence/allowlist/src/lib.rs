@@ -1,11 +1,79 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ResidenceCellLeaf {
     pub h3_index: u64,
     pub geo_resolution: u8,
     pub allowlist_version: u64,
+}
+
+#[derive(Debug)]
+pub enum ResidenceAllowlistError {
+    DuplicateH3Index(u64),
+    LeafEncoding(bcs::Error),
+}
+
+impl fmt::Display for ResidenceAllowlistError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateH3Index(h3_index) => {
+                write!(
+                    formatter,
+                    "duplicate h3_index in residence allowlist: {h3_index}"
+                )
+            }
+            Self::LeafEncoding(error) => {
+                write!(formatter, "failed to encode residence leaf: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ResidenceAllowlistError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::DuplicateH3Index(_) => None,
+            Self::LeafEncoding(error) => Some(error),
+        }
+    }
+}
+
+impl From<bcs::Error> for ResidenceAllowlistError {
+    fn from(error: bcs::Error) -> Self {
+        Self::LeafEncoding(error)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ProofDirection {
+    #[serde(rename = "LEFT")]
+    Left,
+    #[serde(rename = "RIGHT")]
+    Right,
+}
+
+impl ProofDirection {
+    pub fn sibling_on_left(self) -> bool {
+        matches!(self, Self::Left)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ResidenceProofStep {
+    pub direction: ProofDirection,
+    pub sibling_on_left: bool,
+    pub sibling_hash: [u8; 32],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResidenceMerkleProof {
+    pub target_h3_index: u64,
+    pub target_leaf_hash: [u8; 32],
+    pub promoted_without_sibling_at_levels: Vec<usize>,
+    pub steps: Vec<ResidenceProofStep>,
+    pub expected_root: [u8; 32],
 }
 
 pub fn leaf_bcs_bytes(leaf: &ResidenceCellLeaf) -> Result<Vec<u8>, bcs::Error> {
@@ -47,4 +115,122 @@ pub fn merkle_root_from_leaf_hashes(leaf_hashes: &[[u8; 32]]) -> Option<[u8; 32]
     }
 
     level.first().copied()
+}
+
+pub fn merkle_root_from_leaves(
+    leaves: &[ResidenceCellLeaf],
+) -> Result<Option<[u8; 32]>, ResidenceAllowlistError> {
+    let leaf_hashes = sorted_leaf_hashes(leaves)?
+        .into_iter()
+        .map(|(_, hash)| hash)
+        .collect::<Vec<_>>();
+
+    Ok(merkle_root_from_leaf_hashes(&leaf_hashes))
+}
+
+pub fn generate_proof_for_h3_index(
+    leaves: &[ResidenceCellLeaf],
+    target_h3_index: u64,
+) -> Result<Option<ResidenceMerkleProof>, ResidenceAllowlistError> {
+    let sorted = sorted_leaf_hashes(leaves)?;
+    let Some(target_index) = sorted
+        .iter()
+        .position(|(leaf, _)| leaf.h3_index == target_h3_index)
+    else {
+        return Ok(None);
+    };
+
+    let leaf_hashes = sorted.iter().map(|(_, hash)| *hash).collect::<Vec<_>>();
+    let Some(expected_root) = merkle_root_from_leaf_hashes(&leaf_hashes) else {
+        return Ok(None);
+    };
+    let Some((_, target_leaf_hash)) = sorted.get(target_index).copied() else {
+        return Ok(None);
+    };
+
+    let mut current_index = target_index;
+    let mut level = leaf_hashes;
+    let mut level_index = 0;
+    let mut promoted_without_sibling_at_levels = Vec::new();
+    let mut steps = Vec::new();
+
+    while level.len() > 1 {
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        let mut next_target_index = None;
+
+        for left_index in (0..level.len()).step_by(2) {
+            let Some(left_hash) = level.get(left_index).copied() else {
+                return Ok(None);
+            };
+            let right_index = left_index + 1;
+            let Some(right_hash) = level.get(right_index).copied() else {
+                if current_index == left_index {
+                    promoted_without_sibling_at_levels.push(level_index);
+                    next_target_index = Some(next.len());
+                }
+                next.push(left_hash);
+                continue;
+            };
+
+            if current_index == left_index {
+                steps.push(proof_step(ProofDirection::Right, right_hash));
+                next_target_index = Some(next.len());
+            } else if current_index == right_index {
+                steps.push(proof_step(ProofDirection::Left, left_hash));
+                next_target_index = Some(next.len());
+            }
+
+            next.push(internal_node_hash(left_hash, right_hash));
+        }
+
+        let Some(index) = next_target_index else {
+            return Ok(None);
+        };
+        current_index = index;
+        level = next;
+        level_index += 1;
+    }
+
+    Ok(Some(ResidenceMerkleProof {
+        target_h3_index,
+        target_leaf_hash,
+        promoted_without_sibling_at_levels,
+        steps,
+        expected_root,
+    }))
+}
+
+fn proof_step(direction: ProofDirection, sibling_hash: [u8; 32]) -> ResidenceProofStep {
+    ResidenceProofStep {
+        direction,
+        sibling_on_left: direction.sibling_on_left(),
+        sibling_hash,
+    }
+}
+
+fn sorted_leaf_hashes(
+    leaves: &[ResidenceCellLeaf],
+) -> Result<Vec<(ResidenceCellLeaf, [u8; 32])>, ResidenceAllowlistError> {
+    let mut sorted = leaves.to_vec();
+    sorted.sort_by_key(|leaf| leaf.h3_index);
+
+    for pair in sorted.windows(2) {
+        let Some(left) = pair.first() else {
+            continue;
+        };
+        let Some(right) = pair.get(1) else {
+            continue;
+        };
+        if left.h3_index == right.h3_index {
+            return Err(ResidenceAllowlistError::DuplicateH3Index(left.h3_index));
+        }
+    }
+
+    sorted
+        .into_iter()
+        .map(|leaf| {
+            let hash = leaf_hash(&leaf)?;
+            Ok((leaf, hash))
+        })
+        .collect()
 }
