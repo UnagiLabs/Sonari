@@ -1,19 +1,14 @@
 # Residence Cells データ
 
-このディレクトリは、residence-cell allowlist のためのローカルデータツールを管理します。
+このディレクトリは、residence-cell allowlist のためのローカル生成ツールを管理します。
 Nautilus verifier ランタイムの一部ではありません。
+
+ここに置く Rust CLI は、`data/residence_cells` 専用の独立ツールです。
+root の Rust workspace には参加せず、`nautilus` 配下の crate にも依存しません。
 
 このツールは、pin 留めされた Natural Earth land GeoJSON から H3 解像度 7 の
 land allowlist を生成します。生成された allowlist 本体はローカル/S3 のアーティファクトです。
 コントラクトが参照する値は、その結果として得られる Merkle root と関連メタデータです。
-
-## セットアップ
-
-リポジトリのルートから `uv` を使います:
-
-```bash
-uv sync --project data/residence_cells
-```
 
 ## ソース
 
@@ -40,34 +35,72 @@ curl -L \
 
 ## 生成と検証
 
+生成は `h3o::ContainmentMode::Covers` の tiler を polygon 単位で並列実行し、
+最後に `h3_index` を数値昇順で sort / dedup します。
+比較用に `--strategy hierarchical` も残していますが、full Natural Earth 生成では
+`--strategy tiler` が実用 default です。
+
+基本の流れは以下です。
+
+1. `generate` で、Natural Earth land GeoJSON から allowlist JSON を作る。
+2. `root` で、作成済み allowlist の Merkle root を確認する。
+3. `proof` で、特定の H3 index が allowlist に含まれることを示す proof を作る。
+4. `verify-local` で、manifest・allowlist・元ソースの整合性をローカル検証する。
+
+### 1. allowlist を生成する
+
+`generate` は、pin 留めされた land GeoJSON を読み込み、H3 解像度 7 の
+land cell を列挙して allowlist JSON に書き出します。通常はこのコマンドから始めます。
+大きな入力を処理するため、必要に応じて `--jobs` で並列数を指定できます。
+
 ```bash
-uv run --project data/residence_cells residence-allowlist generate \
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- generate \
   --source .build/residence-cells/ne_10m_land.geojson \
   --output .build/residence-cells/allowed_residence_cells.v1.res7.json \
-  --allowlist-version 1
+  --allowlist-version 1 \
+  --strategy tiler
 ```
 
-```bash
-uv run --project data/residence_cells residence-allowlist root \
-  --allowlist .build/residence-cells/allowed_residence_cells.v1.res7.json \
-  --source .build/residence-cells/ne_10m_land.geojson
-```
+### 2. Merkle root を確認する
+
+`root` は、生成済み allowlist から Merkle root を計算します。
+コントラクトや manifest が参照する代表値を確認したいときに使います。
 
 ```bash
-uv run --project data/residence_cells residence-allowlist proof \
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- root \
   --allowlist .build/residence-cells/allowed_residence_cells.v1.res7.json \
   --source .build/residence-cells/ne_10m_land.geojson \
-  --h3-index 608819013513904127
+  --strategy tiler
 ```
+
+### 3. 特定セルの proof を作る
+
+`proof` は、指定した `--h3-index` が allowlist に含まれることを示す Merkle proof を
+出力します。検証対象のセルを 1 件だけ確認したいときに使います。
 
 ```bash
-uv run --project data/residence_cells residence-allowlist verify-local \
-  --manifest data/residence_cells/allowed_residence_cells_manifest.v1.res7.json \
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- proof \
   --allowlist .build/residence-cells/allowed_residence_cells.v1.res7.json \
-  --source .build/residence-cells/ne_10m_land.geojson
+  --source .build/residence-cells/ne_10m_land.geojson \
+  --h3-index 608819013513904127 \
+  --strategy tiler
 ```
 
-`root`、`proof`、`verify-local` は、アーティファクトのメタデータだけを信頼することはしません。
+### 4. ローカルで全体の整合性を検証する
+
+`verify-local` は、manifest、allowlist、元の Natural Earth GeoJSON を突き合わせます。
+公開・アップロード前に、手元のアーティファクトが pin 留めされたソースから再現できることを
+確認するための最終チェックです。
+
+```bash
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- verify-local \
+  --manifest data/residence_cells/allowed_residence_cells_manifest.v1.res7.json \
+  --allowlist .build/residence-cells/allowed_residence_cells.v1.res7.json \
+  --source .build/residence-cells/ne_10m_land.geojson \
+  --strategy tiler
+```
+
+`root`、`proof`、`verify-local` は、アーティファクトのメタデータだけを信頼しません。
 root・proof・検証結果を出力する前に、pin 留めされたソースを読み直し、H3 インデックスを
 再生成します。
 
