@@ -12,7 +12,7 @@ import {
     UsgsSourceClient,
 } from "./nautilus_local_e2e.js";
 
-const target = "0x123::earthquake_oracle::submit_payload";
+const target = "0x123::accessor::create_disaster_event_from_signed_payload";
 const registry = "0x456";
 const verifierRegistry = "0x654";
 // CI runs this test with a cold Cargo binary build before the Rust TEE tests.

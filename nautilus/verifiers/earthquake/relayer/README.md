@@ -117,7 +117,7 @@ const input = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
 
 // プレビューを確認
 const result = buildRelayerRequestPreview(input, {
-  target: "0xpackage::oracle_verifier::attest",
+  target: "0xpackage::accessor::create_disaster_event_from_signed_payload",
   registry: "0xregistry_object_id",
   verifierRegistry: "0xverifier_registry_id",
 });

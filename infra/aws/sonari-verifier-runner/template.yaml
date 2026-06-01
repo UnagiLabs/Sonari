@@ -146,7 +146,7 @@ Parameters:
   RelayerTarget:
     Type: String
     Default: ""
-    Description: Move target for the earthquake relayer call.
+    Description: Move target for the earthquake relayer call. Use <PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload.
   RelayerRegistry:
     Type: String
     Default: ""

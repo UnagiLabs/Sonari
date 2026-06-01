@@ -33,6 +33,8 @@ describe("AWS Sonari verifier runner README", () => {
             "scripts/aws_sonari_verifier_runner_deploy_plan.ts",
             "--relayer-network mainnet --world-id-proof-mode dummy",
             "parameterOverrideArgs",
+            "RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload",
+            "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET",
             "aws cloudformation deploy",
             "--template-file infra/aws/sonari-verifier-runner/template.yaml",
             "ScheduleState=DISABLED",

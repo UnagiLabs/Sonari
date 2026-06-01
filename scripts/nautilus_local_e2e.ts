@@ -33,7 +33,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_CASE_ID = "usgs/finalized_minimal";
 const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/earthquake/fixtures";
 const LEGACY_FIXTURES_URI_DIR = "nautilus/verifiers/earthquake/fixtures";
-const DEFAULT_TARGET = "0x123::earthquake_oracle::submit_payload";
+const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_from_signed_payload";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
