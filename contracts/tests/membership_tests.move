@@ -553,14 +553,16 @@ fun current_pass_precheck_rejects_inactive_registry_record_status() {
 }
 
 #[test]
-fun claim_precheck_allows_active_pass_owner() {
+fun current_pass_precheck_allows_active_pass_owner() {
     let mut scenario = initialized_with_pools();
     register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
+        let registry = scenario.take_shared<membership::MembershipRegistry>();
         let pass = scenario.take_from_sender<membership::MembershipPass>();
-        membership::assert_claim_precheck(&pass, MEMBER);
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+        test_scenario::return_shared(registry);
         scenario.return_to_sender(pass);
     };
 
@@ -568,29 +570,31 @@ fun claim_precheck_allows_active_pass_owner() {
 }
 
 #[test, expected_failure(abort_code = membership::EMembershipPassNotActive)]
-fun suspended_pass_fails_claim_precheck() {
+fun suspended_pass_fails_current_pass_precheck() {
     run_inactive_status_precheck(membership::status_suspended());
 }
 
 #[test, expected_failure(abort_code = membership::EMembershipPassNotActive)]
-fun revoked_pass_fails_claim_precheck() {
+fun revoked_pass_fails_current_pass_precheck() {
     run_inactive_status_precheck(membership::status_revoked());
 }
 
 #[test, expected_failure(abort_code = membership::EMembershipPassNotActive)]
-fun migrated_pass_fails_claim_precheck() {
+fun migrated_pass_fails_current_pass_precheck() {
     run_inactive_status_precheck(membership::status_migrated());
 }
 
 #[test, expected_failure(abort_code = membership::EClaimantNotAuthorized)]
-fun unrelated_claimant_fails_claim_precheck() {
+fun unrelated_claimant_fails_current_pass_precheck() {
     let mut scenario = initialized_with_pools();
     register_member(&mut scenario);
 
     scenario.next_tx(MEMBER);
     {
+        let registry = scenario.take_shared<membership::MembershipRegistry>();
         let pass = scenario.take_from_sender<membership::MembershipPass>();
-        membership::assert_claim_precheck(&pass, OTHER);
+        membership::assert_current_pass_precheck(&registry, &pass, OTHER);
+        test_scenario::return_shared(registry);
         scenario.return_to_sender(pass);
     };
 
@@ -749,9 +753,11 @@ fun run_inactive_status_precheck(status: u8) {
 
     scenario.next_tx(MEMBER);
     {
+        let registry = scenario.take_shared<membership::MembershipRegistry>();
         let mut pass = scenario.take_from_sender<membership::MembershipPass>();
         membership::set_status_for_testing(&mut pass, status);
-        membership::assert_claim_precheck(&pass, MEMBER);
+        membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
+        test_scenario::return_shared(registry);
         scenario.return_to_sender(pass);
     };
 

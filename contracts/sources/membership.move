@@ -171,18 +171,14 @@ public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
     registry_id
 }
 
-// Caller must pass a trusted claimant, typically ctx.sender(), not an unchecked user-supplied address.
-public fun assert_claim_precheck(pass: &MembershipPass, claimant: address) {
-    assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
-    assert!(claimant == pass.owner, EClaimantNotAuthorized);
-}
-
 public fun assert_current_pass_precheck(
     registry: &MembershipRegistry,
     pass: &MembershipPass,
     claimant: address,
 ) {
-    assert_claim_precheck(pass, claimant);
+    // Caller must pass a trusted claimant, typically ctx.sender(), not an unchecked user-supplied address.
+    assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
+    assert!(claimant == pass.owner, EClaimantNotAuthorized);
     let record = current_record(registry, pass.pass_lineage_id);
     assert!(record.status == STATUS_ACTIVE, ERegistryRecordNotActive);
     assert!(record.current_pass_id == object::id(pass), ERegistryPassMismatch);
