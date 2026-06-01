@@ -20,7 +20,7 @@ describe("AWS earthquake EIF build script", () => {
         expect(plan.teeCommand).toEqual([
             "/bin/sh",
             "-c",
-            "set -e; /opt/sonari/tee-artifact/bin/vsock-tcp-bridge --listen-host 127.0.0.1 --listen-port 18080 --parent-cid 3 --vsock-port 18080 & exec /opt/sonari/tee-artifact/bin/tee server",
+            "set -e; ip link set lo up || true; /opt/sonari/tee-artifact/bin/vsock-tcp-bridge --listen-host 127.0.0.1 --listen-port 18080 --parent-cid 3 --vsock-port 18080 & exec /opt/sonari/tee-artifact/bin/tee server",
         ]);
         expect(plan.buildEnclaveCommand).toEqual([
             "nitro-cli",
@@ -63,5 +63,6 @@ describe("AWS earthquake EIF build script", () => {
         );
 
         expect(script).toContain("ca-certificates");
+        expect(script).toContain("iproute");
     });
 });

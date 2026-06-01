@@ -16,7 +16,7 @@ const EARTHQUAKE_EGRESS_PROXY_PORT = "18080";
 const EARTHQUAKE_TEE_COMMAND = [
     "/bin/sh",
     "-c",
-    `set -e; ${EARTHQUAKE_VSOCK_TCP_BRIDGE_BIN} --listen-host 127.0.0.1 --listen-port ${EARTHQUAKE_EGRESS_PROXY_PORT} --parent-cid 3 --vsock-port ${EARTHQUAKE_EGRESS_PROXY_PORT} & exec ${EARTHQUAKE_TEE_BIN} server`,
+    `set -e; ip link set lo up || true; ${EARTHQUAKE_VSOCK_TCP_BRIDGE_BIN} --listen-host 127.0.0.1 --listen-port ${EARTHQUAKE_EGRESS_PROXY_PORT} --parent-cid 3 --vsock-port ${EARTHQUAKE_EGRESS_PROXY_PORT} & exec ${EARTHQUAKE_TEE_BIN} server`,
 ] as const;
 
 export interface BuildAwsEarthquakeEifOptions {
@@ -109,7 +109,7 @@ export async function buildAwsEarthquakeEif(
 function dockerfileFor(teeCommand: readonly string[]): string {
     return [
         "FROM public.ecr.aws/amazonlinux/amazonlinux:2023",
-        "RUN dnf install -y ca-certificates && dnf clean all",
+        "RUN dnf install -y ca-certificates iproute && dnf clean all",
         "COPY tee-artifact/ /opt/sonari/tee-artifact/",
         `ENTRYPOINT ${JSON.stringify(teeCommand)}`,
         "",
