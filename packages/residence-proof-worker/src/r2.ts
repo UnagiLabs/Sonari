@@ -30,7 +30,10 @@ export async function loadProofManifest(
         return cached;
     }
 
-    const promise = readManifest(bucket, config);
+    const promise = readManifest(bucket, config).catch((error: unknown) => {
+        bucketCache.delete(cacheKey);
+        throw error;
+    });
     bucketCache.set(cacheKey, promise);
     return promise;
 }

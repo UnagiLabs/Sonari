@@ -147,6 +147,26 @@ describe("residence proof Worker API", () => {
             "proof_manifest_invalid",
         );
     });
+
+    it("evicts failed manifest reads from cache so later requests can retry", async () => {
+        const env = await buildEnvWithFixtureR2({ includeManifest: false });
+        const request = new Request(
+            "https://worker.example/api/residence-proof?h3_index=608819013681676287",
+        );
+
+        await expectErrorCode(await worker.fetch(request, env), 500, "proof_manifest_missing");
+        const restored = await buildFixtureR2Entries();
+        env.RESIDENCE_PROOF_SHARDS.set(
+            proofManifestObjectKey(fixtureConfig),
+            restored.manifestBytes,
+        );
+        env.RESIDENCE_PROOF_SHARDS.set(proofShardObjectKey(0, 7), restored.shardBytes);
+
+        const response = await worker.fetch(request, env);
+
+        expect(response.status).toBe(200);
+        expect(env.RESIDENCE_PROOF_SHARDS.getCount(proofManifestObjectKey(fixtureConfig))).toBe(2);
+    });
 });
 
 const fixtureConfig = {
@@ -157,12 +177,35 @@ const fixtureConfig = {
 async function buildEnvWithFixtureR2(
     options: {
         includeShard?: boolean;
+        includeManifest?: boolean;
         manifestGeoResolution?: number;
         manifestSha256?: string;
         reverseManifestInventory?: boolean;
         shardProofs?: unknown[];
     } = {},
 ): Promise<Env & { RESIDENCE_PROOF_SHARDS: FakeR2Bucket }> {
+    const fixture = await buildFixtureR2Entries(options);
+    return {
+        RESIDENCE_PROOF_SHARDS: new FakeR2Bucket(fixture.entries),
+        ALLOWLIST_VERSION: "1",
+        GEO_RESOLUTION: "7",
+    };
+}
+
+async function buildFixtureR2Entries(
+    options: {
+        includeShard?: boolean;
+        includeManifest?: boolean;
+        manifestGeoResolution?: number;
+        manifestSha256?: string;
+        reverseManifestInventory?: boolean;
+        shardProofs?: unknown[];
+    } = {},
+): Promise<{
+    entries: Array<[string, Uint8Array]>;
+    manifestBytes: Uint8Array;
+    shardBytes: Uint8Array;
+}> {
     const manifestGeoResolution = options.manifestGeoResolution ?? 7;
     const shardProofs = options.shardProofs ?? [LEAF_THREE];
     const shard = {
@@ -205,18 +248,16 @@ async function buildEnvWithFixtureR2(
         shards,
     };
 
-    const entries: Array<[string, Uint8Array]> = [
-        [proofManifestObjectKey(fixtureConfig), textBytes(JSON.stringify(manifest))],
-    ];
+    const manifestBytes = textBytes(JSON.stringify(manifest));
+    const entries: Array<[string, Uint8Array]> = [];
+    if (options.includeManifest !== false) {
+        entries.push([proofManifestObjectKey(fixtureConfig), manifestBytes]);
+    }
     if (options.includeShard !== false) {
         entries.push([proofShardObjectKey(0, manifestGeoResolution), shardBytes]);
     }
 
-    return {
-        RESIDENCE_PROOF_SHARDS: new FakeR2Bucket(entries),
-        ALLOWLIST_VERSION: "1",
-        GEO_RESOLUTION: "7",
-    };
+    return { entries, manifestBytes, shardBytes };
 }
 
 async function expectErrorCode(response: Response, status: number, code: string): Promise<void> {
@@ -278,6 +319,10 @@ class FakeR2Bucket {
         this.counts.set(key, this.getCount(key) + 1);
         const value = this.objects.get(key);
         return value === undefined ? null : new FakeR2Object(value);
+    }
+
+    set(key: string, value: Uint8Array): void {
+        this.objects.set(key, value);
     }
 
     getCount(key: string): number {
