@@ -1,6 +1,7 @@
 module contracts::admin;
 
 use contracts::claim;
+use contracts::allowed_residence_cell;
 use contracts::disaster_event;
 use contracts::donation;
 use contracts::identity_registry;
@@ -30,11 +31,13 @@ const GENESIS_KIND_IDENTITY_REGISTRY: u8 = 9;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
+const EAllowedResidenceCellRegistryAlreadyCreated: u64 = 2;
 
 public struct ADMIN has drop {}
 
 public struct AdminCap has key {
     id: UID,
+    allowed_residence_cell_registry_id: Option<ID>,
 }
 
 public struct PauseState has key {
@@ -70,7 +73,10 @@ fun init(otw: ADMIN, ctx: &mut TxContext) {
 }
 
 fun initialize(ctx: &mut TxContext) {
-    let admin_cap = AdminCap { id: object::new(ctx) };
+    let admin_cap = AdminCap {
+        id: object::new(ctx),
+        allowed_residence_cell_registry_id: option::none(),
+    };
     emit_genesis_object(object::id(&admin_cap), GENESIS_KIND_ADMIN_CAP, false, ctx);
     transfer::transfer(admin_cap, ctx.sender());
 
@@ -311,6 +317,48 @@ public fun disable_verifier_key(
     ctx: &mut TxContext,
 ) {
     metadata_verifier::disable_verifier_key(registry, public_key, ctx);
+}
+
+public fun create_allowed_residence_cell_registry(
+    cap: &mut AdminCap,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    ctx: &mut TxContext,
+): ID {
+    assert!(
+        !option::is_some(&cap.allowed_residence_cell_registry_id),
+        EAllowedResidenceCellRegistryAlreadyCreated,
+    );
+    let registry_id = allowed_residence_cell::create_registry(
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        ctx,
+    );
+    cap.allowed_residence_cell_registry_id = option::some(registry_id);
+    registry_id
+}
+
+public fun update_allowed_residence_cell_root(
+    _: &AdminCap,
+    registry: &mut allowed_residence_cell::AllowedResidenceCellRegistry,
+    root: vector<u8>,
+    geo_resolution: u8,
+    allowlist_version: u64,
+    source_hash: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    allowed_residence_cell::update_root(
+        registry,
+        root,
+        geo_resolution,
+        allowlist_version,
+        source_hash,
+        ctx,
+    );
 }
 
 public fun pause_global(

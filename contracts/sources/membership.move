@@ -89,7 +89,7 @@ public(package) fun register_member(
     let id = object::new(ctx);
     let pass_lineage_id = id.to_inner();
     let issued_at_ms = ctx.epoch_timestamp_ms();
-    let pass = MembershipPass {
+    let mut pass = MembershipPass {
         id,
         owner: ctx.sender(),
         pass_lineage_id,
@@ -97,8 +97,8 @@ public(package) fun register_member(
         status_label: status_label(STATUS_ACTIVE),
         issued_at_ms,
         account_created_at_ms: issued_at_ms,
-        home_cell,
-        home_cell_registered_at_ms: issued_at_ms,
+        home_cell: 0,
+        home_cell_registered_at_ms: 0,
         identity_verified: false,
         identity_provider_mask: 0,
         provider_label: provider_label(0),
@@ -107,6 +107,7 @@ public(package) fun register_member(
         terms_version,
         signed_statement_hash,
     };
+    set_home_cell(&mut pass, home_cell, issued_at_ms);
     let pass_id = object::id(&pass);
     let registry_id = object::id(registry);
     let record = MembershipRecord {
@@ -134,6 +135,26 @@ public(package) fun register_member(
     transfer::transfer(pass, ctx.sender());
 }
 
+public(package) fun update_home_cell(
+    registry: &MembershipRegistry,
+    pass: &mut MembershipPass,
+    claimant: address,
+    home_cell: u64,
+    registered_at_ms: u64,
+) {
+    assert_current_pass_precheck(registry, pass, claimant);
+    set_home_cell(pass, home_cell, registered_at_ms);
+}
+
+fun set_home_cell(
+    pass: &mut MembershipPass,
+    home_cell: u64,
+    registered_at_ms: u64,
+) {
+    pass.home_cell = home_cell;
+    pass.home_cell_registered_at_ms = registered_at_ms;
+}
+
 public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
     let registry = MembershipRegistry {
         id: object::new(ctx),
@@ -150,18 +171,14 @@ public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
     registry_id
 }
 
-// Caller must pass a trusted claimant, typically ctx.sender(), not an unchecked user-supplied address.
-public fun assert_claim_precheck(pass: &MembershipPass, claimant: address) {
-    assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
-    assert!(claimant == pass.owner, EClaimantNotAuthorized);
-}
-
 public fun assert_current_pass_precheck(
     registry: &MembershipRegistry,
     pass: &MembershipPass,
     claimant: address,
 ) {
-    assert_claim_precheck(pass, claimant);
+    // Caller must pass a trusted claimant, typically ctx.sender(), not an unchecked user-supplied address.
+    assert!(pass.status == STATUS_ACTIVE, EMembershipPassNotActive);
+    assert!(claimant == pass.owner, EClaimantNotAuthorized);
     let record = current_record(registry, pass.pass_lineage_id);
     assert!(record.status == STATUS_ACTIVE, ERegistryRecordNotActive);
     assert!(record.current_pass_id == object::id(pass), ERegistryPassMismatch);

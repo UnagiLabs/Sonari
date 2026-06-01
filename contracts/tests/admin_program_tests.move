@@ -2,6 +2,7 @@
 module contracts::admin_program_tests;
 
 use contracts::admin;
+use contracts::allowed_residence_cell;
 use contracts::claim;
 use contracts::disaster_event;
 use contracts::donation;
@@ -19,6 +20,7 @@ use sui::test_scenario;
 
 const ADMIN: address = @0xA11CE;
 const NON_ADMIN: address = @0xB0B;
+const ALLOWLIST_UPDATE_MS: u64 = 1_234;
 
 #[test]
 fun init_creates_genesis_objects_and_tracking_events() {
@@ -188,7 +190,8 @@ fun init_creates_display_objects_for_explorer() {
 
 #[test]
 fun non_admin_cannot_access_admin_cap_required_for_admin_entries() {
-    // create_program / create_campaign / pause_* all require &AdminCap.
+    // create_program / create_campaign / pause_* / residence allowlist registry
+    // admin wrappers all require &AdminCap.
     // Direct calls without &AdminCap are rejected at compile time, so this
     // fixes the runtime boundary that NON_ADMIN cannot obtain ADMIN's cap.
     let mut scenario = test_scenario::begin(ADMIN);
@@ -196,6 +199,253 @@ fun non_admin_cannot_access_admin_cap_required_for_admin_entries() {
 
     scenario.next_tx(NON_ADMIN);
     assert!(!scenario.has_most_recent_for_sender<admin::AdminCap>());
+
+    scenario.end();
+}
+
+#[test]
+fun admin_can_create_allowed_residence_cell_registry() {
+    let mut scenario = initialized();
+
+    {
+        let mut cap = scenario.take_from_sender<admin::AdminCap>();
+        let registry_id = admin::create_allowed_residence_cell_registry(
+            &mut cap,
+            root_a(),
+            7,
+            1,
+            source_hash_a(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+
+        let events = event::events_by_type<allowed_residence_cell::AllowedResidenceCellRootUpdated>();
+        assert!(events.length() == 1);
+        let (
+            event_registry_id,
+            event_root,
+            event_geo_resolution,
+            event_allowlist_version,
+            event_source_hash,
+            event_updated_at_ms,
+            event_actor,
+        ) = allowed_residence_cell::root_updated_event_fields(*events.borrow(0));
+        assert!(event_registry_id == registry_id);
+        assert!(event_root == root_a());
+        assert!(event_geo_resolution == 7u8);
+        assert!(event_allowlist_version == 1u64);
+        assert!(event_source_hash == source_hash_a());
+        assert!(event_updated_at_ms == 0u64);
+        assert!(event_actor == ADMIN);
+    };
+
+    scenario.next_tx(ADMIN);
+    {
+        let registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+        let (_, root, geo_resolution, allowlist_version, source_hash, updated_at_ms) =
+            allowed_residence_cell::registry_fields_for_testing(&registry);
+        assert!(root == root_a());
+        assert!(geo_resolution == 7u8);
+        assert!(allowlist_version == 1u64);
+        assert!(source_hash == source_hash_a());
+        assert!(updated_at_ms == 0u64);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun admin_can_update_allowed_residence_cell_registry_metadata() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+    test_scenario::later_epoch(&mut scenario, ALLOWLIST_UPDATE_MS, ADMIN);
+
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+        let (registry_id, _, _, _, _, _) =
+            allowed_residence_cell::registry_fields_for_testing(&registry);
+        admin::update_allowed_residence_cell_root(
+            &cap,
+            &mut registry,
+            root_b(),
+            7,
+            2,
+            source_hash_b(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+
+        let (
+            updated_registry_id,
+            updated_root,
+            updated_geo_resolution,
+            updated_allowlist_version,
+            updated_source_hash,
+            updated_at_ms,
+        ) = allowed_residence_cell::registry_fields_for_testing(&registry);
+        assert!(updated_registry_id == registry_id);
+        assert!(updated_root == root_b());
+        assert!(updated_geo_resolution == 7u8);
+        assert!(updated_allowlist_version == 2u64);
+        assert!(updated_source_hash == source_hash_b());
+        assert!(updated_at_ms == ALLOWLIST_UPDATE_MS);
+        test_scenario::return_shared(registry);
+
+        let events = event::events_by_type<allowed_residence_cell::AllowedResidenceCellRootUpdated>();
+        assert!(events.length() == 1);
+        let (
+            event_registry_id,
+            event_root,
+            event_geo_resolution,
+            event_allowlist_version,
+            event_source_hash,
+            event_updated_at_ms,
+            event_actor,
+        ) = allowed_residence_cell::root_updated_event_fields(*events.borrow(0));
+        assert!(event_registry_id == registry_id);
+        assert!(event_root == root_b());
+        assert!(event_geo_resolution == 7u8);
+        assert!(event_allowlist_version == 2u64);
+        assert!(event_source_hash == source_hash_b());
+        assert!(event_updated_at_ms == ALLOWLIST_UPDATE_MS);
+        assert!(event_actor == ADMIN);
+    };
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EInvalidHashLength)]
+fun create_allowed_residence_cell_registry_rejects_invalid_root_length() {
+    let mut scenario = initialized();
+
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        vector[0],
+        7,
+        1,
+        source_hash_a(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EInvalidHashLength)]
+fun create_allowed_residence_cell_registry_rejects_invalid_source_hash_length() {
+    let mut scenario = initialized();
+
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        root_a(),
+        7,
+        1,
+        vector[0],
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EUnsupportedGeoResolution)]
+fun create_allowed_residence_cell_registry_rejects_non_res7_root() {
+    let mut scenario = initialized();
+
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        root_a(),
+        8,
+        1,
+        source_hash_a(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = admin::EAllowedResidenceCellRegistryAlreadyCreated)]
+fun create_allowed_residence_cell_registry_rejects_second_registry() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        root_b(),
+        7,
+        2,
+        source_hash_b(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EInvalidHashLength)]
+fun update_allowed_residence_cell_registry_rejects_invalid_root_length() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+    admin::update_allowed_residence_cell_root(
+        &cap,
+        &mut registry,
+        vector[0],
+        7,
+        2,
+        source_hash_b(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+    test_scenario::return_shared(registry);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EInvalidHashLength)]
+fun update_allowed_residence_cell_registry_rejects_invalid_source_hash_length() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+    admin::update_allowed_residence_cell_root(
+        &cap,
+        &mut registry,
+        root_b(),
+        7,
+        2,
+        vector[0],
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+    test_scenario::return_shared(registry);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = allowed_residence_cell::EUnsupportedGeoResolution)]
+fun update_allowed_residence_cell_registry_rejects_non_res7_root() {
+    let mut scenario = initialized_with_allowed_residence_cell_registry();
+
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+    admin::update_allowed_residence_cell_root(
+        &cap,
+        &mut registry,
+        root_b(),
+        8,
+        2,
+        source_hash_b(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+    test_scenario::return_shared(registry);
 
     scenario.end();
 }
@@ -847,6 +1097,38 @@ fun initialized(): test_scenario::Scenario {
     admin::init_for_testing(scenario.ctx());
     scenario.next_tx(ADMIN);
     scenario
+}
+
+fun initialized_with_allowed_residence_cell_registry(): test_scenario::Scenario {
+    let mut scenario = initialized();
+    let mut cap = scenario.take_from_sender<admin::AdminCap>();
+    admin::create_allowed_residence_cell_registry(
+        &mut cap,
+        root_a(),
+        7,
+        1,
+        source_hash_a(),
+        scenario.ctx(),
+    );
+    scenario.return_to_sender(cap);
+    scenario.next_tx(ADMIN);
+    scenario
+}
+
+fun root_a(): vector<u8> {
+    x"a26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+}
+
+fun root_b(): vector<u8> {
+    x"b26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75021"
+}
+
+fun source_hash_a(): vector<u8> {
+    x"1111111111111111111111111111111111111111111111111111111111111111"
+}
+
+fun source_hash_b(): vector<u8> {
+    x"2222222222222222222222222222222222222222222222222222222222222222"
 }
 
 fun assert_display_fields<T: key>(

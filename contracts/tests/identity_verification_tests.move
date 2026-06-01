@@ -3,6 +3,7 @@ module contracts::identity_verification_tests;
 
 use contracts::accessor;
 use contracts::admin;
+use contracts::allowed_residence_cell;
 use contracts::identity_registry;
 use contracts::identity_result_v1;
 use contracts::membership;
@@ -19,6 +20,9 @@ const RELAYER: address = @0xB0B;
 const NOW_MS: u64 = 1_800_000_000_000;
 const ISSUED_AT_MS: u64 = 1_800_000_000_000;
 const EXPIRES_AT_MS: u64 = 1_831_536_000_000;
+const HOME_CELL: u64 = 608_819_013_597_790_207;
+const GEO_RESOLUTION: u8 = 7;
+const ALLOWLIST_VERSION: u64 = 1;
 const TERMS_VERSION: u64 = 7;
 const KYC_DUPLICATE_KEY_HASH: vector<u8> =
     x"4444444444444444444444444444444444444444444444444444444444444444";
@@ -355,23 +359,61 @@ fun initialized_with_registered_member(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
 
+    scenario.next_tx(ADMIN);
+    {
+        let mut cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_allowed_residence_cell_registry(
+            &mut cap,
+            residence_root(),
+            GEO_RESOLUTION,
+            ALLOWLIST_VERSION,
+            source_hash(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+    };
+
     scenario.next_tx(MEMBER);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut membership_registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         accessor::register_member(
             &pause_state,
             &mut membership_registry,
-            617700169958293503,
+            &residence_registry,
+            HOME_CELL,
+            residence_proof(),
             TERMS_VERSION,
             SIGNED_STATEMENT_HASH,
             scenario.ctx(),
         );
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(membership_registry);
+        test_scenario::return_shared(residence_registry);
     };
 
     scenario
+}
+
+fun residence_proof(): vector<allowed_residence_cell::ProofStep> {
+    vector[
+        accessor::new_residence_proof_step_left(
+            x"07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569",
+        ),
+        accessor::new_residence_proof_step_right(
+            x"8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7",
+        ),
+    ]
+}
+
+fun residence_root(): vector<u8> {
+    x"a26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020"
+}
+
+fun source_hash(): vector<u8> {
+    x"1111111111111111111111111111111111111111111111111111111111111111"
 }
 
 fun add_identity_verifier_key(scenario: &mut test_scenario::Scenario) {
@@ -658,27 +700,27 @@ fun identity_result_bcs(
 }
 
 fun identity_public_key(): vector<u8> {
-    x"d48258c427f21c839d84d58b8599788a4327ee1a96ef8b2ecf29ca912fe24f43"
+    x"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
 }
 
 fun kyc_signature(): vector<u8> {
-    x"825580c97380e0dd163cb5e713466491fcfd99c82cc5aa5e135e5babc20720fd2b1076236a1de3d50921d705fa743168b361af523b3f7cc43c54a00f7251ce04"
+    x"f6c12dbcaed89937c9b276951850f90eedf1593b8b3b618d1b3d6a065d18943c516c6ece9b4d2d26424707bdd0c8291a1c60a95329730a35ce25ccd8a279d500"
 }
 
 fun world_id_signature(): vector<u8> {
-    x"7e392ec6d0702b6ae20611ccd23772b233a4548e7f1c4a4f7629ab097f667677b094b400bebe55b063a92493f5a5268404ede3394f30d9e7871cb25d70ce1b0c"
+    x"eef110e95cec52b011f2a2de48c4eb388fd63feb7b5c6cbbb4f9de0bc9aff4849e3164d2d67f3ab39053271d4800503c094457cbd7b8c77c31108dfbc1ad690b"
 }
 
 fun step5_public_key(): vector<u8> {
-    x"9df8f695ea4e0815a362d3969ee9afbb80bc5b9982620ff8390f99a2ddd1469e"
+    x"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
 }
 
 fun rust_fixture_payload_bcs(): vector<u8> {
-    x"1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000075b6758a05e5945c492eb147dcfe2e58df886a71ff36c25b2ad07bec42cd407ad726ecf6f7036ee3557cd6c7b93a49b231070e8eecada9cfa157e40e3f02e5d3000000000000000000000000000000000000000000000000000000000000051a0201b9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a7468893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f00505c18a3010000007c0d70aa01000007000000000000006666666666666666666666666666666666666666666666666666666666666666"
+    x"1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000075b6758a05e5945c492eb147dcfe2e58df886a71ff36c25b2ad07bec42cd407adba72804cc9504a82bbaa13ed4a83a0e2c6219d7e45125cf57fd10cbab957a97000000000000000000000000000000000000000000000000000000000000051a0201b9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74555555555555555555555555555555555555555555555555555555555555555500505c18a3010000007c0d70aa01000007000000000000006666666666666666666666666666666666666666666666666666666666666666"
 }
 
 fun rust_fixture_signature(): vector<u8> {
-    x"ad78ca7d3b21c21b2a701d9c22cb63a59307ecb1eb971ddb3fdd927962caed355752e835e11cf474804f2791f88b4bb821fbf62659736cb1648f555bf23c9607"
+    x"5e74818871cee57fc7da5131aa042f4ce2e221694dd3d1a4b56ef2201c81dd7113600b689d0d0b88e0ba50dbcd5144ea8dab22d3a1f1e9af576ef69f2424170f"
 }
 
 fun rust_fixture_public_key(): vector<u8> {
@@ -690,33 +732,33 @@ fun rust_fixture_world_id_duplicate_key_hash(): vector<u8> {
 }
 
 fun step5_kyc_signature(): vector<u8> {
-    x"4d191346dbe3f8cf401bcd16f4776f095c4daea6f68e86cf09d9b6b909075b4c89cc58f14ddfa026ada4bfe593e455a4892ec988d540e4c7e30059121221900b"
+    x"f6c12dbcaed89937c9b276951850f90eedf1593b8b3b618d1b3d6a065d18943c516c6ece9b4d2d26424707bdd0c8291a1c60a95329730a35ce25ccd8a279d500"
 }
 
 fun step5_wrong_registry_signature(): vector<u8> {
-    x"4eb2b252788ebb3c389653438ea258948920cc01afc4ac1748a14f55bcf2a5d90f39724a70ec116b119fb32f46b2ea01bc8ca0d0d7455a4f44b36ada28ffba04"
+    x"6bc6fcc7b91c995f9a9e590492d37ee9ac2f31e06bf2926b1f6b57ae647f4ee591db8ade0ac0567b1929801588468a0485325eb14b262e2b4a9b4e250801e101"
 }
 
 fun step5_wrong_membership_signature(): vector<u8> {
-    x"7dc6f174a34c447d6c6c4bf836b9b64685d163e699e56fb2e3690953ed98f9f77bcf4c4a0e60573d10b7edd4ae59e2f374e009fd889964d4a96d84cc643e4a07"
+    x"709b6893d0da161d661e9885b6a79c4f77ed56a9f7ff82e15a94a0c488a1d083e71577de5f9c67834281218ed0644b96732a1282c2c00661fac16e9dc2224b06"
 }
 
 fun step5_wrong_owner_signature(): vector<u8> {
-    x"63546403a829e9a9a4a6ae177bd8ca812c5df2284a3d3bf70cb18a7ec23ff4382985d85daa62efb5c89c183ebc69253d30dffc999aad89995157009acd6e510b"
+    x"b86fa62a4c0c2fef97bfda1b72b1d35a2751fca431a037e466d9e128beb5b96a71d2e8bdcd59fc979783985ab5fd11f007491117f794dd2a73cc7c35de422e0b"
 }
 
 fun step5_wrong_provider_signature(): vector<u8> {
-    x"c2f0af7079e6ca034e6b1685d01cb4f7d1ecc6b30099ccb0337e2883de710cdcdd5e61b33ecf077290ac5badee03c552d5d3ac72ba91d11f5a20b846ce29d50d"
+    x"3b1ba2788bf1560bd10764e4928ac4c94d6b48b3f4cb52673f474067be62ef574950f026e7c5c24bce8ff3b763fe1d590b7beea78559de587aeaccf7fc7b0101"
 }
 
 fun step5_verified_false_signature(): vector<u8> {
-    x"c6b4f3c7935717c206cacf12035877da61766b75182481a95f16c79b0539be23a229ddc119c6240ee8cfb31705794c543fa393fd853f64b2929699787ef4c804"
+    x"c87b5c04fe879623dc884af9975061b4884aa6041ff1c3e8e510c46269050c520e0873ae68cf96d0d5b4c6c89dadd997796fad150946567e3c13c7b5363bbe06"
 }
 
 fun step5_terms_mismatch_signature(): vector<u8> {
-    x"d57720c7491dbaba36042747669a5c0a7836371496a3a72a8bb6666e0fc13f75219915ec79bf1411a454e2057622ebc495467f0ff02a111d45f9c29ad0451b00"
+    x"c779c31ada6c17fb833ec8871da48c20a97b01619fecd4a3452a6d3716a536222049370505c7c43cc3b4c5acc5810c9ee8b4bd0818fab5d23c5fdf6ca5170a07"
 }
 
 fun step5_statement_hash_mismatch_signature(): vector<u8> {
-    x"b90f6dea69f75c9976edec07516581088f378a3374b3a90f5ac27fdd463f2b83e6d627a81d985e6632931b3174a5f705296603dcffb605f6437e08eb98e5080a"
+    x"50488632dda2b7a7eec5624beeeac356aae5ec545daa6544c4998a4ec8c4c55222b07752320bd1eea59c0072e37a74d95b8034248e3d43ed6a719d25f7a57006"
 }

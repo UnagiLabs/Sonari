@@ -2,6 +2,7 @@ module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
+use contracts::allowed_residence_cell;
 use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
@@ -15,6 +16,8 @@ use contracts::program::{Self, Campaign, Program};
 use sui::clock::{Self, Clock};
 use sui::coin::Coin;
 use usdc::usdc::USDC;
+
+const EInvalidResidenceCellProof: u64 = 0;
 
 public fun donate_general_usdc(
     pause_state: &PauseState,
@@ -123,19 +126,62 @@ public fun donate_operations_usdc_with_pass(
 public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,
+    residence_registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
     home_cell: u64,
+    proof: vector<allowed_residence_cell::ProofStep>,
     terms_version: u64,
     signed_statement_hash: vector<u8>,
     ctx: &mut TxContext,
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
+    assert!(
+        allowed_residence_cell::is_valid_home_cell(residence_registry, home_cell, proof),
+        EInvalidResidenceCellProof,
+    );
     membership::register_member(
         registry,
         home_cell,
         terms_version,
         signed_statement_hash,
         ctx,
+    );
+}
+
+public fun new_residence_proof_step_left(
+    sibling_hash: vector<u8>,
+): allowed_residence_cell::ProofStep {
+    allowed_residence_cell::new_proof_step_left(sibling_hash)
+}
+
+public fun new_residence_proof_step_right(
+    sibling_hash: vector<u8>,
+): allowed_residence_cell::ProofStep {
+    allowed_residence_cell::new_proof_step_right(sibling_hash)
+}
+
+public fun update_member_home_cell(
+    pause_state: &PauseState,
+    registry: &membership::MembershipRegistry,
+    residence_registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
+    pass: &mut membership::MembershipPass,
+    clock: &Clock,
+    home_cell: u64,
+    proof: vector<allowed_residence_cell::ProofStep>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, membership::registry_id(registry));
+    assert!(
+        allowed_residence_cell::is_valid_home_cell(residence_registry, home_cell, proof),
+        EInvalidResidenceCellProof,
+    );
+    membership::update_home_cell(
+        registry,
+        pass,
+        ctx.sender(),
+        home_cell,
+        clock::timestamp_ms(clock),
     );
 }
 
