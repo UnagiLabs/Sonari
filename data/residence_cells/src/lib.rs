@@ -389,6 +389,57 @@ pub struct ProofShardStep {
     pub sibling_hash: String,
 }
 
+struct ProofShardBuildContext {
+    sorted: Vec<(ResidenceCellLeaf, [u8; 32])>,
+    levels: Vec<Vec<[u8; 32]>>,
+    merkle_root: String,
+    allowlist_version: u64,
+    geo_resolution: u8,
+    shard_count: usize,
+}
+
+struct ProofShardLeafIndices {
+    starts: Vec<usize>,
+    leaf_indices: Vec<usize>,
+}
+
+struct HashingWriter<W> {
+    inner: W,
+    hasher: Sha256,
+    byte_size: u64,
+}
+
+impl<W: Write> HashingWriter<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+            byte_size: 0,
+        }
+    }
+
+    fn finish(self) -> (W, String, u64) {
+        (
+            self.inner,
+            prefixed_hex(&self.hasher.finalize()),
+            self.byte_size,
+        )
+    }
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.update(&buf[..written]);
+        self.byte_size += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 pub fn build_allowlist_artifact(
     source: &str,
     source_bytes: &[u8],
@@ -817,51 +868,28 @@ pub fn generate_proof_shards(
     leaves: &[ResidenceCellLeaf],
     shard_count: usize,
 ) -> Result<GeneratedProofShards, ResidenceAllowlistError> {
-    if shard_count == 0 {
-        return Err(ResidenceAllowlistError::InvalidArgument(
-            "shard_count must be greater than zero".to_owned(),
-        ));
-    }
-    let Some(first_leaf) = leaves.first().copied() else {
-        return Err(ResidenceAllowlistError::InvalidArtifact(
-            "proof shards require at least one residence leaf".to_owned(),
-        ));
-    };
-    validate_proof_shard_leaf_metadata(leaves, first_leaf)?;
+    let context = build_proof_shard_context(leaves, shard_count)?;
 
-    let sorted = sorted_leaf_hashes(leaves)?;
-    let leaf_hashes = sorted.iter().map(|(_, hash)| *hash).collect::<Vec<_>>();
-    let levels = merkle_levels_from_leaf_hashes(&leaf_hashes);
-    let Some(root) = levels.last().and_then(|level| level.first()).copied() else {
-        return Err(ResidenceAllowlistError::InvalidArtifact(
-            "proof shards require at least one residence leaf".to_owned(),
-        ));
-    };
-    let merkle_root = prefixed_hex(&root);
-
-    let mut shards = (0..shard_count)
+    let mut shards = (0..context.shard_count)
         .map(|shard_id| ProofShard {
             schema: PROOF_SHARD_SCHEMA.to_owned(),
             schema_version: PROOF_SHARD_SCHEMA_VERSION,
-            allowlist_version: first_leaf.allowlist_version,
-            geo_resolution: first_leaf.geo_resolution,
-            merkle_root: merkle_root.clone(),
+            allowlist_version: context.allowlist_version,
+            geo_resolution: context.geo_resolution,
+            merkle_root: context.merkle_root.clone(),
             shard_id,
-            shard_count,
+            shard_count: context.shard_count,
             proofs: Vec::new(),
         })
         .collect::<Vec<_>>();
 
-    for (leaf_index, (leaf, leaf_hash)) in sorted.iter().enumerate() {
-        let shard_id = (leaf.h3_index % shard_count as u64) as usize;
-        let entry = ProofShardEntry {
-            h3_index: leaf.h3_index.to_string(),
-            leaf_hash: prefixed_hex(leaf_hash),
-            proof: proof_steps_from_levels(&levels, leaf_index),
-        };
+    for (leaf_index, (leaf, _)) in context.sorted.iter().enumerate() {
+        let shard_id = (leaf.h3_index % context.shard_count as u64) as usize;
+        let entry = proof_shard_entry_from_context(&context, leaf_index)?;
         let Some(shard) = shards.get_mut(shard_id) else {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
-                "computed shard_id {shard_id} is outside shard_count {shard_count}"
+                "computed shard_id {shard_id} is outside shard_count {}",
+                context.shard_count
             )));
         };
         shard.proofs.push(entry);
@@ -889,11 +917,11 @@ pub fn generate_proof_shards(
         manifest: ProofShardManifest {
             schema: PROOF_MANIFEST_SCHEMA.to_owned(),
             schema_version: PROOF_MANIFEST_SCHEMA_VERSION,
-            allowlist_version: first_leaf.allowlist_version,
-            geo_resolution: first_leaf.geo_resolution,
-            merkle_root,
-            shard_count,
-            total_proof_count: sorted.len(),
+            allowlist_version: context.allowlist_version,
+            geo_resolution: context.geo_resolution,
+            merkle_root: context.merkle_root,
+            shard_count: context.shard_count,
+            total_proof_count: context.sorted.len(),
             object_key_rule: PROOF_SHARD_OBJECT_KEY_RULE.to_owned(),
             shards: inventory,
         },
@@ -930,12 +958,6 @@ pub fn replay_proof_shard_entry(
 
 pub fn parse_valid_allowlist(bytes: &[u8]) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
     parse_allowlist_with_validator(bytes, validate_artifact)
-}
-
-fn parse_allowlist_for_source_verification(
-    bytes: &[u8],
-) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
-    parse_allowlist_with_validator(bytes, validate_allowlist_shape)
 }
 
 fn parse_allowlist_with_validator(
@@ -1036,17 +1058,46 @@ pub fn generate_and_write_proof_shards_atomic(
         ));
     }
 
-    let allowlist_bytes = fs::read(allowlist_path)?;
-    let allowlist = parse_allowlist_for_source_verification(&allowlist_bytes)?;
-    let source_bytes = fs::read(source_path)?;
-    let source = String::from_utf8(source_bytes.clone()).map_err(|error| {
-        ResidenceAllowlistError::InvalidArtifact(format!("{source_path:?} must be UTF-8: {error}"))
-    })?;
-    validate_allowlist_matches_source_content(&allowlist, &source, &source_bytes, options)?;
+    let allowlist = load_verified_allowlist(allowlist_path, source_path, options)?;
+    write_proof_shards_from_leaves_atomic(output_dir, &allowlist.leaves, shard_count)
+}
 
-    let generated = generate_proof_shards(&allowlist.leaves, shard_count)?;
-    write_generated_proof_shards_atomic(output_dir, &generated)?;
-    Ok(generated.manifest)
+pub fn write_proof_shards_from_leaves_atomic(
+    output_dir: &Path,
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+) -> Result<ProofShardManifest, ResidenceAllowlistError> {
+    let context = build_proof_shard_context(leaves, shard_count)?;
+    let shards_dir = output_dir.join("shards");
+    fs::create_dir_all(&shards_dir)?;
+    let shard_indices = proof_shard_leaf_indices(&context);
+    let mut inventory = Vec::with_capacity(context.shard_count);
+
+    for shard_id in 0..context.shard_count {
+        let start = shard_indices.starts[shard_id];
+        let end = shard_indices.starts[shard_id + 1];
+        let leaf_indices = &shard_indices.leaf_indices[start..end];
+        inventory.push(write_proof_shard_from_indices_atomic(
+            &shards_dir,
+            &context,
+            shard_id,
+            leaf_indices,
+        )?);
+    }
+
+    let manifest = ProofShardManifest {
+        schema: PROOF_MANIFEST_SCHEMA.to_owned(),
+        schema_version: PROOF_MANIFEST_SCHEMA_VERSION,
+        allowlist_version: context.allowlist_version,
+        geo_resolution: context.geo_resolution,
+        merkle_root: context.merkle_root,
+        shard_count: context.shard_count,
+        total_proof_count: context.sorted.len(),
+        object_key_rule: PROOF_SHARD_OBJECT_KEY_RULE.to_owned(),
+        shards: inventory,
+    };
+    write_proof_shard_manifest_atomic(output_dir, &manifest)?;
+    Ok(manifest)
 }
 
 pub fn write_generated_proof_shards_atomic(
@@ -1061,9 +1112,7 @@ pub fn write_generated_proof_shards_atomic(
         write_bytes_atomic(&shard_path, &proof_shard_gzip_bytes(shard)?)?;
     }
 
-    let manifest_path = output_dir.join("proof_manifest.json");
-    let manifest = format!("{}\n", serde_json::to_string_pretty(&generated.manifest)?);
-    write_bytes_atomic(&manifest_path, manifest.as_bytes())
+    write_proof_shard_manifest_atomic(output_dir, &generated.manifest)
 }
 
 pub fn verify_proof_shards(
@@ -1938,6 +1987,41 @@ fn proof_step(direction: ProofDirection, sibling_hash: [u8; 32]) -> ResidencePro
     }
 }
 
+fn build_proof_shard_context(
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+) -> Result<ProofShardBuildContext, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+    let Some(first_leaf) = leaves.first().copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof shards require at least one residence leaf".to_owned(),
+        ));
+    };
+    validate_proof_shard_leaf_metadata(leaves, first_leaf)?;
+
+    let sorted = sorted_leaf_hashes(leaves)?;
+    let leaf_hashes = sorted.iter().map(|(_, hash)| *hash).collect::<Vec<_>>();
+    let levels = merkle_levels_from_leaf_hashes(&leaf_hashes);
+    let Some(root) = levels.last().and_then(|level| level.first()).copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof shards require at least one residence leaf".to_owned(),
+        ));
+    };
+
+    Ok(ProofShardBuildContext {
+        sorted,
+        levels,
+        merkle_root: prefixed_hex(&root),
+        allowlist_version: first_leaf.allowlist_version,
+        geo_resolution: first_leaf.geo_resolution,
+        shard_count,
+    })
+}
+
 fn validate_proof_shard_leaf_metadata(
     leaves: &[ResidenceCellLeaf],
     expected: ResidenceCellLeaf,
@@ -1999,6 +2083,105 @@ fn proof_steps_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> Vec<P
         current_index /= 2;
     }
     proof
+}
+
+fn proof_shard_leaf_indices(context: &ProofShardBuildContext) -> ProofShardLeafIndices {
+    let mut counts = vec![0usize; context.shard_count];
+    for (leaf, _) in &context.sorted {
+        counts[(leaf.h3_index % context.shard_count as u64) as usize] += 1;
+    }
+
+    let mut starts = Vec::with_capacity(context.shard_count + 1);
+    starts.push(0);
+    for count in &counts {
+        let next = starts.last().copied().expect("starts has seed") + count;
+        starts.push(next);
+    }
+
+    let mut write_offsets = starts[..context.shard_count].to_vec();
+    let mut leaf_indices = vec![0usize; context.sorted.len()];
+    for (leaf_index, (leaf, _)) in context.sorted.iter().enumerate() {
+        let shard_id = (leaf.h3_index % context.shard_count as u64) as usize;
+        let output_index = write_offsets[shard_id];
+        leaf_indices[output_index] = leaf_index;
+        write_offsets[shard_id] += 1;
+    }
+
+    ProofShardLeafIndices {
+        starts,
+        leaf_indices,
+    }
+}
+
+fn proof_shard_entry_from_context(
+    context: &ProofShardBuildContext,
+    leaf_index: usize,
+) -> Result<ProofShardEntry, ResidenceAllowlistError> {
+    let Some((leaf, leaf_hash)) = context.sorted.get(leaf_index) else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "leaf index {leaf_index} is outside proof shard tree"
+        )));
+    };
+    Ok(ProofShardEntry {
+        h3_index: leaf.h3_index.to_string(),
+        leaf_hash: prefixed_hex(leaf_hash),
+        proof: proof_steps_from_levels(&context.levels, leaf_index),
+    })
+}
+
+fn write_proof_shard_from_indices_atomic(
+    shards_dir: &Path,
+    context: &ProofShardBuildContext,
+    shard_id: usize,
+    leaf_indices: &[usize],
+) -> Result<ProofShardInventoryEntry, ResidenceAllowlistError> {
+    let shard_path = shards_dir.join(format!("{shard_id:05}.json.gz"));
+    let tmp_path = tmp_path_for(&shard_path)?;
+    let file = fs::File::create(&tmp_path)?;
+    let writer = HashingWriter::new(BufWriter::new(file));
+    let mut encoder = GzBuilder::new()
+        .mtime(0)
+        .write(writer, Compression::default());
+
+    write!(
+        encoder,
+        "{{\"schema\":\"{PROOF_SHARD_SCHEMA}\",\"schema_version\":{PROOF_SHARD_SCHEMA_VERSION},\"allowlist_version\":{},\"geo_resolution\":{},\"merkle_root\":\"{}\",\"shard_id\":{shard_id},\"shard_count\":{},\"proofs\":[",
+        context.allowlist_version, context.geo_resolution, context.merkle_root, context.shard_count
+    )?;
+    for (entry_index, leaf_index) in leaf_indices.iter().copied().enumerate() {
+        if entry_index > 0 {
+            encoder.write_all(b",")?;
+        }
+        let entry = proof_shard_entry_from_context(context, leaf_index)?;
+        serde_json::to_writer(&mut encoder, &entry)?;
+    }
+    encoder.write_all(b"]}")?;
+
+    let hashing_writer = encoder.finish()?;
+    let (mut writer, sha256, byte_size) = hashing_writer.finish();
+    writer.flush()?;
+    fs::rename(tmp_path, &shard_path)?;
+
+    Ok(ProofShardInventoryEntry {
+        shard_id,
+        object_key: proof_shard_object_key(
+            context.allowlist_version,
+            context.geo_resolution,
+            shard_id,
+        ),
+        proof_count: leaf_indices.len(),
+        sha256,
+        byte_size,
+    })
+}
+
+fn write_proof_shard_manifest_atomic(
+    output_dir: &Path,
+    manifest: &ProofShardManifest,
+) -> Result<(), ResidenceAllowlistError> {
+    let manifest_path = output_dir.join("proof_manifest.json");
+    let manifest = format!("{}\n", serde_json::to_string_pretty(manifest)?);
+    write_bytes_atomic(&manifest_path, manifest.as_bytes())
 }
 
 fn proof_shard_object_key(allowlist_version: u64, geo_resolution: u8, shard_id: usize) -> String {

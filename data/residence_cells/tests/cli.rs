@@ -1,7 +1,8 @@
 use flate2::read::GzDecoder;
 use residence_allowlist::{
-    LandSourceManifest, ProofShard, ProofShardManifest, build_allowlist_artifact_with_manifest,
-    prefixed_hex, write_allowlist_artifact_atomic,
+    LandSourceManifest, ProofShard, ProofShardManifest, ResidenceCellLeaf,
+    build_allowlist_artifact_with_manifest, generate_proof_shards, prefixed_hex,
+    write_allowlist_artifact_atomic, write_generated_proof_shards_atomic,
 };
 use sha2::{Digest, Sha256};
 use std::{fs, io::Read, process::Command, time::Duration};
@@ -51,7 +52,7 @@ fn proof_shards_rejects_zero_shard_count() {
 }
 
 #[test]
-fn proof_shards_writes_manifest_and_all_gzipped_shards() {
+fn proof_shards_rejects_unpinned_fixture_source() {
     let directory = tempdir().expect("tempdir");
     let source_path = directory.path().join("compact_land.geojson");
     let allowlist_path = directory.path().join("allowlist.json");
@@ -100,20 +101,27 @@ fn proof_shards_writes_manifest_and_all_gzipped_shards() {
         .output()
         .expect("run proof-shards");
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("pinned Natural Earth source"));
+    assert!(!output_dir.exists());
+}
+
+#[test]
+fn verify_proof_shards_cli_accepts_generated_fixture_artifact() {
+    let directory = tempdir().expect("tempdir");
+    let output_dir = directory.path().join("proofs");
+    let generated = generate_proof_shards(&fixture_leaves(), 4).expect("proof shards");
+    write_generated_proof_shards_atomic(&output_dir, &generated).expect("write proof shards");
 
     let manifest_path = output_dir.join("proof_manifest.json");
     let manifest: ProofShardManifest =
         serde_json::from_slice(&fs::read(&manifest_path).expect("read proof_manifest.json"))
             .expect("parse proof manifest");
     assert_eq!(manifest.schema, "sonari.residence.proof_manifest.v1");
-    assert_eq!(manifest.allowlist_version, 42);
+    assert_eq!(manifest.allowlist_version, 1);
     assert_eq!(manifest.shard_count, 4);
-    assert_eq!(manifest.total_proof_count, artifact.h3_indexes.len());
+    assert_eq!(manifest.total_proof_count, fixture_leaves().len());
     assert_eq!(manifest.shards.len(), 4);
 
     for inventory in &manifest.shards {
@@ -126,7 +134,7 @@ fn proof_shards_writes_manifest_and_all_gzipped_shards() {
 
         let shard = decode_shard(&compressed);
         assert_eq!(shard.schema, "sonari.residence.proof_shard.v1");
-        assert_eq!(shard.allowlist_version, 42);
+        assert_eq!(shard.allowlist_version, 1);
         assert_eq!(shard.shard_id, inventory.shard_id);
         assert_eq!(shard.shard_count, 4);
         assert_eq!(shard.proofs.len(), inventory.proof_count);
@@ -153,7 +161,7 @@ fn proof_shards_writes_manifest_and_all_gzipped_shards() {
         serde_json::from_slice(&verify_output.stdout).expect("verify summary");
     assert_eq!(summary["status"], "verified");
     assert_eq!(summary["shard_count"], 4);
-    assert_eq!(summary["total_proof_count"], artifact.h3_indexes.len());
+    assert_eq!(summary["total_proof_count"], fixture_leaves().len());
 }
 
 #[test]
@@ -189,4 +197,24 @@ fn decode_shard(compressed: &[u8]) -> ProofShard {
     let mut json = Vec::new();
     decoder.read_to_end(&mut json).expect("gzip decode");
     serde_json::from_slice(&json).expect("parse proof shard")
+}
+
+fn fixture_leaves() -> Vec<ResidenceCellLeaf> {
+    vec![
+        ResidenceCellLeaf {
+            h3_index: 608_819_013_513_904_127,
+            geo_resolution: 7,
+            allowlist_version: 1,
+        },
+        ResidenceCellLeaf {
+            h3_index: 608_819_013_597_790_207,
+            geo_resolution: 7,
+            allowlist_version: 1,
+        },
+        ResidenceCellLeaf {
+            h3_index: 608_819_013_681_676_287,
+            geo_resolution: 7,
+            allowlist_version: 1,
+        },
+    ]
 }

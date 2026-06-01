@@ -2,6 +2,7 @@ use residence_allowlist::{
     GeneratedProofShards, ProofShard, ProofShardEntry, ProofShardManifest, ResidenceCellLeaf,
     generate_proof_shards, prefixed_hex, proof_shard_gzip_bytes, replay_proof_shard_entry,
     verify_proof_shards, write_generated_proof_shards_atomic,
+    write_proof_shards_from_leaves_atomic,
 };
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
@@ -110,6 +111,24 @@ fn verifies_generated_proof_shard_artifact() {
     assert_eq!(summary.verified_shards, SHARD_COUNT);
     assert_eq!(summary.verified_proofs, fixture_leaves().len());
     assert_eq!(summary.merkle_root, generated.manifest.merkle_root);
+}
+
+#[test]
+fn writes_proof_shards_without_materializing_all_entries() {
+    let directory = tempdir().expect("tempdir");
+    let output_dir = directory.path().join("proofs");
+    let generated = generate_proof_shards(&fixture_leaves(), SHARD_COUNT).expect("proof shards");
+    let streamed_manifest =
+        write_proof_shards_from_leaves_atomic(&output_dir, &fixture_leaves(), SHARD_COUNT)
+            .expect("write streamed proof shards");
+
+    assert_eq!(streamed_manifest, generated.manifest);
+    let summary = verify_proof_shards(
+        &output_dir.join("proof_manifest.json"),
+        &output_dir.join("shards"),
+    )
+    .expect("verify streamed proof shards");
+    assert_eq!(summary.verified_proofs, fixture_leaves().len());
 }
 
 #[test]
