@@ -680,6 +680,9 @@ Resources:
                 printf '%s:443\n' "$walrus_upload_relay_host"
               fi
             } | sort -u >/opt/sonari/earthquake-egress-allowlist
+            if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
+              printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
+            fi
             cat >/etc/systemd/system/sonari-earthquake-egress-connect-proxy.service <<'SONARI_EARTHQUAKE_CONNECT_PROXY_SERVICE'
             [Unit]
             Description=Sonari earthquake HTTPS CONNECT egress proxy

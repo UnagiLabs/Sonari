@@ -188,6 +188,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("sonari-earthquake-egress-connect-proxy.service");
         expect(template).toContain("sonari-earthquake-egress-vsock-proxy.service");
         expect(template).toContain("earthquake.usgs.gov:443");
+        expect(template).toContain("{address: 127.0.0.1, port: 18081}");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080");
     });
