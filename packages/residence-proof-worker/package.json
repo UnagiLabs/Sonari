@@ -4,9 +4,10 @@
     "private": true,
     "type": "module",
     "exports": {
-        ".": "./src/proof_shards.ts"
+        ".": "./src/index.ts",
+        "./proof-shards": "./src/proof_shards.ts"
     },
-    "types": "./src/proof_shards.ts",
+    "types": "./src/index.ts",
     "scripts": {
         "test": "vitest run src",
         "typecheck": "tsc -b --noEmit"

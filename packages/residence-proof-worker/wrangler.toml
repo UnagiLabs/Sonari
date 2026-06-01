@@ -1,0 +1,11 @@
+name = "sonari-residence-proof-worker"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+[[r2_buckets]]
+binding = "RESIDENCE_PROOF_SHARDS"
+bucket_name = "sonari-residence-cells"
+
+[vars]
+ALLOWLIST_VERSION = "1"
+GEO_RESOLUTION = "7"
