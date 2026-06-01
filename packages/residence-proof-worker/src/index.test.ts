@@ -19,7 +19,7 @@ const EMPTY_SHA256 = "0x00000000000000000000000000000000000000000000000000000000
 
 describe("residence proof Worker API", () => {
     it("returns only the requested proof from an R2 proof shard and caches the manifest", async () => {
-        const env = await buildEnvWithFixtureR2();
+        const env = await buildEnvWithFixtureR2({ reverseManifestInventory: true });
         const request = new Request(
             "https://worker.example/api/residence-proof?h3_index=608819013681676287",
         );
@@ -159,6 +159,7 @@ async function buildEnvWithFixtureR2(
         includeShard?: boolean;
         manifestGeoResolution?: number;
         manifestSha256?: string;
+        reverseManifestInventory?: boolean;
         shardProofs?: unknown[];
     } = {},
 ): Promise<Env & { RESIDENCE_PROOF_SHARDS: FakeR2Bucket }> {
@@ -175,6 +176,22 @@ async function buildEnvWithFixtureR2(
         proofs: shardProofs,
     };
     const shardBytes = await gzipJsonBytes(shard);
+    const shards = [
+        {
+            shard_id: 0,
+            object_key: proofShardObjectKey(0, manifestGeoResolution),
+            proof_count: shardProofs.length,
+            sha256: options.manifestSha256 ?? (await sha256Hex(shardBytes)),
+            byte_size: shardBytes.byteLength,
+        },
+        emptyInventoryEntry(1, manifestGeoResolution),
+        emptyInventoryEntry(2, manifestGeoResolution),
+        emptyInventoryEntry(3, manifestGeoResolution),
+        emptyInventoryEntry(4, manifestGeoResolution),
+    ];
+    if (options.reverseManifestInventory === true) {
+        shards.reverse();
+    }
     const manifest = {
         schema: "sonari.residence.proof_manifest.v1",
         schema_version: 1,
@@ -185,19 +202,7 @@ async function buildEnvWithFixtureR2(
         total_proof_count: shardProofs.length,
         object_key_rule:
             "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz",
-        shards: [
-            {
-                shard_id: 0,
-                object_key: proofShardObjectKey(0, manifestGeoResolution),
-                proof_count: shardProofs.length,
-                sha256: options.manifestSha256 ?? (await sha256Hex(shardBytes)),
-                byte_size: shardBytes.byteLength,
-            },
-            emptyInventoryEntry(1, manifestGeoResolution),
-            emptyInventoryEntry(2, manifestGeoResolution),
-            emptyInventoryEntry(3, manifestGeoResolution),
-            emptyInventoryEntry(4, manifestGeoResolution),
-        ],
+        shards,
     };
 
     const entries: Array<[string, Uint8Array]> = [

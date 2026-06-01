@@ -6,6 +6,7 @@ const PROOF_SHARD_OBJECT_KEY_RULE =
 const U64_MAX = 18_446_744_073_709_551_615n;
 const H3_MAX_RESOLUTION = 15;
 const H3_MODE_CELL = 1n;
+const H3_PENTAGON_BASE_CELLS = new Set([4, 14, 24, 38, 49, 58, 63, 72, 83, 97, 107, 117]);
 
 export interface ParsedH3Index {
     decimal: string;
@@ -158,20 +159,22 @@ export function parseProofShardManifest(value: unknown): ProofShardManifest {
 
     const seen = new Set<number>();
     let proofCountSum = 0;
-    const shards = rawShards.map((entry) => {
-        const parsed = parseInventoryEntry(entry);
-        validateProofShardInventoryEntry(parsed, {
-            allowlistVersion,
-            geoResolution,
-            shardCount,
-        });
-        if (seen.has(parsed.shard_id)) {
-            throw new Error(`duplicate shard inventory entry for shard_id ${parsed.shard_id}`);
-        }
-        seen.add(parsed.shard_id);
-        proofCountSum += parsed.proof_count;
-        return parsed;
-    });
+    const shards = rawShards
+        .map((entry) => {
+            const parsed = parseInventoryEntry(entry);
+            validateProofShardInventoryEntry(parsed, {
+                allowlistVersion,
+                geoResolution,
+                shardCount,
+            });
+            if (seen.has(parsed.shard_id)) {
+                throw new Error(`duplicate shard inventory entry for shard_id ${parsed.shard_id}`);
+            }
+            seen.add(parsed.shard_id);
+            proofCountSum += parsed.proof_count;
+            return parsed;
+        })
+        .sort((left, right) => left.shard_id - right.shard_id);
 
     for (let shardId = 0; shardId < shardCount; shardId += 1) {
         if (!seen.has(shardId)) {
@@ -393,6 +396,9 @@ function validateH3CellLayout(h3Index: bigint, expectedResolution: number, rawVa
     if (mode !== H3_MODE_CELL) {
         throw new Error(`h3_index mode must be an H3 cell: ${rawValue}`);
     }
+    if (((h3Index >> 56n) & 0x7n) !== 0n) {
+        throw new Error(`h3_index reserved bits must be zero: ${rawValue}`);
+    }
     const resolution = Number((h3Index >> 52n) & 0xfn);
     if (resolution !== expectedResolution) {
         throw new Error(`h3_index resolution must be ${expectedResolution}: ${rawValue}`);
@@ -402,14 +408,21 @@ function validateH3CellLayout(h3Index: bigint, expectedResolution: number, rawVa
         throw new Error(`h3_index base cell is outside the H3 range: ${rawValue}`);
     }
 
+    let leadingNonZeroDigit = 0;
     for (let digit = 1; digit <= H3_MAX_RESOLUTION; digit += 1) {
         const value = Number((h3Index >> BigInt((H3_MAX_RESOLUTION - digit) * 3)) & 0x7n);
         if (digit <= expectedResolution && value === 7) {
             throw new Error(`h3_index active digit must be 0..6: ${rawValue}`);
         }
+        if (digit <= expectedResolution && leadingNonZeroDigit === 0 && value !== 0) {
+            leadingNonZeroDigit = value;
+        }
         if (digit > expectedResolution && value !== 7) {
             throw new Error(`h3_index unused digit must be 7: ${rawValue}`);
         }
+    }
+    if (H3_PENTAGON_BASE_CELLS.has(baseCell) && leadingNonZeroDigit === 1) {
+        throw new Error(`h3_index uses the deleted pentagon subsequence: ${rawValue}`);
     }
 }
 

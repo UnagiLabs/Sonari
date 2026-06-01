@@ -47,7 +47,7 @@ async function handleResidenceProofRequestUnchecked(request: Request, env: Env):
     const h3Index = parseRequestH3Index(h3IndexParam, config.geoResolution);
     const manifest = await loadProofManifest(env.RESIDENCE_PROOF_SHARDS, config);
     const shardId = await proofShardId(h3Index.value, manifest.shard_count);
-    const inventory = manifest.shards[shardId];
+    const inventory = manifest.shards.find((entry) => entry.shard_id === shardId);
     if (inventory === undefined) {
         throw new ResidenceProofError(
             "proof_manifest_invalid",

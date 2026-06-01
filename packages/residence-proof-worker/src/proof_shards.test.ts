@@ -135,11 +135,16 @@ describe("h3_index parsing", () => {
         const wrongMode = (608819013513904127n & ~(0xfn << 59n)) | (2n << 59n);
         expect(() => parseH3Index(wrongMode.toString(), 7)).toThrow(/mode/i);
 
+        const reservedBitsSet = 608819013513904127n | (1n << 56n);
+        expect(() => parseH3Index(reservedBitsSet.toString(), 7)).toThrow(/reserved/i);
+
         const activeDigitSeven = 608819013513904127n | (7n << 42n);
         expect(() => parseH3Index(activeDigitSeven.toString(), 7)).toThrow(/digit/i);
 
         const unusedDigitNotSeven = 608819013513904127n & ~(7n << 21n);
         expect(() => parseH3Index(unusedDigitNotSeven.toString(), 7)).toThrow(/unused/i);
+
+        expect(() => parseH3Index("608131085246660607", 7)).toThrow(/pentagon/i);
     });
 });
 
@@ -194,6 +199,18 @@ describe("proof shard contracts", () => {
 describe("manifest and shard parsing", () => {
     it("parses a complete proof manifest with inventory validation", () => {
         expect(parseProofShardManifest(MANIFEST)).toEqual(MANIFEST);
+        expect(
+            parseProofShardManifest({
+                ...MANIFEST,
+                shards: [
+                    MANIFEST.shards[4],
+                    MANIFEST.shards[3],
+                    MANIFEST.shards[2],
+                    MANIFEST.shards[1],
+                    MANIFEST.shards[0],
+                ],
+            }).shards.map((entry) => entry.shard_id),
+        ).toEqual([0, 1, 2, 3, 4]);
         expect(() =>
             parseProofShardManifest({
                 ...MANIFEST,
