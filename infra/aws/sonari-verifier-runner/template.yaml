@@ -40,25 +40,6 @@ Parameters:
     Default: 7
   RunnerTokenSecretArn:
     Type: String
-  WalrusConfigSecretArn:
-    Type: String
-  SuiWalletConfigSecretArn:
-    Type: String
-    Description: Secrets Manager ARN containing the Sui wallet client config for Walrus writes.
-  SuiKeystoreSecretArn:
-    Type: String
-    Description: Secrets Manager ARN containing the Sui keystore file referenced by the wallet config.
-  WalrusAggregatorUrl:
-    Type: String
-    Description: Walrus aggregator URL used by the earthquake verifier process.
-  WalrusUploadRelayUrl:
-    Type: String
-    Default: ""
-    Description: Optional Walrus upload relay URL used by the earthquake verifier process.
-  WalrusContext:
-    Type: String
-    Default: testnet
-    Description: Walrus client config context used by the earthquake verifier process.
   NitroEnclaveProcessCommand:
     Type: String
     Default: /opt/sonari/bin/run-sonari-verifier
@@ -319,9 +300,6 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource:
                   - !Ref RunnerTokenSecretArn
-                  - !Ref WalrusConfigSecretArn
-                  - !Ref SuiWalletConfigSecretArn
-                  - !Ref SuiKeystoreSecretArn
               - Effect: Allow
                 Action: s3:GetObject
                 Resource:
@@ -410,13 +388,10 @@ Resources:
             printf '%s  %s\n' '${TeeEifSha256}' "$tee_eif" | sha256sum -c -
             aws s3 cp 's3://${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}' /opt/sonari/signing-seed.ciphertext
             aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
-            aws secretsmanager get-secret-value --secret-id '${WalrusConfigSecretArn}' --query SecretString --output text > /opt/sonari/walrus-client-config.yaml
-            aws secretsmanager get-secret-value --secret-id '${SuiWalletConfigSecretArn}' --query SecretString --output text > /opt/sonari/sui_config.yaml
-            aws secretsmanager get-secret-value --secret-id '${SuiKeystoreSecretArn}' --query SecretString --output text > /opt/sonari/sui.keystore
             chown -R ec2-user:ec2-user /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
             chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
-            chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
-            chmod 0400 /opt/sonari/runner-token /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            chown ec2-user:ec2-user /opt/sonari/runner-token "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            chmod 0400 /opt/sonari/runner-token "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
             cat >/opt/sonari/bin/run-earthquake-enclave <<'SONARI_EARTHQUAKE_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
@@ -429,12 +404,7 @@ Resources:
             : "${!SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS:?SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS is required}"
             : "${!SONARI_EARTHQUAKE_ENCLAVE_CID:?SONARI_EARTHQUAKE_ENCLAVE_CID is required}"
             : "${!SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"
-            : "${!SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"
-            : "${!SONARI_WALRUS_WALLET:?SONARI_WALRUS_WALLET is required}"
-            : "${!SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"
-            : "${!SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"
             : "${!SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"
-            : "${!SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"
 
             marker=/tmp/sonari-earthquake-enclave-bootstrapped
             input_file="$(mktemp)"
@@ -458,24 +428,10 @@ Resources:
 
               jq -n \
                 --arg walrus_cli "$SONARI_WALRUS_CLI" \
-                --arg walrus_context "$SONARI_WALRUS_CONTEXT" \
-                --arg walrus_aggregator_url "$SONARI_WALRUS_AGGREGATOR_URL" \
-                --arg walrus_upload_relay "${!SONARI_WALRUS_UPLOAD_RELAY:-}" \
                 --arg egress_proxy_url "$SONARI_EARTHQUAKE_EGRESS_PROXY_URL" \
-                --arg walrus_epochs "$SONARI_WALRUS_EPOCHS" \
-                --rawfile walrus_config "$SONARI_WALRUS_CONFIG" \
-                --rawfile sui_config "$SONARI_WALRUS_WALLET" \
-                --rawfile sui_keystore /opt/sonari/sui.keystore \
                 '{
                   walrus_cli: $walrus_cli,
-                  walrus_config: $walrus_config,
-                  sui_config: $sui_config,
-                  sui_keystore: $sui_keystore,
-                  walrus_context: $walrus_context,
-                  walrus_aggregator_url: $walrus_aggregator_url,
-                  walrus_upload_relay: $walrus_upload_relay,
-                  egress_proxy_url: $egress_proxy_url,
-                  walrus_epochs: ($walrus_epochs | tonumber)
+                  egress_proxy_url: $egress_proxy_url
                 }' | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777" >/dev/null
               touch "$marker"
             }
@@ -560,18 +516,6 @@ Resources:
             ${MembershipNitroEnclaveProcessCommand}
             SONARI_MEMBERSHIP_COMMAND
             )
-            walrus_aggregator_url=$(cat <<'SONARI_WALRUS_URL'
-            ${WalrusAggregatorUrl}
-            SONARI_WALRUS_URL
-            )
-            walrus_upload_relay_url=$(cat <<'SONARI_WALRUS_UPLOAD_RELAY'
-            ${WalrusUploadRelayUrl}
-            SONARI_WALRUS_UPLOAD_RELAY
-            )
-            walrus_context=$(cat <<'SONARI_WALRUS_CONTEXT'
-            ${WalrusContext}
-            SONARI_WALRUS_CONTEXT
-            )
             world_id_app_id=$(cat <<'SONARI_WORLD_ID_APP_ID'
             ${WorldIdAppId}
             SONARI_WORLD_ID_APP_ID
@@ -584,19 +528,6 @@ Resources:
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
-            fi
-            walrus_aggregator_host="$(printf '%s' "$walrus_aggregator_url" | sed -E 's#^https?://([^/:]+).*#\1#')"
-            if [ -z "$walrus_aggregator_host" ] || [ "$walrus_aggregator_host" = "$walrus_aggregator_url" ]; then
-              echo "WalrusAggregatorUrl must be an http(s) URL" >&2
-              exit 1
-            fi
-            walrus_upload_relay_host=""
-            if [ -n "$walrus_upload_relay_url" ]; then
-              walrus_upload_relay_host="$(printf '%s' "$walrus_upload_relay_url" | sed -E 's#^https?://([^/:]+).*#\1#')"
-              if [ -z "$walrus_upload_relay_host" ] || [ "$walrus_upload_relay_host" = "$walrus_upload_relay_url" ]; then
-                echo "WalrusUploadRelayUrl must be empty or an http(s) URL" >&2
-                exit 1
-              fi
             fi
             sonari_dev_membership_stdio_bridge=0
             if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
@@ -673,13 +604,7 @@ Resources:
                 server.serve_forever()
             SONARI_EARTHQUAKE_CONNECT_PROXY
             chmod 0500 /opt/sonari/bin/sonari-earthquake-egress-connect-proxy
-            {
-              echo "earthquake.usgs.gov:443"
-              printf '%s:443\n' "$walrus_aggregator_host"
-              if [ -n "$walrus_upload_relay_host" ]; then
-                printf '%s:443\n' "$walrus_upload_relay_host"
-              fi
-            } | sort -u >/opt/sonari/earthquake-egress-allowlist
+            printf '%s\n' "earthquake.usgs.gov:443" >/opt/sonari/earthquake-egress-allowlist
             if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
               printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
             fi
@@ -753,12 +678,6 @@ Resources:
             {
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
-              echo "SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml"
-              echo "SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml"
-              echo "SONARI_WALRUS_EPOCHS=2"
-              printf 'SONARI_WALRUS_CONTEXT=%q\n' "$walrus_context"
-              printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
-              printf 'SONARI_WALRUS_UPLOAD_RELAY=%q\n' "$walrus_upload_relay_url"
               echo "SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080"
               echo "SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"

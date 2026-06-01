@@ -232,7 +232,7 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.bootstrapReadinessChecks).toEqual(["i-cold"]);
     });
 
-    it("checks required bootstrap sentinel, env, secret files, Walrus config, and Nitro allocator", () => {
+    it("checks required bootstrap sentinel, env, blob-id CLI, egress proxy, and Nitro allocator", () => {
         const command = buildRunnerBootstrapReadinessShellCommand();
 
         expect(command).toContain("test -f /opt/sonari/bootstrap-complete");
@@ -240,18 +240,15 @@ describe("AWS runner workflow helper", () => {
         expect(command).toContain("source /opt/sonari/runner.env");
         expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
         expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED_FILE");
-        expect(command).toContain("test -s \"$SONARI_WALRUS_CONFIG\"");
-        expect(command).toContain("test -s \"$SONARI_WALRUS_WALLET\"");
+        expect(command).toContain(
+            ': "${SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"',
+        );
         expect(command).toContain("test -x \"$SONARI_WALRUS_CLI\"");
-        expect(command).toContain(
-            ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
-        );
-        expect(command).toContain(
-            ': "${SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"',
-        );
-        expect(command).toContain(
-            ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
-        );
+        expect(command).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(command).not.toContain("SONARI_WALRUS_WALLET");
+        expect(command).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(command).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(command).not.toContain("SONARI_WALRUS_EPOCHS");
         expect(command).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
     });
 
@@ -286,26 +283,19 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.commands[0]).toContain("NITRO_ENCLAVE_PROCESS_COMMAND");
         expect(ssm.commands[0]).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"',
-        );
-        expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
-        );
-        expect(ssm.commands[0]).toContain(
             ': "${SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_WALLET:?SONARI_WALRUS_WALLET is required}"',
+            ': "${SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"',
+            "export SONARI_WALRUS_CLI SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         );
-        expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
-        );
-        expect(ssm.commands[0]).toContain(
-            "export SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
-        );
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_WALLET");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_EPOCHS");
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[0]).not.toContain("latest.json");
     });

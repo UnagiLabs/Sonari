@@ -197,63 +197,18 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
     let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
-    write_secret_file(
-        "/opt/sonari/walrus-client-config.yaml",
-        &config.walrus_config,
-    )?;
-    write_secret_file("/opt/sonari/sui_config.yaml", &config.sui_config)?;
-    write_secret_file("/opt/sonari/sui.keystore", &config.sui_keystore)?;
     set_env_before_server("SONARI_WALRUS_CLI", &config.walrus_cli);
     set_env_before_server(
-        "SONARI_WALRUS_CONFIG",
-        "/opt/sonari/walrus-client-config.yaml",
+        "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+        &config.egress_proxy_url,
     );
-    set_env_before_server("SONARI_WALRUS_WALLET", "/opt/sonari/sui_config.yaml");
-    set_env_before_server("SONARI_WALRUS_KEYSTORE", "/opt/sonari/sui.keystore");
-    set_env_before_server("SONARI_WALRUS_CONTEXT", &config.walrus_context);
-    set_env_before_server(
-        "SONARI_WALRUS_AGGREGATOR_URL",
-        &config.walrus_aggregator_url,
-    );
-    if let Some(upload_relay) = non_empty_option(config.walrus_upload_relay.as_deref()) {
-        set_env_before_server("SONARI_WALRUS_UPLOAD_RELAY", upload_relay);
-    }
-    if let Some(egress_proxy_url) = non_empty_option(config.egress_proxy_url.as_deref()) {
-        set_env_before_server("SONARI_EARTHQUAKE_EGRESS_PROXY_URL", egress_proxy_url);
-    }
-    set_env_before_server("SONARI_WALRUS_EPOCHS", &config.walrus_epochs.to_string());
     Ok(())
 }
 
 #[derive(Debug, Deserialize)]
 struct BootstrapConfig {
     walrus_cli: String,
-    walrus_config: String,
-    sui_config: String,
-    sui_keystore: String,
-    walrus_context: String,
-    walrus_aggregator_url: String,
-    #[serde(default)]
-    walrus_upload_relay: Option<String>,
-    #[serde(default)]
-    egress_proxy_url: Option<String>,
-    walrus_epochs: u32,
-}
-
-fn non_empty_option(value: Option<&str>) -> Option<&str> {
-    value.map(str::trim).filter(|value| !value.is_empty())
-}
-
-fn write_secret_file(path: &str, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
-    fs::write(path, contents)?;
-    let mut permissions = fs::metadata(path)?.permissions();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        permissions.set_mode(0o400);
-    }
-    fs::set_permissions(path, permissions)?;
-    Ok(())
+    egress_proxy_url: String,
 }
 
 fn set_env_before_server(name: &str, value: &str) {
@@ -994,11 +949,6 @@ fn walrus_archive_config(
         return Ok(None);
     }
 
-    let aggregator_url = cli
-        .walrus_aggregator_url
-        .clone()
-        .or_else(|| non_empty_env("SONARI_WALRUS_AGGREGATOR_URL"))
-        .ok_or("--walrus-aggregator-url or SONARI_WALRUS_AGGREGATOR_URL is required with --walrus-archive")?;
     let epochs = match cli
         .walrus_epochs
         .map(Ok)
@@ -1041,7 +991,11 @@ fn walrus_archive_config(
             .walrus_upload_relay
             .clone()
             .or_else(|| non_empty_env("SONARI_WALRUS_UPLOAD_RELAY")),
-        aggregator_url,
+        aggregator_url: cli
+            .walrus_aggregator_url
+            .clone()
+            .or_else(|| non_empty_env("SONARI_WALRUS_AGGREGATOR_URL"))
+            .unwrap_or_default(),
         epochs,
         command_timeout_ms,
         egress_proxy_url: non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),

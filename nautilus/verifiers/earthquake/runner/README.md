@@ -72,7 +72,8 @@ HTTP server を AWS backend で起動する場合の環境変数:
 RUNNER_TOKEN=<bearer-token>
 RUNNER_BACKEND=aws
 NITRO_ENCLAVE_PROCESS_COMMAND=<host-to-enclave-command>
-SONARI_WALRUS_AGGREGATOR_URL=<url>
+SONARI_WALRUS_CLI=<path-to-walrus-cli>
+SONARI_EARTHQUAKE_EGRESS_PROXY_URL=<url>
 ```
 
 ## 本番 TEE backend の条件

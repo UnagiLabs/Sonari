@@ -138,15 +138,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(scheduleStateUsageCount).toBe(2);
     });
 
-    it("retains earthquake Walrus parameters and runner environment", async () => {
+    it("keeps only the earthquake Walrus blob-id CLI in the runner environment", async () => {
         const template = await readTemplate();
 
-        expect(template).toContain("WalrusConfigSecretArn:");
-        expect(template).toContain("SuiWalletConfigSecretArn:");
-        expect(template).toContain("SuiKeystoreSecretArn:");
-        expect(template).toContain("WalrusAggregatorUrl:");
-        expect(template).toContain("WalrusUploadRelayUrl:");
-        expect(template).toContain("WalrusContext:");
         expect(template).toContain("EarthquakeTeeEifS3Bucket:");
         expect(template).toContain("EarthquakeTeeEifS3Key:");
         expect(template).toContain("EarthquakeTeeEifSha256:");
@@ -166,11 +160,6 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("call_earthquake_enclave GET /get_attestation");
         expect(template).toContain("call_earthquake_enclave POST /process_data");
         expect(template).toContain("SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus");
-        expect(template).toContain("SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml");
-        expect(template).toContain("SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml");
-        expect(template).toContain("SONARI_WALRUS_CONTEXT");
-        expect(template).toContain("SONARI_WALRUS_AGGREGATOR_URL");
-        expect(template).toContain("SONARI_WALRUS_UPLOAD_RELAY");
         expect(template).toContain("SONARI_EARTHQUAKE_EIF_PATH");
         expect(template).toContain("SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
@@ -179,6 +168,17 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             'exec "$' +
                 '{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"',
         );
+        expect(template).not.toContain("WalrusConfigSecretArn:");
+        expect(template).not.toContain("SuiWalletConfigSecretArn:");
+        expect(template).not.toContain("SuiKeystoreSecretArn:");
+        expect(template).not.toContain("WalrusAggregatorUrl:");
+        expect(template).not.toContain("WalrusUploadRelayUrl:");
+        expect(template).not.toContain("WalrusContext:");
+        expect(template).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(template).not.toContain("SONARI_WALRUS_WALLET");
+        expect(template).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(template).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(template).not.toContain("SONARI_WALRUS_UPLOAD_RELAY");
     });
 
     it("configures earthquake enclave egress through a parent CONNECT proxy and local bridge", async () => {
@@ -191,6 +191,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("{address: 127.0.0.1, port: 18081}");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).not.toContain("walrus_aggregator_host");
+        expect(template).not.toContain("walrus_upload_relay_host");
     });
 
     it("retains membership World ID, EIF, KMS attestation, and ciphertext configuration", async () => {

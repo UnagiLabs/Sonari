@@ -365,7 +365,7 @@ fn finalized_entrypoint_signs_core_payload_with_injected_signer() {
 }
 
 #[test]
-fn finalized_usgs_archives_raw_sources_before_signing_payload() {
+fn finalized_usgs_references_raw_sources_before_signing_payload() {
     let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
     let archive = RecordingSourceArchive::default();
     let output = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
@@ -378,7 +378,7 @@ fn finalized_usgs_archives_raw_sources_before_signing_payload() {
         .expect("finalized output should include raw manifest");
     assert_eq!(raw_manifest.entries.len(), 2);
     assert_eq!(archive.stored.get(), 2);
-    assert_eq!(archive.fetched.get(), 2);
+    assert_eq!(archive.fetched.get(), 0);
 
     for entry in &raw_manifest.entries {
         assert!(entry.uri.starts_with("walrus://blob/"));
@@ -421,7 +421,7 @@ fn finalized_usgs_archives_raw_grid_zip_artifact_bytes_not_expanded_xml() {
     let grid_record = stored
         .iter()
         .find(|record| record.source_uri == "https://example.test/download/grid.xml.zip")
-        .expect("zip source should be archived");
+        .expect("zip source should be referenced");
     assert_eq!(grid_record.bytes, grid_zip);
     assert_eq!(grid_record.source_hash, grid_zip_hash);
 }
@@ -1089,7 +1089,6 @@ impl SourceArchive for RecordingSourceArchive {
     ) -> Result<StoredSourceRef, SourceArchiveError> {
         let index = self.stored.get();
         self.stored.set(index + 1);
-        self.fetched.set(self.fetched.get() + 1);
         self.records.borrow_mut().push(ArchivedSourceRecord {
             source_uri: source_uri.to_owned(),
             source_hash: source_hash.to_owned(),

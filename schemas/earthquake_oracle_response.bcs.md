@@ -77,7 +77,7 @@ event_uid = SHA-256(
 
 - `event_uid` 生成時の `primary_source` はPayload enum名ではなくsource name文字列です。MVPでは `USGS` を使います。
 - `source_set_hash = SHA-256(canonical_source_manifest_json_bytes)` です。
-- `raw_data_hash = SHA-256(canonical_raw_data_manifest_json_bytes)` です。raw source bytesを単純結合してhashしてはいけません。Production finalized の raw data manifest entries には Walrus の content-addressed blob id と raw source hash を含め、`entries[].uri = walrus://blob/<blob_id>` を raw source の canonical reference とします。`raw_data_uri` は manifest の配送先 URI であり、manifest 自体の Walrus 保存を署名対象にはしません。
+- `raw_data_hash = SHA-256(canonical_raw_data_manifest_json_bytes)` です。raw source bytesを単純結合してhashしてはいけません。Production finalized の raw data manifest entries には、TEE が同じ raw source bytes から計算した Walrus の content-addressed blob id と raw source hash を含め、`entries[].uri = walrus://blob/<blob_id>` を raw source の canonical reference とします。Walrus への実保存、pin、再試行、aggregator fetch による再検証は TEE 外の archiver 責務です。`raw_data_uri` は manifest の配送先 URI であり、manifest 自体の Walrus 保存を署名対象にはしません。
 - `affected_cells_data_hash = SHA-256(canonical_affected_cells_json_bytes)` です。
 - `affected_cells_root` とMerkle leaf / internal node hashはすべて `SHA-256` です。詳細は `schemas/affected_cell_leaf.md` に従います。
 - `properties.mag` はdecimal文字列表現として扱い、小数第3位が `5` 以上なら繰り上げます。例: `7.234 -> 723`、`7.235 -> 724`、`7.995 -> 800`。

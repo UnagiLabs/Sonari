@@ -144,10 +144,10 @@ Sui 投稿対象になるのは `finalized` 出力だけです。
 ## プライバシー / セキュリティ
 
 - この検証器は個人の residence、student、phone、GPS、address、document evidence を扱いません。
-- 生の地震 source artifact は hash 化し、必要に応じて Walrus-backed reference として archive します。
+- 生の地震 source artifact は TEE 内で hash 化し、Walrus の content-addressed blob id を計算して署名対象 manifest に入れます。TEE は保存を待たず、Walrus への実保存、pin、retry、fetch 再検証は TEE 外の archiver が担います。
 - TEE signing key は本番 TEE boundary 内に隔離します。秘密鍵を EC2 host、Lambda、relayer、GitHub Actions、Sui wallet config へ出してはいけません。
 - Watcher と relayer の入力は contract boundary では untrusted として扱います。
-- Source fetch、archive verification、BCS serialization、Merkle generation、signing の失敗は fail-closed にします。
+- Source fetch、source hash / blob id 計算、BCS serialization、Merkle generation、signing の失敗は fail-closed にします。
 
 ## 今後の作業
 

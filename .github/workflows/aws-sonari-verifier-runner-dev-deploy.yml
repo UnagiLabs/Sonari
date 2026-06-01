@@ -31,11 +31,6 @@ jobs:
       SUBNET_IDS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUBNET_IDS }}
       AMI_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_AMI_ID }}
       RUNNER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RUNNER_TOKEN_SECRET_ARN }}
-      WALRUS_CONFIG_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CONFIG_SECRET_ARN }}
-      SUI_WALLET_CONFIG_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUI_WALLET_CONFIG_SECRET_ARN }}
-      SUI_KEYSTORE_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUI_KEYSTORE_SECRET_ARN }}
-      WALRUS_AGGREGATOR_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_AGGREGATOR_URL }}
-      WALRUS_CONTEXT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CONTEXT }}
       SIGNING_SEED_CIPHERTEXT_S3_BUCKET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_BUCKET }}
       SIGNING_SEED_CIPHERTEXT_S3_KEY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_KEY }}
       NITRO_ENCLAVE_IMAGE_SHA384: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_IMAGE_SHA384 }}
@@ -76,10 +71,6 @@ jobs:
             SUBNET_IDS
             AMI_ID
             RUNNER_TOKEN_SECRET_ARN
-            WALRUS_CONFIG_SECRET_ARN
-            SUI_WALLET_CONFIG_SECRET_ARN
-            SUI_KEYSTORE_SECRET_ARN
-            WALRUS_AGGREGATOR_URL
             SIGNING_SEED_CIPHERTEXT_S3_BUCKET
             SIGNING_SEED_CIPHERTEXT_S3_KEY
             NITRO_ENCLAVE_IMAGE_SHA384
@@ -456,10 +447,6 @@ jobs:
             "SubnetIds=$SUBNET_IDS"
             "AmiId=$AMI_ID"
             "RunnerTokenSecretArn=$RUNNER_TOKEN_SECRET_ARN"
-            "WalrusConfigSecretArn=$WALRUS_CONFIG_SECRET_ARN"
-            "SuiWalletConfigSecretArn=$SUI_WALLET_CONFIG_SECRET_ARN"
-            "SuiKeystoreSecretArn=$SUI_KEYSTORE_SECRET_ARN"
-            "WalrusAggregatorUrl=$WALRUS_AGGREGATOR_URL"
             "SigningSeedCiphertextS3Bucket=$SIGNING_SEED_CIPHERTEXT_S3_BUCKET"
             "SigningSeedCiphertextS3Key=$SIGNING_SEED_CIPHERTEXT_S3_KEY"
             "NitroEnclaveImageSha384=$NITRO_ENCLAVE_IMAGE_SHA384"
@@ -468,9 +455,6 @@ jobs:
             "EarthquakeNitroEnclaveProcessCommand=/opt/sonari/bin/run-earthquake-enclave"
           )
 
-          if [[ -n "${WALRUS_CONTEXT:-}" ]]; then
-            extra_parameter_overrides+=("WalrusContext=$WALRUS_CONTEXT")
-          fi
           if [[ -n "${WORLD_ID_API_BASE:-}" ]]; then
             extra_parameter_overrides+=("WorldIdApiBase=$WORLD_ID_API_BASE")
           fi
