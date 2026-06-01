@@ -8,6 +8,7 @@ use contracts::identity_registry;
 use contracts::identity_result_v1;
 use contracts::membership;
 use contracts::metadata_verifier;
+use contracts::reader;
 use sui::address;
 use sui::bcs;
 use sui::clock;
@@ -50,7 +51,7 @@ fun relayer_without_admin_cap_can_submit_signed_kyc_result() {
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         kyc_signature(),
     );
@@ -69,7 +70,7 @@ fun relayer_without_admin_cap_can_submit_signed_world_id_result() {
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_world_id(),
+        identity_registry::provider_world_id(),
         WORLD_ID_DUPLICATE_KEY_HASH,
         world_id_signature(),
     );
@@ -120,9 +121,9 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
             identity_expires_at_ms,
             terms_version,
             signed_statement_hash,
-        ) = accessor::membership_pass_mvp_summary(&pass);
+        ) = membership::membership_pass_mvp_summary(&pass);
         assert!(identity_verified);
-        assert!(identity_provider_mask == accessor::identity_provider_world_id());
+        assert!(identity_provider_mask == identity_registry::provider_world_id());
         assert!(identity_verified_at_ms == NOW_MS);
         assert!(identity_expires_at_ms == EXPIRES_AT_MS);
         assert!(terms_version == TERMS_VERSION);
@@ -130,7 +131,7 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
         identity_registry::assert_duplicate_key_bound_to_pass(
             &identity_registry,
             &pass,
-            accessor::identity_provider_world_id(),
+            identity_registry::provider_world_id(),
             rust_fixture_world_id_duplicate_key_hash(),
         );
 
@@ -157,7 +158,7 @@ fun invalid_identity_result_signature_is_rejected() {
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         signature,
     );
@@ -176,7 +177,7 @@ fun signed_identity_result_expired_is_rejected_at_public_accessor() {
     submit_identity_result_for_key(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         step5_kyc_signature(),
         step5_public_key(),
@@ -235,7 +236,7 @@ fun signed_identity_result_replay_is_rejected_at_public_accessor() {
     submit_identity_result_for_key(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         step5_kyc_signature(),
         step5_public_key(),
@@ -243,7 +244,7 @@ fun signed_identity_result_replay_is_rejected_at_public_accessor() {
     submit_identity_result_for_key(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         step5_kyc_signature(),
         step5_public_key(),
@@ -263,7 +264,7 @@ fun disabled_identity_verifier_key_is_rejected() {
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         kyc_signature(),
     );
@@ -283,7 +284,7 @@ fun global_pause_blocks_signed_identity_update() {
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         kyc_signature(),
     );
@@ -299,12 +300,12 @@ fun identity_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = identity_registry_id(&mut scenario);
-    pause_target(&mut scenario, admin::target_kind_identity_registry(), target_id);
+    pause_target(&mut scenario, reader::target_kind_identity_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         kyc_signature(),
     );
@@ -320,12 +321,12 @@ fun membership_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = membership_registry_id(&mut scenario);
-    pause_target(&mut scenario, accessor::target_kind_membership_registry(), target_id);
+    pause_target(&mut scenario, reader::target_kind_membership_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         kyc_signature(),
     );
@@ -341,12 +342,12 @@ fun verifier_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = verifier_registry_id(&mut scenario);
-    pause_target(&mut scenario, admin::target_kind_verifier_registry(), target_id);
+    pause_target(&mut scenario, reader::target_kind_verifier_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
         &clock,
-        accessor::identity_provider_kyc(),
+        identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
         kyc_signature(),
     );
@@ -435,8 +436,8 @@ fun add_identity_verifier_key_with_public_key(
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_identity(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_identity(),
+            reader::verifier_version_v1(),
             public_key,
             scenario.ctx(),
         );
@@ -453,8 +454,8 @@ fun add_disabled_identity_verifier_key(scenario: &mut test_scenario::Scenario) {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_identity(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_identity(),
+            reader::verifier_version_v1(),
             identity_public_key(),
             scenario.ctx(),
         );
@@ -495,7 +496,7 @@ fun identity_registry_id(scenario: &mut test_scenario::Scenario): ID {
     scenario.next_tx(ADMIN);
     {
         let registry = scenario.take_shared<identity_registry::IdentityRegistry>();
-        let id = accessor::identity_registry_id(&registry);
+        let id = identity_registry::registry_id(&registry);
         test_scenario::return_shared(registry);
         id
     }
@@ -505,7 +506,7 @@ fun membership_registry_id(scenario: &mut test_scenario::Scenario): ID {
     scenario.next_tx(ADMIN);
     {
         let registry = scenario.take_shared<membership::MembershipRegistry>();
-        let id = accessor::membership_registry_id(&registry);
+        let id = membership::registry_id(&registry);
         test_scenario::return_shared(registry);
         id
     }
@@ -515,7 +516,7 @@ fun verifier_registry_id(scenario: &mut test_scenario::Scenario): ID {
     scenario.next_tx(ADMIN);
     {
         let registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        let id = admin::verifier_registry_id(&registry);
+        let id = metadata_verifier::registry_id(&registry);
         test_scenario::return_shared(registry);
         id
     }
@@ -558,7 +559,7 @@ fun submit_identity_result_for_key(
             MEMBER,
         );
         let payload_bcs = identity_result_bcs(
-            accessor::identity_registry_id(&identity_registry),
+            identity_registry::registry_id(&identity_registry),
             object::id(&pass),
             MEMBER,
             provider,
@@ -588,7 +589,7 @@ fun submit_identity_result_for_key(
             identity_expires_at_ms,
             terms_version,
             signed_statement_hash,
-        ) = accessor::membership_pass_mvp_summary(&pass);
+        ) = membership::membership_pass_mvp_summary(&pass);
         assert!(identity_verified);
         assert!(identity_provider_mask == provider);
         assert!(identity_verified_at_ms == NOW_MS);
@@ -643,10 +644,10 @@ fun submit_mutated_identity_result_for_key(
             MEMBER,
         );
         let mut payload_bcs = identity_result_bcs(
-            accessor::identity_registry_id(&identity_registry),
+            identity_registry::registry_id(&identity_registry),
             object::id(&pass),
             MEMBER,
-            accessor::identity_provider_kyc(),
+            identity_registry::provider_kyc(),
             KYC_DUPLICATE_KEY_HASH,
         );
         *payload_bcs.borrow_mut(offset) = value;

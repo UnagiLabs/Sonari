@@ -1,7 +1,7 @@
 #[test_only]
 module contracts::identity_result_tests;
 
-use contracts::accessor;
+use contracts::identity_registry;
 use contracts::identity_result_v1;
 
 const NOW_MS: u64 = 1_800_000_000_000;
@@ -35,7 +35,7 @@ fun fixed_field_order_identity_result_fixture_decodes() {
     assert!(registry_id == x"1111111111111111111111111111111111111111111111111111111111111111");
     assert!(membership_id == x"2222222222222222222222222222222222222222222222222222222222222222");
     assert!(owner == x"3333333333333333333333333333333333333333333333333333333333333333");
-    assert!(provider == accessor::identity_provider_world_id());
+    assert!(provider == identity_registry::provider_world_id());
     assert!(verified);
     assert!(
         duplicate_key_hash ==

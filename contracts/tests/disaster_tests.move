@@ -2,10 +2,12 @@
 module contracts::disaster_tests;
 
 use contracts::admin;
+use contracts::affected_cell;
 use contracts::accessor;
 use contracts::disaster_event;
 use contracts::metadata_verifier;
 use contracts::payload;
+use contracts::reader;
 use sui::bcs;
 use sui::clock;
 use sui::event;
@@ -47,7 +49,7 @@ fun affected_cell_leaf_hash_and_merkle_proof_match_fixture_vectors() {
         CELLS_GENERATION_METHOD,
         ORACLE_VERSION,
     );
-    let hash = accessor::affected_cell_leaf_hash(&leaf);
+    let hash = affected_cell::leaf_hash(&leaf);
     assert!(
         hash == x"bc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
     );
@@ -57,7 +59,7 @@ fun affected_cell_leaf_hash_and_merkle_proof_match_fixture_vectors() {
             x"83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
         ),
     ];
-    assert!(accessor::verify_affected_cell_proof(&leaf, proof, affected_cells_root()));
+    assert!(affected_cell::verify_proof(&leaf, proof, affected_cells_root()));
 }
 
 #[test]
@@ -123,8 +125,8 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
@@ -208,7 +210,7 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         assert!(signature_scheme == SIGNATURE_SCHEME_ED25519);
         assert!(verifier_public_key == oracle_public_key());
         assert!(signature == oracle_signature());
-        assert!(verifier_registry_id == admin::verifier_registry_id(&verifier_registry));
+        assert!(verifier_registry_id == metadata_verifier::registry_id(&verifier_registry));
 
         let (
             object_payload_bcs_hash,
@@ -461,8 +463,8 @@ fun duplicate_disaster_event_uid_and_revision_is_rejected() {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
@@ -539,8 +541,8 @@ fun relayer_without_admin_cap_can_submit_registered_signed_payload() {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
@@ -588,8 +590,8 @@ fun signed_payload_freshness_uses_clock_timestamp() {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
@@ -631,8 +633,8 @@ fun disabled_earthquake_oracle_key_is_rejected() {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
@@ -671,7 +673,7 @@ fun wrong_earthquake_oracle_key_family_is_rejected() {
         metadata_verifier::add_verifier_key_unchecked_for_testing(
             &mut verifier_registry,
             1,
-            admin::verifier_version_v1(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
@@ -703,7 +705,7 @@ fun wrong_earthquake_oracle_key_version_is_rejected() {
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
         metadata_verifier::add_verifier_key_unchecked_for_testing(
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
+            reader::verifier_family_earthquake_oracle(),
             2,
             oracle_public_key(),
             scenario.ctx(),
@@ -765,8 +767,8 @@ fun create_signed_event_with_payload(payload_bcs: vector<u8>, signature: vector<
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            admin::verifier_family_earthquake_oracle(),
-            admin::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             oracle_public_key(),
             scenario.ctx(),
         );
