@@ -221,6 +221,25 @@ fn rejects_h3_index_that_does_not_match_leaf_hash() {
 }
 
 #[test]
+fn rejects_duplicate_valid_proof_entry() {
+    let directory = tempdir().expect("tempdir");
+    let output_dir = directory.path().join("proofs");
+    let mut generated = write_fixture_artifact(&output_dir);
+    let shard_id = 2;
+    let duplicate = generated.shards[shard_id].proofs[0].clone();
+    generated.shards[shard_id].proofs[1] = duplicate;
+    rewrite_shard_and_inventory(&output_dir, &mut generated, shard_id);
+
+    let error = verify_proof_shards(
+        &output_dir.join("proof_manifest.json"),
+        &output_dir.join("shards"),
+    )
+    .expect_err("duplicate valid proof must fail");
+
+    assert!(error.to_string().contains("duplicate proof entry"));
+}
+
+#[test]
 fn rejects_missing_expected_shard() {
     let directory = tempdir().expect("tempdir");
     let output_dir = directory.path().join("proofs");

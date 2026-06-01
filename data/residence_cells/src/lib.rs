@@ -1135,6 +1135,7 @@ pub fn verify_proof_shards(
     }
 
     let mut verified_proofs = 0usize;
+    let mut seen_h3_indexes = std::collections::BTreeSet::new();
     for (shard_id, inventory) in inventory_by_id.into_iter().enumerate() {
         let Some(inventory) = inventory else {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
@@ -1166,12 +1167,25 @@ pub fn verify_proof_shards(
         }
 
         let shard = read_proof_shard_gzip(&shard_path, &compressed)?;
-        verified_proofs += validate_proof_shard_contents(&manifest, inventory, shard_id, &shard)?;
+        verified_proofs += validate_proof_shard_contents(
+            &manifest,
+            inventory,
+            shard_id,
+            &shard,
+            &mut seen_h3_indexes,
+        )?;
     }
 
     if verified_proofs != manifest.total_proof_count {
         return Err(ResidenceAllowlistError::InvalidArtifact(format!(
             "verified proof count {verified_proofs} does not match manifest total_proof_count {}",
+            manifest.total_proof_count
+        )));
+    }
+    if seen_h3_indexes.len() != manifest.total_proof_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "unique proof count {} does not match manifest total_proof_count {}",
+            seen_h3_indexes.len(),
             manifest.total_proof_count
         )));
     }
@@ -1790,6 +1804,7 @@ fn validate_proof_shard_contents(
     inventory: &ProofShardInventoryEntry,
     expected_shard_id: usize,
     shard: &ProofShard,
+    seen_h3_indexes: &mut std::collections::BTreeSet<u64>,
 ) -> Result<usize, ResidenceAllowlistError> {
     if shard.schema != PROOF_SHARD_SCHEMA {
         return Err(ResidenceAllowlistError::InvalidArtifact(format!(
@@ -1846,6 +1861,11 @@ fn validate_proof_shard_contents(
     })?;
     for entry in &shard.proofs {
         let h3_index = parse_h3_index(&entry.h3_index, manifest.geo_resolution)?;
+        if !seen_h3_indexes.insert(h3_index) {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "duplicate proof entry for h3_index {h3_index}"
+            )));
+        }
         let expected_leaf = ResidenceCellLeaf {
             h3_index,
             geo_resolution: manifest.geo_resolution,
