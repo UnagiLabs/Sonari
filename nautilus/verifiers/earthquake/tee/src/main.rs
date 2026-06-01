@@ -505,10 +505,7 @@ fn production_worker_request_result(
     seed: [u8; 32],
     registration_metadata: Option<EnclaveRegistrationMetadata>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let detail_url = format!(
-        "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
-        request.source_event_id
-    );
+    let detail_url = usgs_detail_url(&request.source_event_id);
     let client = production_http_client()?;
     let detail_json = match client.get(&detail_url).send().and_then(|response| {
         if response.status().is_success() {
@@ -598,9 +595,7 @@ fn build_production_input(parts: ProductionInputParts, observed_at_ms: u64) -> U
         grid_xml: parts.grid_xml,
         raw_grid_bytes: parts.raw_grid_bytes,
         observed_at_ms,
-        raw_detail_uri: format!(
-            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{id}.geojson"
-        ),
+        raw_detail_uri: usgs_detail_url(id),
         raw_grid_uri: parts.raw_grid_uri,
         raw_data_uri: format!("ipfs://sonari/live/{id}/raw_data_manifest.json"),
         affected_cells_uri: format!("ipfs://sonari/live/{id}/affected_cells.json"),
@@ -627,6 +622,12 @@ fn canonical_usgs_detail_id_for_request<'a>(
         return Some(canonical_id);
     }
     None
+}
+
+fn usgs_detail_url(source_event_id: &str) -> String {
+    format!(
+        "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid={source_event_id}&format=geojson"
+    )
 }
 
 fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -1100,7 +1101,7 @@ mod tests {
         assert_eq!(input.case_id, "usgs-live/us7000abcd");
         assert_eq!(
             input.raw_detail_uri,
-            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000abcd.geojson"
+            "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000abcd&format=geojson"
         );
         assert_eq!(
             input.raw_data_uri,
