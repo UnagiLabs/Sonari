@@ -232,14 +232,14 @@ public fun create_campaign(
     );
 }
 
-public fun create_default_disaster_policy(cap: &AdminCap, ctx: &mut TxContext) {
+public fun create_default_disaster_policy(cap: &AdminCap, ctx: &mut TxContext): ID {
     let _ = cap;
-    payout_policy::create_default_disaster_policy(ctx);
+    payout_policy::create_default_disaster_policy(ctx)
 }
 
-public fun create_disaster_registry(cap: &AdminCap, ctx: &mut TxContext) {
+public fun create_disaster_registry(cap: &AdminCap, ctx: &mut TxContext): ID {
     let _ = cap;
-    disaster_event::create_disaster_registry(ctx);
+    disaster_event::create_disaster_registry(ctx)
 }
 
 public fun bind_disaster_campaign(
@@ -282,7 +282,7 @@ public fun open_campaign_budget_from_designated_and_main(
     );
 }
 
-public fun assert_claim_precheck(
+public(package) fun assert_claim_precheck(
     pause_state: &PauseState,
     program: &program::Program,
     campaign: &program::Campaign,
@@ -433,11 +433,11 @@ public fun is_target_paused(pause_state: &PauseState, target_id: ID): bool {
     pause_state.paused_targets.contains(&target_id)
 }
 
-public fun assert_not_globally_paused(pause_state: &PauseState) {
+public(package) fun assert_not_globally_paused(pause_state: &PauseState) {
     assert!(!is_global_paused(pause_state), EGlobalPaused);
 }
 
-public fun assert_target_not_paused(pause_state: &PauseState, target_id: ID) {
+public(package) fun assert_target_not_paused(pause_state: &PauseState, target_id: ID) {
     assert!(!is_target_paused(pause_state, target_id), ETargetPaused);
 }
 

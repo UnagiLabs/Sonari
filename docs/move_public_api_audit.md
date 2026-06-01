@@ -1,7 +1,8 @@
 # Move public API audit
 
-Issue #105 Step 2 inventory. Scope is `contracts/sources` after moving
-external/user/UI read getters behind `contracts::accessor`.
+Issue #105 Step 3 inventory. Scope is `contracts/sources` after moving
+external/user/UI read getters behind `contracts::accessor` and keeping
+AdminCap-gated operations in `contracts::admin`.
 
 ## Accessor public
 
@@ -69,7 +70,7 @@ building blocks. They should not be external transaction targets:
   `tier_gold`, `bronze_threshold_usdc`, `silver_threshold_usdc`,
   `gold_threshold_usdc`, `coin_type_usdc`.
 - `identity_registry`: `create_identity_registry`, `bind_duplicate_key`,
-  `apply_identity_verification_result`.
+  `assert_duplicate_key_bound_to_pass`, `apply_identity_verification_result`.
 - `identity_result_v1`: `registry_id`, `membership_id`, `owner`,
   `provider`, `duplicate_key_hash`, `expires_at_ms`, `terms_version`,
   `signed_statement_hash`.
@@ -102,37 +103,45 @@ building blocks. They should not be external transaction targets:
   `operations_pool_total_received_usdc`, `pool_kind_main`,
   `pool_kind_designated`, `pool_kind_operations`, `target_kind_main_pool`,
   `target_kind_designated_pool`, `target_kind_operations_pool`.
-- `program`: `create_program`, `create_campaign`,
+- `program`: `create_program`, `create_campaign`, `assert_claim_precheck`,
+  `assert_claim_window`,
   `assert_budget_not_opened_and_mark`, `assert_campaign_program_match`,
   `assert_payout_policy_matches`, `assert_no_effective_designated_pool`,
   `assert_effective_designated_pool_matches`.
+- `admin`: `assert_claim_precheck`, `assert_not_globally_paused`,
+  `assert_target_not_paused`.
 
-## Public retained for future steps
+## Admin public
 
-These are production `public fun` declarations outside `accessor`. They remain
-public after Step 2, mostly as admin entrypoints, non-user read accessors,
-constants, or assertion helpers. Later steps can decide whether to keep them
-module-public, move them behind accessor/view modules, or narrow them.
+AdminCap-gated production `public fun` declarations remain in `admin`, not
+`accessor`, so external admin/config/status transactions enter through the
+admin module and preserve existing admin-cap checks:
 
 - `admin`: `create_designated_pool`, `create_program`, `create_campaign`,
   `create_default_disaster_policy`, `create_disaster_registry`,
   `bind_disaster_campaign`, `open_campaign_budget_from_main`,
-  `open_campaign_budget_from_designated_and_main`, `assert_claim_precheck`,
-  `add_verifier_key`, `disable_verifier_key`,
+  `open_campaign_budget_from_designated_and_main`, `add_verifier_key`,
+  `disable_verifier_key`,
   `create_allowed_residence_cell_registry`,
   `update_allowed_residence_cell_root`, `pause_global`, `unpause_global`,
-  `pause_target`, `unpause_target`, `is_global_paused`,
-  `is_target_paused`, `assert_not_globally_paused`,
-  `assert_target_not_paused`, `paused_target_count`, `scope_global`,
-  `scope_target`, `target_kind_none`, `genesis_kind_admin_cap`,
+  `pause_target`, `unpause_target`.
+
+## Public retained for future steps
+
+These are production `public fun` declarations outside `accessor`. They remain
+public after Step 3 as non-admin read accessors, constants, or externally useful
+helpers. Later steps can decide whether to keep them module-public, move them
+behind dedicated view modules, or narrow them.
+
+- `admin`: `is_global_paused`, `is_target_paused`, `paused_target_count`,
+  `scope_global`, `scope_target`, `target_kind_none`, `genesis_kind_admin_cap`,
   `genesis_kind_pause_state`, `genesis_kind_main_pool`,
   `genesis_kind_operations_pool`, `genesis_kind_donor_registry`,
   `genesis_kind_membership_registry`, `genesis_kind_verifier_registry`,
   `genesis_kind_claim_index`, `genesis_kind_identity_registry`.
 - `disaster_event`: `assert_campaign_binding`.
-- `identity_registry`: `assert_duplicate_key_bound_to_pass`,
-  `registry_id`, `registry_kind_identity`, `target_kind_identity_registry`,
-  `provider_kyc`, `provider_world_id`.
+- `identity_registry`: `registry_id`, `registry_kind_identity`,
+  `target_kind_identity_registry`, `provider_kyc`, `provider_world_id`.
 - `identity_result_v1`: `decode_verified`, `identity_result_summary`,
   `provider_kyc`, `provider_world_id`.
 - `membership`: `assert_current_pass_precheck`, `duplicate_claim_key`.
@@ -148,15 +157,15 @@ module-public, move them behind accessor/view modules, or narrow them.
   `occurred_at_ms`, `freshness_deadline_ms`,
   `intent_earthquake_oracle_payload`, `hazard_type_earthquake`,
   `status_finalized`.
-- `program`: `assert_claim_precheck`, `assert_claim_window`, `id`,
-  `campaign_id`, `required_pass_metadata`, `required_verifier_family`,
-  `payout_policy_id`, `campaign_claim_start_ms`, `campaign_claim_end_ms`,
-  `status_active`, `status_inactive`, `status_closed`,
-  `target_kind_program`, `target_kind_campaign`.
+- `program`: `id`, `campaign_id`, `required_pass_metadata`,
+  `required_verifier_family`, `payout_policy_id`,
+  `campaign_claim_start_ms`, `campaign_claim_end_ms`, `status_active`,
+  `status_inactive`, `status_closed`, `target_kind_program`,
+  `target_kind_campaign`.
 
 ## Private
 
-No production `public fun` is reclassified to private in Step 2. Existing
+No production `public fun` is reclassified to private in Step 3. Existing
 private helpers remain private within their modules.
 
 ## Test-only

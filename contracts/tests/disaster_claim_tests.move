@@ -906,8 +906,9 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
-        let payout_policy_id = payout_policy::create_default_disaster_policy(scenario.ctx());
-        program::create_program(
+        let payout_policy_id = admin::create_default_disaster_policy(&cap, scenario.ctx());
+        admin::create_program(
+            &cap,
             1,
             1,
             1,
@@ -915,7 +916,7 @@ fun create_disaster_claim_objects_without_budget_with_pool(
             option::none(),
             scenario.ctx(),
         );
-        disaster_event::create_disaster_registry(scenario.ctx());
+        admin::create_disaster_registry(&cap, scenario.ctx());
         scenario.return_to_sender(cap);
     };
 
@@ -923,7 +924,8 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
-        program::create_campaign(
+        admin::create_campaign(
+            &cap,
             &program,
             1,
             b"disaster-claim",

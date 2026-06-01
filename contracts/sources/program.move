@@ -139,7 +139,7 @@ public(package) fun create_campaign(
     transfer::share_object(campaign);
 }
 
-public fun assert_claim_precheck(
+public(package) fun assert_claim_precheck(
     program: &Program,
     campaign: &Campaign,
 ) {
@@ -148,7 +148,7 @@ public fun assert_claim_precheck(
     assert!(campaign.program_id == object::id(program), ECampaignProgramMismatch);
 }
 
-public fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
+public(package) fun assert_claim_window(campaign: &Campaign, now_ms: u64) {
     assert!(
         campaign.claim_start_ms <= now_ms && now_ms < campaign.claim_end_ms,
         EClaimWindowNotOpen,

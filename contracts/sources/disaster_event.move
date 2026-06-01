@@ -111,7 +111,7 @@ public struct DisasterCampaignBound has copy, drop {
     actor: address,
 }
 
-public(package) fun create_disaster_registry(ctx: &mut TxContext) {
+public(package) fun create_disaster_registry(ctx: &mut TxContext): ID {
     let registry = DisasterRegistry {
         id: object::new(ctx),
         event_count: 0,
@@ -123,6 +123,7 @@ public(package) fun create_disaster_registry(ctx: &mut TxContext) {
         actor: ctx.sender(),
     });
     transfer::share_object(registry);
+    registry_id
 }
 
 public(package) fun create_from_signed_payload(

@@ -743,7 +743,8 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
     let mut scenario = initialized();
 
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    program::create_program(
+    admin::create_program(
+        &cap,
         7,
         0xFF,
         3,
@@ -773,7 +774,8 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
     assert!(program::id(&program) == program_id_from_event);
-    program::create_campaign(
+    admin::create_campaign(
+        &cap,
         &program,
         9,
         b"metadata-hash",
@@ -1153,7 +1155,8 @@ fun assert_display_fields<T: key>(
 
 fun create_program(scenario: &mut test_scenario::Scenario, program_type: u8): object::ID {
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    program::create_program(
+    admin::create_program(
+        &cap,
         program_type,
         0xFF,
         3,
@@ -1179,7 +1182,8 @@ fun create_program_and_campaign(
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
-    program::create_campaign(
+    admin::create_campaign(
+        &cap,
         &program,
         9,
         b"metadata-hash",
@@ -1205,7 +1209,8 @@ fun create_program_and_campaign_with_pools(
     campaign_pool_id: Option<object::ID>,
 ) {
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    program::create_program(
+    admin::create_program(
+        &cap,
         7,
         0xFF,
         3,
@@ -1218,7 +1223,8 @@ fun create_program_and_campaign_with_pools(
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
-    program::create_campaign(
+    admin::create_campaign(
+        &cap,
         &program,
         9,
         b"metadata-hash",

@@ -70,7 +70,7 @@ public(package) fun bind_duplicate_key(
     };
 }
 
-public fun assert_duplicate_key_bound_to_pass(
+public(package) fun assert_duplicate_key_bound_to_pass(
     registry: &IdentityRegistry,
     pass: &MembershipPass,
     provider: u8,

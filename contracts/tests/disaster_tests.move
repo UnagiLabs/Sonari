@@ -110,7 +110,9 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
 
     scenario.next_tx(ADMIN);
     {
-        disaster_event::create_disaster_registry(scenario.ctx());
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_disaster_registry(&cap, scenario.ctx());
+        scenario.return_to_sender(cap);
     };
 
     scenario.next_tx(ADMIN);
@@ -446,7 +448,9 @@ fun duplicate_disaster_event_uid_and_revision_is_rejected() {
 
     scenario.next_tx(ADMIN);
     {
-        disaster_event::create_disaster_registry(scenario.ctx());
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_disaster_registry(&cap, scenario.ctx());
+        scenario.return_to_sender(cap);
     };
 
     scenario.next_tx(ADMIN);
@@ -741,7 +745,9 @@ fun initialized_disaster_registry(): test_scenario::Scenario {
 
     scenario.next_tx(ADMIN);
     {
-        disaster_event::create_disaster_registry(scenario.ctx());
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_disaster_registry(&cap, scenario.ctx());
+        scenario.return_to_sender(cap);
     };
 
     scenario
