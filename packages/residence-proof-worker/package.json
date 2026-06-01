@@ -1,0 +1,14 @@
+{
+    "name": "@sonari/residence-proof-worker",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/proof_shards.ts"
+    },
+    "types": "./src/proof_shards.ts",
+    "scripts": {
+        "test": "vitest run src",
+        "typecheck": "tsc -b --noEmit"
+    }
+}

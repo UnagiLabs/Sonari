@@ -7,6 +7,7 @@
         { "path": "./nautilus/verifiers/earthquake/relayer" },
         { "path": "./nautilus/verifiers/earthquake/runner" },
         { "path": "./nautilus/verifiers/membership/shared" },
-        { "path": "./nautilus/verifiers/membership/runner" }
+        { "path": "./nautilus/verifiers/membership/runner" },
+        { "path": "./packages/residence-proof-worker" }
     ]
 }

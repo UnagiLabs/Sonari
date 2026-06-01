@@ -158,6 +158,8 @@ importers:
 
   nautilus/verifiers/membership/shared: {}
 
+  packages/residence-proof-worker: {}
+
 packages:
 
   '@0no-co/graphql.web@1.2.0':
