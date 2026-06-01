@@ -44,6 +44,109 @@ describe("residence proof Worker API", () => {
             ),
         ).toBe(2);
     });
+
+    it("returns stable errors for invalid requests", async () => {
+        const env = await buildEnvWithFixtureR2();
+
+        await expectErrorCode(
+            await worker.fetch(new Request("https://worker.example/api/residence-proof"), env),
+            400,
+            "invalid_h3_index",
+        );
+        await expectErrorCode(
+            await worker.fetch(
+                new Request("https://worker.example/api/residence-proof?h3_index=not-decimal"),
+                env,
+            ),
+            400,
+            "invalid_h3_index",
+        );
+        await expectErrorCode(
+            await worker.fetch(
+                new Request(
+                    "https://worker.example/api/residence-proof?h3_index=608819013513904127",
+                ),
+                env,
+            ),
+            404,
+            "residence_cell_not_allowed",
+        );
+        await expectErrorCode(
+            await worker.fetch(
+                new Request(
+                    "https://worker.example/api/residence-proof?h3_index=608819013681676287",
+                    {
+                        method: "POST",
+                    },
+                ),
+                env,
+            ),
+            405,
+            "method_not_allowed",
+        );
+        await expectErrorCode(
+            await worker.fetch(new Request("https://worker.example/api/unknown"), env),
+            404,
+            "not_found",
+        );
+    });
+
+    it("fails closed when R2 artifacts are missing or inconsistent", async () => {
+        await expectErrorCode(
+            await worker.fetch(
+                new Request(
+                    "https://worker.example/api/residence-proof?h3_index=608819013681676287",
+                ),
+                await buildEnvWithFixtureR2({ includeShard: false }),
+            ),
+            500,
+            "proof_shard_missing",
+        );
+        await expectErrorCode(
+            await worker.fetch(
+                new Request(
+                    "https://worker.example/api/residence-proof?h3_index=608819013681676287",
+                ),
+                await buildEnvWithFixtureR2({
+                    manifestSha256: `0x${"ff".repeat(32)}`,
+                }),
+            ),
+            500,
+            "proof_shard_integrity_mismatch",
+        );
+        await expectErrorCode(
+            await worker.fetch(
+                new Request(
+                    "https://worker.example/api/residence-proof?h3_index=608819013681676287",
+                ),
+                await buildEnvWithFixtureR2({
+                    shardProofs: [
+                        {
+                            ...LEAF_THREE,
+                            proof: [
+                                {
+                                    sibling_on_left: true,
+                                    sibling_hash: `0x${"ff".repeat(32)}`,
+                                },
+                            ],
+                        },
+                    ],
+                }),
+            ),
+            500,
+            "proof_invalid",
+        );
+        await expectErrorCode(
+            await worker.fetch(
+                new Request(
+                    "https://worker.example/api/residence-proof?h3_index=608819013681676287",
+                ),
+                await buildEnvWithFixtureR2({ manifestGeoResolution: 6 }),
+            ),
+            500,
+            "proof_manifest_invalid",
+        );
+    });
 });
 
 const fixtureConfig = {
@@ -51,54 +154,80 @@ const fixtureConfig = {
     geoResolution: 7,
 };
 
-async function buildEnvWithFixtureR2(): Promise<Env & { RESIDENCE_PROOF_SHARDS: FakeR2Bucket }> {
+async function buildEnvWithFixtureR2(
+    options: {
+        includeShard?: boolean;
+        manifestGeoResolution?: number;
+        manifestSha256?: string;
+        shardProofs?: unknown[];
+    } = {},
+): Promise<Env & { RESIDENCE_PROOF_SHARDS: FakeR2Bucket }> {
+    const manifestGeoResolution = options.manifestGeoResolution ?? 7;
+    const shardProofs = options.shardProofs ?? [LEAF_THREE];
     const shard = {
         schema: "sonari.residence.proof_shard.v1",
         schema_version: 1,
         allowlist_version: 1,
-        geo_resolution: 7,
+        geo_resolution: manifestGeoResolution,
         merkle_root: MERKLE_ROOT,
         shard_id: 0,
         shard_count: 5,
-        proofs: [LEAF_THREE],
+        proofs: shardProofs,
     };
     const shardBytes = await gzipJsonBytes(shard);
     const manifest = {
         schema: "sonari.residence.proof_manifest.v1",
         schema_version: 1,
         allowlist_version: 1,
-        geo_resolution: 7,
+        geo_resolution: manifestGeoResolution,
         merkle_root: MERKLE_ROOT,
         shard_count: 5,
-        total_proof_count: 1,
+        total_proof_count: shardProofs.length,
         object_key_rule:
             "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz",
         shards: [
             {
                 shard_id: 0,
-                object_key: "residence-cells/v1/res7/proofs/shards/00000.json.gz",
-                proof_count: 1,
-                sha256: await sha256Hex(shardBytes),
+                object_key: proofShardObjectKey(0, manifestGeoResolution),
+                proof_count: shardProofs.length,
+                sha256: options.manifestSha256 ?? (await sha256Hex(shardBytes)),
                 byte_size: shardBytes.byteLength,
             },
-            emptyInventoryEntry(1),
-            emptyInventoryEntry(2),
-            emptyInventoryEntry(3),
-            emptyInventoryEntry(4),
+            emptyInventoryEntry(1, manifestGeoResolution),
+            emptyInventoryEntry(2, manifestGeoResolution),
+            emptyInventoryEntry(3, manifestGeoResolution),
+            emptyInventoryEntry(4, manifestGeoResolution),
         ],
     };
 
+    const entries: Array<[string, Uint8Array]> = [
+        [proofManifestObjectKey(fixtureConfig), textBytes(JSON.stringify(manifest))],
+    ];
+    if (options.includeShard !== false) {
+        entries.push([proofShardObjectKey(0, manifestGeoResolution), shardBytes]);
+    }
+
     return {
-        RESIDENCE_PROOF_SHARDS: new FakeR2Bucket([
-            [proofManifestObjectKey(fixtureConfig), textBytes(JSON.stringify(manifest))],
-            ["residence-cells/v1/res7/proofs/shards/00000.json.gz", shardBytes],
-        ]),
+        RESIDENCE_PROOF_SHARDS: new FakeR2Bucket(entries),
         ALLOWLIST_VERSION: "1",
         GEO_RESOLUTION: "7",
     };
 }
 
-function emptyInventoryEntry(shardId: number): {
+async function expectErrorCode(response: Response, status: number, code: string): Promise<void> {
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toEqual({
+        error: {
+            code,
+            message: expect.any(String),
+        },
+    });
+}
+
+function emptyInventoryEntry(
+    shardId: number,
+    geoResolution: number,
+): {
     shard_id: number;
     object_key: string;
     proof_count: 0;
@@ -107,13 +236,17 @@ function emptyInventoryEntry(shardId: number): {
 } {
     return {
         shard_id: shardId,
-        object_key: `residence-cells/v1/res7/proofs/shards/${shardId
-            .toString()
-            .padStart(5, "0")}.json.gz`,
+        object_key: proofShardObjectKey(shardId, geoResolution),
         proof_count: 0,
         sha256: EMPTY_SHA256,
         byte_size: 0,
     };
+}
+
+function proofShardObjectKey(shardId: number, geoResolution: number): string {
+    return `residence-cells/v1/res${geoResolution}/proofs/shards/${shardId
+        .toString()
+        .padStart(5, "0")}.json.gz`;
 }
 
 async function gzipJsonBytes(value: unknown): Promise<Uint8Array> {

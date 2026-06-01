@@ -1,3 +1,4 @@
+import { ResidenceProofError } from "./errors.js";
 import type { ResidenceProofR2Bucket } from "./http.js";
 import {
     type ProofShard,
@@ -41,31 +42,37 @@ export async function loadProofShard(
 ): Promise<ProofShard> {
     const object = await bucket.get(inventory.object_key);
     if (object === null) {
-        throw new Error(`proof shard is missing: ${inventory.object_key}`);
+        throw new ResidenceProofError(
+            "proof_shard_missing",
+            `Proof shard is missing: ${inventory.object_key}`,
+            500,
+        );
     }
 
     const bytes = new Uint8Array(await object.arrayBuffer());
     if (bytes.byteLength !== inventory.byte_size) {
-        throw new Error(
-            `proof shard byte_size ${bytes.byteLength} does not match manifest ${inventory.byte_size}`,
+        throw new ResidenceProofError(
+            "proof_shard_integrity_mismatch",
+            `Proof shard byte_size ${bytes.byteLength} does not match manifest ${inventory.byte_size}`,
+            500,
         );
     }
     const digest = await sha256Hex(bytes);
     if (digest !== inventory.sha256) {
-        throw new Error(`proof shard sha256 ${digest} does not match manifest ${inventory.sha256}`);
+        throw new ResidenceProofError(
+            "proof_shard_integrity_mismatch",
+            `Proof shard sha256 ${digest} does not match manifest ${inventory.sha256}`,
+            500,
+        );
     }
 
     const json = await gunzipJsonBytes(bytes);
-    const shard = parseProofShard(JSON.parse(json) as unknown, {
-        allowlistVersion: manifest.allowlist_version,
-        geoResolution: manifest.geo_resolution,
-        merkleRoot: manifest.merkle_root,
-        shardId: inventory.shard_id,
-        shardCount: manifest.shard_count,
-    });
+    const shard = parseProofShardJson(json, inventory, manifest);
     if (shard.proofs.length !== inventory.proof_count) {
-        throw new Error(
-            `proof shard proof_count ${shard.proofs.length} does not match manifest ${inventory.proof_count}`,
+        throw new ResidenceProofError(
+            "proof_shard_invalid",
+            `Proof shard proof_count ${shard.proofs.length} does not match manifest ${inventory.proof_count}`,
+            500,
         );
     }
     return shard;
@@ -85,20 +92,26 @@ async function readManifest(
     const key = proofManifestObjectKey(config);
     const object = await bucket.get(key);
     if (object === null) {
-        throw new Error(`proof manifest is missing: ${key}`);
+        throw new ResidenceProofError(
+            "proof_manifest_missing",
+            `Proof manifest is missing: ${key}`,
+            500,
+        );
     }
 
-    const manifest = parseProofShardManifest(
-        JSON.parse(await arrayBufferToText(object)) as unknown,
-    );
+    const manifest = parseProofManifestJson(await arrayBufferToText(object));
     if (manifest.allowlist_version !== config.allowlistVersion) {
-        throw new Error(
-            `proof manifest allowlist_version ${manifest.allowlist_version} does not match Worker config ${config.allowlistVersion}`,
+        throw new ResidenceProofError(
+            "proof_manifest_invalid",
+            `Proof manifest allowlist_version ${manifest.allowlist_version} does not match Worker config ${config.allowlistVersion}`,
+            500,
         );
     }
     if (manifest.geo_resolution !== config.geoResolution) {
-        throw new Error(
-            `proof manifest geo_resolution ${manifest.geo_resolution} does not match Worker config ${config.geoResolution}`,
+        throw new ResidenceProofError(
+            "proof_manifest_invalid",
+            `Proof manifest geo_resolution ${manifest.geo_resolution} does not match Worker config ${config.geoResolution}`,
+            500,
         );
     }
     return manifest;
@@ -115,5 +128,35 @@ async function gunzipJsonBytes(bytes: Uint8Array): Promise<string> {
     if (stream === null) {
         throw new Error("proof shard response body is empty");
     }
-    return new Response(stream.pipeThrough(new DecompressionStream("gzip"))).text();
+    try {
+        return await new Response(stream.pipeThrough(new DecompressionStream("gzip"))).text();
+    } catch {
+        throw new ResidenceProofError("proof_shard_invalid", "Proof shard gzip is invalid", 500);
+    }
+}
+
+function parseProofManifestJson(json: string): ProofShardManifest {
+    try {
+        return parseProofShardManifest(JSON.parse(json) as unknown);
+    } catch {
+        throw new ResidenceProofError("proof_manifest_invalid", "Proof manifest is invalid", 500);
+    }
+}
+
+function parseProofShardJson(
+    json: string,
+    inventory: ProofShardInventoryEntry,
+    manifest: ProofShardManifest,
+): ProofShard {
+    try {
+        return parseProofShard(JSON.parse(json) as unknown, {
+            allowlistVersion: manifest.allowlist_version,
+            geoResolution: manifest.geo_resolution,
+            merkleRoot: manifest.merkle_root,
+            shardId: inventory.shard_id,
+            shardCount: manifest.shard_count,
+        });
+    } catch {
+        throw new ResidenceProofError("proof_shard_invalid", "Proof shard is invalid", 500);
+    }
 }

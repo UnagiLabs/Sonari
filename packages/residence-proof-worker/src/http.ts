@@ -1,3 +1,4 @@
+import { errorResponse, ResidenceProofError, toResidenceProofError } from "./errors.js";
 import {
     findProofEntry,
     parseH3Index,
@@ -22,32 +23,35 @@ export interface ResidenceProofR2Object {
 }
 
 export async function handleResidenceProofRequest(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    if (request.method !== "GET" || url.pathname !== "/api/residence-proof") {
-        return jsonResponse({ error: { code: "not_found", message: "Not found" } }, 404);
+    try {
+        return await handleResidenceProofRequestUnchecked(request, env);
+    } catch (error) {
+        return errorResponse(toResidenceProofError(error));
     }
+}
 
+async function handleResidenceProofRequestUnchecked(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname !== "/api/residence-proof") {
+        throw new ResidenceProofError("not_found", "Not found", 404);
+    }
+    if (request.method !== "GET") {
+        throw new ResidenceProofError("method_not_allowed", "Only GET is supported", 405);
+    }
     const config = readConfig(env);
     const h3IndexParam = url.searchParams.get("h3_index");
     if (h3IndexParam === null) {
-        return jsonResponse(
-            { error: { code: "invalid_h3_index", message: "h3_index is required" } },
-            400,
-        );
+        throw new ResidenceProofError("invalid_h3_index", "h3_index is required", 400);
     }
 
-    const h3Index = parseH3Index(h3IndexParam, config.geoResolution);
+    const h3Index = parseRequestH3Index(h3IndexParam, config.geoResolution);
     const manifest = await loadProofManifest(env.RESIDENCE_PROOF_SHARDS, config);
     const shardId = await proofShardId(h3Index.value, manifest.shard_count);
     const inventory = manifest.shards[shardId];
     if (inventory === undefined) {
-        return jsonResponse(
-            {
-                error: {
-                    code: "proof_manifest_invalid",
-                    message: "Proof shard inventory is missing",
-                },
-            },
+        throw new ResidenceProofError(
+            "proof_manifest_invalid",
+            "Proof shard inventory is missing",
             500,
         );
     }
@@ -55,13 +59,9 @@ export async function handleResidenceProofRequest(request: Request, env: Env): P
     const shard = await loadProofShard(env.RESIDENCE_PROOF_SHARDS, inventory, manifest);
     const entry = findProofEntry(shard, h3Index);
     if (entry === null) {
-        return jsonResponse(
-            {
-                error: {
-                    code: "residence_cell_not_allowed",
-                    message: "Residence cell is not in the allowlist",
-                },
-            },
+        throw new ResidenceProofError(
+            "residence_cell_not_allowed",
+            "Residence cell is not in the allowlist",
             404,
         );
     }
@@ -101,7 +101,20 @@ function readConfig(env: Env): { allowlistVersion: number; geoResolution: number
 function parseConfigInteger(name: string, value: string | number): number {
     const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isSafeInteger(parsed) || parsed < 0) {
-        throw new Error(`${name} must be a non-negative integer`);
+        throw new ResidenceProofError(
+            "proof_manifest_invalid",
+            `${name} must be a non-negative integer`,
+            500,
+        );
     }
     return parsed;
+}
+
+function parseRequestH3Index(value: string, expectedResolution: number) {
+    try {
+        return parseH3Index(value, expectedResolution);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "h3_index is invalid";
+        throw new ResidenceProofError("invalid_h3_index", message, 400);
+    }
 }
