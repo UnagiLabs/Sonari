@@ -107,6 +107,8 @@ extra_parameter_overrides=()
 
 aws cloudformation deploy \
   --template-file infra/aws/sonari-verifier-runner/template.yaml \
+  --s3-bucket "$ARTIFACT_BUCKET" \
+  --s3-prefix "sonari-verifier-runner/$COMMIT_SHA/cloudformation" \
   --stack-name "$STACK_NAME" \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides "${deploy_plan_parameter_overrides[@]}" "${extra_parameter_overrides[@]}" \

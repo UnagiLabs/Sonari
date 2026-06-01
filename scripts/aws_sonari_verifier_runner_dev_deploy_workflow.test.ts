@@ -181,6 +181,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "--parameter-overrides",
             "aws cloudformation deploy",
             "--template-file infra/aws/sonari-verifier-runner/template.yaml",
+            '--s3-bucket "$ARTIFACT_BUCKET"',
+            '--s3-prefix "$' + "{S3_PREFIX}/$" + '{GITHUB_SHA}/cloudformation"',
             "--capabilities CAPABILITY_NAMED_IAM",
             "--no-fail-on-empty-changeset",
         ]);

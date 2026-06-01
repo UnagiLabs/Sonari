@@ -43,6 +43,8 @@ describe("AWS Sonari verifier runner README", () => {
             "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET",
             "aws cloudformation deploy",
             "--template-file infra/aws/sonari-verifier-runner/template.yaml",
+            "--s3-bucket",
+            "sonari-verifier-runner/$COMMIT_SHA/cloudformation",
             "ScheduleState=DISABLED",
         ]);
     });
