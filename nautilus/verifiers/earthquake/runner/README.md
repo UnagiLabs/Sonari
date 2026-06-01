@@ -75,4 +75,10 @@ NITRO_ENCLAVE_PROCESS_COMMAND=<host-to-enclave-command>
 SONARI_WALRUS_AGGREGATOR_URL=<url>
 ```
 
-本番の earthquake finalized signing seed は EC2 host へ渡しません。固定 seed を使う経路は fixture / debug / test 専用です。EC2 bootstrap script が Secrets Manager の値を runner service user から読める local file として materialize する場合、runner token には `RUNNER_TOKEN_FILE` を利用できます。
+## 本番 TEE backend の条件
+
+Nautilus 準拠の本番 backend は、`get_attestation` と `process_data` を同じ enclave instance で処理します。`get_attestation` は enclave 内で生成した公開鍵を含む Nitro attestation document を返し、`process_data` は同じ公開鍵に対応する秘密鍵で finalized payload を署名します。
+
+SSM Run Command 経由で `NITRO_ENCLAVE_PROCESS_COMMAND` を複数回呼ぶ場合でも、この条件は変わりません。Host command は永続 enclave service、vsock bridge、または同等の stateful TEE bridge へ委譲する必要があります。Host 上の一時ファイル、環境変数、固定 seed で鍵を共有する実装は本番経路として扱いません。
+
+固定 seed を使う経路は fixture / debug / test 専用です。EC2 bootstrap script が local file を materialize する場合でも、runner token には `RUNNER_TOKEN_FILE` だけを使い、earthquake finalized signing material は EC2 host へ渡しません。
