@@ -41,6 +41,20 @@ const currentPayload = {
     freshness_deadline_ms: 1_704_172_800_000,
 } as const satisfies Record<string, unknown>;
 
+const validPayloadBcsHex = "0x01";
+const validSignature = `0x${"11".repeat(64)}`;
+const validPublicKey = `0x${"22".repeat(32)}`;
+const finalizedRelayerInput = {
+    status: "finalized",
+    payload: currentPayload,
+    payload_bcs_hex: validPayloadBcsHex,
+    signature: validSignature,
+    public_key: validPublicKey,
+    verifier_config_key: 1,
+    verifier_config_version: 1,
+    enclave_instance_public_key: validPublicKey,
+} as const;
+
 describe("oracle schema contracts", () => {
     it("keeps current payload field order aligned with the root schema", () => {
         expect(PAYLOAD_FIELD_ORDER).toEqual([
@@ -211,32 +225,24 @@ describe("oracle boundary validators", () => {
     });
 
     it("accepts only finalized signed payloads for relayer submission", () => {
-        expect(
-            validateRelayerSubmitInput({
-                status: "finalized",
-                payload: currentPayload,
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
-            }),
-        ).toEqual({
+        expect(validateRelayerSubmitInput(finalizedRelayerInput)).toEqual({
             ok: true,
             value: {
                 status: "finalized",
                 payload: currentPayload,
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
+                payload_bcs_hex: validPayloadBcsHex,
+                signature: validSignature,
+                public_key: validPublicKey,
+                verifier_config_key: 1,
+                verifier_config_version: 1,
+                enclave_instance_public_key: validPublicKey,
             },
         });
 
         expect(
             validateRelayerSubmitInput({
+                ...finalizedRelayerInput,
                 status: "pending_mmi",
-                payload: currentPayload,
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
             }),
         ).toMatchObject({ ok: false, error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD" });
     });
@@ -269,11 +275,40 @@ describe("oracle boundary validators", () => {
         ]) {
             expect(
                 validateRelayerSubmitInput({
-                    status: "finalized",
+                    ...finalizedRelayerInput,
                     payload: { ...currentPayload, ...payloadPatch },
-                    payload_bcs_hex: "0x01",
-                    signature: "0xsig",
-                    public_key: "0xpub",
+                }),
+            ).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            });
+        }
+    });
+
+    it("rejects missing or malformed enclave tracking metadata", () => {
+        for (const patch of [
+            { payload_bcs_hex: "" },
+            { payload_bcs_hex: "0x0" },
+            { payload_bcs_hex: "0xzz" },
+            { signature: "" },
+            { signature: `0x${"11".repeat(63)}` },
+            { public_key: "" },
+            { public_key: `0x${"22".repeat(31)}` },
+            { verifier_config_key: undefined },
+            { verifier_config_key: 0 },
+            { verifier_config_key: 2 },
+            { verifier_config_key: 1.5 },
+            { verifier_config_version: undefined },
+            { verifier_config_version: 0 },
+            { verifier_config_version: 1.5 },
+            { enclave_instance_public_key: "" },
+            { enclave_instance_public_key: `0x${"22".repeat(31)}` },
+            { enclave_instance_public_key: `0x${"33".repeat(32)}` },
+        ]) {
+            expect(
+                validateRelayerSubmitInput({
+                    ...finalizedRelayerInput,
+                    ...patch,
                 }),
             ).toMatchObject({
                 ok: false,

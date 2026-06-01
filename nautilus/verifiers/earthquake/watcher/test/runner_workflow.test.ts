@@ -25,6 +25,9 @@ const earthquakeRelayerTarget = "0x123::accessor::create_disaster_event_from_sig
 const earthquakeRelayerRegistry = "0xregistry";
 const earthquakeRelayerVerifierRegistry = "0xverifier";
 const earthquakeRelayerClock = "0x6";
+const finalizedPayloadBcsHex = "0x01";
+const finalizedSignature = `0x${"11".repeat(64)}`;
+const finalizedPublicKey = `0x${"22".repeat(32)}`;
 
 describe("AWS runner workflow helper", () => {
     const originalEnv = { ...process.env };
@@ -920,7 +923,7 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
@@ -1034,7 +1037,7 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
@@ -1065,6 +1068,9 @@ describe("AWS runner workflow helper", () => {
                             registry: config.registry,
                             verifierRegistry: config.verifierRegistry,
                             clock: "0x6",
+                            verifierConfigKey: result.verifier_config_key,
+                            verifierConfigVersion: result.verifier_config_version,
+                            enclaveInstancePublicKey: result.enclave_instance_public_key,
                             arguments: [
                                 config.registry,
                                 config.verifierRegistry,
@@ -1078,6 +1084,9 @@ describe("AWS runner workflow helper", () => {
                                 registry: config.registry,
                                 verifierRegistry: config.verifierRegistry,
                                 clock: "0x6",
+                                verifierConfigKey: result.verifier_config_key,
+                                verifierConfigVersion: result.verifier_config_version,
+                                enclaveInstancePublicKey: result.enclave_instance_public_key,
                                 arguments: [
                                     config.registry,
                                     config.verifierRegistry,
@@ -1201,9 +1210,12 @@ function finalizedResult(): TeeCoreResult {
             intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
             freshness_deadline_ms: 1_800_021_600_000,
         },
-        payload_bcs_hex: "0x01",
-        signature: "0xsig",
-        public_key: "0xpub",
+        payload_bcs_hex: finalizedPayloadBcsHex,
+        signature: finalizedSignature,
+        public_key: finalizedPublicKey,
+        verifier_config_key: 1,
+        verifier_config_version: 1,
+        enclave_instance_public_key: finalizedPublicKey,
     };
 }
 

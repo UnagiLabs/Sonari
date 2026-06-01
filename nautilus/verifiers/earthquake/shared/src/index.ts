@@ -75,6 +75,8 @@ export const DEFAULT_ORACLE_CONTRACT = {
     geo_resolution: 7,
 } as const;
 
+export const EARTHQUAKE_VERIFIER_CONFIG_KEY = 1;
+
 export const FRESHNESS_WINDOW_MS = 21_600_000;
 
 export const OFFCHAIN_STATUSES = [
@@ -166,6 +168,15 @@ export interface SignedFinalizedPayload {
     payload_bcs_hex: string;
     signature: string;
     public_key: string;
+    verifier_config_key?: number;
+    verifier_config_version?: number;
+    enclave_instance_public_key?: string;
+}
+
+export interface EnclaveVerificationMetadata {
+    verifier_config_key: typeof EARTHQUAKE_VERIFIER_CONFIG_KEY;
+    verifier_config_version: number;
+    enclave_instance_public_key: string;
 }
 
 export type TeeCoreResult =
@@ -189,7 +200,7 @@ export type TeeCoreResult =
       }
     | SignedFinalizedPayload;
 
-export type RelayerSubmitInput = SignedFinalizedPayload;
+export type RelayerSubmitInput = SignedFinalizedPayload & EnclaveVerificationMetadata;
 
 type ValidationResult<T> =
     | { ok: true; value: T }
@@ -205,6 +216,7 @@ const WORKER_TO_TEE_KEYS = [
 const U32_MAX = 0xffff_ffff;
 const ONE_MILLION = 1_000_000;
 const HASH_32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+const HEX_BYTES_PATTERN = /^(?:0x)?[0-9a-fA-F]+$/;
 const textEncoder = new TextEncoder();
 
 function isRecord(input: unknown): input is Record<string, unknown> {
@@ -240,6 +252,21 @@ function isSafeNonNegativeInteger(value: unknown): value is number {
 
 function isHash32(value: unknown): value is string {
     return typeof value === "string" && HASH_32_PATTERN.test(value);
+}
+
+function isHexBytes(value: unknown, expectedBytes?: number): value is string {
+    if (typeof value !== "string" || !HEX_BYTES_PATTERN.test(value)) {
+        return false;
+    }
+    const normalized = value.startsWith("0x") ? value.slice(2) : value;
+    if (normalized.length === 0 || normalized.length % 2 !== 0) {
+        return false;
+    }
+    return expectedBytes === undefined || normalized.length === expectedBytes * 2;
+}
+
+function normalizeHexBytes(value: string): string {
+    return value.startsWith("0x") ? value.slice(2).toLowerCase() : value.toLowerCase();
 }
 
 function hasCurrentPayloadShape(payload: Record<string, unknown>): boolean {
@@ -390,14 +417,27 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
     }
 
     if (
-        !isNonEmptyString(input.payload_bcs_hex) ||
-        !isNonEmptyString(input.signature) ||
-        !isNonEmptyString(input.public_key)
+        !isHexBytes(input.payload_bcs_hex) ||
+        !isHexBytes(input.signature, 64) ||
+        !isHexBytes(input.public_key, 32)
     ) {
         return {
             ok: false,
             error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
             message: "Relayer input requires BCS payload bytes, signature, and public key",
+        };
+    }
+
+    if (
+        input.verifier_config_key !== EARTHQUAKE_VERIFIER_CONFIG_KEY ||
+        !isSafeIntegerInRange(input.verifier_config_version, 1, Number.MAX_SAFE_INTEGER) ||
+        !isHexBytes(input.enclave_instance_public_key, 32) ||
+        normalizeHexBytes(input.enclave_instance_public_key) !== normalizeHexBytes(input.public_key)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input requires Earthquake Oracle v1 enclave tracking metadata",
         };
     }
 
@@ -409,6 +449,9 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             payload_bcs_hex: input.payload_bcs_hex,
             signature: input.signature,
             public_key: input.public_key,
+            verifier_config_key: input.verifier_config_key,
+            verifier_config_version: input.verifier_config_version,
+            enclave_instance_public_key: input.enclave_instance_public_key,
         },
     };
 }
