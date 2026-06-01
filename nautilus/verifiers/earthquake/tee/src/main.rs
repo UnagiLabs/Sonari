@@ -253,6 +253,31 @@ fn handle_vsock_http_connection(
     state: EnclaveState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let request = read_http_request(&mut stream)?;
+    let (status_code, body) = handle_vsock_http_request(request, state);
+    write_http_json_response(&mut stream, status_code, &body)?;
+    Ok(())
+}
+
+fn handle_vsock_http_request(
+    request: HttpRequest,
+    state: EnclaveState,
+) -> (u16, serde_json::Value) {
+    match route_vsock_http_request(request, state) {
+        Ok(response) => response,
+        Err(error) => (
+            500,
+            serde_json::json!({
+                "error_code": "AWS_RUNNER_PROCESS_FAILED",
+                "message": error.to_string(),
+            }),
+        ),
+    }
+}
+
+fn route_vsock_http_request(
+    request: HttpRequest,
+    state: EnclaveState,
+) -> Result<(u16, serde_json::Value), Box<dyn std::error::Error>> {
     let (status_code, body) = match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/health_check") => (
             200,
@@ -277,8 +302,7 @@ fn handle_vsock_http_connection(
             }),
         ),
     };
-    write_http_json_response(&mut stream, status_code, &body)?;
-    Ok(())
+    Ok((status_code, body))
 }
 
 fn enclave_attestation_response(
