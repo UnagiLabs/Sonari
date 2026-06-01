@@ -55,4 +55,13 @@ describe("AWS earthquake EIF build script", () => {
             "tsx scripts/build_aws_earthquake_eif.ts",
         );
     });
+
+    it("installs CA certificates for HTTPS source fetches inside the EIF", async () => {
+        const script = await readFile(
+            path.join(process.cwd(), "scripts/build_aws_earthquake_eif.ts"),
+            "utf8",
+        );
+
+        expect(script).toContain("ca-certificates");
+    });
 });

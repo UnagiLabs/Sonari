@@ -109,6 +109,7 @@ export async function buildAwsEarthquakeEif(
 function dockerfileFor(teeCommand: readonly string[]): string {
     return [
         "FROM public.ecr.aws/amazonlinux/amazonlinux:2023",
+        "RUN dnf install -y ca-certificates && dnf clean all",
         "COPY tee-artifact/ /opt/sonari/tee-artifact/",
         `ENTRYPOINT ${JSON.stringify(teeCommand)}`,
         "",
