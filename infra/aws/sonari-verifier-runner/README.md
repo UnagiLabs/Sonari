@@ -123,6 +123,8 @@ GitHub Actions では、同じ値を environment variable の `AWS_SONARI_VERIFI
 
 地震 verifier は Nautilus の server pattern に合わせ、EIF 内で起動時に enclave-local な Ed25519 key を生成し、NSM attestation document の `public_key` にその public key を入れます。runner host は `/opt/sonari/bin/run-earthquake-enclave` から VSOCK で `/health_check`、`/get_attestation`、`/process_data` を呼びます。host は Walrus / Sui config を bootstrap するだけで、finalized payload の署名鍵は host に置きません。
 
+Launch template の user data は、AWS Nitro Enclaves allocator の `/etc/nitro_enclaves/allocator.yaml` を `NitroEnclaveCpuCount` / `NitroEnclaveMemoryMiB` に合わせて更新し、`nitro-enclaves-allocator.service` を restart します。`nitro-cli run-enclave --memory` より小さい hugepage 予約で instance を起動してはいけません。
+
 ```bash
 RUNNER_ROLE_ARN="arn:aws:iam::$EXPECTED_ACCOUNT_ID:role/sonari-verifier-runner-$STACK_NAME-runner"
 NITRO_ENCLAVE_PCR3="$(ROLE_ARN="$RUNNER_ROLE_ARN" python3 - <<'PY'

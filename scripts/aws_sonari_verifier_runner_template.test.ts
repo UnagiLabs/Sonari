@@ -154,6 +154,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             "aws s3 cp 's3://$" + "{EarthquakeTeeEifS3Bucket}/$" + "{EarthquakeTeeEifS3Key}'",
         );
         expect(template).toContain("SONARI_EARTHQUAKE_ENCLAVE_WRAPPER");
+        expect(template).toContain(
+            'sed -i "s/^memory_mib:.*/memory_mib: $' + '{NitroEnclaveMemoryMiB}/"',
+        );
+        expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
         expect(template).toContain("source /opt/sonari/runner.env");
         expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777");
         expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000");

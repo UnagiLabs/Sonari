@@ -188,6 +188,8 @@ AWS deployment には、少なくとも次の stack parameter が必要です。
 - `ScheduleState`
 - `GitCommitSha`
 
+Launch template の user data は、AWS Nitro Enclaves allocator の `/etc/nitro_enclaves/allocator.yaml` を `NitroEnclaveCpuCount` / `NitroEnclaveMemoryMiB` に合わせて更新し、`nitro-enclaves-allocator.service` を restart します。`nitro-cli run-enclave --memory` より小さい hugepage 予約で instance を起動してはいけません。
+
 ### Sui object ID
 
 Sui dry-run、Sui submit、post-tx membership pass state readback には次が必要です。
