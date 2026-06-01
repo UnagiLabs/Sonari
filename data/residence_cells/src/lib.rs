@@ -1,3 +1,4 @@
+use flate2::{Compression, GzBuilder};
 use geo::{
     BooleanOps, Geometry as GeoGeometry, LineString, MultiPolygon, Polygon, Rect, Relate, coord,
 };
@@ -859,7 +860,7 @@ pub fn generate_proof_shards(
     let inventory = shards
         .iter()
         .map(|shard| {
-            let shard_bytes = proof_shard_json_bytes(shard)?;
+            let shard_bytes = proof_shard_gzip_bytes(shard)?;
             Ok(ProofShardInventoryEntry {
                 shard_id: shard.shard_id,
                 object_key: proof_shard_object_key(
@@ -894,6 +895,14 @@ pub fn proof_shard_json_bytes(shard: &ProofShard) -> Result<Vec<u8>, ResidenceAl
     Ok(serde_json::to_vec(shard)?)
 }
 
+pub fn proof_shard_gzip_bytes(shard: &ProofShard) -> Result<Vec<u8>, ResidenceAllowlistError> {
+    let mut encoder = GzBuilder::new()
+        .mtime(0)
+        .write(Vec::new(), Compression::default());
+    encoder.write_all(&proof_shard_json_bytes(shard)?)?;
+    Ok(encoder.finish()?)
+}
+
 pub fn replay_proof_shard_entry(
     entry: &ProofShardEntry,
 ) -> Result<String, ResidenceAllowlistError> {
@@ -910,8 +919,21 @@ pub fn replay_proof_shard_entry(
 }
 
 pub fn parse_valid_allowlist(bytes: &[u8]) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
+    parse_allowlist_with_validator(bytes, validate_artifact)
+}
+
+fn parse_allowlist_for_source_verification(
+    bytes: &[u8],
+) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
+    parse_allowlist_with_validator(bytes, validate_allowlist_shape)
+}
+
+fn parse_allowlist_with_validator(
+    bytes: &[u8],
+    validator: fn(&AllowlistArtifact) -> Result<(), ResidenceAllowlistError>,
+) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
     let artifact: AllowlistArtifact = serde_json::from_slice(bytes)?;
-    validate_artifact(&artifact)?;
+    validator(&artifact)?;
     let leaves = artifact
         .h3_indexes
         .iter()
@@ -948,13 +970,23 @@ pub fn validate_allowlist_matches_source(
     options: GenerateOptions,
 ) -> Result<(), ResidenceAllowlistError> {
     let source_sha256 = sha256_hex(source_bytes);
-    let source_sha256_prefixed = format!("0x{source_sha256}");
-
     if source_sha256 != NATURAL_EARTH_LAND_SOURCE.sha256 {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "local source file does not match pinned Natural Earth source".to_owned(),
         ));
     }
+    validate_allowlist_matches_source_content(allowlist, source, source_bytes, options)
+}
+
+fn validate_allowlist_matches_source_content(
+    allowlist: &ValidatedAllowlist,
+    source: &str,
+    source_bytes: &[u8],
+    options: GenerateOptions,
+) -> Result<(), ResidenceAllowlistError> {
+    let source_sha256 = sha256_hex(source_bytes);
+    let source_sha256_prefixed = format!("0x{source_sha256}");
+
     if allowlist.artifact.source.sha256 != source_sha256_prefixed {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "allowlist source.sha256 does not match local source file".to_owned(),
@@ -979,6 +1011,49 @@ pub fn validate_allowlist_matches_source(
     }
 
     Ok(())
+}
+
+pub fn generate_and_write_proof_shards_atomic(
+    allowlist_path: &Path,
+    source_path: &Path,
+    output_dir: &Path,
+    shard_count: usize,
+    options: GenerateOptions,
+) -> Result<ProofShardManifest, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+
+    let allowlist_bytes = fs::read(allowlist_path)?;
+    let allowlist = parse_allowlist_for_source_verification(&allowlist_bytes)?;
+    let source_bytes = fs::read(source_path)?;
+    let source = String::from_utf8(source_bytes.clone()).map_err(|error| {
+        ResidenceAllowlistError::InvalidArtifact(format!("{source_path:?} must be UTF-8: {error}"))
+    })?;
+    validate_allowlist_matches_source_content(&allowlist, &source, &source_bytes, options)?;
+
+    let generated = generate_proof_shards(&allowlist.leaves, shard_count)?;
+    write_generated_proof_shards_atomic(output_dir, &generated)?;
+    Ok(generated.manifest)
+}
+
+pub fn write_generated_proof_shards_atomic(
+    output_dir: &Path,
+    generated: &GeneratedProofShards,
+) -> Result<(), ResidenceAllowlistError> {
+    let shards_dir = output_dir.join("shards");
+    fs::create_dir_all(&shards_dir)?;
+
+    for shard in &generated.shards {
+        let shard_path = shards_dir.join(format!("{:05}.json.gz", shard.shard_id));
+        write_bytes_atomic(&shard_path, &proof_shard_gzip_bytes(shard)?)?;
+    }
+
+    let manifest_path = output_dir.join("proof_manifest.json");
+    let manifest = format!("{}\n", serde_json::to_string_pretty(&generated.manifest)?);
+    write_bytes_atomic(&manifest_path, manifest.as_bytes())
 }
 
 pub fn root_output(
@@ -1342,6 +1417,26 @@ fn root_for_valid_allowlist(
 }
 
 fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowlistError> {
+    validate_allowlist_shape(artifact)?;
+    if artifact.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
+        || artifact.source.version != NATURAL_EARTH_LAND_SOURCE.version
+        || artifact.source.url != NATURAL_EARTH_LAND_SOURCE.url
+        || artifact.source.sha256 != format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256)
+    {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "allowlist source metadata does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
+    if artifact.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "allowlist geo_resolution must be {}",
+            NATURAL_EARTH_LAND_SOURCE.resolution
+        )));
+    }
+    Ok(())
+}
+
+fn validate_allowlist_shape(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowlistError> {
     if artifact.schema != ALLOWLIST_SCHEMA {
         return Err(ResidenceAllowlistError::InvalidArtifact(format!(
             "allowlist schema must be {ALLOWLIST_SCHEMA}"
@@ -1357,15 +1452,6 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowl
             "allowlist source.kind must be {LOCAL_GEOJSON_SOURCE_KIND}"
         )));
     }
-    if artifact.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
-        || artifact.source.version != NATURAL_EARTH_LAND_SOURCE.version
-        || artifact.source.url != NATURAL_EARTH_LAND_SOURCE.url
-        || artifact.source.sha256 != format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256)
-    {
-        return Err(ResidenceAllowlistError::InvalidArtifact(
-            "allowlist source metadata does not match pinned Natural Earth source".to_owned(),
-        ));
-    }
     if !is_lower_prefixed_hex(&artifact.source.sha256, 32) {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "allowlist source.sha256 must be a lowercase 0x-prefixed SHA-256 hash".to_owned(),
@@ -1376,12 +1462,7 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowl
             "allowlist source.byte_length must be greater than zero".to_owned(),
         ));
     }
-    if artifact.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {
-        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
-            "allowlist geo_resolution must be {}",
-            NATURAL_EARTH_LAND_SOURCE.resolution
-        )));
-    }
+    resolution_from_u8(artifact.geo_resolution)?;
     if artifact.h3_indexes.is_empty() {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "allowlist must contain at least one h3_index".to_owned(),
@@ -1698,6 +1779,16 @@ fn tmp_path_for(output: &Path) -> Result<PathBuf, ResidenceAllowlistError> {
         )));
     };
     Ok(output.with_file_name(format!("{file_name}.tmp")))
+}
+
+fn write_bytes_atomic(output: &Path, bytes: &[u8]) -> Result<(), ResidenceAllowlistError> {
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = tmp_path_for(output)?;
+    fs::write(&tmp_path, bytes)?;
+    fs::rename(tmp_path, output)?;
+    Ok(())
 }
 
 fn is_lower_prefixed_hex(value: &str, byte_len: usize) -> bool {

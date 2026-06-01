@@ -1,4 +1,10 @@
-use std::{fs, process::Command};
+use flate2::read::GzDecoder;
+use residence_allowlist::{
+    LandSourceManifest, ProofShard, ProofShardManifest, build_allowlist_artifact_with_manifest,
+    prefixed_hex, write_allowlist_artifact_atomic,
+};
+use sha2::{Digest, Sha256};
+use std::{fs, io::Read, process::Command, time::Duration};
 use tempfile::tempdir;
 
 const FIXTURE_SOURCE: &str = include_str!("fixtures/compact_land.geojson");
@@ -13,7 +19,117 @@ fn help_succeeds() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
     assert!(stdout.contains("generate"));
+    assert!(stdout.contains("proof-shards"));
     assert!(stdout.contains("verify-local"));
+}
+
+#[test]
+fn proof_shards_rejects_zero_shard_count() {
+    let directory = tempdir().expect("tempdir");
+    let output_dir = directory.path().join("proofs");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_residence-allowlist"))
+        .args([
+            "proof-shards",
+            "--allowlist",
+            "missing-allowlist.json",
+            "--source",
+            "missing-source.geojson",
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+            "--shard-count",
+            "0",
+        ])
+        .output()
+        .expect("run proof-shards");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
+    assert!(stderr.contains("shard_count must be greater than zero"));
+    assert!(!output_dir.exists());
+}
+
+#[test]
+fn proof_shards_writes_manifest_and_all_gzipped_shards() {
+    let directory = tempdir().expect("tempdir");
+    let source_path = directory.path().join("compact_land.geojson");
+    let allowlist_path = directory.path().join("allowlist.json");
+    let output_dir = directory.path().join("proofs");
+    fs::write(&source_path, FIXTURE_SOURCE).expect("write source");
+
+    let source_bytes = fs::read(&source_path).expect("source bytes");
+    let source_hash = residence_allowlist::sha256_hex(&source_bytes);
+    let fixture_manifest = LandSourceManifest {
+        source_name: "Natural Earth ne_10m_land",
+        version: "v5.1.2",
+        url: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_land.geojson",
+        sha256: Box::leak(source_hash.into_boxed_str()),
+        resolution: 7,
+        containment_mode: "h3o::geom::ContainmentMode::Covers",
+    };
+    let options = residence_allowlist::GenerateOptions {
+        allowlist_version: 42,
+        strategy: residence_allowlist::GenerationStrategy::Hierarchical,
+        start_resolution: 5,
+        target_resolution: 7,
+        progress_interval: Duration::ZERO,
+        ..residence_allowlist::GenerateOptions::default()
+    };
+    let artifact = build_allowlist_artifact_with_manifest(
+        FIXTURE_SOURCE,
+        &source_bytes,
+        options,
+        fixture_manifest,
+    )
+    .expect("allowlist artifact");
+    write_allowlist_artifact_atomic(&allowlist_path, &artifact).expect("write allowlist");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_residence-allowlist"))
+        .args([
+            "proof-shards",
+            "--allowlist",
+            allowlist_path.to_str().expect("allowlist path"),
+            "--source",
+            source_path.to_str().expect("source path"),
+            "--output-dir",
+            output_dir.to_str().expect("output dir"),
+            "--shard-count",
+            "4",
+        ])
+        .output()
+        .expect("run proof-shards");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest_path = output_dir.join("proof_manifest.json");
+    let manifest: ProofShardManifest =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("read proof_manifest.json"))
+            .expect("parse proof manifest");
+    assert_eq!(manifest.schema, "sonari.residence.proof_manifest.v1");
+    assert_eq!(manifest.allowlist_version, 42);
+    assert_eq!(manifest.shard_count, 4);
+    assert_eq!(manifest.total_proof_count, artifact.h3_indexes.len());
+    assert_eq!(manifest.shards.len(), 4);
+
+    for inventory in &manifest.shards {
+        let shard_path = output_dir
+            .join("shards")
+            .join(format!("{:05}.json.gz", inventory.shard_id));
+        let compressed = fs::read(&shard_path).expect("read shard gzip");
+        assert_eq!(inventory.byte_size, compressed.len() as u64);
+        assert_eq!(inventory.sha256, prefixed_hex(&Sha256::digest(&compressed)));
+
+        let shard = decode_shard(&compressed);
+        assert_eq!(shard.schema, "sonari.residence.proof_shard.v1");
+        assert_eq!(shard.allowlist_version, 42);
+        assert_eq!(shard.shard_id, inventory.shard_id);
+        assert_eq!(shard.shard_count, 4);
+        assert_eq!(shard.proofs.len(), inventory.proof_count);
+    }
 }
 
 #[test]
@@ -42,4 +158,11 @@ fn generate_rejects_unpinned_fixture_source() {
     let stderr = String::from_utf8(output.stderr).expect("utf8 stderr");
     assert!(stderr.contains("source file does not match pinned Natural Earth source"));
     assert!(!output_path.exists());
+}
+
+fn decode_shard(compressed: &[u8]) -> ProofShard {
+    let mut decoder = GzDecoder::new(compressed);
+    let mut json = Vec::new();
+    decoder.read_to_end(&mut json).expect("gzip decode");
+    serde_json::from_slice(&json).expect("parse proof shard")
 }

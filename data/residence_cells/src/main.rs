@@ -1,7 +1,8 @@
 use clap::{Parser, Subcommand};
 use residence_allowlist::{
     GenerateOptions, GenerationStrategy, ResidenceAllowlistError,
-    generate_and_write_allowlist_artifact_atomic, proof_output, root_output, verify_local,
+    generate_and_write_allowlist_artifact_atomic, generate_and_write_proof_shards_atomic,
+    proof_output, root_output, verify_local,
 };
 use std::{fs, path::PathBuf, time::Duration};
 
@@ -18,6 +19,7 @@ enum Command {
     Generate(GenerateArgs),
     Root(InspectArgs),
     Proof(ProofArgs),
+    ProofShards(ProofShardsArgs),
     VerifyLocal(VerifyLocalArgs),
 }
 
@@ -76,6 +78,18 @@ struct ProofArgs {
 }
 
 #[derive(Debug, Parser)]
+struct ProofShardsArgs {
+    #[arg(long)]
+    allowlist: PathBuf,
+    #[arg(long)]
+    source: PathBuf,
+    #[arg(long)]
+    output_dir: PathBuf,
+    #[arg(long, default_value_t = 65_536)]
+    shard_count: usize,
+}
+
+#[derive(Debug, Parser)]
 struct VerifyLocalArgs {
     #[arg(long)]
     manifest: PathBuf,
@@ -115,6 +129,7 @@ fn main() -> Result<(), ResidenceAllowlistError> {
             println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }
+        Command::ProofShards(args) => proof_shards(args),
         Command::VerifyLocal(args) => {
             let options = GenerateOptions {
                 strategy: args.strategy,
@@ -147,6 +162,19 @@ fn generate(args: GenerateArgs) -> Result<(), ResidenceAllowlistError> {
         progress_interval: Duration::from_secs(args.progress_interval_seconds),
     };
     generate_and_write_allowlist_artifact_atomic(&source, &source_bytes, &args.output, options)
+}
+
+fn proof_shards(args: ProofShardsArgs) -> Result<(), ResidenceAllowlistError> {
+    let options = GenerateOptions::default();
+    let manifest = generate_and_write_proof_shards_atomic(
+        &args.allowlist,
+        &args.source,
+        &args.output_dir,
+        args.shard_count,
+        options,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&manifest)?);
+    Ok(())
 }
 
 fn inspect_options(args: &InspectArgs) -> GenerateOptions {

@@ -1,5 +1,5 @@
 use residence_allowlist::{
-    ProofShard, ProofShardEntry, ResidenceCellLeaf, generate_proof_shards, proof_shard_json_bytes,
+    ProofShard, ProofShardEntry, ResidenceCellLeaf, generate_proof_shards, proof_shard_gzip_bytes,
     replay_proof_shard_entry,
 };
 
@@ -52,7 +52,7 @@ fn generates_deterministic_manifest_and_shards() {
             .iter()
             .find(|inventory| inventory.shard_id == shard.shard_id)
             .expect("inventory");
-        let bytes = proof_shard_json_bytes(shard).expect("shard json");
+        let bytes = proof_shard_gzip_bytes(shard).expect("shard gzip");
         assert_eq!(inventory.object_key, expected_object_key(shard.shard_id));
         assert_eq!(inventory.proof_count, shard.proofs.len());
         assert_eq!(inventory.sha256, prefixed_sha256(&bytes));
