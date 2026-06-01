@@ -12,6 +12,7 @@ use contracts::metadata_verifier;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
+use contracts::reader;
 use sui::display::{Self, Display};
 use sui::event;
 use sui::package::Publisher;
@@ -742,7 +743,8 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
     let mut scenario = initialized();
 
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    program::create_program(
+    admin::create_program(
+        &cap,
         7,
         0xFF,
         3,
@@ -772,7 +774,8 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
     assert!(program::id(&program) == program_id_from_event);
-    program::create_campaign(
+    admin::create_campaign(
+        &cap,
         &program,
         9,
         b"metadata-hash",
@@ -875,7 +878,7 @@ fun program_target_pause_blocks_claim_precheck() {
     let mut scenario = initialized();
     let (program_id, _) = create_program_and_campaign(&mut scenario);
 
-    pause_target(&mut scenario, program::target_kind_program(), program_id);
+    pause_target(&mut scenario, reader::target_kind_program(), program_id);
 
     run_precheck(&mut scenario);
     scenario.end();
@@ -886,7 +889,7 @@ fun campaign_target_pause_blocks_claim_precheck() {
     let mut scenario = initialized();
     let (_, campaign_id) = create_program_and_campaign(&mut scenario);
 
-    pause_target(&mut scenario, program::target_kind_campaign(), campaign_id);
+    pause_target(&mut scenario, reader::target_kind_campaign(), campaign_id);
 
     run_precheck(&mut scenario);
     scenario.end();
@@ -897,7 +900,7 @@ fun unpause_target_allows_claim_precheck_again() {
     let mut scenario = initialized();
     let (_, campaign_id) = create_program_and_campaign(&mut scenario);
 
-    pause_target(&mut scenario, program::target_kind_campaign(), campaign_id);
+    pause_target(&mut scenario, reader::target_kind_campaign(), campaign_id);
 
     scenario.next_tx(ADMIN);
     {
@@ -906,7 +909,7 @@ fun unpause_target_allows_claim_precheck_again() {
         admin::unpause_target(
             &cap,
             &mut pause_state,
-            program::target_kind_campaign(),
+            reader::target_kind_campaign(),
             campaign_id,
             scenario.ctx(),
         );
@@ -932,14 +935,14 @@ fun pause_events_include_scope_target_and_actor() {
         admin::pause_target(
             &cap,
             &mut pause_state,
-            program::target_kind_program(),
+            reader::target_kind_program(),
             program_id,
             scenario.ctx(),
         );
         admin::unpause_target(
             &cap,
             &mut pause_state,
-            program::target_kind_program(),
+            reader::target_kind_program(),
             program_id,
             scenario.ctx(),
         );
@@ -959,7 +962,7 @@ fun pause_events_include_scope_target_and_actor() {
     let (scope, target_kind, target_id, actor) =
         admin::paused_event_fields(*paused_events.borrow(1));
     assert!(scope == admin::scope_target());
-    assert!(target_kind == program::target_kind_program());
+    assert!(target_kind == reader::target_kind_program());
     assert!(target_id.destroy_some() == program_id);
     assert!(actor == ADMIN);
 
@@ -975,7 +978,7 @@ fun pause_events_include_scope_target_and_actor() {
     let (scope, target_kind, target_id, actor) =
         admin::unpaused_event_fields(*unpaused_events.borrow(1));
     assert!(scope == admin::scope_target());
-    assert!(target_kind == program::target_kind_program());
+    assert!(target_kind == reader::target_kind_program());
     assert!(target_id.destroy_some() == program_id);
     assert!(actor == ADMIN);
 
@@ -1152,7 +1155,8 @@ fun assert_display_fields<T: key>(
 
 fun create_program(scenario: &mut test_scenario::Scenario, program_type: u8): object::ID {
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    program::create_program(
+    admin::create_program(
+        &cap,
         program_type,
         0xFF,
         3,
@@ -1178,7 +1182,8 @@ fun create_program_and_campaign(
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
-    program::create_campaign(
+    admin::create_campaign(
+        &cap,
         &program,
         9,
         b"metadata-hash",
@@ -1204,7 +1209,8 @@ fun create_program_and_campaign_with_pools(
     campaign_pool_id: Option<object::ID>,
 ) {
     let cap = scenario.take_from_sender<admin::AdminCap>();
-    program::create_program(
+    admin::create_program(
+        &cap,
         7,
         0xFF,
         3,
@@ -1217,7 +1223,8 @@ fun create_program_and_campaign_with_pools(
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
-    program::create_campaign(
+    admin::create_campaign(
+        &cap,
         &program,
         9,
         b"metadata-hash",

@@ -34,7 +34,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
         object::id(&registry),
         pass_id,
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -60,7 +60,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
         signed_statement_hash,
     ) = membership::membership_pass_mvp_summary(&pass);
     assert!(identity_verified);
-    assert!(identity_provider_mask == identity_result_v1::provider_kyc());
+    assert!(identity_provider_mask == identity_registry::provider_kyc());
     assert!(identity_verified_at_ms == APPLY_TIME_MS);
     assert!(identity_expires_at_ms == EXPIRES_AT_MS);
     assert!(terms_version == TERMS_VERSION);
@@ -71,7 +71,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
-            identity_result_v1::provider_kyc(),
+            identity_registry::provider_kyc(),
             RESULT_DUPLICATE_KEY_HASH,
         ) == membership::membership_pass_lineage_id(&pass),
     );
@@ -87,7 +87,7 @@ fun decoded_world_id_result_accumulates_provider_mask() {
         object::id(&registry),
         pass_id,
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -96,7 +96,7 @@ fun decoded_world_id_result_accumulates_provider_mask() {
         object::id(&registry),
         pass_id,
         MEMBER,
-        identity_result_v1::provider_world_id(),
+        identity_registry::provider_world_id(),
         OTHER_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -122,7 +122,7 @@ fun decoded_world_id_result_accumulates_provider_mask() {
     assert!(identity_verified);
     assert!(
         identity_provider_mask ==
-            identity_result_v1::provider_kyc() + identity_result_v1::provider_world_id(),
+            identity_registry::provider_kyc() + identity_registry::provider_world_id(),
     );
     let (_, provider_label) = membership::membership_pass_display_labels(&pass);
     assert!(provider_label == b"KYC + World ID".to_string());
@@ -139,7 +139,7 @@ fun decoded_result_rejects_wrong_identity_registry() {
         object::id(&pass),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -164,7 +164,7 @@ fun decoded_result_rejects_wrong_membership_id() {
         object::id(&registry),
         object::id(&other_pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -194,7 +194,7 @@ fun decoded_result_rejects_pass_that_is_not_membership_registry_current_sbt() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -223,7 +223,7 @@ fun decoded_result_rejects_wrong_owner() {
         object::id(&registry),
         object::id(&pass),
         OTHER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -247,7 +247,7 @@ fun decoded_result_rejects_terms_version_mismatch() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION + 1,
         SIGNED_STATEMENT_HASH,
@@ -271,7 +271,7 @@ fun decoded_result_rejects_signed_statement_hash_mismatch() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         OTHER_SIGNED_STATEMENT_HASH,
@@ -295,14 +295,14 @@ fun decoded_result_rejects_duplicate_key_bound_to_another_sbt() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &other_pass,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
     let result = decoded_result(
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -327,7 +327,7 @@ fun decoded_result_rejects_replay_for_same_provider() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -611,7 +611,7 @@ fun cleanup_step3(
 ) {
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
     identity_registry::destroy_identity_registry_for_testing(registry);
@@ -631,12 +631,12 @@ fun cleanup_step3_with_two_bindings(
 ) {
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_result_v1::provider_kyc(),
+        identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_result_v1::provider_world_id(),
+        identity_registry::provider_world_id(),
         OTHER_DUPLICATE_KEY_HASH,
     );
     identity_registry::destroy_identity_registry_for_testing(registry);

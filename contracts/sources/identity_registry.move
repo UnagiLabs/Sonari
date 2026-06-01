@@ -70,7 +70,7 @@ public(package) fun bind_duplicate_key(
     };
 }
 
-public fun assert_duplicate_key_bound_to_pass(
+public(package) fun assert_duplicate_key_bound_to_pass(
     registry: &IdentityRegistry,
     pass: &MembershipPass,
     provider: u8,
@@ -130,23 +130,23 @@ public(package) fun apply_identity_verification_result(
     );
 }
 
-public fun registry_id(registry: &IdentityRegistry): ID {
+public(package) fun registry_id(registry: &IdentityRegistry): ID {
     object::id(registry)
 }
 
-public fun registry_kind_identity(): u8 {
+public(package) fun registry_kind_identity(): u8 {
     REGISTRY_KIND_IDENTITY
 }
 
-public fun target_kind_identity_registry(): u8 {
+public(package) fun target_kind_identity_registry(): u8 {
     TARGET_KIND_IDENTITY_REGISTRY
 }
 
-public fun provider_kyc(): u8 {
+public(package) fun provider_kyc(): u8 {
     PROVIDER_KYC
 }
 
-public fun provider_world_id(): u8 {
+public(package) fun provider_world_id(): u8 {
     PROVIDER_WORLD_ID
 }
 

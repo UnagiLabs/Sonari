@@ -108,7 +108,7 @@ fun available_usdc_saturates_at_u64_max() {
 #[test]
 fun default_disaster_policy_min_claim_band_is_one() {
     let mut scenario = test_scenario::begin(ADMIN);
-    payout_policy::create_default_disaster_policy(scenario.ctx());
+    create_default_disaster_policy(&mut scenario);
 
     scenario.next_tx(ADMIN);
     {
@@ -123,7 +123,7 @@ fun default_disaster_policy_min_claim_band_is_one() {
 #[test]
 fun quote_uses_full_band_amount_without_identity_multipliers() {
     let mut scenario = test_scenario::begin(ADMIN);
-    payout_policy::create_default_disaster_policy(scenario.ctx());
+    create_default_disaster_policy(&mut scenario);
 
     scenario.next_tx(ADMIN);
     {
@@ -163,7 +163,7 @@ fun quote_uses_full_band_amount_without_identity_multipliers() {
 #[test]
 fun quote_keeps_user_budget_and_pool_caps() {
     let mut scenario = test_scenario::begin(ADMIN);
-    payout_policy::create_default_disaster_policy(scenario.ctx());
+    create_default_disaster_policy(&mut scenario);
 
     scenario.next_tx(ADMIN);
     {
@@ -200,6 +200,16 @@ fun quote_keeps_user_budget_and_pool_caps() {
     scenario.end();
 }
 
+fun create_default_disaster_policy(scenario: &mut test_scenario::Scenario) {
+    admin::init_for_testing(scenario.ctx());
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        admin::create_default_disaster_policy(&cap, scenario.ctx());
+        scenario.return_to_sender(cap);
+    };
+}
+
 fun initialized(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
@@ -225,7 +235,8 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
-        program::create_program(
+        admin::create_program(
+            &cap,
             1,
             0,
             0,
@@ -233,7 +244,7 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
             option::none(),
             scenario.ctx(),
         );
-        payout_policy::create_default_disaster_policy(scenario.ctx());
+        admin::create_default_disaster_policy(&cap, scenario.ctx());
         scenario.return_to_sender(cap);
     };
 
@@ -241,7 +252,8 @@ fun create_claim_objects(scenario: &mut test_scenario::Scenario) {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
-        program::create_campaign(
+        admin::create_campaign(
+            &cap,
             &program,
             1,
             b"generic-claim",

@@ -13,6 +13,7 @@ use contracts::payload;
 use contracts::payout_policy;
 use contracts::pools;
 use contracts::program;
+use contracts::reader;
 use sui::clock;
 use sui::coin;
 use sui::test_scenario;
@@ -283,7 +284,7 @@ fun disaster_claim_rejects_paused_identity_registry_before_payout() {
 
     pause_target(
         &mut scenario,
-        identity_registry::target_kind_identity_registry(),
+        reader::target_kind_identity_registry(),
         identity_registry_id,
     );
 
@@ -906,8 +907,9 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
-        let payout_policy_id = payout_policy::create_default_disaster_policy(scenario.ctx());
-        program::create_program(
+        let payout_policy_id = admin::create_default_disaster_policy(&cap, scenario.ctx());
+        admin::create_program(
+            &cap,
             1,
             1,
             1,
@@ -915,7 +917,7 @@ fun create_disaster_claim_objects_without_budget_with_pool(
             option::none(),
             scenario.ctx(),
         );
-        disaster_event::create_disaster_registry(scenario.ctx());
+        admin::create_disaster_registry(&cap, scenario.ctx());
         scenario.return_to_sender(cap);
     };
 
@@ -923,7 +925,8 @@ fun create_disaster_claim_objects_without_budget_with_pool(
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let program = scenario.take_shared<program::Program>();
-        program::create_campaign(
+        admin::create_campaign(
+            &cap,
             &program,
             1,
             b"disaster-claim",
@@ -998,7 +1001,7 @@ fun open_designated_campaign_budget(scenario: &mut test_scenario::Scenario) {
 }
 
 fun affected_leaf(): AffectedCellLeaf {
-    affected_cell::new_leaf(
+    accessor::new_affected_cell_leaf(
         event_uid(),
         1,
         H3_INDEX,
@@ -1014,7 +1017,7 @@ fun affected_leaf(): AffectedCellLeaf {
 
 fun proof(): vector<affected_cell::ProofStep> {
     vector[
-        affected_cell::new_proof_step_left(
+        accessor::new_affected_cell_proof_step_left(
             x"83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
         ),
     ]

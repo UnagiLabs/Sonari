@@ -111,7 +111,7 @@ public struct DisasterCampaignBound has copy, drop {
     actor: address,
 }
 
-public(package) fun create_disaster_registry(ctx: &mut TxContext) {
+public(package) fun create_disaster_registry(ctx: &mut TxContext): ID {
     let registry = DisasterRegistry {
         id: object::new(ctx),
         event_count: 0,
@@ -123,9 +123,10 @@ public(package) fun create_disaster_registry(ctx: &mut TxContext) {
         actor: ctx.sender(),
     });
     transfer::share_object(registry);
+    registry_id
 }
 
-public fun create_from_signed_payload(
+public(package) fun create_from_signed_payload(
     registry: &mut DisasterRegistry,
     verifier_registry: &VerifierRegistry,
     clock: &Clock,
@@ -192,7 +193,7 @@ public(package) fun bind_campaign(
     transfer::share_object(binding);
 }
 
-public fun assert_campaign_binding(
+public(package) fun assert_campaign_binding(
     binding: &DisasterCampaignBinding,
     campaign: &Campaign,
     disaster_event: &DisasterEvent,
@@ -317,27 +318,27 @@ public fun create_from_payload_for_testing(
     );
 }
 
-public fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
+public(package) fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
     disaster_event.affected_cells_root
 }
 
-public fun event_uid(disaster_event: &DisasterEvent): vector<u8> {
+public(package) fun event_uid(disaster_event: &DisasterEvent): vector<u8> {
     disaster_event.event_uid
 }
 
-public fun event_revision(disaster_event: &DisasterEvent): u32 {
+public(package) fun event_revision(disaster_event: &DisasterEvent): u32 {
     disaster_event.event_revision
 }
 
-public fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
+public(package) fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
     disaster_event.occurred_at_ms
 }
 
-public fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
+public(package) fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
     registry.event_count
 }
 
-public fun disaster_event_id(disaster_event: &DisasterEvent): ID {
+public(package) fun disaster_event_id(disaster_event: &DisasterEvent): ID {
     object::id(disaster_event)
 }
 

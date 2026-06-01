@@ -6,6 +6,7 @@ use contracts::admin;
 use contracts::allowed_residence_cell;
 use contracts::membership;
 use contracts::pools;
+use contracts::reader;
 use sui::clock;
 use sui::event;
 use sui::test_scenario;
@@ -328,7 +329,7 @@ fun membership_registry_target_pause_blocks_member_home_cell_update() {
         admin::pause_target(
             &cap,
             &mut pause_state,
-            membership::target_kind_membership_registry(),
+            reader::target_kind_membership_registry(),
             registry_id,
             scenario.ctx(),
         );
@@ -401,7 +402,7 @@ fun membership_registry_target_pause_blocks_member_registration() {
         admin::pause_target(
             &cap,
             &mut pause_state,
-            membership::target_kind_membership_registry(),
+            reader::target_kind_membership_registry(),
             registry_id,
             scenario.ctx(),
         );

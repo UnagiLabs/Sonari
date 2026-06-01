@@ -171,7 +171,7 @@ public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
     registry_id
 }
 
-public fun assert_current_pass_precheck(
+public(package) fun assert_current_pass_precheck(
     registry: &MembershipRegistry,
     pass: &MembershipPass,
     claimant: address,
@@ -185,7 +185,7 @@ public fun assert_current_pass_precheck(
     assert!(record.current_owner == pass.owner, ERegistryOwnerMismatch);
 }
 
-public fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID): (ID, ID) {
+public(package) fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID): (ID, ID) {
     (pass.pass_lineage_id, campaign_id)
 }
 
@@ -215,23 +215,23 @@ public(package) fun apply_identity_verification(
     pass.identity_expires_at_ms = expires_at_ms;
 }
 
-public fun registry_id(registry: &MembershipRegistry): ID {
+public(package) fun registry_id(registry: &MembershipRegistry): ID {
     object::id(registry)
 }
 
-public fun registry_kind_membership(): u8 {
+public(package) fun registry_kind_membership(): u8 {
     REGISTRY_KIND_MEMBERSHIP
 }
 
-public fun target_kind_membership_registry(): u8 {
+public(package) fun target_kind_membership_registry(): u8 {
     TARGET_KIND_MEMBERSHIP_REGISTRY
 }
 
-public fun membership_registry_issued_count(registry: &MembershipRegistry): u64 {
+public(package) fun membership_registry_issued_count(registry: &MembershipRegistry): u64 {
     registry.issued_count
 }
 
-public fun membership_owner_lineage_id(
+public(package) fun membership_owner_lineage_id(
     registry: &MembershipRegistry,
     owner: address,
 ): ID {
@@ -242,7 +242,7 @@ public fun membership_owner_lineage_id(
     *dynamic_field::borrow<address, ID>(&registry.id, owner)
 }
 
-public fun membership_record_summary(
+public(package) fun membership_record_summary(
     registry: &MembershipRegistry,
     pass_lineage_id: ID,
 ): (ID, ID, address, u8, u64, u64) {
@@ -304,27 +304,27 @@ fun provider_label(provider_mask: u8): String {
     }
 }
 
-public fun membership_pass_owner(pass: &MembershipPass): address {
+public(package) fun membership_pass_owner(pass: &MembershipPass): address {
     pass.owner
 }
 
-public fun membership_pass_lineage_id(pass: &MembershipPass): ID {
+public(package) fun membership_pass_lineage_id(pass: &MembershipPass): ID {
     pass.pass_lineage_id
 }
 
-public fun membership_pass_status(pass: &MembershipPass): u8 {
+public(package) fun membership_pass_status(pass: &MembershipPass): u8 {
     pass.status
 }
 
-public fun membership_pass_issued_at_ms(pass: &MembershipPass): u64 {
+public(package) fun membership_pass_issued_at_ms(pass: &MembershipPass): u64 {
     pass.issued_at_ms
 }
 
-public fun membership_pass_display_labels(pass: &MembershipPass): (String, String) {
+public(package) fun membership_pass_display_labels(pass: &MembershipPass): (String, String) {
     (pass.status_label, pass.provider_label)
 }
 
-public fun membership_pass_mvp_summary(
+public(package) fun membership_pass_mvp_summary(
     pass: &MembershipPass,
 ): (u64, u64, u64, bool, u8, u64, u64, u64, vector<u8>) {
     (
@@ -340,19 +340,19 @@ public fun membership_pass_mvp_summary(
     )
 }
 
-public fun status_active(): u8 {
+public(package) fun status_active(): u8 {
     STATUS_ACTIVE
 }
 
-public fun status_suspended(): u8 {
+public(package) fun status_suspended(): u8 {
     STATUS_SUSPENDED
 }
 
-public fun status_revoked(): u8 {
+public(package) fun status_revoked(): u8 {
     STATUS_REVOKED
 }
 
-public fun status_migrated(): u8 {
+public(package) fun status_migrated(): u8 {
     STATUS_MIGRATED
 }
 

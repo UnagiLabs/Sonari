@@ -518,7 +518,7 @@ public(package) fun donor_pass_tier(pass: &DonorPass): u8 {
     pass.tier
 }
 
-public fun donor_pass_tier_label(pass: &DonorPass): String {
+public(package) fun donor_pass_tier_label(pass: &DonorPass): String {
     pass.tier_label
 }
 
@@ -566,11 +566,11 @@ public(package) fun coin_type_usdc(): vector<u8> {
     COIN_TYPE_USDC
 }
 
-public fun registry_id(registry: &DonorRegistry): ID {
+public(package) fun registry_id(registry: &DonorRegistry): ID {
     object::id(registry)
 }
 
-public fun registry_kind_donor(): u8 {
+public(package) fun registry_kind_donor(): u8 {
     REGISTRY_KIND_DONOR
 }
 

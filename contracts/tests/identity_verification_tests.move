@@ -8,6 +8,7 @@ use contracts::identity_registry;
 use contracts::identity_result_v1;
 use contracts::membership;
 use contracts::metadata_verifier;
+use contracts::reader;
 use sui::address;
 use sui::bcs;
 use sui::clock;
@@ -299,7 +300,7 @@ fun identity_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = identity_registry_id(&mut scenario);
-    pause_target(&mut scenario, identity_registry::target_kind_identity_registry(), target_id);
+    pause_target(&mut scenario, reader::target_kind_identity_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
@@ -320,7 +321,7 @@ fun membership_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = membership_registry_id(&mut scenario);
-    pause_target(&mut scenario, membership::target_kind_membership_registry(), target_id);
+    pause_target(&mut scenario, reader::target_kind_membership_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
@@ -341,7 +342,7 @@ fun verifier_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = verifier_registry_id(&mut scenario);
-    pause_target(&mut scenario, metadata_verifier::target_kind_verifier_registry(), target_id);
+    pause_target(&mut scenario, reader::target_kind_verifier_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
@@ -435,8 +436,8 @@ fun add_identity_verifier_key_with_public_key(
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            metadata_verifier::verifier_family_identity(),
-            metadata_verifier::verifier_version_v1(),
+            reader::verifier_family_identity(),
+            reader::verifier_version_v1(),
             public_key,
             scenario.ctx(),
         );
@@ -453,8 +454,8 @@ fun add_disabled_identity_verifier_key(scenario: &mut test_scenario::Scenario) {
         admin::add_verifier_key(
             &cap,
             &mut verifier_registry,
-            metadata_verifier::verifier_family_identity(),
-            metadata_verifier::verifier_version_v1(),
+            reader::verifier_family_identity(),
+            reader::verifier_version_v1(),
             identity_public_key(),
             scenario.ctx(),
         );

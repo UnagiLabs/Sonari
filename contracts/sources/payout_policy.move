@@ -212,7 +212,7 @@ public(package) fun record_claim(
     budget.designated_claimed_usdc = budget.designated_claimed_usdc + designated_amount_usdc;
 }
 
-public fun quote_usdc(
+public(package) fun quote_usdc(
     policy: &PayoutPolicy,
     eligibility_tier: u8,
     user_max_amount_usdc: u64,
@@ -226,7 +226,7 @@ public fun quote_usdc(
     min_u64(amount, pool_available_usdc)
 }
 
-public fun main_backstop_budget_usdc(
+public(package) fun main_backstop_budget_usdc(
     main_total_received_usdc: u64,
     main_balance_usdc: u64,
 ): u64 {
@@ -241,35 +241,35 @@ public fun main_backstop_budget_usdc(
     min_u64(liquid_budget, spendable)
 }
 
-public fun future_reserve_floor_usdc(main_total_received_usdc: u64): u64 {
+public(package) fun future_reserve_floor_usdc(main_total_received_usdc: u64): u64 {
     apply_bps(main_total_received_usdc, FUTURE_RESERVE_FLOOR_BPS)
 }
 
-public fun liquid_reserve_target_usdc(main_total_received_usdc: u64): u64 {
+public(package) fun liquid_reserve_target_usdc(main_total_received_usdc: u64): u64 {
     apply_bps(main_total_received_usdc, LIQUID_RESERVE_TARGET_BPS)
 }
 
-public fun campaign_budget_claimed_usdc(budget: &CampaignBudget): u64 {
+public(package) fun campaign_budget_claimed_usdc(budget: &CampaignBudget): u64 {
     budget.designated_claimed_usdc + budget.main_claimed_usdc
 }
 
-public fun campaign_budget_remaining_usdc(budget: &CampaignBudget): u64 {
+public(package) fun campaign_budget_remaining_usdc(budget: &CampaignBudget): u64 {
     designated_remaining_usdc(budget) + main_remaining_usdc(budget)
 }
 
-public fun main_remaining_usdc(budget: &CampaignBudget): u64 {
+public(package) fun main_remaining_usdc(budget: &CampaignBudget): u64 {
     budget.main_backstop_budget_usdc - budget.main_claimed_usdc
 }
 
-public fun designated_remaining_usdc(budget: &CampaignBudget): u64 {
+public(package) fun designated_remaining_usdc(budget: &CampaignBudget): u64 {
     budget.designated_budget_usdc - budget.designated_claimed_usdc
 }
 
-public fun policy_id(policy: &PayoutPolicy): ID {
+public(package) fun policy_id(policy: &PayoutPolicy): ID {
     object::id(policy)
 }
 
-public fun min_claim_band(policy: &PayoutPolicy): u8 {
+public(package) fun min_claim_band(policy: &PayoutPolicy): u8 {
     policy.min_claim_band
 }
 

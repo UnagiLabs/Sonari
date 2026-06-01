@@ -3,6 +3,7 @@ module contracts::metadata_verifier_tests;
 
 use contracts::admin;
 use contracts::metadata_verifier;
+use contracts::reader;
 use sui::event;
 use sui::test_scenario;
 
@@ -21,8 +22,8 @@ fun verifier_registry_adds_and_disables_key_with_events() {
         admin::add_verifier_key(
             &cap,
             &mut registry,
-            metadata_verifier::verifier_family_earthquake_oracle(),
-            metadata_verifier::verifier_version_v1(),
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
             public_key,
             scenario.ctx(),
         );
@@ -38,8 +39,8 @@ fun verifier_registry_adds_and_disables_key_with_events() {
         metadata_verifier::verifier_key_added_event_fields(*added_events.borrow(0));
     assert!(registry_id != object::id_from_address(@0x0));
     assert!(key == valid_public_key());
-    assert!(family == metadata_verifier::verifier_family_earthquake_oracle());
-    assert!(version == metadata_verifier::verifier_version_v1());
+    assert!(family == reader::verifier_family_earthquake_oracle());
+    assert!(version == reader::verifier_version_v1());
     assert!(enabled);
     assert!(actor == ADMIN);
 
@@ -60,8 +61,8 @@ fun identity_verifier_key_registration_is_allowed() {
 
     metadata_verifier::add_verifier_key_for_testing(
         &mut registry,
-        metadata_verifier::verifier_family_identity(),
-        metadata_verifier::verifier_version_v1(),
+        reader::verifier_family_identity(),
+        reader::verifier_version_v1(),
         valid_public_key(),
         &mut ctx,
     );
@@ -71,8 +72,8 @@ fun identity_verifier_key_registration_is_allowed() {
     let (_, key, family, version, enabled, actor) =
         metadata_verifier::verifier_key_added_event_fields(*added_events.borrow(0));
     assert!(key == valid_public_key());
-    assert!(family == metadata_verifier::verifier_family_identity());
-    assert!(version == metadata_verifier::verifier_version_v1());
+    assert!(family == reader::verifier_family_identity());
+    assert!(version == reader::verifier_version_v1());
     assert!(enabled);
     assert!(actor == @0x0);
 
@@ -84,8 +85,8 @@ fun disabling_already_disabled_key_is_rejected() {
     let (mut registry, mut ctx) = direct_initialized();
     metadata_verifier::add_verifier_key_for_testing(
         &mut registry,
-        metadata_verifier::verifier_family_earthquake_oracle(),
-        metadata_verifier::verifier_version_v1(),
+        reader::verifier_family_earthquake_oracle(),
+        reader::verifier_version_v1(),
         valid_public_key(),
         &mut ctx,
     );
@@ -100,7 +101,7 @@ fun unknown_verifier_family_registration_is_rejected() {
     metadata_verifier::add_verifier_key_for_testing(
         &mut registry,
         99,
-        metadata_verifier::verifier_version_v1(),
+        reader::verifier_version_v1(),
         valid_public_key(),
         &mut ctx,
     );
@@ -112,7 +113,7 @@ fun unknown_verifier_version_registration_is_rejected() {
     let (mut registry, mut ctx) = direct_initialized();
     metadata_verifier::add_verifier_key_for_testing(
         &mut registry,
-        metadata_verifier::verifier_family_earthquake_oracle(),
+        reader::verifier_family_earthquake_oracle(),
         99,
         valid_public_key(),
         &mut ctx,

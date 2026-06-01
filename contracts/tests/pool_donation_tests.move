@@ -5,6 +5,7 @@ use contracts::admin;
 use contracts::accessor;
 use contracts::donation;
 use contracts::pools;
+use contracts::reader;
 use sui::coin;
 use sui::event;
 use sui::test_scenario;
@@ -391,7 +392,7 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         assert!(tier == donation::tier_silver());
 
         let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
-            accessor::donation_record_summary(&pass, 1);
+            reader::donation_record_summary(&pass, 1);
         assert!(donation_index == 1);
         assert!(donation_type == donation::donation_type_general());
         assert!(amount == 999_999);
@@ -471,7 +472,7 @@ fun second_designated_donation_updates_existing_pass_without_new_issue_event() {
         assert!(donation_count == 2);
 
         let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
-            accessor::donation_record_summary(&pass, 1);
+            reader::donation_record_summary(&pass, 1);
         assert!(donation_index == 1);
         assert!(donation_type == donation::donation_type_designated());
         assert!(amount == 5);
@@ -554,7 +555,7 @@ fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
         assert!(donation_count == 2);
 
         let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
-            accessor::donation_record_summary(&pass, 1);
+            reader::donation_record_summary(&pass, 1);
         assert!(donation_index == 1);
         assert!(donation_type == donation::donation_type_operations());
         assert!(amount == 7);
