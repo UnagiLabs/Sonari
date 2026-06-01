@@ -11,6 +11,7 @@ import {
     type RelayerResult,
 } from "../nautilus/verifiers/earthquake/relayer/src/index.js";
 import type {
+    EARTHQUAKE_VERIFIER_CONFIG_KEY,
     OracleErrorCode,
     SignedFinalizedPayload,
     TeeCoreResult,
@@ -489,6 +490,9 @@ async function readFinalizedResult(outputDir: string): Promise<SignedFinalizedPa
         payload_bcs_hex: hashes.unsigned_bcs_payload_hex,
         signature: signature.signature,
         public_key: signature.public_key,
+        verifier_config_key: 1 satisfies typeof EARTHQUAKE_VERIFIER_CONFIG_KEY,
+        verifier_config_version: 1,
+        enclave_instance_public_key: signature.public_key,
     };
 }
 
