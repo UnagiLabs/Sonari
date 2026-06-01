@@ -41,6 +41,19 @@ fn readme_documents_r2_proof_shard_operations() {
         "R2/Worker are distribution surfaces",
         "Move contract verifies proof/root",
     ]);
+
+    assert_required_terms([
+        "GET /api/residence-proof?h3_index=608819013681676287",
+        "RESIDENCE_PROOF_SHARDS",
+        "ALLOWLIST_VERSION",
+        "GEO_RESOLUTION",
+        "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/proof_manifest.json",
+        "manifest cache",
+        "sha256",
+        "byte_size",
+        "per-proof KV writes",
+        "per-proof DynamoDB writes",
+    ]);
 }
 
 fn assert_required_terms<const N: usize>(terms: [&str; N]) {

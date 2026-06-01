@@ -37,7 +37,10 @@
             "nautilus/verifiers/membership/runner/package.json",
             "nautilus/verifiers/membership/runner/tsconfig.json",
             "nautilus/verifiers/membership/runner/src/**/*.ts",
-            "nautilus/verifiers/membership/runner/test/**/*.ts"
+            "nautilus/verifiers/membership/runner/test/**/*.ts",
+            "packages/residence-proof-worker/package.json",
+            "packages/residence-proof-worker/tsconfig.json",
+            "packages/residence-proof-worker/src/**/*.ts"
         ]
     },
     "formatter": {
