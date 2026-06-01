@@ -92,15 +92,22 @@ mapfile -t deploy_plan_parameter_overrides < <(
 
 printf '%s\n' "${deploy_plan_parameter_overrides[@]}" | grep '^ScheduleState=DISABLED$'
 
+# 地震 relayer を有効にする場合だけ、次のように追加します。
+# <PACKAGE_ID> は deploy 済み Move package id に置き換えます。
+extra_parameter_overrides=()
+# extra_parameter_overrides+=("RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload")
+
 aws cloudformation deploy \
   --template-file infra/aws/sonari-verifier-runner/template.yaml \
   --stack-name "$STACK_NAME" \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides "${deploy_plan_parameter_overrides[@]}" \
+  --parameter-overrides "${deploy_plan_parameter_overrides[@]}" "${extra_parameter_overrides[@]}" \
   --no-fail-on-empty-changeset
 ```
 
 初回作成、または environment-specific な stack parameter が必要な更新では、この stack 用に review 済みの account parameter source を使い、同じ command に追加します。artifact parameter は deploy plan の値を維持してください。`LambdaCodeS3Key`、TEE key、checksum 値、`GitCommitSha`、`ScheduleState` を手書きしてはいけません。
+
+GitHub Actions では、同じ値を environment variable の `AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET` に設定します。空の場合、CloudFormation の `RelayerTarget` は空文字のままです。
 
 `NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
 
