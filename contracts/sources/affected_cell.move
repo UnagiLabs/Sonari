@@ -23,7 +23,7 @@ public struct ProofStep has copy, drop, store {
     sibling_on_left: bool,
 }
 
-public fun new_leaf(
+public(package) fun new_leaf(
     event_uid: vector<u8>,
     event_revision: u32,
     h3_index: u64,
@@ -50,12 +50,12 @@ public fun new_leaf(
     }
 }
 
-public fun new_proof_step_left(sibling_hash: vector<u8>): ProofStep {
+public(package) fun new_proof_step_left(sibling_hash: vector<u8>): ProofStep {
     assert_32_bytes(&sibling_hash);
     ProofStep { sibling_hash, sibling_on_left: true }
 }
 
-public fun new_proof_step_right(sibling_hash: vector<u8>): ProofStep {
+public(package) fun new_proof_step_right(sibling_hash: vector<u8>): ProofStep {
     assert_32_bytes(&sibling_hash);
     ProofStep { sibling_hash, sibling_on_left: false }
 }

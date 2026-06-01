@@ -998,7 +998,7 @@ fun open_designated_campaign_budget(scenario: &mut test_scenario::Scenario) {
 }
 
 fun affected_leaf(): AffectedCellLeaf {
-    affected_cell::new_leaf(
+    accessor::new_affected_cell_leaf(
         event_uid(),
         1,
         H3_INDEX,
@@ -1014,7 +1014,7 @@ fun affected_leaf(): AffectedCellLeaf {
 
 fun proof(): vector<affected_cell::ProofStep> {
     vector[
-        affected_cell::new_proof_step_left(
+        accessor::new_affected_cell_proof_step_left(
             x"83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
         ),
     ]

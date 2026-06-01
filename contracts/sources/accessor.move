@@ -1,10 +1,10 @@
 module contracts::accessor;
 
 use contracts::admin::{Self, PauseState};
-use contracts::affected_cell::{AffectedCellLeaf, ProofStep};
+use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::allowed_residence_cell;
 use contracts::claim::{Self, ClaimIndex};
-use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
+use contracts::disaster_event::{Self, DisasterCampaignBinding, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::identity_registry::{Self, IdentityRegistry};
 use contracts::identity_result_v1;
@@ -229,6 +229,60 @@ public fun update_identity_verification(
         &result,
         now_ms,
     );
+}
+
+public fun create_disaster_event_from_signed_payload(
+    registry: &mut DisasterRegistry,
+    verifier_registry: &metadata_verifier::VerifierRegistry,
+    clock: &Clock,
+    payload_bcs: vector<u8>,
+    signature: vector<u8>,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    disaster_event::create_from_signed_payload(
+        registry,
+        verifier_registry,
+        clock,
+        payload_bcs,
+        signature,
+        public_key,
+        ctx,
+    );
+}
+
+public fun new_affected_cell_leaf(
+    event_uid: vector<u8>,
+    event_revision: u32,
+    h3_index: u64,
+    geo_resolution: u8,
+    cell_metric: u8,
+    intensity_value: u16,
+    intensity_scale: u8,
+    cell_band: u8,
+    cells_generation_method: u8,
+    oracle_version: u64,
+): AffectedCellLeaf {
+    affected_cell::new_leaf(
+        event_uid,
+        event_revision,
+        h3_index,
+        geo_resolution,
+        cell_metric,
+        intensity_value,
+        intensity_scale,
+        cell_band,
+        cells_generation_method,
+        oracle_version,
+    )
+}
+
+public fun new_affected_cell_proof_step_left(sibling_hash: vector<u8>): ProofStep {
+    affected_cell::new_proof_step_left(sibling_hash)
+}
+
+public fun new_affected_cell_proof_step_right(sibling_hash: vector<u8>): ProofStep {
+    affected_cell::new_proof_step_right(sibling_hash)
 }
 
 public fun claim_disaster_usdc(

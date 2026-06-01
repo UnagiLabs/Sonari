@@ -125,7 +125,7 @@ public(package) fun create_disaster_registry(ctx: &mut TxContext) {
     transfer::share_object(registry);
 }
 
-public fun create_from_signed_payload(
+public(package) fun create_from_signed_payload(
     registry: &mut DisasterRegistry,
     verifier_registry: &VerifierRegistry,
     clock: &Clock,
