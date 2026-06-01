@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use residence_allowlist::{
     GenerateOptions, GenerationStrategy, ResidenceAllowlistError,
     generate_and_write_allowlist_artifact_atomic, generate_and_write_proof_shards_atomic,
-    proof_output, root_output, verify_local,
+    proof_output, root_output, verify_local, verify_proof_shards,
 };
 use std::{fs, path::PathBuf, time::Duration};
 
@@ -20,6 +20,7 @@ enum Command {
     Root(InspectArgs),
     Proof(ProofArgs),
     ProofShards(ProofShardsArgs),
+    VerifyProofShards(VerifyProofShardsArgs),
     VerifyLocal(VerifyLocalArgs),
 }
 
@@ -90,6 +91,14 @@ struct ProofShardsArgs {
 }
 
 #[derive(Debug, Parser)]
+struct VerifyProofShardsArgs {
+    #[arg(long)]
+    manifest: PathBuf,
+    #[arg(long)]
+    shards_dir: PathBuf,
+}
+
+#[derive(Debug, Parser)]
 struct VerifyLocalArgs {
     #[arg(long)]
     manifest: PathBuf,
@@ -130,6 +139,11 @@ fn main() -> Result<(), ResidenceAllowlistError> {
             Ok(())
         }
         Command::ProofShards(args) => proof_shards(args),
+        Command::VerifyProofShards(args) => {
+            let output = verify_proof_shards(&args.manifest, &args.shards_dir)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(())
+        }
         Command::VerifyLocal(args) => {
             let options = GenerateOptions {
                 strategy: args.strategy,
