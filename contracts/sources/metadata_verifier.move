@@ -12,6 +12,8 @@ const REGISTRY_KIND_VERIFIER: u8 = 3;
 
 const ED25519_PUBLIC_KEY_LENGTH: u64 = 32;
 const ED25519_SIGNATURE_LENGTH: u64 = 64;
+const PCR_LENGTH: u64 = 48;
+const EARTHQUAKE_V1_CONFIG_KEY: u64 = 1;
 
 const EInvalidPublicKeyLength: u64 = 0;
 const EInvalidSignatureLength: u64 = 1;
@@ -21,11 +23,17 @@ const EVerifierKeyDisabled: u64 = 4;
 const EVerifierFamilyMismatch: u64 = 5;
 const EVerifierVersionMismatch: u64 = 6;
 const EInvalidSignature: u64 = 8;
+const EVerifierConfigAlreadyRegistered: u64 = 9;
+const EVerifierConfigNotRegistered: u64 = 10;
+const EVerifierConfigAlreadyDisabled: u64 = 11;
+const EInvalidPcrLength: u64 = 12;
+const EInvalidPcrValue: u64 = 13;
 const EVerifierKeyAlreadyDisabled: u64 = 15;
 
 public struct VerifierRegistry has key {
     id: UID,
     keys: VecMap<vector<u8>, VerifierKey>,
+    configs: VecMap<u64, VerifierConfig>,
 }
 
 public struct VerifierKey has copy, drop, store {
@@ -34,6 +42,19 @@ public struct VerifierKey has copy, drop, store {
     public_key: vector<u8>,
     enabled: bool,
     added_at_ms: u64,
+    disabled_at_ms: Option<u64>,
+}
+
+public struct VerifierConfig has copy, drop, store {
+    verifier_family: u8,
+    verifier_version: u64,
+    config_version: u64,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    enabled: bool,
+    created_at_ms: u64,
+    updated_at_ms: u64,
     disabled_at_ms: Option<u64>,
 }
 
@@ -49,6 +70,38 @@ public struct VerifierKeyAdded has copy, drop {
 public struct VerifierKeyDisabled has copy, drop {
     registry_id: ID,
     public_key: vector<u8>,
+    actor: address,
+}
+
+public struct VerifierConfigCreated has copy, drop {
+    registry_id: ID,
+    verifier_family: u8,
+    verifier_version: u64,
+    config_version: u64,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    enabled: bool,
+    actor: address,
+}
+
+public struct VerifierConfigPcrsUpdated has copy, drop {
+    registry_id: ID,
+    verifier_family: u8,
+    verifier_version: u64,
+    config_version: u64,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    enabled: bool,
+    actor: address,
+}
+
+public struct VerifierConfigDisabled has copy, drop {
+    registry_id: ID,
+    verifier_family: u8,
+    verifier_version: u64,
+    config_version: u64,
     actor: address,
 }
 
@@ -80,6 +133,33 @@ public(package) fun add_verifier_key(
     ctx: &TxContext,
 ) {
     add_verifier_key_internal(registry, verifier_family, verifier_version, public_key, ctx);
+}
+
+public(package) fun create_earthquake_verifier_config(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    create_earthquake_verifier_config_internal(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+public(package) fun update_earthquake_verifier_config_pcrs(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    update_earthquake_verifier_config_pcrs_internal(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+public(package) fun disable_earthquake_verifier_config(
+    registry: &mut VerifierRegistry,
+    ctx: &TxContext,
+) {
+    disable_earthquake_verifier_config_internal(registry, ctx);
 }
 
 public(package) fun disable_verifier_key(
@@ -142,6 +222,7 @@ fun new_registry(ctx: &mut TxContext): VerifierRegistry {
     VerifierRegistry {
         id: object::new(ctx),
         keys: vec_map::empty(),
+        configs: vec_map::empty(),
     }
 }
 
@@ -178,6 +259,92 @@ fun add_verifier_key_internal(
     });
 }
 
+fun create_earthquake_verifier_config_internal(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    assert_pcr(&pcr0);
+    assert_pcr(&pcr1);
+    assert_pcr(&pcr2);
+    let config_key = earthquake_v1_config_key();
+    assert!(
+        !registry.configs.contains(&config_key),
+        EVerifierConfigAlreadyRegistered,
+    );
+
+    registry.configs.insert(
+        config_key,
+        VerifierConfig {
+            verifier_family: VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
+            verifier_version: VERIFIER_VERSION_V1,
+            config_version: 1,
+            pcr0,
+            pcr1,
+            pcr2,
+            enabled: true,
+            created_at_ms: ctx.epoch_timestamp_ms(),
+            updated_at_ms: ctx.epoch_timestamp_ms(),
+            disabled_at_ms: option::none(),
+        },
+    );
+    event::emit(VerifierConfigCreated {
+        registry_id: object::id(registry),
+        verifier_family: VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
+        verifier_version: VERIFIER_VERSION_V1,
+        config_version: 1,
+        pcr0,
+        pcr1,
+        pcr2,
+        enabled: true,
+        actor: ctx.sender(),
+    });
+}
+
+fun update_earthquake_verifier_config_pcrs_internal(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    assert_pcr(&pcr0);
+    assert_pcr(&pcr1);
+    assert_pcr(&pcr2);
+    let config_key = earthquake_v1_config_key();
+    assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
+    let registry_id = object::id(registry);
+    let (verifier_family, verifier_version, config_version, enabled) = {
+        let config = registry.configs.get_mut(&config_key);
+        assert!(config.enabled, EVerifierConfigAlreadyDisabled);
+        config.config_version = config.config_version + 1;
+        config.pcr0 = pcr0;
+        config.pcr1 = pcr1;
+        config.pcr2 = pcr2;
+        config.updated_at_ms = ctx.epoch_timestamp_ms();
+        (
+            config.verifier_family,
+            config.verifier_version,
+            config.config_version,
+            config.enabled,
+        )
+    };
+
+    event::emit(VerifierConfigPcrsUpdated {
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        pcr0,
+        pcr1,
+        pcr2,
+        enabled,
+        actor: ctx.sender(),
+    });
+}
+
 fun disable_verifier_key_internal(
     registry: &mut VerifierRegistry,
     public_key: vector<u8>,
@@ -193,6 +360,35 @@ fun disable_verifier_key_internal(
     event::emit(VerifierKeyDisabled {
         registry_id: object::id(registry),
         public_key,
+        actor: ctx.sender(),
+    });
+}
+
+fun disable_earthquake_verifier_config_internal(
+    registry: &mut VerifierRegistry,
+    ctx: &TxContext,
+) {
+    let config_key = earthquake_v1_config_key();
+    assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
+    let registry_id = object::id(registry);
+    let (verifier_family, verifier_version, config_version) = {
+        let config = registry.configs.get_mut(&config_key);
+        assert!(config.enabled, EVerifierConfigAlreadyDisabled);
+        config.enabled = false;
+        config.updated_at_ms = ctx.epoch_timestamp_ms();
+        config.disabled_at_ms = option::some(ctx.epoch_timestamp_ms());
+        (
+            config.verifier_family,
+            config.verifier_version,
+            config.config_version,
+        )
+    };
+
+    event::emit(VerifierConfigDisabled {
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
         actor: ctx.sender(),
     });
 }
@@ -217,6 +413,27 @@ fun assert_allowed_verifier_version(verifier_version: u64) {
     assert!(verifier_version == VERIFIER_VERSION_V1, EVerifierVersionMismatch);
 }
 
+fun assert_pcr(pcr: &vector<u8>) {
+    assert!(pcr.length() == PCR_LENGTH, EInvalidPcrLength);
+    assert!(!is_all_zero(pcr), EInvalidPcrValue);
+}
+
+fun is_all_zero(bytes: &vector<u8>): bool {
+    let mut index = 0;
+    let mut all_zero = true;
+    while (index < bytes.length()) {
+        if (*bytes.borrow(index) != 0) {
+            all_zero = false;
+        };
+        index = index + 1;
+    };
+    all_zero
+}
+
+fun earthquake_v1_config_key(): u64 {
+    EARTHQUAKE_V1_CONFIG_KEY
+}
+
 #[test_only]
 public fun create_verifier_registry_for_testing(ctx: &mut TxContext): VerifierRegistry {
     new_registry(ctx)
@@ -224,8 +441,9 @@ public fun create_verifier_registry_for_testing(ctx: &mut TxContext): VerifierRe
 
 #[test_only]
 public fun destroy_verifier_registry_for_testing(registry: VerifierRegistry) {
-    let VerifierRegistry { id, keys } = registry;
+    let VerifierRegistry { id, keys, configs } = registry;
     destroy_keys_for_testing(keys);
+    destroy_configs_for_testing(configs);
     id.delete();
 }
 
@@ -235,6 +453,14 @@ fun destroy_keys_for_testing(mut keys: VecMap<vector<u8>, VerifierKey>) {
         let (_, _) = keys.pop();
     };
     keys.destroy_empty();
+}
+
+#[test_only]
+fun destroy_configs_for_testing(mut configs: VecMap<u64, VerifierConfig>) {
+    while (!configs.is_empty()) {
+        let (_, _) = configs.pop();
+    };
+    configs.destroy_empty();
 }
 
 #[test_only]
@@ -281,6 +507,24 @@ public fun disable_verifier_key_for_testing(
 }
 
 #[test_only]
+public fun earthquake_verifier_config_fields_for_testing(
+    registry: &VerifierRegistry,
+): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
+    let config_key = earthquake_v1_config_key();
+    assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
+    let config = registry.configs.get(&config_key);
+    (
+        config.verifier_family,
+        config.verifier_version,
+        config.config_version,
+        config.pcr0,
+        config.pcr1,
+        config.pcr2,
+        config.enabled,
+    )
+}
+
+#[test_only]
 public fun verifier_key_added_event_fields(
     event: VerifierKeyAdded,
 ): (ID, vector<u8>, u8, u64, bool, address) {
@@ -305,6 +549,76 @@ public fun verifier_key_disabled_event_fields(
         actor,
     } = event;
     (registry_id, public_key, actor)
+}
+
+#[test_only]
+public fun verifier_config_created_event_fields(
+    event: VerifierConfigCreated,
+): (ID, u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool, address) {
+    let VerifierConfigCreated {
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        pcr0,
+        pcr1,
+        pcr2,
+        enabled,
+        actor,
+    } = event;
+    (
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        pcr0,
+        pcr1,
+        pcr2,
+        enabled,
+        actor,
+    )
+}
+
+#[test_only]
+public fun verifier_config_pcrs_updated_event_fields(
+    event: VerifierConfigPcrsUpdated,
+): (ID, u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool, address) {
+    let VerifierConfigPcrsUpdated {
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        pcr0,
+        pcr1,
+        pcr2,
+        enabled,
+        actor,
+    } = event;
+    (
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        pcr0,
+        pcr1,
+        pcr2,
+        enabled,
+        actor,
+    )
+}
+
+#[test_only]
+public fun verifier_config_disabled_event_fields(
+    event: VerifierConfigDisabled,
+): (ID, u8, u64, u64, address) {
+    let VerifierConfigDisabled {
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        actor,
+    } = event;
+    (registry_id, verifier_family, verifier_version, config_version, actor)
 }
 
 #[test_only]
