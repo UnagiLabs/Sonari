@@ -173,6 +173,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "--capabilities CAPABILITY_NAMED_IAM",
             "--no-fail-on-empty-changeset",
         ]);
+        expect(workflow).not.toContain("TeeSigningKeySecretArn");
+        expect(workflow).not.toContain("TEE_SIGNING_KEY_SECRET_ARN");
     });
 
     it("checks post-deploy guardrails before completing", async () => {
