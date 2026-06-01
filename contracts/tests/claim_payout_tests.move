@@ -113,7 +113,7 @@ fun default_disaster_policy_min_claim_band_is_one() {
     scenario.next_tx(ADMIN);
     {
         let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        assert!(payout_policy::min_claim_band(&policy) == 1);
+        assert!(accessor::min_claim_band(&policy) == 1);
         test_scenario::return_shared(policy);
     };
 
@@ -128,21 +128,21 @@ fun quote_uses_full_band_amount_without_identity_multipliers() {
     scenario.next_tx(ADMIN);
     {
         let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        let band1 = payout_policy::quote_usdc(
+        let band1 = accessor::quote_usdc(
             &policy,
             1,
             300_000_000,
             300_000_000,
             300_000_000,
         );
-        let band2 = payout_policy::quote_usdc(
+        let band2 = accessor::quote_usdc(
             &policy,
             2,
             300_000_000,
             300_000_000,
             300_000_000,
         );
-        let band3 = payout_policy::quote_usdc(
+        let band3 = accessor::quote_usdc(
             &policy,
             3,
             300_000_000,
@@ -168,21 +168,21 @@ fun quote_keeps_user_budget_and_pool_caps() {
     scenario.next_tx(ADMIN);
     {
         let policy = scenario.take_shared<payout_policy::PayoutPolicy>();
-        let user_cap = payout_policy::quote_usdc(
+        let user_cap = accessor::quote_usdc(
             &policy,
             3,
             125_000_000,
             300_000_000,
             300_000_000,
         );
-        let budget_cap = payout_policy::quote_usdc(
+        let budget_cap = accessor::quote_usdc(
             &policy,
             3,
             300_000_000,
             175_000_000,
             300_000_000,
         );
-        let pool_cap = payout_policy::quote_usdc(
+        let pool_cap = accessor::quote_usdc(
             &policy,
             3,
             300_000_000,
@@ -322,7 +322,7 @@ fun eligibility(
     claim::new_eligibility_result(
         program::id(program),
         program::campaign_id(campaign),
-        membership::membership_pass_lineage_id(pass),
+        accessor::membership_pass_lineage_id(pass),
         tier,
         max_amount,
         0,

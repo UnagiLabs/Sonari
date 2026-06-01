@@ -2,6 +2,7 @@
 module contracts::admin_program_tests;
 
 use contracts::admin;
+use contracts::accessor;
 use contracts::allowed_residence_cell;
 use contracts::claim;
 use contracts::disaster_event;
@@ -40,13 +41,13 @@ fun init_creates_genesis_objects_and_tracking_events() {
     assert!(donor_events.length() == 1);
     let (donor_registry_id_from_event, donor_registry_kind, _, _) =
         donation::registry_created_event_fields(*donor_events.borrow(0));
-    assert!(donor_registry_kind == donation::registry_kind_donor());
+    assert!(donor_registry_kind == accessor::registry_kind_donor());
 
     let membership_events = event::events_by_type<membership::RegistryCreated>();
     assert!(membership_events.length() == 1);
     let (membership_registry_id_from_event, membership_registry_kind, _, _) =
         membership::registry_created_event_fields(*membership_events.borrow(0));
-    assert!(membership_registry_kind == membership::registry_kind_membership());
+    assert!(membership_registry_kind == accessor::registry_kind_membership());
 
     let verifier_events = event::events_by_type<metadata_verifier::RegistryCreated>();
     assert!(verifier_events.length() == 1);
@@ -98,8 +99,8 @@ fun init_creates_genesis_objects_and_tracking_events() {
 
         assert!(main_pool_id_from_event == pools::main_pool_id(&main_pool));
         assert!(operations_pool_id_from_event == pools::operations_pool_id(&operations_pool));
-        assert!(donor_registry_id_from_event == donation::registry_id(&donor_registry));
-        assert!(membership_registry_id_from_event == membership::registry_id(&membership_registry));
+        assert!(donor_registry_id_from_event == accessor::donor_registry_id(&donor_registry));
+        assert!(membership_registry_id_from_event == accessor::membership_registry_id(&membership_registry));
         assert!(
             verifier_registry_id_from_event == metadata_verifier::registry_id(&verifier_registry),
         );

@@ -69,8 +69,8 @@ fun kyc_verified_member_can_claim_full_disaster_payout() {
     {
         let receipt = scenario.take_from_sender<claim::ClaimReceipt>();
         let (_, _, _, amount, _, _, claimant, recipient) =
-            claim::claim_receipt_summary(&receipt);
-        let tier_label = claim::claim_receipt_tier_label(&receipt);
+            accessor::claim_receipt_summary(&receipt);
+        let tier_label = accessor::claim_receipt_tier_label(&receipt);
         assert!(amount == 50_000_000);
         assert!(tier_label == b"Tier 1".to_string());
         assert!(claimant == MEMBER);
@@ -85,7 +85,7 @@ fun kyc_verified_member_can_claim_full_disaster_payout() {
         let main_pool = scenario.take_shared<pools::MainPool>();
         assert!(pools::designated_pool_balance_usdc(&designated_pool) == 4_000_000);
         assert!(pools::main_pool_balance_usdc(&main_pool) == 966_000_000);
-        assert!(payout_policy::campaign_budget_claimed_usdc(&budget) == 50_000_000);
+        assert!(accessor::campaign_budget_claimed_usdc(&budget) == 50_000_000);
 
         test_scenario::return_shared(budget);
         test_scenario::return_shared(designated_pool);
@@ -665,7 +665,7 @@ fun disaster_cutoff_ms(scenario: &mut test_scenario::Scenario): u64 {
     scenario.next_tx(ADMIN);
     {
         let disaster_event = scenario.take_shared<disaster_event::DisasterEvent>();
-        let cutoff_ms = disaster_event::occurred_at_ms(&disaster_event);
+        let cutoff_ms = accessor::occurred_at_ms(&disaster_event);
         test_scenario::return_shared(disaster_event);
         cutoff_ms
     }

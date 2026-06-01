@@ -31,7 +31,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
-        let registry_id = membership::registry_id(&registry);
+        let registry_id = accessor::membership_registry_id(&registry);
 
         accessor::register_member(
             &pause_state,
@@ -59,7 +59,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         assert!(event_issued_at_ms == 0);
         assert!(event_actor == MEMBER);
 
-        assert!(membership::membership_registry_issued_count(&registry) == 1);
+        assert!(accessor::membership_registry_issued_count(&registry) == 1);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
@@ -70,11 +70,11 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
         let pass_id = object::id(&pass);
         assert!(event_pass_id == pass_id);
         assert!(event_pass_lineage_id == pass_id);
-        assert!(membership::membership_pass_owner(&pass) == MEMBER);
-        assert!(membership::membership_pass_lineage_id(&pass) == pass_id);
-        assert!(membership::membership_pass_status(&pass) == membership::status_active());
-        assert!(membership::membership_pass_issued_at_ms(&pass) == 0);
-        let (status_label, provider_label) = membership::membership_pass_display_labels(&pass);
+        assert!(accessor::membership_pass_owner(&pass) == MEMBER);
+        assert!(accessor::membership_pass_lineage_id(&pass) == pass_id);
+        assert!(accessor::membership_pass_status(&pass) == accessor::membership_status_active());
+        assert!(accessor::membership_pass_issued_at_ms(&pass) == 0);
+        let (status_label, provider_label) = accessor::membership_pass_display_labels(&pass);
         assert!(status_label == b"Active".to_string());
         assert!(provider_label == b"Unverified".to_string());
         let (
@@ -87,7 +87,7 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
             identity_expires_at_ms,
             terms_version,
             signed_statement_hash,
-        ) = membership::membership_pass_mvp_summary(&pass);
+        ) = accessor::membership_pass_mvp_summary(&pass);
         assert!(account_created_at_ms == 0u64);
         assert!(home_cell == HOME_CELL);
         assert!(home_cell_registered_at_ms == 0u64);
@@ -204,7 +204,7 @@ fun valid_residence_proof_updates_member_home_cell_at_clock_time() {
             _identity_expires_at_ms,
             _terms_version,
             _signed_statement_hash,
-        ) = membership::membership_pass_mvp_summary(&pass);
+        ) = accessor::membership_pass_mvp_summary(&pass);
         assert!(home_cell == PROMOTED_HOME_CELL);
         assert!(home_cell_registered_at_ms == HOME_CELL_UPDATED_AT_MS);
         scenario.return_to_sender(pass);
@@ -266,7 +266,7 @@ fun current_pass_mismatch_rejects_member_home_cell_update() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         membership::set_current_pass_id_for_testing(
             &mut registry,
-            membership::membership_pass_lineage_id(&pass),
+            accessor::membership_pass_lineage_id(&pass),
             wrong_pass_id,
         );
         test_scenario::return_shared(registry);
@@ -328,7 +328,7 @@ fun membership_registry_target_pause_blocks_member_home_cell_update() {
         admin::pause_target(
             &cap,
             &mut pause_state,
-            membership::target_kind_membership_registry(),
+            accessor::target_kind_membership_registry(),
             registry_id,
             scenario.ctx(),
         );
@@ -401,7 +401,7 @@ fun membership_registry_target_pause_blocks_member_registration() {
         admin::pause_target(
             &cap,
             &mut pause_state,
-            membership::target_kind_membership_registry(),
+            accessor::target_kind_membership_registry(),
             registry_id,
             scenario.ctx(),
         );
@@ -431,10 +431,10 @@ fun registry_current_pass_precheck_matches_pass_and_owner_index() {
         let registry = scenario.take_shared<membership::MembershipRegistry>();
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         let pass_id = object::id(&pass);
-        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        let pass_lineage_id = accessor::membership_pass_lineage_id(&pass);
 
         membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
-        assert!(membership::membership_owner_lineage_id(&registry, MEMBER) == pass_lineage_id);
+        assert!(accessor::membership_owner_lineage_id(&registry, MEMBER) == pass_lineage_id);
 
         let (
             record_lineage_id,
@@ -443,11 +443,11 @@ fun registry_current_pass_precheck_matches_pass_and_owner_index() {
             status,
             issued_at_ms,
             updated_at_ms,
-        ) = membership::membership_record_summary(&registry, pass_lineage_id);
+        ) = accessor::membership_record_summary(&registry, pass_lineage_id);
         assert!(record_lineage_id == pass_lineage_id);
         assert!(current_pass_id == pass_id);
         assert!(current_owner == MEMBER);
-        assert!(status == membership::status_active());
+        assert!(status == accessor::membership_status_active());
         assert!(issued_at_ms == 0);
         assert!(updated_at_ms == 0);
 
@@ -467,7 +467,7 @@ fun current_pass_precheck_rejects_missing_registry_record() {
     {
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
         let pass = scenario.take_from_sender<membership::MembershipPass>();
-        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        let pass_lineage_id = accessor::membership_pass_lineage_id(&pass);
         membership::remove_membership_record_for_testing(&mut registry, pass_lineage_id);
 
         membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
@@ -491,7 +491,7 @@ fun current_pass_precheck_rejects_wrong_current_pass_id() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         membership::set_current_pass_id_for_testing(
             &mut registry,
-            membership::membership_pass_lineage_id(&pass),
+            accessor::membership_pass_lineage_id(&pass),
             wrong_pass_id,
         );
 
@@ -515,7 +515,7 @@ fun current_pass_precheck_rejects_wrong_current_owner() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         membership::set_current_owner_for_testing(
             &mut registry,
-            membership::membership_pass_lineage_id(&pass),
+            accessor::membership_pass_lineage_id(&pass),
             OTHER,
         );
 
@@ -539,8 +539,8 @@ fun current_pass_precheck_rejects_inactive_registry_record_status() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         membership::set_membership_record_status_for_testing(
             &mut registry,
-            membership::membership_pass_lineage_id(&pass),
-            membership::status_suspended(),
+            accessor::membership_pass_lineage_id(&pass),
+            accessor::membership_status_suspended(),
         );
 
         membership::assert_current_pass_precheck(&registry, &pass, MEMBER);
@@ -571,17 +571,17 @@ fun current_pass_precheck_allows_active_pass_owner() {
 
 #[test, expected_failure(abort_code = membership::EMembershipPassNotActive)]
 fun suspended_pass_fails_current_pass_precheck() {
-    run_inactive_status_precheck(membership::status_suspended());
+    run_inactive_status_precheck(accessor::membership_status_suspended());
 }
 
 #[test, expected_failure(abort_code = membership::EMembershipPassNotActive)]
 fun revoked_pass_fails_current_pass_precheck() {
-    run_inactive_status_precheck(membership::status_revoked());
+    run_inactive_status_precheck(accessor::membership_status_revoked());
 }
 
 #[test, expected_failure(abort_code = membership::EMembershipPassNotActive)]
 fun migrated_pass_fails_current_pass_precheck() {
-    run_inactive_status_precheck(membership::status_migrated());
+    run_inactive_status_precheck(accessor::membership_status_migrated());
 }
 
 #[test, expected_failure(abort_code = membership::EClaimantNotAuthorized)]
@@ -612,7 +612,7 @@ fun duplicate_claim_key_uses_pass_lineage_id_and_campaign_id() {
         let pass = scenario.take_from_sender<membership::MembershipPass>();
         let (key_pass_lineage_id, key_campaign_id) =
             membership::duplicate_claim_key(&pass, campaign_id);
-        assert!(key_pass_lineage_id == membership::membership_pass_lineage_id(&pass));
+        assert!(key_pass_lineage_id == accessor::membership_pass_lineage_id(&pass));
         assert!(key_campaign_id == campaign_id);
         scenario.return_to_sender(pass);
     };
@@ -742,7 +742,7 @@ fun operations_pool_id(scenario: &mut test_scenario::Scenario): object::ID {
 fun membership_registry_id(scenario: &mut test_scenario::Scenario): object::ID {
     scenario.next_tx(ADMIN);
     let registry = scenario.take_shared<membership::MembershipRegistry>();
-    let registry_id = membership::registry_id(&registry);
+    let registry_id = accessor::membership_registry_id(&registry);
     test_scenario::return_shared(registry);
     registry_id
 }

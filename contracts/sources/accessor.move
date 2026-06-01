@@ -3,7 +3,7 @@ module contracts::accessor;
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::allowed_residence_cell;
-use contracts::claim::{Self, ClaimIndex};
+use contracts::claim::{Self, ClaimIndex, ClaimReceipt};
 use contracts::disaster_event::{Self, DisasterCampaignBinding, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::identity_registry::{Self, IdentityRegistry};
@@ -11,8 +11,9 @@ use contracts::identity_result_v1;
 use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
-use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
+use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
 use contracts::program::{Self, Campaign, Program};
+use std::string::String;
 use sui::clock::{Self, Clock};
 use sui::coin::Coin;
 use usdc::usdc::USDC;
@@ -339,9 +340,216 @@ public fun claim_disaster_usdc(
     );
 }
 
+public fun donor_pass_tier_label(pass: &DonorPass): String {
+    donation::donor_pass_tier_label(pass)
+}
+
 public fun donation_record_summary(
     pass: &DonorPass,
     donation_index: u64,
 ): (u64, u8, Option<ID>, Option<ID>, ID, u64, vector<u8>, u64) {
     donation::donation_record_summary(pass, donation_index)
+}
+
+public fun donor_registry_id(registry: &DonorRegistry): ID {
+    donation::registry_id(registry)
+}
+
+public fun registry_kind_donor(): u8 {
+    donation::registry_kind_donor()
+}
+
+public fun membership_registry_id(registry: &membership::MembershipRegistry): ID {
+    membership::registry_id(registry)
+}
+
+public fun registry_kind_membership(): u8 {
+    membership::registry_kind_membership()
+}
+
+public fun target_kind_membership_registry(): u8 {
+    membership::target_kind_membership_registry()
+}
+
+public fun membership_registry_issued_count(registry: &membership::MembershipRegistry): u64 {
+    membership::membership_registry_issued_count(registry)
+}
+
+public fun membership_owner_lineage_id(
+    registry: &membership::MembershipRegistry,
+    owner: address,
+): ID {
+    membership::membership_owner_lineage_id(registry, owner)
+}
+
+public fun membership_record_summary(
+    registry: &membership::MembershipRegistry,
+    pass_lineage_id: ID,
+): (ID, ID, address, u8, u64, u64) {
+    membership::membership_record_summary(registry, pass_lineage_id)
+}
+
+public fun membership_pass_owner(pass: &membership::MembershipPass): address {
+    membership::membership_pass_owner(pass)
+}
+
+public fun membership_pass_lineage_id(pass: &membership::MembershipPass): ID {
+    membership::membership_pass_lineage_id(pass)
+}
+
+public fun membership_pass_status(pass: &membership::MembershipPass): u8 {
+    membership::membership_pass_status(pass)
+}
+
+public fun membership_pass_issued_at_ms(pass: &membership::MembershipPass): u64 {
+    membership::membership_pass_issued_at_ms(pass)
+}
+
+public fun membership_pass_display_labels(
+    pass: &membership::MembershipPass,
+): (String, String) {
+    membership::membership_pass_display_labels(pass)
+}
+
+public fun membership_pass_mvp_summary(
+    pass: &membership::MembershipPass,
+): (u64, u64, u64, bool, u8, u64, u64, u64, vector<u8>) {
+    membership::membership_pass_mvp_summary(pass)
+}
+
+public fun membership_status_active(): u8 {
+    membership::status_active()
+}
+
+public fun membership_status_suspended(): u8 {
+    membership::status_suspended()
+}
+
+public fun membership_status_revoked(): u8 {
+    membership::status_revoked()
+}
+
+public fun membership_status_migrated(): u8 {
+    membership::status_migrated()
+}
+
+public fun claim_index_claim_count(index: &ClaimIndex): u64 {
+    claim::claim_index_claim_count(index)
+}
+
+public fun claim_receipt_summary(
+    receipt: &ClaimReceipt,
+): (ID, ID, ID, u64, u64, u64, address, address) {
+    claim::claim_receipt_summary(receipt)
+}
+
+public fun claim_receipt_tier_label(receipt: &ClaimReceipt): String {
+    claim::claim_receipt_tier_label(receipt)
+}
+
+public fun quote_usdc(
+    policy: &PayoutPolicy,
+    eligibility_tier: u8,
+    user_max_amount_usdc: u64,
+    budget_remaining_usdc: u64,
+    pool_available_usdc: u64,
+): u64 {
+    payout_policy::quote_usdc(
+        policy,
+        eligibility_tier,
+        user_max_amount_usdc,
+        budget_remaining_usdc,
+        pool_available_usdc,
+    )
+}
+
+public fun main_backstop_budget_usdc(
+    main_total_received_usdc: u64,
+    main_balance_usdc: u64,
+): u64 {
+    payout_policy::main_backstop_budget_usdc(main_total_received_usdc, main_balance_usdc)
+}
+
+public fun future_reserve_floor_usdc(main_total_received_usdc: u64): u64 {
+    payout_policy::future_reserve_floor_usdc(main_total_received_usdc)
+}
+
+public fun liquid_reserve_target_usdc(main_total_received_usdc: u64): u64 {
+    payout_policy::liquid_reserve_target_usdc(main_total_received_usdc)
+}
+
+public fun campaign_budget_claimed_usdc(budget: &CampaignBudget): u64 {
+    payout_policy::campaign_budget_claimed_usdc(budget)
+}
+
+public fun campaign_budget_remaining_usdc(budget: &CampaignBudget): u64 {
+    payout_policy::campaign_budget_remaining_usdc(budget)
+}
+
+public fun main_remaining_usdc(budget: &CampaignBudget): u64 {
+    payout_policy::main_remaining_usdc(budget)
+}
+
+public fun designated_remaining_usdc(budget: &CampaignBudget): u64 {
+    payout_policy::designated_remaining_usdc(budget)
+}
+
+public fun policy_id(policy: &PayoutPolicy): ID {
+    payout_policy::policy_id(policy)
+}
+
+public fun min_claim_band(policy: &PayoutPolicy): u8 {
+    payout_policy::min_claim_band(policy)
+}
+
+public fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
+    disaster_event::affected_cells_root(disaster_event)
+}
+
+public fun disaster_event_uid(disaster_event: &DisasterEvent): vector<u8> {
+    disaster_event::event_uid(disaster_event)
+}
+
+public fun disaster_event_revision(disaster_event: &DisasterEvent): u32 {
+    disaster_event::event_revision(disaster_event)
+}
+
+public fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
+    disaster_event::occurred_at_ms(disaster_event)
+}
+
+public fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
+    disaster_event::disaster_registry_event_count(registry)
+}
+
+public fun disaster_event_id(disaster_event: &DisasterEvent): ID {
+    disaster_event::disaster_event_id(disaster_event)
+}
+
+public fun affected_cell_leaf_hash(leaf: &AffectedCellLeaf): vector<u8> {
+    affected_cell::leaf_hash(leaf)
+}
+
+public fun verify_affected_cell_proof(
+    leaf: &AffectedCellLeaf,
+    proof: vector<ProofStep>,
+    expected_root: vector<u8>,
+): bool {
+    affected_cell::verify_proof(leaf, proof, expected_root)
+}
+
+public fun affected_cell_h3_index(leaf: &AffectedCellLeaf): u64 {
+    affected_cell::h3_index(leaf)
+}
+
+public fun affected_cell_band(leaf: &AffectedCellLeaf): u8 {
+    affected_cell::cell_band(leaf)
+}
+
+public fun affected_cell_event_uid(leaf: &AffectedCellLeaf): vector<u8> {
+    affected_cell::event_uid(leaf)
+}
+
+public fun affected_cell_event_revision(leaf: &AffectedCellLeaf): u32 {
+    affected_cell::event_revision(leaf)
 }

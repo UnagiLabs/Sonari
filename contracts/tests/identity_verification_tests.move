@@ -120,7 +120,7 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
             identity_expires_at_ms,
             terms_version,
             signed_statement_hash,
-        ) = membership::membership_pass_mvp_summary(&pass);
+        ) = accessor::membership_pass_mvp_summary(&pass);
         assert!(identity_verified);
         assert!(identity_provider_mask == identity_registry::provider_world_id());
         assert!(identity_verified_at_ms == NOW_MS);
@@ -320,7 +320,7 @@ fun membership_registry_target_pause_blocks_signed_identity_update() {
     let mut scenario = initialized_with_registered_member();
     add_identity_verifier_key(&mut scenario);
     let target_id = membership_registry_id(&mut scenario);
-    pause_target(&mut scenario, membership::target_kind_membership_registry(), target_id);
+    pause_target(&mut scenario, accessor::target_kind_membership_registry(), target_id);
 
     submit_identity_result(
         &mut scenario,
@@ -505,7 +505,7 @@ fun membership_registry_id(scenario: &mut test_scenario::Scenario): ID {
     scenario.next_tx(ADMIN);
     {
         let registry = scenario.take_shared<membership::MembershipRegistry>();
-        let id = membership::registry_id(&registry);
+        let id = accessor::membership_registry_id(&registry);
         test_scenario::return_shared(registry);
         id
     }
@@ -588,7 +588,7 @@ fun submit_identity_result_for_key(
             identity_expires_at_ms,
             terms_version,
             signed_statement_hash,
-        ) = membership::membership_pass_mvp_summary(&pass);
+        ) = accessor::membership_pass_mvp_summary(&pass);
         assert!(identity_verified);
         assert!(identity_provider_mask == provider);
         assert!(identity_verified_at_ms == NOW_MS);

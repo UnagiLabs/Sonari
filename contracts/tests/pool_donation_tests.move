@@ -133,7 +133,7 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
         let total_donated = donation::donor_pass_total_donated_usdc(&pass);
         let donation_count = donation::donor_pass_donation_count(&pass);
         let tier = donation::donor_pass_tier(&pass);
-        let tier_label = donation::donor_pass_tier_label(&pass);
+        let tier_label = accessor::donor_pass_tier_label(&pass);
         assert!(owner == DONOR);
         assert!(total_donated == 1_000_000);
         assert!(donation_count == 1);
@@ -775,7 +775,7 @@ fun tier_update_event_is_emitted_only_when_tier_changes() {
         );
 
         let tier = donation::donor_pass_tier(&pass);
-        let tier_label = donation::donor_pass_tier_label(&pass);
+        let tier_label = accessor::donor_pass_tier_label(&pass);
         assert!(tier == donation::tier_bronze());
         assert!(tier_label == b"Bronze".to_string());
 

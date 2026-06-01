@@ -341,11 +341,11 @@ fun create_receipt_and_emit(
     transfer::transfer(receipt, ctx.sender());
 }
 
-public fun claim_index_claim_count(index: &ClaimIndex): u64 {
+public(package) fun claim_index_claim_count(index: &ClaimIndex): u64 {
     index.claim_count
 }
 
-public fun claim_receipt_summary(
+public(package) fun claim_receipt_summary(
     receipt: &ClaimReceipt,
 ): (ID, ID, ID, u64, u64, u64, address, address) {
     (
@@ -360,7 +360,7 @@ public fun claim_receipt_summary(
     )
 }
 
-public fun claim_receipt_tier_label(receipt: &ClaimReceipt): String {
+public(package) fun claim_receipt_tier_label(receipt: &ClaimReceipt): String {
     receipt.tier_label
 }
 

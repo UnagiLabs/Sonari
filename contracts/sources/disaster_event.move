@@ -317,27 +317,27 @@ public fun create_from_payload_for_testing(
     );
 }
 
-public fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
+public(package) fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {
     disaster_event.affected_cells_root
 }
 
-public fun event_uid(disaster_event: &DisasterEvent): vector<u8> {
+public(package) fun event_uid(disaster_event: &DisasterEvent): vector<u8> {
     disaster_event.event_uid
 }
 
-public fun event_revision(disaster_event: &DisasterEvent): u32 {
+public(package) fun event_revision(disaster_event: &DisasterEvent): u32 {
     disaster_event.event_revision
 }
 
-public fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
+public(package) fun occurred_at_ms(disaster_event: &DisasterEvent): u64 {
     disaster_event.occurred_at_ms
 }
 
-public fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
+public(package) fun disaster_registry_event_count(registry: &DisasterRegistry): u64 {
     registry.event_count
 }
 
-public fun disaster_event_id(disaster_event: &DisasterEvent): ID {
+public(package) fun disaster_event_id(disaster_event: &DisasterEvent): ID {
     object::id(disaster_event)
 }
 

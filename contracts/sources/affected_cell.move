@@ -60,7 +60,7 @@ public(package) fun new_proof_step_right(sibling_hash: vector<u8>): ProofStep {
     ProofStep { sibling_hash, sibling_on_left: false }
 }
 
-public fun leaf_hash(leaf: &AffectedCellLeaf): vector<u8> {
+public(package) fun leaf_hash(leaf: &AffectedCellLeaf): vector<u8> {
     let mut bytes = vector[0x00];
     bytes.append(leaf.event_uid);
     bytes.append(bcs::to_bytes(&leaf.event_revision));
@@ -75,7 +75,7 @@ public fun leaf_hash(leaf: &AffectedCellLeaf): vector<u8> {
     hash::sha2_256(bytes)
 }
 
-public fun verify_proof(
+public(package) fun verify_proof(
     leaf: &AffectedCellLeaf,
     proof: vector<ProofStep>,
     expected_root: vector<u8>,
@@ -92,19 +92,19 @@ public fun verify_proof(
     current == expected_root
 }
 
-public fun h3_index(leaf: &AffectedCellLeaf): u64 {
+public(package) fun h3_index(leaf: &AffectedCellLeaf): u64 {
     leaf.h3_index
 }
 
-public fun cell_band(leaf: &AffectedCellLeaf): u8 {
+public(package) fun cell_band(leaf: &AffectedCellLeaf): u8 {
     leaf.cell_band
 }
 
-public fun event_uid(leaf: &AffectedCellLeaf): vector<u8> {
+public(package) fun event_uid(leaf: &AffectedCellLeaf): vector<u8> {
     leaf.event_uid
 }
 
-public fun event_revision(leaf: &AffectedCellLeaf): u32 {
+public(package) fun event_revision(leaf: &AffectedCellLeaf): u32 {
     leaf.event_revision
 }
 

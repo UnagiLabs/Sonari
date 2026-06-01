@@ -1,6 +1,7 @@
 #[test_only]
 module contracts::identity_registry_tests;
 
+use contracts::accessor;
 use contracts::identity_registry;
 use contracts::identity_result_v1;
 use contracts::membership;
@@ -58,14 +59,14 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
         identity_expires_at_ms,
         terms_version,
         signed_statement_hash,
-    ) = membership::membership_pass_mvp_summary(&pass);
+    ) = accessor::membership_pass_mvp_summary(&pass);
     assert!(identity_verified);
     assert!(identity_provider_mask == identity_result_v1::provider_kyc());
     assert!(identity_verified_at_ms == APPLY_TIME_MS);
     assert!(identity_expires_at_ms == EXPIRES_AT_MS);
     assert!(terms_version == TERMS_VERSION);
     assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
-    let (_, provider_label) = membership::membership_pass_display_labels(&pass);
+    let (_, provider_label) = accessor::membership_pass_display_labels(&pass);
     assert!(provider_label == b"KYC".to_string());
     assert!(identity_registry::binding_count_for_testing(&registry) == 1);
     assert!(
@@ -73,7 +74,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
             &registry,
             identity_result_v1::provider_kyc(),
             RESULT_DUPLICATE_KEY_HASH,
-        ) == membership::membership_pass_lineage_id(&pass),
+        ) == accessor::membership_pass_lineage_id(&pass),
     );
 
     cleanup_step3(registry, membership_registry, pass, MEMBER);
@@ -118,13 +119,13 @@ fun decoded_world_id_result_accumulates_provider_mask() {
     );
 
     let (_, _, _, identity_verified, identity_provider_mask, identity_verified_at_ms, _, _, _) =
-        membership::membership_pass_mvp_summary(&pass);
+        accessor::membership_pass_mvp_summary(&pass);
     assert!(identity_verified);
     assert!(
         identity_provider_mask ==
             identity_result_v1::provider_kyc() + identity_result_v1::provider_world_id(),
     );
-    let (_, provider_label) = membership::membership_pass_display_labels(&pass);
+    let (_, provider_label) = accessor::membership_pass_display_labels(&pass);
     assert!(provider_label == b"KYC + World ID".to_string());
     assert!(identity_verified_at_ms == APPLY_TIME_MS + 1);
     assert!(identity_registry::binding_count_for_testing(&registry) == 2);
@@ -182,7 +183,7 @@ fun decoded_result_rejects_wrong_membership_id() {
     membership::destroy_membership_registry_for_testing(
         other_membership_registry,
         OTHER,
-        membership::membership_pass_lineage_id(&other_pass),
+        accessor::membership_pass_lineage_id(&other_pass),
     );
     membership::destroy_pass_for_testing(other_pass);
 }
@@ -201,7 +202,7 @@ fun decoded_result_rejects_pass_that_is_not_membership_registry_current_sbt() {
     );
     membership::set_current_pass_id_for_testing(
         &mut membership_registry,
-        membership::membership_pass_lineage_id(&pass),
+        accessor::membership_pass_lineage_id(&pass),
         object::id(&registry),
     );
 
@@ -414,14 +415,14 @@ fun same_hash_across_providers_is_allowed() {
             &registry,
             identity_registry::provider_kyc(),
             DUPLICATE_KEY_HASH,
-        ) == membership::membership_pass_lineage_id(&pass),
+        ) == accessor::membership_pass_lineage_id(&pass),
     );
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
             identity_registry::provider_world_id(),
             DUPLICATE_KEY_HASH,
-        ) == membership::membership_pass_lineage_id(&other_pass),
+        ) == accessor::membership_pass_lineage_id(&other_pass),
     );
 
     identity_registry::remove_binding_for_testing(
@@ -460,7 +461,7 @@ fun same_key_same_pass_is_idempotent() {
             &registry,
             identity_registry::provider_kyc(),
             DUPLICATE_KEY_HASH,
-        ) == membership::membership_pass_lineage_id(&pass),
+        ) == accessor::membership_pass_lineage_id(&pass),
     );
 
     identity_registry::remove_binding_for_testing(
@@ -618,7 +619,7 @@ fun cleanup_step3(
     membership::destroy_membership_registry_for_testing(
         membership_registry,
         owner,
-        membership::membership_pass_lineage_id(&pass),
+        accessor::membership_pass_lineage_id(&pass),
     );
     membership::destroy_pass_for_testing(pass);
 }
@@ -643,7 +644,7 @@ fun cleanup_step3_with_two_bindings(
     membership::destroy_membership_registry_for_testing(
         membership_registry,
         owner,
-        membership::membership_pass_lineage_id(&pass),
+        accessor::membership_pass_lineage_id(&pass),
     );
     membership::destroy_pass_for_testing(pass);
 }
@@ -655,7 +656,7 @@ fun cleanup_other_step3_pass(
     membership::destroy_membership_registry_for_testing(
         membership_registry,
         OTHER,
-        membership::membership_pass_lineage_id(&pass),
+        accessor::membership_pass_lineage_id(&pass),
     );
     membership::destroy_pass_for_testing(pass);
 }

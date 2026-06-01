@@ -2,7 +2,6 @@
 module contracts::disaster_tests;
 
 use contracts::admin;
-use contracts::affected_cell;
 use contracts::accessor;
 use contracts::disaster_event;
 use contracts::metadata_verifier;
@@ -48,7 +47,7 @@ fun affected_cell_leaf_hash_and_merkle_proof_match_fixture_vectors() {
         CELLS_GENERATION_METHOD,
         ORACLE_VERSION,
     );
-    let hash = affected_cell::leaf_hash(&leaf);
+    let hash = accessor::affected_cell_leaf_hash(&leaf);
     assert!(
         hash == x"bc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
     );
@@ -58,7 +57,7 @@ fun affected_cell_leaf_hash_and_merkle_proof_match_fixture_vectors() {
             x"83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
         ),
     ];
-    assert!(affected_cell::verify_proof(&leaf, proof, affected_cells_root()));
+    assert!(accessor::verify_affected_cell_proof(&leaf, proof, affected_cells_root()));
 }
 
 #[test]
