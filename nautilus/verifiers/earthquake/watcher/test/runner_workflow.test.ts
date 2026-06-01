@@ -21,6 +21,10 @@ import { InMemoryStateRepository } from "../src/state.js";
 
 const validEd25519SuiPrivateKey =
     "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf";
+const earthquakeRelayerTarget = "0x123::accessor::create_disaster_event_from_signed_payload";
+const earthquakeRelayerRegistry = "0xregistry";
+const earthquakeRelayerVerifierRegistry = "0xverifier";
+const earthquakeRelayerClock = "0x6";
 
 describe("AWS runner workflow helper", () => {
     const originalEnv = { ...process.env };
@@ -929,9 +933,9 @@ describe("AWS runner workflow helper", () => {
                 ...baseConfig(),
                 relayer: {
                     mode: "dry_run",
-                    target: "0xtarget",
-                    registry: "0xregistry",
-                    verifierRegistry: "0xverifier",
+                    target: earthquakeRelayerTarget,
+                    registry: earthquakeRelayerRegistry,
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
                     grpcUrl: "https://fullnode.testnet.sui.io:443",
                     senderAddress: "0xsender",
                     configurationError: "RELAYER_NETWORK is required",
@@ -963,9 +967,9 @@ describe("AWS runner workflow helper", () => {
 
         process.env.RELAYER_MODE = "submit";
         process.env.RELAYER_NETWORK = "testnet";
-        process.env.RELAYER_TARGET = "0xtarget";
-        process.env.RELAYER_REGISTRY = "0xregistry";
-        process.env.RELAYER_VERIFIER_REGISTRY = "0xverifier";
+        process.env.RELAYER_TARGET = earthquakeRelayerTarget;
+        process.env.RELAYER_REGISTRY = earthquakeRelayerRegistry;
+        process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
         process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
         process.env.RELAYER_ALLOW_SUBMIT = "false";
         process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
@@ -984,9 +988,9 @@ describe("AWS runner workflow helper", () => {
     it("creates a lazy submit signer loader from RELAYER_SIGNER_SECRET_ARN", async () => {
         process.env.RELAYER_MODE = "submit";
         process.env.RELAYER_NETWORK = "testnet";
-        process.env.RELAYER_TARGET = "0xtarget";
-        process.env.RELAYER_REGISTRY = "0xregistry";
-        process.env.RELAYER_VERIFIER_REGISTRY = "0xverifier";
+        process.env.RELAYER_TARGET = earthquakeRelayerTarget;
+        process.env.RELAYER_REGISTRY = earthquakeRelayerRegistry;
+        process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
         process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
         process.env.RELAYER_ALLOW_SUBMIT = "true";
         process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
@@ -1043,9 +1047,9 @@ describe("AWS runner workflow helper", () => {
                 ...baseConfig(),
                 relayer: {
                     mode: "submit",
-                    target: "0xtarget",
-                    registry: "0xregistry",
-                    verifierRegistry: "0xverifier",
+                    target: earthquakeRelayerTarget,
+                    registry: earthquakeRelayerRegistry,
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
                     network: "testnet",
                     grpcUrl: "https://fullnode.testnet.sui.io:443",
                     allowSubmit: true,
@@ -1108,9 +1112,9 @@ describe("AWS runner workflow helper", () => {
             relayer: "succeeded",
             relayer_success: {
                 mode: "submit",
-                target: "0xtarget",
-                registry: "0xregistry",
-                verifierRegistry: "0xverifier",
+                target: earthquakeRelayerTarget,
+                registry: earthquakeRelayerRegistry,
+                verifierRegistry: earthquakeRelayerVerifierRegistry,
                 digest: "tx-digest",
                 objectId: "0xdisaster",
             },
@@ -1297,17 +1301,31 @@ class RecordingRelayerAdapter implements RelayerAdapter {
             value: {
                 mode: this.mode,
                 request: {
-                    target: "0xtarget",
-                    registry: "0xregistry",
-                    verifierRegistry: "0xverifier",
-                    clock: "0x6",
-                    arguments: ["0xtarget", "0xregistry", "0xverifier", [], [], []],
+                    target: earthquakeRelayerTarget,
+                    registry: earthquakeRelayerRegistry,
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    clock: earthquakeRelayerClock,
+                    arguments: [
+                        earthquakeRelayerRegistry,
+                        earthquakeRelayerVerifierRegistry,
+                        earthquakeRelayerClock,
+                        [],
+                        [],
+                        [],
+                    ],
                     submitRequest: {
-                        target: "0xtarget",
-                        registry: "0xregistry",
-                        verifierRegistry: "0xverifier",
-                        clock: "0x6",
-                        arguments: ["0xtarget", "0xregistry", "0xverifier", [], [], []],
+                        target: earthquakeRelayerTarget,
+                        registry: earthquakeRelayerRegistry,
+                        verifierRegistry: earthquakeRelayerVerifierRegistry,
+                        clock: earthquakeRelayerClock,
+                        arguments: [
+                            earthquakeRelayerRegistry,
+                            earthquakeRelayerVerifierRegistry,
+                            earthquakeRelayerClock,
+                            [],
+                            [],
+                            [],
+                        ],
                     },
                 },
             },
