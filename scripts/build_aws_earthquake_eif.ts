@@ -11,6 +11,13 @@ const DEFAULT_CPU_COUNT = 2;
 const DEFAULT_MEMORY_MIB = 1024;
 const DEFAULT_ENCLAVE_CID = 16;
 const EARTHQUAKE_TEE_BIN = "/opt/sonari/tee-artifact/bin/tee";
+const EARTHQUAKE_VSOCK_TCP_BRIDGE_BIN = "/opt/sonari/tee-artifact/bin/vsock-tcp-bridge";
+const EARTHQUAKE_EGRESS_PROXY_PORT = "18080";
+const EARTHQUAKE_TEE_COMMAND = [
+    "/bin/sh",
+    "-c",
+    `set -e; ${EARTHQUAKE_VSOCK_TCP_BRIDGE_BIN} --listen-host 127.0.0.1 --listen-port ${EARTHQUAKE_EGRESS_PROXY_PORT} --parent-cid 3 --vsock-port ${EARTHQUAKE_EGRESS_PROXY_PORT} & exec ${EARTHQUAKE_TEE_BIN} server`,
+] as const;
 
 export interface BuildAwsEarthquakeEifOptions {
     artifactPath?: string;
@@ -49,7 +56,7 @@ export function createAwsEarthquakeEifBuildPlan(
         eifPath,
         dockerContextDir,
         dockerUri: DEFAULT_DOCKER_URI,
-        teeCommand: [EARTHQUAKE_TEE_BIN, "server"],
+        teeCommand: EARTHQUAKE_TEE_COMMAND,
         buildEnclaveCommand: [
             "nitro-cli",
             "build-enclave",

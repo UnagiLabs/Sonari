@@ -1109,7 +1109,8 @@ function buildSsmShellCommand(input: {
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONTEXT"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_EPOCHS"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
-        "export SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
+        buildRequiredShellEnvCheck("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
+        "export SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL SONARI_WALRUS_UPLOAD_RELAY SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
@@ -1131,11 +1132,14 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONTEXT"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_EPOCHS"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
+        buildRequiredShellEnvCheck("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
         'test -s "$RUNNER_TOKEN_FILE"',
         'test -x "$SONARI_WALRUS_CLI"',
         'test -s "$SONARI_WALRUS_CONFIG"',
         'test -s "$SONARI_WALRUS_WALLET"',
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
+        "systemctl is-active --quiet sonari-earthquake-egress-connect-proxy.service",
+        "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
     ].join("\n");
 }
 

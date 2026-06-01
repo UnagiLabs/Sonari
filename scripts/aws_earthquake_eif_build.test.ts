@@ -17,7 +17,11 @@ describe("AWS earthquake EIF build script", () => {
         expect(plan.eifPath).toBe(path.resolve("dist/aws/earthquake-tee.eif"));
         expect(plan.dockerContextDir).toBe(path.resolve(".build/aws-earthquake-eif"));
         expect(plan.dockerUri).toBe("sonari/earthquake-tee:local");
-        expect(plan.teeCommand).toEqual(["/opt/sonari/tee-artifact/bin/tee", "server"]);
+        expect(plan.teeCommand).toEqual([
+            "/bin/sh",
+            "-c",
+            "set -e; /opt/sonari/tee-artifact/bin/vsock-tcp-bridge --listen-host 127.0.0.1 --listen-port 18080 --parent-cid 3 --vsock-port 18080 & exec /opt/sonari/tee-artifact/bin/tee server",
+        ]);
         expect(plan.buildEnclaveCommand).toEqual([
             "nitro-cli",
             "build-enclave",

@@ -12,13 +12,15 @@ use std::io::{self, Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
     WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
     grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
+
+const PRODUCTION_FETCH_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate deterministic Sonari USGS oracle artifacts")]
@@ -213,6 +215,12 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
         "SONARI_WALRUS_AGGREGATOR_URL",
         &config.walrus_aggregator_url,
     );
+    if let Some(upload_relay) = non_empty_option(config.walrus_upload_relay.as_deref()) {
+        set_env_before_server("SONARI_WALRUS_UPLOAD_RELAY", upload_relay);
+    }
+    if let Some(egress_proxy_url) = non_empty_option(config.egress_proxy_url.as_deref()) {
+        set_env_before_server("SONARI_EARTHQUAKE_EGRESS_PROXY_URL", egress_proxy_url);
+    }
     set_env_before_server("SONARI_WALRUS_EPOCHS", &config.walrus_epochs.to_string());
     Ok(())
 }
@@ -225,7 +233,15 @@ struct BootstrapConfig {
     sui_keystore: String,
     walrus_context: String,
     walrus_aggregator_url: String,
+    #[serde(default)]
+    walrus_upload_relay: Option<String>,
+    #[serde(default)]
+    egress_proxy_url: Option<String>,
     walrus_epochs: u32,
+}
+
+fn non_empty_option(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 fn write_secret_file(path: &str, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -538,7 +554,8 @@ fn production_worker_request_result(
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
         request.source_event_id
     );
-    let detail_json = match reqwest::blocking::get(&detail_url).and_then(|response| {
+    let client = production_http_client()?;
+    let detail_json = match client.get(&detail_url).send().and_then(|response| {
         if response.status().is_success() {
             response.bytes()
         } else {
@@ -572,7 +589,7 @@ fn production_worker_request_result(
     };
 
     let grid = match preferred_grid_uri_from_detail(&detail_value) {
-        Some(uri) => match fetch_grid(&uri) {
+        Some(uri) => match fetch_grid(&client, &uri) {
             Ok(grid) => Some(grid),
             Err(_) => {
                 return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
@@ -693,8 +710,20 @@ struct FetchedGrid {
     raw_grid_uri: String,
 }
 
-fn fetch_grid(uri: &str) -> Result<FetchedGrid, Box<dyn std::error::Error>> {
-    let bytes = match reqwest::blocking::get(uri).and_then(|response| {
+fn production_http_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    let mut builder = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(PRODUCTION_FETCH_TIMEOUT_MS));
+    if let Some(proxy_url) = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL") {
+        builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+    }
+    builder.build()
+}
+
+fn fetch_grid(
+    client: &reqwest::blocking::Client,
+    uri: &str,
+) -> Result<FetchedGrid, Box<dyn std::error::Error>> {
+    let bytes = match client.get(uri).send().and_then(|response| {
         if response.status().is_success() {
             response.bytes()
         } else {
@@ -1015,6 +1044,7 @@ fn walrus_archive_config(
         aggregator_url,
         epochs,
         command_timeout_ms,
+        egress_proxy_url: non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
     }))
 }
 

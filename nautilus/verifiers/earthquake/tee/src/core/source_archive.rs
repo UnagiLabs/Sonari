@@ -52,6 +52,7 @@ pub struct WalrusCliSourceArchiveConfig {
     pub aggregator_url: String,
     pub epochs: u32,
     pub command_timeout_ms: u64,
+    pub egress_proxy_url: Option<String>,
 }
 
 impl Default for WalrusCliSourceArchiveConfig {
@@ -65,6 +66,7 @@ impl Default for WalrusCliSourceArchiveConfig {
             aggregator_url: String::new(),
             epochs: 2,
             command_timeout_ms: DEFAULT_WALRUS_CLI_TIMEOUT_MS,
+            egress_proxy_url: None,
         }
     }
 }
@@ -78,6 +80,7 @@ impl WalrusCliSourceArchiveConfig {
         let context = non_empty_env("SONARI_WALRUS_CONTEXT");
         let wallet = non_empty_env("SONARI_WALRUS_WALLET");
         let upload_relay = non_empty_env("SONARI_WALRUS_UPLOAD_RELAY");
+        let egress_proxy_url = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
         let aggregator_url = non_empty_env("SONARI_WALRUS_AGGREGATOR_URL").ok_or_else(|| {
             SourceArchiveError::StoreFailed(
                 "SONARI_WALRUS_AGGREGATOR_URL is required for Walrus archive".to_owned(),
@@ -106,6 +109,7 @@ impl WalrusCliSourceArchiveConfig {
             aggregator_url,
             epochs,
             command_timeout_ms,
+            egress_proxy_url,
         })
     }
 }
@@ -196,8 +200,14 @@ where
             args.push(OsString::from(wallet));
         }
         args.extend(command_args);
+        let env_overrides = proxy_env_overrides(self.config.egress_proxy_url.as_deref());
         self.command_runner
-            .run(&self.config.cli_path, &args, self.config.command_timeout_ms)
+            .run(
+                &self.config.cli_path,
+                &args,
+                self.config.command_timeout_ms,
+                &env_overrides,
+            )
             .map_err(map_error)
     }
 }
@@ -278,6 +288,7 @@ pub trait WalrusCommandRunner {
         program: &Path,
         args: &[OsString],
         timeout_ms: u64,
+        env_overrides: &[(OsString, OsString)],
     ) -> Result<CommandOutput, String>;
 }
 
@@ -287,8 +298,9 @@ impl<T: WalrusCommandRunner + ?Sized> WalrusCommandRunner for &T {
         program: &Path,
         args: &[OsString],
         timeout_ms: u64,
+        env_overrides: &[(OsString, OsString)],
     ) -> Result<CommandOutput, String> {
-        (*self).run(program, args, timeout_ms)
+        (*self).run(program, args, timeout_ms, env_overrides)
     }
 }
 
@@ -307,6 +319,7 @@ impl WalrusCommandRunner for SystemWalrusCommandRunner {
         program: &Path,
         args: &[OsString],
         timeout_ms: u64,
+        env_overrides: &[(OsString, OsString)],
     ) -> Result<CommandOutput, String> {
         if timeout_ms == 0 {
             return Err("Walrus CLI timeout must be greater than zero".to_owned());
@@ -314,6 +327,7 @@ impl WalrusCommandRunner for SystemWalrusCommandRunner {
 
         let mut child = Command::new(program)
             .args(args)
+            .envs(env_overrides.iter().map(|(key, value)| (key, value)))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -409,9 +423,7 @@ impl BlobFetcher for ReqwestBlobFetcher {
         let max_read_bytes = expected_size_bytes
             .checked_add(1)
             .ok_or_else(|| "expected source size is too large".to_owned())?;
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .build()
+        let client = proxy_aware_client(Duration::from_millis(timeout_ms))
             .map_err(|error| format!("GET {url} client build failed: {error}"))?;
         let response = client
             .get(url)
@@ -430,6 +442,31 @@ impl BlobFetcher for ReqwestBlobFetcher {
         }
         Ok(bytes)
     }
+}
+
+pub(crate) fn proxy_aware_client(
+    timeout: Duration,
+) -> Result<reqwest::blocking::Client, reqwest::Error> {
+    let mut builder = reqwest::blocking::Client::builder().timeout(timeout);
+    if let Some(proxy_url) = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL") {
+        builder = builder.proxy(reqwest::Proxy::all(&proxy_url)?);
+    }
+    builder.build()
+}
+
+fn proxy_env_overrides(proxy_url: Option<&str>) -> Vec<(OsString, OsString)> {
+    let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    [
+        ("ALL_PROXY", proxy_url),
+        ("HTTPS_PROXY", proxy_url),
+        ("HTTP_PROXY", proxy_url),
+        ("NO_PROXY", "127.0.0.1,localhost"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+    .collect()
 }
 
 fn validate_walrus_config(config: &WalrusCliSourceArchiveConfig) -> Result<(), SourceArchiveError> {
@@ -821,12 +858,87 @@ mod tests {
     }
 
     #[test]
+    fn walrus_config_from_env_reads_earthquake_egress_proxy_url() {
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous_aggregator = std::env::var_os("SONARI_WALRUS_AGGREGATOR_URL");
+        let previous_proxy = std::env::var_os("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
+        unsafe {
+            std::env::set_var("SONARI_WALRUS_AGGREGATOR_URL", "https://aggregator.test");
+            std::env::set_var(
+                "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+                "http://127.0.0.1:18080",
+            );
+        }
+
+        let config = WalrusCliSourceArchiveConfig::from_env().unwrap();
+
+        unsafe {
+            match previous_aggregator {
+                Some(value) => std::env::set_var("SONARI_WALRUS_AGGREGATOR_URL", value),
+                None => std::env::remove_var("SONARI_WALRUS_AGGREGATOR_URL"),
+            }
+            match previous_proxy {
+                Some(value) => std::env::set_var("SONARI_EARTHQUAKE_EGRESS_PROXY_URL", value),
+                None => std::env::remove_var("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
+            }
+        }
+        assert_eq!(
+            config.egress_proxy_url.as_deref(),
+            Some("http://127.0.0.1:18080")
+        );
+    }
+
+    #[test]
+    fn walrus_cli_commands_receive_proxy_environment_when_configured() {
+        let bytes = b"source".to_vec();
+        let hash = source_hash(&bytes);
+        let walrus = FakeWalrusCommandRunner::new([
+            Ok("blob-123\n"),
+            Ok(r#"{"alreadyCertified":{"blobId":"blob-123"}}"#),
+            Ok("blob-123\n"),
+        ]);
+        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+        let archive = WalrusCliSourceArchive::with_clients(
+            WalrusCliSourceArchiveConfig {
+                cli_path: PathBuf::from("fake-walrus"),
+                aggregator_url: "https://aggregator.test".to_owned(),
+                egress_proxy_url: Some("http://127.0.0.1:18080".to_owned()),
+                ..WalrusCliSourceArchiveConfig::default()
+            },
+            &walrus,
+            &fetcher,
+        );
+
+        archive
+            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
+            .expect("Walrus archive should verify");
+
+        let envs = walrus.envs.borrow();
+        assert_eq!(envs.len(), 3);
+        for command_env in envs.iter() {
+            assert_eq!(
+                stringify_env(command_env),
+                vec![
+                    ("ALL_PROXY".to_owned(), "http://127.0.0.1:18080".to_owned()),
+                    (
+                        "HTTPS_PROXY".to_owned(),
+                        "http://127.0.0.1:18080".to_owned(),
+                    ),
+                    ("HTTP_PROXY".to_owned(), "http://127.0.0.1:18080".to_owned(),),
+                    ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
+                ]
+            );
+        }
+    }
+
+    #[test]
     fn system_walrus_command_runner_kills_process_after_timeout() {
         let runner = SystemWalrusCommandRunner;
         let started_at = Instant::now();
 
         let error = runner
-            .run(Path::new("sleep"), &[OsString::from("5")], 50)
+            .run(Path::new("sleep"), &[OsString::from("5")], 50, &[])
             .expect_err("long-running command must time out");
 
         assert!(
@@ -1103,6 +1215,7 @@ mod tests {
     struct FakeWalrusCommandRunner {
         outputs: RefCell<VecDeque<Result<String, String>>>,
         args: RefCell<Vec<Vec<OsString>>>,
+        envs: RefCell<Vec<Vec<(OsString, OsString)>>>,
         temp_file_bytes: RefCell<Vec<Vec<u8>>>,
     }
 
@@ -1122,6 +1235,7 @@ mod tests {
                         .collect(),
                 ),
                 args: RefCell::new(Vec::new()),
+                envs: RefCell::new(Vec::new()),
                 temp_file_bytes: RefCell::new(Vec::new()),
             }
         }
@@ -1133,8 +1247,10 @@ mod tests {
             _program: &Path,
             args: &[OsString],
             _timeout_ms: u64,
+            env_overrides: &[(OsString, OsString)],
         ) -> Result<CommandOutput, String> {
             self.args.borrow_mut().push(args.to_vec());
+            self.envs.borrow_mut().push(env_overrides.to_vec());
             if let Some(path) = args.last().map(PathBuf::from).filter(|path| path.exists()) {
                 self.temp_file_bytes
                     .borrow_mut()
@@ -1215,6 +1331,17 @@ mod tests {
                 } else {
                     Box::leak(value.into_owned().into_boxed_str())
                 }
+            })
+            .collect()
+    }
+
+    fn stringify_env(envs: &[(OsString, OsString)]) -> Vec<(String, String)> {
+        envs.iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
             })
             .collect()
     }

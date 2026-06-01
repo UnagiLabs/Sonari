@@ -33,6 +33,8 @@ devnet / testnet の dummy World ID proof では、任意 variables として Wo
 - `membership-identity-tee.eif`
 - TEE tarball と EIF の checksum file、または取得済み SHA-256 値
 
+`earthquake-tee-artifact.tar.gz` は `bin/tee`、`bin/walrus`、`bin/vsock-tcp-bridge` を含みます。runner EC2 は earthquake 用に allowlist 付き HTTPS CONNECT proxy と vsock proxy を systemd で起動し、enclave 側の local proxy URL は `SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080` です。allowlist は USGS、Walrus aggregator、任意の `WalrusUploadRelayUrl` に限定します。
+
 ```bash
 COMMIT_SHA="$(git rev-parse HEAD)"
 ARTIFACT_BUCKET="${AWS_SONARI_VERIFIER_RUNNER_DEV_ARTIFACT_BUCKET:?}"
