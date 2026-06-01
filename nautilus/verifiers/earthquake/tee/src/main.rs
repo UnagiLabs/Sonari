@@ -10,6 +10,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -233,16 +234,35 @@ fn handle_vsock_http_request(
     request: HttpRequest,
     state: EnclaveState,
 ) -> (u16, serde_json::Value) {
-    match route_vsock_http_request(request, state) {
-        Ok(response) => response,
-        Err(error) => (
+    match catch_unwind(AssertUnwindSafe(|| {
+        route_vsock_http_request(request, state)
+    })) {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) => (
             500,
             serde_json::json!({
                 "error_code": "AWS_RUNNER_PROCESS_FAILED",
                 "message": error.to_string(),
             }),
         ),
+        Err(payload) => (
+            500,
+            serde_json::json!({
+                "error_code": "AWS_RUNNER_PROCESS_FAILED",
+                "message": panic_message(payload),
+            }),
+        ),
     }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return format!("panic: {message}");
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return format!("panic: {message}");
+    }
+    "panic: unknown payload".to_owned()
 }
 
 fn route_vsock_http_request(
