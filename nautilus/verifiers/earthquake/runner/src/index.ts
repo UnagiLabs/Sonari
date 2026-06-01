@@ -9,6 +9,8 @@ import {
     dryRunRelayerSubmit,
 } from "@sonari/earthquake-relayer";
 import {
+    EARTHQUAKE_VERIFIER_CONFIG_KEY,
+    type EnclaveVerificationMetadata,
     type OracleErrorCode,
     type TeeCoreResult,
     validateRelayerSubmitInput,
@@ -26,7 +28,23 @@ export interface RunnerServiceOptions {
 }
 
 export interface TeeProcessAdapter {
-    process(request: WorkerToTeeRequest, signal?: AbortSignal): Promise<TeeCoreResult>;
+    healthCheck?(signal?: AbortSignal): Promise<EnclaveHealthCheckResult>;
+    getAttestation?(signal?: AbortSignal): Promise<EnclaveAttestationResult>;
+    process(
+        request: WorkerToTeeRequest,
+        signal?: AbortSignal,
+        registrationMetadata?: EnclaveVerificationMetadata,
+    ): Promise<TeeCoreResult>;
+}
+
+export interface EnclaveHealthCheckResult {
+    status: "healthy";
+    external_sources_reachable: boolean;
+}
+
+export interface EnclaveAttestationResult {
+    attestation_document_hex: string;
+    public_key: string;
 }
 
 export function createRunnerServer(options: RunnerServiceOptions): Server {
@@ -45,6 +63,12 @@ export function createRunnerServer(options: RunnerServiceOptions): Server {
 
             if (request.method === "GET" && request.url === "/health") {
                 writeJson(response, 200, { ok: true, service: "sonari-earthquake-runner" });
+                return;
+            }
+
+            if (request.method === "GET" && request.url === "/health_check") {
+                const result = await runHealthCheck(options.tee);
+                writeJson(response, 200, { ok: true, result });
                 return;
             }
 
@@ -70,7 +94,21 @@ export function createRunnerServer(options: RunnerServiceOptions): Server {
             }
 
             if (request.url === "/process") {
-                await handleProcess(request, response, options.tee, sessions, bodyLimitBytes);
+                await handleProcess(request, response, options.tee, sessions, bodyLimitBytes, {
+                    requireRegistrationMetadata: false,
+                });
+                return;
+            }
+
+            if (request.url === "/get_attestation") {
+                await handleGetAttestation(request, response, options.tee, sessions);
+                return;
+            }
+
+            if (request.url === "/process_data") {
+                await handleProcess(request, response, options.tee, sessions, bodyLimitBytes, {
+                    requireRegistrationMetadata: true,
+                });
                 return;
             }
 
@@ -105,26 +143,13 @@ async function handleProcess(
     tee: TeeProcessAdapter,
     sessions: Map<string, RunnerSession>,
     bodyLimitBytes: number,
+    options: { requireRegistrationMetadata: boolean },
 ): Promise<void> {
-    const runnerId = singleHeaderValue(request.headers["x-runner-id"]);
-    if (runnerId === undefined || runnerId.length === 0) {
-        writeJson(response, 400, {
-            ok: false,
-            error_code: "AWS_RUNNER_CONTRACT_INVALID",
-            message: "process requires x-runner-id",
-        });
+    const sessionResult = readRunnerSession(request, response, sessions, "process");
+    if (sessionResult === undefined) {
         return;
     }
-
-    const session = sessions.get(runnerId);
-    if (session === undefined) {
-        writeJson(response, 404, {
-            ok: false,
-            error_code: "AWS_RUNNER_PROCESS_FAILED",
-            message: "unknown runner_id",
-        });
-        return;
-    }
+    const { session } = sessionResult;
 
     if (session.activeProcess !== undefined) {
         writeJson(response, 409, {
@@ -136,11 +161,16 @@ async function handleProcess(
     }
 
     const body = await readJsonBody(request, bodyLimitBytes);
-    if (!isRecord(body) || firstUnexpectedKey(body, ["payload"]) !== undefined) {
+    const allowedKeys = options.requireRegistrationMetadata
+        ? ["payload", "registration_metadata"]
+        : ["payload"];
+    if (!isRecord(body) || firstUnexpectedKey(body, allowedKeys) !== undefined) {
         writeJson(response, 400, {
             ok: false,
             error_code: "AWS_RUNNER_CONTRACT_INVALID",
-            message: "process accepts only payload",
+            message: options.requireRegistrationMetadata
+                ? "process_data accepts only payload and registration_metadata"
+                : "process accepts only payload",
         });
         return;
     }
@@ -155,7 +185,19 @@ async function handleProcess(
         return;
     }
 
-    if (sessions.get(runnerId) !== session) {
+    const registrationMetadata = options.requireRegistrationMetadata
+        ? readRegistrationMetadata(body.registration_metadata)
+        : undefined;
+    if (options.requireRegistrationMetadata && registrationMetadata === undefined) {
+        writeJson(response, 400, {
+            ok: false,
+            error_code: "AWS_RUNNER_CONTRACT_INVALID",
+            message: "process_data requires registration metadata",
+        });
+        return;
+    }
+
+    if (sessions.get(sessionResult.runnerId) !== session) {
         writeJson(response, 404, {
             ok: false,
             error_code: "AWS_RUNNER_PROCESS_FAILED",
@@ -167,13 +209,74 @@ async function handleProcess(
     const abortController = new AbortController();
     session.activeProcess = abortController;
     try {
-        const result = await tee.process(validation.value, abortController.signal);
-        writeJson(response, 200, { ok: true, result });
+        const result = await tee.process(
+            validation.value,
+            abortController.signal,
+            registrationMetadata,
+        );
+        writeJson(response, 200, {
+            ok: true,
+            result:
+                registrationMetadata === undefined
+                    ? result
+                    : attachRegistrationMetadata(result, registrationMetadata),
+        });
     } finally {
         if (session.activeProcess === abortController) {
             delete session.activeProcess;
         }
     }
+}
+
+async function handleGetAttestation(
+    request: IncomingMessage,
+    response: ServerResponse,
+    tee: TeeProcessAdapter,
+    sessions: Map<string, RunnerSession>,
+): Promise<void> {
+    const sessionResult = readRunnerSession(request, response, sessions, "get_attestation");
+    if (sessionResult === undefined) {
+        return;
+    }
+    const result =
+        tee.getAttestation === undefined
+            ? undefined
+            : await tee.getAttestation(sessionResult.session.activeProcess?.signal);
+    if (result === undefined) {
+        throw new RunnerServiceError(
+            "AWS_RUNNER_PROCESS_FAILED",
+            "get_attestation is not configured",
+        );
+    }
+    writeJson(response, 200, { ok: true, result });
+}
+
+function readRunnerSession(
+    request: IncomingMessage,
+    response: ServerResponse,
+    sessions: Map<string, RunnerSession>,
+    operation: string,
+): { runnerId: string; session: RunnerSession } | undefined {
+    const runnerId = singleHeaderValue(request.headers["x-runner-id"]);
+    if (runnerId === undefined || runnerId.length === 0) {
+        writeJson(response, 400, {
+            ok: false,
+            error_code: "AWS_RUNNER_CONTRACT_INVALID",
+            message: `${operation} requires x-runner-id`,
+        });
+        return undefined;
+    }
+
+    const session = sessions.get(runnerId);
+    if (session === undefined) {
+        writeJson(response, 404, {
+            ok: false,
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
+            message: "unknown runner_id",
+        });
+        return undefined;
+    }
+    return { runnerId, session };
 }
 
 async function handleStop(
@@ -276,6 +379,17 @@ export interface RustCliTeeAdapterOptions {
 export class RustCliTeeAdapter implements TeeProcessAdapter {
     constructor(private readonly options: RustCliTeeAdapterOptions) {}
 
+    async healthCheck(_signal?: AbortSignal): Promise<EnclaveHealthCheckResult> {
+        return { status: "healthy", external_sources_reachable: true };
+    }
+
+    async getAttestation(_signal?: AbortSignal): Promise<EnclaveAttestationResult> {
+        throw new RunnerServiceError(
+            "AWS_RUNNER_PROCESS_FAILED",
+            "Rust CLI get_attestation is available only through a Nautilus/Nitro backend",
+        );
+    }
+
     async process(request: WorkerToTeeRequest, signal?: AbortSignal): Promise<TeeCoreResult> {
         const dir = await mkdtemp(path.join(tmpdir(), "sonari-runner-"));
         const inputPath = path.join(dir, "worker_request.json");
@@ -325,10 +439,37 @@ export interface EnclaveCommandTeeAdapterOptions {
 export class EnclaveCommandTeeAdapter implements TeeProcessAdapter {
     constructor(private readonly options: EnclaveCommandTeeAdapterOptions) {}
 
-    async process(request: WorkerToTeeRequest, signal?: AbortSignal): Promise<TeeCoreResult> {
+    async healthCheck(signal?: AbortSignal): Promise<EnclaveHealthCheckResult> {
+        return this.runJsonCommand({ action: "health_check" }, signal) as Promise<EnclaveHealthCheckResult>;
+    }
+
+    async getAttestation(signal?: AbortSignal): Promise<EnclaveAttestationResult> {
+        return this.runJsonCommand(
+            { action: "get_attestation" },
+            signal,
+        ) as Promise<EnclaveAttestationResult>;
+    }
+
+    async process(
+        request: WorkerToTeeRequest,
+        signal?: AbortSignal,
+        registrationMetadata?: EnclaveVerificationMetadata,
+    ): Promise<TeeCoreResult> {
+        const input =
+            registrationMetadata === undefined
+                ? request
+                : {
+                      action: "process_data",
+                      payload: request,
+                      registration_metadata: registrationMetadata,
+                  };
+        return this.runJsonCommand(input, signal) as Promise<TeeCoreResult>;
+    }
+
+    private async runJsonCommand(input: unknown, signal?: AbortSignal): Promise<unknown> {
         const options: Parameters<typeof execWithStdin>[2] = {
             maxBuffer: 10 * 1024 * 1024,
-            stdin: JSON.stringify(request),
+            stdin: JSON.stringify(input),
         };
         if (signal !== undefined) {
             options.signal = signal;
@@ -340,8 +481,65 @@ export class EnclaveCommandTeeAdapter implements TeeProcessAdapter {
             options.env = this.options.env;
         }
         const stdout = await execWithStdin(this.options.command, this.options.args ?? [], options);
-        return JSON.parse(stdout) as TeeCoreResult;
+        return JSON.parse(stdout) as unknown;
     }
+}
+
+async function runHealthCheck(tee: TeeProcessAdapter): Promise<EnclaveHealthCheckResult> {
+    if (tee.healthCheck === undefined) {
+        return { status: "healthy", external_sources_reachable: true };
+    }
+    return tee.healthCheck();
+}
+
+function attachRegistrationMetadata(
+    result: TeeCoreResult,
+    metadata: EnclaveVerificationMetadata,
+): TeeCoreResult {
+    if (result.status !== "finalized") {
+        return result;
+    }
+    if (normalizeHex(result.public_key) !== normalizeHex(metadata.enclave_instance_public_key)) {
+        throw new RunnerServiceError(
+            "AWS_RUNNER_PROCESS_FAILED",
+            "registration public key does not match finalized result public_key",
+        );
+    }
+    const existingConfigKey = result.verifier_config_key;
+    const existingConfigVersion = result.verifier_config_version;
+    const existingInstancePublicKey = result.enclave_instance_public_key;
+    if (
+        (existingConfigKey !== undefined && existingConfigKey !== metadata.verifier_config_key) ||
+        (existingConfigVersion !== undefined &&
+            existingConfigVersion !== metadata.verifier_config_version) ||
+        (existingInstancePublicKey !== undefined &&
+            normalizeHex(existingInstancePublicKey) !==
+                normalizeHex(metadata.enclave_instance_public_key))
+    ) {
+        throw new RunnerServiceError(
+            "AWS_RUNNER_PROCESS_FAILED",
+            "finalized result enclave metadata does not match registration metadata",
+        );
+    }
+    return { ...result, ...metadata };
+}
+
+function readRegistrationMetadata(input: unknown): EnclaveVerificationMetadata | undefined {
+    if (!isRecord(input)) {
+        return undefined;
+    }
+    if (
+        input.verifier_config_key !== EARTHQUAKE_VERIFIER_CONFIG_KEY ||
+        !isSafeIntegerInRange(input.verifier_config_version, 1, Number.MAX_SAFE_INTEGER) ||
+        !isHexBytes(input.enclave_instance_public_key, 32)
+    ) {
+        return undefined;
+    }
+    return {
+        verifier_config_key: input.verifier_config_key,
+        verifier_config_version: input.verifier_config_version,
+        enclave_instance_public_key: input.enclave_instance_public_key,
+    };
 }
 
 function execWithStdin(
@@ -494,6 +692,22 @@ function firstUnexpectedKey(
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function isSafeIntegerInRange(value: unknown, min: number, max: number): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+}
+
+function isHexBytes(value: unknown, expectedBytes: number): value is string {
+    if (typeof value !== "string" || !/^(?:0x)?[0-9a-fA-F]+$/.test(value)) {
+        return false;
+    }
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    return hex.length === expectedBytes * 2;
+}
+
+function normalizeHex(value: string): string {
+    return (value.startsWith("0x") ? value.slice(2) : value).toLowerCase();
 }
 
 function readSuiNetwork(input: unknown): "mainnet" | "testnet" | "devnet" | undefined {

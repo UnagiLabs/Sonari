@@ -90,6 +90,43 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(waitForLeaseCount).toBe(2);
     });
 
+    it("runs earthquake verifier through health check, attestation registration, and process_data", async () => {
+        const template = await readTemplate();
+        const start = template.indexOf("EarthquakeRunnerStateMachine:");
+        const end = template.indexOf("MembershipRunnerStateMachine:");
+        const earthquake = template.slice(start, end);
+        const expectedActions = [
+            '"action": "dispatch_health_check_command"',
+            '"action": "read_health_check_result"',
+            '"action": "dispatch_get_attestation_command"',
+            '"action": "read_attestation_result"',
+            '"action": "register_enclave_instance"',
+            '"action": "dispatch_process_data_command"',
+            '"action": "read_result"',
+            '"action": "relayer_preview_or_dry_run"',
+        ];
+
+        expect(earthquake).toContain('"Next": "DispatchHealthCheckCommand"');
+        for (const action of expectedActions) {
+            expect(earthquake).toContain(action);
+        }
+        expect(earthquake).not.toContain('"action": "dispatch_tee_command"');
+        for (let index = 1; index < expectedActions.length; index += 1) {
+            const previousAction = expectedActions[index - 1];
+            const currentAction = expectedActions[index];
+            if (previousAction === undefined || currentAction === undefined) {
+                throw new Error("expected action sequence was malformed");
+            }
+            expect(earthquake.indexOf(previousAction)).toBeLessThan(
+                earthquake.indexOf(currentAction),
+            );
+        }
+        expect(earthquake).toContain('"attestation.$": "$.attestation_result.attestation"');
+        expect(earthquake).toContain(
+            '"registration_metadata.$": "$.registration_result.registration_metadata"',
+        );
+    });
+
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {
         const template = await readTemplate();
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;

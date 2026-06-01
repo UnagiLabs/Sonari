@@ -889,6 +889,106 @@ fn production_cli_reads_worker_request_from_stdin_when_input_is_omitted() {
 }
 
 #[test]
+fn production_cli_accepts_nautilus_health_check_action_without_seed() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env_remove("SONARI_TEE_SIGNING_KEY_SEED")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"health_check"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "healthy");
+    assert_eq!(result["external_sources_reachable"], true);
+}
+
+#[test]
+fn production_cli_returns_configured_attestation_action() {
+    let attestation_document_hex = format!("0x{}", "aa".repeat(96));
+    let public_key = format!("0x{}", "22".repeat(32));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .env(
+            "SONARI_TEE_ATTESTATION_DOCUMENT_HEX",
+            &attestation_document_hex,
+        )
+        .env("SONARI_TEE_ATTESTATION_PUBLIC_KEY", &public_key)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"get_attestation"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["attestation_document_hex"], attestation_document_hex);
+    assert_eq!(result["public_key"], public_key);
+}
+
+#[test]
+fn production_cli_requires_registration_metadata_for_process_data_action() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"action":"process_data","payload":{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("registration_metadata"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
     let detail_json = br#"{
         "id": "us7000multi",

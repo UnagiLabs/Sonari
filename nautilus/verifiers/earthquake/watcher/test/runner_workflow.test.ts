@@ -4,14 +4,22 @@ import {
     loadFixtureRelayerSubmitInput,
     type RelayerSubmitConfig,
 } from "@sonari/earthquake-relayer";
-import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
+import {
+    BCS_ENUMS,
+    type EnclaveVerificationMetadata,
+    type TeeCoreResult,
+} from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     handler as runnerWorkflowHandler,
     type AutoScalingClientLike,
+    type EnclaveRegistrationAdapter,
+    type EnclaveRegistrationClient,
+    SuiEnclaveRegistrationAdapter,
     type Ec2ClientLike,
+    readEnclaveRegistrationConfigFromEnv,
     readRelayerConfigFromEnv,
     type RelayerSignerSecretReader,
     type S3ClientLike,
@@ -28,6 +36,12 @@ const earthquakeRelayerClock = "0x6";
 const finalizedPayloadBcsHex = "0x01";
 const finalizedSignature = `0x${"11".repeat(64)}`;
 const finalizedPublicKey = `0x${"22".repeat(32)}`;
+const attestationDocumentHex = `0x${"aa".repeat(96)}`;
+const registrationMetadata: EnclaveVerificationMetadata = {
+    verifier_config_key: 1,
+    verifier_config_version: 7,
+    enclave_instance_public_key: finalizedPublicKey,
+};
 
 describe("AWS runner workflow helper", () => {
     const originalEnv = { ...process.env };
@@ -224,14 +238,8 @@ describe("AWS runner workflow helper", () => {
         expect(command).toContain("test -f /opt/sonari/bootstrap-complete");
         expect(command).toContain("test -s /opt/sonari/runner.env");
         expect(command).toContain("source /opt/sonari/runner.env");
-        expect(command).toContain('if [ -z "${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then');
-        expect(command).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED_FILE:?SONARI_TEE_SIGNING_KEY_SEED_FILE is required when SONARI_TEE_SIGNING_KEY_SEED is unset}"',
-        );
-        expect(command).toContain("test -s \"$SONARI_TEE_SIGNING_KEY_SEED_FILE\"");
-        expect(command).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
-        );
+        expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
+        expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED_FILE");
         expect(command).toContain("test -s \"$SONARI_WALRUS_CONFIG\"");
         expect(command).toContain("test -s \"$SONARI_WALRUS_WALLET\"");
         expect(command).toContain("test -x \"$SONARI_WALRUS_CLI\"");
@@ -276,12 +284,7 @@ describe("AWS runner workflow helper", () => {
         });
         expect(polled).toMatchObject({ command_status: "SUCCEEDED" });
         expect(ssm.commands[0]).toContain("NITRO_ENCLAVE_PROCESS_COMMAND");
-        expect(ssm.commands[0]).toContain(
-            'SONARI_TEE_SIGNING_KEY_SEED="$(tr -d \'[:space:]\' < "$SONARI_TEE_SIGNING_KEY_SEED_FILE")"',
-        );
-        expect(ssm.commands[0]).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
-        );
+        expect(ssm.commands[0]).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
         expect(ssm.commands[0]).toContain(
             ': "${SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"',
         );
@@ -301,10 +304,85 @@ describe("AWS runner workflow helper", () => {
             ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
+            "export SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
         );
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[0]).not.toContain("latest.json");
+    });
+
+    it("registers attestation before dispatching process_data and passes metadata to the runner", async () => {
+        const ssm = new RecordingSsmClient();
+        const registrar = new RecordingEnclaveRegistrationAdapter();
+        let nowMs = 1_800_000_000_123;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            enclaveRegistration: registrar,
+            now: () => nowMs,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "register_enclave_instance",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                attestation: {
+                    attestation_document_hex: attestationDocumentHex,
+                    public_key: finalizedPublicKey,
+                },
+            } as never),
+        ).resolves.toMatchObject({
+            registration_metadata: registrationMetadata,
+        });
+
+        nowMs += 1;
+        await expect(
+            handler({
+                action: "dispatch_process_data_command",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                instance_id: "i-123",
+                registration_metadata: registrationMetadata,
+            } as never),
+        ).resolves.toMatchObject({
+            command_id: "cmd-123",
+            result_s3_key: "results/us7000sonari/1800000000124.json",
+        });
+
+        expect(registrar.inputs).toEqual([
+            {
+                source_event_id: "us7000sonari",
+                attestation_document_hex: attestationDocumentHex,
+                public_key: finalizedPublicKey,
+            },
+        ]);
+        expect(ssm.commands[0]).toContain('"action":"process_data"');
+        expect(ssm.commands[0]).toContain('"registration_metadata"');
+        expect(ssm.commands[0]).toContain('"verifier_config_version":7');
+    });
+
+    it("fails closed before process_data when registration metadata is missing", async () => {
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_process_data_command",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                instance_id: "i-123",
+            } as never),
+        ).rejects.toThrow(/registration metadata/);
+        expect(ssm.commands).toEqual([]);
     });
 
     it("increments SSM command poll count while the command remains pending", async () => {
@@ -1012,6 +1090,84 @@ describe("AWS runner workflow helper", () => {
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
     });
 
+    it("derives enclave registration config from relayer submit environment lazily", async () => {
+        process.env.RELAYER_NETWORK = "testnet";
+        process.env.RELAYER_TARGET = earthquakeRelayerTarget;
+        process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
+        process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+        process.env.ENCLAVE_REGISTRATION_ALLOW_SUBMIT = "true";
+        process.env.ENCLAVE_INSTANCE_TTL_MS = "60000";
+        process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
+        const reader = new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey);
+        const config = readEnclaveRegistrationConfigFromEnv(reader);
+
+        expect(config).toMatchObject({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            instanceTtlMs: 60_000,
+        });
+        expect(config.configurationError).toBeUndefined();
+        expect(reader.secretReads).toEqual([]);
+        await expect(config.loadSigner?.()).resolves.toMatchObject({
+            toSuiAddress: expect.any(Function),
+        });
+        expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
+    });
+
+    it("registers an attested enclave on Sui and returns contract metadata", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient();
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toEqual(registrationMetadata);
+        expect(client.requests).toHaveLength(1);
+        expect(client.requests[0]?.signer).toBe(signer);
+        expect(client.requests[0]?.include).toEqual({ effects: true, events: true });
+    });
+
+    it("fails enclave registration before Sui submission when submit is not explicitly allowed", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient();
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: false,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).rejects.toThrow(/ALLOW_SUBMIT/);
+        expect(client.requests).toEqual([]);
+    });
+
     it("returns a relayer configuration error instead of throwing when required object IDs are missing", () => {
         process.env.RELAYER_MODE = "dry_run";
         process.env.RELAYER_NETWORK = "testnet";
@@ -1288,6 +1444,61 @@ class RecordingS3Client implements S3ClientLike {
                 error_code: "SHAKEMAP_PRODUCT_MISSING",
             })
         );
+    }
+}
+
+class RecordingEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {
+    readonly inputs: Array<{
+        source_event_id: string;
+        attestation_document_hex: string;
+        public_key: string;
+    }> = [];
+
+    async register(input: {
+        sourceEventId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<typeof registrationMetadata> {
+        this.inputs.push({
+            source_event_id: input.sourceEventId,
+            attestation_document_hex: input.attestationDocumentHex,
+            public_key: input.publicKey,
+        });
+        return registrationMetadata;
+    }
+}
+
+class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
+    readonly requests: Array<{
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }> = [];
+
+    async signAndExecuteTransaction(input: {
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }) {
+        this.requests.push(input);
+        return {
+            $kind: "Transaction" as const,
+            Transaction: {
+                status: { success: true, error: null },
+                effects: {},
+                events: [
+                    {
+                        type: "0x123::metadata_verifier::EnclaveInstanceRegistered",
+                        json: {
+                            verifier_family: 3,
+                            verifier_version: "1",
+                            config_version: String(registrationMetadata.verifier_config_version),
+                            public_key: Array.from({ length: 32 }, () => 0x22),
+                        },
+                    },
+                ],
+            },
+        };
     }
 }
 

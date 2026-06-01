@@ -40,11 +40,7 @@ function createTeeAdapter(): TeeProcessAdapter {
 }
 
 function teeEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env };
-    if (env.SONARI_TEE_SIGNING_KEY_SEED === undefined) {
-        env.SONARI_TEE_SIGNING_KEY_SEED = optionalSecret("SONARI_TEE_SIGNING_KEY_SEED_FILE");
-    }
-    return env;
+    return { ...process.env };
 }
 
 function requiredEnv(name: string): string {

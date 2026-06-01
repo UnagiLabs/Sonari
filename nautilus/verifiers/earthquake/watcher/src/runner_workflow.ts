@@ -12,6 +12,8 @@ import {
     SendCommandCommand,
     SSMClient,
 } from "@aws-sdk/client-ssm";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { Transaction } from "@mysten/sui/transactions";
 import {
     buildRelayerRequestPreview,
     createEd25519SuiSignerFromPrivateKey,
@@ -22,6 +24,8 @@ import {
     type SuiNetwork,
 } from "@sonari/earthquake-relayer";
 import {
+    EARTHQUAKE_VERIFIER_CONFIG_KEY,
+    type EnclaveVerificationMetadata,
     ERROR_CODES,
     type OracleErrorCode,
     type TeeCoreResult,
@@ -105,6 +109,78 @@ export interface RelayerSignerSecretReader {
     getSecretString(secretArn: string): Promise<string>;
 }
 
+export interface EnclaveAttestationResult {
+    attestation_document_hex: string;
+    public_key: string;
+}
+
+export interface EnclaveHealthCheckResult {
+    status: "healthy";
+    external_sources_reachable: boolean;
+}
+
+export interface EnclaveRegistrationAdapter {
+    register(input: {
+        sourceEventId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata>;
+}
+
+export interface EnclaveRegistrationConfig {
+    target: string;
+    verifierRegistry: string;
+    network?: SuiNetwork;
+    grpcUrl?: string;
+    allowSubmit: boolean;
+    configurationError?: string;
+    signer?: RelayerSigner;
+    client?: EnclaveRegistrationClient;
+    transaction?: unknown;
+    loadSigner?: () => Promise<RelayerSigner>;
+    instanceTtlMs: number;
+    now?: () => number;
+}
+
+export interface EnclaveRegistrationClient {
+    signAndExecuteTransaction(input: {
+        transaction: unknown;
+        signer: RelayerSigner;
+        include: { effects: true; events: true };
+    }): Promise<EnclaveRegistrationExecutionResponse>;
+}
+
+export interface EnclaveRegistrationExecutionStatus {
+    success: boolean;
+    error?: { message?: string } | string | null;
+}
+
+export interface EnclaveRegistrationTransactionResult {
+    status?: EnclaveRegistrationExecutionStatus;
+    effects?: Record<string, unknown>;
+    events?: EnclaveRegistrationEvent[];
+}
+
+export interface EnclaveRegistrationEvent {
+    type?: string;
+    eventType?: string;
+    json?: unknown;
+    parsedJson?: unknown;
+}
+
+export type EnclaveRegistrationExecutionResponse =
+    | {
+          $kind: "Transaction";
+          Transaction: EnclaveRegistrationTransactionResult;
+          FailedTransaction?: never;
+      }
+    | {
+          $kind: "FailedTransaction";
+          Transaction?: never;
+          FailedTransaction: EnclaveRegistrationTransactionResult;
+      }
+    | Record<string, unknown>;
+
 export interface RelayerRecordSuccessInput {
     mode: RelayerMode;
     target: string;
@@ -127,6 +203,43 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               source_event_id: string;
               attempt?: number | undefined;
               instance_id: string;
+          }
+        | {
+              action: "dispatch_health_check_command";
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+          }
+        | {
+              action: "dispatch_get_attestation_command";
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+          }
+        | {
+              action: "read_health_check_result";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
+              action: "read_attestation_result";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
+              action: "register_enclave_instance";
+              source_event_id: string;
+              attempt?: number | undefined;
+              attestation: EnclaveAttestationResult;
+          }
+        | {
+              action: "dispatch_process_data_command";
+              source_event_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              registration_metadata: EnclaveVerificationMetadata;
           }
         | {
               action: "poll_command";
@@ -187,6 +300,21 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              registration_metadata: EnclaveVerificationMetadata;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              health_check: EnclaveHealthCheckResult;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              attestation: EnclaveAttestationResult;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
               instance_id?: string;
               command_id?: string;
               result_s3_key?: string;
@@ -229,6 +357,7 @@ export interface RunnerControlHandlerOptions {
     s3: S3ClientLike;
     repository?: StateRepository;
     relayer?: RelayerAdapter;
+    enclaveRegistration?: EnclaveRegistrationAdapter;
     now?: () => number;
     config: RunnerWorkflowConfig;
 }
@@ -330,6 +459,183 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     command_id: dispatched.commandId,
                     result_s3_key: dispatched.resultS3Key,
                     command_poll_count: dispatched.commandPollCount,
+                });
+            }
+            case "dispatch_health_check_command": {
+                assertValidUsgsSourceEventId(event.source_event_id);
+                const dispatchTimestampMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "health_checking",
+                    instanceId: event.instance_id,
+                    nowMs: dispatchTimestampMs,
+                });
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.source_event_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            sourceEventId: event.source_event_id,
+                            dispatchTimestampMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                            teeInput: { action: "health_check" },
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "health_checking",
+                    instanceId: event.instance_id,
+                    commandId: dispatched.commandId,
+                    resultS3Key: dispatched.resultS3Key,
+                    nowMs: dispatchTimestampMs,
+                });
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
+            }
+            case "dispatch_get_attestation_command": {
+                assertValidUsgsSourceEventId(event.source_event_id);
+                const dispatchTimestampMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "getting_attestation",
+                    instanceId: event.instance_id,
+                    nowMs: dispatchTimestampMs,
+                });
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.source_event_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            sourceEventId: event.source_event_id,
+                            dispatchTimestampMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                            teeInput: { action: "get_attestation" },
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "getting_attestation",
+                    instanceId: event.instance_id,
+                    commandId: dispatched.commandId,
+                    resultS3Key: dispatched.resultS3Key,
+                    nowMs: dispatchTimestampMs,
+                });
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
+            }
+            case "register_enclave_instance": {
+                const registrar = options.enclaveRegistration;
+                if (registrar === undefined) {
+                    throw new Error("enclave registration is not configured");
+                }
+                const attestation = readEnclaveAttestation(event.attestation);
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "registering_enclave",
+                    nowMs,
+                });
+                const registered = requireRegistrationMetadata(
+                    await registrar.register({
+                        sourceEventId: event.source_event_id,
+                        attestationDocumentHex: attestation.attestation_document_hex,
+                        publicKey: attestation.public_key,
+                    }),
+                );
+                if (
+                    normalizeHex(registered.enclave_instance_public_key) !==
+                    normalizeHex(attestation.public_key)
+                ) {
+                    throw new Error("registration metadata public key does not match attestation");
+                }
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    registration_metadata: registered,
+                });
+            }
+            case "dispatch_process_data_command": {
+                assertValidUsgsSourceEventId(event.source_event_id);
+                const registrationMetadata = requireRegistrationMetadata(
+                    event.registration_metadata,
+                );
+                const dispatchTimestampMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "dispatching_command",
+                    instanceId: event.instance_id,
+                    nowMs: dispatchTimestampMs,
+                });
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.source_event_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            sourceEventId: event.source_event_id,
+                            dispatchTimestampMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                            registrationMetadata,
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "dispatching_command",
+                    instanceId: event.instance_id,
+                    commandId: dispatched.commandId,
+                    resultS3Key: dispatched.resultS3Key,
+                    nowMs: dispatchTimestampMs,
+                });
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
+            }
+            case "read_health_check_result": {
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "health_checking",
+                    resultS3Key: event.result_s3_key,
+                });
+                const text = await readRunnerResultText(options.s3, {
+                    bucket: options.config.resultBucket,
+                    key: event.result_s3_key,
+                });
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    health_check: readEnclaveHealthCheck(JSON.parse(text) as unknown),
+                });
+            }
+            case "read_attestation_result": {
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "getting_attestation",
+                    resultS3Key: event.result_s3_key,
+                });
+                const text = await readRunnerResultText(options.s3, {
+                    bucket: options.config.resultBucket,
+                    key: event.result_s3_key,
+                });
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    attestation: readEnclaveAttestation(JSON.parse(text) as unknown),
                 });
             }
             case "poll_command": {
@@ -659,6 +965,86 @@ class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
     }
 }
 
+export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {
+    constructor(private readonly config: EnclaveRegistrationConfig) {}
+
+    async register(input: {
+        sourceEventId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata> {
+        assertValidUsgsSourceEventId(input.sourceEventId);
+        if (this.config.configurationError !== undefined) {
+            throw new Error(this.config.configurationError);
+        }
+        if (!this.config.allowSubmit) {
+            throw new Error(
+                "ENCLAVE_REGISTRATION_ALLOW_SUBMIT or RELAYER_ALLOW_SUBMIT must be true",
+            );
+        }
+        const network = this.config.network;
+        if (network === undefined) {
+            throw new Error("RELAYER_NETWORK is required for enclave registration");
+        }
+        const grpcUrl = this.config.grpcUrl;
+        if (!isNonEmptyString(grpcUrl)) {
+            throw new Error("RELAYER_GRPC_URL is required for enclave registration");
+        }
+        validateSuiNetworkGrpcUrl(network, grpcUrl, "RELAYER_GRPC_URL");
+
+        const signer = this.config.signer ?? (await this.config.loadSigner?.());
+        if (signer === undefined) {
+            throw new Error("RELAYER_SIGNER_SECRET_ARN is required for enclave registration");
+        }
+        const senderAddress = signer.toSuiAddress();
+        if (!isNonEmptyString(senderAddress)) {
+            throw new Error("enclave registration signer did not provide a sender address");
+        }
+        if (!isHexBytes(input.attestationDocumentHex)) {
+            throw new Error("attestation_document_hex must be hex encoded");
+        }
+        if (!isHexBytes(input.publicKey, 32)) {
+            throw new Error("attestation public_key must be 32 bytes");
+        }
+        if (!Number.isSafeInteger(this.config.instanceTtlMs) || this.config.instanceTtlMs <= 0) {
+            throw new Error("ENCLAVE_INSTANCE_TTL_MS must be a positive safe integer");
+        }
+
+        const nowMs = this.config.now?.() ?? Date.now();
+        const expiresAtMs = nowMs + this.config.instanceTtlMs;
+        if (!Number.isSafeInteger(expiresAtMs)) {
+            throw new Error("enclave instance expiry exceeded safe integer range");
+        }
+
+        const client =
+            this.config.client ??
+            (new SuiGrpcClient({
+                network,
+                baseUrl: grpcUrl,
+            }) as unknown as EnclaveRegistrationClient);
+        const transaction =
+            this.config.transaction ??
+            createSuiEnclaveRegistrationTransaction({
+                target: this.config.target,
+                verifierRegistry: this.config.verifierRegistry,
+                attestationDocumentBytes: parseHexByteVector(input.attestationDocumentHex),
+                expiresAtMs,
+                senderAddress,
+            });
+        const response = await client.signAndExecuteTransaction({
+            transaction,
+            signer,
+            include: { effects: true, events: true },
+        });
+        const events = readSuccessfulEnclaveRegistrationEvents(response);
+        const metadata = readEnclaveRegistrationMetadata(events);
+        if (normalizeHex(metadata.enclave_instance_public_key) !== normalizeHex(input.publicKey)) {
+            throw new Error("registered enclave public key does not match attestation");
+        }
+        return metadata;
+    }
+}
+
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
     parseExpectedVerifierKind(
         (event as { verifier_kind?: unknown }).verifier_kind,
@@ -675,12 +1061,19 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
             config.relayer = relayer;
         }
     }
+    const enclaveRegistration =
+        event.action === "register_enclave_instance"
+            ? new SuiEnclaveRegistrationAdapter(
+                  readEnclaveRegistrationConfigFromEnv(new AwsRelayerSignerSecretReader()),
+              )
+            : undefined;
     return createRunnerControlHandler({
         autoscaling: new AwsAutoScalingClient(),
         ec2: new AwsEc2Client(),
         ssm: new AwsSsmClient(),
         s3: new AwsS3Client(),
         repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
+        ...(enclaveRegistration === undefined ? {} : { enclaveRegistration }),
         config,
     })(event);
 }
@@ -691,26 +1084,36 @@ function buildSsmShellCommand(input: {
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
+    registrationMetadata?: EnclaveVerificationMetadata | undefined;
+    teeInput?: unknown;
 }): string {
     const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
     const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
         .map(shellSingleQuote)
         .join(" ");
+    const teeInput =
+        input.teeInput ??
+        (input.registrationMetadata === undefined
+            ? buildEarthquakeVerifierRequest(input.sourceEventId)
+            : {
+                  action: "process_data",
+                  payload: buildEarthquakeVerifierRequest(input.sourceEventId),
+                  registration_metadata: input.registrationMetadata,
+              });
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
-        ...buildSigningKeySeedShellLines(),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CLI"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONFIG"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_WALLET"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONTEXT"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_EPOCHS"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_AGGREGATOR_URL"),
-        "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
+        "export SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' ${shellSingleQuote(JSON.stringify(buildEarthquakeVerifierRequest(input.sourceEventId)))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
@@ -722,7 +1125,6 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         "test -s /opt/sonari/runner.env",
         "source /opt/sonari/runner.env",
         buildRequiredShellEnvCheck("RUNNER_TOKEN_FILE"),
-        ...buildSigningKeySeedShellLines(),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CLI"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CONFIG"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_WALLET"),
@@ -739,20 +1141,6 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
 
 function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;
-}
-
-function buildSigningKeySeedShellLines(): string[] {
-    return [
-        `if [ -z "\${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then`,
-        buildRequiredShellEnvCheck(
-            "SONARI_TEE_SIGNING_KEY_SEED_FILE",
-            "SONARI_TEE_SIGNING_KEY_SEED_FILE is required when SONARI_TEE_SIGNING_KEY_SEED is unset",
-        ),
-        'test -s "$SONARI_TEE_SIGNING_KEY_SEED_FILE"',
-        'SONARI_TEE_SIGNING_KEY_SEED="$(tr -d \'[:space:]\' < "$SONARI_TEE_SIGNING_KEY_SEED_FILE")"',
-        "fi",
-        buildRequiredShellEnvCheck("SONARI_TEE_SIGNING_KEY_SEED"),
-    ];
 }
 
 function parseNitroEnclaveProcessCommand(command: string): string[] {
@@ -1039,6 +1427,70 @@ export function readRelayerConfigFromEnv(
     return config;
 }
 
+export function readEnclaveRegistrationConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): EnclaveRegistrationConfig {
+    const target =
+        process.env.ENCLAVE_REGISTRATION_TARGET ??
+        deriveEnclaveRegistrationTarget(process.env.RELAYER_TARGET) ??
+        "";
+    const verifierRegistry = process.env.RELAYER_VERIFIER_REGISTRY ?? "";
+    const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+    const grpcUrl = process.env.RELAYER_GRPC_URL;
+    const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+    const missing = [
+        ["ENCLAVE_REGISTRATION_TARGET or RELAYER_TARGET", target],
+        ["RELAYER_VERIFIER_REGISTRY", verifierRegistry],
+        ["RELAYER_NETWORK", process.env.RELAYER_NETWORK],
+        ["RELAYER_GRPC_URL", grpcUrl],
+        ["RELAYER_SIGNER_SECRET_ARN", signerSecretArn],
+    ]
+        .filter(([, value]) => value === undefined || value.length === 0)
+        .map(([name]) => name);
+    let configurationError =
+        missing.length === 0
+            ? undefined
+            : `${missing.join(", ")} required for enclave registration`;
+    if (process.env.RELAYER_NETWORK !== undefined && network === undefined) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "RELAYER_NETWORK is required for enclave registration",
+        );
+    }
+    const instanceTtlMs = readPositiveIntegerEnv("ENCLAVE_INSTANCE_TTL_MS", 6 * HOUR_MS);
+    if (instanceTtlMs === undefined) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "ENCLAVE_INSTANCE_TTL_MS must be a positive safe integer",
+        );
+    }
+
+    const config: EnclaveRegistrationConfig = {
+        target,
+        verifierRegistry,
+        allowSubmit:
+            process.env.ENCLAVE_REGISTRATION_ALLOW_SUBMIT === "true" ||
+            process.env.RELAYER_ALLOW_SUBMIT === "true",
+        instanceTtlMs: instanceTtlMs ?? 0,
+    };
+    if (network !== undefined) {
+        config.network = network;
+    }
+    if (grpcUrl !== undefined) {
+        config.grpcUrl = grpcUrl;
+    }
+    if (configurationError !== undefined) {
+        config.configurationError = configurationError;
+    }
+    if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+        config.loadSigner = async () =>
+            createEd25519SuiSignerFromPrivateKey(
+                await secretReader.getSecretString(signerSecretArn),
+            );
+    }
+    return config;
+}
+
 function appendConfigurationError(existing: string | undefined, next: string): string {
     return existing === undefined ? next : `${existing}; ${next}`;
 }
@@ -1047,8 +1499,262 @@ function readSuiNetwork(value: string | undefined): SuiNetwork | undefined {
     return value === "mainnet" || value === "testnet" || value === "devnet" ? value : undefined;
 }
 
+function deriveEnclaveRegistrationTarget(relayerTarget: string | undefined): string | undefined {
+    if (relayerTarget === undefined || relayerTarget.length === 0) {
+        return undefined;
+    }
+    const [packageId, moduleName, functionName] = relayerTarget.split("::");
+    if (
+        !isNonEmptyString(packageId) ||
+        !isNonEmptyString(moduleName) ||
+        !isNonEmptyString(functionName)
+    ) {
+        return undefined;
+    }
+    return `${packageId}::metadata_verifier::register_enclave_instance`;
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number): number | undefined {
+    const value = process.env[name];
+    if (value === undefined || value.length === 0) {
+        return fallback;
+    }
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function validateSuiNetworkGrpcUrl(network: SuiNetwork, grpcUrl: string, fieldName: string): void {
+    let url: URL;
+    try {
+        url = new URL(grpcUrl);
+    } catch {
+        throw new Error(`${fieldName} must be a valid URL`);
+    }
+    if (url.protocol !== "https:") {
+        throw new Error(`${fieldName} must use https`);
+    }
+    if (url.username.length > 0 || url.password.length > 0) {
+        throw new Error(`${fieldName} must not include credentials`);
+    }
+    const expectedHost = `fullnode.${network}.sui.io`;
+    if (url.hostname !== expectedHost) {
+        throw new Error(
+            `${fieldName} host ${url.hostname} does not match RELAYER_NETWORK=${network}`,
+        );
+    }
+}
+
+function createSuiEnclaveRegistrationTransaction(input: {
+    target: string;
+    verifierRegistry: string;
+    attestationDocumentBytes: number[];
+    expiresAtMs: number;
+    senderAddress: string;
+}): Transaction {
+    const tx = new Transaction();
+    tx.setSender(input.senderAddress);
+    const document = tx.moveCall({
+        target: "0x2::nitro_attestation::load_nitro_attestation",
+        arguments: [tx.pure.vector("u8", input.attestationDocumentBytes), tx.object.clock()],
+    });
+    tx.moveCall({
+        target: input.target,
+        arguments: [tx.object(input.verifierRegistry), document, tx.pure.u64(input.expiresAtMs)],
+    });
+    return tx;
+}
+
+function parseHexByteVector(value: string): number[] {
+    return Array.from(Buffer.from(normalizeHex(value), "hex"));
+}
+
+function readSuccessfulEnclaveRegistrationEvents(
+    response: EnclaveRegistrationExecutionResponse,
+): EnclaveRegistrationEvent[] {
+    if (!isRecord(response)) {
+        throw new Error("Sui response was not an object");
+    }
+    if (response.$kind === "FailedTransaction") {
+        const status = isRecord(response.FailedTransaction)
+            ? readEnclaveExecutionStatus(response.FailedTransaction.status)
+            : undefined;
+        throw new Error(status?.errorMessage ?? "Move transaction failed");
+    }
+    if (response.$kind !== "Transaction" || !isRecord(response.Transaction)) {
+        throw new Error("Sui response used an unknown transaction result shape");
+    }
+    const status = readEnclaveExecutionStatus(response.Transaction.status);
+    if (status?.success === false) {
+        throw new Error(status.errorMessage ?? "Move transaction reported failure");
+    }
+    if (status?.success !== true) {
+        throw new Error("Sui response did not include transaction status");
+    }
+    if (!isRecord(response.Transaction.effects)) {
+        throw new Error("Sui response did not include transaction effects");
+    }
+    return Array.isArray(response.Transaction.events)
+        ? response.Transaction.events.filter(isRecord)
+        : [];
+}
+
+function readEnclaveExecutionStatus(
+    value: unknown,
+):
+    | { success: true; errorMessage?: undefined }
+    | { success: false; errorMessage?: string }
+    | undefined {
+    if (!isRecord(value) || typeof value.success !== "boolean") {
+        return undefined;
+    }
+    if (value.success) {
+        return { success: true };
+    }
+    const errorMessage = readExecutionErrorMessage(value.error);
+    return errorMessage === undefined ? { success: false } : { success: false, errorMessage };
+}
+
+function readExecutionErrorMessage(value: unknown): string | undefined {
+    if (typeof value === "string" && value.length > 0) {
+        return value;
+    }
+    if (isRecord(value) && typeof value.message === "string" && value.message.length > 0) {
+        return value.message;
+    }
+    return undefined;
+}
+
+function readEnclaveRegistrationMetadata(
+    events: EnclaveRegistrationEvent[],
+): EnclaveVerificationMetadata {
+    const event = events.find(isEnclaveInstanceRegisteredEvent);
+    if (event === undefined) {
+        throw new Error("Sui response did not include EnclaveInstanceRegistered event");
+    }
+    const json = readEventJson(event);
+    if (!isRecord(json)) {
+        throw new Error("EnclaveInstanceRegistered event was malformed");
+    }
+    const verifierFamily = readSafeIntegerField(json, "verifier_family");
+    const verifierVersion = readSafeIntegerField(json, "verifier_version");
+    const configVersion = readSafeIntegerField(json, "config_version");
+    const publicKey = readHexByteVectorField(json.public_key);
+    if (verifierFamily !== 3 || verifierVersion !== 1 || configVersion === undefined) {
+        throw new Error("EnclaveInstanceRegistered event did not match earthquake verifier v1");
+    }
+    if (publicKey === undefined) {
+        throw new Error("EnclaveInstanceRegistered event public key was malformed");
+    }
+    return {
+        verifier_config_key: EARTHQUAKE_VERIFIER_CONFIG_KEY,
+        verifier_config_version: configVersion,
+        enclave_instance_public_key: publicKey,
+    };
+}
+
+function isEnclaveInstanceRegisteredEvent(event: EnclaveRegistrationEvent): boolean {
+    const eventType = typeof event.eventType === "string" ? event.eventType : event.type;
+    return (
+        typeof eventType === "string" &&
+        eventType.endsWith("::metadata_verifier::EnclaveInstanceRegistered")
+    );
+}
+
+function readEventJson(event: EnclaveRegistrationEvent): unknown {
+    return event.json ?? event.parsedJson;
+}
+
+function readSafeIntegerField(input: Record<string, unknown>, key: string): number | undefined {
+    const value = input[key];
+    if (typeof value === "number" && Number.isSafeInteger(value)) {
+        return value;
+    }
+    if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+        const parsed = Number(value);
+        return Number.isSafeInteger(parsed) ? parsed : undefined;
+    }
+    return undefined;
+}
+
+function readHexByteVectorField(input: unknown): string | undefined {
+    if (isHexBytes(input, 32)) {
+        return `0x${normalizeHex(input)}`;
+    }
+    if (
+        Array.isArray(input) &&
+        input.length === 32 &&
+        input.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+    ) {
+        return `0x${input.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+    }
+    return undefined;
+}
+
+function readEnclaveHealthCheck(input: unknown): EnclaveHealthCheckResult {
+    if (
+        !isRecord(input) ||
+        input.status !== "healthy" ||
+        input.external_sources_reachable !== true
+    ) {
+        throw new Error("enclave health_check failed");
+    }
+    return {
+        status: "healthy",
+        external_sources_reachable: true,
+    };
+}
+
+function readEnclaveAttestation(input: unknown): EnclaveAttestationResult {
+    if (
+        !isRecord(input) ||
+        !isHexBytes(input.attestation_document_hex) ||
+        !isHexBytes(input.public_key, 32)
+    ) {
+        throw new Error("enclave attestation is malformed");
+    }
+    return {
+        attestation_document_hex: input.attestation_document_hex,
+        public_key: input.public_key,
+    };
+}
+
+function requireRegistrationMetadata(input: unknown): EnclaveVerificationMetadata {
+    if (
+        !isRecord(input) ||
+        input.verifier_config_key !== EARTHQUAKE_VERIFIER_CONFIG_KEY ||
+        !isSafeIntegerInRange(input.verifier_config_version, 1, Number.MAX_SAFE_INTEGER) ||
+        !isHexBytes(input.enclave_instance_public_key, 32)
+    ) {
+        throw new Error("enclave registration metadata is malformed");
+    }
+    return {
+        verifier_config_key: input.verifier_config_key,
+        verifier_config_version: input.verifier_config_version,
+        enclave_instance_public_key: input.enclave_instance_public_key,
+    };
+}
+
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function isSafeIntegerInRange(value: unknown, min: number, max: number): value is number {
+    return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
+}
+
+function isHexBytes(value: unknown, expectedBytes?: number): value is string {
+    if (typeof value !== "string" || !/^(?:0x)?[0-9a-fA-F]+$/.test(value)) {
+        return false;
+    }
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    if (hex.length === 0 || hex.length % 2 !== 0) {
+        return false;
+    }
+    return expectedBytes === undefined || hex.length === expectedBytes * 2;
+}
+
+function normalizeHex(value: string): string {
+    return (value.startsWith("0x") ? value.slice(2) : value).toLowerCase();
 }
 
 function isNonEmptyString(input: string | undefined): input is string {

@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
-use serde::Serialize;
-use sonari_tee_core::{DEV_SIGNING_KEY_SEED_HEX, parse_seed, signing_key_seed_from_env};
+use serde::{Deserialize, Serialize};
+use sonari_tee_core::{
+    DEV_SIGNING_KEY_SEED_HEX, PayloadSigner, parse_seed, signing_key_seed_from_env,
+};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -119,11 +121,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
-    let seed = strict_signing_key_seed(args.signing_key_seed)?;
+fn production_result(
+    args: ProductionArgs,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let request_json: serde_json::Value =
         serde_json::from_slice(&production_request_bytes(args.input)?)?;
+    if request_json.get("action").is_some() {
+        return production_action_result(request_json, args.signing_key_seed);
+    }
+    let seed = strict_signing_key_seed(args.signing_key_seed)?;
     let request = tee::WorkerToTeeRequest::from_json_value(request_json)?;
+    production_worker_request_result(request, seed, None)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum ProductionAction {
+    HealthCheck,
+    GetAttestation,
+    ProcessData {
+        payload: serde_json::Value,
+        registration_metadata: EnclaveRegistrationMetadata,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct EnclaveRegistrationMetadata {
+    verifier_config_key: u64,
+    verifier_config_version: u64,
+    enclave_instance_public_key: String,
+}
+
+fn production_action_result(
+    request_json: serde_json::Value,
+    signing_key_seed: Option<String>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    match serde_json::from_value::<ProductionAction>(request_json)? {
+        ProductionAction::HealthCheck => Ok(serde_json::json!({
+            "status": "healthy",
+            "external_sources_reachable": true,
+        })),
+        ProductionAction::GetAttestation => {
+            let seed = strict_signing_key_seed(signing_key_seed)?;
+            let document = non_empty_env("SONARI_TEE_ATTESTATION_DOCUMENT_HEX")
+                .ok_or("SONARI_TEE_ATTESTATION_DOCUMENT_HEX is required for get_attestation")?;
+            let signer = LocalEd25519Signer::new(seed);
+            let signature = signer.sign_payload(b"sonari-earthquake-attestation-public-key");
+            let public_key =
+                non_empty_env("SONARI_TEE_ATTESTATION_PUBLIC_KEY").unwrap_or(signature.public_key);
+            Ok(serde_json::json!({
+                "attestation_document_hex": document,
+                "public_key": public_key,
+            }))
+        }
+        ProductionAction::ProcessData {
+            payload,
+            registration_metadata,
+        } => {
+            let seed = strict_signing_key_seed(signing_key_seed)?;
+            let request = tee::WorkerToTeeRequest::from_json_value(payload)?;
+            production_worker_request_result(request, seed, Some(registration_metadata))
+        }
+    }
+}
+
+fn production_worker_request_result(
+    request: tee::WorkerToTeeRequest,
+    seed: [u8; 32],
+    registration_metadata: Option<EnclaveRegistrationMetadata>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let detail_url = format!(
         "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
         request.source_event_id
@@ -137,38 +203,38 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     }) {
         Ok(bytes) => bytes.to_vec(),
         Err(_) => {
-            return Ok(TeeJsonResult::PendingSource {
+            return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
                 source_event_id: request.source_event_id,
                 error_code: "USGS_DETAIL_UNAVAILABLE",
-            });
+            })?);
         }
     };
     let detail_value: serde_json::Value = match serde_json::from_slice(&detail_json) {
         Ok(value) => value,
         Err(_) => {
-            return Ok(TeeJsonResult::PendingSource {
+            return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
                 source_event_id: request.source_event_id,
                 error_code: "USGS_DETAIL_UNAVAILABLE",
-            });
+            })?);
         }
     };
     let Some(canonical_source_event_id) =
         canonical_usgs_detail_id_for_request(&detail_value, &request.source_event_id)
     else {
-        return Ok(TeeJsonResult::PendingSource {
+        return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
             source_event_id: request.source_event_id,
             error_code: "USGS_DETAIL_UNAVAILABLE",
-        });
+        })?);
     };
 
     let grid = match preferred_grid_uri_from_detail(&detail_value) {
         Some(uri) => match fetch_grid(&uri) {
             Ok(grid) => Some(grid),
             Err(_) => {
-                return Ok(TeeJsonResult::PendingSource {
+                return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
                     source_event_id: request.source_event_id,
                     error_code: "SHAKEMAP_GRID_UNAVAILABLE",
-                });
+                })?);
             }
         },
         None => None,
@@ -185,13 +251,19 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     let input = build_production_input(parts, observed_at_ms);
     let preliminary = process_usgs_from_worker_request(request, input.clone())?;
     if preliminary.result.status != tee::OracleStatus::Finalized {
-        return output_to_tee_json(preliminary);
+        return Ok(serde_json::to_value(output_to_tee_json(preliminary)?)?);
     }
 
     let signer = LocalEd25519Signer::new(seed);
     let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
     let output = process_usgs_with_source_archive(input, &archive, &signer)?;
-    output_to_tee_json(output)
+    let mut result = output_to_tee_json(output)?;
+    if let (TeeJsonResult::Finalized { metadata, .. }, Some(registration_metadata)) =
+        (&mut result, registration_metadata)
+    {
+        *metadata = Some(registration_metadata);
+    }
+    Ok(serde_json::to_value(result)?)
 }
 
 struct ProductionInputParts {
@@ -372,6 +444,8 @@ enum TeeJsonResult {
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
+        #[serde(flatten, skip_serializing_if = "Option::is_none")]
+        metadata: Option<EnclaveRegistrationMetadata>,
     },
 }
 
@@ -393,6 +467,7 @@ fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std
                 payload_bcs_hex,
                 signature: signature.signature,
                 public_key: signature.public_key,
+                metadata: None,
             })
         }
         tee::OracleStatus::PendingSource => Ok(TeeJsonResult::PendingSource {

@@ -1,6 +1,7 @@
 import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
+    type EnclaveVerificationMetadata,
     type TeeCoreResult,
 } from "@sonari/earthquake-shared";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -20,7 +21,7 @@ const request = {
     geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
 };
 
-const finalized: TeeCoreResult = {
+const finalized: Extract<TeeCoreResult, { status: "finalized" }> = {
     status: "finalized",
     payload: {
         event_uid: "us7000sonari",
@@ -31,6 +32,12 @@ const finalized: TeeCoreResult = {
     payload_bcs_hex: "0x01",
     signature: `0x${"11".repeat(64)}`,
     public_key: `0x${"22".repeat(32)}`,
+};
+
+const registrationMetadata: EnclaveVerificationMetadata = {
+    verifier_config_key: 1,
+    verifier_config_version: 3,
+    enclave_instance_public_key: finalized.public_key,
 };
 
 const servers: Awaited<ReturnType<typeof listen>>[] = [];
@@ -114,6 +121,84 @@ describe("runner HTTP service", () => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toEqual({ ok: true, result: finalized });
+        expect(tee.requests).toEqual([request]);
+    });
+
+    it("exposes Nautilus-style health_check, get_attestation, and process_data responsibilities", async () => {
+        const tee = new RecordingTeeAdapter();
+        const server = await listen(tee);
+        const runnerId = await startRunner(server.url);
+
+        const health = await fetch(`${server.url}/health_check`, { headers: authHeaders() });
+        const attestation = await fetch(`${server.url}/get_attestation`, {
+            method: "POST",
+            headers: authHeaders(runnerId),
+            body: JSON.stringify({}),
+        });
+        const processed = await fetch(`${server.url}/process_data`, {
+            method: "POST",
+            headers: authHeaders(runnerId),
+            body: JSON.stringify({
+                payload: request,
+                registration_metadata: registrationMetadata,
+            }),
+        });
+
+        expect(health.status).toBe(200);
+        await expect(health.json()).resolves.toEqual({
+            ok: true,
+            result: { status: "healthy", external_sources_reachable: true },
+        });
+        expect(attestation.status).toBe(200);
+        await expect(attestation.json()).resolves.toEqual({
+            ok: true,
+            result: {
+                attestation_document_hex: `0x${"aa".repeat(96)}`,
+                public_key: finalized.public_key,
+            },
+        });
+        expect(processed.status).toBe(200);
+        await expect(processed.json()).resolves.toEqual({
+            ok: true,
+            result: { ...finalized, ...registrationMetadata },
+        });
+        expect(tee.requests).toEqual([request]);
+        expect(tee.registrations).toEqual([registrationMetadata]);
+    });
+
+    it("fails closed when process_data registration metadata is missing or mismatched", async () => {
+        const tee = new RecordingTeeAdapter();
+        const server = await listen(tee);
+        const runnerId = await startRunner(server.url);
+
+        const missing = await fetch(`${server.url}/process_data`, {
+            method: "POST",
+            headers: authHeaders(runnerId),
+            body: JSON.stringify({ payload: request }),
+        });
+        const mismatch = await fetch(`${server.url}/process_data`, {
+            method: "POST",
+            headers: authHeaders(runnerId),
+            body: JSON.stringify({
+                payload: request,
+                registration_metadata: {
+                    ...registrationMetadata,
+                    enclave_instance_public_key: `0x${"33".repeat(32)}`,
+                },
+            }),
+        });
+
+        expect(missing.status).toBe(400);
+        await expect(missing.json()).resolves.toMatchObject({
+            ok: false,
+            error_code: "AWS_RUNNER_CONTRACT_INVALID",
+        });
+        expect(mismatch.status).toBe(500);
+        await expect(mismatch.json()).resolves.toMatchObject({
+            ok: false,
+            error_code: "AWS_RUNNER_PROCESS_FAILED",
+            message: expect.stringContaining("registration public key"),
+        });
         expect(tee.requests).toEqual([request]);
     });
 
@@ -239,9 +324,28 @@ setTimeout(() => {
 
 class RecordingTeeAdapter implements TeeProcessAdapter {
     readonly requests: typeof request[] = [];
+    readonly registrations: EnclaveVerificationMetadata[] = [];
 
-    async process(input: typeof request, _signal?: AbortSignal): Promise<TeeCoreResult> {
+    async healthCheck(): Promise<{ status: "healthy"; external_sources_reachable: boolean }> {
+        return { status: "healthy", external_sources_reachable: true };
+    }
+
+    async getAttestation(): Promise<{ attestation_document_hex: string; public_key: string }> {
+        return {
+            attestation_document_hex: `0x${"aa".repeat(96)}`,
+            public_key: finalized.public_key,
+        };
+    }
+
+    async process(
+        input: typeof request,
+        _signal?: AbortSignal,
+        registration?: EnclaveVerificationMetadata,
+    ): Promise<TeeCoreResult> {
         this.requests.push(structuredClone(input));
+        if (registration !== undefined) {
+            this.registrations.push(structuredClone(registration));
+        }
         return finalized;
     }
 }
