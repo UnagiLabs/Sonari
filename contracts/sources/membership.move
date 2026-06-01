@@ -171,7 +171,7 @@ public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
     registry_id
 }
 
-public fun assert_current_pass_precheck(
+public(package) fun assert_current_pass_precheck(
     registry: &MembershipRegistry,
     pass: &MembershipPass,
     claimant: address,
@@ -185,7 +185,7 @@ public fun assert_current_pass_precheck(
     assert!(record.current_owner == pass.owner, ERegistryOwnerMismatch);
 }
 
-public fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID): (ID, ID) {
+public(package) fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID): (ID, ID) {
     (pass.pass_lineage_id, campaign_id)
 }
 

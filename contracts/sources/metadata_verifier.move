@@ -114,27 +114,27 @@ public(package) fun assert_signed_bytes(
     );
 }
 
-public fun registry_id(registry: &VerifierRegistry): ID {
+public(package) fun registry_id(registry: &VerifierRegistry): ID {
     object::id(registry)
 }
 
-public fun registry_kind_verifier(): u8 {
+public(package) fun registry_kind_verifier(): u8 {
     REGISTRY_KIND_VERIFIER
 }
 
-public fun verifier_family_earthquake_oracle(): u8 {
+public(package) fun verifier_family_earthquake_oracle(): u8 {
     VERIFIER_FAMILY_EARTHQUAKE_ORACLE
 }
 
-public fun verifier_family_identity(): u8 {
+public(package) fun verifier_family_identity(): u8 {
     VERIFIER_FAMILY_IDENTITY
 }
 
-public fun verifier_version_v1(): u64 {
+public(package) fun verifier_version_v1(): u64 {
     VERIFIER_VERSION_V1
 }
 
-public fun target_kind_verifier_registry(): u8 {
+public(package) fun target_kind_verifier_registry(): u8 {
     TARGET_KIND_VERIFIER_REGISTRY
 }
 

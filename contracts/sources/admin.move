@@ -319,6 +319,30 @@ public fun disable_verifier_key(
     metadata_verifier::disable_verifier_key(registry, public_key, ctx);
 }
 
+public fun verifier_registry_id(registry: &metadata_verifier::VerifierRegistry): ID {
+    metadata_verifier::registry_id(registry)
+}
+
+public fun registry_kind_verifier(): u8 {
+    metadata_verifier::registry_kind_verifier()
+}
+
+public fun verifier_family_earthquake_oracle(): u8 {
+    metadata_verifier::verifier_family_earthquake_oracle()
+}
+
+public fun verifier_family_identity(): u8 {
+    metadata_verifier::verifier_family_identity()
+}
+
+public fun verifier_version_v1(): u64 {
+    metadata_verifier::verifier_version_v1()
+}
+
+public fun target_kind_verifier_registry(): u8 {
+    metadata_verifier::target_kind_verifier_registry()
+}
+
 public fun create_allowed_residence_cell_registry(
     cap: &mut AdminCap,
     root: vector<u8>,
@@ -455,6 +479,18 @@ public fun scope_target(): u8 {
 
 public fun target_kind_none(): u8 {
     TARGET_KIND_NONE
+}
+
+public fun target_kind_program(): u8 {
+    program::target_kind_program()
+}
+
+public fun target_kind_campaign(): u8 {
+    program::target_kind_campaign()
+}
+
+public fun target_kind_identity_registry(): u8 {
+    identity_registry::target_kind_identity_registry()
 }
 
 public fun genesis_kind_admin_cap(): u8 {

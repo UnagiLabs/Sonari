@@ -193,7 +193,7 @@ public(package) fun bind_campaign(
     transfer::share_object(binding);
 }
 
-public fun assert_campaign_binding(
+public(package) fun assert_campaign_binding(
     binding: &DisasterCampaignBinding,
     campaign: &Campaign,
     disaster_event: &DisasterEvent,

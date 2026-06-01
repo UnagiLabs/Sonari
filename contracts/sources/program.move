@@ -205,51 +205,51 @@ public(package) fun assert_effective_designated_pool_matches(
     }
 }
 
-public fun id(program: &Program): ID {
+public(package) fun id(program: &Program): ID {
     object::id(program)
 }
 
-public fun campaign_id(campaign: &Campaign): ID {
+public(package) fun campaign_id(campaign: &Campaign): ID {
     object::id(campaign)
 }
 
-public fun required_pass_metadata(program: &Program): u64 {
+public(package) fun required_pass_metadata(program: &Program): u64 {
     program.required_pass_metadata
 }
 
-public fun required_verifier_family(program: &Program): u8 {
+public(package) fun required_verifier_family(program: &Program): u8 {
     program.required_verifier_family
 }
 
-public fun payout_policy_id(program: &Program): Option<ID> {
+public(package) fun payout_policy_id(program: &Program): Option<ID> {
     program.payout_policy_id
 }
 
-public fun campaign_claim_start_ms(campaign: &Campaign): u64 {
+public(package) fun campaign_claim_start_ms(campaign: &Campaign): u64 {
     campaign.claim_start_ms
 }
 
-public fun campaign_claim_end_ms(campaign: &Campaign): u64 {
+public(package) fun campaign_claim_end_ms(campaign: &Campaign): u64 {
     campaign.claim_end_ms
 }
 
-public fun status_active(): u8 {
+public(package) fun status_active(): u8 {
     STATUS_ACTIVE
 }
 
-public fun status_inactive(): u8 {
+public(package) fun status_inactive(): u8 {
     STATUS_INACTIVE
 }
 
-public fun status_closed(): u8 {
+public(package) fun status_closed(): u8 {
     STATUS_CLOSED
 }
 
-public fun target_kind_program(): u8 {
+public(package) fun target_kind_program(): u8 {
     TARGET_KIND_PROGRAM
 }
 
-public fun target_kind_campaign(): u8 {
+public(package) fun target_kind_campaign(): u8 {
     TARGET_KIND_CAMPAIGN
 }
 

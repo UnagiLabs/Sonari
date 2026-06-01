@@ -75,7 +75,7 @@ public struct Payload has copy, drop, store {
     freshness_deadline_ms: u64,
 }
 
-public fun decode_finalized(bytes: vector<u8>, now_ms: u64): Payload {
+public(package) fun decode_finalized(bytes: vector<u8>, now_ms: u64): Payload {
     let mut bcs = bcs::new(bytes);
     let payload = Payload {
         intent: bcs.peel_u8(),
@@ -168,7 +168,7 @@ fun length_in_range(bytes: &vector<u8>, min: u64, max: u64): bool {
     min <= length && length <= max
 }
 
-public fun payload_summary(
+public(package) fun payload_summary(
     payload: &Payload,
 ): (
     u8,
@@ -208,94 +208,94 @@ public fun payload_summary(
     )
 }
 
-public fun event_uid(payload: &Payload): vector<u8> {
+public(package) fun event_uid(payload: &Payload): vector<u8> {
     payload.event_uid
 }
 
-public fun event_revision(payload: &Payload): u32 {
+public(package) fun event_revision(payload: &Payload): u32 {
     payload.event_revision
 }
 
-public fun hazard_type(payload: &Payload): u8 {
+public(package) fun hazard_type(payload: &Payload): u8 {
     payload.hazard_type
 }
 
-public fun oracle_version(payload: &Payload): u64 {
+public(package) fun oracle_version(payload: &Payload): u64 {
     payload.oracle_version
 }
 
-public fun source_event_id(payload: &Payload): vector<u8> {
+public(package) fun source_event_id(payload: &Payload): vector<u8> {
     payload.source_event_id
 }
 
-public fun title(payload: &Payload): vector<u8> {
+public(package) fun title(payload: &Payload): vector<u8> {
     payload.title
 }
 
-public fun region(payload: &Payload): vector<u8> {
+public(package) fun region(payload: &Payload): vector<u8> {
     payload.region
 }
 
-public fun magnitude_x100(payload: &Payload): u64 {
+public(package) fun magnitude_x100(payload: &Payload): u64 {
     payload.magnitude_x100
 }
 
-public fun verified_at_ms(payload: &Payload): u64 {
+public(package) fun verified_at_ms(payload: &Payload): u64 {
     payload.verified_at_ms
 }
 
-public fun source_updated_at_ms(payload: &Payload): u64 {
+public(package) fun source_updated_at_ms(payload: &Payload): u64 {
     payload.source_updated_at_ms
 }
 
-public fun primary_source(payload: &Payload): u8 {
+public(package) fun primary_source(payload: &Payload): u8 {
     payload.primary_source
 }
 
-public fun source_set_hash(payload: &Payload): vector<u8> {
+public(package) fun source_set_hash(payload: &Payload): vector<u8> {
     payload.source_set_hash
 }
 
-public fun raw_data_hash(payload: &Payload): vector<u8> {
+public(package) fun raw_data_hash(payload: &Payload): vector<u8> {
     payload.raw_data_hash
 }
 
-public fun raw_data_uri(payload: &Payload): vector<u8> {
+public(package) fun raw_data_uri(payload: &Payload): vector<u8> {
     payload.raw_data_uri
 }
 
-public fun affected_cells_root(payload: &Payload): vector<u8> {
+public(package) fun affected_cells_root(payload: &Payload): vector<u8> {
     payload.affected_cells_root
 }
 
-public fun affected_cells_uri(payload: &Payload): vector<u8> {
+public(package) fun affected_cells_uri(payload: &Payload): vector<u8> {
     payload.affected_cells_uri
 }
 
-public fun affected_cells_data_hash(payload: &Payload): vector<u8> {
+public(package) fun affected_cells_data_hash(payload: &Payload): vector<u8> {
     payload.affected_cells_data_hash
 }
 
-public fun affected_cell_count(payload: &Payload): u64 {
+public(package) fun affected_cell_count(payload: &Payload): u64 {
     payload.affected_cell_count
 }
 
-public fun occurred_at_ms(payload: &Payload): u64 {
+public(package) fun occurred_at_ms(payload: &Payload): u64 {
     payload.occurred_at_ms
 }
 
-public fun freshness_deadline_ms(payload: &Payload): u64 {
+public(package) fun freshness_deadline_ms(payload: &Payload): u64 {
     payload.freshness_deadline_ms
 }
 
-public fun intent_earthquake_oracle_payload(): u8 {
+public(package) fun intent_earthquake_oracle_payload(): u8 {
     INTENT_EARTHQUAKE_ORACLE_PAYLOAD
 }
 
-public fun hazard_type_earthquake(): u8 {
+public(package) fun hazard_type_earthquake(): u8 {
     HAZARD_TYPE_EARTHQUAKE
 }
 
-public fun status_finalized(): u8 {
+public(package) fun status_finalized(): u8 {
     STATUS_FINALIZED
 }

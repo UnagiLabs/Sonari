@@ -332,8 +332,8 @@ fun eligibility(
     max_amount: u64,
 ): claim::EligibilityResult {
     claim::new_eligibility_result(
-        program::id(program),
-        program::campaign_id(campaign),
+        accessor::program_id(program),
+        accessor::campaign_id(campaign),
         accessor::membership_pass_lineage_id(pass),
         tier,
         max_amount,

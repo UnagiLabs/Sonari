@@ -433,6 +433,22 @@ public fun membership_status_migrated(): u8 {
     membership::status_migrated()
 }
 
+public fun identity_registry_id(registry: &IdentityRegistry): ID {
+    identity_registry::registry_id(registry)
+}
+
+public fun registry_kind_identity(): u8 {
+    identity_registry::registry_kind_identity()
+}
+
+public fun identity_provider_kyc(): u8 {
+    identity_registry::provider_kyc()
+}
+
+public fun identity_provider_world_id(): u8 {
+    identity_registry::provider_world_id()
+}
+
 public fun claim_index_claim_count(index: &ClaimIndex): u64 {
     claim::claim_index_claim_count(index)
 }
@@ -500,6 +516,46 @@ public fun policy_id(policy: &PayoutPolicy): ID {
 
 public fun min_claim_band(policy: &PayoutPolicy): u8 {
     payout_policy::min_claim_band(policy)
+}
+
+public fun program_id(program: &Program): ID {
+    program::id(program)
+}
+
+public fun campaign_id(campaign: &Campaign): ID {
+    program::campaign_id(campaign)
+}
+
+public fun program_required_pass_metadata(program: &Program): u64 {
+    program::required_pass_metadata(program)
+}
+
+public fun program_required_verifier_family(program: &Program): u8 {
+    program::required_verifier_family(program)
+}
+
+public fun program_payout_policy_id(program: &Program): Option<ID> {
+    program::payout_policy_id(program)
+}
+
+public fun campaign_claim_start_ms(campaign: &Campaign): u64 {
+    program::campaign_claim_start_ms(campaign)
+}
+
+public fun campaign_claim_end_ms(campaign: &Campaign): u64 {
+    program::campaign_claim_end_ms(campaign)
+}
+
+public fun program_status_active(): u8 {
+    program::status_active()
+}
+
+public fun program_status_inactive(): u8 {
+    program::status_inactive()
+}
+
+public fun program_status_closed(): u8 {
+    program::status_closed()
 }
 
 public fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {

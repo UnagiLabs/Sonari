@@ -37,7 +37,7 @@ public struct IdentityVerificationResult has copy, drop, store {
     signed_statement_hash: vector<u8>,
 }
 
-public fun decode_verified(bytes: vector<u8>, now_ms: u64): IdentityVerificationResult {
+public(package) fun decode_verified(bytes: vector<u8>, now_ms: u64): IdentityVerificationResult {
     let mut bcs = bcs::new(bytes);
     let result = IdentityVerificationResult {
         intent: bcs.peel_vec_u8(),
@@ -96,7 +96,7 @@ fun assert_32_bytes(bytes: &vector<u8>) {
     assert!(bytes.length() == 32, EInvalidHashLength);
 }
 
-public fun identity_result_summary(
+public(package) fun identity_result_summary(
     result: &IdentityVerificationResult,
 ): (
     vector<u8>,
@@ -164,10 +164,10 @@ public(package) fun signed_statement_hash(result: &IdentityVerificationResult): 
     result.signed_statement_hash
 }
 
-public fun provider_kyc(): u8 {
+public(package) fun provider_kyc(): u8 {
     PROVIDER_KYC
 }
 
-public fun provider_world_id(): u8 {
+public(package) fun provider_world_id(): u8 {
     PROVIDER_WORLD_ID
 }

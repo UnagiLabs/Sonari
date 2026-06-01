@@ -53,13 +53,13 @@ fun init_creates_genesis_objects_and_tracking_events() {
     assert!(verifier_events.length() == 1);
     let (verifier_registry_id_from_event, verifier_registry_kind, _, _) =
         metadata_verifier::registry_created_event_fields(*verifier_events.borrow(0));
-    assert!(verifier_registry_kind == metadata_verifier::registry_kind_verifier());
+    assert!(verifier_registry_kind == admin::registry_kind_verifier());
 
     let identity_events = event::events_by_type<identity_registry::RegistryCreated>();
     assert!(identity_events.length() == 1);
     let (identity_registry_id_from_event, identity_registry_kind, _, _) =
         identity_registry::registry_created_event_fields(*identity_events.borrow(0));
-    assert!(identity_registry_kind == identity_registry::registry_kind_identity());
+    assert!(identity_registry_kind == accessor::registry_kind_identity());
 
     let genesis_events = event::events_by_type<admin::GenesisObjectCreated>();
     assert!(genesis_events.length() == 9);
@@ -102,10 +102,10 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(donor_registry_id_from_event == accessor::donor_registry_id(&donor_registry));
         assert!(membership_registry_id_from_event == accessor::membership_registry_id(&membership_registry));
         assert!(
-            verifier_registry_id_from_event == metadata_verifier::registry_id(&verifier_registry),
+            verifier_registry_id_from_event == admin::verifier_registry_id(&verifier_registry),
         );
         assert!(
-            identity_registry_id_from_event == identity_registry::registry_id(&identity_registry),
+            identity_registry_id_from_event == accessor::identity_registry_id(&identity_registry),
         );
 
         scenario.return_to_sender(cap);
@@ -773,7 +773,7 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
     scenario.next_tx(ADMIN);
     let cap = scenario.take_from_sender<admin::AdminCap>();
     let program = scenario.take_shared<program::Program>();
-    assert!(program::id(&program) == program_id_from_event);
+    assert!(accessor::program_id(&program) == program_id_from_event);
     admin::create_campaign(
         &cap,
         &program,
@@ -809,7 +809,7 @@ fun admin_can_create_program_and_campaign_and_emit_events() {
 
     scenario.next_tx(ADMIN);
     let campaign = scenario.take_shared<program::Campaign>();
-    assert!(program::campaign_id(&campaign) == event_campaign_id);
+    assert!(accessor::campaign_id(&campaign) == event_campaign_id);
     test_scenario::return_shared(campaign);
 
     scenario.end();
@@ -878,7 +878,7 @@ fun program_target_pause_blocks_claim_precheck() {
     let mut scenario = initialized();
     let (program_id, _) = create_program_and_campaign(&mut scenario);
 
-    pause_target(&mut scenario, program::target_kind_program(), program_id);
+    pause_target(&mut scenario, admin::target_kind_program(), program_id);
 
     run_precheck(&mut scenario);
     scenario.end();
@@ -889,7 +889,7 @@ fun campaign_target_pause_blocks_claim_precheck() {
     let mut scenario = initialized();
     let (_, campaign_id) = create_program_and_campaign(&mut scenario);
 
-    pause_target(&mut scenario, program::target_kind_campaign(), campaign_id);
+    pause_target(&mut scenario, admin::target_kind_campaign(), campaign_id);
 
     run_precheck(&mut scenario);
     scenario.end();
@@ -900,7 +900,7 @@ fun unpause_target_allows_claim_precheck_again() {
     let mut scenario = initialized();
     let (_, campaign_id) = create_program_and_campaign(&mut scenario);
 
-    pause_target(&mut scenario, program::target_kind_campaign(), campaign_id);
+    pause_target(&mut scenario, admin::target_kind_campaign(), campaign_id);
 
     scenario.next_tx(ADMIN);
     {
@@ -909,7 +909,7 @@ fun unpause_target_allows_claim_precheck_again() {
         admin::unpause_target(
             &cap,
             &mut pause_state,
-            program::target_kind_campaign(),
+            admin::target_kind_campaign(),
             campaign_id,
             scenario.ctx(),
         );
@@ -935,14 +935,14 @@ fun pause_events_include_scope_target_and_actor() {
         admin::pause_target(
             &cap,
             &mut pause_state,
-            program::target_kind_program(),
+            admin::target_kind_program(),
             program_id,
             scenario.ctx(),
         );
         admin::unpause_target(
             &cap,
             &mut pause_state,
-            program::target_kind_program(),
+            admin::target_kind_program(),
             program_id,
             scenario.ctx(),
         );
@@ -962,7 +962,7 @@ fun pause_events_include_scope_target_and_actor() {
     let (scope, target_kind, target_id, actor) =
         admin::paused_event_fields(*paused_events.borrow(1));
     assert!(scope == admin::scope_target());
-    assert!(target_kind == program::target_kind_program());
+    assert!(target_kind == admin::target_kind_program());
     assert!(target_id.destroy_some() == program_id);
     assert!(actor == ADMIN);
 
@@ -978,7 +978,7 @@ fun pause_events_include_scope_target_and_actor() {
     let (scope, target_kind, target_id, actor) =
         admin::unpaused_event_fields(*unpaused_events.borrow(1));
     assert!(scope == admin::scope_target());
-    assert!(target_kind == program::target_kind_program());
+    assert!(target_kind == admin::target_kind_program());
     assert!(target_id.destroy_some() == program_id);
     assert!(actor == ADMIN);
 
@@ -1017,7 +1017,7 @@ fun inactive_program_fails_precheck() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut program = scenario.take_shared<program::Program>();
         let campaign = scenario.take_shared<program::Campaign>();
-        program::set_program_status_for_testing(&mut program, program::status_inactive());
+        program::set_program_status_for_testing(&mut program, accessor::program_status_inactive());
 
         admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
@@ -1039,7 +1039,7 @@ fun closed_program_fails_precheck() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut program = scenario.take_shared<program::Program>();
         let campaign = scenario.take_shared<program::Campaign>();
-        program::set_program_status_for_testing(&mut program, program::status_closed());
+        program::set_program_status_for_testing(&mut program, accessor::program_status_closed());
 
         admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
@@ -1061,7 +1061,7 @@ fun inactive_campaign_fails_precheck() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let program = scenario.take_shared<program::Program>();
         let mut campaign = scenario.take_shared<program::Campaign>();
-        program::set_campaign_status_for_testing(&mut campaign, program::status_inactive());
+        program::set_campaign_status_for_testing(&mut campaign, accessor::program_status_inactive());
 
         admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
@@ -1083,7 +1083,7 @@ fun closed_campaign_fails_precheck() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let program = scenario.take_shared<program::Program>();
         let mut campaign = scenario.take_shared<program::Campaign>();
-        program::set_campaign_status_for_testing(&mut campaign, program::status_closed());
+        program::set_campaign_status_for_testing(&mut campaign, accessor::program_status_closed());
 
         admin::assert_claim_precheck(&pause_state, &program, &campaign);
 
@@ -1168,7 +1168,7 @@ fun create_program(scenario: &mut test_scenario::Scenario, program_type: u8): ob
 
     scenario.next_tx(ADMIN);
     let program = scenario.take_shared<program::Program>();
-    let program_id = program::id(&program);
+    let program_id = accessor::program_id(&program);
     test_scenario::return_shared(program);
 
     program_id
@@ -1197,7 +1197,7 @@ fun create_program_and_campaign(
 
     scenario.next_tx(ADMIN);
     let campaign = scenario.take_shared<program::Campaign>();
-    let campaign_id = program::campaign_id(&campaign);
+    let campaign_id = accessor::campaign_id(&campaign);
     test_scenario::return_shared(campaign);
 
     (program_id, campaign_id)

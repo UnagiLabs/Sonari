@@ -35,7 +35,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
         object::id(&registry),
         pass_id,
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -61,7 +61,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
         signed_statement_hash,
     ) = accessor::membership_pass_mvp_summary(&pass);
     assert!(identity_verified);
-    assert!(identity_provider_mask == identity_result_v1::provider_kyc());
+    assert!(identity_provider_mask == accessor::identity_provider_kyc());
     assert!(identity_verified_at_ms == APPLY_TIME_MS);
     assert!(identity_expires_at_ms == EXPIRES_AT_MS);
     assert!(terms_version == TERMS_VERSION);
@@ -72,7 +72,7 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
-            identity_result_v1::provider_kyc(),
+            accessor::identity_provider_kyc(),
             RESULT_DUPLICATE_KEY_HASH,
         ) == accessor::membership_pass_lineage_id(&pass),
     );
@@ -88,7 +88,7 @@ fun decoded_world_id_result_accumulates_provider_mask() {
         object::id(&registry),
         pass_id,
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -97,7 +97,7 @@ fun decoded_world_id_result_accumulates_provider_mask() {
         object::id(&registry),
         pass_id,
         MEMBER,
-        identity_result_v1::provider_world_id(),
+        accessor::identity_provider_world_id(),
         OTHER_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -123,7 +123,7 @@ fun decoded_world_id_result_accumulates_provider_mask() {
     assert!(identity_verified);
     assert!(
         identity_provider_mask ==
-            identity_result_v1::provider_kyc() + identity_result_v1::provider_world_id(),
+            accessor::identity_provider_kyc() + accessor::identity_provider_world_id(),
     );
     let (_, provider_label) = accessor::membership_pass_display_labels(&pass);
     assert!(provider_label == b"KYC + World ID".to_string());
@@ -140,7 +140,7 @@ fun decoded_result_rejects_wrong_identity_registry() {
         object::id(&pass),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -165,7 +165,7 @@ fun decoded_result_rejects_wrong_membership_id() {
         object::id(&registry),
         object::id(&other_pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -195,7 +195,7 @@ fun decoded_result_rejects_pass_that_is_not_membership_registry_current_sbt() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -224,7 +224,7 @@ fun decoded_result_rejects_wrong_owner() {
         object::id(&registry),
         object::id(&pass),
         OTHER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -248,7 +248,7 @@ fun decoded_result_rejects_terms_version_mismatch() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION + 1,
         SIGNED_STATEMENT_HASH,
@@ -272,7 +272,7 @@ fun decoded_result_rejects_signed_statement_hash_mismatch() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         OTHER_SIGNED_STATEMENT_HASH,
@@ -296,14 +296,14 @@ fun decoded_result_rejects_duplicate_key_bound_to_another_sbt() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &other_pass,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
     let result = decoded_result(
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -328,7 +328,7 @@ fun decoded_result_rejects_replay_for_same_provider() {
         object::id(&registry),
         object::id(&pass),
         MEMBER,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
@@ -359,13 +359,13 @@ fun kyc_duplicate_key_rejects_different_pass() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
         &other_pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
 
@@ -379,13 +379,13 @@ fun world_id_duplicate_key_rejects_different_pass() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
         &other_pass,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
 
@@ -399,13 +399,13 @@ fun same_hash_across_providers_is_allowed() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
         &other_pass,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
 
@@ -413,26 +413,26 @@ fun same_hash_across_providers_is_allowed() {
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
-            identity_registry::provider_kyc(),
+            accessor::identity_provider_kyc(),
             DUPLICATE_KEY_HASH,
         ) == accessor::membership_pass_lineage_id(&pass),
     );
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
-            identity_registry::provider_world_id(),
+            accessor::identity_provider_world_id(),
             DUPLICATE_KEY_HASH,
         ) == accessor::membership_pass_lineage_id(&other_pass),
     );
 
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
     cleanup(registry, pass, other_pass);
@@ -445,13 +445,13 @@ fun same_key_same_pass_is_idempotent() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
 
@@ -459,14 +459,14 @@ fun same_key_same_pass_is_idempotent() {
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
-            identity_registry::provider_kyc(),
+            accessor::identity_provider_kyc(),
             DUPLICATE_KEY_HASH,
         ) == accessor::membership_pass_lineage_id(&pass),
     );
 
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     cleanup(registry, pass, other_pass);
@@ -479,19 +479,19 @@ fun duplicate_key_binding_check_accepts_same_pass() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
 
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     cleanup(registry, pass, other_pass);
@@ -504,7 +504,7 @@ fun duplicate_key_binding_check_rejects_missing_key() {
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
 
@@ -518,13 +518,13 @@ fun duplicate_key_binding_check_rejects_different_pass() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &other_pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
 
@@ -538,19 +538,19 @@ fun duplicate_key_binding_check_rejects_wrong_provider() {
     identity_registry::bind_duplicate_key(
         &mut registry,
         &pass,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
         &pass,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
 
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     cleanup(registry, pass, other_pass);
@@ -612,7 +612,7 @@ fun cleanup_step3(
 ) {
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
     identity_registry::destroy_identity_registry_for_testing(registry);
@@ -632,12 +632,12 @@ fun cleanup_step3_with_two_bindings(
 ) {
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_result_v1::provider_kyc(),
+        accessor::identity_provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
     identity_registry::remove_binding_for_testing(
         &mut registry,
-        identity_result_v1::provider_world_id(),
+        accessor::identity_provider_world_id(),
         OTHER_DUPLICATE_KEY_HASH,
     );
     identity_registry::destroy_identity_registry_for_testing(registry);

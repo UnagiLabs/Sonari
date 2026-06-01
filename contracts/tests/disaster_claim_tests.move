@@ -57,7 +57,7 @@ fun kyc_verified_member_can_claim_full_disaster_payout() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -103,7 +103,7 @@ fun disaster_claim_rejects_affected_cell_below_policy_min_claim_band() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -127,7 +127,7 @@ fun disaster_claim_rejects_program_policy_mismatch() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -158,7 +158,7 @@ fun world_id_verified_member_can_claim_full_disaster_payout() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         WORLD_ID_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -166,7 +166,7 @@ fun world_id_verified_member_can_claim_full_disaster_payout() {
 
     execute_disaster_claim_with_identity(
         &mut scenario,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         WORLD_ID_DUPLICATE_KEY_HASH,
     );
 
@@ -274,7 +274,7 @@ fun disaster_claim_rejects_paused_identity_registry_before_payout() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -283,7 +283,7 @@ fun disaster_claim_rejects_paused_identity_registry_before_payout() {
 
     pause_target(
         &mut scenario,
-        identity_registry::target_kind_identity_registry(),
+        admin::target_kind_identity_registry(),
         identity_registry_id,
     );
 
@@ -327,7 +327,7 @@ fun disaster_claim_rejects_account_created_after_cutoff() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -346,7 +346,7 @@ fun disaster_claim_rejects_account_created_at_cutoff() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -365,7 +365,7 @@ fun disaster_claim_rejects_home_cell_registered_after_cutoff() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -384,7 +384,7 @@ fun disaster_claim_rejects_home_cell_registered_at_cutoff() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -403,7 +403,7 @@ fun disaster_claim_rejects_home_cell_changed_after_disaster_cutoff() {
     register_member_with_home_cell(&mut scenario, PROMOTED_H3_INDEX);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -426,7 +426,7 @@ fun disaster_claim_rejects_affected_cell_mismatch() {
     register_member_with_home_cell(&mut scenario, PROMOTED_H3_INDEX);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -443,7 +443,7 @@ fun disaster_claim_rejects_missing_duplicate_key_binding() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -451,7 +451,7 @@ fun disaster_claim_rejects_missing_duplicate_key_binding() {
 
     execute_disaster_claim_with_identity(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         WORLD_ID_DUPLICATE_KEY_HASH,
     );
     scenario.end();
@@ -464,7 +464,7 @@ fun disaster_claim_rejects_duplicate_key_with_wrong_provider() {
     register_member(&mut scenario);
     verify_member_with_provider(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -472,7 +472,7 @@ fun disaster_claim_rejects_duplicate_key_with_wrong_provider() {
 
     execute_disaster_claim_with_identity(
         &mut scenario,
-        identity_registry::provider_world_id(),
+        accessor::identity_provider_world_id(),
         KYC_DUPLICATE_KEY_HASH,
     );
     scenario.end();
@@ -485,11 +485,11 @@ fun disaster_claim_rejects_duplicate_key_bound_to_other_sbt() {
     register_member(&mut scenario);
     mark_member_identity_verified_without_binding(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
     );
     bind_duplicate_key_to_other_pass(
         &mut scenario,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
@@ -757,7 +757,7 @@ fun execute_disaster_claim_with_clock(
     execute_disaster_claim_with_clock_and_identity(
         scenario,
         clock,
-        identity_registry::provider_kyc(),
+        accessor::identity_provider_kyc(),
         KYC_DUPLICATE_KEY_HASH,
     );
 }
@@ -808,7 +808,7 @@ fun designated_pool_id(scenario: &mut test_scenario::Scenario): object::ID {
 fun identity_registry_id(scenario: &mut test_scenario::Scenario): object::ID {
     scenario.next_tx(ADMIN);
     let identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
-    let id = identity_registry::registry_id(&identity_registry);
+    let id = accessor::identity_registry_id(&identity_registry);
     test_scenario::return_shared(identity_registry);
     id
 }
