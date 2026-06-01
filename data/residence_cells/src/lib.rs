@@ -25,6 +25,12 @@ const ALLOWLIST_SCHEMA_VERSION: u64 = 1;
 const LOCAL_GEOJSON_SOURCE_KIND: &str = "local_geojson";
 const MANIFEST_SCHEMA: &str = "sonari.residence.allowlist.manifest.v1";
 const MANIFEST_SCHEMA_VERSION: u64 = 1;
+const PROOF_MANIFEST_SCHEMA: &str = "sonari.residence.proof_manifest.v1";
+const PROOF_MANIFEST_SCHEMA_VERSION: u64 = 1;
+const PROOF_SHARD_SCHEMA: &str = "sonari.residence.proof_shard.v1";
+const PROOF_SHARD_SCHEMA_VERSION: u64 = 1;
+const PROOF_SHARD_OBJECT_KEY_RULE: &str =
+    "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz";
 const S3_BUCKET_ENV: &str = "SONARI_RESIDENCE_CELLS_BUCKET";
 const PI: f64 = std::f64::consts::PI;
 const FRAC_PI_2: f64 = std::f64::consts::FRAC_PI_2;
@@ -311,6 +317,65 @@ pub struct VerifyLocalOutput {
     pub byte_size: u64,
     pub h3_count: usize,
     pub merkle_root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedProofShards {
+    pub manifest: ProofShardManifest,
+    pub shards: Vec<ProofShard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardManifest {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub merkle_root: String,
+    pub shard_count: usize,
+    pub total_proof_count: usize,
+    pub object_key_rule: String,
+    pub shards: Vec<ProofShardInventoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardInventoryEntry {
+    pub shard_id: usize,
+    pub object_key: String,
+    pub proof_count: usize,
+    pub sha256: String,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShard {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub merkle_root: String,
+    pub shard_id: usize,
+    pub shard_count: usize,
+    pub proofs: Vec<ProofShardEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardEntry {
+    pub h3_index: String,
+    pub leaf_hash: String,
+    pub proof: Vec<ProofShardStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardStep {
+    pub sibling_on_left: bool,
+    pub sibling_hash: String,
 }
 
 pub fn build_allowlist_artifact(
@@ -735,6 +800,113 @@ pub fn generate_proof_for_h3_index(
         steps,
         expected_root,
     }))
+}
+
+pub fn generate_proof_shards(
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+) -> Result<GeneratedProofShards, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+    let Some(first_leaf) = leaves.first().copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof shards require at least one residence leaf".to_owned(),
+        ));
+    };
+    validate_proof_shard_leaf_metadata(leaves, first_leaf)?;
+
+    let sorted = sorted_leaf_hashes(leaves)?;
+    let leaf_hashes = sorted.iter().map(|(_, hash)| *hash).collect::<Vec<_>>();
+    let levels = merkle_levels_from_leaf_hashes(&leaf_hashes);
+    let Some(root) = levels.last().and_then(|level| level.first()).copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof shards require at least one residence leaf".to_owned(),
+        ));
+    };
+    let merkle_root = prefixed_hex(&root);
+
+    let mut shards = (0..shard_count)
+        .map(|shard_id| ProofShard {
+            schema: PROOF_SHARD_SCHEMA.to_owned(),
+            schema_version: PROOF_SHARD_SCHEMA_VERSION,
+            allowlist_version: first_leaf.allowlist_version,
+            geo_resolution: first_leaf.geo_resolution,
+            merkle_root: merkle_root.clone(),
+            shard_id,
+            shard_count,
+            proofs: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+
+    for (leaf_index, (leaf, leaf_hash)) in sorted.iter().enumerate() {
+        let shard_id = (leaf.h3_index % shard_count as u64) as usize;
+        let entry = ProofShardEntry {
+            h3_index: leaf.h3_index.to_string(),
+            leaf_hash: prefixed_hex(leaf_hash),
+            proof: proof_steps_from_levels(&levels, leaf_index),
+        };
+        let Some(shard) = shards.get_mut(shard_id) else {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "computed shard_id {shard_id} is outside shard_count {shard_count}"
+            )));
+        };
+        shard.proofs.push(entry);
+    }
+
+    let inventory = shards
+        .iter()
+        .map(|shard| {
+            let shard_bytes = proof_shard_json_bytes(shard)?;
+            Ok(ProofShardInventoryEntry {
+                shard_id: shard.shard_id,
+                object_key: proof_shard_object_key(
+                    shard.allowlist_version,
+                    shard.geo_resolution,
+                    shard.shard_id,
+                ),
+                proof_count: shard.proofs.len(),
+                sha256: prefixed_hex(&Sha256::digest(&shard_bytes)),
+                byte_size: shard_bytes.len() as u64,
+            })
+        })
+        .collect::<Result<Vec<_>, ResidenceAllowlistError>>()?;
+
+    Ok(GeneratedProofShards {
+        manifest: ProofShardManifest {
+            schema: PROOF_MANIFEST_SCHEMA.to_owned(),
+            schema_version: PROOF_MANIFEST_SCHEMA_VERSION,
+            allowlist_version: first_leaf.allowlist_version,
+            geo_resolution: first_leaf.geo_resolution,
+            merkle_root,
+            shard_count,
+            total_proof_count: sorted.len(),
+            object_key_rule: PROOF_SHARD_OBJECT_KEY_RULE.to_owned(),
+            shards: inventory,
+        },
+        shards,
+    })
+}
+
+pub fn proof_shard_json_bytes(shard: &ProofShard) -> Result<Vec<u8>, ResidenceAllowlistError> {
+    Ok(serde_json::to_vec(shard)?)
+}
+
+pub fn replay_proof_shard_entry(
+    entry: &ProofShardEntry,
+) -> Result<String, ResidenceAllowlistError> {
+    let mut current = parse_prefixed_hex_32("leaf_hash", &entry.leaf_hash)?;
+    for step in &entry.proof {
+        let sibling = parse_prefixed_hex_32("sibling_hash", &step.sibling_hash)?;
+        current = if step.sibling_on_left {
+            internal_node_hash(sibling, current)
+        } else {
+            internal_node_hash(current, sibling)
+        };
+    }
+    Ok(prefixed_hex(&current))
 }
 
 pub fn parse_valid_allowlist(bytes: &[u8]) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
@@ -1393,6 +1565,96 @@ fn proof_step(direction: ProofDirection, sibling_hash: [u8; 32]) -> ResidencePro
         sibling_on_left: direction.sibling_on_left(),
         sibling_hash,
     }
+}
+
+fn validate_proof_shard_leaf_metadata(
+    leaves: &[ResidenceCellLeaf],
+    expected: ResidenceCellLeaf,
+) -> Result<(), ResidenceAllowlistError> {
+    for leaf in leaves {
+        if leaf.geo_resolution != expected.geo_resolution {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "all proof shard leaves must use geo_resolution {}",
+                expected.geo_resolution
+            )));
+        }
+        if leaf.allowlist_version != expected.allowlist_version {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "all proof shard leaves must use allowlist_version {}",
+                expected.allowlist_version
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn merkle_levels_from_leaf_hashes(leaf_hashes: &[[u8; 32]]) -> Vec<Vec<[u8; 32]>> {
+    let mut levels = vec![leaf_hashes.to_vec()];
+    while let Some(level) = levels.last() {
+        if level.len() <= 1 {
+            break;
+        }
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        for chunk in level.chunks(2) {
+            if chunk.len() == 1 {
+                next.push(chunk[0]);
+            } else {
+                next.push(internal_node_hash(chunk[0], chunk[1]));
+            }
+        }
+        levels.push(next);
+    }
+    levels
+}
+
+fn proof_steps_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> Vec<ProofShardStep> {
+    let mut current_index = leaf_index;
+    let mut proof = Vec::new();
+    for level in levels {
+        if level.len() <= 1 {
+            break;
+        }
+        let sibling_index = if current_index % 2 == 0 {
+            current_index + 1
+        } else {
+            current_index - 1
+        };
+        if let Some(sibling_hash) = level.get(sibling_index) {
+            proof.push(ProofShardStep {
+                sibling_on_left: sibling_index < current_index,
+                sibling_hash: prefixed_hex(sibling_hash),
+            });
+        }
+        current_index /= 2;
+    }
+    proof
+}
+
+fn proof_shard_object_key(allowlist_version: u64, geo_resolution: u8, shard_id: usize) -> String {
+    format!(
+        "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz"
+    )
+}
+
+fn parse_prefixed_hex_32(field: &str, value: &str) -> Result<[u8; 32], ResidenceAllowlistError> {
+    if !is_lower_prefixed_hex(value, 32) {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "{field} must be a lowercase 0x-prefixed SHA-256 hash"
+        )));
+    }
+    let hex = value
+        .strip_prefix("0x")
+        .expect("is_lower_prefixed_hex validated prefix");
+    let mut bytes = [0u8; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        let start = index * 2;
+        *byte = u8::from_str_radix(&hex[start..start + 2], 16).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "{field} contains invalid hex at byte {index}: {error}"
+            ))
+        })?;
+    }
+    Ok(bytes)
 }
 
 fn sorted_leaf_hashes(
