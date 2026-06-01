@@ -1134,6 +1134,32 @@ describe("AWS runner workflow helper", () => {
         expect(client.requests[0]?.include).toEqual({ effects: true, events: true });
     });
 
+    it("accepts base64 encoded enclave public keys in Sui registration events", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient(
+            Buffer.from(Array.from({ length: 32 }, () => 0x22)).toString("base64"),
+        );
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toEqual(registrationMetadata);
+    });
+
     it("fails enclave registration before Sui submission when submit is not explicitly allowed", async () => {
         const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
         const client = new RecordingEnclaveRegistrationClient();
@@ -1465,6 +1491,10 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
         include: { effects: true; events: true };
     }> = [];
 
+    constructor(
+        private readonly eventPublicKey: unknown = Array.from({ length: 32 }, () => 0x22),
+    ) {}
+
     async signAndExecuteTransaction(input: {
         transaction: unknown;
         signer: unknown;
@@ -1483,7 +1513,7 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
                             verifier_family: 3,
                             verifier_version: "1",
                             config_version: String(registrationMetadata.verifier_config_version),
-                            public_key: Array.from({ length: 32 }, () => 0x22),
+                            public_key: this.eventPublicKey,
                         },
                     },
                 ],

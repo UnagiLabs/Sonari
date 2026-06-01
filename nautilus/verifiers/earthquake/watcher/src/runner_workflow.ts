@@ -1672,6 +1672,12 @@ function readHexByteVectorField(input: unknown): string | undefined {
     if (isHexBytes(input, 32)) {
         return `0x${normalizeHex(input)}`;
     }
+    if (typeof input === "string") {
+        const decoded = decodeBase64ByteVector(input);
+        if (decoded !== undefined) {
+            return `0x${decoded.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+        }
+    }
     if (
         Array.isArray(input) &&
         input.length === 32 &&
@@ -1680,6 +1686,17 @@ function readHexByteVectorField(input: unknown): string | undefined {
         return `0x${input.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
     }
     return undefined;
+}
+
+function decodeBase64ByteVector(input: string): number[] | undefined {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input) || input.length % 4 !== 0) {
+        return undefined;
+    }
+    const decoded = Buffer.from(input, "base64");
+    if (decoded.length !== 32 || decoded.toString("base64") !== input) {
+        return undefined;
+    }
+    return Array.from(decoded);
 }
 
 function readEnclaveHealthCheck(input: unknown): EnclaveHealthCheckResult {
