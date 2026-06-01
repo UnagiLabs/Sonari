@@ -183,6 +183,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "--template-file infra/aws/sonari-verifier-runner/template.yaml",
             '--s3-bucket "$ARTIFACT_BUCKET"',
             '--s3-prefix "$' + "{S3_PREFIX}/$" + '{GITHUB_SHA}/cloudformation"',
+            "EarthquakeNitroEnclaveProcessCommand=/opt/sonari/bin/run-earthquake-enclave",
             "--capabilities CAPABILITY_NAMED_IAM",
             "--no-fail-on-empty-changeset",
         ]);

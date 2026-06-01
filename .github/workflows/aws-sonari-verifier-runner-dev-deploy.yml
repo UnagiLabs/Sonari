@@ -465,6 +465,7 @@ jobs:
             "NitroEnclaveImageSha384=$NITRO_ENCLAVE_IMAGE_SHA384"
             "NitroEnclavePcr3=$NITRO_ENCLAVE_PCR3"
             "WorldIdAppId=$WORLD_ID_APP_ID"
+            "EarthquakeNitroEnclaveProcessCommand=/opt/sonari/bin/run-earthquake-enclave"
           )
 
           if [[ -n "${WALRUS_CONTEXT:-}" ]]; then

@@ -154,6 +154,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             "aws s3 cp 's3://$" + "{EarthquakeTeeEifS3Bucket}/$" + "{EarthquakeTeeEifS3Key}'",
         );
         expect(template).toContain("SONARI_EARTHQUAKE_ENCLAVE_WRAPPER");
+        expect(template).toContain("source /opt/sonari/runner.env");
         expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777");
         expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000");
         expect(template).toContain("call_earthquake_enclave GET /health_check");
@@ -166,6 +167,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SONARI_WALRUS_AGGREGATOR_URL");
         expect(template).toContain("SONARI_EARTHQUAKE_EIF_PATH");
         expect(template).toContain("SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS");
+        expect(template).toContain(
+            'exec "$' +
+                '{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"',
+        );
     });
 
     it("retains membership World ID, EIF, KMS attestation, and ciphertext configuration", async () => {

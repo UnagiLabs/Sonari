@@ -411,6 +411,11 @@ Resources:
             cat >/opt/sonari/bin/run-earthquake-enclave <<'SONARI_EARTHQUAKE_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
+            if [ -f /opt/sonari/runner.env ]; then
+              set -a
+              source /opt/sonari/runner.env
+              set +a
+            fi
             : "${!SONARI_EARTHQUAKE_EIF_PATH:?SONARI_EARTHQUAKE_EIF_PATH is required}"
             : "${!SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS:?SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS is required}"
             : "${!SONARI_EARTHQUAKE_ENCLAVE_CID:?SONARI_EARTHQUAKE_ENCLAVE_CID is required}"
@@ -521,7 +526,12 @@ Resources:
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
             #!/bin/bash
             set -euo pipefail
-            exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/tee-artifact/bin/tee production}"
+            if [ -f /opt/sonari/runner.env ]; then
+              set -a
+              source /opt/sonari/runner.env
+              set +a
+            fi
+            exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
             SONARI_VERIFIER_DISPATCH
             chmod 0500 /opt/sonari/bin/run-sonari-verifier
             nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
