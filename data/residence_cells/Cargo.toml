@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 bcs = "0.1"
 clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.1"
 geo = "0.30"
 geojson = { version = "0.24", default-features = false, features = ["geo-types"] }
 h3o = { version = "0.8", features = ["geo"] }

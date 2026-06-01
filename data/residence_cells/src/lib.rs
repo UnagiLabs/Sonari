@@ -1,3 +1,4 @@
+use flate2::{Compression, GzBuilder, read::GzDecoder};
 use geo::{
     BooleanOps, Geometry as GeoGeometry, LineString, MultiPolygon, Polygon, Rect, Relate, coord,
 };
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     fmt, fs, io,
-    io::{BufWriter, Write},
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -25,6 +26,12 @@ const ALLOWLIST_SCHEMA_VERSION: u64 = 1;
 const LOCAL_GEOJSON_SOURCE_KIND: &str = "local_geojson";
 const MANIFEST_SCHEMA: &str = "sonari.residence.allowlist.manifest.v1";
 const MANIFEST_SCHEMA_VERSION: u64 = 1;
+const PROOF_MANIFEST_SCHEMA: &str = "sonari.residence.proof_manifest.v1";
+const PROOF_MANIFEST_SCHEMA_VERSION: u64 = 1;
+const PROOF_SHARD_SCHEMA: &str = "sonari.residence.proof_shard.v1";
+const PROOF_SHARD_SCHEMA_VERSION: u64 = 1;
+const PROOF_SHARD_OBJECT_KEY_RULE: &str =
+    "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz";
 const S3_BUCKET_ENV: &str = "SONARI_RESIDENCE_CELLS_BUCKET";
 const PI: f64 = std::f64::consts::PI;
 const FRAC_PI_2: f64 = std::f64::consts::FRAC_PI_2;
@@ -311,6 +318,127 @@ pub struct VerifyLocalOutput {
     pub byte_size: u64,
     pub h3_count: usize,
     pub merkle_root: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VerifyProofShardsOutput {
+    pub status: String,
+    pub shard_count: usize,
+    pub total_proof_count: usize,
+    pub verified_shards: usize,
+    pub verified_proofs: usize,
+    pub merkle_root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedProofShards {
+    pub manifest: ProofShardManifest,
+    pub shards: Vec<ProofShard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardManifest {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub merkle_root: String,
+    pub shard_count: usize,
+    pub total_proof_count: usize,
+    pub object_key_rule: String,
+    pub shards: Vec<ProofShardInventoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardInventoryEntry {
+    pub shard_id: usize,
+    pub object_key: String,
+    pub proof_count: usize,
+    pub sha256: String,
+    pub byte_size: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShard {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub merkle_root: String,
+    pub shard_id: usize,
+    pub shard_count: usize,
+    pub proofs: Vec<ProofShardEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardEntry {
+    pub h3_index: String,
+    pub leaf_hash: String,
+    pub proof: Vec<ProofShardStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProofShardStep {
+    pub sibling_on_left: bool,
+    pub sibling_hash: String,
+}
+
+struct ProofShardBuildContext {
+    sorted: Vec<(ResidenceCellLeaf, [u8; 32])>,
+    levels: Vec<Vec<[u8; 32]>>,
+    merkle_root: String,
+    allowlist_version: u64,
+    geo_resolution: u8,
+    shard_count: usize,
+    shard_count_u64: u64,
+}
+
+struct ProofShardLeafIndices {
+    starts: Vec<usize>,
+    leaf_indices: Vec<usize>,
+}
+
+struct HashingWriter<W> {
+    inner: W,
+    hasher: Sha256,
+    byte_size: u64,
+}
+
+impl<W: Write> HashingWriter<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+            byte_size: 0,
+        }
+    }
+
+    fn finish(self) -> (W, String, u64) {
+        (
+            self.inner,
+            prefixed_hex(&self.hasher.finalize()),
+            self.byte_size,
+        )
+    }
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.update(&buf[..written]);
+        self.byte_size += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 pub fn build_allowlist_artifact(
@@ -737,9 +865,120 @@ pub fn generate_proof_for_h3_index(
     }))
 }
 
+pub fn generate_proof_shards(
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+) -> Result<GeneratedProofShards, ResidenceAllowlistError> {
+    let context = build_proof_shard_context(leaves, shard_count)?;
+
+    let mut shards = (0..context.shard_count)
+        .map(|shard_id| ProofShard {
+            schema: PROOF_SHARD_SCHEMA.to_owned(),
+            schema_version: PROOF_SHARD_SCHEMA_VERSION,
+            allowlist_version: context.allowlist_version,
+            geo_resolution: context.geo_resolution,
+            merkle_root: context.merkle_root.clone(),
+            shard_id,
+            shard_count: context.shard_count,
+            proofs: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+
+    for (leaf_index, (leaf, _)) in context.sorted.iter().enumerate() {
+        let shard_id = proof_shard_id_for_count(leaf.h3_index, context.shard_count_u64);
+        let entry = proof_shard_entry_from_context(&context, leaf_index)?;
+        let Some(shard) = shards.get_mut(shard_id) else {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "computed shard_id {shard_id} is outside shard_count {}",
+                context.shard_count
+            )));
+        };
+        shard.proofs.push(entry);
+    }
+
+    let inventory = shards
+        .iter()
+        .map(|shard| {
+            let shard_bytes = proof_shard_gzip_bytes(shard)?;
+            Ok(ProofShardInventoryEntry {
+                shard_id: shard.shard_id,
+                object_key: proof_shard_object_key(
+                    shard.allowlist_version,
+                    shard.geo_resolution,
+                    shard.shard_id,
+                ),
+                proof_count: shard.proofs.len(),
+                sha256: prefixed_hex(&Sha256::digest(&shard_bytes)),
+                byte_size: shard_bytes.len() as u64,
+            })
+        })
+        .collect::<Result<Vec<_>, ResidenceAllowlistError>>()?;
+
+    Ok(GeneratedProofShards {
+        manifest: ProofShardManifest {
+            schema: PROOF_MANIFEST_SCHEMA.to_owned(),
+            schema_version: PROOF_MANIFEST_SCHEMA_VERSION,
+            allowlist_version: context.allowlist_version,
+            geo_resolution: context.geo_resolution,
+            merkle_root: context.merkle_root,
+            shard_count: context.shard_count,
+            total_proof_count: context.sorted.len(),
+            object_key_rule: PROOF_SHARD_OBJECT_KEY_RULE.to_owned(),
+            shards: inventory,
+        },
+        shards,
+    })
+}
+
+pub fn proof_shard_json_bytes(shard: &ProofShard) -> Result<Vec<u8>, ResidenceAllowlistError> {
+    Ok(serde_json::to_vec(shard)?)
+}
+
+pub fn proof_shard_gzip_bytes(shard: &ProofShard) -> Result<Vec<u8>, ResidenceAllowlistError> {
+    let mut encoder = GzBuilder::new()
+        .mtime(0)
+        .write(Vec::new(), Compression::default());
+    encoder.write_all(&proof_shard_json_bytes(shard)?)?;
+    Ok(encoder.finish()?)
+}
+
+pub fn proof_shard_id(h3_index: u64, shard_count: usize) -> Result<usize, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+    let shard_count_u64 = u64::try_from(shard_count).map_err(|_| {
+        ResidenceAllowlistError::InvalidArgument("shard_count is outside the u64 range".to_owned())
+    })?;
+    Ok(proof_shard_id_for_count(h3_index, shard_count_u64))
+}
+
+pub fn replay_proof_shard_entry(
+    entry: &ProofShardEntry,
+) -> Result<String, ResidenceAllowlistError> {
+    let mut current = parse_prefixed_hex_32("leaf_hash", &entry.leaf_hash)?;
+    for step in &entry.proof {
+        let sibling = parse_prefixed_hex_32("sibling_hash", &step.sibling_hash)?;
+        current = if step.sibling_on_left {
+            internal_node_hash(sibling, current)
+        } else {
+            internal_node_hash(current, sibling)
+        };
+    }
+    Ok(prefixed_hex(&current))
+}
+
 pub fn parse_valid_allowlist(bytes: &[u8]) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
+    parse_allowlist_with_validator(bytes, validate_artifact)
+}
+
+fn parse_allowlist_with_validator(
+    bytes: &[u8],
+    validator: fn(&AllowlistArtifact) -> Result<(), ResidenceAllowlistError>,
+) -> Result<ValidatedAllowlist, ResidenceAllowlistError> {
     let artifact: AllowlistArtifact = serde_json::from_slice(bytes)?;
-    validate_artifact(&artifact)?;
+    validator(&artifact)?;
     let leaves = artifact
         .h3_indexes
         .iter()
@@ -776,13 +1015,23 @@ pub fn validate_allowlist_matches_source(
     options: GenerateOptions,
 ) -> Result<(), ResidenceAllowlistError> {
     let source_sha256 = sha256_hex(source_bytes);
-    let source_sha256_prefixed = format!("0x{source_sha256}");
-
     if source_sha256 != NATURAL_EARTH_LAND_SOURCE.sha256 {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "local source file does not match pinned Natural Earth source".to_owned(),
         ));
     }
+    validate_allowlist_matches_source_content(allowlist, source, source_bytes, options)
+}
+
+fn validate_allowlist_matches_source_content(
+    allowlist: &ValidatedAllowlist,
+    source: &str,
+    source_bytes: &[u8],
+    options: GenerateOptions,
+) -> Result<(), ResidenceAllowlistError> {
+    let source_sha256 = sha256_hex(source_bytes);
+    let source_sha256_prefixed = format!("0x{source_sha256}");
+
     if allowlist.artifact.source.sha256 != source_sha256_prefixed {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "allowlist source.sha256 does not match local source file".to_owned(),
@@ -807,6 +1056,189 @@ pub fn validate_allowlist_matches_source(
     }
 
     Ok(())
+}
+
+pub fn generate_and_write_proof_shards_atomic(
+    allowlist_path: &Path,
+    source_path: &Path,
+    output_dir: &Path,
+    shard_count: usize,
+    options: GenerateOptions,
+) -> Result<ProofShardManifest, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+
+    let allowlist = load_verified_allowlist(allowlist_path, source_path, options)?;
+    write_proof_shards_from_leaves_atomic_with_jobs(
+        output_dir,
+        &allowlist.leaves,
+        shard_count,
+        options.jobs,
+    )
+}
+
+pub fn write_proof_shards_from_leaves_atomic(
+    output_dir: &Path,
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+) -> Result<ProofShardManifest, ResidenceAllowlistError> {
+    write_proof_shards_from_leaves_atomic_with_jobs(output_dir, leaves, shard_count, None)
+}
+
+pub fn write_proof_shards_from_leaves_atomic_with_jobs(
+    output_dir: &Path,
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+    jobs: Option<usize>,
+) -> Result<ProofShardManifest, ResidenceAllowlistError> {
+    let context = build_proof_shard_context(leaves, shard_count)?;
+    let shards_dir = output_dir.join("shards");
+    fs::create_dir_all(&shards_dir)?;
+    let shard_indices = proof_shard_leaf_indices(&context);
+
+    let write_inventory = || {
+        (0..context.shard_count)
+            .into_par_iter()
+            .map(|shard_id| {
+                let start = shard_indices.starts[shard_id];
+                let end = shard_indices.starts[shard_id + 1];
+                let leaf_indices = &shard_indices.leaf_indices[start..end];
+                write_proof_shard_from_indices_atomic(&shards_dir, &context, shard_id, leaf_indices)
+            })
+            .collect::<Result<Vec<_>, ResidenceAllowlistError>>()
+    };
+
+    let inventory = if let Some(jobs) = jobs {
+        if jobs == 0 {
+            return Err(ResidenceAllowlistError::InvalidArgument(
+                "jobs must be greater than zero".to_owned(),
+            ));
+        }
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build()
+            .map_err(|error| ResidenceAllowlistError::InvalidArgument(error.to_string()))?
+            .install(write_inventory)
+    } else {
+        write_inventory()
+    }?;
+
+    let manifest = ProofShardManifest {
+        schema: PROOF_MANIFEST_SCHEMA.to_owned(),
+        schema_version: PROOF_MANIFEST_SCHEMA_VERSION,
+        allowlist_version: context.allowlist_version,
+        geo_resolution: context.geo_resolution,
+        merkle_root: context.merkle_root,
+        shard_count: context.shard_count,
+        total_proof_count: context.sorted.len(),
+        object_key_rule: PROOF_SHARD_OBJECT_KEY_RULE.to_owned(),
+        shards: inventory,
+    };
+    write_proof_shard_manifest_atomic(output_dir, &manifest)?;
+    Ok(manifest)
+}
+
+pub fn write_generated_proof_shards_atomic(
+    output_dir: &Path,
+    generated: &GeneratedProofShards,
+) -> Result<(), ResidenceAllowlistError> {
+    let shards_dir = output_dir.join("shards");
+    fs::create_dir_all(&shards_dir)?;
+
+    for shard in &generated.shards {
+        let shard_path = shards_dir.join(format!("{:05}.json.gz", shard.shard_id));
+        write_bytes_atomic(&shard_path, &proof_shard_gzip_bytes(shard)?)?;
+    }
+
+    write_proof_shard_manifest_atomic(output_dir, &generated.manifest)
+}
+
+pub fn verify_proof_shards(
+    manifest_path: &Path,
+    shards_dir: &Path,
+) -> Result<VerifyProofShardsOutput, ResidenceAllowlistError> {
+    let manifest: ProofShardManifest = serde_json::from_slice(&fs::read(manifest_path)?)?;
+    validate_proof_shard_manifest(&manifest)?;
+    reject_unexpected_shard_files(shards_dir, manifest.shard_count)?;
+
+    let mut inventory_by_id = vec![None; manifest.shard_count];
+    for inventory in &manifest.shards {
+        if inventory_by_id[inventory.shard_id].is_some() {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "duplicate shard inventory entry for shard_id {}",
+                inventory.shard_id
+            )));
+        }
+        inventory_by_id[inventory.shard_id] = Some(inventory);
+    }
+
+    let mut verified_proofs = 0usize;
+    let mut seen_h3_indexes = std::collections::BTreeSet::new();
+    for (shard_id, inventory) in inventory_by_id.into_iter().enumerate() {
+        let Some(inventory) = inventory else {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "missing shard inventory entry for shard_id {shard_id}"
+            )));
+        };
+        let shard_path = shards_dir.join(format!("{shard_id:05}.json.gz"));
+        if !shard_path.is_file() {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "missing shard file {}",
+                shard_path.display()
+            )));
+        }
+
+        let compressed = fs::read(&shard_path)?;
+        if compressed.len() as u64 != inventory.byte_size {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "shard {shard_id} byte_size {} does not match manifest {}",
+                compressed.len(),
+                inventory.byte_size
+            )));
+        }
+        let actual_sha256 = prefixed_hex(&Sha256::digest(&compressed));
+        if actual_sha256 != inventory.sha256 {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "shard {shard_id} sha256 {actual_sha256} does not match manifest {}",
+                inventory.sha256
+            )));
+        }
+
+        let shard = read_proof_shard_gzip(&shard_path, &compressed)?;
+        verified_proofs += validate_proof_shard_contents(
+            &manifest,
+            inventory,
+            shard_id,
+            &shard,
+            &mut seen_h3_indexes,
+        )?;
+    }
+
+    if verified_proofs != manifest.total_proof_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "verified proof count {verified_proofs} does not match manifest total_proof_count {}",
+            manifest.total_proof_count
+        )));
+    }
+    if seen_h3_indexes.len() != manifest.total_proof_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "unique proof count {} does not match manifest total_proof_count {}",
+            seen_h3_indexes.len(),
+            manifest.total_proof_count
+        )));
+    }
+
+    Ok(VerifyProofShardsOutput {
+        status: "verified".to_owned(),
+        shard_count: manifest.shard_count,
+        total_proof_count: manifest.total_proof_count,
+        verified_shards: manifest.shard_count,
+        verified_proofs,
+        merkle_root: manifest.merkle_root,
+    })
 }
 
 pub fn root_output(
@@ -1170,6 +1602,26 @@ fn root_for_valid_allowlist(
 }
 
 fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowlistError> {
+    validate_allowlist_shape(artifact)?;
+    if artifact.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
+        || artifact.source.version != NATURAL_EARTH_LAND_SOURCE.version
+        || artifact.source.url != NATURAL_EARTH_LAND_SOURCE.url
+        || artifact.source.sha256 != format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256)
+    {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "allowlist source metadata does not match pinned Natural Earth source".to_owned(),
+        ));
+    }
+    if artifact.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "allowlist geo_resolution must be {}",
+            NATURAL_EARTH_LAND_SOURCE.resolution
+        )));
+    }
+    Ok(())
+}
+
+fn validate_allowlist_shape(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowlistError> {
     if artifact.schema != ALLOWLIST_SCHEMA {
         return Err(ResidenceAllowlistError::InvalidArtifact(format!(
             "allowlist schema must be {ALLOWLIST_SCHEMA}"
@@ -1185,15 +1637,6 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowl
             "allowlist source.kind must be {LOCAL_GEOJSON_SOURCE_KIND}"
         )));
     }
-    if artifact.source.name != NATURAL_EARTH_LAND_SOURCE.source_name
-        || artifact.source.version != NATURAL_EARTH_LAND_SOURCE.version
-        || artifact.source.url != NATURAL_EARTH_LAND_SOURCE.url
-        || artifact.source.sha256 != format!("0x{}", NATURAL_EARTH_LAND_SOURCE.sha256)
-    {
-        return Err(ResidenceAllowlistError::InvalidArtifact(
-            "allowlist source metadata does not match pinned Natural Earth source".to_owned(),
-        ));
-    }
     if !is_lower_prefixed_hex(&artifact.source.sha256, 32) {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "allowlist source.sha256 must be a lowercase 0x-prefixed SHA-256 hash".to_owned(),
@@ -1204,12 +1647,7 @@ fn validate_artifact(artifact: &AllowlistArtifact) -> Result<(), ResidenceAllowl
             "allowlist source.byte_length must be greater than zero".to_owned(),
         ));
     }
-    if artifact.geo_resolution != NATURAL_EARTH_LAND_SOURCE.resolution {
-        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
-            "allowlist geo_resolution must be {}",
-            NATURAL_EARTH_LAND_SOURCE.resolution
-        )));
-    }
+    resolution_from_u8(artifact.geo_resolution)?;
     if artifact.h3_indexes.is_empty() {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "allowlist must contain at least one h3_index".to_owned(),
@@ -1284,6 +1722,221 @@ fn validate_manifest_metadata(manifest: &AllowlistManifest) -> Result<(), Reside
         ));
     }
     Ok(())
+}
+
+fn validate_proof_shard_manifest(
+    manifest: &ProofShardManifest,
+) -> Result<(), ResidenceAllowlistError> {
+    if manifest.schema != PROOF_MANIFEST_SCHEMA {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "proof manifest schema must be {PROOF_MANIFEST_SCHEMA}"
+        )));
+    }
+    if manifest.schema_version != PROOF_MANIFEST_SCHEMA_VERSION {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "proof manifest schema_version must be {PROOF_MANIFEST_SCHEMA_VERSION}"
+        )));
+    }
+    if manifest.shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof manifest shard_count must be greater than zero".to_owned(),
+        ));
+    }
+    resolution_from_u8(manifest.geo_resolution)?;
+    parse_prefixed_hex_32("proof manifest merkle_root", &manifest.merkle_root)?;
+    if manifest.object_key_rule != PROOF_SHARD_OBJECT_KEY_RULE {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "proof manifest object_key_rule must be {PROOF_SHARD_OBJECT_KEY_RULE}"
+        )));
+    }
+    if manifest.shards.len() != manifest.shard_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "proof manifest inventory length {} does not match shard_count {}",
+            manifest.shards.len(),
+            manifest.shard_count
+        )));
+    }
+
+    let mut seen = vec![false; manifest.shard_count];
+    for inventory in &manifest.shards {
+        if inventory.shard_id >= manifest.shard_count {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "proof manifest shard_id {} is outside shard_count {}",
+                inventory.shard_id, manifest.shard_count
+            )));
+        }
+        if seen[inventory.shard_id] {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "duplicate shard inventory entry for shard_id {}",
+                inventory.shard_id
+            )));
+        }
+        seen[inventory.shard_id] = true;
+        let expected_object_key = proof_shard_object_key(
+            manifest.allowlist_version,
+            manifest.geo_resolution,
+            inventory.shard_id,
+        );
+        if inventory.object_key != expected_object_key {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "shard {} object_key {} does not match expected {}",
+                inventory.shard_id, inventory.object_key, expected_object_key
+            )));
+        }
+        parse_prefixed_hex_32("proof manifest shard sha256", &inventory.sha256)?;
+    }
+
+    for shard_id in 0..manifest.shard_count {
+        if !seen[shard_id] {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "missing shard inventory entry for shard_id {shard_id}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn reject_unexpected_shard_files(
+    shards_dir: &Path,
+    shard_count: usize,
+) -> Result<(), ResidenceAllowlistError> {
+    let expected = (0..shard_count)
+        .map(|shard_id| format!("{shard_id:05}.json.gz"))
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for entry in fs::read_dir(shards_dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "unexpected non-UTF-8 shard file in {}",
+                shards_dir.display()
+            )));
+        };
+        if !expected.contains(file_name) {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "unexpected shard file {}",
+                entry.path().display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn read_proof_shard_gzip(
+    shard_path: &Path,
+    compressed: &[u8],
+) -> Result<ProofShard, ResidenceAllowlistError> {
+    let mut decoder = GzDecoder::new(compressed);
+    let mut json = Vec::new();
+    decoder.read_to_end(&mut json).map_err(|error| {
+        ResidenceAllowlistError::InvalidArtifact(format!(
+            "failed to decode gzip shard {}: {error}",
+            shard_path.display()
+        ))
+    })?;
+    serde_json::from_slice(&json).map_err(ResidenceAllowlistError::Json)
+}
+
+fn validate_proof_shard_contents(
+    manifest: &ProofShardManifest,
+    inventory: &ProofShardInventoryEntry,
+    expected_shard_id: usize,
+    shard: &ProofShard,
+    seen_h3_indexes: &mut std::collections::BTreeSet<u64>,
+) -> Result<usize, ResidenceAllowlistError> {
+    if shard.schema != PROOF_SHARD_SCHEMA {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} schema must be {PROOF_SHARD_SCHEMA}"
+        )));
+    }
+    if shard.schema_version != PROOF_SHARD_SCHEMA_VERSION {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} schema_version must be {PROOF_SHARD_SCHEMA_VERSION}"
+        )));
+    }
+    if shard.allowlist_version != manifest.allowlist_version {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} allowlist_version {} does not match manifest {}",
+            shard.allowlist_version, manifest.allowlist_version
+        )));
+    }
+    if shard.geo_resolution != manifest.geo_resolution {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} geo_resolution {} does not match manifest {}",
+            shard.geo_resolution, manifest.geo_resolution
+        )));
+    }
+    if shard.merkle_root != manifest.merkle_root {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} merkle_root {} does not match manifest {}",
+            shard.merkle_root, manifest.merkle_root
+        )));
+    }
+    if shard.shard_id != expected_shard_id {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard file {expected_shard_id} contains shard_id {}",
+            shard.shard_id
+        )));
+    }
+    if shard.shard_count != manifest.shard_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} shard_count {} does not match manifest {}",
+            shard.shard_count, manifest.shard_count
+        )));
+    }
+    if shard.proofs.len() != inventory.proof_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "shard {expected_shard_id} proof_count {} does not match manifest {}",
+            shard.proofs.len(),
+            inventory.proof_count
+        )));
+    }
+
+    let shard_count_u64 = u64::try_from(manifest.shard_count).map_err(|_| {
+        ResidenceAllowlistError::InvalidArtifact(
+            "proof manifest shard_count is outside the u64 range".to_owned(),
+        )
+    })?;
+    for entry in &shard.proofs {
+        let h3_index = parse_h3_index(&entry.h3_index, manifest.geo_resolution)?;
+        if !seen_h3_indexes.insert(h3_index) {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "duplicate proof entry for h3_index {h3_index}"
+            )));
+        }
+        let expected_leaf = ResidenceCellLeaf {
+            h3_index,
+            geo_resolution: manifest.geo_resolution,
+            allowlist_version: manifest.allowlist_version,
+        };
+        let expected_leaf_hash = prefixed_hex(&leaf_hash(&expected_leaf)?);
+        if entry.leaf_hash != expected_leaf_hash {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {h3_index} leaf_hash {} does not match computed {}",
+                entry.leaf_hash, expected_leaf_hash
+            )));
+        }
+
+        let computed_shard_id = proof_shard_id_for_count(h3_index, shard_count_u64);
+        if computed_shard_id != expected_shard_id {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {h3_index} belongs to shard_id {computed_shard_id}, not {expected_shard_id}"
+            )));
+        }
+
+        let replayed_root = replay_proof_shard_entry(entry)?;
+        if replayed_root != manifest.merkle_root {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {h3_index} proof replays to {replayed_root}, not manifest merkle_root {}",
+                manifest.merkle_root
+            )));
+        }
+    }
+
+    Ok(shard.proofs.len())
 }
 
 fn assert_manifest_field(
@@ -1395,6 +2048,241 @@ fn proof_step(direction: ProofDirection, sibling_hash: [u8; 32]) -> ResidencePro
     }
 }
 
+fn build_proof_shard_context(
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+) -> Result<ProofShardBuildContext, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+    let shard_count_u64 = u64::try_from(shard_count).map_err(|_| {
+        ResidenceAllowlistError::InvalidArgument("shard_count is outside the u64 range".to_owned())
+    })?;
+    let Some(first_leaf) = leaves.first().copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof shards require at least one residence leaf".to_owned(),
+        ));
+    };
+    validate_proof_shard_leaf_metadata(leaves, first_leaf)?;
+
+    let sorted = sorted_leaf_hashes(leaves)?;
+    let leaf_hashes = sorted.iter().map(|(_, hash)| *hash).collect::<Vec<_>>();
+    let levels = merkle_levels_from_leaf_hashes(&leaf_hashes);
+    let Some(root) = levels.last().and_then(|level| level.first()).copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "proof shards require at least one residence leaf".to_owned(),
+        ));
+    };
+
+    Ok(ProofShardBuildContext {
+        sorted,
+        levels,
+        merkle_root: prefixed_hex(&root),
+        allowlist_version: first_leaf.allowlist_version,
+        geo_resolution: first_leaf.geo_resolution,
+        shard_count,
+        shard_count_u64,
+    })
+}
+
+fn validate_proof_shard_leaf_metadata(
+    leaves: &[ResidenceCellLeaf],
+    expected: ResidenceCellLeaf,
+) -> Result<(), ResidenceAllowlistError> {
+    for leaf in leaves {
+        if leaf.geo_resolution != expected.geo_resolution {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "all proof shard leaves must use geo_resolution {}",
+                expected.geo_resolution
+            )));
+        }
+        if leaf.allowlist_version != expected.allowlist_version {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "all proof shard leaves must use allowlist_version {}",
+                expected.allowlist_version
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn merkle_levels_from_leaf_hashes(leaf_hashes: &[[u8; 32]]) -> Vec<Vec<[u8; 32]>> {
+    let mut levels = vec![leaf_hashes.to_vec()];
+    while let Some(level) = levels.last() {
+        if level.len() <= 1 {
+            break;
+        }
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        for chunk in level.chunks(2) {
+            if chunk.len() == 1 {
+                next.push(chunk[0]);
+            } else {
+                next.push(internal_node_hash(chunk[0], chunk[1]));
+            }
+        }
+        levels.push(next);
+    }
+    levels
+}
+
+fn proof_steps_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> Vec<ProofShardStep> {
+    let mut current_index = leaf_index;
+    let mut proof = Vec::new();
+    for level in levels {
+        if level.len() <= 1 {
+            break;
+        }
+        let sibling_index = if current_index % 2 == 0 {
+            current_index + 1
+        } else {
+            current_index - 1
+        };
+        if let Some(sibling_hash) = level.get(sibling_index) {
+            proof.push(ProofShardStep {
+                sibling_on_left: sibling_index < current_index,
+                sibling_hash: prefixed_hex(sibling_hash),
+            });
+        }
+        current_index /= 2;
+    }
+    proof
+}
+
+fn proof_shard_leaf_indices(context: &ProofShardBuildContext) -> ProofShardLeafIndices {
+    let mut counts = vec![0usize; context.shard_count];
+    for (leaf, _) in &context.sorted {
+        counts[proof_shard_id_for_count(leaf.h3_index, context.shard_count_u64)] += 1;
+    }
+
+    let mut starts = Vec::with_capacity(context.shard_count + 1);
+    starts.push(0);
+    for count in &counts {
+        let next = starts.last().copied().expect("starts has seed") + count;
+        starts.push(next);
+    }
+
+    let mut write_offsets = starts[..context.shard_count].to_vec();
+    let mut leaf_indices = vec![0usize; context.sorted.len()];
+    for (leaf_index, (leaf, _)) in context.sorted.iter().enumerate() {
+        let shard_id = proof_shard_id_for_count(leaf.h3_index, context.shard_count_u64);
+        let output_index = write_offsets[shard_id];
+        leaf_indices[output_index] = leaf_index;
+        write_offsets[shard_id] += 1;
+    }
+
+    ProofShardLeafIndices {
+        starts,
+        leaf_indices,
+    }
+}
+
+fn proof_shard_id_for_count(h3_index: u64, shard_count: u64) -> usize {
+    let digest = Sha256::digest(h3_index.to_be_bytes());
+    let mut prefix = [0u8; 8];
+    prefix.copy_from_slice(&digest[..8]);
+    (u64::from_be_bytes(prefix) % shard_count) as usize
+}
+
+fn proof_shard_entry_from_context(
+    context: &ProofShardBuildContext,
+    leaf_index: usize,
+) -> Result<ProofShardEntry, ResidenceAllowlistError> {
+    let Some((leaf, leaf_hash)) = context.sorted.get(leaf_index) else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "leaf index {leaf_index} is outside proof shard tree"
+        )));
+    };
+    Ok(ProofShardEntry {
+        h3_index: leaf.h3_index.to_string(),
+        leaf_hash: prefixed_hex(leaf_hash),
+        proof: proof_steps_from_levels(&context.levels, leaf_index),
+    })
+}
+
+fn write_proof_shard_from_indices_atomic(
+    shards_dir: &Path,
+    context: &ProofShardBuildContext,
+    shard_id: usize,
+    leaf_indices: &[usize],
+) -> Result<ProofShardInventoryEntry, ResidenceAllowlistError> {
+    let shard_path = shards_dir.join(format!("{shard_id:05}.json.gz"));
+    let tmp_path = tmp_path_for(&shard_path)?;
+    let file = fs::File::create(&tmp_path)?;
+    let writer = HashingWriter::new(BufWriter::new(file));
+    let mut encoder = GzBuilder::new()
+        .mtime(0)
+        .write(writer, Compression::default());
+
+    write!(
+        encoder,
+        "{{\"schema\":\"{PROOF_SHARD_SCHEMA}\",\"schema_version\":{PROOF_SHARD_SCHEMA_VERSION},\"allowlist_version\":{},\"geo_resolution\":{},\"merkle_root\":\"{}\",\"shard_id\":{shard_id},\"shard_count\":{},\"proofs\":[",
+        context.allowlist_version, context.geo_resolution, context.merkle_root, context.shard_count
+    )?;
+    for (entry_index, leaf_index) in leaf_indices.iter().copied().enumerate() {
+        if entry_index > 0 {
+            encoder.write_all(b",")?;
+        }
+        let entry = proof_shard_entry_from_context(context, leaf_index)?;
+        serde_json::to_writer(&mut encoder, &entry)?;
+    }
+    encoder.write_all(b"]}")?;
+
+    let hashing_writer = encoder.finish()?;
+    let (mut writer, sha256, byte_size) = hashing_writer.finish();
+    writer.flush()?;
+    fs::rename(tmp_path, &shard_path)?;
+
+    Ok(ProofShardInventoryEntry {
+        shard_id,
+        object_key: proof_shard_object_key(
+            context.allowlist_version,
+            context.geo_resolution,
+            shard_id,
+        ),
+        proof_count: leaf_indices.len(),
+        sha256,
+        byte_size,
+    })
+}
+
+fn write_proof_shard_manifest_atomic(
+    output_dir: &Path,
+    manifest: &ProofShardManifest,
+) -> Result<(), ResidenceAllowlistError> {
+    let manifest_path = output_dir.join("proof_manifest.json");
+    let manifest = format!("{}\n", serde_json::to_string_pretty(manifest)?);
+    write_bytes_atomic(&manifest_path, manifest.as_bytes())
+}
+
+fn proof_shard_object_key(allowlist_version: u64, geo_resolution: u8, shard_id: usize) -> String {
+    format!(
+        "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz"
+    )
+}
+
+fn parse_prefixed_hex_32(field: &str, value: &str) -> Result<[u8; 32], ResidenceAllowlistError> {
+    if !is_lower_prefixed_hex(value, 32) {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "{field} must be a lowercase 0x-prefixed SHA-256 hash"
+        )));
+    }
+    let hex = value
+        .strip_prefix("0x")
+        .expect("is_lower_prefixed_hex validated prefix");
+    let mut bytes = [0u8; 32];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        let start = index * 2;
+        *byte = u8::from_str_radix(&hex[start..start + 2], 16).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "{field} contains invalid hex at byte {index}: {error}"
+            ))
+        })?;
+    }
+    Ok(bytes)
+}
+
 fn sorted_leaf_hashes(
     leaves: &[ResidenceCellLeaf],
 ) -> Result<Vec<(ResidenceCellLeaf, [u8; 32])>, ResidenceAllowlistError> {
@@ -1436,6 +2324,16 @@ fn tmp_path_for(output: &Path) -> Result<PathBuf, ResidenceAllowlistError> {
         )));
     };
     Ok(output.with_file_name(format!("{file_name}.tmp")))
+}
+
+fn write_bytes_atomic(output: &Path, bytes: &[u8]) -> Result<(), ResidenceAllowlistError> {
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = tmp_path_for(output)?;
+    fs::write(&tmp_path, bytes)?;
+    fs::rename(tmp_path, output)?;
+    Ok(())
 }
 
 fn is_lower_prefixed_hex(value: &str, byte_len: usize) -> bool {
