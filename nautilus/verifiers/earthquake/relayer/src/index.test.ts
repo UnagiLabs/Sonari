@@ -9,7 +9,7 @@ import {
     submitRelayerPayload,
 } from "./index.js";
 
-const target = "0x123::earthquake_oracle::submit_payload";
+const target = "0x123::accessor::create_disaster_event_from_signed_payload";
 const registry = "0x456";
 const verifierRegistry = "0x654";
 const clock = "0x0000000000000000000000000000000000000000000000000000000000000006";
