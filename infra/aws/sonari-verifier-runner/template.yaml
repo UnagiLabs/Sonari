@@ -61,7 +61,7 @@ Parameters:
     Description: Shared runner command. The packaged handler dispatches by verifier_kind.
   EarthquakeNitroEnclaveProcessCommand:
     Type: String
-    Default: /opt/sonari/tee-artifact/bin/tee production
+    Default: /opt/sonari/bin/run-earthquake-enclave
     Description: Earthquake verifier command made available to the shared runner environment.
   MembershipNitroEnclaveProcessCommand:
     Type: String
@@ -76,6 +76,15 @@ Parameters:
   TeeArtifactSha256:
     Type: String
     Description: SHA-256 hex digest for the earthquake TEE artifact tar.gz.
+  EarthquakeTeeEifS3Bucket:
+    Type: String
+    Description: S3 bucket containing the earthquake Nitro Enclave EIF.
+  EarthquakeTeeEifS3Key:
+    Type: String
+    Description: S3 object key for the earthquake Nitro Enclave EIF.
+  EarthquakeTeeEifSha256:
+    Type: String
+    Description: SHA-256 hex digest for the earthquake Nitro Enclave EIF.
   MembershipTeeArtifactS3Bucket:
     Type: String
     Description: S3 bucket containing the membership identity TEE artifact tar.gz.
@@ -313,6 +322,7 @@ Resources:
                 Action: s3:GetObject
                 Resource:
                   - !Sub arn:${AWS::Partition}:s3:::${TeeArtifactS3Bucket}/${TeeArtifactS3Key}
+                  - !Sub arn:${AWS::Partition}:s3:::${EarthquakeTeeEifS3Bucket}/${EarthquakeTeeEifS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${MembershipTeeArtifactS3Bucket}/${MembershipTeeArtifactS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${TeeEifS3Bucket}/${TeeEifS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}
@@ -361,7 +371,7 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euo pipefail
-            dnf install -y awscli amazon-ssm-agent git nodejs npm libstdc++ aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm libstdc++ aws-nitro-enclaves-cli
+            dnf install -y awscli amazon-ssm-agent git nodejs npm libstdc++ jq socat aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent git nodejs npm libstdc++ jq socat aws-nitro-enclaves-cli
             systemctl enable --now amazon-ssm-agent || true
             usermod -aG ne ec2-user || true
             systemctl enable --now nitro-enclaves-allocator.service || true
@@ -375,6 +385,9 @@ Resources:
             test -x /opt/sonari/tee-artifact/bin/tee
             test -x /opt/sonari/tee-artifact/bin/walrus
             rm -f "$tee_artifact_archive"
+            earthquake_eif=/opt/sonari/earthquake-tee.eif
+            aws s3 cp 's3://${EarthquakeTeeEifS3Bucket}/${EarthquakeTeeEifS3Key}' "$earthquake_eif"
+            printf '%s  %s\n' '${EarthquakeTeeEifSha256}' "$earthquake_eif" | sha256sum -c -
             membership_artifact_archive=/tmp/sonari-membership-identity-tee-artifact.tar.gz
             aws s3 cp 's3://${MembershipTeeArtifactS3Bucket}/${MembershipTeeArtifactS3Key}' "$membership_artifact_archive"
             printf '%s  %s\n' '${MembershipTeeArtifactSha256}' "$membership_artifact_archive" | sha256sum -c -
@@ -393,8 +406,108 @@ Resources:
             aws secretsmanager get-secret-value --secret-id '${SuiKeystoreSecretArn}' --query SecretString --output text > /opt/sonari/sui.keystore
             chown -R ec2-user:ec2-user /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
             chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
-            chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$tee_eif" /opt/sonari/signing-seed.ciphertext
-            chmod 0400 /opt/sonari/runner-token /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            chown ec2-user:ec2-user /opt/sonari/runner-token /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            chmod 0400 /opt/sonari/runner-token /opt/sonari/walrus-client-config.yaml /opt/sonari/sui_config.yaml /opt/sonari/sui.keystore "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            cat >/opt/sonari/bin/run-earthquake-enclave <<'SONARI_EARTHQUAKE_ENCLAVE_WRAPPER'
+            #!/bin/bash
+            set -euo pipefail
+            : "${!SONARI_EARTHQUAKE_EIF_PATH:?SONARI_EARTHQUAKE_EIF_PATH is required}"
+            : "${!SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS:?SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS is required}"
+            : "${!SONARI_EARTHQUAKE_ENCLAVE_CID:?SONARI_EARTHQUAKE_ENCLAVE_CID is required}"
+            : "${!SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"
+            : "${!SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"
+            : "${!SONARI_WALRUS_WALLET:?SONARI_WALRUS_WALLET is required}"
+            : "${!SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"
+            : "${!SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"
+            : "${!SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"
+
+            marker=/tmp/sonari-earthquake-enclave-bootstrapped
+            input_file="$(mktemp)"
+            response_file="$(mktemp)"
+            trap 'rm -f "$input_file" "$response_file"' EXIT
+            cat >"$input_file"
+
+            ensure_earthquake_enclave() {
+              test -s "$SONARI_EARTHQUAKE_EIF_PATH"
+              if [ -f "$marker" ]; then
+                return
+              fi
+
+              nitro-cli run-enclave $SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS >/tmp/sonari-earthquake-run-enclave.json 2>/tmp/sonari-earthquake-run-enclave.err || {
+                if ! nitro-cli describe-enclaves | grep -q '"EnclaveCID": '"$SONARI_EARTHQUAKE_ENCLAVE_CID"; then
+                  cat /tmp/sonari-earthquake-run-enclave.err >&2
+                  exit 1
+                fi
+              }
+              sleep 2
+
+              jq -n \
+                --arg walrus_cli "$SONARI_WALRUS_CLI" \
+                --arg walrus_context "$SONARI_WALRUS_CONTEXT" \
+                --arg walrus_aggregator_url "$SONARI_WALRUS_AGGREGATOR_URL" \
+                --arg walrus_epochs "$SONARI_WALRUS_EPOCHS" \
+                --rawfile walrus_config "$SONARI_WALRUS_CONFIG" \
+                --rawfile sui_config "$SONARI_WALRUS_WALLET" \
+                --rawfile sui_keystore /opt/sonari/sui.keystore \
+                '{
+                  walrus_cli: $walrus_cli,
+                  walrus_config: $walrus_config,
+                  sui_config: $sui_config,
+                  sui_keystore: $sui_keystore,
+                  walrus_context: $walrus_context,
+                  walrus_aggregator_url: $walrus_aggregator_url,
+                  walrus_epochs: ($walrus_epochs | tonumber)
+                }' | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777" >/dev/null
+              touch "$marker"
+            }
+
+            call_earthquake_enclave() {
+              local method="$1"
+              local request_path="$2"
+              local body_file="$3"
+              local content_length=0
+
+              if [ "$method" = "POST" ]; then
+                content_length="$(wc -c <"$body_file")"
+                {
+                  printf '%s %s HTTP/1.1\r\nHost: sonari-earthquake\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %s\r\n\r\n' "$method" "$request_path" "$content_length"
+                  cat "$body_file"
+                } | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
+              else
+                printf '%s %s HTTP/1.1\r\nHost: sonari-earthquake\r\nConnection: close\r\n\r\n' "$method" "$request_path" \
+                  | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
+              fi
+
+              status_line="$(head -n 1 "$response_file" | tr -d '\r')"
+              case "$status_line" in
+                "HTTP/1.1 200 "*|"HTTP/1.0 200 "*) ;;
+                *)
+                  cat "$response_file" >&2
+                  exit 1
+                  ;;
+              esac
+              awk 'BEGIN { body = 0 } body { print } { line = $0; sub(/\r$/, "", line); if (line == "") body = 1 }' "$response_file"
+            }
+
+            ensure_earthquake_enclave
+            action="$(jq -r '.action // empty' "$input_file")"
+            case "$action" in
+              health_check)
+                call_earthquake_enclave GET /health_check "$input_file"
+                ;;
+              get_attestation)
+                call_earthquake_enclave GET /get_attestation "$input_file"
+                ;;
+              process_data)
+                call_earthquake_enclave POST /process_data "$input_file"
+                ;;
+              *)
+                echo "Unsupported earthquake TEE action: $action" >&2
+                exit 1
+                ;;
+            esac
+            SONARI_EARTHQUAKE_ENCLAVE_WRAPPER
+            chmod 0500 /opt/sonari/bin/run-earthquake-enclave
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
@@ -500,6 +613,9 @@ Resources:
               printf 'SONARI_WALRUS_AGGREGATOR_URL=%q\n' "$walrus_aggregator_url"
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
               echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=${SigningMaterialKmsKey}"
+              printf 'SONARI_EARTHQUAKE_EIF_PATH=%q\n' "$earthquake_eif"
+              echo "SONARI_EARTHQUAKE_ENCLAVE_CID=${NitroEnclaveCid}"
+              printf 'SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $earthquake_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
               echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
@@ -513,6 +629,7 @@ Resources:
             chown ec2-user:ec2-user /opt/sonari/runner.env
             chmod 0400 /opt/sonari/runner.env
             test -x /opt/sonari/bin/run-sonari-verifier
+            test -x /opt/sonari/bin/run-earthquake-enclave
             test -x /opt/sonari/bin/run-membership-identity-enclave
             systemctl is-active --quiet nitro-enclaves-allocator.service
             touch /opt/sonari/bootstrap-complete
@@ -1198,6 +1315,10 @@ Outputs:
     Value: !Ref TeeArtifactS3Key
   TeeArtifactSha256Output:
     Value: !Ref TeeArtifactSha256
+  EarthquakeTeeEifS3KeyOutput:
+    Value: !Ref EarthquakeTeeEifS3Key
+  EarthquakeTeeEifSha256Output:
+    Value: !Ref EarthquakeTeeEifSha256
   MembershipTeeArtifactS3KeyOutput:
     Value: !Ref MembershipTeeArtifactS3Key
   MembershipTeeArtifactSha256Output:

@@ -1,12 +1,17 @@
 use clap::{Parser, Subcommand};
+use nsm_api::api::{Request as NsmRequest, Response as NsmResponse};
+use nsm_api::driver;
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::{
     DEV_SIGNING_KEY_SEED_HEX, PayloadSigner, parse_seed, signing_key_seed_from_env,
 };
 use std::env;
 use std::fs;
-use std::io::{self, Read};
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::os::fd::{FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
@@ -62,6 +67,7 @@ struct Cli {
 enum Command {
     Fixture(FixtureArgs),
     Production(ProductionArgs),
+    Server(ServerArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -86,6 +92,16 @@ struct ProductionArgs {
     signing_key_seed: Option<String>,
 }
 
+#[derive(Debug, Parser)]
+struct ServerArgs {
+    #[arg(long, default_value_t = 3000)]
+    port: u32,
+    #[arg(long, default_value_t = 7777)]
+    bootstrap_port: u32,
+    #[arg(long)]
+    skip_bootstrap: bool,
+}
+
 struct RunConfig {
     input: UsgsOracleInput,
     output_dir: Option<PathBuf>,
@@ -100,6 +116,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Production(args)) => {
             let result = production_result(args)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
+        Some(Command::Server(args)) => {
+            run_nautilus_server(args)?;
             return Ok(());
         }
         None => low_level_input(cli)?,
@@ -132,6 +152,306 @@ fn production_result(
     let seed = strict_signing_key_seed(args.signing_key_seed)?;
     let request = tee::WorkerToTeeRequest::from_json_value(request_json)?;
     production_worker_request_result(request, seed, None)
+}
+
+#[derive(Clone)]
+struct EnclaveState {
+    signing_key_seed: [u8; 32],
+}
+
+fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let signing_key_seed = generate_ephemeral_signing_key_seed()?;
+    let state = EnclaveState { signing_key_seed };
+    if !args.skip_bootstrap {
+        receive_bootstrap_config(args.bootstrap_port)?;
+    }
+    let listener = VsockListener::bind(args.port)?;
+    eprintln!(
+        "sonari earthquake nautilus server listening on vsock port {}",
+        args.port
+    );
+    loop {
+        let stream = listener.accept()?;
+        let state = state.clone();
+        thread::spawn(move || {
+            if let Err(error) = handle_vsock_http_connection(stream, state) {
+                eprintln!("sonari earthquake nautilus request failed: {error}");
+            }
+        });
+    }
+}
+
+fn generate_ephemeral_signing_key_seed() -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    let mut file = File::open("/dev/urandom")?;
+    let mut seed = [0u8; 32];
+    file.read_exact(&mut seed)?;
+    Ok(seed)
+}
+
+fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = VsockListener::bind(port)?;
+    eprintln!("waiting for sonari earthquake bootstrap config on vsock port {port}");
+    let mut stream = listener.accept()?;
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes)?;
+    let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
+    write_secret_file(
+        "/opt/sonari/walrus-client-config.yaml",
+        &config.walrus_config,
+    )?;
+    write_secret_file("/opt/sonari/sui_config.yaml", &config.sui_config)?;
+    write_secret_file("/opt/sonari/sui.keystore", &config.sui_keystore)?;
+    set_env_before_server("SONARI_WALRUS_CLI", &config.walrus_cli);
+    set_env_before_server(
+        "SONARI_WALRUS_CONFIG",
+        "/opt/sonari/walrus-client-config.yaml",
+    );
+    set_env_before_server("SONARI_WALRUS_WALLET", "/opt/sonari/sui_config.yaml");
+    set_env_before_server("SONARI_WALRUS_KEYSTORE", "/opt/sonari/sui.keystore");
+    set_env_before_server("SONARI_WALRUS_CONTEXT", &config.walrus_context);
+    set_env_before_server(
+        "SONARI_WALRUS_AGGREGATOR_URL",
+        &config.walrus_aggregator_url,
+    );
+    set_env_before_server("SONARI_WALRUS_EPOCHS", &config.walrus_epochs.to_string());
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapConfig {
+    walrus_cli: String,
+    walrus_config: String,
+    sui_config: String,
+    sui_keystore: String,
+    walrus_context: String,
+    walrus_aggregator_url: String,
+    walrus_epochs: u32,
+}
+
+fn write_secret_file(path: &str, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fs::write(path, contents)?;
+    let mut permissions = fs::metadata(path)?.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o400);
+    }
+    fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+fn set_env_before_server(name: &str, value: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap values are installed.
+    unsafe {
+        env::set_var(name, value);
+    }
+}
+
+fn handle_vsock_http_connection(
+    mut stream: File,
+    state: EnclaveState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request = read_http_request(&mut stream)?;
+    let (status_code, body) = match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/health_check") => (
+            200,
+            serde_json::json!({
+                "status": "healthy",
+                "external_sources_reachable": true,
+            }),
+        ),
+        ("GET", "/get_attestation") => (200, enclave_attestation_response(&state)?),
+        ("POST", "/process_data") => {
+            let request_json: serde_json::Value = serde_json::from_slice(&request.body)?;
+            (
+                200,
+                production_action_result(request_json, Some(to_hex_seed(&state.signing_key_seed)))?,
+            )
+        }
+        _ => (
+            404,
+            serde_json::json!({
+                "error_code": "AWS_RUNNER_PROCESS_FAILED",
+                "message": "not found",
+            }),
+        ),
+    };
+    write_http_json_response(&mut stream, status_code, &body)?;
+    Ok(())
+}
+
+fn enclave_attestation_response(
+    state: &EnclaveState,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let signer = LocalEd25519Signer::new(state.signing_key_seed);
+    let signature = signer.sign_payload(b"sonari-earthquake-attestation-public-key");
+    let public_key_bytes = hex::decode(signature.public_key.trim_start_matches("0x"))?;
+    let fd = driver::nsm_init();
+    let request = NsmRequest::Attestation {
+        user_data: None,
+        nonce: None,
+        public_key: Some(serde_bytes::ByteBuf::from(public_key_bytes)),
+    };
+    let response = driver::nsm_process_request(fd, request);
+    driver::nsm_exit(fd);
+    match response {
+        NsmResponse::Attestation { document } => Ok(serde_json::json!({
+            "attestation_document_hex": format!("0x{}", hex::encode(document)),
+            "public_key": signature.public_key,
+        })),
+        _ => Err("unexpected NSM attestation response".into()),
+    }
+}
+
+fn to_hex_seed(seed: &[u8; 32]) -> String {
+    format!("0x{}", hex::encode(seed))
+}
+
+struct HttpRequest {
+    method: String,
+    path: String,
+    body: Vec<u8>,
+}
+
+fn read_http_request(stream: &mut File) -> Result<HttpRequest, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let header_end;
+    loop {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Err("connection closed before HTTP headers".into());
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if let Some(index) = find_header_end(&bytes) {
+            header_end = index;
+            break;
+        }
+        if bytes.len() > 1024 * 1024 {
+            return Err("HTTP headers exceeded max size".into());
+        }
+    }
+    let header_text = std::str::from_utf8(&bytes[..header_end])?;
+    let mut lines = header_text.split("\r\n");
+    let request_line = lines.next().ok_or("missing HTTP request line")?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().ok_or("missing HTTP method")?.to_owned();
+    let path = parts.next().ok_or("missing HTTP path")?.to_owned();
+    let content_length = lines
+        .filter_map(|line| line.split_once(':'))
+        .find_map(|(name, value)| {
+            if name.eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let body_start = header_end + 4;
+    while bytes.len() < body_start + content_length {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Err("connection closed before HTTP body".into());
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    Ok(HttpRequest {
+        method,
+        path,
+        body: bytes[body_start..body_start + content_length].to_vec(),
+    })
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn write_http_json_response(
+    stream: &mut File,
+    status_code: u16,
+    body: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let body_bytes = serde_json::to_vec(body)?;
+    let reason = if status_code == 200 { "OK" } else { "Error" };
+    write!(
+        stream,
+        "HTTP/1.1 {status_code} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body_bytes.len()
+    )?;
+    stream.write_all(&body_bytes)?;
+    Ok(())
+}
+
+struct VsockListener {
+    fd: RawFd,
+}
+
+impl VsockListener {
+    fn bind(port: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        let addr = SockAddrVm {
+            svm_family: AF_VSOCK as libc::sa_family_t,
+            svm_reserved1: 0,
+            svm_port: port,
+            svm_cid: VMADDR_CID_ANY,
+            svm_zero: [0; 4],
+        };
+        let bind_result = unsafe {
+            libc::bind(
+                fd,
+                (&addr as *const SockAddrVm).cast::<libc::sockaddr>(),
+                std::mem::size_of::<SockAddrVm>() as libc::socklen_t,
+            )
+        };
+        if bind_result < 0 {
+            let error = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(error.into());
+        }
+        let listen_result = unsafe { libc::listen(fd, 128) };
+        if listen_result < 0 {
+            let error = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(error.into());
+        }
+        Ok(Self { fd })
+    }
+
+    fn accept(&self) -> Result<File, Box<dyn std::error::Error>> {
+        let fd = unsafe { libc::accept(self.fd, std::ptr::null_mut(), std::ptr::null_mut()) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+}
+
+impl Drop for VsockListener {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+const AF_VSOCK: libc::c_int = 40;
+const VMADDR_CID_ANY: u32 = 0xFFFF_FFFF;
+
+#[repr(C)]
+struct SockAddrVm {
+    svm_family: libc::sa_family_t,
+    svm_reserved1: u16,
+    svm_port: u32,
+    svm_cid: u32,
+    svm_zero: [u8; 4],
 }
 
 #[derive(Debug, Deserialize)]

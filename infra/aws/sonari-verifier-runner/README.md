@@ -28,6 +28,7 @@ devnet / testnet の dummy World ID proof では、任意 variables として Wo
 
 - `sonari-verifier-runner-lambda.zip`
 - `earthquake-tee-artifact.tar.gz`
+- `earthquake-tee.eif`
 - `membership-identity-tee-artifact.tar.gz`
 - `membership-identity-tee.eif`
 - TEE tarball と EIF の checksum file、または取得済み SHA-256 値
@@ -43,6 +44,7 @@ pnpm test:oracle
 pnpm test:identity
 pnpm build:aws-sonari-verifier-runner-lambda
 pnpm build:aws-earthquake-tee-artifact
+pnpm build:aws-earthquake-eif
 pnpm build:aws-membership-identity-tee-artifact
 pnpm build:aws-membership-identity-eif
 
@@ -55,6 +57,9 @@ aws s3 cp \
 aws s3 cp \
   dist/aws/earthquake-tee-artifact.tar.gz \
   "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/earthquake-tee-artifact.tar.gz"
+aws s3 cp \
+  dist/aws/earthquake-tee.eif \
+  "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/earthquake-tee.eif"
 aws s3 cp \
   dist/aws/membership-identity-tee-artifact.tar.gz \
   "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/membership-identity-tee-artifact.tar.gz"
@@ -69,6 +74,7 @@ aws s3 cp \
 
 ```bash
 EARTHQUAKE_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/earthquake-tee-artifact.tar.gz.sha256)"
+EARTHQUAKE_EIF_SHA256="$(sha256sum dist/aws/earthquake-tee.eif | cut -d ' ' -f 1)"
 MEMBERSHIP_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/membership-identity-tee-artifact.tar.gz.sha256)"
 MEMBERSHIP_EIF_SHA256="$(sha256sum dist/aws/membership-identity-tee.eif | cut -d ' ' -f 1)"
 
@@ -77,6 +83,8 @@ pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --lambda-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-sha256 "$EARTHQUAKE_TEE_SHA256" \
+  --earthquake-eif-bucket "$ARTIFACT_BUCKET" \
+  --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256" \
   --membership-tee-bucket "$ARTIFACT_BUCKET" \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
@@ -111,6 +119,8 @@ GitHub Actions では、同じ値を environment variable の `AWS_SONARI_VERIFI
 
 `NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
 
+地震 verifier は Nautilus の server pattern に合わせ、EIF 内で起動時に enclave-local な Ed25519 key を生成し、NSM attestation document の `public_key` にその public key を入れます。runner host は `/opt/sonari/bin/run-earthquake-enclave` から VSOCK で `/health_check`、`/get_attestation`、`/process_data` を呼びます。host は Walrus / Sui config を bootstrap するだけで、finalized payload の署名鍵は host に置きません。
+
 ```bash
 RUNNER_ROLE_ARN="arn:aws:iam::$EXPECTED_ACCOUNT_ID:role/sonari-verifier-runner-$STACK_NAME-runner"
 NITRO_ENCLAVE_PCR3="$(ROLE_ARN="$RUNNER_ROLE_ARN" python3 - <<'PY'
@@ -133,6 +143,8 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --lambda-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-sha256 "$EARTHQUAKE_TEE_SHA256" \
+  --earthquake-eif-bucket "$ARTIFACT_BUCKET" \
+  --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256" \
   --membership-tee-bucket "$ARTIFACT_BUCKET" \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \

@@ -20,6 +20,7 @@
         "test:local-e2e": "vitest run --dir scripts",
         "build:aws-sonari-verifier-runner-lambda": "tsx scripts/build_aws_sonari_verifier_runner_lambda.ts",
         "build:aws-earthquake-tee-artifact": "tsx scripts/build_aws_earthquake_tee_artifact.ts",
+        "build:aws-earthquake-eif": "tsx scripts/build_aws_earthquake_eif.ts",
         "build:aws-membership-identity-tee-artifact": "tsx scripts/build_aws_membership_identity_tee_artifact.ts",
         "build:aws-membership-identity-eif": "tsx scripts/build_aws_membership_identity_eif.ts",
         "test:relayer": "pnpm --filter @sonari/earthquake-relayer test",

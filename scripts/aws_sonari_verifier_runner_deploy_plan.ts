@@ -4,6 +4,7 @@ import process from "node:process";
 const DEFAULT_PREFIX = "sonari-verifier-runner";
 const LAMBDA_ARTIFACT_FILE_NAME = "sonari-verifier-runner-lambda.zip";
 const EARTHQUAKE_TEE_ARTIFACT_FILE_NAME = "earthquake-tee-artifact.tar.gz";
+const EARTHQUAKE_EIF_FILE_NAME = "earthquake-tee.eif";
 const MEMBERSHIP_TEE_ARTIFACT_FILE_NAME = "membership-identity-tee-artifact.tar.gz";
 const MEMBERSHIP_EIF_FILE_NAME = "membership-identity-tee.eif";
 const DEPLOY_PARAMETER_KEYS = [
@@ -12,6 +13,9 @@ const DEPLOY_PARAMETER_KEYS = [
     "TeeArtifactS3Bucket",
     "TeeArtifactS3Key",
     "TeeArtifactSha256",
+    "EarthquakeTeeEifS3Bucket",
+    "EarthquakeTeeEifS3Key",
+    "EarthquakeTeeEifSha256",
     "MembershipTeeArtifactS3Bucket",
     "MembershipTeeArtifactS3Key",
     "MembershipTeeArtifactSha256",
@@ -31,6 +35,8 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     lambdaBucket: string;
     earthquakeTeeBucket: string;
     earthquakeTeeArtifactSha256: string;
+    earthquakeEifBucket: string;
+    earthquakeEifSha256: string;
     membershipTeeBucket: string;
     membershipTeeArtifactSha256: string;
     membershipEifBucket: string;
@@ -61,6 +67,12 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
             input.earthquakeTeeArtifactSha256,
             "earthquake TEE artifact SHA-256",
         ),
+        EarthquakeTeeEifS3Bucket: validateS3Bucket(
+            input.earthquakeEifBucket,
+            "earthquake EIF bucket",
+        ),
+        EarthquakeTeeEifS3Key: `${prefix}/${commitSha}/${EARTHQUAKE_EIF_FILE_NAME}`,
+        EarthquakeTeeEifSha256: validateSha256(input.earthquakeEifSha256, "earthquake EIF SHA-256"),
         MembershipTeeArtifactS3Bucket: validateS3Bucket(
             input.membershipTeeBucket,
             "membership TEE bucket",
@@ -133,6 +145,8 @@ type CliOptions = {
     lambdaBucket?: string;
     earthquakeTeeBucket?: string;
     earthquakeTeeArtifactSha256?: string;
+    earthquakeEifBucket?: string;
+    earthquakeEifSha256?: string;
     membershipTeeBucket?: string;
     membershipTeeArtifactSha256?: string;
     membershipEifBucket?: string;
@@ -150,6 +164,8 @@ async function main(): Promise<void> {
         options.lambdaBucket === undefined ||
         options.earthquakeTeeBucket === undefined ||
         options.earthquakeTeeArtifactSha256 === undefined ||
+        options.earthquakeEifBucket === undefined ||
+        options.earthquakeEifSha256 === undefined ||
         options.membershipTeeBucket === undefined ||
         options.membershipTeeArtifactSha256 === undefined ||
         options.membershipEifBucket === undefined ||
@@ -162,6 +178,8 @@ async function main(): Promise<void> {
                 "--lambda-bucket <bucket>",
                 "--earthquake-tee-bucket <bucket>",
                 "--earthquake-tee-sha256 <sha256>",
+                "--earthquake-eif-bucket <bucket>",
+                "--earthquake-eif-sha256 <sha256>",
                 "--membership-tee-bucket <bucket>",
                 "--membership-tee-sha256 <sha256>",
                 "--membership-eif-bucket <bucket>",
@@ -179,6 +197,8 @@ async function main(): Promise<void> {
         lambdaBucket: options.lambdaBucket,
         earthquakeTeeBucket: options.earthquakeTeeBucket,
         earthquakeTeeArtifactSha256: options.earthquakeTeeArtifactSha256,
+        earthquakeEifBucket: options.earthquakeEifBucket,
+        earthquakeEifSha256: options.earthquakeEifSha256,
         membershipTeeBucket: options.membershipTeeBucket,
         membershipTeeArtifactSha256: options.membershipTeeArtifactSha256,
         membershipEifBucket: options.membershipEifBucket,
@@ -223,6 +243,12 @@ function parseArgs(args: string[]): CliOptions {
                 break;
             case "--earthquake-tee-sha256":
                 options.earthquakeTeeArtifactSha256 = next;
+                break;
+            case "--earthquake-eif-bucket":
+                options.earthquakeEifBucket = next;
+                break;
+            case "--earthquake-eif-sha256":
+                options.earthquakeEifSha256 = next;
                 break;
             case "--membership-tee-bucket":
                 options.membershipTeeBucket = next;

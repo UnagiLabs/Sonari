@@ -146,11 +146,26 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SuiKeystoreSecretArn:");
         expect(template).toContain("WalrusAggregatorUrl:");
         expect(template).toContain("WalrusContext:");
+        expect(template).toContain("EarthquakeTeeEifS3Bucket:");
+        expect(template).toContain("EarthquakeTeeEifS3Key:");
+        expect(template).toContain("EarthquakeTeeEifSha256:");
+        expect(template).toContain("Default: /opt/sonari/bin/run-earthquake-enclave");
+        expect(template).toContain(
+            "aws s3 cp 's3://$" + "{EarthquakeTeeEifS3Bucket}/$" + "{EarthquakeTeeEifS3Key}'",
+        );
+        expect(template).toContain("SONARI_EARTHQUAKE_ENCLAVE_WRAPPER");
+        expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777");
+        expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000");
+        expect(template).toContain("call_earthquake_enclave GET /health_check");
+        expect(template).toContain("call_earthquake_enclave GET /get_attestation");
+        expect(template).toContain("call_earthquake_enclave POST /process_data");
         expect(template).toContain("SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus");
         expect(template).toContain("SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml");
         expect(template).toContain("SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml");
         expect(template).toContain("SONARI_WALRUS_CONTEXT");
         expect(template).toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(template).toContain("SONARI_EARTHQUAKE_EIF_PATH");
+        expect(template).toContain("SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS");
     });
 
     it("retains membership World ID, EIF, KMS attestation, and ciphertext configuration", async () => {
@@ -195,6 +210,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("RunnerAutoScalingGroupName:");
         expect(template).toContain("RunnerLaunchTemplateId:");
         expect(template).toContain("RunnerRoleArn:");
+        expect(template).toContain("EarthquakeTeeEifS3KeyOutput:");
+        expect(template).toContain("EarthquakeTeeEifSha256Output:");
         expect(template).toContain("WatcherScheduleName:");
         expect(template).toContain("BatchScheduleName:");
         expect(template).toContain("WatcherLambdaName:");
