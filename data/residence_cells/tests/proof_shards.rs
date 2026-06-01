@@ -1,8 +1,8 @@
 use residence_allowlist::{
     GeneratedProofShards, ProofShard, ProofShardEntry, ProofShardManifest, ResidenceCellLeaf,
-    generate_proof_shards, prefixed_hex, proof_shard_gzip_bytes, replay_proof_shard_entry,
-    verify_proof_shards, write_generated_proof_shards_atomic,
-    write_proof_shards_from_leaves_atomic,
+    generate_proof_shards, prefixed_hex, proof_shard_gzip_bytes, proof_shard_id,
+    replay_proof_shard_entry, verify_proof_shards, write_generated_proof_shards_atomic,
+    write_proof_shards_from_leaves_atomic, write_proof_shards_from_leaves_atomic_with_jobs,
 };
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
@@ -41,14 +41,6 @@ fn generates_deterministic_manifest_and_shards() {
         .collect::<Vec<_>>();
     assert_eq!(shard_ids, vec![0, 1, 2, 3, 4]);
 
-    let empty_shards = generated
-        .shards
-        .iter()
-        .filter(|shard| shard.proofs.is_empty())
-        .map(|shard| shard.shard_id)
-        .collect::<Vec<_>>();
-    assert_eq!(empty_shards, vec![0, 1, 3, 4]);
-
     for shard in &generated.shards {
         assert_shard_metadata(shard);
         let inventory = generated
@@ -65,7 +57,7 @@ fn generates_deterministic_manifest_and_shards() {
     }
 
     for leaf in &leaves {
-        let shard_id = (leaf.h3_index % shard_count as u64) as usize;
+        let shard_id = proof_shard_id(leaf.h3_index, shard_count).expect("proof shard id");
         let entry = find_entry(&generated.shards, leaf.h3_index);
         assert_eq!(entry.h3_index, leaf.h3_index.to_string());
         assert_eq!(entry.leaf_hash.len(), 66);
@@ -75,10 +67,26 @@ fn generates_deterministic_manifest_and_shards() {
                 .proofs
                 .iter()
                 .any(|candidate| candidate.h3_index == entry.h3_index),
-            "h3_index {} must be assigned by modulo",
+            "h3_index {} must be assigned by the stable shard hash",
             leaf.h3_index
         );
     }
+}
+
+#[test]
+fn hashes_h3_indexes_before_assigning_power_of_two_shards() {
+    let raw_modulo_shard_id = 65_535;
+    let shard_ids = fixture_leaves()
+        .iter()
+        .map(|leaf| proof_shard_id(leaf.h3_index, 65_536).expect("proof shard id"))
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert!(shard_ids.len() > 1);
+    assert!(
+        shard_ids
+            .iter()
+            .any(|shard_id| *shard_id != raw_modulo_shard_id)
+    );
 }
 
 #[test]
@@ -132,12 +140,51 @@ fn writes_proof_shards_without_materializing_all_entries() {
 }
 
 #[test]
+fn writes_proof_shards_with_bounded_parallel_jobs() {
+    let directory = tempdir().expect("tempdir");
+    let output_dir = directory.path().join("proofs");
+    let generated = generate_proof_shards(&fixture_leaves(), SHARD_COUNT).expect("proof shards");
+    let streamed_manifest = write_proof_shards_from_leaves_atomic_with_jobs(
+        &output_dir,
+        &fixture_leaves(),
+        SHARD_COUNT,
+        Some(2),
+    )
+    .expect("write streamed proof shards");
+
+    assert_eq!(streamed_manifest, generated.manifest);
+    let summary = verify_proof_shards(
+        &output_dir.join("proof_manifest.json"),
+        &output_dir.join("shards"),
+    )
+    .expect("verify streamed proof shards");
+    assert_eq!(summary.verified_shards, SHARD_COUNT);
+    assert_eq!(summary.verified_proofs, fixture_leaves().len());
+}
+
+#[test]
+fn rejects_zero_parallel_jobs_for_proof_shard_writes() {
+    let directory = tempdir().expect("tempdir");
+    let output_dir = directory.path().join("proofs");
+
+    let error = write_proof_shards_from_leaves_atomic_with_jobs(
+        &output_dir,
+        &fixture_leaves(),
+        SHARD_COUNT,
+        Some(0),
+    )
+    .expect_err("zero jobs must fail");
+
+    assert!(error.to_string().contains("jobs must be greater than zero"));
+}
+
+#[test]
 fn rejects_shard_with_wrong_shard_id() {
     let directory = tempdir().expect("tempdir");
     let output_dir = directory.path().join("proofs");
     let mut generated = write_fixture_artifact(&output_dir);
-    let shard_id = 2;
-    generated.shards[shard_id].shard_id = 1;
+    let shard_id = first_non_empty_shard_id(&generated);
+    generated.shards[shard_id].shard_id = if shard_id == 0 { 1 } else { 0 };
     rewrite_shard_and_inventory(&output_dir, &mut generated, shard_id);
 
     let error = verify_proof_shards(
@@ -188,7 +235,7 @@ fn rejects_proof_that_does_not_replay_to_manifest_root() {
     let directory = tempdir().expect("tempdir");
     let output_dir = directory.path().join("proofs");
     let mut generated = write_fixture_artifact(&output_dir);
-    let shard_id = 2;
+    let shard_id = first_non_empty_shard_id(&generated);
     generated.shards[shard_id].proofs[0].proof[0].sibling_hash = format!("0x{}", "22".repeat(32));
     rewrite_shard_and_inventory(&output_dir, &mut generated, shard_id);
 
@@ -206,7 +253,7 @@ fn rejects_h3_index_that_does_not_match_leaf_hash() {
     let directory = tempdir().expect("tempdir");
     let output_dir = directory.path().join("proofs");
     let mut generated = write_fixture_artifact(&output_dir);
-    let shard_id = 2;
+    let shard_id = first_shard_id_with_at_least(&generated, 2);
     let replacement_h3_index = generated.shards[shard_id].proofs[1].h3_index.clone();
     generated.shards[shard_id].proofs[0].h3_index = replacement_h3_index;
     rewrite_shard_and_inventory(&output_dir, &mut generated, shard_id);
@@ -225,7 +272,7 @@ fn rejects_duplicate_valid_proof_entry() {
     let directory = tempdir().expect("tempdir");
     let output_dir = directory.path().join("proofs");
     let mut generated = write_fixture_artifact(&output_dir);
-    let shard_id = 2;
+    let shard_id = first_shard_id_with_at_least(&generated, 2);
     let duplicate = generated.shards[shard_id].proofs[0].clone();
     generated.shards[shard_id].proofs[1] = duplicate;
     rewrite_shard_and_inventory(&output_dir, &mut generated, shard_id);
@@ -316,6 +363,19 @@ fn write_fixture_artifact(output_dir: &Path) -> GeneratedProofShards {
     let generated = generate_proof_shards(&fixture_leaves(), SHARD_COUNT).expect("proof shards");
     write_generated_proof_shards_atomic(output_dir, &generated).expect("write proof shards");
     generated
+}
+
+fn first_non_empty_shard_id(generated: &GeneratedProofShards) -> usize {
+    first_shard_id_with_at_least(generated, 1)
+}
+
+fn first_shard_id_with_at_least(generated: &GeneratedProofShards, proof_count: usize) -> usize {
+    generated
+        .shards
+        .iter()
+        .find(|shard| shard.proofs.len() >= proof_count)
+        .map(|shard| shard.shard_id)
+        .expect("shard with enough proofs")
 }
 
 fn rewrite_shard_and_inventory(

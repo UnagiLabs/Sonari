@@ -88,6 +88,8 @@ struct ProofShardsArgs {
     output_dir: PathBuf,
     #[arg(long, default_value_t = 65_536)]
     shard_count: usize,
+    #[arg(long)]
+    jobs: Option<usize>,
 }
 
 #[derive(Debug, Parser)]
@@ -179,7 +181,10 @@ fn generate(args: GenerateArgs) -> Result<(), ResidenceAllowlistError> {
 }
 
 fn proof_shards(args: ProofShardsArgs) -> Result<(), ResidenceAllowlistError> {
-    let options = GenerateOptions::default();
+    let options = GenerateOptions {
+        jobs: args.jobs,
+        ..GenerateOptions::default()
+    };
     let manifest = generate_and_write_proof_shards_atomic(
         &args.allowlist,
         &args.source,

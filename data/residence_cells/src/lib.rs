@@ -396,6 +396,7 @@ struct ProofShardBuildContext {
     allowlist_version: u64,
     geo_resolution: u8,
     shard_count: usize,
+    shard_count_u64: u64,
 }
 
 struct ProofShardLeafIndices {
@@ -884,7 +885,7 @@ pub fn generate_proof_shards(
         .collect::<Vec<_>>();
 
     for (leaf_index, (leaf, _)) in context.sorted.iter().enumerate() {
-        let shard_id = (leaf.h3_index % context.shard_count as u64) as usize;
+        let shard_id = proof_shard_id_for_count(leaf.h3_index, context.shard_count_u64);
         let entry = proof_shard_entry_from_context(&context, leaf_index)?;
         let Some(shard) = shards.get_mut(shard_id) else {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
@@ -939,6 +940,18 @@ pub fn proof_shard_gzip_bytes(shard: &ProofShard) -> Result<Vec<u8>, ResidenceAl
         .write(Vec::new(), Compression::default());
     encoder.write_all(&proof_shard_json_bytes(shard)?)?;
     Ok(encoder.finish()?)
+}
+
+pub fn proof_shard_id(h3_index: u64, shard_count: usize) -> Result<usize, ResidenceAllowlistError> {
+    if shard_count == 0 {
+        return Err(ResidenceAllowlistError::InvalidArgument(
+            "shard_count must be greater than zero".to_owned(),
+        ));
+    }
+    let shard_count_u64 = u64::try_from(shard_count).map_err(|_| {
+        ResidenceAllowlistError::InvalidArgument("shard_count is outside the u64 range".to_owned())
+    })?;
+    Ok(proof_shard_id_for_count(h3_index, shard_count_u64))
 }
 
 pub fn replay_proof_shard_entry(
@@ -1059,7 +1072,12 @@ pub fn generate_and_write_proof_shards_atomic(
     }
 
     let allowlist = load_verified_allowlist(allowlist_path, source_path, options)?;
-    write_proof_shards_from_leaves_atomic(output_dir, &allowlist.leaves, shard_count)
+    write_proof_shards_from_leaves_atomic_with_jobs(
+        output_dir,
+        &allowlist.leaves,
+        shard_count,
+        options.jobs,
+    )
 }
 
 pub fn write_proof_shards_from_leaves_atomic(
@@ -1067,23 +1085,46 @@ pub fn write_proof_shards_from_leaves_atomic(
     leaves: &[ResidenceCellLeaf],
     shard_count: usize,
 ) -> Result<ProofShardManifest, ResidenceAllowlistError> {
+    write_proof_shards_from_leaves_atomic_with_jobs(output_dir, leaves, shard_count, None)
+}
+
+pub fn write_proof_shards_from_leaves_atomic_with_jobs(
+    output_dir: &Path,
+    leaves: &[ResidenceCellLeaf],
+    shard_count: usize,
+    jobs: Option<usize>,
+) -> Result<ProofShardManifest, ResidenceAllowlistError> {
     let context = build_proof_shard_context(leaves, shard_count)?;
     let shards_dir = output_dir.join("shards");
     fs::create_dir_all(&shards_dir)?;
     let shard_indices = proof_shard_leaf_indices(&context);
-    let mut inventory = Vec::with_capacity(context.shard_count);
 
-    for shard_id in 0..context.shard_count {
-        let start = shard_indices.starts[shard_id];
-        let end = shard_indices.starts[shard_id + 1];
-        let leaf_indices = &shard_indices.leaf_indices[start..end];
-        inventory.push(write_proof_shard_from_indices_atomic(
-            &shards_dir,
-            &context,
-            shard_id,
-            leaf_indices,
-        )?);
-    }
+    let write_inventory = || {
+        (0..context.shard_count)
+            .into_par_iter()
+            .map(|shard_id| {
+                let start = shard_indices.starts[shard_id];
+                let end = shard_indices.starts[shard_id + 1];
+                let leaf_indices = &shard_indices.leaf_indices[start..end];
+                write_proof_shard_from_indices_atomic(&shards_dir, &context, shard_id, leaf_indices)
+            })
+            .collect::<Result<Vec<_>, ResidenceAllowlistError>>()
+    };
+
+    let inventory = if let Some(jobs) = jobs {
+        if jobs == 0 {
+            return Err(ResidenceAllowlistError::InvalidArgument(
+                "jobs must be greater than zero".to_owned(),
+            ));
+        }
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(jobs)
+            .build()
+            .map_err(|error| ResidenceAllowlistError::InvalidArgument(error.to_string()))?
+            .install(write_inventory)
+    } else {
+        write_inventory()
+    }?;
 
     let manifest = ProofShardManifest {
         schema: PROOF_MANIFEST_SCHEMA.to_owned(),
@@ -1854,7 +1895,7 @@ fn validate_proof_shard_contents(
         )));
     }
 
-    let shard_count = u64::try_from(manifest.shard_count).map_err(|_| {
+    let shard_count_u64 = u64::try_from(manifest.shard_count).map_err(|_| {
         ResidenceAllowlistError::InvalidArtifact(
             "proof manifest shard_count is outside the u64 range".to_owned(),
         )
@@ -1879,7 +1920,7 @@ fn validate_proof_shard_contents(
             )));
         }
 
-        let computed_shard_id = (h3_index % shard_count) as usize;
+        let computed_shard_id = proof_shard_id_for_count(h3_index, shard_count_u64);
         if computed_shard_id != expected_shard_id {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
                 "h3_index {h3_index} belongs to shard_id {computed_shard_id}, not {expected_shard_id}"
@@ -2016,6 +2057,9 @@ fn build_proof_shard_context(
             "shard_count must be greater than zero".to_owned(),
         ));
     }
+    let shard_count_u64 = u64::try_from(shard_count).map_err(|_| {
+        ResidenceAllowlistError::InvalidArgument("shard_count is outside the u64 range".to_owned())
+    })?;
     let Some(first_leaf) = leaves.first().copied() else {
         return Err(ResidenceAllowlistError::InvalidArtifact(
             "proof shards require at least one residence leaf".to_owned(),
@@ -2039,6 +2083,7 @@ fn build_proof_shard_context(
         allowlist_version: first_leaf.allowlist_version,
         geo_resolution: first_leaf.geo_resolution,
         shard_count,
+        shard_count_u64,
     })
 }
 
@@ -2108,7 +2153,7 @@ fn proof_steps_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> Vec<P
 fn proof_shard_leaf_indices(context: &ProofShardBuildContext) -> ProofShardLeafIndices {
     let mut counts = vec![0usize; context.shard_count];
     for (leaf, _) in &context.sorted {
-        counts[(leaf.h3_index % context.shard_count as u64) as usize] += 1;
+        counts[proof_shard_id_for_count(leaf.h3_index, context.shard_count_u64)] += 1;
     }
 
     let mut starts = Vec::with_capacity(context.shard_count + 1);
@@ -2121,7 +2166,7 @@ fn proof_shard_leaf_indices(context: &ProofShardBuildContext) -> ProofShardLeafI
     let mut write_offsets = starts[..context.shard_count].to_vec();
     let mut leaf_indices = vec![0usize; context.sorted.len()];
     for (leaf_index, (leaf, _)) in context.sorted.iter().enumerate() {
-        let shard_id = (leaf.h3_index % context.shard_count as u64) as usize;
+        let shard_id = proof_shard_id_for_count(leaf.h3_index, context.shard_count_u64);
         let output_index = write_offsets[shard_id];
         leaf_indices[output_index] = leaf_index;
         write_offsets[shard_id] += 1;
@@ -2131,6 +2176,13 @@ fn proof_shard_leaf_indices(context: &ProofShardBuildContext) -> ProofShardLeafI
         starts,
         leaf_indices,
     }
+}
+
+fn proof_shard_id_for_count(h3_index: u64, shard_count: u64) -> usize {
+    let digest = Sha256::digest(h3_index.to_be_bytes());
+    let mut prefix = [0u8; 8];
+    prefix.copy_from_slice(&digest[..8]);
+    (u64::from_be_bytes(prefix) % shard_count) as usize
 }
 
 fn proof_shard_entry_from_context(
