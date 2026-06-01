@@ -66,7 +66,7 @@ Worker は `wrangler.toml` の値を source of truth とします。
 ```toml
 [[r2_buckets]]
 binding = "RESIDENCE_PROOF_SHARDS"
-bucket_name = "sonari-residence-cells"
+bucket_name = "sonari-residence-proofs-v1-res7"
 
 [vars]
 ALLOWLIST_VERSION = "1"
