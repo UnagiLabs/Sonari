@@ -34,6 +34,8 @@ const OCCURRED_AT_MS: u64 = 1_704_067_200_000;
 const VERIFIED_AT_MS: u64 = 1_704_151_200_000;
 const SOURCE_UPDATED_AT_MS: u64 = 1_704_151_200_000;
 const FRESHNESS_DEADLINE_MS: u64 = 1_704_172_800_000;
+const ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS: u64 = 1_704_172_800_001;
+const EARTHQUAKE_V1_CONFIG_KEY: u64 = 1;
 
 #[test]
 fun affected_cell_leaf_hash_and_merkle_proof_match_fixture_vectors() {
@@ -122,12 +124,10 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
+        register_oracle_enclave_for_testing(
             &cap,
             &mut verifier_registry,
-            reader::verifier_family_earthquake_oracle(),
-            reader::verifier_version_v1(),
-            oracle_public_key(),
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
             scenario.ctx(),
         );
         accessor::create_disaster_event_from_signed_payload(
@@ -206,11 +206,17 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
             verifier_public_key,
             signature,
             verifier_registry_id,
+            verifier_config_key,
+            verifier_config_version,
+            enclave_instance_public_key,
         ) = disaster_event::certificate_verifier_for_testing(&disaster_event);
         assert!(signature_scheme == SIGNATURE_SCHEME_ED25519);
         assert!(verifier_public_key == oracle_public_key());
         assert!(signature == oracle_signature());
         assert!(verifier_registry_id == metadata_verifier::registry_id(&verifier_registry));
+        assert!(verifier_config_key == EARTHQUAKE_V1_CONFIG_KEY);
+        assert!(verifier_config_version == 1);
+        assert!(enclave_instance_public_key == oracle_public_key());
 
         let (
             object_payload_bcs_hash,
@@ -240,6 +246,185 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
         assert!(object_affected_cell_count == 2);
 
         test_scenario::return_shared(disaster_event);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceNotRegistered)]
+fun raw_earthquake_verifier_key_without_enclave_instance_is_rejected() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
+    let mut scenario = initialized_disaster_registry();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::add_verifier_key(
+            &cap,
+            &mut verifier_registry,
+            reader::verifier_family_earthquake_oracle(),
+            reader::verifier_version_v1(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.next_tx(RELAYER);
+    {
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        accessor::create_disaster_event_from_signed_payload(
+            &mut disaster_registry,
+            &verifier_registry,
+            &clock,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceDisabled)]
+fun disabled_enclave_instance_is_rejected() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
+    let mut scenario = initialized_disaster_registry();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        register_oracle_enclave_for_testing(
+            &cap,
+            &mut verifier_registry,
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        metadata_verifier::disable_enclave_instance_for_testing(
+            &mut verifier_registry,
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.next_tx(RELAYER);
+    {
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        accessor::create_disaster_event_from_signed_payload(
+            &mut disaster_registry,
+            &verifier_registry,
+            &clock,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceExpired)]
+fun expired_enclave_instance_is_rejected_using_clock_timestamp() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
+    let mut scenario = initialized_disaster_registry();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        register_oracle_enclave_for_testing(
+            &cap,
+            &mut verifier_registry,
+            NOW_BEFORE_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.next_tx(RELAYER);
+    {
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        accessor::create_disaster_event_from_signed_payload(
+            &mut disaster_registry,
+            &verifier_registry,
+            &clock,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceConfigMismatch)]
+fun stale_enclave_instance_config_version_is_rejected_after_config_pcr_update() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
+    let mut scenario = initialized_disaster_registry();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        register_oracle_enclave_for_testing(
+            &cap,
+            &mut verifier_registry,
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
+            scenario.ctx(),
+        );
+        admin::update_earthquake_verifier_config_pcrs(
+            &cap,
+            &mut verifier_registry,
+            updated_pcr0(),
+            updated_pcr1(),
+            updated_pcr2(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+
+    scenario.next_tx(RELAYER);
+    {
+        let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        accessor::create_disaster_event_from_signed_payload(
+            &mut disaster_registry,
+            &verifier_registry,
+            &clock,
+            finalized_payload_bcs(),
+            oracle_signature(),
+            oracle_public_key(),
+            scenario.ctx(),
+        );
+        test_scenario::return_shared(disaster_registry);
         test_scenario::return_shared(verifier_registry);
     };
 
@@ -460,12 +645,10 @@ fun duplicate_disaster_event_uid_and_revision_is_rejected() {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
+        register_oracle_enclave_for_testing(
             &cap,
             &mut verifier_registry,
-            reader::verifier_family_earthquake_oracle(),
-            reader::verifier_version_v1(),
-            oracle_public_key(),
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
             scenario.ctx(),
         );
         accessor::create_disaster_event_from_signed_payload(
@@ -538,12 +721,10 @@ fun relayer_without_admin_cap_can_submit_registered_signed_payload() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
+        register_oracle_enclave_for_testing(
             &cap,
             &mut verifier_registry,
-            reader::verifier_family_earthquake_oracle(),
-            reader::verifier_version_v1(),
-            oracle_public_key(),
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
             scenario.ctx(),
         );
         scenario.return_to_sender(cap);
@@ -587,12 +768,10 @@ fun signed_payload_freshness_uses_clock_timestamp() {
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
+        register_oracle_enclave_for_testing(
             &cap,
             &mut verifier_registry,
-            reader::verifier_family_earthquake_oracle(),
-            reader::verifier_version_v1(),
-            oracle_public_key(),
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
             scenario.ctx(),
         );
         scenario.return_to_sender(cap);
@@ -620,8 +799,8 @@ fun signed_payload_freshness_uses_clock_timestamp() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = metadata_verifier::EVerifierKeyDisabled)]
-fun disabled_earthquake_oracle_key_is_rejected() {
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceNotRegistered)]
+fun disabled_raw_earthquake_oracle_key_without_enclave_instance_is_rejected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
     let mut scenario = initialized_disaster_registry();
@@ -661,8 +840,8 @@ fun disabled_earthquake_oracle_key_is_rejected() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = metadata_verifier::EVerifierFamilyMismatch)]
-fun wrong_earthquake_oracle_key_family_is_rejected() {
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceNotRegistered)]
+fun wrong_raw_earthquake_oracle_key_family_without_enclave_instance_is_rejected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
     let mut scenario = initialized_disaster_registry();
@@ -693,8 +872,8 @@ fun wrong_earthquake_oracle_key_family_is_rejected() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = metadata_verifier::EVerifierVersionMismatch)]
-fun wrong_earthquake_oracle_key_version_is_rejected() {
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceNotRegistered)]
+fun wrong_raw_earthquake_oracle_key_version_without_enclave_instance_is_rejected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_BEFORE_FRESHNESS_DEADLINE_MS);
     let mut scenario = initialized_disaster_registry();
@@ -764,12 +943,10 @@ fun create_signed_event_with_payload(payload_bcs: vector<u8>, signature: vector<
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
+        register_oracle_enclave_for_testing(
             &cap,
             &mut verifier_registry,
-            reader::verifier_family_earthquake_oracle(),
-            reader::verifier_version_v1(),
-            oracle_public_key(),
+            ENCLAVE_EXPIRES_AFTER_FRESHNESS_DEADLINE_MS,
             scenario.ctx(),
         );
         accessor::create_disaster_event_from_signed_payload(
@@ -787,6 +964,28 @@ fun create_signed_event_with_payload(payload_bcs: vector<u8>, signature: vector<
     };
     scenario.end();
     clock.destroy_for_testing();
+}
+
+fun register_oracle_enclave_for_testing(
+    cap: &admin::AdminCap,
+    verifier_registry: &mut metadata_verifier::VerifierRegistry,
+    expires_at_ms: u64,
+    ctx: &mut TxContext,
+) {
+    admin::create_earthquake_verifier_config(
+        cap,
+        verifier_registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_testing(
+        verifier_registry,
+        oracle_public_key(),
+        expires_at_ms,
+        ctx,
+    );
 }
 
 fun assert_mutated_payload_is_rejected(offset: u64, value: u8) {
@@ -836,6 +1035,30 @@ fun oracle_public_key(): vector<u8> {
 
 fun oracle_signature(): vector<u8> {
     x"16cc2bce20f532dc9396dc62903ebc65abccb97221e72a75415cf6fc707fd0a285a761144db877f9ad1bc276aaeaec24f164583239dce269b766fe0c4d2a7708"
+}
+
+fun valid_pcr0(): vector<u8> {
+    x"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30"
+}
+
+fun valid_pcr1(): vector<u8> {
+    x"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+
+fun valid_pcr2(): vector<u8> {
+    x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}
+
+fun updated_pcr0(): vector<u8> {
+    x"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}
+
+fun updated_pcr1(): vector<u8> {
+    x"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+}
+
+fun updated_pcr2(): vector<u8> {
+    x"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 }
 
 fun finalized_payload_bcs(): vector<u8> {

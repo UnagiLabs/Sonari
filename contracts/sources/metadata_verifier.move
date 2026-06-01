@@ -37,6 +37,8 @@ const EEnclaveAttestationMissingPublicKey: u64 = 19;
 const EEnclavePcrMissing: u64 = 20;
 const EEnclavePcrMismatch: u64 = 21;
 const EEnclaveInstanceExpired: u64 = 22;
+const EEnclaveInstanceDisabled: u64 = 23;
+const EEnclaveInstanceConfigMismatch: u64 = 24;
 
 public struct VerifierRegistry has key {
     id: UID,
@@ -247,6 +249,49 @@ public(package) fun assert_signed_bytes(
         ed25519::ed25519_verify(signature, public_key, signed_bytes),
         EInvalidSignature,
     );
+}
+
+public(package) fun assert_enclave_signed_bytes(
+    registry: &VerifierRegistry,
+    signed_bytes: &vector<u8>,
+    signature: &vector<u8>,
+    public_key: &vector<u8>,
+    now_ms: u64,
+): (u64, u64, vector<u8>) {
+    assert_public_key_length(public_key);
+    assert_signature_length(signature);
+    assert!(
+        registry.instances.contains(public_key),
+        EEnclaveInstanceNotRegistered,
+    );
+
+    let instance = registry.instances.get(public_key);
+    assert!(instance.enabled, EEnclaveInstanceDisabled);
+    assert!(instance.expires_at_ms > now_ms, EEnclaveInstanceExpired);
+    assert!(
+        instance.verifier_family == VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
+        EVerifierFamilyMismatch,
+    );
+    assert!(
+        instance.verifier_version == VERIFIER_VERSION_V1,
+        EVerifierVersionMismatch,
+    );
+
+    let config_key = earthquake_v1_config_key();
+    assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
+    let config = registry.configs.get(&config_key);
+    assert!(config.enabled, EVerifierConfigAlreadyDisabled);
+    assert!(
+        instance.config_version == config.config_version,
+        EEnclaveInstanceConfigMismatch,
+    );
+    assert!(
+        ed25519::ed25519_verify(signature, public_key, signed_bytes),
+        EInvalidSignature,
+    );
+    let config_version = config.config_version;
+    let instance_public_key = instance.public_key;
+    (config_key, config_version, instance_public_key)
 }
 
 public(package) fun registry_id(registry: &VerifierRegistry): ID {
@@ -695,6 +740,38 @@ public fun disable_enclave_instance_for_testing(
     ctx: &mut TxContext,
 ) {
     disable_enclave_instance_internal(registry, public_key, ctx);
+}
+
+#[test_only]
+public fun add_enclave_instance_for_testing(
+    registry: &mut VerifierRegistry,
+    public_key: vector<u8>,
+    expires_at_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert_public_key_length(&public_key);
+    assert!(
+        !registry.instances.contains(&public_key),
+        EEnclaveInstanceAlreadyRegistered,
+    );
+    let config_key = earthquake_v1_config_key();
+    assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
+    let config = registry.configs.get(&config_key);
+    assert!(config.enabled, EVerifierConfigAlreadyDisabled);
+
+    registry.instances.insert(
+        public_key,
+        EnclaveInstance {
+            verifier_family: config.verifier_family,
+            verifier_version: config.verifier_version,
+            config_version: config.config_version,
+            public_key,
+            enabled: true,
+            registered_at_ms: ctx.epoch_timestamp_ms(),
+            expires_at_ms,
+            disabled_at_ms: option::none(),
+        },
+    );
 }
 
 #[test_only]
