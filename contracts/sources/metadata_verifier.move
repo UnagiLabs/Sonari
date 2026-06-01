@@ -2,6 +2,7 @@ module contracts::metadata_verifier;
 
 use sui::ed25519;
 use sui::event;
+use sui::nitro_attestation::{Self, NitroAttestationDocument};
 use sui::vec_map::{Self, VecMap};
 
 const VERIFIER_FAMILY_EARTHQUAKE_ORACLE: u8 = 3;
@@ -29,11 +30,19 @@ const EVerifierConfigAlreadyDisabled: u64 = 11;
 const EInvalidPcrLength: u64 = 12;
 const EInvalidPcrValue: u64 = 13;
 const EVerifierKeyAlreadyDisabled: u64 = 15;
+const EEnclaveInstanceAlreadyRegistered: u64 = 16;
+const EEnclaveInstanceNotRegistered: u64 = 17;
+const EEnclaveInstanceAlreadyDisabled: u64 = 18;
+const EEnclaveAttestationMissingPublicKey: u64 = 19;
+const EEnclavePcrMissing: u64 = 20;
+const EEnclavePcrMismatch: u64 = 21;
+const EEnclaveInstanceExpired: u64 = 22;
 
 public struct VerifierRegistry has key {
     id: UID,
     keys: VecMap<vector<u8>, VerifierKey>,
     configs: VecMap<u64, VerifierConfig>,
+    instances: VecMap<vector<u8>, EnclaveInstance>,
 }
 
 public struct VerifierKey has copy, drop, store {
@@ -55,6 +64,17 @@ public struct VerifierConfig has copy, drop, store {
     enabled: bool,
     created_at_ms: u64,
     updated_at_ms: u64,
+    disabled_at_ms: Option<u64>,
+}
+
+public struct EnclaveInstance has copy, drop, store {
+    verifier_family: u8,
+    verifier_version: u64,
+    config_version: u64,
+    public_key: vector<u8>,
+    enabled: bool,
+    registered_at_ms: u64,
+    expires_at_ms: u64,
     disabled_at_ms: Option<u64>,
 }
 
@@ -102,6 +122,24 @@ public struct VerifierConfigDisabled has copy, drop {
     verifier_family: u8,
     verifier_version: u64,
     config_version: u64,
+    actor: address,
+}
+
+public struct EnclaveInstanceRegistered has copy, drop {
+    registry_id: ID,
+    verifier_family: u8,
+    verifier_version: u64,
+    config_version: u64,
+    public_key: vector<u8>,
+    enabled: bool,
+    registered_at_ms: u64,
+    expires_at_ms: u64,
+    actor: address,
+}
+
+public struct EnclaveInstanceDisabled has copy, drop {
+    registry_id: ID,
+    public_key: vector<u8>,
     actor: address,
 }
 
@@ -160,6 +198,23 @@ public(package) fun disable_earthquake_verifier_config(
     ctx: &TxContext,
 ) {
     disable_earthquake_verifier_config_internal(registry, ctx);
+}
+
+public fun register_enclave_instance(
+    registry: &mut VerifierRegistry,
+    document: NitroAttestationDocument,
+    expires_at_ms: u64,
+    ctx: &mut TxContext,
+) {
+    register_enclave_instance_internal(registry, document, expires_at_ms, ctx);
+}
+
+public(package) fun disable_enclave_instance(
+    registry: &mut VerifierRegistry,
+    public_key: vector<u8>,
+    ctx: &TxContext,
+) {
+    disable_enclave_instance_internal(registry, public_key, ctx);
 }
 
 public(package) fun disable_verifier_key(
@@ -223,6 +278,7 @@ fun new_registry(ctx: &mut TxContext): VerifierRegistry {
         id: object::new(ctx),
         keys: vec_map::empty(),
         configs: vec_map::empty(),
+        instances: vec_map::empty(),
     }
 }
 
@@ -393,6 +449,108 @@ fun disable_earthquake_verifier_config_internal(
     });
 }
 
+fun register_enclave_instance_internal(
+    registry: &mut VerifierRegistry,
+    document: NitroAttestationDocument,
+    expires_at_ms: u64,
+    ctx: &TxContext,
+) {
+    assert!(expires_at_ms > ctx.epoch_timestamp_ms(), EEnclaveInstanceExpired);
+    let public_key = public_key_from_attestation(&document);
+    assert_public_key_length(&public_key);
+    assert!(
+        !registry.instances.contains(&public_key),
+        EEnclaveInstanceAlreadyRegistered,
+    );
+    let config_key = earthquake_v1_config_key();
+    assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
+
+    let config = registry.configs.get(&config_key);
+    assert!(config.enabled, EVerifierConfigAlreadyDisabled);
+    assert_attestation_pcr_matches(&document, 0, &config.pcr0);
+    assert_attestation_pcr_matches(&document, 1, &config.pcr1);
+    assert_attestation_pcr_matches(&document, 2, &config.pcr2);
+
+    registry.instances.insert(
+        public_key,
+        EnclaveInstance {
+            verifier_family: config.verifier_family,
+            verifier_version: config.verifier_version,
+            config_version: config.config_version,
+            public_key,
+            enabled: true,
+            registered_at_ms: ctx.epoch_timestamp_ms(),
+            expires_at_ms,
+            disabled_at_ms: option::none(),
+        },
+    );
+    event::emit(EnclaveInstanceRegistered {
+        registry_id: object::id(registry),
+        verifier_family: config.verifier_family,
+        verifier_version: config.verifier_version,
+        config_version: config.config_version,
+        public_key,
+        enabled: true,
+        registered_at_ms: ctx.epoch_timestamp_ms(),
+        expires_at_ms,
+        actor: ctx.sender(),
+    });
+}
+
+fun disable_enclave_instance_internal(
+    registry: &mut VerifierRegistry,
+    public_key: vector<u8>,
+    ctx: &TxContext,
+) {
+    assert_public_key_length(&public_key);
+    assert!(
+        registry.instances.contains(&public_key),
+        EEnclaveInstanceNotRegistered,
+    );
+
+    let instance = registry.instances.get_mut(&public_key);
+    assert!(instance.enabled, EEnclaveInstanceAlreadyDisabled);
+    instance.enabled = false;
+    instance.disabled_at_ms = option::some(ctx.epoch_timestamp_ms());
+    event::emit(EnclaveInstanceDisabled {
+        registry_id: object::id(registry),
+        public_key,
+        actor: ctx.sender(),
+    });
+}
+
+fun public_key_from_attestation(document: &NitroAttestationDocument): vector<u8> {
+    let public_key = nitro_attestation::public_key(document);
+    assert!(public_key.is_some(), EEnclaveAttestationMissingPublicKey);
+    *public_key.borrow()
+}
+
+fun assert_attestation_pcr_matches(
+    document: &NitroAttestationDocument,
+    expected_index: u8,
+    expected_value: &vector<u8>,
+) {
+    let pcr = attestation_pcr_value(document, expected_index);
+    assert!(pcr.is_some(), EEnclavePcrMissing);
+    assert!(*pcr.borrow() == *expected_value, EEnclavePcrMismatch);
+}
+
+fun attestation_pcr_value(
+    document: &NitroAttestationDocument,
+    expected_index: u8,
+): Option<vector<u8>> {
+    let pcrs = nitro_attestation::pcrs(document);
+    let mut index = 0;
+    while (index < pcrs.length()) {
+        let pcr = pcrs.borrow(index);
+        if (nitro_attestation::index(pcr) == expected_index) {
+            return option::some(*nitro_attestation::value(pcr))
+        };
+        index = index + 1;
+    };
+    option::none()
+}
+
 fun assert_public_key_length(public_key: &vector<u8>) {
     assert!(public_key.length() == ED25519_PUBLIC_KEY_LENGTH, EInvalidPublicKeyLength);
 }
@@ -441,9 +599,15 @@ public fun create_verifier_registry_for_testing(ctx: &mut TxContext): VerifierRe
 
 #[test_only]
 public fun destroy_verifier_registry_for_testing(registry: VerifierRegistry) {
-    let VerifierRegistry { id, keys, configs } = registry;
+    let VerifierRegistry {
+        id,
+        keys,
+        configs,
+        instances,
+    } = registry;
     destroy_keys_for_testing(keys);
     destroy_configs_for_testing(configs);
+    destroy_instances_for_testing(instances);
     id.delete();
 }
 
@@ -461,6 +625,14 @@ fun destroy_configs_for_testing(mut configs: VecMap<u64, VerifierConfig>) {
         let (_, _) = configs.pop();
     };
     configs.destroy_empty();
+}
+
+#[test_only]
+fun destroy_instances_for_testing(mut instances: VecMap<vector<u8>, EnclaveInstance>) {
+    while (!instances.is_empty()) {
+        let (_, _) = instances.pop();
+    };
+    instances.destroy_empty();
 }
 
 #[test_only]
@@ -507,6 +679,25 @@ public fun disable_verifier_key_for_testing(
 }
 
 #[test_only]
+public fun register_enclave_instance_for_testing(
+    registry: &mut VerifierRegistry,
+    document: NitroAttestationDocument,
+    expires_at_ms: u64,
+    ctx: &mut TxContext,
+) {
+    register_enclave_instance_internal(registry, document, expires_at_ms, ctx);
+}
+
+#[test_only]
+public fun disable_enclave_instance_for_testing(
+    registry: &mut VerifierRegistry,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    disable_enclave_instance_internal(registry, public_key, ctx);
+}
+
+#[test_only]
 public fun earthquake_verifier_config_fields_for_testing(
     registry: &VerifierRegistry,
 ): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
@@ -521,6 +712,28 @@ public fun earthquake_verifier_config_fields_for_testing(
         config.pcr1,
         config.pcr2,
         config.enabled,
+    )
+}
+
+#[test_only]
+public fun enclave_instance_fields_for_testing(
+    registry: &VerifierRegistry,
+    public_key: vector<u8>,
+): (u8, u64, u64, vector<u8>, bool, u64, u64, Option<u64>) {
+    assert!(
+        registry.instances.contains(&public_key),
+        EEnclaveInstanceNotRegistered,
+    );
+    let instance = registry.instances.get(&public_key);
+    (
+        instance.verifier_family,
+        instance.verifier_version,
+        instance.config_version,
+        instance.public_key,
+        instance.enabled,
+        instance.registered_at_ms,
+        instance.expires_at_ms,
+        instance.disabled_at_ms,
     )
 }
 
@@ -619,6 +832,46 @@ public fun verifier_config_disabled_event_fields(
         actor,
     } = event;
     (registry_id, verifier_family, verifier_version, config_version, actor)
+}
+
+#[test_only]
+public fun enclave_instance_registered_event_fields(
+    event: EnclaveInstanceRegistered,
+): (ID, u8, u64, u64, vector<u8>, bool, u64, u64, address) {
+    let EnclaveInstanceRegistered {
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        public_key,
+        enabled,
+        registered_at_ms,
+        expires_at_ms,
+        actor,
+    } = event;
+    (
+        registry_id,
+        verifier_family,
+        verifier_version,
+        config_version,
+        public_key,
+        enabled,
+        registered_at_ms,
+        expires_at_ms,
+        actor,
+    )
+}
+
+#[test_only]
+public fun enclave_instance_disabled_event_fields(
+    event: EnclaveInstanceDisabled,
+): (ID, vector<u8>, address) {
+    let EnclaveInstanceDisabled {
+        registry_id,
+        public_key,
+        actor,
+    } = event;
+    (registry_id, public_key, actor)
 }
 
 #[test_only]
