@@ -1,17 +1,27 @@
 use clap::{Parser, Subcommand};
-use serde::Serialize;
-use sonari_tee_core::{DEV_SIGNING_KEY_SEED_HEX, parse_seed, signing_key_seed_from_env};
+use nsm_api::api::{Request as NsmRequest, Response as NsmResponse};
+use nsm_api::driver;
+use serde::{Deserialize, Serialize};
+use sonari_tee_core::{
+    DEV_SIGNING_KEY_SEED_HEX, PayloadSigner, parse_seed, signing_key_seed_from_env,
+};
 use std::env;
 use std::fs;
-use std::io::{self, Read};
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::os::fd::{FromRawFd, RawFd};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
     WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
-    grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs,
+    grid_xml_from_artifact, parse_command_timeout_ms, parse_n_shards,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
+
+const PRODUCTION_FETCH_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate deterministic Sonari USGS oracle artifacts")]
@@ -41,17 +51,7 @@ struct Cli {
     #[arg(long)]
     walrus_cli: Option<PathBuf>,
     #[arg(long)]
-    walrus_config: Option<PathBuf>,
-    #[arg(long)]
-    walrus_context: Option<String>,
-    #[arg(long)]
-    walrus_wallet: Option<String>,
-    #[arg(long)]
-    walrus_upload_relay: Option<String>,
-    #[arg(long)]
-    walrus_aggregator_url: Option<String>,
-    #[arg(long)]
-    walrus_epochs: Option<u32>,
+    walrus_n_shards: Option<u32>,
     #[arg(long)]
     walrus_timeout_ms: Option<u64>,
 }
@@ -60,6 +60,7 @@ struct Cli {
 enum Command {
     Fixture(FixtureArgs),
     Production(ProductionArgs),
+    Server(ServerArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -84,6 +85,16 @@ struct ProductionArgs {
     signing_key_seed: Option<String>,
 }
 
+#[derive(Debug, Parser)]
+struct ServerArgs {
+    #[arg(long, default_value_t = 3000)]
+    port: u32,
+    #[arg(long, default_value_t = 7777)]
+    bootstrap_port: u32,
+    #[arg(long)]
+    skip_bootstrap: bool,
+}
+
 struct RunConfig {
     input: UsgsOracleInput,
     output_dir: Option<PathBuf>,
@@ -98,6 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Command::Production(args)) => {
             let result = production_result(args)?;
             println!("{}", serde_json::to_string_pretty(&result)?);
+            return Ok(());
+        }
+        Some(Command::Server(args)) => {
+            run_nautilus_server(args)?;
             return Ok(());
         }
         None => low_level_input(cli)?,
@@ -119,16 +134,395 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
-    let seed = strict_signing_key_seed(args.signing_key_seed)?;
+fn production_result(
+    args: ProductionArgs,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let request_json: serde_json::Value =
         serde_json::from_slice(&production_request_bytes(args.input)?)?;
+    if request_json.get("action").is_some() {
+        return production_action_result(request_json, args.signing_key_seed);
+    }
+    let seed = strict_signing_key_seed(args.signing_key_seed)?;
     let request = tee::WorkerToTeeRequest::from_json_value(request_json)?;
-    let detail_url = format!(
-        "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{}.geojson",
-        request.source_event_id
+    production_worker_request_result(request, seed, None)
+}
+
+#[derive(Clone)]
+struct EnclaveState {
+    signing_key_seed: [u8; 32],
+}
+
+fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let signing_key_seed = generate_ephemeral_signing_key_seed()?;
+    let state = EnclaveState { signing_key_seed };
+    if !args.skip_bootstrap {
+        receive_bootstrap_config(args.bootstrap_port)?;
+    }
+    let listener = VsockListener::bind(args.port)?;
+    eprintln!(
+        "sonari earthquake nautilus server listening on vsock port {}",
+        args.port
     );
-    let detail_json = match reqwest::blocking::get(&detail_url).and_then(|response| {
+    loop {
+        let stream = listener.accept()?;
+        let state = state.clone();
+        thread::spawn(move || {
+            if let Err(error) = handle_vsock_http_connection(stream, state) {
+                eprintln!("sonari earthquake nautilus request failed: {error}");
+            }
+        });
+    }
+}
+
+fn generate_ephemeral_signing_key_seed() -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    let mut file = File::open("/dev/urandom")?;
+    let mut seed = [0u8; 32];
+    file.read_exact(&mut seed)?;
+    Ok(seed)
+}
+
+fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = VsockListener::bind(port)?;
+    eprintln!("waiting for sonari earthquake bootstrap config on vsock port {port}");
+    let mut stream = listener.accept()?;
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes)?;
+    let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
+    set_env_before_server("SONARI_WALRUS_CLI", &config.walrus_cli);
+    set_env_before_server(
+        "SONARI_WALRUS_N_SHARDS",
+        &config.walrus_n_shards.to_string(),
+    );
+    set_env_before_server(
+        "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+        &config.egress_proxy_url,
+    );
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapConfig {
+    walrus_cli: String,
+    walrus_n_shards: u32,
+    egress_proxy_url: String,
+}
+
+fn set_env_before_server(name: &str, value: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap values are installed.
+    unsafe {
+        env::set_var(name, value);
+    }
+}
+
+fn handle_vsock_http_connection(
+    mut stream: File,
+    state: EnclaveState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let request = read_http_request(&mut stream)?;
+    let (status_code, body) = handle_vsock_http_request(request, state);
+    write_http_json_response(&mut stream, status_code, &body)?;
+    Ok(())
+}
+
+fn handle_vsock_http_request(
+    request: HttpRequest,
+    state: EnclaveState,
+) -> (u16, serde_json::Value) {
+    match catch_unwind(AssertUnwindSafe(|| {
+        route_vsock_http_request(request, state)
+    })) {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) => (
+            500,
+            serde_json::json!({
+                "error_code": "AWS_RUNNER_PROCESS_FAILED",
+                "message": error.to_string(),
+            }),
+        ),
+        Err(payload) => (
+            500,
+            serde_json::json!({
+                "error_code": "AWS_RUNNER_PROCESS_FAILED",
+                "message": panic_message(payload),
+            }),
+        ),
+    }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return format!("panic: {message}");
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return format!("panic: {message}");
+    }
+    "panic: unknown payload".to_owned()
+}
+
+fn route_vsock_http_request(
+    request: HttpRequest,
+    state: EnclaveState,
+) -> Result<(u16, serde_json::Value), Box<dyn std::error::Error>> {
+    let (status_code, body) = match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/health_check") => (
+            200,
+            serde_json::json!({
+                "status": "healthy",
+                "external_sources_reachable": true,
+            }),
+        ),
+        ("GET", "/get_attestation") => (200, enclave_attestation_response(&state)?),
+        ("POST", "/process_data") => {
+            let request_json: serde_json::Value = serde_json::from_slice(&request.body)?;
+            (
+                200,
+                production_action_result(request_json, Some(to_hex_seed(&state.signing_key_seed)))?,
+            )
+        }
+        _ => (
+            404,
+            serde_json::json!({
+                "error_code": "AWS_RUNNER_PROCESS_FAILED",
+                "message": "not found",
+            }),
+        ),
+    };
+    Ok((status_code, body))
+}
+
+fn enclave_attestation_response(
+    state: &EnclaveState,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let signer = LocalEd25519Signer::new(state.signing_key_seed);
+    let signature = signer.sign_payload(b"sonari-earthquake-attestation-public-key");
+    let public_key_bytes = hex::decode(signature.public_key.trim_start_matches("0x"))?;
+    let fd = driver::nsm_init();
+    let request = NsmRequest::Attestation {
+        user_data: None,
+        nonce: None,
+        public_key: Some(serde_bytes::ByteBuf::from(public_key_bytes)),
+    };
+    let response = driver::nsm_process_request(fd, request);
+    driver::nsm_exit(fd);
+    match response {
+        NsmResponse::Attestation { document } => Ok(serde_json::json!({
+            "attestation_document_hex": format!("0x{}", hex::encode(document)),
+            "public_key": signature.public_key,
+        })),
+        _ => Err("unexpected NSM attestation response".into()),
+    }
+}
+
+fn to_hex_seed(seed: &[u8; 32]) -> String {
+    format!("0x{}", hex::encode(seed))
+}
+
+struct HttpRequest {
+    method: String,
+    path: String,
+    body: Vec<u8>,
+}
+
+fn read_http_request(stream: &mut File) -> Result<HttpRequest, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let header_end;
+    loop {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Err("connection closed before HTTP headers".into());
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if let Some(index) = find_header_end(&bytes) {
+            header_end = index;
+            break;
+        }
+        if bytes.len() > 1024 * 1024 {
+            return Err("HTTP headers exceeded max size".into());
+        }
+    }
+    let header_text = std::str::from_utf8(&bytes[..header_end])?;
+    let mut lines = header_text.split("\r\n");
+    let request_line = lines.next().ok_or("missing HTTP request line")?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().ok_or("missing HTTP method")?.to_owned();
+    let path = parts.next().ok_or("missing HTTP path")?.to_owned();
+    let content_length = lines
+        .filter_map(|line| line.split_once(':'))
+        .find_map(|(name, value)| {
+            if name.eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let body_start = header_end + 4;
+    while bytes.len() < body_start + content_length {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Err("connection closed before HTTP body".into());
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    Ok(HttpRequest {
+        method,
+        path,
+        body: bytes[body_start..body_start + content_length].to_vec(),
+    })
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn write_http_json_response(
+    stream: &mut File,
+    status_code: u16,
+    body: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let body_bytes = serde_json::to_vec(body)?;
+    let reason = if status_code == 200 { "OK" } else { "Error" };
+    write!(
+        stream,
+        "HTTP/1.1 {status_code} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body_bytes.len()
+    )?;
+    stream.write_all(&body_bytes)?;
+    Ok(())
+}
+
+struct VsockListener {
+    fd: RawFd,
+}
+
+impl VsockListener {
+    fn bind(port: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        let addr = SockAddrVm {
+            svm_family: AF_VSOCK as libc::sa_family_t,
+            svm_reserved1: 0,
+            svm_port: port,
+            svm_cid: VMADDR_CID_ANY,
+            svm_zero: [0; 4],
+        };
+        let bind_result = unsafe {
+            libc::bind(
+                fd,
+                (&addr as *const SockAddrVm).cast::<libc::sockaddr>(),
+                std::mem::size_of::<SockAddrVm>() as libc::socklen_t,
+            )
+        };
+        if bind_result < 0 {
+            let error = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(error.into());
+        }
+        let listen_result = unsafe { libc::listen(fd, 128) };
+        if listen_result < 0 {
+            let error = io::Error::last_os_error();
+            unsafe {
+                libc::close(fd);
+            }
+            return Err(error.into());
+        }
+        Ok(Self { fd })
+    }
+
+    fn accept(&self) -> Result<File, Box<dyn std::error::Error>> {
+        let fd = unsafe { libc::accept(self.fd, std::ptr::null_mut(), std::ptr::null_mut()) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        Ok(unsafe { File::from_raw_fd(fd) })
+    }
+}
+
+impl Drop for VsockListener {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+const AF_VSOCK: libc::c_int = 40;
+const VMADDR_CID_ANY: u32 = 0xFFFF_FFFF;
+
+#[repr(C)]
+struct SockAddrVm {
+    svm_family: libc::sa_family_t,
+    svm_reserved1: u16,
+    svm_port: u32,
+    svm_cid: u32,
+    svm_zero: [u8; 4],
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+enum ProductionAction {
+    HealthCheck,
+    GetAttestation,
+    ProcessData {
+        payload: serde_json::Value,
+        registration_metadata: EnclaveRegistrationMetadata,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct EnclaveRegistrationMetadata {
+    verifier_config_key: u64,
+    verifier_config_version: u64,
+    enclave_instance_public_key: String,
+}
+
+fn production_action_result(
+    request_json: serde_json::Value,
+    signing_key_seed: Option<String>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    match serde_json::from_value::<ProductionAction>(request_json)? {
+        ProductionAction::HealthCheck => Ok(serde_json::json!({
+            "status": "healthy",
+            "external_sources_reachable": true,
+        })),
+        ProductionAction::GetAttestation => {
+            let seed = strict_signing_key_seed(signing_key_seed)?;
+            let document = non_empty_env("SONARI_TEE_ATTESTATION_DOCUMENT_HEX")
+                .ok_or("SONARI_TEE_ATTESTATION_DOCUMENT_HEX is required for get_attestation")?;
+            let signer = LocalEd25519Signer::new(seed);
+            let signature = signer.sign_payload(b"sonari-earthquake-attestation-public-key");
+            let public_key =
+                non_empty_env("SONARI_TEE_ATTESTATION_PUBLIC_KEY").unwrap_or(signature.public_key);
+            Ok(serde_json::json!({
+                "attestation_document_hex": document,
+                "public_key": public_key,
+            }))
+        }
+        ProductionAction::ProcessData {
+            payload,
+            registration_metadata,
+        } => {
+            let seed = strict_signing_key_seed(signing_key_seed)?;
+            let request = tee::WorkerToTeeRequest::from_json_value(payload)?;
+            production_worker_request_result(request, seed, Some(registration_metadata))
+        }
+    }
+}
+
+fn production_worker_request_result(
+    request: tee::WorkerToTeeRequest,
+    seed: [u8; 32],
+    registration_metadata: Option<EnclaveRegistrationMetadata>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let detail_url = usgs_detail_url(&request.source_event_id);
+    let client = production_http_client()?;
+    let detail_json = match client.get(&detail_url).send().and_then(|response| {
         if response.status().is_success() {
             response.bytes()
         } else {
@@ -137,38 +531,38 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     }) {
         Ok(bytes) => bytes.to_vec(),
         Err(_) => {
-            return Ok(TeeJsonResult::PendingSource {
+            return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
                 source_event_id: request.source_event_id,
                 error_code: "USGS_DETAIL_UNAVAILABLE",
-            });
+            })?);
         }
     };
     let detail_value: serde_json::Value = match serde_json::from_slice(&detail_json) {
         Ok(value) => value,
         Err(_) => {
-            return Ok(TeeJsonResult::PendingSource {
+            return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
                 source_event_id: request.source_event_id,
                 error_code: "USGS_DETAIL_UNAVAILABLE",
-            });
+            })?);
         }
     };
     let Some(canonical_source_event_id) =
         canonical_usgs_detail_id_for_request(&detail_value, &request.source_event_id)
     else {
-        return Ok(TeeJsonResult::PendingSource {
+        return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
             source_event_id: request.source_event_id,
             error_code: "USGS_DETAIL_UNAVAILABLE",
-        });
+        })?);
     };
 
     let grid = match preferred_grid_uri_from_detail(&detail_value) {
-        Some(uri) => match fetch_grid(&uri) {
+        Some(uri) => match fetch_grid(&client, &uri) {
             Ok(grid) => Some(grid),
             Err(_) => {
-                return Ok(TeeJsonResult::PendingSource {
+                return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
                     source_event_id: request.source_event_id,
                     error_code: "SHAKEMAP_GRID_UNAVAILABLE",
-                });
+                })?);
             }
         },
         None => None,
@@ -185,13 +579,19 @@ fn production_result(args: ProductionArgs) -> Result<TeeJsonResult, Box<dyn std:
     let input = build_production_input(parts, observed_at_ms);
     let preliminary = process_usgs_from_worker_request(request, input.clone())?;
     if preliminary.result.status != tee::OracleStatus::Finalized {
-        return output_to_tee_json(preliminary);
+        return Ok(serde_json::to_value(output_to_tee_json(preliminary)?)?);
     }
 
     let signer = LocalEd25519Signer::new(seed);
     let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
     let output = process_usgs_with_source_archive(input, &archive, &signer)?;
-    output_to_tee_json(output)
+    let mut result = output_to_tee_json(output)?;
+    if let (TeeJsonResult::Finalized { metadata, .. }, Some(registration_metadata)) =
+        (&mut result, registration_metadata)
+    {
+        *metadata = Some(registration_metadata);
+    }
+    Ok(serde_json::to_value(result)?)
 }
 
 struct ProductionInputParts {
@@ -210,9 +610,7 @@ fn build_production_input(parts: ProductionInputParts, observed_at_ms: u64) -> U
         grid_xml: parts.grid_xml,
         raw_grid_bytes: parts.raw_grid_bytes,
         observed_at_ms,
-        raw_detail_uri: format!(
-            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{id}.geojson"
-        ),
+        raw_detail_uri: usgs_detail_url(id),
         raw_grid_uri: parts.raw_grid_uri,
         raw_data_uri: format!("ipfs://sonari/live/{id}/raw_data_manifest.json"),
         affected_cells_uri: format!("ipfs://sonari/live/{id}/affected_cells.json"),
@@ -239,6 +637,12 @@ fn canonical_usgs_detail_id_for_request<'a>(
         return Some(canonical_id);
     }
     None
+}
+
+fn usgs_detail_url(source_event_id: &str) -> String {
+    format!(
+        "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid={source_event_id}&format=geojson"
+    )
 }
 
 fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -277,8 +681,20 @@ struct FetchedGrid {
     raw_grid_uri: String,
 }
 
-fn fetch_grid(uri: &str) -> Result<FetchedGrid, Box<dyn std::error::Error>> {
-    let bytes = match reqwest::blocking::get(uri).and_then(|response| {
+fn production_http_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
+    let mut builder = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_millis(PRODUCTION_FETCH_TIMEOUT_MS));
+    if let Some(proxy_url) = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL") {
+        builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+    }
+    builder.build()
+}
+
+fn fetch_grid(
+    client: &reqwest::blocking::Client,
+    uri: &str,
+) -> Result<FetchedGrid, Box<dyn std::error::Error>> {
+    let bytes = match client.get(uri).send().and_then(|response| {
         if response.status().is_success() {
             response.bytes()
         } else {
@@ -372,6 +788,9 @@ enum TeeJsonResult {
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
+        raw_data_manifest: tee::RawDataManifest,
+        #[serde(flatten, skip_serializing_if = "Option::is_none")]
+        metadata: Option<EnclaveRegistrationMetadata>,
     },
 }
 
@@ -388,11 +807,16 @@ fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std
             let signature = output
                 .signature
                 .ok_or("finalized output is missing signature")?;
+            let raw_data_manifest = output
+                .raw_data_manifest
+                .ok_or("finalized output is missing raw data manifest")?;
             Ok(TeeJsonResult::Finalized {
                 payload: Box::new(payload),
                 payload_bcs_hex,
                 signature: signature.signature,
                 public_key: signature.public_key,
+                raw_data_manifest,
+                metadata: None,
             })
         }
         tee::OracleStatus::PendingSource => Ok(TeeJsonResult::PendingSource {
@@ -546,18 +970,15 @@ fn walrus_archive_config(
         return Ok(None);
     }
 
-    let aggregator_url = cli
-        .walrus_aggregator_url
-        .clone()
-        .or_else(|| non_empty_env("SONARI_WALRUS_AGGREGATOR_URL"))
-        .ok_or("--walrus-aggregator-url or SONARI_WALRUS_AGGREGATOR_URL is required with --walrus-archive")?;
-    let epochs = match cli
-        .walrus_epochs
+    let n_shards = match cli
+        .walrus_n_shards
         .map(Ok)
-        .or_else(|| non_empty_env("SONARI_WALRUS_EPOCHS").map(|value| parse_epochs(&value)))
+        .or_else(|| non_empty_env("SONARI_WALRUS_N_SHARDS").map(|value| parse_n_shards(&value)))
     {
-        Some(epochs) => epochs?,
-        None => 2,
+        Some(n_shards) => n_shards?,
+        None => {
+            return Err("SONARI_WALRUS_N_SHARDS is required when --walrus-archive is used".into());
+        }
     };
     let command_timeout_ms = if let Some(timeout_ms) = cli.walrus_timeout_ms {
         parse_command_timeout_ms(&timeout_ms.to_string())?
@@ -577,25 +998,9 @@ fn walrus_archive_config(
             .clone()
             .or_else(|| env::var_os("SONARI_WALRUS_CLI").map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("walrus")),
-        config_path: cli
-            .walrus_config
-            .clone()
-            .or_else(|| env::var_os("SONARI_WALRUS_CONFIG").map(PathBuf::from)),
-        context: cli
-            .walrus_context
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_CONTEXT")),
-        wallet: cli
-            .walrus_wallet
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_WALLET")),
-        upload_relay: cli
-            .walrus_upload_relay
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_UPLOAD_RELAY")),
-        aggregator_url,
-        epochs,
+        n_shards,
         command_timeout_ms,
+        egress_proxy_url: non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
     }))
 }
 
@@ -697,7 +1102,7 @@ mod tests {
         assert_eq!(input.case_id, "usgs-live/us7000abcd");
         assert_eq!(
             input.raw_detail_uri,
-            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000abcd.geojson"
+            "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000abcd&format=geojson"
         );
         assert_eq!(
             input.raw_data_uri,

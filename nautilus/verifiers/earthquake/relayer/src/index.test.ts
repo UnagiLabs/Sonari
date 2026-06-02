@@ -27,6 +27,8 @@ const fixtureSignatureBytes = hexToBytes(
 const fixturePublicKeyBytes = hexToBytes(
     "0xea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
 );
+const fixtureVerifierConfigKey = 1;
+const fixtureVerifierConfigVersion = 1;
 
 function hexToBytes(hex: string): number[] {
     const normalized = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -92,6 +94,9 @@ describe("relayer request preview", () => {
                 registry,
                 verifierRegistry,
                 clock,
+                verifierConfigKey: fixtureVerifierConfigKey,
+                verifierConfigVersion: fixtureVerifierConfigVersion,
+                enclaveInstancePublicKey: fixtureInput.public_key,
                 arguments: [
                     registry,
                     verifierRegistry,
@@ -105,6 +110,9 @@ describe("relayer request preview", () => {
                     registry,
                     verifierRegistry,
                     clock,
+                    verifierConfigKey: fixtureVerifierConfigKey,
+                    verifierConfigVersion: fixtureVerifierConfigVersion,
+                    enclaveInstancePublicKey: fixtureInput.public_key,
                     arguments: [
                         registry,
                         verifierRegistry,
@@ -144,6 +152,11 @@ describe("relayer request preview", () => {
             { public_key: `0x${"22".repeat(33)}` },
             { signature: "AQID+/==" },
             { signature: "AFakeSuiSerializedSignatureValue==" },
+            { verifier_config_key: 0 },
+            { verifier_config_key: 2 },
+            { verifier_config_version: 0 },
+            { enclave_instance_public_key: `0x${"33".repeat(32)}` },
+            { enclave_instance_public_key: `0x${"22".repeat(31)}` },
         ]) {
             expect(
                 buildRelayerRequestPreview(

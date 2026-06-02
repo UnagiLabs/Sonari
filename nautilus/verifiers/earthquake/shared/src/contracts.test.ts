@@ -41,6 +41,38 @@ const currentPayload = {
     freshness_deadline_ms: 1_704_172_800_000,
 } as const satisfies Record<string, unknown>;
 
+const validPayloadBcsHex = "0x01";
+const validSignature = `0x${"11".repeat(64)}`;
+const validPublicKey = `0x${"22".repeat(32)}`;
+const finalizedRelayerInput = {
+    status: "finalized",
+    payload: currentPayload,
+    payload_bcs_hex: validPayloadBcsHex,
+    signature: validSignature,
+    public_key: validPublicKey,
+    verifier_config_key: 1,
+    verifier_config_version: 1,
+    enclave_instance_public_key: validPublicKey,
+} as const;
+
+const validRawDataManifest = {
+    entries: [
+        {
+            name: "USGS",
+            event_id: "us7000sonari",
+            product: "detail_geojson",
+            uri: "walrus://blob/testBlob_123456",
+            content_hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            source_uri:
+                "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
+            walrus_blob_id: "testBlob_123456",
+            source_hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            size_bytes: 1234,
+        },
+    ],
+    oracle_version: 1,
+} as const;
+
 describe("oracle schema contracts", () => {
     it("keeps current payload field order aligned with the root schema", () => {
         expect(PAYLOAD_FIELD_ORDER).toEqual([
@@ -143,6 +175,8 @@ describe("oracle schema contracts", () => {
             "AWS_RUNNER_CONTRACT_INVALID",
             "RELAYER_SUBMIT_FAILED",
             "MOVE_REJECTED",
+            "SOURCE_ARCHIVE_RETRYABLE_FAILED",
+            "SOURCE_ARCHIVE_INTEGRITY_FAILED",
             "REJECTED_AUTO_TRIGGER",
             "WATCHER_BELOW_AUTO_THRESHOLD",
         ]);
@@ -211,34 +245,66 @@ describe("oracle boundary validators", () => {
     });
 
     it("accepts only finalized signed payloads for relayer submission", () => {
-        expect(
-            validateRelayerSubmitInput({
-                status: "finalized",
-                payload: currentPayload,
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
-            }),
-        ).toEqual({
+        expect(validateRelayerSubmitInput(finalizedRelayerInput)).toEqual({
             ok: true,
             value: {
                 status: "finalized",
                 payload: currentPayload,
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
+                payload_bcs_hex: validPayloadBcsHex,
+                signature: validSignature,
+                public_key: validPublicKey,
+                verifier_config_key: 1,
+                verifier_config_version: 1,
+                enclave_instance_public_key: validPublicKey,
             },
         });
 
         expect(
             validateRelayerSubmitInput({
+                ...finalizedRelayerInput,
                 status: "pending_mmi",
-                payload: currentPayload,
-                payload_bcs_hex: "0x01",
-                signature: "0xsig",
-                public_key: "0xpub",
             }),
         ).toMatchObject({ ok: false, error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD" });
+    });
+
+    it("accepts a finalized raw data manifest without adding it to the payload field order", () => {
+        expect(
+            validateRelayerSubmitInput({
+                ...finalizedRelayerInput,
+                raw_data_manifest: validRawDataManifest,
+            }),
+        ).toEqual({
+            ok: true,
+            value: {
+                ...finalizedRelayerInput,
+                raw_data_manifest: validRawDataManifest,
+            },
+        });
+        expect(Object.keys(currentPayload)).toEqual(PAYLOAD_FIELD_ORDER);
+    });
+
+    it("rejects malformed raw data manifest references", () => {
+        for (const entryPatch of [
+            { source_hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+            { uri: "walrus://blob/otherBlob_123456" },
+            { walrus_blob_id: "" },
+            { source_uri: "" },
+            { size_bytes: 0 },
+            { size_bytes: 1.5 },
+        ]) {
+            expect(
+                validateRelayerSubmitInput({
+                    ...finalizedRelayerInput,
+                    raw_data_manifest: {
+                        ...validRawDataManifest,
+                        entries: [{ ...validRawDataManifest.entries[0], ...entryPatch }],
+                    },
+                }),
+            ).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            });
+        }
     });
 
     it("rejects malformed finalized payload metadata", () => {
@@ -269,11 +335,40 @@ describe("oracle boundary validators", () => {
         ]) {
             expect(
                 validateRelayerSubmitInput({
-                    status: "finalized",
+                    ...finalizedRelayerInput,
                     payload: { ...currentPayload, ...payloadPatch },
-                    payload_bcs_hex: "0x01",
-                    signature: "0xsig",
-                    public_key: "0xpub",
+                }),
+            ).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            });
+        }
+    });
+
+    it("rejects missing or malformed enclave tracking metadata", () => {
+        for (const patch of [
+            { payload_bcs_hex: "" },
+            { payload_bcs_hex: "0x0" },
+            { payload_bcs_hex: "0xzz" },
+            { signature: "" },
+            { signature: `0x${"11".repeat(63)}` },
+            { public_key: "" },
+            { public_key: `0x${"22".repeat(31)}` },
+            { verifier_config_key: undefined },
+            { verifier_config_key: 0 },
+            { verifier_config_key: 2 },
+            { verifier_config_key: 1.5 },
+            { verifier_config_version: undefined },
+            { verifier_config_version: 0 },
+            { verifier_config_version: 1.5 },
+            { enclave_instance_public_key: "" },
+            { enclave_instance_public_key: `0x${"22".repeat(31)}` },
+            { enclave_instance_public_key: `0x${"33".repeat(32)}` },
+        ]) {
+            expect(
+                validateRelayerSubmitInput({
+                    ...finalizedRelayerInput,
+                    ...patch,
                 }),
             ).toMatchObject({
                 ok: false,

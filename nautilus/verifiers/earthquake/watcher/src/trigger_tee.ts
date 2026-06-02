@@ -7,6 +7,10 @@ import {
     type TeeCoreResult,
 } from "@sonari/earthquake-shared";
 
+const mockPayloadBcsHex = "0x01";
+const mockSignature = `0x${"11".repeat(64)}`;
+const mockPublicKey = `0x${"22".repeat(32)}`;
+
 export interface RunnerAdapter {
     run(request: EarthquakeVerifierRequest): Promise<TeeCoreResult>;
 }
@@ -228,9 +232,12 @@ export class MockRunnerAdapter implements RunnerAdapter {
                 return {
                     status: "finalized",
                     payload: finalizedPayload,
-                    payload_bcs_hex: "0x01",
-                    signature: "0xsig",
-                    public_key: "0xpub",
+                    payload_bcs_hex: mockPayloadBcsHex,
+                    signature: mockSignature,
+                    public_key: mockPublicKey,
+                    verifier_config_key: 1,
+                    verifier_config_version: 1,
+                    enclave_instance_public_key: mockPublicKey,
                 };
             case "us7000pending-source":
                 return {

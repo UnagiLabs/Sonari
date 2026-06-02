@@ -31,12 +31,6 @@ jobs:
       SUBNET_IDS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUBNET_IDS }}
       AMI_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_AMI_ID }}
       RUNNER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RUNNER_TOKEN_SECRET_ARN }}
-      TEE_SIGNING_KEY_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_TEE_SIGNING_KEY_SECRET_ARN }}
-      WALRUS_CONFIG_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CONFIG_SECRET_ARN }}
-      SUI_WALLET_CONFIG_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUI_WALLET_CONFIG_SECRET_ARN }}
-      SUI_KEYSTORE_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUI_KEYSTORE_SECRET_ARN }}
-      WALRUS_AGGREGATOR_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_AGGREGATOR_URL }}
-      WALRUS_CONTEXT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CONTEXT }}
       SIGNING_SEED_CIPHERTEXT_S3_BUCKET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_BUCKET }}
       SIGNING_SEED_CIPHERTEXT_S3_KEY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_KEY }}
       NITRO_ENCLAVE_IMAGE_SHA384: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_IMAGE_SHA384 }}
@@ -77,11 +71,6 @@ jobs:
             SUBNET_IDS
             AMI_ID
             RUNNER_TOKEN_SECRET_ARN
-            TEE_SIGNING_KEY_SECRET_ARN
-            WALRUS_CONFIG_SECRET_ARN
-            SUI_WALLET_CONFIG_SECRET_ARN
-            SUI_KEYSTORE_SECRET_ARN
-            WALRUS_AGGREGATOR_URL
             SIGNING_SEED_CIPHERTEXT_S3_BUCKET
             SIGNING_SEED_CIPHERTEXT_S3_KEY
             NITRO_ENCLAVE_IMAGE_SHA384
@@ -307,6 +296,9 @@ jobs:
       - name: Build earthquake TEE artifact
         run: pnpm build:aws-earthquake-tee-artifact
 
+      - name: Build earthquake EIF
+        run: pnpm build:aws-earthquake-eif
+
       - name: Build membership identity TEE artifact
         run: pnpm build:aws-membership-identity-tee-artifact
 
@@ -340,24 +332,29 @@ jobs:
 
           lambda_key="${S3_PREFIX}/${GITHUB_SHA}/sonari-verifier-runner-lambda.zip"
           earthquake_tee_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
+          earthquake_eif_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee.eif"
           membership_tee_key="${S3_PREFIX}/${GITHUB_SHA}/membership-identity-tee-artifact.tar.gz"
           membership_eif_key="${S3_PREFIX}/${GITHUB_SHA}/membership-identity-tee.eif"
 
           earthquake_tee_artifact_sha256="$(validate_sha256 "earthquake TEE artifact" dist/aws/earthquake-tee-artifact.tar.gz)"
+          earthquake_eif_sha256="$(validate_sha256 "earthquake EIF" dist/aws/earthquake-tee.eif)"
           membership_tee_artifact_sha256="$(validate_sha256 "membership TEE artifact" dist/aws/membership-identity-tee-artifact.tar.gz)"
           membership_eif_sha256="$(validate_sha256 "membership EIF" dist/aws/membership-identity-tee.eif)"
 
           aws s3 cp dist/aws/sonari-verifier-runner-lambda.zip "s3://$ARTIFACT_BUCKET/$lambda_key"
           aws s3 cp dist/aws/earthquake-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/$earthquake_tee_key"
+          aws s3 cp dist/aws/earthquake-tee.eif "s3://$ARTIFACT_BUCKET/$earthquake_eif_key"
           aws s3 cp dist/aws/membership-identity-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/$membership_tee_key"
           aws s3 cp dist/aws/membership-identity-tee.eif "s3://$ARTIFACT_BUCKET/$membership_eif_key"
 
           {
             echo "LAMBDA_S3_KEY=$lambda_key"
             echo "EARTHQUAKE_TEE_S3_KEY=$earthquake_tee_key"
+            echo "EARTHQUAKE_EIF_S3_KEY=$earthquake_eif_key"
             echo "MEMBERSHIP_TEE_S3_KEY=$membership_tee_key"
             echo "MEMBERSHIP_EIF_S3_KEY=$membership_eif_key"
             echo "EARTHQUAKE_TEE_ARTIFACT_SHA256=$earthquake_tee_artifact_sha256"
+            echo "EARTHQUAKE_EIF_SHA256=$earthquake_eif_sha256"
             echo "MEMBERSHIP_TEE_ARTIFACT_SHA256=$membership_tee_artifact_sha256"
             echo "MEMBERSHIP_EIF_SHA256=$membership_eif_sha256"
           } >> "$GITHUB_ENV"
@@ -374,6 +371,8 @@ jobs:
             --lambda-bucket "$ARTIFACT_BUCKET"
             --earthquake-tee-bucket "$ARTIFACT_BUCKET"
             --earthquake-tee-sha256 "$EARTHQUAKE_TEE_ARTIFACT_SHA256"
+            --earthquake-eif-bucket "$ARTIFACT_BUCKET"
+            --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256"
             --membership-tee-bucket "$ARTIFACT_BUCKET"
             --membership-tee-sha256 "$MEMBERSHIP_TEE_ARTIFACT_SHA256"
             --membership-eif-bucket "$ARTIFACT_BUCKET"
@@ -402,6 +401,9 @@ jobs:
             "TeeArtifactS3Bucket",
             "TeeArtifactS3Key",
             "TeeArtifactSha256",
+            "EarthquakeTeeEifS3Bucket",
+            "EarthquakeTeeEifS3Key",
+            "EarthquakeTeeEifSha256",
             "MembershipTeeArtifactS3Bucket",
             "MembershipTeeArtifactS3Key",
             "MembershipTeeArtifactSha256",
@@ -445,21 +447,14 @@ jobs:
             "SubnetIds=$SUBNET_IDS"
             "AmiId=$AMI_ID"
             "RunnerTokenSecretArn=$RUNNER_TOKEN_SECRET_ARN"
-            "TeeSigningKeySecretArn=$TEE_SIGNING_KEY_SECRET_ARN"
-            "WalrusConfigSecretArn=$WALRUS_CONFIG_SECRET_ARN"
-            "SuiWalletConfigSecretArn=$SUI_WALLET_CONFIG_SECRET_ARN"
-            "SuiKeystoreSecretArn=$SUI_KEYSTORE_SECRET_ARN"
-            "WalrusAggregatorUrl=$WALRUS_AGGREGATOR_URL"
             "SigningSeedCiphertextS3Bucket=$SIGNING_SEED_CIPHERTEXT_S3_BUCKET"
             "SigningSeedCiphertextS3Key=$SIGNING_SEED_CIPHERTEXT_S3_KEY"
             "NitroEnclaveImageSha384=$NITRO_ENCLAVE_IMAGE_SHA384"
             "NitroEnclavePcr3=$NITRO_ENCLAVE_PCR3"
             "WorldIdAppId=$WORLD_ID_APP_ID"
+            "EarthquakeNitroEnclaveProcessCommand=/opt/sonari/bin/run-earthquake-enclave"
           )
 
-          if [[ -n "${WALRUS_CONTEXT:-}" ]]; then
-            extra_parameter_overrides+=("WalrusContext=$WALRUS_CONTEXT")
-          fi
           if [[ -n "${WORLD_ID_API_BASE:-}" ]]; then
             extra_parameter_overrides+=("WorldIdApiBase=$WORLD_ID_API_BASE")
           fi
@@ -493,6 +488,8 @@ jobs:
 
           aws cloudformation deploy \
             --template-file infra/aws/sonari-verifier-runner/template.yaml \
+            --s3-bucket "$ARTIFACT_BUCKET" \
+            --s3-prefix "${S3_PREFIX}/${GITHUB_SHA}/cloudformation" \
             --stack-name "$STACK_NAME" \
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides "${deploy_plan_parameter_overrides[@]}" "${extra_parameter_overrides[@]}" \
@@ -529,6 +526,8 @@ jobs:
           lambda_code_s3_key="$(stack_output LambdaCodeS3KeyOutput)"
           tee_artifact_s3_key="$(stack_output TeeArtifactS3KeyOutput)"
           deployed_tee_artifact_sha256="$(stack_output TeeArtifactSha256Output)"
+          earthquake_eif_s3_key="$(stack_output EarthquakeTeeEifS3KeyOutput)"
+          deployed_earthquake_eif_sha256="$(stack_output EarthquakeTeeEifSha256Output)"
           membership_tee_artifact_s3_key="$(stack_output MembershipTeeArtifactS3KeyOutput)"
           deployed_membership_tee_artifact_sha256="$(stack_output MembershipTeeArtifactSha256Output)"
           tee_eif_s3_key="$(stack_output TeeEifS3KeyOutput)"
@@ -566,8 +565,10 @@ jobs:
           [[ "$deployed_git_commit_sha" == "$GITHUB_SHA" ]]
           [[ "$lambda_code_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/sonari-verifier-runner-lambda.zip" ]]
           [[ "$tee_artifact_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz" ]]
+          [[ "$earthquake_eif_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/earthquake-tee.eif" ]]
           [[ "$membership_tee_artifact_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/membership-identity-tee-artifact.tar.gz" ]]
           [[ "$tee_eif_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/membership-identity-tee.eif" ]]
           [[ "$deployed_tee_artifact_sha256" == "$EARTHQUAKE_TEE_ARTIFACT_SHA256" ]]
+          [[ "$deployed_earthquake_eif_sha256" == "$EARTHQUAKE_EIF_SHA256" ]]
           [[ "$deployed_membership_tee_artifact_sha256" == "$MEMBERSHIP_TEE_ARTIFACT_SHA256" ]]
           [[ "$deployed_tee_eif_sha256" == "$MEMBERSHIP_EIF_SHA256" ]]

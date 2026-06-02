@@ -1,20 +1,31 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
     createEd25519SuiSignerFromPrivateKey,
     loadFixtureRelayerSubmitInput,
     type RelayerSubmitConfig,
 } from "@sonari/earthquake-relayer";
-import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
+import {
+    BCS_ENUMS,
+    type EnclaveVerificationMetadata,
+    type TeeCoreResult,
+} from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     handler as runnerWorkflowHandler,
     type AutoScalingClientLike,
+    type EnclaveRegistrationAdapter,
+    type EnclaveRegistrationClient,
+    SuiEnclaveRegistrationAdapter,
     type Ec2ClientLike,
+    readEnclaveRegistrationConfigFromEnv,
     readRelayerConfigFromEnv,
     type RelayerSignerSecretReader,
     type S3ClientLike,
+    type SourceArchiveAdapter,
     type SsmClientLike,
 } from "../src/runner_workflow.js";
 import { InMemoryStateRepository } from "../src/state.js";
@@ -25,6 +36,15 @@ const earthquakeRelayerTarget = "0x123::accessor::create_disaster_event_from_sig
 const earthquakeRelayerRegistry = "0xregistry";
 const earthquakeRelayerVerifierRegistry = "0xverifier";
 const earthquakeRelayerClock = "0x6";
+const finalizedPayloadBcsHex = "0x01";
+const finalizedSignature = `0x${"11".repeat(64)}`;
+const finalizedPublicKey = `0x${"22".repeat(32)}`;
+const attestationDocumentHex = `0x${"aa".repeat(96)}`;
+const registrationMetadata: EnclaveVerificationMetadata = {
+    verifier_config_key: 1,
+    verifier_config_version: 7,
+    enclave_instance_public_key: finalizedPublicKey,
+};
 
 describe("AWS runner workflow helper", () => {
     const originalEnv = { ...process.env };
@@ -215,33 +235,47 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.bootstrapReadinessChecks).toEqual(["i-cold"]);
     });
 
-    it("checks required bootstrap sentinel, env, secret files, Walrus config, and Nitro allocator", () => {
+    it("checks required bootstrap sentinel, env, blob-id CLI, egress proxy, and Nitro allocator", () => {
         const command = buildRunnerBootstrapReadinessShellCommand();
 
         expect(command).toContain("test -f /opt/sonari/bootstrap-complete");
         expect(command).toContain("test -s /opt/sonari/runner.env");
         expect(command).toContain("source /opt/sonari/runner.env");
-        expect(command).toContain('if [ -z "${SONARI_TEE_SIGNING_KEY_SEED:-}" ]; then');
+        expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
+        expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED_FILE");
         expect(command).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED_FILE:?SONARI_TEE_SIGNING_KEY_SEED_FILE is required when SONARI_TEE_SIGNING_KEY_SEED is unset}"',
+            ': "${SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"',
         );
-        expect(command).toContain("test -s \"$SONARI_TEE_SIGNING_KEY_SEED_FILE\"");
         expect(command).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
+            ': "${SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"',
         );
-        expect(command).toContain("test -s \"$SONARI_WALRUS_CONFIG\"");
-        expect(command).toContain("test -s \"$SONARI_WALRUS_WALLET\"");
         expect(command).toContain("test -x \"$SONARI_WALRUS_CLI\"");
-        expect(command).toContain(
-            ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
-        );
-        expect(command).toContain(
-            ': "${SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"',
-        );
-        expect(command).toContain(
-            ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
-        );
+        expect(command).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(command).not.toContain("SONARI_WALRUS_WALLET");
+        expect(command).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(command).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(command).not.toContain("SONARI_WALRUS_EPOCHS");
         expect(command).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
+    });
+
+    it("keeps AWS template source archive and shard-count wiring ahead of relayer", () => {
+        const template = readFileSync(
+            new URL("../../../../../infra/aws/sonari-verifier-runner/template.yaml", import.meta.url),
+            "utf8",
+        );
+
+        expect(template).toContain('echo "SONARI_WALRUS_N_SHARDS=1000"');
+        expect(template).toContain("walrus_n_shards: $walrus_n_shards");
+        expect(template).toContain("SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=180");
+        expect(template).toContain(
+            'socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000"',
+        );
+        expect(template.indexOf('"ArchiveSources"')).toBeGreaterThan(
+            template.indexOf('"ApplyResult"'),
+        );
+        expect(template.indexOf('"RelayerPreviewOrDryRun"')).toBeGreaterThan(
+            template.indexOf('"ArchiveSources"'),
+        );
     });
 
     it("dispatches SSM command and polls pending/success states", async () => {
@@ -273,35 +307,101 @@ describe("AWS runner workflow helper", () => {
         });
         expect(polled).toMatchObject({ command_status: "SUCCEEDED" });
         expect(ssm.commands[0]).toContain("NITRO_ENCLAVE_PROCESS_COMMAND");
-        expect(ssm.commands[0]).toContain(
-            'SONARI_TEE_SIGNING_KEY_SEED="$(tr -d \'[:space:]\' < "$SONARI_TEE_SIGNING_KEY_SEED_FILE")"',
-        );
-        expect(ssm.commands[0]).toContain(
-            ': "${SONARI_TEE_SIGNING_KEY_SEED:?SONARI_TEE_SIGNING_KEY_SEED is required}"',
-        );
-        expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_CONFIG:?SONARI_WALRUS_CONFIG is required}"',
-        );
-        expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_AGGREGATOR_URL:?SONARI_WALRUS_AGGREGATOR_URL is required}"',
-        );
+        expect(ssm.commands[0]).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
         expect(ssm.commands[0]).toContain(
             ': "${SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_WALLET:?SONARI_WALRUS_WALLET is required}"',
+            ': "${SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"',
         );
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_CONTEXT:?SONARI_WALRUS_CONTEXT is required}"',
+            "export SONARI_WALRUS_CLI SONARI_WALRUS_N_SHARDS SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         );
         expect(ssm.commands[0]).toContain(
-            ': "${SONARI_WALRUS_EPOCHS:?SONARI_WALRUS_EPOCHS is required}"',
+            ': "${SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"',
         );
-        expect(ssm.commands[0]).toContain(
-            "export SONARI_TEE_SIGNING_KEY_SEED SONARI_WALRUS_CLI SONARI_WALRUS_CONFIG SONARI_WALRUS_WALLET SONARI_WALRUS_CONTEXT SONARI_WALRUS_EPOCHS SONARI_WALRUS_AGGREGATOR_URL",
-        );
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_WALLET");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(ssm.commands[0]).not.toContain("SONARI_WALRUS_EPOCHS");
         expect(ssm.commands[0]).toContain("/tmp/sonari-tee-result-us7000sonari-1800000000123.json");
         expect(ssm.commands[0]).not.toContain("latest.json");
+    });
+
+    it("registers attestation before dispatching process_data and passes metadata to the runner", async () => {
+        const ssm = new RecordingSsmClient();
+        const registrar = new RecordingEnclaveRegistrationAdapter();
+        let nowMs = 1_800_000_000_123;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            enclaveRegistration: registrar,
+            now: () => nowMs,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "register_enclave_instance",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                attestation: {
+                    attestation_document_hex: attestationDocumentHex,
+                    public_key: finalizedPublicKey,
+                },
+            } as never),
+        ).resolves.toMatchObject({
+            registration_metadata: registrationMetadata,
+        });
+
+        nowMs += 1;
+        await expect(
+            handler({
+                action: "dispatch_process_data_command",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                instance_id: "i-123",
+                registration_metadata: registrationMetadata,
+            } as never),
+        ).resolves.toMatchObject({
+            command_id: "cmd-123",
+            result_s3_key: "results/us7000sonari/1800000000124.json",
+        });
+
+        expect(registrar.inputs).toEqual([
+            {
+                source_event_id: "us7000sonari",
+                attestation_document_hex: attestationDocumentHex,
+                public_key: finalizedPublicKey,
+            },
+        ]);
+        expect(ssm.commands[0]).toContain('"action":"process_data"');
+        expect(ssm.commands[0]).toContain('"registration_metadata"');
+        expect(ssm.commands[0]).toContain('"verifier_config_version":7');
+    });
+
+    it("fails closed before process_data when registration metadata is missing", async () => {
+        const ssm = new RecordingSsmClient();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_process_data_command",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                instance_id: "i-123",
+            } as never),
+        ).rejects.toThrow(/registration metadata/);
+        expect(ssm.commands).toEqual([]);
     });
 
     it("increments SSM command poll count while the command remains pending", async () => {
@@ -912,6 +1012,156 @@ describe("AWS runner workflow helper", () => {
         expect(relayer).toMatchObject({ relayer: "skipped" });
     });
 
+    it("archives finalized source manifest entries before relayer work", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const bytes = new TextEncoder().encode("source bytes");
+        const result = finalizedResultWithRawManifest(bytes);
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
+        const relayer = new RecordingRelayerAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            sourceArchive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        const archived = await handler({
+            action: "archive_sources",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result,
+        });
+        const relayed = await handler({
+            action: "relayer_preview_or_dry_run",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result,
+        });
+
+        expect(archived).toMatchObject({
+            source_archive: "success",
+            source_artifact_s3_keys: [
+                `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
+            ],
+        });
+        expect(sourceArchive.fetches).toEqual(["https://source.test/detail.geojson"]);
+        expect(sourceArchive.puts).toEqual([
+            {
+                bucket: "sonari-results",
+                key: `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
+                bytes,
+            },
+        ]);
+        expect(relayed).toMatchObject({ relayer: "succeeded" });
+        expect(relayer.inputs).toEqual([result]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            source_archive_status: "success",
+            source_archive_error_code: null,
+        });
+    });
+
+    it("records source archive integrity failures and blocks relayer", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("expected"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const relayer = new RecordingRelayerAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            sourceArchive: new RecordingSourceArchiveAdapter(new TextEncoder().encode("tampered")),
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ relayer: "skipped" });
+        expect(relayer.inputs).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "integrity_failed",
+            error_code: "SOURCE_ARCHIVE_INTEGRITY_FAILED",
+        });
+    });
+
+    it("records retryable source archive failures without mutating the TEE result", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const originalJson = JSON.stringify(result);
+        const archive = new RecordingSourceArchiveAdapter(new TextEncoder().encode("source bytes"));
+        archive.failS3 = true;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive: archive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "retryable_failed" });
+
+        expect(JSON.stringify(result)).toBe(originalJson);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "failed",
+            source_archive_status: "retryable_failed",
+            error_code: "SOURCE_ARCHIVE_RETRYABLE_FAILED",
+            payload_bcs_hex: result.payload_bcs_hex,
+            signature: result.signature,
+        });
+    });
+
     it("marks dry-run relayer as failed when RELAYER_NETWORK is missing", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -920,8 +1170,14 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/0.bin"] },
+            1_800_000_001_500,
+            1,
+        );
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -1009,6 +1265,110 @@ describe("AWS runner workflow helper", () => {
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
     });
 
+    it("derives enclave registration config from relayer submit environment lazily", async () => {
+        process.env.RELAYER_NETWORK = "testnet";
+        process.env.RELAYER_TARGET = earthquakeRelayerTarget;
+        process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
+        process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+        process.env.ENCLAVE_REGISTRATION_ALLOW_SUBMIT = "true";
+        process.env.ENCLAVE_INSTANCE_TTL_MS = "60000";
+        process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
+        const reader = new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey);
+        const config = readEnclaveRegistrationConfigFromEnv(reader);
+
+        expect(config).toMatchObject({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            instanceTtlMs: 60_000,
+        });
+        expect(config.configurationError).toBeUndefined();
+        expect(reader.secretReads).toEqual([]);
+        await expect(config.loadSigner?.()).resolves.toMatchObject({
+            toSuiAddress: expect.any(Function),
+        });
+        expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
+    });
+
+    it("registers an attested enclave on Sui and returns contract metadata", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient();
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toEqual(registrationMetadata);
+        expect(client.requests).toHaveLength(1);
+        expect(client.requests[0]?.signer).toBe(signer);
+        expect(client.requests[0]?.include).toEqual({ effects: true, events: true });
+    });
+
+    it("accepts base64 encoded enclave public keys in Sui registration events", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient(
+            Buffer.from(Array.from({ length: 32 }, () => 0x22)).toString("base64"),
+        );
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toEqual(registrationMetadata);
+    });
+
+    it("fails enclave registration before Sui submission when submit is not explicitly allowed", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient();
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: false,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).rejects.toThrow(/ALLOW_SUBMIT/);
+        expect(client.requests).toEqual([]);
+    });
+
     it("returns a relayer configuration error instead of throwing when required object IDs are missing", () => {
         process.env.RELAYER_MODE = "dry_run";
         process.env.RELAYER_NETWORK = "testnet";
@@ -1034,8 +1394,14 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal") as TeeCoreResult;
+        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/0.bin"] },
+            1_800_000_001_500,
+            1,
+        );
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -1065,6 +1431,9 @@ describe("AWS runner workflow helper", () => {
                             registry: config.registry,
                             verifierRegistry: config.verifierRegistry,
                             clock: "0x6",
+                            verifierConfigKey: result.verifier_config_key,
+                            verifierConfigVersion: result.verifier_config_version,
+                            enclaveInstancePublicKey: result.enclave_instance_public_key,
                             arguments: [
                                 config.registry,
                                 config.verifierRegistry,
@@ -1078,6 +1447,9 @@ describe("AWS runner workflow helper", () => {
                                 registry: config.registry,
                                 verifierRegistry: config.verifierRegistry,
                                 clock: "0x6",
+                                verifierConfigKey: result.verifier_config_key,
+                                verifierConfigVersion: result.verifier_config_version,
+                                enclaveInstancePublicKey: result.enclave_instance_public_key,
                                 arguments: [
                                     config.registry,
                                     config.verifierRegistry,
@@ -1167,7 +1539,7 @@ function pendingSourceResult(sourceEventId: string): TeeCoreResult {
     };
 }
 
-function finalizedResult(): TeeCoreResult {
+function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
     return {
         status: "finalized",
         payload: {
@@ -1201,10 +1573,42 @@ function finalizedResult(): TeeCoreResult {
             intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
             freshness_deadline_ms: 1_800_021_600_000,
         },
-        payload_bcs_hex: "0x01",
-        signature: "0xsig",
-        public_key: "0xpub",
+        payload_bcs_hex: finalizedPayloadBcsHex,
+        signature: finalizedSignature,
+        public_key: finalizedPublicKey,
+        verifier_config_key: 1,
+        verifier_config_version: 1,
+        enclave_instance_public_key: finalizedPublicKey,
     };
+}
+
+function finalizedResultWithRawManifest(
+    bytes: Uint8Array,
+): Extract<TeeCoreResult, { status: "finalized" }> {
+    const hash = `0x${sha256Hex(bytes)}`;
+    return {
+        ...finalizedResult(),
+        raw_data_manifest: {
+            entries: [
+                {
+                    name: "USGS",
+                    event_id: "us7000sonari",
+                    product: "detail_geojson",
+                    uri: "walrus://blob/testBlob_123456",
+                    content_hash: hash,
+                    source_uri: "https://source.test/detail.geojson",
+                    walrus_blob_id: "testBlob_123456",
+                    source_hash: hash,
+                    size_bytes: bytes.byteLength,
+                },
+            ],
+            oracle_version: 1,
+        },
+    };
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+    return createHash("sha256").update(bytes).digest("hex");
 }
 
 class RecordingAutoScalingClient implements AutoScalingClientLike {
@@ -1276,6 +1680,111 @@ class RecordingS3Client implements S3ClientLike {
                 error_code: "SHAKEMAP_PRODUCT_MISSING",
             })
         );
+    }
+}
+
+class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
+    readonly fetches: string[] = [];
+    readonly puts: Array<{ bucket: string; key: string; bytes: Uint8Array }> = [];
+    readonly archived: Array<{ artifactS3Key: string; walrusBlobId: string }> = [];
+    failFetch = false;
+    failS3 = false;
+    walrusBlobId = "testBlob_123456";
+
+    readonly fetcher = {
+        fetchBytes: async (sourceUri: string): Promise<Uint8Array> => {
+            this.fetches.push(sourceUri);
+            if (this.failFetch) {
+                throw new Error("source fetch unavailable");
+            }
+            return this.bytes;
+        },
+    };
+
+    readonly s3 = {
+        putObjectBytes: async (input: {
+            bucket: string;
+            key: string;
+            bytes: Uint8Array;
+        }): Promise<void> => {
+            if (this.failS3) {
+                throw new Error("S3 put failed");
+            }
+            this.puts.push(input);
+        },
+    };
+
+    readonly walrus = {
+        archiveAndVerify: async (input: {
+            artifactS3Key: string;
+        }): Promise<{ walrusBlobId: string }> => {
+            this.archived.push({
+                artifactS3Key: input.artifactS3Key,
+                walrusBlobId: this.walrusBlobId,
+            });
+            return { walrusBlobId: this.walrusBlobId };
+        },
+    };
+
+    constructor(private readonly bytes: Uint8Array) {}
+}
+
+class RecordingEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {
+    readonly inputs: Array<{
+        source_event_id: string;
+        attestation_document_hex: string;
+        public_key: string;
+    }> = [];
+
+    async register(input: {
+        sourceEventId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<typeof registrationMetadata> {
+        this.inputs.push({
+            source_event_id: input.sourceEventId,
+            attestation_document_hex: input.attestationDocumentHex,
+            public_key: input.publicKey,
+        });
+        return registrationMetadata;
+    }
+}
+
+class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
+    readonly requests: Array<{
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }> = [];
+
+    constructor(
+        private readonly eventPublicKey: unknown = Array.from({ length: 32 }, () => 0x22),
+    ) {}
+
+    async signAndExecuteTransaction(input: {
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }) {
+        this.requests.push(input);
+        return {
+            $kind: "Transaction" as const,
+            Transaction: {
+                status: { success: true, error: null },
+                effects: {},
+                events: [
+                    {
+                        type: "0x123::metadata_verifier::EnclaveInstanceRegistered",
+                        json: {
+                            verifier_family: 3,
+                            verifier_version: "1",
+                            config_version: String(registrationMetadata.verifier_config_version),
+                            public_key: this.eventPublicKey,
+                        },
+                    },
+                ],
+            },
+        };
     }
 }
 

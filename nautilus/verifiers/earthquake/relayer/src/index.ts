@@ -108,6 +108,10 @@ export interface ParsedRelayerSubmitInput {
     payloadBcsBytes: number[];
     signatureBytes: number[];
     publicKeyBytes: number[];
+    verifierConfigKey: number;
+    verifierConfigVersion: number;
+    enclaveInstancePublicKey: string;
+    enclaveInstancePublicKeyBytes: number[];
 }
 
 export interface RelayerRequestPreview {
@@ -115,12 +119,18 @@ export interface RelayerRequestPreview {
     registry: string;
     verifierRegistry: string;
     clock: string;
+    verifierConfigKey: number;
+    verifierConfigVersion: number;
+    enclaveInstancePublicKey: string;
     arguments: [string, string, string, number[], number[], number[]];
     submitRequest: {
         target: string;
         registry: string;
         verifierRegistry: string;
         clock: string;
+        verifierConfigKey: number;
+        verifierConfigVersion: number;
+        enclaveInstancePublicKey: string;
         arguments: [string, string, string, number[], number[], number[]];
     };
 }
@@ -150,11 +160,15 @@ export function loadFixtureRelayerSubmitInput(caseId: string): RelayerSubmitInpu
     const payload = readJson(new URL("unsigned_payload.json", fixtureRoot));
     const hashes = readJson(new URL("expected_hashes.json", fixtureRoot));
     const signature = readJson(new URL("signature.json", fixtureRoot));
+    const enclave = readJson(new URL("enclave_instance.json", fixtureRoot));
 
     if (
         typeof hashes.unsigned_bcs_payload_hex !== "string" ||
         typeof signature.signature !== "string" ||
-        typeof signature.public_key !== "string"
+        typeof signature.public_key !== "string" ||
+        enclave.verifier_config_key !== 1 ||
+        typeof enclave.verifier_config_version !== "number" ||
+        typeof enclave.enclave_instance_public_key !== "string"
     ) {
         throw new Error(`Relayer fixture case is malformed: ${caseId}`);
     }
@@ -165,6 +179,9 @@ export function loadFixtureRelayerSubmitInput(caseId: string): RelayerSubmitInpu
         payload_bcs_hex: hashes.unsigned_bcs_payload_hex,
         signature: signature.signature,
         public_key: signature.public_key,
+        verifier_config_key: enclave.verifier_config_key,
+        verifier_config_version: enclave.verifier_config_version,
+        enclave_instance_public_key: enclave.enclave_instance_public_key,
     };
 }
 
@@ -204,6 +221,9 @@ export function buildRelayerRequestPreview(
         registry: config.registry,
         verifierRegistry: config.verifierRegistry,
         clock: SUI_CLOCK_OBJECT_ID,
+        verifierConfigKey: parsed.value.verifierConfigKey,
+        verifierConfigVersion: parsed.value.verifierConfigVersion,
+        enclaveInstancePublicKey: parsed.value.enclaveInstancePublicKey,
         arguments: cloneMoveArguments(moveArguments),
     };
 
@@ -214,6 +234,9 @@ export function buildRelayerRequestPreview(
             registry: config.registry,
             verifierRegistry: config.verifierRegistry,
             clock: SUI_CLOCK_OBJECT_ID,
+            verifierConfigKey: parsed.value.verifierConfigKey,
+            verifierConfigVersion: parsed.value.verifierConfigVersion,
+            enclaveInstancePublicKey: parsed.value.enclaveInstancePublicKey,
             arguments: cloneMoveArguments(moveArguments),
             submitRequest,
         },
@@ -377,6 +400,18 @@ export function parseRelayerSubmitInput(input: unknown): RelayerResult<ParsedRel
         return publicKeyBytes;
     }
 
+    const enclaveInstancePublicKeyBytes = parseHexBytes(
+        validation.value.enclave_instance_public_key,
+        "enclave_instance_public_key",
+        ED25519_PUBLIC_KEY_BYTES,
+    );
+    if (!enclaveInstancePublicKeyBytes.ok) {
+        return enclaveInstancePublicKeyBytes;
+    }
+    if (!bytesEqual(publicKeyBytes.value, enclaveInstancePublicKeyBytes.value)) {
+        return relayerSubmitFailed("enclave_instance_public_key must match public_key");
+    }
+
     return {
         ok: true,
         value: {
@@ -384,6 +419,10 @@ export function parseRelayerSubmitInput(input: unknown): RelayerResult<ParsedRel
             payloadBcsBytes: payloadBcsBytes.value,
             signatureBytes: signatureBytes.value,
             publicKeyBytes: publicKeyBytes.value,
+            verifierConfigKey: validation.value.verifier_config_key,
+            verifierConfigVersion: validation.value.verifier_config_version,
+            enclaveInstancePublicKey: validation.value.enclave_instance_public_key,
+            enclaveInstancePublicKeyBytes: enclaveInstancePublicKeyBytes.value,
         },
     };
 }
@@ -647,6 +686,10 @@ function cloneMoveArguments(
     args: [string, string, string, number[], number[], number[]],
 ): [string, string, string, number[], number[], number[]] {
     return [args[0], args[1], args[2], [...args[3]], [...args[4]], [...args[5]]];
+}
+
+function bytesEqual(left: readonly number[], right: readonly number[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function readJson(url: URL): Record<string, unknown> {

@@ -6,14 +6,17 @@ import { buildAwsSonariVerifierRunnerDeployPlan } from "./aws_sonari_verifier_ru
 const execFileAsync = promisify(execFile);
 const validCommitSha = "0123456789abcdef0123456789abcdef01234567";
 const validEarthquakeTeeSha256 = "a".repeat(64);
-const validMembershipTeeSha256 = "b".repeat(64);
-const validMembershipEifSha256 = "c".repeat(64);
+const validEarthquakeEifSha256 = "b".repeat(64);
+const validMembershipTeeSha256 = "c".repeat(64);
+const validMembershipEifSha256 = "d".repeat(64);
 
 const validInput = {
     commitSha: validCommitSha,
     lambdaBucket: "lambda-artifacts",
     earthquakeTeeBucket: "earthquake-tee-artifacts",
     earthquakeTeeArtifactSha256: validEarthquakeTeeSha256,
+    earthquakeEifBucket: "earthquake-eif-artifacts",
+    earthquakeEifSha256: validEarthquakeEifSha256,
     membershipTeeBucket: "membership-tee-artifacts",
     membershipTeeArtifactSha256: validMembershipTeeSha256,
     membershipEifBucket: "membership-eif-artifacts",
@@ -44,6 +47,9 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(plan.parameterOverrides.MembershipTeeArtifactS3Key).toBe(
             `sonari-verifier-runner/${validCommitSha}/membership-identity-tee-artifact.tar.gz`,
         );
+        expect(plan.parameterOverrides.EarthquakeTeeEifS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/earthquake-tee.eif`,
+        );
         expect(plan.parameterOverrides.TeeEifS3Key).toBe(
             `sonari-verifier-runner/${validCommitSha}/membership-identity-tee.eif`,
         );
@@ -57,6 +63,12 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 earthquakeTeeArtifactSha256: "not-a-sha",
             }),
         ).toThrow("Invalid earthquake TEE artifact SHA-256");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                earthquakeEifSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid earthquake EIF SHA-256");
         expect(() =>
             buildAwsSonariVerifierRunnerDeployPlan({
                 ...validInput,
@@ -88,6 +100,9 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                     `${validCommitSha}/earthquake-tee-artifact.tar.gz`,
                 ].join("/"),
                 `TeeArtifactSha256=${validEarthquakeTeeSha256}`,
+                `EarthquakeTeeEifS3Bucket=${validInput.earthquakeEifBucket}`,
+                `EarthquakeTeeEifS3Key=sonari-verifier-runner/${validCommitSha}/earthquake-tee.eif`,
+                `EarthquakeTeeEifSha256=${validEarthquakeEifSha256}`,
                 `MembershipTeeArtifactS3Bucket=${validInput.membershipTeeBucket}`,
                 [
                     "MembershipTeeArtifactS3Key=sonari-verifier-runner",
@@ -126,6 +141,10 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 validInput.earthquakeTeeBucket,
                 "--earthquake-tee-sha256",
                 validEarthquakeTeeSha256,
+                "--earthquake-eif-bucket",
+                validInput.earthquakeEifBucket,
+                "--earthquake-eif-sha256",
+                validEarthquakeEifSha256,
                 "--membership-tee-bucket",
                 validInput.membershipTeeBucket,
                 "--membership-tee-sha256",

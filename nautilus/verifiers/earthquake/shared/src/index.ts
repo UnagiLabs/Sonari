@@ -75,6 +75,8 @@ export const DEFAULT_ORACLE_CONTRACT = {
     geo_resolution: 7,
 } as const;
 
+export const EARTHQUAKE_VERIFIER_CONFIG_KEY = 1;
+
 export const FRESHNESS_WINDOW_MS = 21_600_000;
 
 export const OFFCHAIN_STATUSES = [
@@ -111,6 +113,8 @@ export const ERROR_CODES = [
     "AWS_RUNNER_CONTRACT_INVALID",
     "RELAYER_SUBMIT_FAILED",
     "MOVE_REJECTED",
+    "SOURCE_ARCHIVE_RETRYABLE_FAILED",
+    "SOURCE_ARCHIVE_INTEGRITY_FAILED",
     "REJECTED_AUTO_TRIGGER",
     "WATCHER_BELOW_AUTO_THRESHOLD",
 ] as const;
@@ -166,6 +170,33 @@ export interface SignedFinalizedPayload {
     payload_bcs_hex: string;
     signature: string;
     public_key: string;
+    raw_data_manifest?: RawDataManifest;
+    verifier_config_key?: number;
+    verifier_config_version?: number;
+    enclave_instance_public_key?: string;
+}
+
+export interface RawDataManifest {
+    entries: RawDataEntry[];
+    oracle_version: typeof DEFAULT_ORACLE_CONTRACT.oracle_version;
+}
+
+export interface RawDataEntry {
+    name: string;
+    event_id: string;
+    product: string;
+    uri: string;
+    content_hash: string;
+    source_uri: string;
+    walrus_blob_id: string;
+    source_hash: string;
+    size_bytes: number;
+}
+
+export interface EnclaveVerificationMetadata {
+    verifier_config_key: typeof EARTHQUAKE_VERIFIER_CONFIG_KEY;
+    verifier_config_version: number;
+    enclave_instance_public_key: string;
 }
 
 export type TeeCoreResult =
@@ -189,7 +220,7 @@ export type TeeCoreResult =
       }
     | SignedFinalizedPayload;
 
-export type RelayerSubmitInput = SignedFinalizedPayload;
+export type RelayerSubmitInput = SignedFinalizedPayload & EnclaveVerificationMetadata;
 
 type ValidationResult<T> =
     | { ok: true; value: T }
@@ -205,6 +236,8 @@ const WORKER_TO_TEE_KEYS = [
 const U32_MAX = 0xffff_ffff;
 const ONE_MILLION = 1_000_000;
 const HASH_32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+const HEX_BYTES_PATTERN = /^(?:0x)?[0-9a-fA-F]+$/;
+const WALRUS_BLOB_ID_PATTERN = /^[A-Za-z0-9_-]{8,256}$/;
 const textEncoder = new TextEncoder();
 
 function isRecord(input: unknown): input is Record<string, unknown> {
@@ -240,6 +273,21 @@ function isSafeNonNegativeInteger(value: unknown): value is number {
 
 function isHash32(value: unknown): value is string {
     return typeof value === "string" && HASH_32_PATTERN.test(value);
+}
+
+function isHexBytes(value: unknown, expectedBytes?: number): value is string {
+    if (typeof value !== "string" || !HEX_BYTES_PATTERN.test(value)) {
+        return false;
+    }
+    const normalized = value.startsWith("0x") ? value.slice(2) : value;
+    if (normalized.length === 0 || normalized.length % 2 !== 0) {
+        return false;
+    }
+    return expectedBytes === undefined || normalized.length === expectedBytes * 2;
+}
+
+function normalizeHexBytes(value: string): string {
+    return value.startsWith("0x") ? value.slice(2).toLowerCase() : value.toLowerCase();
 }
 
 function hasCurrentPayloadShape(payload: Record<string, unknown>): boolean {
@@ -306,6 +354,40 @@ function hasValidFinalizedPayload(payload: Record<string, unknown>): boolean {
     }
 
     return freshnessDeadlineMs === verifiedAtMs + FRESHNESS_WINDOW_MS;
+}
+
+function hasValidRawDataManifest(value: unknown): value is RawDataManifest {
+    if (!isRecord(value) || value.oracle_version !== DEFAULT_ORACLE_CONTRACT.oracle_version) {
+        return false;
+    }
+    if (!Array.isArray(value.entries) || value.entries.length === 0 || value.entries.length > 16) {
+        return false;
+    }
+    return value.entries.every(hasValidRawDataEntry);
+}
+
+function hasValidRawDataEntry(value: unknown): value is RawDataEntry {
+    if (!isRecord(value)) {
+        return false;
+    }
+    if (
+        !isUtf8BytesInRange(value.name, 1, 64) ||
+        !isUtf8BytesInRange(value.event_id, 1, 96) ||
+        !isUtf8BytesInRange(value.product, 1, 96) ||
+        !isUtf8BytesInRange(value.source_uri, 1, 2048) ||
+        !isHash32(value.source_hash) ||
+        !isHash32(value.content_hash) ||
+        !isSafeIntegerInRange(value.size_bytes, 1, Number.MAX_SAFE_INTEGER) ||
+        typeof value.walrus_blob_id !== "string" ||
+        !WALRUS_BLOB_ID_PATTERN.test(value.walrus_blob_id) ||
+        typeof value.uri !== "string"
+    ) {
+        return false;
+    }
+    return (
+        value.source_hash === value.content_hash &&
+        value.uri === `walrus://blob/${value.walrus_blob_id}`
+    );
 }
 
 export function validateWorkerToTeeRequest(input: unknown): ValidationResult<WorkerToTeeRequest> {
@@ -390,14 +472,38 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
     }
 
     if (
-        !isNonEmptyString(input.payload_bcs_hex) ||
-        !isNonEmptyString(input.signature) ||
-        !isNonEmptyString(input.public_key)
+        !isHexBytes(input.payload_bcs_hex) ||
+        !isHexBytes(input.signature, 64) ||
+        !isHexBytes(input.public_key, 32)
     ) {
         return {
             ok: false,
             error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
             message: "Relayer input requires BCS payload bytes, signature, and public key",
+        };
+    }
+
+    if (
+        input.verifier_config_key !== EARTHQUAKE_VERIFIER_CONFIG_KEY ||
+        !isSafeIntegerInRange(input.verifier_config_version, 1, Number.MAX_SAFE_INTEGER) ||
+        !isHexBytes(input.enclave_instance_public_key, 32) ||
+        normalizeHexBytes(input.enclave_instance_public_key) !== normalizeHexBytes(input.public_key)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input requires Earthquake Oracle v1 enclave tracking metadata",
+        };
+    }
+
+    if (
+        input.raw_data_manifest !== undefined &&
+        !hasValidRawDataManifest(input.raw_data_manifest)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input raw_data_manifest is malformed",
         };
     }
 
@@ -409,6 +515,12 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             payload_bcs_hex: input.payload_bcs_hex,
             signature: input.signature,
             public_key: input.public_key,
+            ...(input.raw_data_manifest === undefined
+                ? {}
+                : { raw_data_manifest: input.raw_data_manifest }),
+            verifier_config_key: input.verifier_config_key,
+            verifier_config_version: input.verifier_config_version,
+            enclave_instance_public_key: input.enclave_instance_public_key,
         },
     };
 }

@@ -90,6 +90,43 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(waitForLeaseCount).toBe(2);
     });
 
+    it("runs earthquake verifier through health check, attestation registration, and process_data", async () => {
+        const template = await readTemplate();
+        const start = template.indexOf("EarthquakeRunnerStateMachine:");
+        const end = template.indexOf("MembershipRunnerStateMachine:");
+        const earthquake = template.slice(start, end);
+        const expectedActions = [
+            '"action": "dispatch_health_check_command"',
+            '"action": "read_health_check_result"',
+            '"action": "dispatch_get_attestation_command"',
+            '"action": "read_attestation_result"',
+            '"action": "register_enclave_instance"',
+            '"action": "dispatch_process_data_command"',
+            '"action": "read_result"',
+            '"action": "relayer_preview_or_dry_run"',
+        ];
+
+        expect(earthquake).toContain('"Next": "DispatchHealthCheckCommand"');
+        for (const action of expectedActions) {
+            expect(earthquake).toContain(action);
+        }
+        expect(earthquake).not.toContain('"action": "dispatch_tee_command"');
+        for (let index = 1; index < expectedActions.length; index += 1) {
+            const previousAction = expectedActions[index - 1];
+            const currentAction = expectedActions[index];
+            if (previousAction === undefined || currentAction === undefined) {
+                throw new Error("expected action sequence was malformed");
+            }
+            expect(earthquake.indexOf(previousAction)).toBeLessThan(
+                earthquake.indexOf(currentAction),
+            );
+        }
+        expect(earthquake).toContain('"attestation.$": "$.attestation_result.attestation"');
+        expect(earthquake).toContain(
+            '"registration_metadata.$": "$.registration_result.registration_metadata"',
+        );
+    });
+
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {
         const template = await readTemplate();
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
@@ -101,19 +138,61 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(scheduleStateUsageCount).toBe(2);
     });
 
-    it("retains earthquake Walrus parameters and runner environment", async () => {
+    it("keeps only the earthquake Walrus blob-id CLI in the runner environment", async () => {
         const template = await readTemplate();
 
-        expect(template).toContain("WalrusConfigSecretArn:");
-        expect(template).toContain("SuiWalletConfigSecretArn:");
-        expect(template).toContain("SuiKeystoreSecretArn:");
-        expect(template).toContain("WalrusAggregatorUrl:");
-        expect(template).toContain("WalrusContext:");
+        expect(template).toContain("EarthquakeTeeEifS3Bucket:");
+        expect(template).toContain("EarthquakeTeeEifS3Key:");
+        expect(template).toContain("EarthquakeTeeEifSha256:");
+        expect(template).toContain("Default: /opt/sonari/bin/run-earthquake-enclave");
+        expect(template).toContain(
+            "aws s3 cp 's3://$" + "{EarthquakeTeeEifS3Bucket}/$" + "{EarthquakeTeeEifS3Key}'",
+        );
+        expect(template).toContain("SONARI_EARTHQUAKE_ENCLAVE_WRAPPER");
+        expect(template).toContain(
+            'sed -i "s/^memory_mib:.*/memory_mib: $' + '{NitroEnclaveMemoryMiB}/"',
+        );
+        expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
+        expect(template).toContain("source /opt/sonari/runner.env");
+        expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777");
+        expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000");
+        expect(template).toContain("call_earthquake_enclave GET /health_check");
+        expect(template).toContain("call_earthquake_enclave GET /get_attestation");
+        expect(template).toContain("call_earthquake_enclave POST /process_data");
         expect(template).toContain("SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus");
-        expect(template).toContain("SONARI_WALRUS_CONFIG=/opt/sonari/walrus-client-config.yaml");
-        expect(template).toContain("SONARI_WALRUS_WALLET=/opt/sonari/sui_config.yaml");
-        expect(template).toContain("SONARI_WALRUS_CONTEXT");
-        expect(template).toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(template).toContain("SONARI_EARTHQUAKE_EIF_PATH");
+        expect(template).toContain("SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS");
+        expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
+        expect(template).toContain("egress_proxy_url: $egress_proxy_url");
+        expect(template).toContain(
+            'exec "$' +
+                '{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"',
+        );
+        expect(template).not.toContain("WalrusConfigSecretArn:");
+        expect(template).not.toContain("SuiWalletConfigSecretArn:");
+        expect(template).not.toContain("SuiKeystoreSecretArn:");
+        expect(template).not.toContain("WalrusAggregatorUrl:");
+        expect(template).not.toContain("WalrusUploadRelayUrl:");
+        expect(template).not.toContain("WalrusContext:");
+        expect(template).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(template).not.toContain("SONARI_WALRUS_WALLET");
+        expect(template).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(template).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(template).not.toContain("SONARI_WALRUS_UPLOAD_RELAY");
+    });
+
+    it("configures earthquake enclave egress through a parent CONNECT proxy and local bridge", async () => {
+        const template = await readTemplate();
+
+        expect(template).toContain("test -x /opt/sonari/tee-artifact/bin/vsock-tcp-bridge");
+        expect(template).toContain("sonari-earthquake-egress-connect-proxy.service");
+        expect(template).toContain("sonari-earthquake-egress-vsock-proxy.service");
+        expect(template).toContain("earthquake.usgs.gov:443");
+        expect(template).toContain("{address: 127.0.0.1, port: 18081}");
+        expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080");
+        expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).not.toContain("walrus_aggregator_host");
+        expect(template).not.toContain("walrus_upload_relay_host");
     });
 
     it("retains membership World ID, EIF, KMS attestation, and ciphertext configuration", async () => {
@@ -158,6 +237,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("RunnerAutoScalingGroupName:");
         expect(template).toContain("RunnerLaunchTemplateId:");
         expect(template).toContain("RunnerRoleArn:");
+        expect(template).toContain("EarthquakeTeeEifS3KeyOutput:");
+        expect(template).toContain("EarthquakeTeeEifSha256Output:");
         expect(template).toContain("WatcherScheduleName:");
         expect(template).toContain("BatchScheduleName:");
         expect(template).toContain("WatcherLambdaName:");

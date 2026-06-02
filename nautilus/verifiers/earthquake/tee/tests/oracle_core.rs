@@ -365,7 +365,7 @@ fn finalized_entrypoint_signs_core_payload_with_injected_signer() {
 }
 
 #[test]
-fn finalized_usgs_archives_raw_sources_before_signing_payload() {
+fn finalized_usgs_references_raw_sources_before_signing_payload() {
     let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
     let archive = RecordingSourceArchive::default();
     let output = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
@@ -378,7 +378,7 @@ fn finalized_usgs_archives_raw_sources_before_signing_payload() {
         .expect("finalized output should include raw manifest");
     assert_eq!(raw_manifest.entries.len(), 2);
     assert_eq!(archive.stored.get(), 2);
-    assert_eq!(archive.fetched.get(), 2);
+    assert_eq!(archive.fetched.get(), 0);
 
     for entry in &raw_manifest.entries {
         assert!(entry.uri.starts_with("walrus://blob/"));
@@ -421,7 +421,7 @@ fn finalized_usgs_archives_raw_grid_zip_artifact_bytes_not_expanded_xml() {
     let grid_record = stored
         .iter()
         .find(|record| record.source_uri == "https://example.test/download/grid.xml.zip")
-        .expect("zip source should be archived");
+        .expect("zip source should be referenced");
     assert_eq!(grid_record.bytes, grid_zip);
     assert_eq!(grid_record.source_hash, grid_zip_hash);
 }
@@ -765,8 +765,8 @@ fn low_level_cli_rejects_zero_walrus_timeout() {
     let output = Command::new(env!("CARGO_BIN_EXE_tee"))
         .args([
             "--walrus-archive",
-            "--walrus-aggregator-url",
-            "https://aggregator.test",
+            "--walrus-n-shards",
+            "1000",
             "--walrus-timeout-ms",
             "0",
         ])
@@ -889,6 +889,106 @@ fn production_cli_reads_worker_request_from_stdin_when_input_is_omitted() {
 }
 
 #[test]
+fn production_cli_accepts_nautilus_health_check_action_without_seed() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env_remove("SONARI_TEE_SIGNING_KEY_SEED")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"health_check"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "healthy");
+    assert_eq!(result["external_sources_reachable"], true);
+}
+
+#[test]
+fn production_cli_returns_configured_attestation_action() {
+    let attestation_document_hex = format!("0x{}", "aa".repeat(96));
+    let public_key = format!("0x{}", "22".repeat(32));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .env(
+            "SONARI_TEE_ATTESTATION_DOCUMENT_HEX",
+            &attestation_document_hex,
+        )
+        .env("SONARI_TEE_ATTESTATION_PUBLIC_KEY", &public_key)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"get_attestation"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["attestation_document_hex"], attestation_document_hex);
+    assert_eq!(result["public_key"], public_key);
+}
+
+#[test]
+fn production_cli_requires_registration_metadata_for_process_data_action() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"action":"process_data","payload":{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("registration_metadata"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
     let detail_json = br#"{
         "id": "us7000multi",
@@ -989,7 +1089,6 @@ impl SourceArchive for RecordingSourceArchive {
     ) -> Result<StoredSourceRef, SourceArchiveError> {
         let index = self.stored.get();
         self.stored.set(index + 1);
-        self.fetched.set(self.fetched.get() + 1);
         self.records.borrow_mut().push(ArchivedSourceRecord {
             source_uri: source_uri.to_owned(),
             source_hash: source_hash.to_owned(),

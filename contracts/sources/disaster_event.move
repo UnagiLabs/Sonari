@@ -41,6 +41,9 @@ public struct DisasterEvent has key {
     verifier_public_key: vector<u8>,
     signature: vector<u8>,
     verifier_registry_id: ID,
+    verifier_config_key: u64,
+    verifier_config_version: u64,
+    enclave_instance_public_key: vector<u8>,
     verified_at_ms: u64,
     source_updated_at_ms: u64,
     freshness_deadline_ms: u64,
@@ -137,15 +140,16 @@ public(package) fun create_from_signed_payload(
 ) {
     assert!(payload_bcs.length() <= MAX_PAYLOAD_BCS_BYTES, EPayloadTooLarge);
     let verifier_registry_id = metadata_verifier::registry_id(verifier_registry);
-    metadata_verifier::assert_signed_bytes(
-        verifier_registry,
-        metadata_verifier::verifier_family_earthquake_oracle(),
-        metadata_verifier::verifier_version_v1(),
-        &payload_bcs,
-        &signature,
-        &public_key,
-    );
-    let payload = payload::decode_finalized(payload_bcs, clock::timestamp_ms(clock));
+    let now_ms = clock::timestamp_ms(clock);
+    let (verifier_config_key, verifier_config_version, enclave_instance_public_key) =
+        metadata_verifier::assert_enclave_signed_bytes(
+            verifier_registry,
+            &payload_bcs,
+            &signature,
+            &public_key,
+            now_ms,
+        );
+    let payload = payload::decode_finalized(payload_bcs, now_ms);
     create_from_verified_payload(
         registry,
         payload,
@@ -154,6 +158,9 @@ public(package) fun create_from_signed_payload(
         public_key,
         signature,
         verifier_registry_id,
+        verifier_config_key,
+        verifier_config_version,
+        enclave_instance_public_key,
         ctx,
     );
 }
@@ -212,6 +219,9 @@ fun create_from_verified_payload(
     verifier_public_key: vector<u8>,
     signature: vector<u8>,
     verifier_registry_id: ID,
+    verifier_config_key: u64,
+    verifier_config_version: u64,
+    enclave_instance_public_key: vector<u8>,
     ctx: &mut TxContext,
 ) {
     let event_uid = payload::event_uid(&payload);
@@ -263,6 +273,9 @@ fun create_from_verified_payload(
         verifier_public_key,
         signature,
         verifier_registry_id,
+        verifier_config_key,
+        verifier_config_version,
+        enclave_instance_public_key,
         verified_at_ms: payload::verified_at_ms(&payload),
         source_updated_at_ms: payload::source_updated_at_ms(&payload),
         freshness_deadline_ms: payload::freshness_deadline_ms(&payload),
@@ -314,6 +327,9 @@ public fun create_from_payload_for_testing(
         vector[],
         vector[],
         verifier_registry_id,
+        0,
+        0,
+        vector[],
         ctx,
     );
 }
@@ -413,12 +429,15 @@ public fun certificate_identity_for_testing(
 #[test_only]
 public fun certificate_verifier_for_testing(
     disaster_event: &DisasterEvent,
-): (u8, vector<u8>, vector<u8>, ID) {
+): (u8, vector<u8>, vector<u8>, ID, u64, u64, vector<u8>) {
     (
         disaster_event.signature_scheme,
         disaster_event.verifier_public_key,
         disaster_event.signature,
         disaster_event.verifier_registry_id,
+        disaster_event.verifier_config_key,
+        disaster_event.verifier_config_version,
+        disaster_event.enclave_instance_public_key,
     )
 }
 

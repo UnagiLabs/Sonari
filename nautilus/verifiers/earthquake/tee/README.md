@@ -24,7 +24,7 @@ tee/
 │   ├── core/
 │   │   ├── processing.rs         ← メイン処理パイプライン
 │   │   ├── artifacts.rs          ← 出力データの構造体定義
-│   │   ├── source_archive.rs     ← Walrusアーカイブへの保存
+│   │   ├── source_archive.rs     ← Walrus blob id/source hash 参照の生成
 │   │   └── types.rs              ← OracleInput/Output/Error の型定義
 │   ├── compute/
 │   │   ├── geo.rs                ← グリッドポイント → H3セル変換
@@ -115,7 +115,7 @@ flowchart TD
 | `process_usgs(input)` | テスト用。署名なし |
 | `process_usgs_with_signer(input, signer)` | 本番用。署名あり |
 | `process_usgs_from_worker_request(request, input)` | `EarthquakeVerifierRequest` を検証してから実行。関数名は旧互換名 |
-| `process_usgs_with_source_archive(input, archive, signer)` | Walrusアーカイブ付き本番用 |
+| `process_usgs_with_source_archive(input, archive, signer)` | Walrus content-addressed reference 付き本番用 |
 
 本番 runner からは CLI の `production` subcommand を使います。production input contract は stdin/stdout です。
 
@@ -123,7 +123,9 @@ flowchart TD
 printf '%s' '{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}' | tee production
 ```
 
-stdin は `WorkerToTeeRequest` JSON、stdout は `TeeCoreResult` JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では Walrus archive 設定（例: `SONARI_WALRUS_AGGREGATOR_URL`、`SONARI_WALRUS_CONFIG`、`SONARI_WALRUS_WALLET`）が必須で、保存・fetch・hash verify が失敗した場合は署名しません。
+stdin は `WorkerToTeeRequest` JSON、stdout は `TeeCoreResult` JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では raw source bytes の SHA-256 と `walrus blob-id --n-shards "$SONARI_WALRUS_N_SHARDS"` で得た deterministic blob id を raw data manifest に入れて署名します。TEE は `walrus store` を実行せず、Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致必須で、network、protocol、shard count 変更時は VerifierConfig version、PCR、source policy も同時に更新します。
+
+Nitro Enclave 本番環境では外部 network へ直接接続できないため、`SONARI_EARTHQUAKE_EGRESS_PROXY_URL` を `http://127.0.0.1:<port>` に設定します。AWS runner artifact には `vsock-tcp-bridge` が同梱され、enclave 内の `reqwest` はこの local proxy 経由で USGS へ HTTPS CONNECT します。親 EC2 は allowlist 付き transport proxy だけを担当し、USGS response の検証、正規化、hash、BCS payload、署名は enclave 内で行います。
 
 ローカル検証や fixture/debug では、従来どおり file input も使えます。
 

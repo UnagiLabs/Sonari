@@ -252,7 +252,11 @@ Resources:
             dnf install -y awscli amazon-ssm-agent libstdc++ aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent libstdc++ aws-nitro-enclaves-cli
             systemctl enable --now amazon-ssm-agent || true
             usermod -aG ne ec2-user || true
-            systemctl enable --now nitro-enclaves-allocator.service || true
+            allocator_spec=/etc/nitro_enclaves/allocator.yaml
+            sed -i "s/^cpu_count:.*/cpu_count: ${NitroEnclaveCpuCount}/" "$allocator_spec"
+            sed -i "s/^memory_mib:.*/memory_mib: ${NitroEnclaveMemoryMiB}/" "$allocator_spec"
+            systemctl enable --now nitro-enclaves-allocator.service
+            systemctl restart nitro-enclaves-allocator.service
             mkdir -p /opt/sonari
             mkdir -p /opt/sonari/bin
             tee_artifact_archive=/tmp/sonari-membership-identity-tee-artifact.tar.gz

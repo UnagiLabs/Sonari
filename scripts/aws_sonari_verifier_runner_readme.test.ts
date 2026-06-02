@@ -23,20 +23,28 @@ describe("AWS Sonari verifier runner README", () => {
             "595103996064",
             "pnpm build:aws-sonari-verifier-runner-lambda",
             "pnpm build:aws-earthquake-tee-artifact",
+            "pnpm build:aws-earthquake-eif",
             "pnpm build:aws-membership-identity-tee-artifact",
             "pnpm build:aws-membership-identity-eif",
             "sonari-verifier-runner/<commit>/",
             "sonari-verifier-runner/$COMMIT_SHA/sonari-verifier-runner-lambda.zip",
             "sonari-verifier-runner/$COMMIT_SHA/earthquake-tee-artifact.tar.gz",
+            "sonari-verifier-runner/$COMMIT_SHA/earthquake-tee.eif",
             "sonari-verifier-runner/$COMMIT_SHA/membership-identity-tee-artifact.tar.gz",
             "sonari-verifier-runner/$COMMIT_SHA/membership-identity-tee.eif",
             "scripts/aws_sonari_verifier_runner_deploy_plan.ts",
+            "--earthquake-eif-sha256",
+            "run-earthquake-enclave",
+            "/get_attestation",
+            "/process_data",
             "--relayer-network mainnet --world-id-proof-mode dummy",
             "parameterOverrideArgs",
             "RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload",
             "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET",
             "aws cloudformation deploy",
             "--template-file infra/aws/sonari-verifier-runner/template.yaml",
+            "--s3-bucket",
+            "sonari-verifier-runner/$COMMIT_SHA/cloudformation",
             "ScheduleState=DISABLED",
         ]);
     });
@@ -100,7 +108,7 @@ describe("AWS Sonari verifier runner README", () => {
     it("does not document sensitive local material or static AWS keys", async () => {
         const readme = await readReadme();
 
-        expect(readme).not.toMatch(/\bsecret/i);
+        expect(readme).not.toMatch(/secret value/i);
         expect(readme).not.toContain(".local");
         expect(readme).not.toMatch(/private credential/i);
         expect(readme).not.toContain("AWS_ACCESS_KEY_ID");

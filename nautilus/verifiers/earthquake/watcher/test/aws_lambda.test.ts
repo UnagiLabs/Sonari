@@ -20,6 +20,9 @@ import type { UsgsEarthquakeCandidate } from "../src/usgs.js";
 
 const baseNow = 1_800_000_000_000;
 const manualAuthToken = ["manual", "test", "token"].join("-");
+const finalizedPayloadBcsHex = "0x01";
+const finalizedSignature = `0x${"11".repeat(64)}`;
+const finalizedPublicKey = `0x${"22".repeat(32)}`;
 const passthroughSourceEventIdResolver = async ({ sourceEventId }: { sourceEventId: string }) => ({
     source_event_id: sourceEventId,
 });
@@ -611,7 +614,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "finalized",
             source_updated_at_ms: baseNow,
-            payload_bcs_hex: "0x01",
+            payload_bcs_hex: finalizedPayloadBcsHex,
         });
     });
 
@@ -754,9 +757,9 @@ describe("DynamoDB-compatible repository behavior", () => {
             ...staleProcessingRow,
             status: "finalized" as const,
             tee_result_json: JSON.stringify(finalizedResult()),
-            payload_bcs_hex: "0x01",
-            signature: "0xsig",
-            public_key: "0xpub",
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
             finalized_at_ms: baseNow + 1_000,
             updated_at_ms: baseNow + 1_000,
         };
@@ -772,9 +775,9 @@ describe("DynamoDB-compatible repository behavior", () => {
             status: "finalized",
             source_updated_at_ms: baseNow,
             last_seen_at_ms: baseNow + 2_000,
-            payload_bcs_hex: "0x01",
-            signature: "0xsig",
-            public_key: "0xpub",
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
             finalized_at_ms: baseNow + 1_000,
         });
     });
@@ -792,9 +795,9 @@ describe("DynamoDB-compatible repository behavior", () => {
             runner_phase: "complete" as const,
             runner_stopped_at_ms: null,
             tee_result_json: JSON.stringify(finalizedResult()),
-            payload_bcs_hex: "0x01",
-            signature: "0xsig",
-            public_key: "0xpub",
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
             finalized_at_ms: baseNow + 1_000,
             source_updated_at_ms: baseNow,
             updated_at_ms: baseNow + 1_000,
@@ -2077,9 +2080,12 @@ function finalizedResult(): TeeCoreResult {
             intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
             freshness_deadline_ms: baseNow + 21_600_000,
         },
-        payload_bcs_hex: "0x01",
-        signature: "0xsig",
-        public_key: "0xpub",
+        payload_bcs_hex: finalizedPayloadBcsHex,
+        signature: finalizedSignature,
+        public_key: finalizedPublicKey,
+        verifier_config_key: 1,
+        verifier_config_version: 1,
+        enclave_instance_public_key: finalizedPublicKey,
     };
 }
 

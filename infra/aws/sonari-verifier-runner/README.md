@@ -28,9 +28,12 @@ devnet / testnet の dummy World ID proof では、任意 variables として Wo
 
 - `sonari-verifier-runner-lambda.zip`
 - `earthquake-tee-artifact.tar.gz`
+- `earthquake-tee.eif`
 - `membership-identity-tee-artifact.tar.gz`
 - `membership-identity-tee.eif`
 - TEE tarball と EIF の checksum file、または取得済み SHA-256 値
+
+`earthquake-tee-artifact.tar.gz` は `bin/tee`、`bin/walrus`、`bin/vsock-tcp-bridge` を含みます。`bin/walrus` は TEE 内で raw source bytes から deterministic blob id を計算するためだけに使い、TEE は `walrus store` を実行しません。Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致している必要があります。network、protocol、shard count を変える場合は、VerifierConfig version、PCR、source policy を同時に更新してください。runner EC2 は earthquake 用に allowlist 付き HTTPS CONNECT proxy と vsock proxy を systemd で起動し、enclave 側の local proxy URL は `SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080` です。allowlist は USGS に限定します。
 
 ```bash
 COMMIT_SHA="$(git rev-parse HEAD)"
@@ -43,6 +46,7 @@ pnpm test:oracle
 pnpm test:identity
 pnpm build:aws-sonari-verifier-runner-lambda
 pnpm build:aws-earthquake-tee-artifact
+pnpm build:aws-earthquake-eif
 pnpm build:aws-membership-identity-tee-artifact
 pnpm build:aws-membership-identity-eif
 
@@ -55,6 +59,9 @@ aws s3 cp \
 aws s3 cp \
   dist/aws/earthquake-tee-artifact.tar.gz \
   "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/earthquake-tee-artifact.tar.gz"
+aws s3 cp \
+  dist/aws/earthquake-tee.eif \
+  "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/earthquake-tee.eif"
 aws s3 cp \
   dist/aws/membership-identity-tee-artifact.tar.gz \
   "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/membership-identity-tee-artifact.tar.gz"
@@ -69,6 +76,7 @@ aws s3 cp \
 
 ```bash
 EARTHQUAKE_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/earthquake-tee-artifact.tar.gz.sha256)"
+EARTHQUAKE_EIF_SHA256="$(sha256sum dist/aws/earthquake-tee.eif | cut -d ' ' -f 1)"
 MEMBERSHIP_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/membership-identity-tee-artifact.tar.gz.sha256)"
 MEMBERSHIP_EIF_SHA256="$(sha256sum dist/aws/membership-identity-tee.eif | cut -d ' ' -f 1)"
 
@@ -77,6 +85,8 @@ pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --lambda-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-sha256 "$EARTHQUAKE_TEE_SHA256" \
+  --earthquake-eif-bucket "$ARTIFACT_BUCKET" \
+  --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256" \
   --membership-tee-bucket "$ARTIFACT_BUCKET" \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
@@ -99,6 +109,8 @@ extra_parameter_overrides=()
 
 aws cloudformation deploy \
   --template-file infra/aws/sonari-verifier-runner/template.yaml \
+  --s3-bucket "$ARTIFACT_BUCKET" \
+  --s3-prefix "sonari-verifier-runner/$COMMIT_SHA/cloudformation" \
   --stack-name "$STACK_NAME" \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides "${deploy_plan_parameter_overrides[@]}" "${extra_parameter_overrides[@]}" \
@@ -110,6 +122,10 @@ aws cloudformation deploy \
 GitHub Actions では、同じ値を environment variable の `AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET` に設定します。空の場合、CloudFormation の `RelayerTarget` は空文字のままです。
 
 `NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
+
+地震 verifier は Nautilus の server pattern に合わせ、EIF 内で起動時に enclave-local な Ed25519 key を生成し、NSM attestation document の `public_key` にその public key を入れます。runner host は `/opt/sonari/bin/run-earthquake-enclave` から VSOCK で `/health_check`、`/get_attestation`、`/process_data` を呼びます。host は Walrus / Sui config を bootstrap するだけで、finalized payload の署名鍵は host に置きません。
+
+Launch template の user data は、AWS Nitro Enclaves allocator の `/etc/nitro_enclaves/allocator.yaml` を `NitroEnclaveCpuCount` / `NitroEnclaveMemoryMiB` に合わせて更新し、`nitro-enclaves-allocator.service` を restart します。`nitro-cli run-enclave --memory` より小さい hugepage 予約で instance を起動してはいけません。
 
 ```bash
 RUNNER_ROLE_ARN="arn:aws:iam::$EXPECTED_ACCOUNT_ID:role/sonari-verifier-runner-$STACK_NAME-runner"
@@ -133,6 +149,8 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --lambda-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-bucket "$ARTIFACT_BUCKET" \
   --earthquake-tee-sha256 "$EARTHQUAKE_TEE_SHA256" \
+  --earthquake-eif-bucket "$ARTIFACT_BUCKET" \
+  --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256" \
   --membership-tee-bucket "$ARTIFACT_BUCKET" \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
