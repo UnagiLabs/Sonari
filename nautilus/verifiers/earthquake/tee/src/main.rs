@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tee::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
     WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
-    grid_xml_from_artifact, parse_command_timeout_ms, parse_epochs,
+    grid_xml_from_artifact, parse_command_timeout_ms, parse_n_shards,
     process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
 
@@ -51,17 +51,7 @@ struct Cli {
     #[arg(long)]
     walrus_cli: Option<PathBuf>,
     #[arg(long)]
-    walrus_config: Option<PathBuf>,
-    #[arg(long)]
-    walrus_context: Option<String>,
-    #[arg(long)]
-    walrus_wallet: Option<String>,
-    #[arg(long)]
-    walrus_upload_relay: Option<String>,
-    #[arg(long)]
-    walrus_aggregator_url: Option<String>,
-    #[arg(long)]
-    walrus_epochs: Option<u32>,
+    walrus_n_shards: Option<u32>,
     #[arg(long)]
     walrus_timeout_ms: Option<u64>,
 }
@@ -200,6 +190,10 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
     set_env_before_server("SONARI_WALRUS_CLI", &config.walrus_cli);
     set_env_before_server(
+        "SONARI_WALRUS_N_SHARDS",
+        &config.walrus_n_shards.to_string(),
+    );
+    set_env_before_server(
         "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         &config.egress_proxy_url,
     );
@@ -209,6 +203,7 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
 #[derive(Debug, Deserialize)]
 struct BootstrapConfig {
     walrus_cli: String,
+    walrus_n_shards: u32,
     egress_proxy_url: String,
 }
 
@@ -793,6 +788,7 @@ enum TeeJsonResult {
         payload_bcs_hex: String,
         signature: String,
         public_key: String,
+        raw_data_manifest: tee::RawDataManifest,
         #[serde(flatten, skip_serializing_if = "Option::is_none")]
         metadata: Option<EnclaveRegistrationMetadata>,
     },
@@ -811,11 +807,15 @@ fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std
             let signature = output
                 .signature
                 .ok_or("finalized output is missing signature")?;
+            let raw_data_manifest = output
+                .raw_data_manifest
+                .ok_or("finalized output is missing raw data manifest")?;
             Ok(TeeJsonResult::Finalized {
                 payload: Box::new(payload),
                 payload_bcs_hex,
                 signature: signature.signature,
                 public_key: signature.public_key,
+                raw_data_manifest,
                 metadata: None,
             })
         }
@@ -970,13 +970,15 @@ fn walrus_archive_config(
         return Ok(None);
     }
 
-    let epochs = match cli
-        .walrus_epochs
+    let n_shards = match cli
+        .walrus_n_shards
         .map(Ok)
-        .or_else(|| non_empty_env("SONARI_WALRUS_EPOCHS").map(|value| parse_epochs(&value)))
+        .or_else(|| non_empty_env("SONARI_WALRUS_N_SHARDS").map(|value| parse_n_shards(&value)))
     {
-        Some(epochs) => epochs?,
-        None => 2,
+        Some(n_shards) => n_shards?,
+        None => {
+            return Err("SONARI_WALRUS_N_SHARDS is required when --walrus-archive is used".into());
+        }
     };
     let command_timeout_ms = if let Some(timeout_ms) = cli.walrus_timeout_ms {
         parse_command_timeout_ms(&timeout_ms.to_string())?
@@ -996,28 +998,7 @@ fn walrus_archive_config(
             .clone()
             .or_else(|| env::var_os("SONARI_WALRUS_CLI").map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("walrus")),
-        config_path: cli
-            .walrus_config
-            .clone()
-            .or_else(|| env::var_os("SONARI_WALRUS_CONFIG").map(PathBuf::from)),
-        context: cli
-            .walrus_context
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_CONTEXT")),
-        wallet: cli
-            .walrus_wallet
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_WALLET")),
-        upload_relay: cli
-            .walrus_upload_relay
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_UPLOAD_RELAY")),
-        aggregator_url: cli
-            .walrus_aggregator_url
-            .clone()
-            .or_else(|| non_empty_env("SONARI_WALRUS_AGGREGATOR_URL"))
-            .unwrap_or_default(),
-        epochs,
+        n_shards,
         command_timeout_ms,
         egress_proxy_url: non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
     }))

@@ -113,6 +113,8 @@ export const ERROR_CODES = [
     "AWS_RUNNER_CONTRACT_INVALID",
     "RELAYER_SUBMIT_FAILED",
     "MOVE_REJECTED",
+    "SOURCE_ARCHIVE_RETRYABLE_FAILED",
+    "SOURCE_ARCHIVE_INTEGRITY_FAILED",
     "REJECTED_AUTO_TRIGGER",
     "WATCHER_BELOW_AUTO_THRESHOLD",
 ] as const;
@@ -168,9 +170,27 @@ export interface SignedFinalizedPayload {
     payload_bcs_hex: string;
     signature: string;
     public_key: string;
+    raw_data_manifest?: RawDataManifest;
     verifier_config_key?: number;
     verifier_config_version?: number;
     enclave_instance_public_key?: string;
+}
+
+export interface RawDataManifest {
+    entries: RawDataEntry[];
+    oracle_version: typeof DEFAULT_ORACLE_CONTRACT.oracle_version;
+}
+
+export interface RawDataEntry {
+    name: string;
+    event_id: string;
+    product: string;
+    uri: string;
+    content_hash: string;
+    source_uri: string;
+    walrus_blob_id: string;
+    source_hash: string;
+    size_bytes: number;
 }
 
 export interface EnclaveVerificationMetadata {
@@ -217,6 +237,7 @@ const U32_MAX = 0xffff_ffff;
 const ONE_MILLION = 1_000_000;
 const HASH_32_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const HEX_BYTES_PATTERN = /^(?:0x)?[0-9a-fA-F]+$/;
+const WALRUS_BLOB_ID_PATTERN = /^[A-Za-z0-9_-]{8,256}$/;
 const textEncoder = new TextEncoder();
 
 function isRecord(input: unknown): input is Record<string, unknown> {
@@ -335,6 +356,40 @@ function hasValidFinalizedPayload(payload: Record<string, unknown>): boolean {
     return freshnessDeadlineMs === verifiedAtMs + FRESHNESS_WINDOW_MS;
 }
 
+function hasValidRawDataManifest(value: unknown): value is RawDataManifest {
+    if (!isRecord(value) || value.oracle_version !== DEFAULT_ORACLE_CONTRACT.oracle_version) {
+        return false;
+    }
+    if (!Array.isArray(value.entries) || value.entries.length === 0 || value.entries.length > 16) {
+        return false;
+    }
+    return value.entries.every(hasValidRawDataEntry);
+}
+
+function hasValidRawDataEntry(value: unknown): value is RawDataEntry {
+    if (!isRecord(value)) {
+        return false;
+    }
+    if (
+        !isUtf8BytesInRange(value.name, 1, 64) ||
+        !isUtf8BytesInRange(value.event_id, 1, 96) ||
+        !isUtf8BytesInRange(value.product, 1, 96) ||
+        !isUtf8BytesInRange(value.source_uri, 1, 2048) ||
+        !isHash32(value.source_hash) ||
+        !isHash32(value.content_hash) ||
+        !isSafeIntegerInRange(value.size_bytes, 1, Number.MAX_SAFE_INTEGER) ||
+        typeof value.walrus_blob_id !== "string" ||
+        !WALRUS_BLOB_ID_PATTERN.test(value.walrus_blob_id) ||
+        typeof value.uri !== "string"
+    ) {
+        return false;
+    }
+    return (
+        value.source_hash === value.content_hash &&
+        value.uri === `walrus://blob/${value.walrus_blob_id}`
+    );
+}
+
 export function validateWorkerToTeeRequest(input: unknown): ValidationResult<WorkerToTeeRequest> {
     if (!isRecord(input)) {
         return {
@@ -441,6 +496,17 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
         };
     }
 
+    if (
+        input.raw_data_manifest !== undefined &&
+        !hasValidRawDataManifest(input.raw_data_manifest)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input raw_data_manifest is malformed",
+        };
+    }
+
     return {
         ok: true,
         value: {
@@ -449,6 +515,9 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             payload_bcs_hex: input.payload_bcs_hex,
             signature: input.signature,
             public_key: input.public_key,
+            ...(input.raw_data_manifest === undefined
+                ? {}
+                : { raw_data_manifest: input.raw_data_manifest }),
             verifier_config_key: input.verifier_config_key,
             verifier_config_version: input.verifier_config_version,
             enclave_instance_public_key: input.enclave_instance_public_key,

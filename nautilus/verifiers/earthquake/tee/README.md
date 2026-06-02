@@ -123,7 +123,7 @@ flowchart TD
 printf '%s' '{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}' | tee production
 ```
 
-stdin は `WorkerToTeeRequest` JSON、stdout は `TeeCoreResult` JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では raw source bytes の SHA-256 と `walrus blob-id` で得た deterministic blob id を raw data manifest に入れて署名します。TEE は `walrus store` を実行せず、Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。
+stdin は `WorkerToTeeRequest` JSON、stdout は `TeeCoreResult` JSON です。`production` command は enclave 内で USGS detail を再取得し、preferred ShakeMap の `download/grid.xml.zip` を優先して取得します。署名には `SONARI_TEE_SIGNING_KEY_SEED` が必須で、dev seed fallback は使いません。finalized output では raw source bytes の SHA-256 と `walrus blob-id --n-shards "$SONARI_WALRUS_N_SHARDS"` で得た deterministic blob id を raw data manifest に入れて署名します。TEE は `walrus store` を実行せず、Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致必須で、network、protocol、shard count 変更時は VerifierConfig version、PCR、source policy も同時に更新します。
 
 Nitro Enclave 本番環境では外部 network へ直接接続できないため、`SONARI_EARTHQUAKE_EGRESS_PROXY_URL` を `http://127.0.0.1:<port>` に設定します。AWS runner artifact には `vsock-tcp-bridge` が同梱され、enclave 内の `reqwest` はこの local proxy 経由で USGS へ HTTPS CONNECT します。親 EC2 は allowlist 付き transport proxy だけを担当し、USGS response の検証、正規化、hash、BCS payload、署名は enclave 内で行います。
 

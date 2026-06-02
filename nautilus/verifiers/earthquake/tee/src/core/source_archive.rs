@@ -42,12 +42,7 @@ pub trait SourceArchive {
 #[derive(Debug, Clone)]
 pub struct WalrusCliSourceArchiveConfig {
     pub cli_path: PathBuf,
-    pub config_path: Option<PathBuf>,
-    pub context: Option<String>,
-    pub wallet: Option<String>,
-    pub upload_relay: Option<String>,
-    pub aggregator_url: String,
-    pub epochs: u32,
+    pub n_shards: u32,
     pub command_timeout_ms: u64,
     pub egress_proxy_url: Option<String>,
 }
@@ -56,12 +51,7 @@ impl Default for WalrusCliSourceArchiveConfig {
     fn default() -> Self {
         Self {
             cli_path: PathBuf::from("walrus"),
-            config_path: None,
-            context: None,
-            wallet: None,
-            upload_relay: None,
-            aggregator_url: String::new(),
-            epochs: 2,
+            n_shards: 1000,
             command_timeout_ms: DEFAULT_WALRUS_CLI_TIMEOUT_MS,
             egress_proxy_url: None,
         }
@@ -73,16 +63,8 @@ impl WalrusCliSourceArchiveConfig {
         let cli_path = std::env::var_os("SONARI_WALRUS_CLI")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("walrus"));
-        let config_path = std::env::var_os("SONARI_WALRUS_CONFIG").map(PathBuf::from);
-        let context = non_empty_env("SONARI_WALRUS_CONTEXT");
-        let wallet = non_empty_env("SONARI_WALRUS_WALLET");
-        let upload_relay = non_empty_env("SONARI_WALRUS_UPLOAD_RELAY");
         let egress_proxy_url = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
-        let aggregator_url = non_empty_env("SONARI_WALRUS_AGGREGATOR_URL").unwrap_or_default();
-        let epochs = match non_empty_env("SONARI_WALRUS_EPOCHS") {
-            Some(value) => parse_epochs(&value)?,
-            None => 2,
-        };
+        let n_shards = required_n_shards_from_env()?;
         let command_timeout_ms = match std::env::var("SONARI_WALRUS_CLI_TIMEOUT_MS") {
             Ok(value) => parse_command_timeout_ms(&value)?,
             Err(std::env::VarError::NotPresent) => DEFAULT_WALRUS_CLI_TIMEOUT_MS,
@@ -95,12 +77,7 @@ impl WalrusCliSourceArchiveConfig {
 
         Ok(Self {
             cli_path,
-            config_path,
-            context,
-            wallet,
-            upload_relay,
-            aggregator_url,
-            epochs,
+            n_shards,
             command_timeout_ms,
             egress_proxy_url,
         })
@@ -141,6 +118,8 @@ where
         let output = self.run_walrus(
             vec![
                 OsString::from("blob-id"),
+                OsString::from("--n-shards"),
+                OsString::from(self.config.n_shards.to_string()),
                 temp_file.path().as_os_str().to_owned(),
             ],
             SourceArchiveError::StoreFailed,
@@ -154,14 +133,6 @@ where
         map_error: impl FnOnce(String) -> SourceArchiveError,
     ) -> Result<CommandOutput, SourceArchiveError> {
         let mut args = Vec::new();
-        if let Some(config_path) = &self.config.config_path {
-            args.push(OsString::from("--config"));
-            args.push(config_path.as_os_str().to_owned());
-        }
-        if let Some(context) = &self.config.context {
-            args.push(OsString::from("--context"));
-            args.push(OsString::from(context));
-        }
         args.extend(command_args);
         let env_overrides = proxy_env_overrides(self.config.egress_proxy_url.as_deref());
         self.command_runner
@@ -332,6 +303,11 @@ fn validate_walrus_config(config: &WalrusCliSourceArchiveConfig) -> Result<(), S
             "Walrus CLI timeout must be greater than zero".to_owned(),
         ));
     }
+    if config.n_shards < 2 {
+        return Err(SourceArchiveError::StoreFailed(
+            "SONARI_WALRUS_N_SHARDS must be an integer greater than or equal to 2".to_owned(),
+        ));
+    }
     Ok(())
 }
 
@@ -374,6 +350,33 @@ pub fn parse_epochs(value: &str) -> Result<u32, SourceArchiveError> {
         ));
     }
     Ok(epochs)
+}
+
+pub fn parse_n_shards(value: &str) -> Result<u32, SourceArchiveError> {
+    let trimmed = value.trim();
+    let n_shards = trimmed.parse::<u32>().map_err(|error| {
+        SourceArchiveError::StoreFailed(format!(
+            "invalid SONARI_WALRUS_N_SHARDS `{value}`: {error}"
+        ))
+    })?;
+    if n_shards < 2 {
+        return Err(SourceArchiveError::StoreFailed(
+            "SONARI_WALRUS_N_SHARDS must be an integer greater than or equal to 2".to_owned(),
+        ));
+    }
+    Ok(n_shards)
+}
+
+fn required_n_shards_from_env() -> Result<u32, SourceArchiveError> {
+    match std::env::var("SONARI_WALRUS_N_SHARDS") {
+        Ok(value) => parse_n_shards(&value),
+        Err(std::env::VarError::NotPresent) => Err(SourceArchiveError::StoreFailed(
+            "SONARI_WALRUS_N_SHARDS is required".to_owned(),
+        )),
+        Err(error) => Err(SourceArchiveError::StoreFailed(format!(
+            "invalid SONARI_WALRUS_N_SHARDS: {error}"
+        ))),
+    }
 }
 
 pub fn parse_command_timeout_ms(value: &str) -> Result<u64, SourceArchiveError> {
@@ -488,6 +491,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn source_hash(bytes: &[u8]) -> String {
         to_hex(&sha256_bytes(bytes))
     }
@@ -525,7 +530,7 @@ mod tests {
                 .iter()
                 .map(|args| stringify_args(args))
                 .collect::<Vec<_>>(),
-            vec![vec!["blob-id", "<temp>"]]
+            vec![vec!["blob-id", "--n-shards", "1000", "<temp>"]]
         );
         assert_eq!(walrus.temp_file_bytes.borrow().as_slice(), [bytes]);
     }
@@ -577,50 +582,76 @@ mod tests {
     }
 
     #[test]
-    fn walrus_config_from_env_rejects_invalid_timeout() {
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn parses_walrus_n_shards_strictly() {
+        assert_eq!(parse_n_shards("1000").unwrap(), 1000);
+        assert!(parse_n_shards("0").is_err());
+        assert!(parse_n_shards("1").is_err());
+        assert!(parse_n_shards("not-a-number").is_err());
+    }
+
+    #[test]
+    fn walrus_config_from_env_rejects_missing_or_invalid_n_shards() {
         let _guard = ENV_LOCK.lock().unwrap();
-        let previous_timeout = std::env::var_os("SONARI_WALRUS_CLI_TIMEOUT_MS");
-        unsafe {
-            std::env::set_var("SONARI_WALRUS_CLI_TIMEOUT_MS", "0");
+        with_env_var("SONARI_WALRUS_N_SHARDS", None, || {
+            let error = WalrusCliSourceArchiveConfig::from_env()
+                .expect_err("missing n_shards must be rejected");
+            assert!(format!("{error}").contains("SONARI_WALRUS_N_SHARDS"));
+        });
+        for value in ["0", "1", "not-a-number"] {
+            with_env_var("SONARI_WALRUS_N_SHARDS", Some(value), || {
+                let error = WalrusCliSourceArchiveConfig::from_env()
+                    .expect_err("invalid n_shards must be rejected");
+                assert!(format!("{error}").contains("SONARI_WALRUS_N_SHARDS"));
+            });
         }
+    }
 
-        let error =
-            WalrusCliSourceArchiveConfig::from_env().expect_err("zero timeout must be rejected");
+    #[test]
+    fn walrus_config_from_env_rejects_invalid_timeout() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        with_env_var("SONARI_WALRUS_N_SHARDS", Some("1000"), || {
+            with_env_var("SONARI_WALRUS_CLI_TIMEOUT_MS", Some("0"), || {
+                let error = WalrusCliSourceArchiveConfig::from_env()
+                    .expect_err("zero timeout must be rejected");
+                assert!(format!("{error}").contains("Walrus CLI timeout"));
+            });
+        });
+    }
 
+    fn with_env_var(name: &str, value: Option<&str>, test: impl FnOnce()) {
+        let previous = std::env::var_os(name);
         unsafe {
-            match previous_timeout {
-                Some(value) => std::env::set_var("SONARI_WALRUS_CLI_TIMEOUT_MS", value),
-                None => std::env::remove_var("SONARI_WALRUS_CLI_TIMEOUT_MS"),
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
             }
         }
-        assert!(format!("{error}").contains("Walrus CLI timeout"));
+        test();
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
     }
 
     #[test]
     fn walrus_config_from_env_reads_earthquake_egress_proxy_url() {
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap();
-        let previous_proxy = std::env::var_os("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
-        unsafe {
-            std::env::set_var(
+        with_env_var("SONARI_WALRUS_N_SHARDS", Some("1000"), || {
+            with_env_var(
                 "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
-                "http://127.0.0.1:18080",
+                Some("http://127.0.0.1:18080"),
+                || {
+                    let config = WalrusCliSourceArchiveConfig::from_env().unwrap();
+                    assert_eq!(
+                        config.egress_proxy_url.as_deref(),
+                        Some("http://127.0.0.1:18080")
+                    );
+                    assert_eq!(config.n_shards, 1000);
+                },
             );
-        }
-
-        let config = WalrusCliSourceArchiveConfig::from_env().unwrap();
-
-        unsafe {
-            match previous_proxy {
-                Some(value) => std::env::set_var("SONARI_EARTHQUAKE_EGRESS_PROXY_URL", value),
-                None => std::env::remove_var("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
-            }
-        }
-        assert_eq!(
-            config.egress_proxy_url.as_deref(),
-            Some("http://127.0.0.1:18080")
-        );
+        });
     }
 
     #[test]

@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import {
     AutoScalingClient,
     DescribeAutoScalingGroupsCommand,
     SetDesiredCapacityCommand,
 } from "@aws-sdk/client-auto-scaling";
 import { DescribeInstancesCommand, EC2Client } from "@aws-sdk/client-ec2";
-import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 import {
     DescribeInstanceInformationCommand,
@@ -28,6 +29,7 @@ import {
     type EnclaveVerificationMetadata,
     ERROR_CODES,
     type OracleErrorCode,
+    type RawDataEntry,
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
@@ -51,6 +53,8 @@ import {
 } from "./relayer_preview.js";
 import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
+
+const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -103,6 +107,25 @@ export interface SsmClientLike {
 
 export interface S3ClientLike {
     getObjectText(input: { bucket: string; key: string }): Promise<string>;
+    putObjectBytes?(input: { bucket: string; key: string; bytes: Uint8Array }): Promise<void>;
+}
+
+export interface SourceFetcherLike {
+    fetchBytes(sourceUri: string): Promise<Uint8Array>;
+}
+
+export interface WalrusSourceArchiverLike {
+    archiveAndVerify(input: {
+        entry: RawDataEntry;
+        bytes: Uint8Array;
+        artifactS3Key: string;
+    }): Promise<{ walrusBlobId: string }>;
+}
+
+export interface SourceArchiveAdapter {
+    fetcher: SourceFetcherLike;
+    s3: Required<Pick<S3ClientLike, "putObjectBytes">>;
+    walrus: WalrusSourceArchiverLike;
 }
 
 export interface RelayerSignerSecretReader {
@@ -263,6 +286,12 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               result: TeeCoreResult;
           }
         | {
+              action: "archive_sources";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result: TeeCoreResult;
+          }
+        | {
               action: "relayer_preview_or_dry_run";
               source_event_id: string;
               attempt?: number | undefined;
@@ -337,6 +366,13 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              source_archive: "skipped" | "success" | "retryable_failed" | "integrity_failed";
+              source_artifact_s3_keys: string[];
+              result: TeeCoreResult;
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
               relayer: "succeeded";
               result: TeeCoreResult;
               relayer_success: RelayerRecordSuccessInput;
@@ -358,6 +394,7 @@ export interface RunnerControlHandlerOptions {
     repository?: StateRepository;
     relayer?: RelayerAdapter;
     enclaveRegistration?: EnclaveRegistrationAdapter;
+    sourceArchive?: SourceArchiveAdapter;
     now?: () => number;
     config: RunnerWorkflowConfig;
 }
@@ -702,6 +739,79 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     result: event.result,
                 });
             }
+            case "archive_sources": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                if (event.result.status !== "finalized") {
+                    await requireCurrentWorkflowAttempt(options, event, {
+                        phase: "complete",
+                        allowNonProcessing: true,
+                        nowMs,
+                    });
+                    const marked = await repository.markSourceArchiveResult(
+                        event.source_event_id,
+                        { status: "skipped", artifactS3Keys: [] },
+                        nowMs,
+                        event.attempt,
+                    );
+                    if (!marked) {
+                        throw new Error("stale runner workflow attempt");
+                    }
+                    return retainVerifierKind({
+                        source_event_id: event.source_event_id,
+                        attempt: event.attempt,
+                        source_archive: "skipped",
+                        source_artifact_s3_keys: [],
+                        result: event.result,
+                    });
+                }
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "archiving_sources",
+                    allowNonProcessing: true,
+                    nowMs,
+                });
+                const archive = options.sourceArchive ?? buildSourceArchiveFromConfig(options);
+                const archived = await archiveFinalizedSources({
+                    sourceEventId: event.source_event_id,
+                    attempt: event.attempt,
+                    resultBucket: options.config.resultBucket,
+                    result: event.result,
+                    archive,
+                });
+                const stateUpdate =
+                    archived.status === "success"
+                        ? { status: "success" as const, artifactS3Keys: archived.artifactS3Keys }
+                        : archived.status === "retryable_failed"
+                          ? {
+                                status: "retryable_failed" as const,
+                                artifactS3Keys: archived.artifactS3Keys,
+                                errorCode: "SOURCE_ARCHIVE_RETRYABLE_FAILED" as const,
+                                retryableNextRetryAtMs: nowMs + SOURCE_ARCHIVE_RETRY_BACKOFF_MS,
+                                message: archived.message,
+                            }
+                          : {
+                                status: "integrity_failed" as const,
+                                artifactS3Keys: archived.artifactS3Keys,
+                                errorCode: "SOURCE_ARCHIVE_INTEGRITY_FAILED" as const,
+                                message: archived.message,
+                            };
+                const marked = await repository.markSourceArchiveResult(
+                    event.source_event_id,
+                    stateUpdate,
+                    nowMs,
+                    event.attempt,
+                );
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    source_archive: archived.status,
+                    source_artifact_s3_keys: archived.artifactS3Keys,
+                    result: event.result,
+                });
+            }
             case "relayer_preview_or_dry_run": {
                 const repository = requireRepository(options);
                 const relayer = options.relayer ?? buildRelayerFromConfig(options.config);
@@ -717,6 +827,15 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     phase: "complete",
                     allowNonProcessing: true,
                 });
+                const row = await repository.get(event.source_event_id);
+                if (row?.source_archive_status !== "success") {
+                    return retainVerifierKind({
+                        source_event_id: event.source_event_id,
+                        attempt: event.attempt,
+                        relayer: "skipped",
+                        result: event.result,
+                    });
+                }
                 const nowMs = options.now?.() ?? Date.now();
                 const result = await relayer.relay(event.result);
                 if (result.ok) {
@@ -950,6 +1069,65 @@ class AwsS3Client implements S3ClientLike {
         }
         return result.Body.transformToString();
     }
+
+    async putObjectBytes(input: { bucket: string; key: string; bytes: Uint8Array }): Promise<void> {
+        await this.client.send(
+            new PutObjectCommand({
+                Bucket: input.bucket,
+                Key: input.key,
+                Body: input.bytes,
+                ContentType: "application/octet-stream",
+            }),
+        );
+    }
+}
+
+class FetchSourceFetcher implements SourceFetcherLike {
+    async fetchBytes(sourceUri: string): Promise<Uint8Array> {
+        const response = await fetch(sourceUri);
+        if (!response.ok) {
+            throw new RetryableSourceArchiveError(
+                `source re-fetch failed for ${sourceUri}: HTTP ${response.status}`,
+            );
+        }
+        return new Uint8Array(await response.arrayBuffer());
+    }
+}
+
+class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
+    constructor(private readonly endpoint: string) {}
+
+    async archiveAndVerify(input: {
+        entry: RawDataEntry;
+        artifactS3Key: string;
+    }): Promise<{ walrusBlobId: string }> {
+        const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                artifact_s3_key: input.artifactS3Key,
+                expected_walrus_blob_id: input.entry.walrus_blob_id,
+                source_hash: input.entry.source_hash,
+                size_bytes: input.entry.size_bytes,
+            }),
+        });
+        if (!response.ok) {
+            throw new RetryableSourceArchiveError(
+                `Walrus source archiver failed: HTTP ${response.status}`,
+            );
+        }
+        const body = (await response.json()) as unknown;
+        if (!isRecord(body) || typeof body.walrus_blob_id !== "string") {
+            throw new RetryableSourceArchiveError("Walrus source archiver returned invalid JSON");
+        }
+        return { walrusBlobId: body.walrus_blob_id };
+    }
+}
+
+class UnconfiguredWalrusSourceArchiver implements WalrusSourceArchiverLike {
+    async archiveAndVerify(): Promise<{ walrusBlobId: string }> {
+        throw new RetryableSourceArchiveError("Walrus source archiver is not configured");
+    }
 }
 
 class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
@@ -1104,8 +1282,9 @@ function buildSsmShellCommand(input: {
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
         buildRequiredShellEnvCheck("SONARI_WALRUS_CLI"),
+        buildRequiredShellEnvCheck("SONARI_WALRUS_N_SHARDS"),
         buildRequiredShellEnvCheck("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
-        "export SONARI_WALRUS_CLI SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+        "export SONARI_WALRUS_CLI SONARI_WALRUS_N_SHARDS SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
@@ -1122,6 +1301,7 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         "source /opt/sonari/runner.env",
         buildRequiredShellEnvCheck("RUNNER_TOKEN_FILE"),
         buildRequiredShellEnvCheck("SONARI_WALRUS_CLI"),
+        buildRequiredShellEnvCheck("SONARI_WALRUS_N_SHARDS"),
         buildRequiredShellEnvCheck("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
         'test -s "$RUNNER_TOKEN_FILE"',
         'test -x "$SONARI_WALRUS_CLI"',
@@ -1130,6 +1310,120 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
     ].join("\n");
 }
+
+function buildSourceArchiveFromConfig(options: RunnerControlHandlerOptions): SourceArchiveAdapter {
+    if (options.s3.putObjectBytes === undefined) {
+        throw new Error("source archive requires S3 byte staging support");
+    }
+    return {
+        fetcher: new FetchSourceFetcher(),
+        s3: { putObjectBytes: options.s3.putObjectBytes.bind(options.s3) },
+        walrus:
+            process.env.SOURCE_ARCHIVER_URL === undefined ||
+            process.env.SOURCE_ARCHIVER_URL.length === 0
+                ? new UnconfiguredWalrusSourceArchiver()
+                : new HttpWalrusSourceArchiver(process.env.SOURCE_ARCHIVER_URL),
+    };
+}
+
+type SourceArchiveAttemptResult =
+    | { status: "success"; artifactS3Keys: string[] }
+    | {
+          status: "retryable_failed" | "integrity_failed";
+          artifactS3Keys: string[];
+          message: string;
+      };
+
+async function archiveFinalizedSources(input: {
+    sourceEventId: string;
+    attempt: number | undefined;
+    resultBucket: string;
+    result: Extract<TeeCoreResult, { status: "finalized" }>;
+    archive: SourceArchiveAdapter;
+}): Promise<SourceArchiveAttemptResult> {
+    const validation = validateRelayerSubmitInput(input.result);
+    if (!validation.ok) {
+        return { status: "integrity_failed", artifactS3Keys: [], message: validation.message };
+    }
+    const manifest = validation.value.raw_data_manifest;
+    if (manifest === undefined) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: "finalized result is missing raw_data_manifest",
+        };
+    }
+    const artifactS3Keys: string[] = [];
+    for (const [index, entry] of manifest.entries.entries()) {
+        try {
+            const bytes = await input.archive.fetcher.fetchBytes(entry.source_uri);
+            verifySourceBytes(entry, bytes);
+            const key = sourceArtifactS3Key({
+                sourceEventId: input.sourceEventId,
+                attempt: input.attempt,
+                index,
+                product: entry.product,
+                sourceHash: entry.source_hash,
+            });
+            await input.archive.s3.putObjectBytes({ bucket: input.resultBucket, key, bytes });
+            artifactS3Keys.push(key);
+            const archived = await input.archive.walrus.archiveAndVerify({
+                entry,
+                bytes,
+                artifactS3Key: key,
+            });
+            if (archived.walrusBlobId !== entry.walrus_blob_id) {
+                return {
+                    status: "integrity_failed",
+                    artifactS3Keys,
+                    message: `Walrus blob id mismatch for ${entry.source_uri}`,
+                };
+            }
+        } catch (error) {
+            if (error instanceof IntegritySourceArchiveError) {
+                return { status: "integrity_failed", artifactS3Keys, message: error.message };
+            }
+            return {
+                status: "retryable_failed",
+                artifactS3Keys,
+                message: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
+    return { status: "success", artifactS3Keys };
+}
+
+function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {
+    const hash = `0x${createHash("sha256").update(bytes).digest("hex")}`;
+    if (hash !== entry.source_hash) {
+        throw new IntegritySourceArchiveError(`source hash mismatch for ${entry.source_uri}`);
+    }
+    if (bytes.byteLength !== entry.size_bytes) {
+        throw new IntegritySourceArchiveError(`source size mismatch for ${entry.source_uri}`);
+    }
+}
+
+function sourceArtifactS3Key(input: {
+    sourceEventId: string;
+    attempt: number | undefined;
+    index: number;
+    product: string;
+    sourceHash: string;
+}): string {
+    return [
+        "source-artifacts",
+        input.sourceEventId,
+        String(input.attempt ?? 1),
+        `${input.index}-${sanitizeS3KeySegment(input.product)}-${input.sourceHash.slice(2).toLowerCase()}.bin`,
+    ].join("/");
+}
+
+function sanitizeS3KeySegment(value: string): string {
+    return value.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 96);
+}
+
+class RetryableSourceArchiveError extends Error {}
+class IntegritySourceArchiveError extends Error {}
 
 function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;

@@ -17,7 +17,7 @@ pub use core::processing::{
 };
 pub use core::source_archive::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, SourceArchive, SourceArchiveError, WalrusCliSourceArchive,
-    WalrusCliSourceArchiveConfig, parse_command_timeout_ms, parse_epochs,
+    WalrusCliSourceArchiveConfig, parse_command_timeout_ms, parse_epochs, parse_n_shards,
 };
 pub use core::types::{
     OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,

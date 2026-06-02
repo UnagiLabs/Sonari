@@ -765,8 +765,8 @@ fn low_level_cli_rejects_zero_walrus_timeout() {
     let output = Command::new(env!("CARGO_BIN_EXE_tee"))
         .args([
             "--walrus-archive",
-            "--walrus-aggregator-url",
-            "https://aggregator.test",
+            "--walrus-n-shards",
+            "1000",
             "--walrus-timeout-ms",
             "0",
         ])

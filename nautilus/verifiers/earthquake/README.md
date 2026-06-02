@@ -144,7 +144,7 @@ Sui 投稿対象になるのは `finalized` 出力だけです。
 ## プライバシー / セキュリティ
 
 - この検証器は個人の residence、student、phone、GPS、address、document evidence を扱いません。
-- 生の地震 source artifact は TEE 内で hash 化し、Walrus の content-addressed blob id を計算して署名対象 manifest に入れます。TEE は保存を待たず、Walrus への実保存、pin、retry、fetch 再検証は TEE 外の archiver が担います。
+- 生の地震 source artifact は TEE 内で hash 化し、`walrus blob-id --n-shards "$SONARI_WALRUS_N_SHARDS"` で Walrus の content-addressed blob id を計算して署名対象 manifest に入れます。TEE は保存を待たず、Walrus への実保存、pin、retry、fetch 再検証は TEE 外の archiver が担います。初期値の `SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致必須です。network、protocol、shard count を変更する場合は VerifierConfig version、PCR、source policy も同時に更新します。
 - TEE signing key は本番 TEE boundary 内に隔離します。秘密鍵を EC2 host、Lambda、relayer、GitHub Actions、Sui wallet config へ出してはいけません。
 - Watcher と relayer の入力は contract boundary では untrusted として扱います。
 - Source fetch、source hash / blob id 計算、BCS serialization、Merkle generation、signing の失敗は fail-closed にします。

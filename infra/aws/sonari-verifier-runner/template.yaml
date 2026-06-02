@@ -404,7 +404,9 @@ Resources:
             : "${!SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS:?SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS is required}"
             : "${!SONARI_EARTHQUAKE_ENCLAVE_CID:?SONARI_EARTHQUAKE_ENCLAVE_CID is required}"
             : "${!SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"
+            : "${!SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"
             : "${!SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"
+            SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=180
 
             marker=/tmp/sonari-earthquake-enclave-bootstrapped
             input_file="$(mktemp)"
@@ -428,11 +430,13 @@ Resources:
 
               jq -n \
                 --arg walrus_cli "$SONARI_WALRUS_CLI" \
+                --argjson walrus_n_shards "$SONARI_WALRUS_N_SHARDS" \
                 --arg egress_proxy_url "$SONARI_EARTHQUAKE_EGRESS_PROXY_URL" \
                 '{
                   walrus_cli: $walrus_cli,
+                  walrus_n_shards: $walrus_n_shards,
                   egress_proxy_url: $egress_proxy_url
-                }' | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777" >/dev/null
+                }' | socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777" >/dev/null
               touch "$marker"
             }
 
@@ -447,10 +451,10 @@ Resources:
                 {
                   printf '%s %s HTTP/1.1\r\nHost: sonari-earthquake\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %s\r\n\r\n' "$method" "$request_path" "$content_length"
                   cat "$body_file"
-                } | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
+                } | socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
               else
                 printf '%s %s HTTP/1.1\r\nHost: sonari-earthquake\r\nConnection: close\r\n\r\n' "$method" "$request_path" \
-                  | socat - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
+                  | socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
               fi
 
               status_line="$(head -n 1 "$response_file" | tr -d '\r')"
@@ -678,6 +682,7 @@ Resources:
             {
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
+              echo "SONARI_WALRUS_N_SHARDS=1000"
               echo "SONARI_EARTHQUAKE_EGRESS_PROXY_PORT=18080"
               echo "SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"
@@ -1181,6 +1186,13 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "ArchiveSources",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "ArchiveSources": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
               "Next": "RelayerPreviewOrDryRun",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
