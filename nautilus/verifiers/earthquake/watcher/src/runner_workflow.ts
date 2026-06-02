@@ -1094,8 +1094,16 @@ class FetchSourceFetcher implements SourceFetcherLike {
     }
 }
 
-class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
-    constructor(private readonly endpoint: string) {}
+export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
+    private cachedToken: string | undefined;
+
+    constructor(
+        private readonly endpoint: string,
+        private readonly auth?: {
+            secretArn: string;
+            secretReader: RelayerSignerSecretReader;
+        },
+    ) {}
 
     async archiveAndVerify(input: {
         entry: RawDataEntry;
@@ -1103,7 +1111,7 @@ class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
     }): Promise<{ walrusBlobId: string }> {
         const response = await fetch(this.endpoint, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: await this.headers(),
             body: JSON.stringify({
                 artifact_s3_key: input.artifactS3Key,
                 expected_walrus_blob_id: input.entry.walrus_blob_id,
@@ -1112,15 +1120,43 @@ class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
             }),
         });
         if (!response.ok) {
-            throw new RetryableSourceArchiveError(
-                `Walrus source archiver failed: HTTP ${response.status}`,
-            );
+            const message = `Walrus source archiver failed: HTTP ${response.status}`;
+            if (response.status === 409 || response.status === 422) {
+                throw new IntegritySourceArchiveError(message);
+            }
+            throw new RetryableSourceArchiveError(message);
         }
         const body = (await response.json()) as unknown;
         if (!isRecord(body) || typeof body.walrus_blob_id !== "string") {
             throw new RetryableSourceArchiveError("Walrus source archiver returned invalid JSON");
         }
         return { walrusBlobId: body.walrus_blob_id };
+    }
+
+    private async headers(): Promise<Record<string, string>> {
+        const headers: Record<string, string> = { "content-type": "application/json" };
+        if (this.auth === undefined) {
+            return headers;
+        }
+        headers["x-sonari-source-archiver-token"] = await this.token();
+        return headers;
+    }
+
+    private async token(): Promise<string> {
+        if (this.cachedToken !== undefined) {
+            return this.cachedToken;
+        }
+        if (this.auth === undefined) {
+            throw new RetryableSourceArchiveError("source archiver auth is not configured");
+        }
+        const token = (await this.auth.secretReader.getSecretString(this.auth.secretArn)).trim();
+        if (token.length === 0) {
+            throw new RetryableSourceArchiveError(
+                `${this.auth.secretArn} did not contain SecretString`,
+            );
+        }
+        this.cachedToken = token;
+        return token;
     }
 }
 
@@ -1315,14 +1351,29 @@ function buildSourceArchiveFromConfig(options: RunnerControlHandlerOptions): Sou
     if (options.s3.putObjectBytes === undefined) {
         throw new Error("source archive requires S3 byte staging support");
     }
+    const sourceArchiverUrl = process.env.SOURCE_ARCHIVER_URL;
+    const sourceArchiverTokenSecretArn = process.env.SOURCE_ARCHIVER_TOKEN_SECRET_ARN;
+    if (
+        sourceArchiverUrl !== undefined &&
+        sourceArchiverUrl.length > 0 &&
+        (sourceArchiverTokenSecretArn === undefined || sourceArchiverTokenSecretArn.length === 0)
+    ) {
+        throw new Error("SOURCE_ARCHIVER_TOKEN_SECRET_ARN is required with SOURCE_ARCHIVER_URL");
+    }
+    const sourceArchiverAuth =
+        sourceArchiverTokenSecretArn === undefined || sourceArchiverTokenSecretArn.length === 0
+            ? undefined
+            : {
+                  secretArn: sourceArchiverTokenSecretArn,
+                  secretReader: new AwsRelayerSignerSecretReader(),
+              };
     return {
         fetcher: new FetchSourceFetcher(),
         s3: { putObjectBytes: options.s3.putObjectBytes.bind(options.s3) },
         walrus:
-            process.env.SOURCE_ARCHIVER_URL === undefined ||
-            process.env.SOURCE_ARCHIVER_URL.length === 0
+            sourceArchiverUrl === undefined || sourceArchiverUrl.length === 0
                 ? new UnconfiguredWalrusSourceArchiver()
-                : new HttpWalrusSourceArchiver(process.env.SOURCE_ARCHIVER_URL),
+                : new HttpWalrusSourceArchiver(sourceArchiverUrl, sourceArchiverAuth),
     };
 }
 
@@ -1422,8 +1473,8 @@ function sanitizeS3KeySegment(value: string): string {
     return value.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 96);
 }
 
-class RetryableSourceArchiveError extends Error {}
-class IntegritySourceArchiveError extends Error {}
+export class RetryableSourceArchiveError extends Error {}
+export class IntegritySourceArchiveError extends Error {}
 
 function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;

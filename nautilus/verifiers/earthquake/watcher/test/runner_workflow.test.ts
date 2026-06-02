@@ -16,14 +16,17 @@ import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     handler as runnerWorkflowHandler,
+    HttpWalrusSourceArchiver,
     type AutoScalingClientLike,
     type EnclaveRegistrationAdapter,
     type EnclaveRegistrationClient,
+    IntegritySourceArchiveError,
     SuiEnclaveRegistrationAdapter,
     type Ec2ClientLike,
     readEnclaveRegistrationConfigFromEnv,
     readRelayerConfigFromEnv,
     type RelayerSignerSecretReader,
+    RetryableSourceArchiveError,
     type S3ClientLike,
     type SourceArchiveAdapter,
     type SsmClientLike,
@@ -1162,6 +1165,82 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("sends a runner-only token to the HTTP source archiver", async () => {
+        const fetchCalls: Array<{ url: string; headers: Record<string, string>; body: unknown }> =
+            [];
+        const archiver = new HttpWalrusSourceArchiver("https://archiver.test/store", {
+            secretArn: "arn:aws:secretsmanager:source-archiver-token",
+            secretReader: new RecordingRelayerSignerSecretReader("archiver-token"),
+        });
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            fetchCalls.push({
+                url: String(url),
+                headers: normalizeHeaders(init?.headers),
+                body: JSON.parse(String(init?.body)) as unknown,
+            });
+            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+                status: 200,
+            });
+        }) as typeof fetch;
+        try {
+            await expect(
+                archiver.archiveAndVerify({
+                    entry: firstRawDataEntry(
+                        finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+                    ),
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).resolves.toEqual({ walrusBlobId: "testBlob_123456" });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        expect(fetchCalls).toEqual([
+            {
+                url: "https://archiver.test/store",
+                headers: {
+                    "content-type": "application/json",
+                    "x-sonari-source-archiver-token": "archiver-token",
+                },
+                body: {
+                    artifact_s3_key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                    expected_walrus_blob_id: "testBlob_123456",
+                    source_hash: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+                    size_bytes: "source bytes".length,
+                },
+            },
+        ]);
+    });
+
+    it("classifies HTTP archiver integrity and retryable failures by status", async () => {
+        const originalFetch = globalThis.fetch;
+        const entry = firstRawDataEntry(
+            finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+        );
+        try {
+            globalThis.fetch = (async () =>
+                new Response("mismatch", { status: 422 })) as typeof fetch;
+            await expect(
+                new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                    entry,
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).rejects.toBeInstanceOf(IntegritySourceArchiveError);
+
+            globalThis.fetch = (async () =>
+                new Response("unavailable", { status: 503 })) as typeof fetch;
+            await expect(
+                new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                    entry,
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).rejects.toBeInstanceOf(RetryableSourceArchiveError);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     it("marks dry-run relayer as failed when RELAYER_NETWORK is missing", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -1609,6 +1688,31 @@ function finalizedResultWithRawManifest(
 
 function sha256Hex(bytes: Uint8Array): string {
     return createHash("sha256").update(bytes).digest("hex");
+}
+
+function normalizeHeaders(headers: RequestInit["headers"] | undefined): Record<string, string> {
+    if (headers === undefined) {
+        return {};
+    }
+    if (headers instanceof Headers) {
+        return Object.fromEntries(headers.entries());
+    }
+    if (Array.isArray(headers)) {
+        return Object.fromEntries(headers);
+    }
+    return Object.fromEntries(
+        Object.entries(headers).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+    );
+}
+
+function firstRawDataEntry(result: Extract<TeeCoreResult, { status: "finalized" }>) {
+    const entry = result.raw_data_manifest?.entries[0];
+    if (entry === undefined) {
+        throw new Error("fixture raw_data_manifest entry missing");
+    }
+    return entry;
 }
 
 class RecordingAutoScalingClient implements AutoScalingClientLike {
