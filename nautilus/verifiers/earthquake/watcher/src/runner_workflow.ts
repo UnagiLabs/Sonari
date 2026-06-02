@@ -26,10 +26,12 @@ import {
 } from "@sonari/earthquake-relayer";
 import {
     EARTHQUAKE_VERIFIER_CONFIG_KEY,
+    type EarthquakeOraclePayload,
     type EnclaveVerificationMetadata,
     ERROR_CODES,
     type OracleErrorCode,
     type RawDataEntry,
+    type RawDataManifest,
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
@@ -1086,6 +1088,7 @@ class AwsS3Client implements S3ClientLike {
 
 class FetchSourceFetcher implements SourceFetcherLike {
     async fetchBytes(entry: RawDataEntry): Promise<Uint8Array> {
+        assertAllowedSourceUri(entry);
         const response = await fetchWithTimeout(
             entry.source_uri,
             {},
@@ -1233,6 +1236,73 @@ function concatBytes(chunks: readonly Uint8Array[], totalBytes: number): Uint8Ar
 
 function isAbortError(error: unknown): boolean {
     return error instanceof Error && error.name === "AbortError";
+}
+
+function assertAllowedSourceUri(entry: RawDataEntry): void {
+    if (entry.name !== "USGS") {
+        throw new IntegritySourceArchiveError("source archive entry is not a USGS source");
+    }
+    let url: URL;
+    try {
+        url = new URL(entry.source_uri);
+    } catch {
+        throw new IntegritySourceArchiveError(`source URI is not a valid URL for ${entry.product}`);
+    }
+    if (
+        url.protocol !== "https:" ||
+        url.hostname !== "earthquake.usgs.gov" ||
+        url.port !== "" ||
+        url.username !== "" ||
+        url.password !== ""
+    ) {
+        throw new IntegritySourceArchiveError(`source URI is outside allowed USGS HTTPS scope`);
+    }
+    if (entry.product === "detail_geojson" && isAllowedUsgsDetailUri(url, entry.event_id)) {
+        return;
+    }
+    if (entry.product === "shakemap_grid_xml" && isAllowedUsgsShakemapGridUri(url)) {
+        return;
+    }
+    throw new IntegritySourceArchiveError(`source URI is not allowed for ${entry.product}`);
+}
+
+function isAllowedUsgsDetailUri(url: URL, eventId: string): boolean {
+    if (url.pathname === `/earthquakes/feed/v1.0/detail/${eventId}.geojson` && url.search === "") {
+        return true;
+    }
+    if (url.pathname !== "/fdsnws/event/1/query") {
+        return false;
+    }
+    const keys = [...url.searchParams.keys()];
+    return (
+        keys.length === 2 &&
+        keys.includes("eventid") &&
+        keys.includes("format") &&
+        url.searchParams.get("eventid") === eventId &&
+        url.searchParams.get("format") === "geojson"
+    );
+}
+
+function isAllowedUsgsShakemapGridUri(url: URL): boolean {
+    if (url.search !== "") {
+        return false;
+    }
+    const parts = url.pathname.split("/");
+    const [empty, productPrefix, productType, code, source, version, download, file] = parts;
+    return (
+        parts.length === 8 &&
+        empty === "" &&
+        productPrefix === "product" &&
+        productType === "shakemap" &&
+        code !== undefined &&
+        code.length > 0 &&
+        source !== undefined &&
+        source.length > 0 &&
+        version !== undefined &&
+        version.length > 0 &&
+        download === "download" &&
+        (file === "grid.xml" || file === "grid.xml.zip")
+    );
 }
 
 class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
@@ -1473,6 +1543,15 @@ async function archiveFinalizedSources(input: {
             message: "finalized result is missing raw_data_manifest",
         };
     }
+    const payload = validation.value.payload as EarthquakeOraclePayload;
+    const manifestHash = rawDataManifestHash(manifest);
+    if (manifestHash !== payload.raw_data_hash) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: "raw_data_manifest does not match signed raw_data_hash",
+        };
+    }
     const artifactS3Keys: string[] = [];
     for (const [index, entry] of manifest.entries.entries()) {
         try {
@@ -1521,6 +1600,27 @@ function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {
     if (bytes.byteLength !== entry.size_bytes) {
         throw new IntegritySourceArchiveError(`source size mismatch for ${entry.source_uri}`);
     }
+}
+
+function rawDataManifestHash(manifest: RawDataManifest): string {
+    return `0x${createHash("sha256").update(canonicalRawDataManifestJson(manifest)).digest("hex")}`;
+}
+
+function canonicalRawDataManifestJson(manifest: RawDataManifest): string {
+    return JSON.stringify({
+        entries: manifest.entries.map((entry) => ({
+            name: entry.name,
+            event_id: entry.event_id,
+            product: entry.product,
+            uri: entry.uri,
+            content_hash: entry.content_hash,
+            source_uri: entry.source_uri,
+            walrus_blob_id: entry.walrus_blob_id,
+            source_hash: entry.source_hash,
+            size_bytes: entry.size_bytes,
+        })),
+        oracle_version: manifest.oracle_version,
+    });
 }
 
 function sourceArtifactS3Key(input: {
