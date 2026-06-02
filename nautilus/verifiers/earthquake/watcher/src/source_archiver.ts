@@ -198,7 +198,7 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
                 envKeys: Object.keys(this.config.env ?? {}).sort(),
             });
             const output = await this.commandRunner.run(commandInput);
-            const blobId = parseWalrusBlobId(output.stdout);
+            const blobId = parseWalrusStoreResult(output.stdout);
             this.logger({
                 event: "source_archiver.walrus_store.success",
                 ...context,
@@ -392,7 +392,16 @@ export async function storeVerifiedSourceArtifact(input: {
     }
 }
 
-export function parseWalrusBlobId(output: string): string {
+export function parseWalrusStoreResult(output: string): string {
+    const parsedJson = parseJsonOutput(output);
+    if (parsedJson !== undefined) {
+        const jsonBlobId = readWalrusStoreResultBlobId(parsedJson);
+        if (jsonBlobId !== undefined) {
+            return validateWalrusBlobIdFromOutput(jsonBlobId);
+        }
+        throw missingWalrusBlobId();
+    }
+
     const labeled = output
         .split(/\r?\n/u)
         .map((line) => line.trim())
@@ -403,20 +412,56 @@ export function parseWalrusBlobId(output: string): string {
         return validateWalrusBlobIdFromOutput(labeled);
     }
 
-    const fallback = output
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .filter((line) => !line.startsWith("Success:"))
-        .at(-1);
-    if (fallback === undefined) {
-        throw new SourceArchiverError(
-            "Walrus store output did not include a blob id",
-            "retryable",
-            502,
-        );
+    throw missingWalrusBlobId();
+}
+
+export function parseWalrusBlobId(output: string): string {
+    return parseWalrusStoreResult(output);
+}
+
+function parseJsonOutput(output: string): unknown | undefined {
+    const trimmed = output.trim();
+    if (trimmed.length === 0) {
+        return undefined;
     }
-    return validateWalrusBlobIdFromOutput(fallback);
+    try {
+        return JSON.parse(trimmed) as unknown;
+    } catch {
+        return undefined;
+    }
+}
+
+function readWalrusStoreResultBlobId(output: unknown): string | undefined {
+    if (!isRecord(output)) {
+        return undefined;
+    }
+    const blobStoreResult = output.blobStoreResult;
+    if (!isRecord(blobStoreResult)) {
+        return undefined;
+    }
+
+    const alreadyCertified = blobStoreResult.alreadyCertified;
+    if (isRecord(alreadyCertified) && typeof alreadyCertified.blobId === "string") {
+        return alreadyCertified.blobId;
+    }
+
+    const newlyCreated = blobStoreResult.newlyCreated;
+    if (!isRecord(newlyCreated)) {
+        return undefined;
+    }
+    const blobObject = newlyCreated.blobObject;
+    if (isRecord(blobObject) && typeof blobObject.blobId === "string") {
+        return blobObject.blobId;
+    }
+    return undefined;
+}
+
+function missingWalrusBlobId(): SourceArchiverError {
+    return new SourceArchiverError(
+        "Walrus store output did not include a blob id",
+        "retryable",
+        502,
+    );
 }
 
 function sourceArchiverRequestLogContext(

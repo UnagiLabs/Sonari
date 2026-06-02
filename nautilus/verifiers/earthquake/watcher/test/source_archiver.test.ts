@@ -6,6 +6,7 @@ import {
     loadVerifiedSourceArtifact,
     parseSourceArchiverEvent,
     parseWalrusBlobId,
+    parseWalrusStoreResult,
     SourceArchiverError,
     type SourceArchiverLogEvent,
     storeVerifiedSourceArtifact,
@@ -170,12 +171,61 @@ describe("source archiver Walrus store", () => {
         });
     });
 
-    it("parses Walrus CLI store output formats", () => {
+    it("parses Walrus JSON store output with an already certified blob id", () => {
+        expect(
+            parseWalrusStoreResult(
+                JSON.stringify({
+                    blobStoreResult: {
+                        alreadyCertified: {
+                            blobId: "testBlob_123456",
+                        },
+                    },
+                }),
+            ),
+        ).toBe("testBlob_123456");
+    });
+
+    it("parses Walrus JSON store output with a newly created blob object id", () => {
+        expect(
+            parseWalrusStoreResult(
+                JSON.stringify({
+                    blobStoreResult: {
+                        newlyCreated: {
+                            blobObject: {
+                                blobId: "testBlob_123456",
+                            },
+                        },
+                    },
+                }),
+            ),
+        ).toBe("testBlob_123456");
+    });
+
+    it("validates blob ids parsed from Walrus JSON store output", () => {
+        expect(() =>
+            parseWalrusStoreResult(
+                JSON.stringify({
+                    blobStoreResult: {
+                        alreadyCertified: {
+                            blobId: "bad/blob/id",
+                        },
+                    },
+                }),
+            ),
+        ).toThrow(SourceArchiverError);
+    });
+
+    it("falls back only to explicit Blob ID human output", () => {
+        expect(parseWalrusStoreResult("Success: stored\nBlob ID: testBlob_123456\n")).toBe(
+            "testBlob_123456",
+        );
         expect(parseWalrusBlobId("Success: stored\nBlob ID: testBlob_123456\n")).toBe(
             "testBlob_123456",
         );
-        expect(parseWalrusBlobId("Success: stored\ntestBlob_123456\n")).toBe("testBlob_123456");
-        expect(() => parseWalrusBlobId("Success: stored\n")).toThrow(SourceArchiverError);
+        expect(() => parseWalrusStoreResult("Success: stored\ntestBlob_123456\n")).toThrow(
+            SourceArchiverError,
+        );
+        expect(() => parseWalrusStoreResult("Success: stored\n")).toThrow(SourceArchiverError);
     });
 
     it("runs walrus store with a temp file containing the source bytes", async () => {
