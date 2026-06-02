@@ -327,8 +327,7 @@ fn parse_blob_id_output(stdout: &[u8]) -> Result<String, SourceArchiveError> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .filter(|line| !line.starts_with("Success:"))
-        .next_back()
+        .rfind(|line| !line.starts_with("Success:"))
         .map(str::to_owned)
         .ok_or_else(|| SourceArchiveError::StoreFailed("walrus blob-id output is empty".to_owned()))
 }
