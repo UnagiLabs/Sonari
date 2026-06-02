@@ -64,6 +64,10 @@ export interface WalrusCliStoreConfig {
     timeoutMs?: number;
     epochs?: number;
     env?: Record<string, string>;
+    walrusClientConfigYaml?: string;
+    walrusContext?: string;
+    suiWalletConfigYaml?: string;
+    suiKeystoreJson?: string;
 }
 
 export interface SourceArchiverHttpEvent {
@@ -92,6 +96,12 @@ interface SourceArchiverRequestLogContext {
     sizeBytes: number;
     sourceHash: string;
     expectedWalrusBlobId: string;
+}
+
+interface WalrusJsonGlobalOptions {
+    config?: string;
+    context?: string;
+    wallet?: string;
 }
 
 export type SourceArchiverHandlerFailureStage =
@@ -172,11 +182,26 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
         const context = sourceArchiverRequestLogContext(input.request);
         try {
             await writeFile(artifactPath, input.bytes);
+            const globalOptions = await materializeWalrusJsonGlobalOptions(tempDir, this.config);
             const storeCommand: { files: string[]; epochs?: number } = { files: [artifactPath] };
             if (this.config.epochs !== undefined) {
                 storeCommand.epochs = this.config.epochs;
             }
-            const args = ["json", JSON.stringify({ command: { store: storeCommand } })];
+            const jsonInput: WalrusJsonGlobalOptions & {
+                command: { store: { files: string[]; epochs?: number } };
+            } = {
+                command: { store: storeCommand },
+            };
+            if (globalOptions.config !== undefined) {
+                jsonInput.config = globalOptions.config;
+            }
+            if (globalOptions.context !== undefined) {
+                jsonInput.context = globalOptions.context;
+            }
+            if (globalOptions.wallet !== undefined) {
+                jsonInput.wallet = globalOptions.wallet;
+            }
+            const args = ["json", JSON.stringify(jsonInput)];
             const commandInput: {
                 cliPath: string;
                 args: string[];
@@ -303,10 +328,10 @@ export async function sourceArchiverHandler(
                             "SOURCE_ARCHIVER_WALRUS_TIMEOUT_MS",
                         ),
                         epochs: readOptionalPositiveIntegerEnv("SOURCE_ARCHIVER_WALRUS_EPOCHS"),
-                        env: await readWalrusEnvironmentSecret(
+                        ...(await readWalrusCliStoreSecret(
                             requiredEnv("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN"),
                             secrets,
-                        ),
+                        )),
                     }),
                     new NodeWalrusStoreCommandRunner(),
                     logger,
@@ -707,20 +732,151 @@ class AwsSecretStringReader implements SecretStringReader {
     }
 }
 
-async function readWalrusEnvironmentSecret(
+export async function readWalrusCliStoreSecret(
     secretArn: string,
     reader: SecretStringReader,
-): Promise<Record<string, string>> {
-    const parsed = JSON.parse(await reader.getSecretString(secretArn)) as unknown;
-    if (!isRecord(parsed)) {
-        throw new Error(`${secretArn} must contain a JSON object`);
+): Promise<
+    Required<Pick<WalrusCliStoreConfig, "walrusClientConfigYaml">> &
+        Pick<
+            WalrusCliStoreConfig,
+            "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson"
+        >
+> {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(await reader.getSecretString(secretArn)) as unknown;
+    } catch {
+        throw sourceArchiverConfigurationError(`${secretArn} must contain valid JSON`);
     }
-    return Object.fromEntries(
-        Object.entries(parsed).filter((entry): entry is [string, string] => {
-            const [key, value] = entry;
-            return key.length > 0 && typeof value === "string" && value.length > 0;
-        }),
+    if (!isRecord(parsed)) {
+        throw sourceArchiverConfigurationError(`${secretArn} must contain a JSON object`);
+    }
+    const allowedKeys = new Set([
+        "SONARI_WALRUS_CLIENT_CONFIG_YAML",
+        "SONARI_WALRUS_CONTEXT",
+        "SONARI_SUI_WALLET_CONFIG_YAML",
+        "SONARI_SUI_KEYSTORE_JSON",
+    ]);
+    for (const key of Object.keys(parsed)) {
+        if (!allowedKeys.has(key)) {
+            throw sourceArchiverConfigurationError(`${secretArn} included an unsupported key`);
+        }
+    }
+
+    const config: Required<Pick<WalrusCliStoreConfig, "walrusClientConfigYaml">> &
+        Pick<
+            WalrusCliStoreConfig,
+            "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson"
+        > = {
+        walrusClientConfigYaml: readRequiredSecretString(
+            parsed,
+            "SONARI_WALRUS_CLIENT_CONFIG_YAML",
+            secretArn,
+        ),
+    };
+
+    const context = readOptionalSecretString(parsed, "SONARI_WALRUS_CONTEXT", secretArn);
+    if (context !== undefined) {
+        config.walrusContext = context;
+    }
+
+    const walletConfigYaml = readOptionalSecretString(
+        parsed,
+        "SONARI_SUI_WALLET_CONFIG_YAML",
+        secretArn,
     );
+    const keystoreJson = readOptionalSecretString(parsed, "SONARI_SUI_KEYSTORE_JSON", secretArn);
+    if ((walletConfigYaml === undefined) !== (keystoreJson === undefined)) {
+        throw sourceArchiverConfigurationError(
+            `${secretArn} must include Sui wallet config and keystore together`,
+        );
+    }
+    if (walletConfigYaml !== undefined && keystoreJson !== undefined) {
+        config.suiWalletConfigYaml = walletConfigYaml;
+        config.suiKeystoreJson = keystoreJson;
+    }
+
+    return config;
+}
+
+async function materializeWalrusJsonGlobalOptions(
+    tempDir: string,
+    config: WalrusCliStoreConfig,
+): Promise<WalrusJsonGlobalOptions> {
+    const globalOptions: WalrusJsonGlobalOptions = {};
+    if (config.walrusClientConfigYaml !== undefined) {
+        const configPath = path.join(tempDir, "client_config.yaml");
+        await writePrivateFile(configPath, config.walrusClientConfigYaml);
+        globalOptions.config = configPath;
+    }
+    if (config.walrusContext !== undefined) {
+        globalOptions.context = config.walrusContext;
+    }
+
+    const hasWalletConfig = config.suiWalletConfigYaml !== undefined;
+    const hasKeystore = config.suiKeystoreJson !== undefined;
+    if (hasWalletConfig !== hasKeystore) {
+        throw sourceArchiverConfigurationError(
+            "Sui wallet config and keystore must be configured together",
+        );
+    }
+    if (config.suiWalletConfigYaml !== undefined && config.suiKeystoreJson !== undefined) {
+        const keystorePath = path.join(tempDir, "sui.keystore");
+        const walletPath = path.join(tempDir, "sui_config.yaml");
+        await writePrivateFile(keystorePath, config.suiKeystoreJson);
+        await writePrivateFile(
+            walletPath,
+            normalizeSuiWalletConfigYaml(config.suiWalletConfigYaml, keystorePath),
+        );
+        globalOptions.wallet = walletPath;
+    }
+
+    return globalOptions;
+}
+
+async function writePrivateFile(filePath: string, contents: string | Uint8Array): Promise<void> {
+    await writeFile(filePath, contents, { mode: 0o600 });
+}
+
+function normalizeSuiWalletConfigYaml(walletConfigYaml: string, keystorePath: string): string {
+    const fileEntryPattern = /^(\s*File:\s*).+$/mu;
+    if (!fileEntryPattern.test(walletConfigYaml)) {
+        throw sourceArchiverConfigurationError(
+            "Sui wallet config must use a file-backed keystore",
+        );
+    }
+    return walletConfigYaml.replace(fileEntryPattern, `$1${keystorePath}`);
+}
+
+function readRequiredSecretString(
+    parsed: Record<string, unknown>,
+    key: string,
+    secretArn: string,
+): string {
+    const value = readOptionalSecretString(parsed, key, secretArn);
+    if (value === undefined) {
+        throw sourceArchiverConfigurationError(`${secretArn} is missing ${key}`);
+    }
+    return value;
+}
+
+function readOptionalSecretString(
+    parsed: Record<string, unknown>,
+    key: string,
+    secretArn: string,
+): string | undefined {
+    if (!Object.hasOwn(parsed, key)) {
+        return undefined;
+    }
+    const value = parsed[key];
+    if (typeof value !== "string" || value.length === 0) {
+        throw sourceArchiverConfigurationError(`${secretArn} has invalid ${key}`);
+    }
+    return value;
+}
+
+function sourceArchiverConfigurationError(message: string): SourceArchiverError {
+    return new SourceArchiverError(message, "retryable", 500);
 }
 
 function requiredEnv(name: string): string {
@@ -747,17 +903,35 @@ function walrusCliStoreConfig(input: {
     cliPath: string;
     timeoutMs: number | undefined;
     epochs: number | undefined;
-    env: Record<string, string>;
+    env?: Record<string, string>;
+    walrusClientConfigYaml?: string;
+    walrusContext?: string;
+    suiWalletConfigYaml?: string;
+    suiKeystoreJson?: string;
 }): WalrusCliStoreConfig {
     const config: WalrusCliStoreConfig = {
         cliPath: input.cliPath,
-        env: input.env,
     };
+    if (input.env !== undefined) {
+        config.env = input.env;
+    }
     if (input.timeoutMs !== undefined) {
         config.timeoutMs = input.timeoutMs;
     }
     if (input.epochs !== undefined) {
         config.epochs = input.epochs;
+    }
+    if (input.walrusClientConfigYaml !== undefined) {
+        config.walrusClientConfigYaml = input.walrusClientConfigYaml;
+    }
+    if (input.walrusContext !== undefined) {
+        config.walrusContext = input.walrusContext;
+    }
+    if (input.suiWalletConfigYaml !== undefined) {
+        config.suiWalletConfigYaml = input.suiWalletConfigYaml;
+    }
+    if (input.suiKeystoreJson !== undefined) {
+        config.suiKeystoreJson = input.suiKeystoreJson;
     }
     return config;
 }
