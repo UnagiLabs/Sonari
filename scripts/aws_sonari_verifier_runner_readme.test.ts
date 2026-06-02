@@ -14,6 +14,17 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
     }
 }
 
+function expectAdminCallIncludesSender(source: string, functionName: string): void {
+    const callBlocks = Array.from(
+        source.matchAll(/```bash\n(sui client call[\s\S]*?)\n```/g),
+        (match) => match[1] ?? "",
+    );
+    const matchingBlock = callBlocks.find((block) => block.includes(`--function ${functionName}`));
+
+    expect(matchingBlock).toBeDefined();
+    expect(matchingBlock).toContain('--sender "$ADMIN_ADDRESS"');
+}
+
 describe("AWS Sonari verifier runner README", () => {
     it("documents manual deploy with the validated deploy plan and commit-scoped artifacts", async () => {
         const readme = await readReadme();
@@ -77,6 +88,62 @@ describe("AWS Sonari verifier runner README", () => {
             "BatchScheduleName",
             "DISABLED",
         ]);
+    });
+
+    it("documents existing AdminCap-gated earthquake PCR config entrypoints", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "admin::create_earthquake_verifier_config",
+            "admin::update_earthquake_verifier_config_pcrs",
+            "admin::disable_earthquake_verifier_config",
+            "`&AdminCap`",
+            "既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません",
+            "metadata_verifier::register_enclave_instance",
+            "accessor::create_disaster_event_from_signed_payload",
+        ]);
+    });
+
+    it("documents Earthquake EIF PCR extraction and Move byte-vector format", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "pnpm build:aws-earthquake-eif",
+            "nitro-cli build-enclave",
+            "PCR0 / PCR1 / PCR2",
+            "48 byte SHA-384",
+            "Move の `vector<u8>`",
+            "hex を 2 桁ずつ byte に分けます",
+            "EarthquakeTeeEifSha256 は EIF file の SHA-256 checksum",
+            "PCR0/1/2 は attestation document の measurement",
+        ]);
+    });
+
+    it("documents AdminCap PCR transactions, key separation, and verification scope", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "PACKAGE_ID",
+            "ADMIN_ADDRESS",
+            "ADMIN_CAP_ID",
+            "VERIFIER_REGISTRY_ID",
+            '--sender "$ADMIN_ADDRESS"',
+            "--function create_earthquake_verifier_config",
+            "--function update_earthquake_verifier_config_pcrs",
+            "--function disable_earthquake_verifier_config",
+            "AdminCap を持つ管理者 wallet は AWS に置きません",
+            "Codex が動く管理端末",
+            "AWS Secrets Manager に入れてはいけません",
+            "Relayer wallet は AdminCap を持ちません",
+            "`VerifierConfigCreated` と `VerifierConfigPcrsUpdated`",
+            "`VerifierConfigDisabled`",
+            "この event は PCR0/1/2 を持たないため",
+            "pnpm check:move",
+            "本番 AWS 実行はこの手順の必須検証ではありません",
+        ]);
+        expectAdminCallIncludesSender(readme, "create_earthquake_verifier_config");
+        expectAdminCallIncludesSender(readme, "update_earthquake_verifier_config_pcrs");
+        expectAdminCallIncludesSender(readme, "disable_earthquake_verifier_config");
     });
 
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
