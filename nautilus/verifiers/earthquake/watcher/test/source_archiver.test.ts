@@ -174,13 +174,16 @@ describe("source archiver Walrus store", () => {
     it("parses Walrus JSON store output with an already certified blob id", () => {
         expect(
             parseWalrusStoreResult(
-                JSON.stringify({
-                    blobStoreResult: {
-                        alreadyCertified: {
-                            blobId: "testBlob_123456",
+                JSON.stringify([
+                    {
+                        path: "/tmp/source-artifact.bin",
+                        blobStoreResult: {
+                            alreadyCertified: {
+                                blobId: "testBlob_123456",
+                            },
                         },
                     },
-                }),
+                ]),
             ),
         ).toBe("testBlob_123456");
     });
@@ -188,15 +191,18 @@ describe("source archiver Walrus store", () => {
     it("parses Walrus JSON store output with a newly created blob object id", () => {
         expect(
             parseWalrusStoreResult(
-                JSON.stringify({
-                    blobStoreResult: {
-                        newlyCreated: {
-                            blobObject: {
-                                blobId: "testBlob_123456",
+                JSON.stringify([
+                    {
+                        path: "/tmp/source-artifact.bin",
+                        blobStoreResult: {
+                            newlyCreated: {
+                                blobObject: {
+                                    blobId: "testBlob_123456",
+                                },
                             },
                         },
                     },
-                }),
+                ]),
             ),
         ).toBe("testBlob_123456");
     });
@@ -239,13 +245,46 @@ describe("source archiver Walrus store", () => {
     it("classifies Walrus JSON output missing a blob id as retryable", () => {
         expect(() =>
             parseWalrusStoreResult(
-                JSON.stringify({
-                    blobStoreResult: {
-                        newlyCreated: {
-                            blobObject: {},
+                JSON.stringify([
+                    {
+                        path: "/tmp/source-artifact.bin",
+                        blobStoreResult: {
+                            newlyCreated: {
+                                blobObject: {},
+                            },
                         },
                     },
-                }),
+                ]),
+            ),
+        ).toThrow(
+            expect.objectContaining({
+                kind: "retryable",
+                statusCode: 502,
+            }),
+        );
+    });
+
+    it("classifies Walrus JSON output with multiple store results as retryable", () => {
+        expect(() =>
+            parseWalrusStoreResult(
+                JSON.stringify([
+                    {
+                        path: "/tmp/source-a.bin",
+                        blobStoreResult: {
+                            alreadyCertified: {
+                                blobId: "testBlob_123456",
+                            },
+                        },
+                    },
+                    {
+                        path: "/tmp/source-b.bin",
+                        blobStoreResult: {
+                            alreadyCertified: {
+                                blobId: "otherBlob_123456",
+                            },
+                        },
+                    },
+                ]),
             ),
         ).toThrow(
             expect.objectContaining({
@@ -706,13 +745,16 @@ async function verifiedArtifact() {
 }
 
 function walrusJsonStdout(blobId: string): string {
-    return JSON.stringify({
-        blobStoreResult: {
-            alreadyCertified: {
-                blobId,
+    return JSON.stringify([
+        {
+            path: "/tmp/source-artifact.bin",
+            blobStoreResult: {
+                alreadyCertified: {
+                    blobId,
+                },
             },
         },
-    });
+    ]);
 }
 
 function sha256Hex(bytes: Uint8Array): string {

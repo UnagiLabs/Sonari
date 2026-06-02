@@ -396,7 +396,15 @@ export async function storeVerifiedSourceArtifact(input: {
 export function parseWalrusStoreResult(output: string): string {
     const parsedJson = parseJsonOutput(output);
     if (parsedJson !== undefined) {
-        const jsonBlobIds = readWalrusStoreResultBlobIds(parsedJson);
+        const jsonResults = readWalrusStoreResults(parsedJson);
+        if (jsonResults.length > 1) {
+            throw new SourceArchiverError(
+                "Walrus store output included multiple store results",
+                "retryable",
+                502,
+            );
+        }
+        const jsonBlobIds = readWalrusStoreResultBlobIds(jsonResults[0]);
         if (jsonBlobIds.length === 1) {
             return validateWalrusBlobIdFromOutput(jsonBlobIds[0] ?? "");
         }
@@ -444,6 +452,13 @@ function parseJsonOutput(output: string): unknown | undefined {
         }
         return undefined;
     }
+}
+
+function readWalrusStoreResults(output: unknown): unknown[] {
+    if (Array.isArray(output)) {
+        return output;
+    }
+    return [output];
 }
 
 function readWalrusStoreResultBlobIds(output: unknown): string[] {
