@@ -52,6 +52,7 @@ Verifier-specific details live with each verifier implementation.
 
 - 機能単位のルート構成を優先し、汎用的な中間ディレクトリは使わない。
 - TypeScript workspace は pnpm で管理し、root から `pnpm typecheck`、`pnpm test`、`pnpm test:oracle` を実行できる状態を保つ。
+- Rust の root 品質ゲートは `pnpm check:rust` で管理し、`cargo fmt --all --check` と `cargo clippy --workspace --all-targets -- -D warnings` を実行する。これにより通常コードだけでなく `#[cfg(test)]` を含む test target の Clippy warning も失敗扱いにする。
 - dApp は `dapp/` に置き、Dashboard、Donation、Membership Pass、Claim、Program / Campaign 表示、Wallet 接続を同じプロダクト面として扱う。
 - Earthquake verifier 専用コードは `nautilus/verifiers/earthquake/` に閉じる。
 - Membership verifier 専用コードは `nautilus/verifiers/membership/` に閉じる。

@@ -89,6 +89,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         const workflow = await readWorkflow();
 
         expectContainsAll(workflow, [
+            "rustup toolchain install stable --profile minimal --component rustfmt --component clippy",
             "pnpm install --frozen-lockfile",
             "pnpm check",
             "pnpm test:oracle",
