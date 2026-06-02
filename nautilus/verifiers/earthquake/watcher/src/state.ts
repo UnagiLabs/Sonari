@@ -88,8 +88,14 @@ export type RunnerPhase =
     | "stopping_instance"
     | "complete";
 
-export type SourceArchiveStatus = "skipped" | "success" | "retryable_failed" | "integrity_failed";
+export type SourceArchiveStatus =
+    | "skipped"
+    | "success"
+    | "configuration_failed"
+    | "retryable_failed"
+    | "integrity_failed";
 export type SourceArchiveErrorCode =
+    | "SOURCE_ARCHIVE_CONFIGURATION_FAILED"
     | "SOURCE_ARCHIVE_RETRYABLE_FAILED"
     | "SOURCE_ARCHIVE_INTEGRITY_FAILED";
 
@@ -2023,6 +2029,12 @@ function applySourceArchiveResultToRow(
         row.error_code = "SOURCE_ARCHIVE_RETRYABLE_FAILED";
         row.runner_error_message = input.message ?? null;
         row.next_retry_at_ms = input.retryableNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+    }
+    if (input.status === "configuration_failed") {
+        row.status = "rejected";
+        row.error_code = "SOURCE_ARCHIVE_CONFIGURATION_FAILED";
+        row.runner_error_message = input.message ?? null;
+        row.next_retry_at_ms = null;
     }
     if (input.status === "integrity_failed") {
         row.status = "rejected";

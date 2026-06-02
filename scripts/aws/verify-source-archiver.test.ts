@@ -91,9 +91,7 @@ describe("AWS SourceArchiver verification script", () => {
                 blobIdForBytes: async () => "expectedBlob123",
                 poll: { intervalMs: 0, timeoutMs: 1 },
             }),
-        ).rejects.toThrow(
-            "SourceArchiver is not configured for stack sonari-verifier-runner-dev",
-        );
+        ).rejects.toThrow("SourceArchiver is not configured for stack sonari-verifier-runner-dev");
     });
 
     it("parses Walrus blob-id JSON, labeled, and plain outputs", () => {
@@ -242,6 +240,10 @@ function stackResponse(input: { sourceArchiverConfigured: boolean }): unknown {
                   ParameterKey: "SourceArchiverWalrusEnvSecretArn",
                   ParameterValue: "source-archiver-walrus-secret",
               },
+              {
+                  ParameterKey: "SourceArchiverWalrusLayerArn",
+                  ParameterValue: "source-archiver-walrus-layer",
+              },
           ]
         : [
               {
@@ -250,6 +252,10 @@ function stackResponse(input: { sourceArchiverConfigured: boolean }): unknown {
               },
               {
                   ParameterKey: "SourceArchiverWalrusEnvSecretArn",
+                  ParameterValue: "",
+              },
+              {
+                  ParameterKey: "SourceArchiverWalrusLayerArn",
                   ParameterValue: "",
               },
           ];

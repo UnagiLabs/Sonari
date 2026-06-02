@@ -1,5 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import process from "node:process";
+import { SOURCE_ARCHIVER_WALRUS_CLI_PATH } from "./aws/sonari-verifier-runner-constants.js";
+
+export { SOURCE_ARCHIVER_WALRUS_CLI_PATH };
 
 const DEFAULT_PREFIX = "sonari-verifier-runner";
 const LAMBDA_ARTIFACT_FILE_NAME = "sonari-verifier-runner-lambda.zip";
@@ -106,7 +109,7 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
             input.sourceArchiverWalrusLayerArn,
             "source archiver Walrus Lambda layer ARN",
         ),
-        SourceArchiverWalrusCliPath: "/opt/bin/walrus-real",
+        SourceArchiverWalrusCliPath: SOURCE_ARCHIVER_WALRUS_CLI_PATH,
     };
 
     return {

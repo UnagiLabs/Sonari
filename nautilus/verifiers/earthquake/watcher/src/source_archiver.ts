@@ -17,7 +17,7 @@ const SENSITIVE_OUTPUT_LINE_PATTERN =
 
 const execFileAsync = promisify(execFile);
 
-export type SourceArchiverErrorKind = "bad_request" | "integrity" | "retryable";
+export type SourceArchiverErrorKind = "bad_request" | "configuration" | "integrity" | "retryable";
 
 export class SourceArchiverError extends Error {
     constructor(
@@ -47,6 +47,10 @@ export interface VerifiedSourceArtifact {
 }
 
 export interface WalrusStoreRunner {
+    /**
+     * Implementations may throw arbitrary errors; storeVerifiedSourceArtifact
+     * normalizes them into SourceArchiverError at this interface boundary.
+     */
     store(input: VerifiedSourceArtifact): Promise<string>;
 }
 
@@ -66,8 +70,12 @@ export interface WalrusCliStoreConfig {
     env?: Record<string, string>;
     walrusClientConfigYaml?: string;
     walrusContext?: string;
-    suiWalletConfigYaml?: string;
-    suiKeystoreJson?: string;
+    suiWallet?: SuiWalletSecretConfig;
+}
+
+export interface SuiWalletSecretConfig {
+    configYaml: string;
+    keystoreJson: string;
 }
 
 export interface SourceArchiverHttpEvent {
@@ -327,11 +335,11 @@ export function createSourceArchiverHandler(input: {
 export async function sourceArchiverHandler(
     event: SourceArchiverHttpEvent,
 ): Promise<SourceArchiverHttpResponse> {
-    const secrets = new AwsSecretStringReader();
+    const secrets = defaultAwsSecretStringReader();
     const logger = defaultSourceArchiverLogger;
     const handler = createSourceArchiverHandler({
         bucket: requiredEnv("RESULT_BUCKET"),
-        s3: new AwsSourceArtifactS3Reader(),
+        s3: defaultAwsSourceArtifactS3Reader(),
         walrus: {
             store: async (artifact) =>
                 new WalrusCliStoreRunner(
@@ -346,7 +354,7 @@ export async function sourceArchiverHandler(
                             secrets,
                         )),
                     }),
-                    new NodeWalrusStoreCommandRunner(),
+                    defaultWalrusStoreCommandRunner(),
                     logger,
                 ).store(artifact),
         },
@@ -745,12 +753,31 @@ class AwsSecretStringReader implements SecretStringReader {
     }
 }
 
+let awsSourceArtifactS3Reader: SourceArtifactS3Reader | undefined;
+let awsSecretStringReader: SecretStringReader | undefined;
+let walrusStoreCommandRunner: WalrusStoreCommandRunner | undefined;
+
+function defaultAwsSourceArtifactS3Reader(): SourceArtifactS3Reader {
+    awsSourceArtifactS3Reader ??= new AwsSourceArtifactS3Reader();
+    return awsSourceArtifactS3Reader;
+}
+
+function defaultAwsSecretStringReader(): SecretStringReader {
+    awsSecretStringReader ??= new AwsSecretStringReader();
+    return awsSecretStringReader;
+}
+
+function defaultWalrusStoreCommandRunner(): WalrusStoreCommandRunner {
+    walrusStoreCommandRunner ??= new NodeWalrusStoreCommandRunner();
+    return walrusStoreCommandRunner;
+}
+
 export async function readWalrusCliStoreSecret(
     secretArn: string,
     reader: SecretStringReader,
 ): Promise<
     Required<Pick<WalrusCliStoreConfig, "walrusClientConfigYaml">> &
-        Pick<WalrusCliStoreConfig, "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson">
+        Pick<WalrusCliStoreConfig, "walrusContext" | "suiWallet">
 > {
     let parsed: unknown;
     try {
@@ -774,7 +801,7 @@ export async function readWalrusCliStoreSecret(
     }
 
     const config: Required<Pick<WalrusCliStoreConfig, "walrusClientConfigYaml">> &
-        Pick<WalrusCliStoreConfig, "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson"> = {
+        Pick<WalrusCliStoreConfig, "walrusContext" | "suiWallet"> = {
         walrusClientConfigYaml: readRequiredSecretString(
             parsed,
             "SONARI_WALRUS_CLIENT_CONFIG_YAML",
@@ -799,8 +826,10 @@ export async function readWalrusCliStoreSecret(
         );
     }
     if (walletConfigYaml !== undefined && keystoreJson !== undefined) {
-        config.suiWalletConfigYaml = walletConfigYaml;
-        config.suiKeystoreJson = keystoreJson;
+        config.suiWallet = {
+            configYaml: walletConfigYaml,
+            keystoreJson,
+        };
     }
 
     return config;
@@ -820,20 +849,13 @@ async function materializeWalrusJsonGlobalOptions(
         globalOptions.context = config.walrusContext;
     }
 
-    const hasWalletConfig = config.suiWalletConfigYaml !== undefined;
-    const hasKeystore = config.suiKeystoreJson !== undefined;
-    if (hasWalletConfig !== hasKeystore) {
-        throw sourceArchiverConfigurationError(
-            "Sui wallet config and keystore must be configured together",
-        );
-    }
-    if (config.suiWalletConfigYaml !== undefined && config.suiKeystoreJson !== undefined) {
+    if (config.suiWallet !== undefined) {
         const keystorePath = path.join(tempDir, "sui.keystore");
         const walletPath = path.join(tempDir, "sui_config.yaml");
-        await writePrivateFile(keystorePath, config.suiKeystoreJson);
+        await writePrivateFile(keystorePath, config.suiWallet.keystoreJson);
         await writePrivateFile(
             walletPath,
-            normalizeSuiWalletConfigYaml(config.suiWalletConfigYaml, keystorePath),
+            normalizeSuiWalletConfigYaml(config.suiWallet.configYaml, keystorePath),
         );
         globalOptions.wallet = walletPath;
     }
@@ -850,7 +872,9 @@ function normalizeSuiWalletConfigYaml(walletConfigYaml: string, keystorePath: st
     if (!fileEntryPattern.test(walletConfigYaml)) {
         throw sourceArchiverConfigurationError("Sui wallet config must use a file-backed keystore");
     }
-    return walletConfigYaml.replace(fileEntryPattern, `$1${keystorePath}`);
+    return walletConfigYaml.replace(fileEntryPattern, (_match, prefix: string) => {
+        return `${prefix}${keystorePath}`;
+    });
 }
 
 function readRequiredSecretString(
@@ -881,7 +905,7 @@ function readOptionalSecretString(
 }
 
 function sourceArchiverConfigurationError(message: string): SourceArchiverError {
-    return new SourceArchiverError(message, "retryable", 500);
+    return new SourceArchiverError(message, "configuration", 500);
 }
 
 function requiredEnv(name: string): string {
@@ -911,8 +935,7 @@ function walrusCliStoreConfig(input: {
     env?: Record<string, string>;
     walrusClientConfigYaml?: string;
     walrusContext?: string;
-    suiWalletConfigYaml?: string;
-    suiKeystoreJson?: string;
+    suiWallet?: SuiWalletSecretConfig;
 }): WalrusCliStoreConfig {
     const config: WalrusCliStoreConfig = {
         cliPath: input.cliPath,
@@ -932,11 +955,8 @@ function walrusCliStoreConfig(input: {
     if (input.walrusContext !== undefined) {
         config.walrusContext = input.walrusContext;
     }
-    if (input.suiWalletConfigYaml !== undefined) {
-        config.suiWalletConfigYaml = input.suiWalletConfigYaml;
-    }
-    if (input.suiKeystoreJson !== undefined) {
-        config.suiKeystoreJson = input.suiKeystoreJson;
+    if (input.suiWallet !== undefined) {
+        config.suiWallet = input.suiWallet;
     }
     return config;
 }

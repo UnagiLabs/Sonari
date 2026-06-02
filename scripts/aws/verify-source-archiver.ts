@@ -15,6 +15,7 @@ import {
     DEFAULT_STACK,
     describeStack,
     ExecFileAwsCli,
+    isRecord,
     type PollOptions,
     parseArgs,
     parseStackOutputs,
@@ -72,6 +73,7 @@ export async function runVerifySourceArchiver(
     const parameters = parseStackParameters(stackResponse);
     await assertSchedulesDisabled(aws, outputs);
 
+    assertSourceArchiverConfigured(stack, parameters, outputs);
     const sourceArchiverLambdaName = requireOutput(outputs, "SourceArchiverLambdaName");
     const sourceArchiverUrl = requireOutput(outputs, "SourceArchiverFunctionUrlOutput");
     const resultBucket = requireOutput(outputs, "RunnerResultBucketName");
@@ -236,7 +238,15 @@ async function walrusBlobIdForBytes(
     }
 }
 
-function parseWalrusBlobIdOutput(stdout: string): string {
+export function parseWalrusBlobIdOutput(stdout: string): string {
+    const trimmed = stdout.trim();
+    if (trimmed.length === 0) {
+        throw new Error("walrus blob-id returned empty output");
+    }
+    const parsedJson = parseJsonWalrusBlobIdOutput(trimmed);
+    if (parsedJson !== undefined) {
+        return parsedJson;
+    }
     const labeled = stdout
         .split(/\r?\n/u)
         .map((line) => line.trim())
@@ -255,6 +265,29 @@ function parseWalrusBlobIdOutput(stdout: string): string {
         throw new Error("walrus blob-id returned empty output");
     }
     return lastLine;
+}
+
+function parseJsonWalrusBlobIdOutput(stdout: string): string | undefined {
+    try {
+        const parsed = JSON.parse(stdout) as unknown;
+        if (typeof parsed === "string" && parsed.length > 0) {
+            return parsed;
+        }
+        if (isRecord(parsed)) {
+            if (typeof parsed.blobId === "string" && parsed.blobId.length > 0) {
+                return parsed.blobId;
+            }
+            if (typeof parsed.blob_id === "string" && parsed.blob_id.length > 0) {
+                return parsed.blob_id;
+            }
+        }
+        return undefined;
+    } catch {
+        if (stdout.startsWith("{") || stdout.startsWith("[")) {
+            throw new Error("walrus blob-id returned malformed JSON output");
+        }
+        return undefined;
+    }
 }
 
 async function getSecretString(aws: AwsCli, secretArn: string): Promise<string> {
@@ -327,6 +360,35 @@ function requireParameter(parameters: Record<string, string>, key: string): stri
     return value;
 }
 
+function assertSourceArchiverConfigured(
+    stack: string,
+    parameters: Record<string, string>,
+    outputs: Record<string, string | undefined>,
+): void {
+    const requiredParameters = [
+        "SourceArchiverTokenSecretArn",
+        "SourceArchiverWalrusEnvSecretArn",
+        "SourceArchiverWalrusLayerArn",
+    ];
+    const requiredOutputs = ["SourceArchiverLambdaName", "SourceArchiverFunctionUrlOutput"];
+    const missingParameters = requiredParameters.filter((key) => {
+        const value = parameters[key];
+        return value === undefined || value.length === 0;
+    });
+    const missingOutputs = requiredOutputs.filter((key) => {
+        const value = outputs[key];
+        return value === undefined || value.length === 0;
+    });
+    if (missingParameters.length > 0 || missingOutputs.length > 0) {
+        throw new Error(
+            [
+                `SourceArchiver is not configured for stack ${stack}`,
+                `set ${requiredParameters.join(", ")}`,
+            ].join(": "),
+        );
+    }
+}
+
 function readPositiveIntegerOption(
     options: Record<string, string | boolean>,
     key: string,
@@ -344,10 +406,6 @@ function readPositiveIntegerOption(
         throw new Error(`--${key} must be a positive integer`);
     }
     return parsed;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 if (process.argv[1]?.endsWith("verify-source-archiver.ts")) {
