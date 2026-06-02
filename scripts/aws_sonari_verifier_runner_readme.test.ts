@@ -93,6 +93,21 @@ describe("AWS Sonari verifier runner README", () => {
         ]);
     });
 
+    it("documents Earthquake EIF PCR extraction and Move byte-vector format", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "pnpm build:aws-earthquake-eif",
+            "nitro-cli build-enclave",
+            "PCR0 / PCR1 / PCR2",
+            "48 byte SHA-384",
+            "Move の `vector<u8>`",
+            "hex を 2 桁ずつ byte に分けます",
+            "EarthquakeTeeEifSha256 は EIF file の SHA-256 checksum",
+            "PCR0/1/2 は attestation document の measurement",
+        ]);
+    });
+
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
         const readme = await readReadme();
 
