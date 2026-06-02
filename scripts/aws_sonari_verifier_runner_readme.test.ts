@@ -15,10 +15,14 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
 }
 
 function expectAdminCallIncludesSender(source: string, functionName: string): void {
-    const pattern = new RegExp(
-        `sui client call[\\s\\S]*?--sender "\\$ADMIN_ADDRESS"[\\s\\S]*?--function ${functionName}`,
+    const callBlocks = Array.from(
+        source.matchAll(/```bash\n(sui client call[\s\S]*?)\n```/g),
+        (match) => match[1] ?? "",
     );
-    expect(source).toMatch(pattern);
+    const matchingBlock = callBlocks.find((block) => block.includes(`--function ${functionName}`));
+
+    expect(matchingBlock).toBeDefined();
+    expect(matchingBlock).toContain('--sender "$ADMIN_ADDRESS"');
 }
 
 describe("AWS Sonari verifier runner README", () => {
