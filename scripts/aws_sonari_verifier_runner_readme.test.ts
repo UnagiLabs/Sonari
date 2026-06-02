@@ -127,7 +127,7 @@ describe("AWS Sonari verifier runner README", () => {
             "ADMIN_ADDRESS",
             "ADMIN_CAP_ID",
             "VERIFIER_REGISTRY_ID",
-            "--sender \"$ADMIN_ADDRESS\"",
+            '--sender "$ADMIN_ADDRESS"',
             "--function create_earthquake_verifier_config",
             "--function update_earthquake_verifier_config_pcrs",
             "--function disable_earthquake_verifier_config",
