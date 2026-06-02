@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, mkdir, readFile, rm, stat } from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
     createSourceArchiverHandler,
@@ -430,6 +431,52 @@ describe("source archiver Walrus store", () => {
         expect(JSON.stringify(command.runs)).not.toContain("sui-private-key-material");
     });
 
+    it("materializes Sui wallet keystore paths containing replacement metacharacters literally", async () => {
+        const originalTmpdir = process.env.TMPDIR;
+        const tmpRoot = path.join(process.cwd(), ".tmp", "source-archiver-$&-tmp");
+        await mkdir(tmpRoot, { recursive: true });
+        process.env.TMPDIR = tmpRoot;
+        try {
+            const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
+            const runner = new WalrusCliStoreRunner(
+                {
+                    cliPath: "/opt/sonari/bin/walrus",
+                    ...(await readWalrusCliStoreSecret(
+                        "secret-arn",
+                        new RecordingSecretStringReader(
+                            JSON.stringify({
+                                SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n",
+                                SONARI_SUI_WALLET_CONFIG_YAML:
+                                    "keystore:\n  File: /home/dev/.sui/sui_config/sui.keystore\n",
+                                SONARI_SUI_KEYSTORE_JSON: '["sui-private-key-material"]\n',
+                            }),
+                        ),
+                    )),
+                },
+                command,
+            );
+
+            await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
+
+            expect(command.materializedFiles).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        path: command.walletConfigPaths[0],
+                        text: `keystore:\n  File: ${command.keystorePaths[0]}\n`,
+                    }),
+                ]),
+            );
+            expect(command.keystorePaths[0]).toContain("$&");
+        } finally {
+            if (originalTmpdir === undefined) {
+                delete process.env.TMPDIR;
+            } else {
+                process.env.TMPDIR = originalTmpdir;
+            }
+            await rm(tmpRoot, { recursive: true, force: true });
+        }
+    });
+
     it("cleans up materialized Walrus config, Sui wallet, keystore, and artifact files", async () => {
         const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
         const runner = new WalrusCliStoreRunner(
@@ -494,7 +541,7 @@ describe("source archiver Walrus store", () => {
                     new RecordingSecretStringReader(JSON.stringify(value)),
                 ),
             ).rejects.toMatchObject({
-                kind: "retryable",
+                kind: "configuration",
                 statusCode: 500,
             });
         }

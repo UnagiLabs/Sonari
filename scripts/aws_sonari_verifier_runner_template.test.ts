@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SOURCE_ARCHIVER_WALRUS_CLI_PATH } from "./aws_sonari_verifier_runner_deploy_plan.js";
 
 const templatePath = path.join(process.cwd(), "infra/aws/sonari-verifier-runner/template.yaml");
 
@@ -211,7 +212,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SourceArchiverFunctionUrlPermission:");
         expect(template).toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN:");
         expect(template).toContain("SOURCE_ARCHIVER_WALRUS_CLI:");
-        expect(template).toContain("Default: /opt/bin/walrus-real");
+        expect(template).toContain(`Default: ${SOURCE_ARCHIVER_WALRUS_CLI_PATH}`);
         expect(template).toContain("SourceArchiverLambdaName:");
         expect(template).toContain("SourceArchiverFunctionUrlOutput:");
         expect(template).toContain("Action: s3:GetObject");

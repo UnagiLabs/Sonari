@@ -20,6 +20,7 @@ import {
     handler as runnerWorkflowHandler,
     HttpWalrusSourceArchiver,
     type AutoScalingClientLike,
+    ConfigurationSourceArchiveError,
     type EnclaveRegistrationAdapter,
     type EnclaveRegistrationClient,
     IntegritySourceArchiveError,
@@ -1436,6 +1437,18 @@ describe("AWS runner workflow helper", () => {
                     artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
                 }),
             ).rejects.toBeInstanceOf(RetryableSourceArchiveError);
+
+            globalThis.fetch = (async () =>
+                new Response(JSON.stringify({ error: "configuration" }), {
+                    status: 500,
+                    headers: { "content-type": "application/json" },
+                })) as typeof fetch;
+            await expect(
+                new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                    entry,
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).rejects.toBeInstanceOf(ConfigurationSourceArchiveError);
         } finally {
             globalThis.fetch = originalFetch;
         }

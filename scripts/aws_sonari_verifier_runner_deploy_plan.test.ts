@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { buildAwsSonariVerifierRunnerDeployPlan } from "./aws_sonari_verifier_runner_deploy_plan.js";
+import {
+    buildAwsSonariVerifierRunnerDeployPlan,
+    SOURCE_ARCHIVER_WALRUS_CLI_PATH,
+} from "./aws_sonari_verifier_runner_deploy_plan.js";
 
 const execFileAsync = promisify(execFile);
 const validCommitSha = "0123456789abcdef0123456789abcdef01234567";
@@ -143,7 +146,7 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
                 `SourceArchiverWalrusEnvSecretArn=${validInput.sourceArchiverWalrusEnvSecretArn}`,
                 `SourceArchiverWalrusLayerArn=${validInput.sourceArchiverWalrusLayerArn}`,
-                "SourceArchiverWalrusCliPath=/opt/bin/walrus-real",
+                `SourceArchiverWalrusCliPath=${SOURCE_ARCHIVER_WALRUS_CLI_PATH}`,
             ]),
         );
     });

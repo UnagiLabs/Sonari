@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { AwsCli } from "./shared.js";
-import { runVerifySourceArchiver } from "./verify-source-archiver.js";
+import { parseWalrusBlobIdOutput, runVerifySourceArchiver } from "./verify-source-archiver.js";
 
 describe("AWS SourceArchiver verification script", () => {
     it("stages a source artifact, invokes SourceArchiver Lambda, checks logs, and asserts idle", async () => {
@@ -80,10 +80,35 @@ describe("AWS SourceArchiver verification script", () => {
             }),
         ).rejects.toThrow("CloudWatch logs contained forbidden SourceArchiver secret material");
     });
+
+    it("fails clearly when the stack does not configure SourceArchiver", async () => {
+        await expect(
+            runVerifySourceArchiver({
+                aws: new RecordingAwsCli({ sourceArchiverConfigured: false }),
+                stack: "sonari-verifier-runner-dev",
+                expectedAccount: "595103996064",
+                region: "ap-northeast-1",
+                blobIdForBytes: async () => "expectedBlob123",
+                poll: { intervalMs: 0, timeoutMs: 1 },
+            }),
+        ).rejects.toThrow(
+            "SourceArchiver is not configured for stack sonari-verifier-runner-dev",
+        );
+    });
+
+    it("parses Walrus blob-id JSON, labeled, and plain outputs", () => {
+        expect(parseWalrusBlobIdOutput(JSON.stringify({ blobId: "expectedBlob123" }))).toBe(
+            "expectedBlob123",
+        );
+        expect(parseWalrusBlobIdOutput('"expectedBlob123"')).toBe("expectedBlob123");
+        expect(parseWalrusBlobIdOutput("Blob ID: expectedBlob123\n")).toBe("expectedBlob123");
+        expect(parseWalrusBlobIdOutput("expectedBlob123\n")).toBe("expectedBlob123");
+    });
 });
 
 type RecordingAwsCliOptions = {
     leakSecretInLogs?: boolean;
+    sourceArchiverConfigured?: boolean;
 };
 
 class RecordingAwsCli implements AwsCli {
@@ -101,7 +126,9 @@ class RecordingAwsCli implements AwsCli {
             case "sts:get-caller-identity":
                 return { Account: "595103996064" };
             case "cloudformation:describe-stacks":
-                return stackResponse();
+                return stackResponse({
+                    sourceArchiverConfigured: this.options.sourceArchiverConfigured ?? true,
+                });
             case "scheduler:get-schedule:watcher-schedule":
             case "scheduler:get-schedule:batch-schedule":
                 return { State: "DISABLED" };
@@ -204,32 +231,49 @@ class RecordingAwsCli implements AwsCli {
     }
 }
 
-function stackResponse(): unknown {
+function stackResponse(input: { sourceArchiverConfigured: boolean }): unknown {
+    const parameters = input.sourceArchiverConfigured
+        ? [
+              {
+                  ParameterKey: "SourceArchiverTokenSecretArn",
+                  ParameterValue: "source-archiver-token-secret",
+              },
+              {
+                  ParameterKey: "SourceArchiverWalrusEnvSecretArn",
+                  ParameterValue: "source-archiver-walrus-secret",
+              },
+          ]
+        : [
+              {
+                  ParameterKey: "SourceArchiverTokenSecretArn",
+                  ParameterValue: "",
+              },
+              {
+                  ParameterKey: "SourceArchiverWalrusEnvSecretArn",
+                  ParameterValue: "",
+              },
+          ];
+    const sourceArchiverOutputs = input.sourceArchiverConfigured
+        ? [
+              { OutputKey: "SourceArchiverLambdaName", OutputValue: "source-archiver" },
+              {
+                  OutputKey: "SourceArchiverFunctionUrlOutput",
+                  OutputValue: "https://source-archiver.lambda-url.test/",
+              },
+          ]
+        : [];
     return {
         Stacks: [
             {
                 StackName: "sonari-verifier-runner-dev",
                 StackStatus: "UPDATE_COMPLETE",
-                Parameters: [
-                    {
-                        ParameterKey: "SourceArchiverTokenSecretArn",
-                        ParameterValue: "source-archiver-token-secret",
-                    },
-                    {
-                        ParameterKey: "SourceArchiverWalrusEnvSecretArn",
-                        ParameterValue: "source-archiver-walrus-secret",
-                    },
-                ],
+                Parameters: parameters,
                 Outputs: [
                     { OutputKey: "RunnerResultBucketName", OutputValue: "runner-results" },
                     { OutputKey: "RunnerAutoScalingGroupName", OutputValue: "runner-asg" },
                     { OutputKey: "WatcherScheduleName", OutputValue: "watcher-schedule" },
                     { OutputKey: "BatchScheduleName", OutputValue: "batch-schedule" },
-                    { OutputKey: "SourceArchiverLambdaName", OutputValue: "source-archiver" },
-                    {
-                        OutputKey: "SourceArchiverFunctionUrlOutput",
-                        OutputValue: "https://source-archiver.lambda-url.test/",
-                    },
+                    ...sourceArchiverOutputs,
                 ],
             },
         ],
