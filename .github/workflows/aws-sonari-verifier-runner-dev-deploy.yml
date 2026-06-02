@@ -31,6 +31,9 @@ jobs:
       SUBNET_IDS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUBNET_IDS }}
       AMI_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_AMI_ID }}
       RUNNER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RUNNER_TOKEN_SECRET_ARN }}
+      SOURCE_ARCHIVER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN }}
+      SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN }}
+      SOURCE_ARCHIVER_WALRUS_LAYER_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_LAYER_ARN }}
       SIGNING_SEED_CIPHERTEXT_S3_BUCKET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_BUCKET }}
       SIGNING_SEED_CIPHERTEXT_S3_KEY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_KEY }}
       NITRO_ENCLAVE_IMAGE_SHA384: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_IMAGE_SHA384 }}
@@ -71,6 +74,9 @@ jobs:
             SUBNET_IDS
             AMI_ID
             RUNNER_TOKEN_SECRET_ARN
+            SOURCE_ARCHIVER_TOKEN_SECRET_ARN
+            SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN
+            SOURCE_ARCHIVER_WALRUS_LAYER_ARN
             SIGNING_SEED_CIPHERTEXT_S3_BUCKET
             SIGNING_SEED_CIPHERTEXT_S3_KEY
             NITRO_ENCLAVE_IMAGE_SHA384
@@ -377,6 +383,9 @@ jobs:
             --membership-tee-sha256 "$MEMBERSHIP_TEE_ARTIFACT_SHA256"
             --membership-eif-bucket "$ARTIFACT_BUCKET"
             --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256"
+            --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN"
+            --source-archiver-walrus-env-secret-arn "$SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN"
+            --source-archiver-walrus-layer-arn "$SOURCE_ARCHIVER_WALRUS_LAYER_ARN"
             --prefix "$S3_PREFIX"
             --out dist/aws/sonari-verifier-runner-deploy-plan.json
           )
@@ -412,6 +421,9 @@ jobs:
             "TeeEifSha256",
             "GitCommitSha",
             "ScheduleState",
+            "SourceArchiverTokenSecretArn",
+            "SourceArchiverWalrusEnvSecretArn",
+            "SourceArchiverWalrusLayerArn",
           ];
           for (const key of requiredParameterKeys) {
             if (
@@ -522,6 +534,7 @@ jobs:
           submit_verification_lambda_name="$(stack_output SubmitVerificationLambdaName)"
           batch_verifier_lambda_name="$(stack_output BatchVerifierLambdaName)"
           runner_control_lambda_name="$(stack_output RunnerControlLambdaName)"
+          source_archiver_lambda_name="$(stack_output SourceArchiverLambdaName)"
           deployed_git_commit_sha="$(stack_output DeployedGitCommitSha)"
           lambda_code_s3_key="$(stack_output LambdaCodeS3KeyOutput)"
           tee_artifact_s3_key="$(stack_output TeeArtifactS3KeyOutput)"
@@ -555,12 +568,14 @@ jobs:
           submit_verification_code_sha="$(lambda_code_sha "$submit_verification_lambda_name")"
           batch_verifier_code_sha="$(lambda_code_sha "$batch_verifier_lambda_name")"
           runner_control_code_sha="$(lambda_code_sha "$runner_control_lambda_name")"
+          source_archiver_code_sha="$(lambda_code_sha "$source_archiver_lambda_name")"
           [[ "$watcher_code_sha" != "" ]]
           [[ "$watcher_code_sha" != "None" ]]
           [[ "$watcher_code_sha" == "$manual_watcher_code_sha" ]]
           [[ "$watcher_code_sha" == "$submit_verification_code_sha" ]]
           [[ "$watcher_code_sha" == "$batch_verifier_code_sha" ]]
           [[ "$watcher_code_sha" == "$runner_control_code_sha" ]]
+          [[ "$watcher_code_sha" == "$source_archiver_code_sha" ]]
 
           [[ "$deployed_git_commit_sha" == "$GITHUB_SHA" ]]
           [[ "$lambda_code_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/sonari-verifier-runner-lambda.zip" ]]

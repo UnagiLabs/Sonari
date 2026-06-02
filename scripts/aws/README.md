@@ -22,6 +22,6 @@ AWS dev stack の確認は、ad hoc AWS CLI ではなくこの directory の scr
 ## Script boundaries
 
 - `aws:verify:earthquake-wrapper` は ASG を `0 -> 1 -> 0` にします。`/opt/sonari/bin/run-earthquake-enclave` の `health_check`、`get_attestation`、`process_data` を SSM 経由で確認します。
-- `aws:smoke:earthquake-manual` は ManualWatcher Lambda URL に `source_event_id` を POST し、Step Functions execution と DynamoDB row の概要を確認します。relayer submit は既存 stack config に依存するため、起動時に明示表示します。
+- `aws:smoke:earthquake-manual` は ManualWatcher Lambda URL に `source_event_id` を POST し、Step Functions execution と DynamoDB row の概要を確認します。出力の `source_archive_summary` で `source_archive_status`、`relayer_mode`、`relayer_digest`、`disaster_event_object_id` を確認します。relayer submit は既存 stack config に依存するため、起動時に明示表示します。
 - `aws:post-deploy-guardrails` は Git commit、artifact S3 keys、Lambda code metadata、ASG idle、schedule disabled を確認します。
 - old S3 artifact cleanup と CloudFormation deploy はここでは実行しません。deploy は既存 workflow と `scripts/aws_sonari_verifier_runner_deploy_plan.ts` を source of truth とします。

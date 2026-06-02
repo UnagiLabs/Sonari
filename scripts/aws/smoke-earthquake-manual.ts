@@ -69,9 +69,27 @@ async function main(): Promise<void> {
         "--key",
         JSON.stringify({ source_event_id: { S: sourceEventId } }),
     ]);
+    const item = isRecord(row) && isRecord(row.Item) ? row.Item : {};
+    const sourceArchiveSummary = {
+        source_archive_status: readDynamoString(item, "source_archive_status"),
+        source_archive_error_code: readDynamoString(item, "source_archive_error_code"),
+        relayer_status: readDynamoString(item, "relayer_status"),
+        relayer_mode: readDynamoString(item, "relayer_mode"),
+        relayer_digest: readDynamoString(item, "relayer_digest"),
+        disaster_event_object_id: readDynamoString(item, "disaster_event_object_id"),
+    };
 
     process.stdout.write(
-        `${JSON.stringify({ manual_response: JSON.parse(body) as unknown, executions, row }, null, 2)}\n`,
+        `${JSON.stringify(
+            {
+                manual_response: JSON.parse(body) as unknown,
+                source_archive_summary: sourceArchiveSummary,
+                executions,
+                row,
+            },
+            null,
+            2,
+        )}\n`,
     );
 }
 
@@ -90,6 +108,15 @@ async function getFunctionUrl(aws: ExecFileAwsCli, functionName: string): Promis
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readDynamoString(item: Record<string, unknown>, key: string): string | null {
+    const value = item[key];
+    if (!isRecord(value)) {
+        return null;
+    }
+    const stringValue = value.S;
+    return typeof stringValue === "string" && stringValue.length > 0 ? stringValue : null;
 }
 
 main().catch((error: unknown) => {
