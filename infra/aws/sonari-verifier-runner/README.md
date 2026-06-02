@@ -177,6 +177,7 @@ Relayer wallet は AdminCap を持ちません。Relayer wallet は `accessor::c
 
 ```bash
 PACKAGE_ID="<published-package-id>"
+ADMIN_ADDRESS="<admin-wallet-address>"
 ADMIN_CAP_ID="<admin-cap-object-id>"
 VERIFIER_REGISTRY_ID="<verifier-registry-object-id>"
 PCR0_VECTOR='[1,2,3]'
@@ -190,6 +191,7 @@ PCR2_VECTOR='[7,8,9]'
 
 ```bash
 sui client call \
+  --sender "$ADMIN_ADDRESS" \
   --package "$PACKAGE_ID" \
   --module admin \
   --function create_earthquake_verifier_config \
@@ -201,6 +203,7 @@ sui client call \
 
 ```bash
 sui client call \
+  --sender "$ADMIN_ADDRESS" \
   --package "$PACKAGE_ID" \
   --module admin \
   --function update_earthquake_verifier_config_pcrs \
@@ -212,6 +215,7 @@ sui client call \
 
 ```bash
 sui client call \
+  --sender "$ADMIN_ADDRESS" \
   --package "$PACKAGE_ID" \
   --module admin \
   --function disable_earthquake_verifier_config \
@@ -219,7 +223,9 @@ sui client call \
   --gas-budget 100000000
 ```
 
-登録または更新後は transaction digest の event を確認します。`VerifierConfigCreated`、`VerifierConfigPcrsUpdated`、`VerifierConfigDisabled` のいずれかが出ていること、actor が管理者 wallet であること、PCR と config version が想定通りであることを確認します。
+登録または更新後は transaction digest の event を確認します。`VerifierConfigCreated` と `VerifierConfigPcrsUpdated` では、actor が `ADMIN_ADDRESS` であること、PCR と config version が想定通りであることを確認します。
+
+緊急停止後は `VerifierConfigDisabled` を確認します。この event は PCR0/1/2 を持たないため、actor が `ADMIN_ADDRESS` であること、config version が停止対象と一致することを確認します。
 
 この手順の PR 前検証では `pnpm check:move` と README test を実行します。本番 AWS 実行はこの手順の必須検証ではありません。実 stack で attestation flow を確認する場合は、別 issue で ASG cleanup と schedule disabled を gate にします。
 

@@ -113,8 +113,10 @@ describe("AWS Sonari verifier runner README", () => {
 
         expectContainsAll(readme, [
             "PACKAGE_ID",
+            "ADMIN_ADDRESS",
             "ADMIN_CAP_ID",
             "VERIFIER_REGISTRY_ID",
+            "--sender \"$ADMIN_ADDRESS\"",
             "--function create_earthquake_verifier_config",
             "--function update_earthquake_verifier_config_pcrs",
             "--function disable_earthquake_verifier_config",
@@ -122,6 +124,8 @@ describe("AWS Sonari verifier runner README", () => {
             "Codex が動く管理端末",
             "AWS Secrets Manager に入れてはいけません",
             "Relayer wallet は AdminCap を持ちません",
+            "`VerifierConfigCreated` と `VerifierConfigPcrsUpdated`",
+            "`VerifierConfigDisabled`",
             "pnpm check:move",
             "本番 AWS 実行はこの手順の必須検証ではありません",
         ]);
