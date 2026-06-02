@@ -167,6 +167,62 @@ Move byte vector: vector[0x01, 0x02, ..., 0x30, 0x30]
 
 EarthquakeTeeEifSha256 は EIF file の SHA-256 checksum です。S3 から EC2 が取得した EIF file の改ざん検知に使います。PCR0/1/2 は attestation document の measurement です。Move の `VerifierConfig` は PCR0/1/2 を見て、起動中の enclave が登録済み code/config かを確認します。
 
+### AdminCap transaction と鍵分離
+
+AdminCap を持つ管理者 wallet は AWS に置きません。PCR config の登録、更新、停止は、デプロイ時に Codex が動く管理端末から実行します。AdminCap の秘密鍵や wallet config は AWS Runner、EC2、Lambda、SSM、AWS Secrets Manager に入れてはいけません。
+
+Relayer wallet は AdminCap を持ちません。Relayer wallet は `accessor::create_disaster_event_from_signed_payload` の submit だけに使います。
+
+次の値を確認してから admin transaction を実行します。
+
+```bash
+PACKAGE_ID="<published-package-id>"
+ADMIN_CAP_ID="<admin-cap-object-id>"
+VERIFIER_REGISTRY_ID="<verifier-registry-object-id>"
+PCR0_VECTOR='[1,2,3]'
+PCR1_VECTOR='[4,5,6]'
+PCR2_VECTOR='[7,8,9]'
+```
+
+`PCR*_VECTOR` は、48 byte PCR hex を decimal byte 配列へ変換した値です。`0102` は `[1,2]` です。
+
+初回登録:
+
+```bash
+sui client call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function create_earthquake_verifier_config \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "$PCR0_VECTOR" "$PCR1_VECTOR" "$PCR2_VECTOR" \
+  --gas-budget 100000000
+```
+
+検証コードや measurement 対象 config を変えた後の PCR 更新:
+
+```bash
+sui client call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function update_earthquake_verifier_config_pcrs \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "$PCR0_VECTOR" "$PCR1_VECTOR" "$PCR2_VECTOR" \
+  --gas-budget 100000000
+```
+
+問題発生時の緊急停止:
+
+```bash
+sui client call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function disable_earthquake_verifier_config \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" \
+  --gas-budget 100000000
+```
+
+登録または更新後は transaction digest の event を確認します。`VerifierConfigCreated`、`VerifierConfigPcrsUpdated`、`VerifierConfigDisabled` のいずれかが出ていること、actor が管理者 wallet であること、PCR と config version が想定通りであることを確認します。
+
+この手順の PR 前検証では `pnpm check:move` と README test を実行します。本番 AWS 実行はこの手順の必須検証ではありません。実 stack で attestation flow を確認する場合は、別 issue で ASG cleanup と schedule disabled を gate にします。
+
 `NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
 
 地震 verifier は Nautilus の server pattern に合わせ、EIF 内で起動時に enclave-local な Ed25519 key を生成し、NSM attestation document の `public_key` にその public key を入れます。runner host は `/opt/sonari/bin/run-earthquake-enclave` から VSOCK で `/health_check`、`/get_attestation`、`/process_data` を呼びます。host は Walrus / Sui config を bootstrap するだけで、finalized payload の署名鍵は host に置きません。

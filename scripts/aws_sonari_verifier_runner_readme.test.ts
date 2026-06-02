@@ -108,6 +108,25 @@ describe("AWS Sonari verifier runner README", () => {
         ]);
     });
 
+    it("documents AdminCap PCR transactions, key separation, and verification scope", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "PACKAGE_ID",
+            "ADMIN_CAP_ID",
+            "VERIFIER_REGISTRY_ID",
+            "--function create_earthquake_verifier_config",
+            "--function update_earthquake_verifier_config_pcrs",
+            "--function disable_earthquake_verifier_config",
+            "AdminCap を持つ管理者 wallet は AWS に置きません",
+            "Codex が動く管理端末",
+            "AWS Secrets Manager に入れてはいけません",
+            "Relayer wallet は AdminCap を持ちません",
+            "pnpm check:move",
+            "本番 AWS 実行はこの手順の必須検証ではありません",
+        ]);
+    });
+
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
         const readme = await readReadme();
 
