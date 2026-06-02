@@ -358,6 +358,7 @@ describe("source archiver Walrus store", () => {
         expect(payload?.wallet).toBeUndefined();
         expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
         expect(payload?.command.store.epochs).toBe(1);
+        expect(payload?.command.store.childProcessUploads).toBe(false);
         expect(command.tempFileBytes).toEqual([validBytes]);
     });
 
@@ -376,6 +377,7 @@ describe("source archiver Walrus store", () => {
         const payload = command.storePayloads[0];
         expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
         expect(payload?.command.store).not.toHaveProperty("epochs");
+        expect(payload?.command.store.childProcessUploads).toBe(false);
         expect(command.tempFileBytes).toEqual([validBytes]);
     });
 
@@ -788,6 +790,7 @@ interface WalrusJsonStorePayload {
         store: {
             files: string[];
             epochs?: number;
+            childProcessUploads: boolean;
         };
     };
 }
@@ -944,6 +947,9 @@ function parseWalrusJsonStorePayload(payloadJson: string | undefined): WalrusJso
     if (store.epochs !== undefined && typeof store.epochs !== "number") {
         throw new Error("Walrus JSON payload command.store.epochs must be a number");
     }
+    if (store.childProcessUploads !== false) {
+        throw new Error("Walrus JSON payload command.store.childProcessUploads must be false");
+    }
     return {
         ...(typeof payload.config === "string" ? { config: payload.config } : {}),
         ...(typeof payload.context === "string" ? { context: payload.context } : {}),
@@ -952,6 +958,7 @@ function parseWalrusJsonStorePayload(payloadJson: string | undefined): WalrusJso
             store: {
                 files: store.files,
                 ...(store.epochs === undefined ? {} : { epochs: store.epochs }),
+                childProcessUploads: store.childProcessUploads,
             },
         },
     };

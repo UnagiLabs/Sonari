@@ -183,12 +183,25 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
         try {
             await writeFile(artifactPath, input.bytes);
             const globalOptions = await materializeWalrusJsonGlobalOptions(tempDir, this.config);
-            const storeCommand: { files: string[]; epochs?: number } = { files: [artifactPath] };
+            const storeCommand: {
+                files: string[];
+                epochs?: number;
+                childProcessUploads: false;
+            } = {
+                files: [artifactPath],
+                childProcessUploads: false,
+            };
             if (this.config.epochs !== undefined) {
                 storeCommand.epochs = this.config.epochs;
             }
             const jsonInput: WalrusJsonGlobalOptions & {
-                command: { store: { files: string[]; epochs?: number } };
+                command: {
+                    store: {
+                        files: string[];
+                        epochs?: number;
+                        childProcessUploads: false;
+                    };
+                };
             } = {
                 command: { store: storeCommand },
             };
