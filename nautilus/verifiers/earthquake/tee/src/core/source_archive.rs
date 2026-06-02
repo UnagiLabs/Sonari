@@ -497,9 +497,9 @@ mod tests {
         to_hex(&sha256_bytes(bytes))
     }
 
-    fn archive<'a>(
-        walrus: &'a FakeWalrusCommandRunner,
-    ) -> WalrusCliSourceArchive<&'a FakeWalrusCommandRunner> {
+    fn archive(
+        walrus: &FakeWalrusCommandRunner,
+    ) -> WalrusCliSourceArchive<&FakeWalrusCommandRunner> {
         WalrusCliSourceArchive::with_clients(
             WalrusCliSourceArchiveConfig {
                 cli_path: PathBuf::from("fake-walrus"),

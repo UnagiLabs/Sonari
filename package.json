@@ -11,7 +11,7 @@
         "check": "pnpm check:ts && pnpm check:rust",
         "check:move": "sui move build -p contracts --force --lint --warnings-are-errors && sui move test -p contracts",
         "check:ts": "biome check . && pnpm typecheck",
-        "check:rust": "cargo fmt --all --check && cargo check --workspace",
+        "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings",
         "lint": "pnpm check",
         "typecheck": "pnpm typecheck:packages && pnpm typecheck:scripts",
         "typecheck:packages": "tsc -b --noEmit",
