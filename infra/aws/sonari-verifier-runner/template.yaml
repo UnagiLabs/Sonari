@@ -54,8 +54,8 @@ Parameters:
     Description: Lambda layer ARN that provides the Walrus CLI binary for the source archiver.
   SourceArchiverWalrusCliPath:
     Type: String
-    Default: /opt/bin/walrus
-    Description: Walrus CLI path inside the source archiver Lambda runtime.
+    Default: /opt/bin/walrus-real
+    Description: Walrus CLI binary path inside the source archiver Lambda runtime.
   SourceArchiverWalrusStoreTimeoutMs:
     Type: Number
     Default: 55000

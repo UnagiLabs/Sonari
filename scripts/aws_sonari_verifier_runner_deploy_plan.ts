@@ -27,6 +27,7 @@ const DEPLOY_PARAMETER_KEYS = [
     "SourceArchiverTokenSecretArn",
     "SourceArchiverWalrusEnvSecretArn",
     "SourceArchiverWalrusLayerArn",
+    "SourceArchiverWalrusCliPath",
 ] as const;
 
 type DeployParameterKey = (typeof DEPLOY_PARAMETER_KEYS)[number];
@@ -105,6 +106,7 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
             input.sourceArchiverWalrusLayerArn,
             "source archiver Walrus Lambda layer ARN",
         ),
+        SourceArchiverWalrusCliPath: "/opt/bin/walrus-real",
     };
 
     return {

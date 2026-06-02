@@ -211,6 +211,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SourceArchiverFunctionUrlPermission:");
         expect(template).toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN:");
         expect(template).toContain("SOURCE_ARCHIVER_WALRUS_CLI:");
+        expect(template).toContain("Default: /opt/bin/walrus-real");
         expect(template).toContain("SourceArchiverLambdaName:");
         expect(template).toContain("SourceArchiverFunctionUrlOutput:");
         expect(template).toContain("Action: s3:GetObject");

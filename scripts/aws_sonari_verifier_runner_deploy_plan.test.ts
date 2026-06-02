@@ -143,6 +143,7 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
                 `SourceArchiverWalrusEnvSecretArn=${validInput.sourceArchiverWalrusEnvSecretArn}`,
                 `SourceArchiverWalrusLayerArn=${validInput.sourceArchiverWalrusLayerArn}`,
+                "SourceArchiverWalrusCliPath=/opt/bin/walrus-real",
             ]),
         );
     });

@@ -60,6 +60,7 @@ describe("AWS Sonari verifier runner README", () => {
             "SONARI_SUI_WALLET_CONFIG_YAML",
             "SONARI_SUI_KEYSTORE_JSON",
             "walrus json",
+            "/opt/bin/walrus-real",
             "--source-archiver-token-secret-arn",
             "--source-archiver-walrus-env-secret-arn",
             "--source-archiver-walrus-layer-arn",
