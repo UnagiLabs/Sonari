@@ -1,8 +1,16 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
 const SOURCE_ARTIFACT_PREFIX = "source-artifacts/";
 const SOURCE_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 const WALRUS_BLOB_ID_PATTERN = /^[A-Za-z0-9_-]{8,256}$/;
+const DEFAULT_WALRUS_STORE_TIMEOUT_MS = 55_000;
+
+const execFileAsync = promisify(execFile);
 
 export type SourceArchiverErrorKind = "bad_request" | "integrity" | "retryable";
 
@@ -26,6 +34,110 @@ export interface SourceArchiverRequest {
 
 export interface SourceArtifactS3Reader {
     getObjectBytes(input: { bucket: string; key: string }): Promise<Uint8Array>;
+}
+
+export interface VerifiedSourceArtifact {
+    request: SourceArchiverRequest;
+    bytes: Uint8Array;
+}
+
+export interface WalrusStoreRunner {
+    store(input: VerifiedSourceArtifact): Promise<string>;
+}
+
+export interface WalrusStoreCommandRunner {
+    run(input: {
+        cliPath: string;
+        args: string[];
+        timeoutMs: number;
+        env?: Record<string, string>;
+    }): Promise<{ stdout: string; stderr: string }>;
+}
+
+export interface WalrusCliStoreConfig {
+    cliPath: string;
+    timeoutMs?: number;
+    epochs?: number;
+    env?: Record<string, string>;
+}
+
+export class WalrusCliStoreRunner implements WalrusStoreRunner {
+    private readonly timeoutMs: number;
+
+    constructor(
+        private readonly config: WalrusCliStoreConfig,
+        private readonly commandRunner: WalrusStoreCommandRunner = new NodeWalrusStoreCommandRunner(),
+    ) {
+        this.timeoutMs = config.timeoutMs ?? DEFAULT_WALRUS_STORE_TIMEOUT_MS;
+        if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs <= 0) {
+            throw new SourceArchiverError(
+                "Walrus store timeout must be a positive integer",
+                "retryable",
+                500,
+            );
+        }
+        if (
+            config.epochs !== undefined &&
+            (!Number.isSafeInteger(config.epochs) || config.epochs <= 0)
+        ) {
+            throw new SourceArchiverError(
+                "Walrus store epochs must be a positive integer",
+                "retryable",
+                500,
+            );
+        }
+    }
+
+    async store(input: VerifiedSourceArtifact): Promise<string> {
+        const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-source-archiver-"));
+        const artifactPath = path.join(tempDir, "source-artifact.bin");
+        try {
+            await writeFile(artifactPath, input.bytes);
+            const args = ["store", artifactPath];
+            if (this.config.epochs !== undefined) {
+                args.push("--epochs", String(this.config.epochs));
+            }
+            const commandInput: {
+                cliPath: string;
+                args: string[];
+                timeoutMs: number;
+                env?: Record<string, string>;
+            } = {
+                cliPath: this.config.cliPath,
+                args,
+                timeoutMs: this.timeoutMs,
+            };
+            if (this.config.env !== undefined) {
+                commandInput.env = this.config.env;
+            }
+            const output = await this.commandRunner.run(commandInput);
+            return parseWalrusBlobId(output.stdout);
+        } catch (error) {
+            if (error instanceof SourceArchiverError) {
+                throw error;
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            throw new SourceArchiverError(`Walrus store failed: ${message}`, "retryable", 502);
+        } finally {
+            await rm(tempDir, { recursive: true, force: true });
+        }
+    }
+}
+
+export class NodeWalrusStoreCommandRunner implements WalrusStoreCommandRunner {
+    async run(input: {
+        cliPath: string;
+        args: string[];
+        timeoutMs: number;
+        env?: Record<string, string>;
+    }): Promise<{ stdout: string; stderr: string }> {
+        const output = await execFileAsync(input.cliPath, input.args, {
+            timeout: input.timeoutMs,
+            maxBuffer: 1024 * 1024,
+            env: input.env === undefined ? process.env : { ...process.env, ...input.env },
+        });
+        return { stdout: output.stdout, stderr: output.stderr };
+    }
 }
 
 export function parseSourceArchiverEvent(event: {
@@ -72,7 +184,7 @@ export async function loadVerifiedSourceArtifact(input: {
     bucket: string;
     request: SourceArchiverRequest;
     s3: SourceArtifactS3Reader;
-}): Promise<{ request: SourceArchiverRequest; bytes: Uint8Array }> {
+}): Promise<VerifiedSourceArtifact> {
     const bytes = await readSourceArtifact(input);
     const sourceHash = `0x${createHash("sha256").update(bytes).digest("hex")}`;
     if (sourceHash !== input.request.sourceHash) {
@@ -82,6 +194,52 @@ export async function loadVerifiedSourceArtifact(input: {
         throw integrityFailure("size_bytes did not match staged artifact bytes");
     }
     return { request: input.request, bytes };
+}
+
+export async function storeVerifiedSourceArtifact(input: {
+    artifact: VerifiedSourceArtifact;
+    walrus: WalrusStoreRunner;
+}): Promise<{ walrusBlobId: string }> {
+    try {
+        const walrusBlobId = await input.walrus.store(input.artifact);
+        if (walrusBlobId !== input.artifact.request.expectedWalrusBlobId) {
+            throw integrityFailure("Walrus store result did not match expected blob id");
+        }
+        return { walrusBlobId };
+    } catch (error) {
+        if (error instanceof SourceArchiverError) {
+            throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        throw new SourceArchiverError(`Walrus store failed: ${message}`, "retryable", 502);
+    }
+}
+
+export function parseWalrusBlobId(output: string): string {
+    const labeled = output
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .find((line) => line.startsWith("Blob ID:"))
+        ?.slice("Blob ID:".length)
+        .trim();
+    if (labeled !== undefined && labeled.length > 0) {
+        return validateWalrusBlobIdFromOutput(labeled);
+    }
+
+    const fallback = output
+        .split(/\r?\n/u)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .filter((line) => !line.startsWith("Success:"))
+        .at(-1);
+    if (fallback === undefined) {
+        throw new SourceArchiverError(
+            "Walrus store output did not include a blob id",
+            "retryable",
+            502,
+        );
+    }
+    return validateWalrusBlobIdFromOutput(fallback);
 }
 
 async function readSourceArtifact(input: {
@@ -133,6 +291,17 @@ function badRequest(message: string): SourceArchiverError {
 
 function integrityFailure(message: string): SourceArchiverError {
     return new SourceArchiverError(message, "integrity", 422);
+}
+
+function validateWalrusBlobIdFromOutput(blobId: string): string {
+    if (!WALRUS_BLOB_ID_PATTERN.test(blobId)) {
+        throw new SourceArchiverError(
+            "Walrus store output included an invalid blob id",
+            "retryable",
+            502,
+        );
+    }
+    return blobId;
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

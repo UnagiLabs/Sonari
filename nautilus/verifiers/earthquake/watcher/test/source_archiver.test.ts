@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
     loadVerifiedSourceArtifact,
     parseSourceArchiverEvent,
+    parseWalrusBlobId,
     SourceArchiverError,
+    storeVerifiedSourceArtifact,
+    WalrusCliStoreRunner,
     type SourceArtifactS3Reader,
+    type WalrusStoreCommandRunner,
+    type WalrusStoreRunner,
 } from "../src/source_archiver.js";
 
 const validBytes = new TextEncoder().encode("source artifact bytes");
@@ -124,6 +130,77 @@ describe("source archiver S3 verification", () => {
     });
 });
 
+describe("source archiver Walrus store", () => {
+    it("stores verified bytes and returns the expected blob id", async () => {
+        const artifact = await verifiedArtifact();
+        const walrus = new RecordingWalrusStoreRunner("testBlob_123456");
+
+        await expect(storeVerifiedSourceArtifact({ artifact, walrus })).resolves.toEqual({
+            walrusBlobId: "testBlob_123456",
+        });
+        expect(walrus.stores).toEqual([artifact]);
+    });
+
+    it("classifies blob id mismatch as integrity failure", async () => {
+        await expect(
+            storeVerifiedSourceArtifact({
+                artifact: await verifiedArtifact(),
+                walrus: new RecordingWalrusStoreRunner("otherBlob_123456"),
+            }),
+        ).rejects.toMatchObject({
+            kind: "integrity",
+            statusCode: 422,
+        });
+    });
+
+    it("classifies Walrus store failure as retryable", async () => {
+        const walrus = new RecordingWalrusStoreRunner("testBlob_123456");
+        walrus.failStore = true;
+
+        await expect(
+            storeVerifiedSourceArtifact({
+                artifact: await verifiedArtifact(),
+                walrus,
+            }),
+        ).rejects.toMatchObject({
+            kind: "retryable",
+            statusCode: 502,
+        });
+    });
+
+    it("parses Walrus CLI store output formats", () => {
+        expect(parseWalrusBlobId("Success: stored\nBlob ID: testBlob_123456\n")).toBe(
+            "testBlob_123456",
+        );
+        expect(parseWalrusBlobId("Success: stored\ntestBlob_123456\n")).toBe("testBlob_123456");
+        expect(() => parseWalrusBlobId("Success: stored\n")).toThrow(SourceArchiverError);
+    });
+
+    it("runs walrus store with a temp file containing the source bytes", async () => {
+        const command = new RecordingWalrusCommandRunner("Blob ID: testBlob_123456\n");
+        const runner = new WalrusCliStoreRunner(
+            {
+                cliPath: "/opt/sonari/bin/walrus",
+                timeoutMs: 12_000,
+                epochs: 1,
+                env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
+            },
+            command,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
+        expect(command.runs).toHaveLength(1);
+        expect(command.runs[0]).toMatchObject({
+            cliPath: "/opt/sonari/bin/walrus",
+            timeoutMs: 12_000,
+            env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
+        });
+        expect(command.runs[0]?.args[0]).toBe("store");
+        expect(command.runs[0]?.args.slice(2)).toEqual(["--epochs", "1"]);
+        expect(command.tempFileBytes).toEqual([validBytes]);
+    });
+});
+
 class RecordingS3Reader implements SourceArtifactS3Reader {
     readonly reads: Array<{ bucket: string; key: string }> = [];
     failRead = false;
@@ -137,6 +214,56 @@ class RecordingS3Reader implements SourceArtifactS3Reader {
         }
         return this.bytes;
     }
+}
+
+class RecordingWalrusStoreRunner implements WalrusStoreRunner {
+    readonly stores: Awaited<ReturnType<typeof verifiedArtifact>>[] = [];
+    failStore = false;
+
+    constructor(private readonly walrusBlobId: string) {}
+
+    async store(input: Awaited<ReturnType<typeof verifiedArtifact>>): Promise<string> {
+        this.stores.push(input);
+        if (this.failStore) {
+            throw new Error("walrus network unavailable");
+        }
+        return this.walrusBlobId;
+    }
+}
+
+class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
+    readonly runs: Array<{
+        cliPath: string;
+        args: string[];
+        timeoutMs: number;
+        env?: Record<string, string>;
+    }> = [];
+    readonly tempFileBytes: Uint8Array[] = [];
+
+    constructor(private readonly stdout: string) {}
+
+    async run(input: {
+        cliPath: string;
+        args: string[];
+        timeoutMs: number;
+        env?: Record<string, string>;
+    }): Promise<{ stdout: string; stderr: string }> {
+        this.runs.push(input);
+        const artifactPath = input.args[1];
+        if (artifactPath === undefined) {
+            throw new Error("artifact path missing");
+        }
+        this.tempFileBytes.push(new Uint8Array(await readFile(artifactPath)));
+        return { stdout: this.stdout, stderr: "" };
+    }
+}
+
+async function verifiedArtifact() {
+    return loadVerifiedSourceArtifact({
+        bucket: "sonari-results",
+        request: parseSourceArchiverEvent({ body: JSON.stringify(validRequest) }),
+        s3: new RecordingS3Reader(validBytes),
+    });
 }
 
 function sha256Hex(bytes: Uint8Array): string {
