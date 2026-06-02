@@ -15,6 +15,15 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
 }
 
 describe("CI workflow cache and Move checks", () => {
+    it("installs Rust formatting and Clippy components before pnpm check", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "rustup toolchain install stable --profile minimal --component rustfmt --component clippy",
+            "pnpm check",
+        ]);
+    });
+
     it("caches pnpm and Cargo dependencies with lockfile based keys", async () => {
         const workflow = await readWorkflow();
 
