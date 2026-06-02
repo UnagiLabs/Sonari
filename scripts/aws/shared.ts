@@ -38,6 +38,8 @@ const STACK_OUTPUT_KEYS = [
     "SubmitVerificationLambdaName",
     "BatchVerifierLambdaName",
     "RunnerControlLambdaName",
+    "SourceArchiverLambdaName",
+    "SourceArchiverFunctionUrlOutput",
     "SigningMaterialKmsKeyId",
 ] as const;
 

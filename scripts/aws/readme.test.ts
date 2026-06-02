@@ -14,6 +14,7 @@ describe("AWS scripts documentation", () => {
             "pnpm aws:inventory",
             "pnpm aws:check-idle",
             "pnpm aws:verify:earthquake-wrapper",
+            "pnpm aws:verify:source-archiver",
             "pnpm aws:smoke:earthquake-manual",
             "source_archive_summary",
             "source_archive_status",
