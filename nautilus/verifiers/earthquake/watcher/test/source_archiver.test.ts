@@ -215,6 +215,70 @@ describe("source archiver Walrus store", () => {
         ).toThrow(SourceArchiverError);
     });
 
+    it("classifies empty Walrus stdout as retryable", () => {
+        expect(() => parseWalrusStoreResult("")).toThrow(SourceArchiverError);
+        expect(() => parseWalrusStoreResult("")).toThrow(
+            expect.objectContaining({
+                kind: "retryable",
+                statusCode: 502,
+            }),
+        );
+    });
+
+    it("classifies malformed JSON-looking Walrus stdout as retryable without human fallback", () => {
+        expect(() =>
+            parseWalrusStoreResult('{"blobStoreResult":\nBlob ID: testBlob_123456\n'),
+        ).toThrow(
+            expect.objectContaining({
+                kind: "retryable",
+                statusCode: 502,
+            }),
+        );
+    });
+
+    it("classifies Walrus JSON output missing a blob id as retryable", () => {
+        expect(() =>
+            parseWalrusStoreResult(
+                JSON.stringify({
+                    blobStoreResult: {
+                        newlyCreated: {
+                            blobObject: {},
+                        },
+                    },
+                }),
+            ),
+        ).toThrow(
+            expect.objectContaining({
+                kind: "retryable",
+                statusCode: 502,
+            }),
+        );
+    });
+
+    it("classifies ambiguous Walrus JSON output with multiple blob ids as retryable", () => {
+        expect(() =>
+            parseWalrusStoreResult(
+                JSON.stringify({
+                    blobStoreResult: {
+                        alreadyCertified: {
+                            blobId: "testBlob_123456",
+                        },
+                        newlyCreated: {
+                            blobObject: {
+                                blobId: "otherBlob_123456",
+                            },
+                        },
+                    },
+                }),
+            ),
+        ).toThrow(
+            expect.objectContaining({
+                kind: "retryable",
+                statusCode: 502,
+            }),
+        );
+    });
+
     it("falls back only to explicit Blob ID human output", () => {
         expect(parseWalrusStoreResult("Success: stored\nBlob ID: testBlob_123456\n")).toBe(
             "testBlob_123456",
@@ -444,6 +508,63 @@ describe("source archiver HTTP handler", () => {
             expectedWalrusBlobId: validRequest.expected_walrus_blob_id,
         });
         expect(JSON.stringify(logger.events)).not.toContain("walrus network unavailable");
+    });
+
+    it("returns retryable status and redacts sensitive Walrus CLI error messages", async () => {
+        const command = new RecordingWalrusCommandRunner("unused");
+        command.failRun = {
+            name: "Error",
+            message:
+                "Command failed: /opt/sonari/bin/walrus store /tmp/source token=abc private keystore wallet password api key",
+            code: 1,
+            killed: false,
+            signal: "SIGTERM",
+            stdout: "",
+            stderr: "",
+        };
+        const logger = new RecordingSourceArchiverLogger();
+        const handler = createSourceArchiverHandler({
+            bucket: "sonari-results",
+            s3: new RecordingS3Reader(validBytes),
+            walrus: new WalrusCliStoreRunner(
+                {
+                    cliPath: "/opt/sonari/bin/walrus",
+                    timeoutMs: 55_000,
+                },
+                command,
+                logger.log,
+            ),
+            authToken: async () => "archiver-token",
+            logger: logger.log,
+        });
+
+        const response = await handler({
+            headers: { "x-sonari-source-archiver-token": "archiver-token" },
+            body: JSON.stringify(validRequest),
+        });
+
+        expect(response).toEqual({
+            statusCode: 502,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ error: "retryable" }),
+        });
+        const failure = logger.events.find(
+            (event) => event.event === "source_archiver.walrus_store.failure",
+        );
+        expect(failure).toMatchObject({
+            event: "source_archiver.walrus_store.failure",
+            errorName: "Error",
+        });
+        if (failure?.event !== "source_archiver.walrus_store.failure") {
+            throw new Error("expected Walrus store failure event");
+        }
+        expect(failure.errorMessage).toMatch(
+            /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
+        );
+        const serializedResponse = JSON.stringify(response);
+        expect(serializedResponse).not.toContain("/opt/sonari/bin/walrus");
+        expect(serializedResponse).not.toContain("token=abc");
+        expect(serializedResponse).not.toContain("password");
     });
 });
 

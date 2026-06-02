@@ -395,9 +395,16 @@ export async function storeVerifiedSourceArtifact(input: {
 export function parseWalrusStoreResult(output: string): string {
     const parsedJson = parseJsonOutput(output);
     if (parsedJson !== undefined) {
-        const jsonBlobId = readWalrusStoreResultBlobId(parsedJson);
-        if (jsonBlobId !== undefined) {
-            return validateWalrusBlobIdFromOutput(jsonBlobId);
+        const jsonBlobIds = readWalrusStoreResultBlobIds(parsedJson);
+        if (jsonBlobIds.length === 1) {
+            return validateWalrusBlobIdFromOutput(jsonBlobIds[0] ?? "");
+        }
+        if (jsonBlobIds.length > 1) {
+            throw new SourceArchiverError(
+                "Walrus store output included multiple blob ids",
+                "retryable",
+                502,
+            );
         }
         throw missingWalrusBlobId();
     }
@@ -427,33 +434,41 @@ function parseJsonOutput(output: string): unknown | undefined {
     try {
         return JSON.parse(trimmed) as unknown;
     } catch {
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            throw new SourceArchiverError(
+                "Walrus store output looked like JSON but was malformed",
+                "retryable",
+                502,
+            );
+        }
         return undefined;
     }
 }
 
-function readWalrusStoreResultBlobId(output: unknown): string | undefined {
+function readWalrusStoreResultBlobIds(output: unknown): string[] {
     if (!isRecord(output)) {
-        return undefined;
+        return [];
     }
     const blobStoreResult = output.blobStoreResult;
     if (!isRecord(blobStoreResult)) {
-        return undefined;
+        return [];
     }
 
+    const blobIds: string[] = [];
     const alreadyCertified = blobStoreResult.alreadyCertified;
     if (isRecord(alreadyCertified) && typeof alreadyCertified.blobId === "string") {
-        return alreadyCertified.blobId;
+        blobIds.push(alreadyCertified.blobId);
     }
 
     const newlyCreated = blobStoreResult.newlyCreated;
     if (!isRecord(newlyCreated)) {
-        return undefined;
+        return blobIds;
     }
     const blobObject = newlyCreated.blobObject;
     if (isRecord(blobObject) && typeof blobObject.blobId === "string") {
-        return blobObject.blobId;
+        blobIds.push(blobObject.blobId);
     }
-    return undefined;
+    return blobIds;
 }
 
 function missingWalrusBlobId(): SourceArchiverError {
@@ -490,10 +505,19 @@ function walrusStoreFailureLogEvent(
         ...optionalProperty("killed", readErrorBooleanProperty(error, "killed")),
         timedOut: readErrorBooleanProperty(error, "killed") === true,
         errorName: error instanceof Error ? error.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: redactSensitiveErrorMessage(
+            error instanceof Error ? error.message : String(error),
+        ),
         stdout: summarizeCliOutput(readErrorStringProperty(error, "stdout") ?? ""),
         stderr: summarizeCliOutput(readErrorStringProperty(error, "stderr") ?? ""),
     };
+}
+
+function redactSensitiveErrorMessage(message: string): string {
+    if (!SENSITIVE_OUTPUT_LINE_PATTERN.test(message)) {
+        return message;
+    }
+    return `[redacted-sensitive-message sha256=${createHash("sha256").update(message).digest("hex")}]`;
 }
 
 function summarizeCliOutput(output: string): CliOutputSummary {
