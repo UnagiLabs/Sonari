@@ -172,10 +172,11 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
         const context = sourceArchiverRequestLogContext(input.request);
         try {
             await writeFile(artifactPath, input.bytes);
-            const args = ["store", artifactPath];
+            const storeCommand: { files: string[]; epochs?: number } = { files: [artifactPath] };
             if (this.config.epochs !== undefined) {
-                args.push("--epochs", String(this.config.epochs));
+                storeCommand.epochs = this.config.epochs;
             }
+            const args = ["json", JSON.stringify({ command: { store: storeCommand } })];
             const commandInput: {
                 cliPath: string;
                 args: string[];
@@ -198,7 +199,7 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
                 envKeys: Object.keys(this.config.env ?? {}).sort(),
             });
             const output = await this.commandRunner.run(commandInput);
-            const blobId = parseWalrusBlobId(output.stdout);
+            const blobId = parseWalrusStoreResult(output.stdout);
             this.logger({
                 event: "source_archiver.walrus_store.success",
                 ...context,
@@ -392,7 +393,31 @@ export async function storeVerifiedSourceArtifact(input: {
     }
 }
 
-export function parseWalrusBlobId(output: string): string {
+export function parseWalrusStoreResult(output: string): string {
+    const parsedJson = parseJsonOutput(output);
+    if (parsedJson !== undefined) {
+        const jsonResults = readWalrusStoreResults(parsedJson);
+        if (jsonResults.length > 1) {
+            throw new SourceArchiverError(
+                "Walrus store output included multiple store results",
+                "retryable",
+                502,
+            );
+        }
+        const jsonBlobIds = readWalrusStoreResultBlobIds(jsonResults[0]);
+        if (jsonBlobIds.length === 1) {
+            return validateWalrusBlobIdFromOutput(jsonBlobIds[0] ?? "");
+        }
+        if (jsonBlobIds.length > 1) {
+            throw new SourceArchiverError(
+                "Walrus store output included multiple blob ids",
+                "retryable",
+                502,
+            );
+        }
+        throw missingWalrusBlobId();
+    }
+
     const labeled = output
         .split(/\r?\n/u)
         .map((line) => line.trim())
@@ -403,20 +428,71 @@ export function parseWalrusBlobId(output: string): string {
         return validateWalrusBlobIdFromOutput(labeled);
     }
 
-    const fallback = output
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .filter((line) => !line.startsWith("Success:"))
-        .at(-1);
-    if (fallback === undefined) {
-        throw new SourceArchiverError(
-            "Walrus store output did not include a blob id",
-            "retryable",
-            502,
-        );
+    throw missingWalrusBlobId();
+}
+
+export function parseWalrusBlobId(output: string): string {
+    return parseWalrusStoreResult(output);
+}
+
+function parseJsonOutput(output: string): unknown | undefined {
+    const trimmed = output.trim();
+    if (trimmed.length === 0) {
+        return undefined;
     }
-    return validateWalrusBlobIdFromOutput(fallback);
+    try {
+        return JSON.parse(trimmed) as unknown;
+    } catch {
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            throw new SourceArchiverError(
+                "Walrus store output looked like JSON but was malformed",
+                "retryable",
+                502,
+            );
+        }
+        return undefined;
+    }
+}
+
+function readWalrusStoreResults(output: unknown): unknown[] {
+    if (Array.isArray(output)) {
+        return output;
+    }
+    return [output];
+}
+
+function readWalrusStoreResultBlobIds(output: unknown): string[] {
+    if (!isRecord(output)) {
+        return [];
+    }
+    const blobStoreResult = output.blobStoreResult;
+    if (!isRecord(blobStoreResult)) {
+        return [];
+    }
+
+    const blobIds: string[] = [];
+    const alreadyCertified = blobStoreResult.alreadyCertified;
+    if (isRecord(alreadyCertified) && typeof alreadyCertified.blobId === "string") {
+        blobIds.push(alreadyCertified.blobId);
+    }
+
+    const newlyCreated = blobStoreResult.newlyCreated;
+    if (!isRecord(newlyCreated)) {
+        return blobIds;
+    }
+    const blobObject = newlyCreated.blobObject;
+    if (isRecord(blobObject) && typeof blobObject.blobId === "string") {
+        blobIds.push(blobObject.blobId);
+    }
+    return blobIds;
+}
+
+function missingWalrusBlobId(): SourceArchiverError {
+    return new SourceArchiverError(
+        "Walrus store output did not include a blob id",
+        "retryable",
+        502,
+    );
 }
 
 function sourceArchiverRequestLogContext(
@@ -445,10 +521,19 @@ function walrusStoreFailureLogEvent(
         ...optionalProperty("killed", readErrorBooleanProperty(error, "killed")),
         timedOut: readErrorBooleanProperty(error, "killed") === true,
         errorName: error instanceof Error ? error.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: redactSensitiveErrorMessage(
+            error instanceof Error ? error.message : String(error),
+        ),
         stdout: summarizeCliOutput(readErrorStringProperty(error, "stdout") ?? ""),
         stderr: summarizeCliOutput(readErrorStringProperty(error, "stderr") ?? ""),
     };
+}
+
+function redactSensitiveErrorMessage(message: string): string {
+    if (!SENSITIVE_OUTPUT_LINE_PATTERN.test(message)) {
+        return message;
+    }
+    return `[redacted-sensitive-message sha256=${createHash("sha256").update(message).digest("hex")}]`;
 }
 
 function summarizeCliOutput(output: string): CliOutputSummary {
