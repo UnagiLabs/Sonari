@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
+    createSourceArchiverHandler,
     loadVerifiedSourceArtifact,
     parseSourceArchiverEvent,
     parseWalrusBlobId,
@@ -198,6 +199,63 @@ describe("source archiver Walrus store", () => {
         expect(command.runs[0]?.args[0]).toBe("store");
         expect(command.runs[0]?.args.slice(2)).toEqual(["--epochs", "1"]);
         expect(command.tempFileBytes).toEqual([validBytes]);
+    });
+});
+
+describe("source archiver HTTP handler", () => {
+    it("returns the stored blob id for an authorized valid request", async () => {
+        const handler = createSourceArchiverHandler({
+            bucket: "sonari-results",
+            s3: new RecordingS3Reader(validBytes),
+            walrus: new RecordingWalrusStoreRunner("testBlob_123456"),
+            authToken: async () => "archiver-token",
+        });
+
+        await expect(
+            handler({
+                headers: { "x-sonari-source-archiver-token": "archiver-token" },
+                body: JSON.stringify(validRequest),
+            }),
+        ).resolves.toEqual({
+            statusCode: 200,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ walrus_blob_id: "testBlob_123456" }),
+        });
+    });
+
+    it("rejects missing or wrong source archiver token before S3 read", async () => {
+        const s3 = new RecordingS3Reader(validBytes);
+        const handler = createSourceArchiverHandler({
+            bucket: "sonari-results",
+            s3,
+            walrus: new RecordingWalrusStoreRunner("testBlob_123456"),
+            authToken: async () => "archiver-token",
+        });
+
+        await expect(handler({ body: JSON.stringify(validRequest) })).resolves.toMatchObject({
+            statusCode: 401,
+        });
+        expect(s3.reads).toEqual([]);
+    });
+
+    it("returns integrity status without leaking mismatch details", async () => {
+        const handler = createSourceArchiverHandler({
+            bucket: "sonari-results",
+            s3: new RecordingS3Reader(new TextEncoder().encode("tampered")),
+            walrus: new RecordingWalrusStoreRunner("testBlob_123456"),
+            authToken: async () => "archiver-token",
+        });
+
+        await expect(
+            handler({
+                headers: { "X-Sonari-Source-Archiver-Token": "archiver-token" },
+                body: JSON.stringify(validRequest),
+            }),
+        ).resolves.toEqual({
+            statusCode: 422,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ error: "integrity" }),
+        });
     });
 });
 

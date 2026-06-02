@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
 
 const SOURCE_ARTIFACT_PREFIX = "source-artifacts/";
 const SOURCE_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
@@ -59,6 +61,22 @@ export interface WalrusCliStoreConfig {
     timeoutMs?: number;
     epochs?: number;
     env?: Record<string, string>;
+}
+
+export interface SourceArchiverHttpEvent {
+    body?: string | null;
+    isBase64Encoded?: boolean;
+    headers?: Record<string, string | undefined> | null;
+}
+
+export interface SourceArchiverHttpResponse {
+    statusCode: number;
+    headers: Record<string, string>;
+    body: string;
+}
+
+export interface SecretStringReader {
+    getSecretString(secretArn: string): Promise<string>;
 }
 
 export class WalrusCliStoreRunner implements WalrusStoreRunner {
@@ -138,6 +156,60 @@ export class NodeWalrusStoreCommandRunner implements WalrusStoreCommandRunner {
         });
         return { stdout: output.stdout, stderr: output.stderr };
     }
+}
+
+export function createSourceArchiverHandler(input: {
+    bucket: string;
+    s3: SourceArtifactS3Reader;
+    walrus: WalrusStoreRunner;
+    authToken: () => Promise<string>;
+}): (event: SourceArchiverHttpEvent) => Promise<SourceArchiverHttpResponse> {
+    return async (event) => {
+        try {
+            await verifyArchiverToken(event, input.authToken);
+            const request = parseSourceArchiverEvent(event);
+            const artifact = await loadVerifiedSourceArtifact({
+                bucket: input.bucket,
+                request,
+                s3: input.s3,
+            });
+            const stored = await storeVerifiedSourceArtifact({ artifact, walrus: input.walrus });
+            return jsonResponse(200, { walrus_blob_id: stored.walrusBlobId });
+        } catch (error) {
+            if (error instanceof SourceArchiverError) {
+                return jsonResponse(error.statusCode, { error: error.kind });
+            }
+            return jsonResponse(500, { error: "retryable" });
+        }
+    };
+}
+
+export async function sourceArchiverHandler(
+    event: SourceArchiverHttpEvent,
+): Promise<SourceArchiverHttpResponse> {
+    const secrets = new AwsSecretStringReader();
+    const handler = createSourceArchiverHandler({
+        bucket: requiredEnv("RESULT_BUCKET"),
+        s3: new AwsSourceArtifactS3Reader(),
+        walrus: {
+            store: async (artifact) =>
+                new WalrusCliStoreRunner(
+                    walrusCliStoreConfig({
+                        cliPath: requiredEnv("SOURCE_ARCHIVER_WALRUS_CLI"),
+                        timeoutMs: readOptionalPositiveIntegerEnv(
+                            "SOURCE_ARCHIVER_WALRUS_TIMEOUT_MS",
+                        ),
+                        epochs: readOptionalPositiveIntegerEnv("SOURCE_ARCHIVER_WALRUS_EPOCHS"),
+                        env: await readWalrusEnvironmentSecret(
+                            requiredEnv("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN"),
+                            secrets,
+                        ),
+                    }),
+                ).store(artifact),
+        },
+        authToken: () => secrets.getSecretString(requiredEnv("SOURCE_ARCHIVER_TOKEN_SECRET_ARN")),
+    });
+    return handler(event);
 }
 
 export function parseSourceArchiverEvent(event: {
@@ -275,6 +347,135 @@ function parseEventBody(event: { body?: string | null; isBase64Encoded?: boolean
     } catch {
         throw badRequest("archiver request body must be valid JSON");
     }
+}
+
+async function verifyArchiverToken(
+    event: SourceArchiverHttpEvent,
+    authToken: () => Promise<string>,
+): Promise<void> {
+    const expected = (await authToken()).trim();
+    const actual = readHeader(event.headers, "x-sonari-source-archiver-token")?.trim();
+    if (expected.length === 0 || actual === undefined || !constantTimeEqual(actual, expected)) {
+        throw new SourceArchiverError("source archiver token is invalid", "bad_request", 401);
+    }
+}
+
+function readHeader(
+    headers: Record<string, string | undefined> | null | undefined,
+    name: string,
+): string | undefined {
+    if (headers === undefined || headers === null) {
+        return undefined;
+    }
+    const expected = name.toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+        if (key.toLowerCase() === expected) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function constantTimeEqual(actual: string, expected: string): boolean {
+    const actualBuffer = Buffer.from(actual);
+    const expectedBuffer = Buffer.from(expected);
+    return (
+        actualBuffer.byteLength === expectedBuffer.byteLength &&
+        timingSafeEqual(actualBuffer, expectedBuffer)
+    );
+}
+
+function jsonResponse(
+    statusCode: number,
+    body: Record<string, unknown>,
+): SourceArchiverHttpResponse {
+    return {
+        statusCode,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+    };
+}
+
+class AwsSourceArtifactS3Reader implements SourceArtifactS3Reader {
+    private readonly client = new S3Client({});
+
+    async getObjectBytes(input: { bucket: string; key: string }): Promise<Uint8Array> {
+        const result = await this.client.send(
+            new GetObjectCommand({ Bucket: input.bucket, Key: input.key }),
+        );
+        if (result.Body === undefined) {
+            throw new Error(`S3 object was empty: ${input.key}`);
+        }
+        return result.Body.transformToByteArray();
+    }
+}
+
+class AwsSecretStringReader implements SecretStringReader {
+    private readonly client = new SecretsManagerClient({});
+
+    async getSecretString(secretArn: string): Promise<string> {
+        const result = await this.client.send(new GetSecretValueCommand({ SecretId: secretArn }));
+        const secret = result.SecretString?.trim();
+        if (secret === undefined || secret.length === 0) {
+            throw new Error(`${secretArn} did not contain SecretString`);
+        }
+        return secret;
+    }
+}
+
+async function readWalrusEnvironmentSecret(
+    secretArn: string,
+    reader: SecretStringReader,
+): Promise<Record<string, string>> {
+    const parsed = JSON.parse(await reader.getSecretString(secretArn)) as unknown;
+    if (!isRecord(parsed)) {
+        throw new Error(`${secretArn} must contain a JSON object`);
+    }
+    return Object.fromEntries(
+        Object.entries(parsed).filter((entry): entry is [string, string] => {
+            const [key, value] = entry;
+            return key.length > 0 && typeof value === "string" && value.length > 0;
+        }),
+    );
+}
+
+function requiredEnv(name: string): string {
+    const value = process.env[name];
+    if (value === undefined || value.length === 0) {
+        throw new Error(`${name} is required`);
+    }
+    return value;
+}
+
+function readOptionalPositiveIntegerEnv(name: string): number | undefined {
+    const value = process.env[name];
+    if (value === undefined || value.length === 0) {
+        return undefined;
+    }
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        throw new Error(`${name} must be a positive integer`);
+    }
+    return parsed;
+}
+
+function walrusCliStoreConfig(input: {
+    cliPath: string;
+    timeoutMs: number | undefined;
+    epochs: number | undefined;
+    env: Record<string, string>;
+}): WalrusCliStoreConfig {
+    const config: WalrusCliStoreConfig = {
+        cliPath: input.cliPath,
+        env: input.env,
+    };
+    if (input.timeoutMs !== undefined) {
+        config.timeoutMs = input.timeoutMs;
+    }
+    if (input.epochs !== undefined) {
+        config.epochs = input.epochs;
+    }
+    return config;
 }
 
 function readString(body: Record<string, unknown>, key: string): string {

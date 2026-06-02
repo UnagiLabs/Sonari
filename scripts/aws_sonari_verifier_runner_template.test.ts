@@ -51,6 +51,12 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("RunnerControlLambda:");
         expect(template).toContain("Handler: dist/src/runner_workflow.handler");
         expect(template).toContain("RUNNER_LEASE_TABLE_NAME: !Ref RunnerLeaseTable");
+        expect(template).toContain(
+            'SOURCE_ARCHIVER_URL: !If [HasSourceArchiverConfig, !GetAtt SourceArchiverFunctionUrl.FunctionUrl, ""]',
+        );
+        expect(template).toContain(
+            'SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]',
+        );
         expect(template).toContain("!GetAtt RunnerLeaseTable.Arn");
         expect(template).toContain(
             "EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref EarthquakeNitroEnclaveProcessCommand",
@@ -181,6 +187,36 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SONARI_WALRUS_UPLOAD_RELAY");
     });
 
+    it("adds a token-protected source archiver Lambda with isolated Walrus secrets", async () => {
+        const template = await readTemplate();
+
+        expect(template).toContain("SourceArchiverTokenSecretArn:");
+        expect(template).toContain("SourceArchiverWalrusEnvSecretArn:");
+        expect(template).toContain("SourceArchiverWalrusLayerArn:");
+        expect(template).toContain("HasSourceArchiverConfig:");
+        expect(template).toContain("SourceArchiverLambdaRole:");
+        expect(template).toContain("SourceArchiverLambda:");
+        expect(template).toContain("Handler: dist/src/source_archiver.sourceArchiverHandler");
+        expect(template).toContain("SourceArchiverFunctionUrl:");
+        expect(template).toContain("SourceArchiverFunctionUrlPermission:");
+        expect(template).toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN:");
+        expect(template).toContain("SOURCE_ARCHIVER_WALRUS_CLI:");
+        expect(template).toContain("SourceArchiverLambdaName:");
+        expect(template).toContain("SourceArchiverFunctionUrlOutput:");
+        expect(template).toContain("Action: s3:GetObject");
+        expect(template).toContain(
+            "Resource: !Sub $" + "{RunnerResultBucket.Arn}/source-artifacts/*",
+        );
+        expect(template).toContain("- !Ref SourceArchiverTokenSecretArn");
+        expect(template).toContain("- !Ref SourceArchiverWalrusEnvSecretArn");
+
+        const runnerRoleStart = template.indexOf("RunnerRole:");
+        const watcherRoleStart = template.indexOf("WatcherLambdaRole:");
+        const runnerRole = template.slice(runnerRoleStart, watcherRoleStart);
+        expect(runnerRole).not.toContain("SourceArchiverWalrusEnvSecretArn");
+        expect(runnerRole).not.toContain("SourceArchiverWalrusLayerArn");
+    });
+
     it("configures earthquake enclave egress through a parent CONNECT proxy and local bridge", async () => {
         const template = await readTemplate();
 
@@ -246,6 +282,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SubmitVerificationLambdaName:");
         expect(template).toContain("BatchVerifierLambdaName:");
         expect(template).toContain("RunnerControlLambdaName:");
+        expect(template).toContain("SourceArchiverLambdaName:");
+        expect(template).toContain("SourceArchiverFunctionUrlOutput:");
         expect(template).not.toContain("SigningSeedCiphertextS3KeyOutput");
         expect(template).not.toContain("SigningSeedCiphertextS3BucketOutput");
     });
