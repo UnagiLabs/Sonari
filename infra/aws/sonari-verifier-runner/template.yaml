@@ -871,6 +871,9 @@ Resources:
                 Action: s3:GetObject
                 Resource: !Sub ${RunnerResultBucket.Arn}/results/*
               - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/source-artifacts/*
+              - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:PutItem

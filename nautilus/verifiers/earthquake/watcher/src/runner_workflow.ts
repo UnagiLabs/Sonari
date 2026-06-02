@@ -1095,8 +1095,6 @@ class FetchSourceFetcher implements SourceFetcherLike {
 }
 
 export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
-    private cachedToken: string | undefined;
-
     constructor(
         private readonly endpoint: string,
         private readonly auth?: {
@@ -1143,9 +1141,6 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
     }
 
     private async token(): Promise<string> {
-        if (this.cachedToken !== undefined) {
-            return this.cachedToken;
-        }
         if (this.auth === undefined) {
             throw new RetryableSourceArchiveError("source archiver auth is not configured");
         }
@@ -1155,7 +1150,6 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
                 `${this.auth.secretArn} did not contain SecretString`,
             );
         }
-        this.cachedToken = token;
         return token;
     }
 }

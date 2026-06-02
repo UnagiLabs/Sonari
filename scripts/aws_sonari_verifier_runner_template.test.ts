@@ -58,6 +58,16 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             'SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]',
         );
         expect(template).toContain("!GetAtt RunnerLeaseTable.Arn");
+        const runnerControlRoleStart = template.indexOf("RunnerControlLambdaRole:");
+        const runnerStateMachineRoleStart = template.indexOf("RunnerStateMachineRole:");
+        const runnerControlRole = template.slice(
+            runnerControlRoleStart,
+            runnerStateMachineRoleStart,
+        );
+        expect(runnerControlRole).toContain("Action: s3:PutObject");
+        expect(runnerControlRole).toContain(
+            "Resource: !Sub $" + "{RunnerResultBucket.Arn}/source-artifacts/*",
+        );
         expect(template).toContain(
             "EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref EarthquakeNitroEnclaveProcessCommand",
         );

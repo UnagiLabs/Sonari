@@ -1168,9 +1168,10 @@ describe("AWS runner workflow helper", () => {
     it("sends a runner-only token to the HTTP source archiver", async () => {
         const fetchCalls: Array<{ url: string; headers: Record<string, string>; body: unknown }> =
             [];
+        const secretReader = new RecordingRelayerSignerSecretReader("archiver-token");
         const archiver = new HttpWalrusSourceArchiver("https://archiver.test/store", {
             secretArn: "arn:aws:secretsmanager:source-archiver-token",
-            secretReader: new RecordingRelayerSignerSecretReader("archiver-token"),
+            secretReader,
         });
         const originalFetch = globalThis.fetch;
         globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -1210,6 +1211,49 @@ describe("AWS runner workflow helper", () => {
                     size_bytes: "source bytes".length,
                 },
             },
+        ]);
+        expect(secretReader.secretReads).toEqual([
+            "arn:aws:secretsmanager:source-archiver-token",
+        ]);
+    });
+
+    it("does not cache the source archiver token across HTTP calls", async () => {
+        const secrets = new QueueingSecretReader(["first-token", "second-token"]);
+        const archiver = new HttpWalrusSourceArchiver("https://archiver.test/store", {
+            secretArn: "arn:aws:secretsmanager:source-archiver-token",
+            secretReader: secrets,
+        });
+        const headers: Record<string, string>[] = [];
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            headers.push(normalizeHeaders(init?.headers));
+            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+                status: 200,
+            });
+        }) as typeof fetch;
+        try {
+            const entry = firstRawDataEntry(
+                finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+            );
+            await archiver.archiveAndVerify({
+                entry,
+                artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+            });
+            await archiver.archiveAndVerify({
+                entry,
+                artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        expect(headers.map((value) => value["x-sonari-source-archiver-token"])).toEqual([
+            "first-token",
+            "second-token",
+        ]);
+        expect(secrets.secretReads).toEqual([
+            "arn:aws:secretsmanager:source-archiver-token",
+            "arn:aws:secretsmanager:source-archiver-token",
         ]);
     });
 
@@ -1900,6 +1944,21 @@ class RecordingRelayerSignerSecretReader implements RelayerSignerSecretReader {
     async getSecretString(secretArn: string): Promise<string> {
         this.secretReads.push(secretArn);
         return this.secret;
+    }
+}
+
+class QueueingSecretReader implements RelayerSignerSecretReader {
+    readonly secretReads: string[] = [];
+
+    constructor(private readonly secrets: string[]) {}
+
+    async getSecretString(secretArn: string): Promise<string> {
+        this.secretReads.push(secretArn);
+        const secret = this.secrets.shift();
+        if (secret === undefined) {
+            throw new Error("secret queue is empty");
+        }
+        return secret;
     }
 }
 
