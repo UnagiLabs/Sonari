@@ -1076,6 +1076,96 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tee_json_result_preserves_payload_field_order_after_value_conversion() {
+        let payload = tee::UnsignedPayload {
+            intent: 1,
+            oracle_version: 1,
+            event_uid: format!("0x{}", "11".repeat(32)),
+            hazard_type: 1,
+            status: 3,
+            event_revision: 1,
+            source_event_id: "us7000abcd".to_owned(),
+            title: "M 7.1 - Sonari Fixture Earthquake".to_owned(),
+            region: "Sonari Fixture Region".to_owned(),
+            occurred_at_ms: 1_700_000_000_000,
+            magnitude_x100: 710,
+            verified_at_ms: 1_700_000_100_000,
+            source_updated_at_ms: 1_700_000_050_000,
+            primary_source: 1,
+            severity_band: 3,
+            source_set_hash: format!("0x{}", "22".repeat(32)),
+            raw_data_hash: format!("0x{}", "33".repeat(32)),
+            raw_data_uri: "ipfs://sonari/live/us7000abcd/raw_data_manifest.json".to_owned(),
+            affected_cells_root: format!("0x{}", "44".repeat(32)),
+            affected_cells_uri: "ipfs://sonari/live/us7000abcd/affected_cells.json".to_owned(),
+            affected_cells_data_hash: format!("0x{}", "55".repeat(32)),
+            affected_cell_count: 1,
+            geo_resolution: 7,
+            cells_generation_method: 1,
+            cell_metric: 1,
+            cell_aggregation: 1,
+            intensity_scale: 1,
+            freshness_deadline_ms: 1_700_021_700_000,
+        };
+
+        let result = TeeJsonResult::Finalized {
+            payload: Box::new(payload),
+            payload_bcs_hex: "0x01".to_owned(),
+            signature: format!("0x{}", "66".repeat(64)),
+            public_key: format!("0x{}", "77".repeat(32)),
+            raw_data_manifest: tee::RawDataManifest {
+                oracle_version: 1,
+                entries: Vec::new(),
+            },
+            metadata: Some(EnclaveRegistrationMetadata {
+                verifier_config_key: 1,
+                verifier_config_version: 10,
+                enclave_instance_public_key: format!("0x{}", "77".repeat(32)),
+            }),
+        };
+        let value = serde_json::to_value(result).expect("TEE result should serialize");
+        let payload = value
+            .get("payload")
+            .and_then(serde_json::Value::as_object)
+            .expect("payload should be a JSON object");
+
+        let keys = payload.keys().map(String::as_str).collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            [
+                "intent",
+                "oracle_version",
+                "event_uid",
+                "hazard_type",
+                "status",
+                "event_revision",
+                "source_event_id",
+                "title",
+                "region",
+                "occurred_at_ms",
+                "magnitude_x100",
+                "verified_at_ms",
+                "source_updated_at_ms",
+                "primary_source",
+                "severity_band",
+                "source_set_hash",
+                "raw_data_hash",
+                "raw_data_uri",
+                "affected_cells_root",
+                "affected_cells_uri",
+                "affected_cells_data_hash",
+                "affected_cell_count",
+                "geo_resolution",
+                "cells_generation_method",
+                "cell_metric",
+                "cell_aggregation",
+                "intensity_scale",
+                "freshness_deadline_ms",
+            ]
+        );
+    }
+
+    #[test]
     fn build_production_input_uses_injected_observed_at_ms() {
         let properties_updated_ms = 1_700_000_000_000_u64;
         let injected_observed_at_ms = 1_800_000_000_000_u64;
