@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
     createSourceArchiverHandler,
@@ -7,8 +7,10 @@ import {
     parseSourceArchiverEvent,
     parseWalrusBlobId,
     parseWalrusStoreResult,
+    readWalrusCliStoreSecret,
     SourceArchiverError,
     type SourceArchiverLogEvent,
+    type SecretStringReader,
     storeVerifiedSourceArtifact,
     WalrusCliStoreRunner,
     type SourceArtifactS3Reader,
@@ -338,7 +340,6 @@ describe("source archiver Walrus store", () => {
                 cliPath: "/opt/sonari/bin/walrus",
                 timeoutMs: 12_000,
                 epochs: 1,
-                env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
             },
             command,
         );
@@ -348,11 +349,13 @@ describe("source archiver Walrus store", () => {
         expect(command.runs[0]).toMatchObject({
             cliPath: "/opt/sonari/bin/walrus",
             timeoutMs: 12_000,
-            env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
         });
         expect(command.runs[0]?.args[0]).toBe("json");
         expect(command.runs[0]?.args).toHaveLength(2);
         const payload = command.storePayloads[0];
+        expect(payload?.config).toBeUndefined();
+        expect(payload?.context).toBeUndefined();
+        expect(payload?.wallet).toBeUndefined();
         expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
         expect(payload?.command.store.epochs).toBe(1);
         expect(command.tempFileBytes).toEqual([validBytes]);
@@ -374,6 +377,125 @@ describe("source archiver Walrus store", () => {
         expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
         expect(payload?.command.store).not.toHaveProperty("epochs");
         expect(command.tempFileBytes).toEqual([validBytes]);
+    });
+
+    it("materializes fixed-schema Walrus and Sui secret bodies into private temp files for JSON mode", async () => {
+        const secret = new RecordingSecretStringReader(
+            JSON.stringify({
+                SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\ncontexts: {}\n",
+                SONARI_WALRUS_CONTEXT: "testnet",
+                SONARI_SUI_WALLET_CONFIG_YAML:
+                    "keystore:\n  File: /home/dev/.sui/sui_config/sui.keystore\nactive_env: testnet\n",
+                SONARI_SUI_KEYSTORE_JSON: '["sui-private-key-material"]\n',
+            }),
+        );
+        const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
+        const runner = new WalrusCliStoreRunner(
+            {
+                cliPath: "/opt/sonari/bin/walrus",
+                timeoutMs: 12_000,
+                epochs: 1,
+                ...(await readWalrusCliStoreSecret("secret-arn", secret)),
+            },
+            command,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
+
+        const payload = command.storePayloads[0];
+        expect(payload?.config).toBe(command.walrusConfigPaths[0]);
+        expect(payload?.context).toBe("testnet");
+        expect(payload?.wallet).toBe(command.walletConfigPaths[0]);
+        expect(command.materializedFiles).toEqual(
+            expect.arrayContaining([
+                {
+                    path: command.walrusConfigPaths[0],
+                    mode: 0o600,
+                    text: "default_context: testnet\ncontexts: {}\n",
+                },
+                {
+                    path: command.walletConfigPaths[0],
+                    mode: 0o600,
+                    text: `keystore:\n  File: ${command.keystorePaths[0]}\nactive_env: testnet\n`,
+                },
+                {
+                    path: command.keystorePaths[0],
+                    mode: 0o600,
+                    text: '["sui-private-key-material"]\n',
+                },
+            ]),
+        );
+        expect(JSON.stringify(command.runs)).not.toContain("sui-private-key-material");
+    });
+
+    it("cleans up materialized Walrus config, Sui wallet, keystore, and artifact files", async () => {
+        const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
+        const runner = new WalrusCliStoreRunner(
+            {
+                cliPath: "/opt/sonari/bin/walrus",
+                ...(await readWalrusCliStoreSecret(
+                    "secret-arn",
+                    new RecordingSecretStringReader(
+                        JSON.stringify({
+                            SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n",
+                            SONARI_SUI_WALLET_CONFIG_YAML:
+                                "keystore:\n  File: /home/dev/.sui/sui_config/sui.keystore\n",
+                            SONARI_SUI_KEYSTORE_JSON: '["sui-private-key-material"]\n',
+                        }),
+                    ),
+                )),
+            },
+            command,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
+
+        for (const filePath of [
+            command.artifactPaths[0],
+            command.walrusConfigPaths[0],
+            command.walletConfigPaths[0],
+            command.keystorePaths[0],
+        ]) {
+            if (filePath === undefined) {
+                throw new Error("expected materialized file path");
+            }
+            await expect(access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
+        }
+    });
+
+    it("rejects malformed SourceArchiver Walrus secret schema fail-closed", async () => {
+        const cases = [
+            {},
+            { SONARI_WALRUS_CLIENT_CONFIG_YAML: "" },
+            {
+                SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n",
+                WALRUS_CONFIG: "/tmp/client_config.yaml",
+            },
+            {
+                SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n",
+                SONARI_WALRUS_CONTEXT: 123,
+            },
+            {
+                SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n",
+                SONARI_SUI_WALLET_CONFIG_YAML: "keystore:\n  File: /tmp/sui.keystore\n",
+            },
+            {
+                SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n",
+                SONARI_SUI_KEYSTORE_JSON: "[]\n",
+            },
+        ];
+
+        for (const value of cases) {
+            await expect(
+                readWalrusCliStoreSecret(
+                    "secret-arn",
+                    new RecordingSecretStringReader(JSON.stringify(value)),
+                ),
+            ).rejects.toMatchObject({
+                kind: "retryable",
+                statusCode: 500,
+            });
+        }
     });
 
     it("logs Walrus CLI success context without exposing environment values", async () => {
@@ -659,6 +781,9 @@ class RecordingWalrusStoreRunner implements WalrusStoreRunner {
 }
 
 interface WalrusJsonStorePayload {
+    config?: string;
+    context?: string;
+    wallet?: string;
     command: {
         store: {
             files: string[];
@@ -676,7 +801,12 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
     }> = [];
     readonly storePayloads: WalrusJsonStorePayload[] = [];
     readonly artifactPaths: string[] = [];
+    readonly walrusConfigPaths: string[] = [];
+    readonly walletConfigPaths: string[] = [];
+    readonly keystorePaths: string[] = [];
     readonly tempFileBytes: Uint8Array[] = [];
+    readonly materializedFiles: Array<{ path: string | undefined; mode: number; text: string }> =
+        [];
 
     failRun?: {
         name: string;
@@ -702,6 +832,20 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
         this.runs.push(input);
         const payload = parseWalrusJsonStorePayload(input.args[1]);
         this.storePayloads.push(payload);
+        if (payload.config !== undefined) {
+            this.walrusConfigPaths.push(payload.config);
+            await this.recordMaterializedFile(payload.config);
+        }
+        if (payload.wallet !== undefined) {
+            this.walletConfigPaths.push(payload.wallet);
+            await this.recordMaterializedFile(payload.wallet);
+            const walletText = await readFile(payload.wallet, "utf8");
+            const keystorePath = walletText.match(/^\s*File:\s*(.+)$/mu)?.[1];
+            if (keystorePath !== undefined) {
+                this.keystorePaths.push(keystorePath);
+                await this.recordMaterializedFile(keystorePath);
+            }
+        }
         const artifactPath = payload.command.store.files[0];
         if (artifactPath === undefined) {
             throw new Error("Walrus JSON payload command.store.files was empty");
@@ -726,6 +870,14 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
         }
         return { stdout: this.stdout, stderr: this.stderr };
     }
+
+    private async recordMaterializedFile(filePath: string): Promise<void> {
+        this.materializedFiles.push({
+            path: filePath,
+            mode: (await stat(filePath)).mode & 0o777,
+            text: await readFile(filePath, "utf8"),
+        });
+    }
 }
 
 class RecordingSourceArchiverLogger {
@@ -734,6 +886,14 @@ class RecordingSourceArchiverLogger {
     readonly log = (event: SourceArchiverLogEvent): void => {
         this.events.push(event);
     };
+}
+
+class RecordingSecretStringReader implements SecretStringReader {
+    constructor(private readonly secretString: string) {}
+
+    async getSecretString(): Promise<string> {
+        return this.secretString;
+    }
 }
 
 async function verifiedArtifact() {
@@ -785,6 +945,9 @@ function parseWalrusJsonStorePayload(payloadJson: string | undefined): WalrusJso
         throw new Error("Walrus JSON payload command.store.epochs must be a number");
     }
     return {
+        ...(typeof payload.config === "string" ? { config: payload.config } : {}),
+        ...(typeof payload.context === "string" ? { context: payload.context } : {}),
+        ...(typeof payload.wallet === "string" ? { wallet: payload.wallet } : {}),
         command: {
             store: {
                 files: store.files,
