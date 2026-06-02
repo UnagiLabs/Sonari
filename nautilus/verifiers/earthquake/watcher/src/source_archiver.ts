@@ -172,10 +172,11 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
         const context = sourceArchiverRequestLogContext(input.request);
         try {
             await writeFile(artifactPath, input.bytes);
-            const args = ["store", artifactPath];
+            const storeCommand: { files: string[]; epochs?: number } = { files: [artifactPath] };
             if (this.config.epochs !== undefined) {
-                args.push("--epochs", String(this.config.epochs));
+                storeCommand.epochs = this.config.epochs;
             }
+            const args = ["json", JSON.stringify({ command: { store: storeCommand } })];
             const commandInput: {
                 cliPath: string;
                 args: string[];

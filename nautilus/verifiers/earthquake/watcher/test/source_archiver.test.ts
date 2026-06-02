@@ -292,8 +292,8 @@ describe("source archiver Walrus store", () => {
         expect(() => parseWalrusStoreResult("Success: stored\n")).toThrow(SourceArchiverError);
     });
 
-    it("runs walrus store with a temp file containing the source bytes", async () => {
-        const command = new RecordingWalrusCommandRunner("Blob ID: testBlob_123456\n");
+    it("runs walrus JSON store with a temp file containing the source bytes and configured epochs", async () => {
+        const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
         const runner = new WalrusCliStoreRunner(
             {
                 cliPath: "/opt/sonari/bin/walrus",
@@ -311,14 +311,35 @@ describe("source archiver Walrus store", () => {
             timeoutMs: 12_000,
             env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
         });
-        expect(command.runs[0]?.args[0]).toBe("store");
-        expect(command.runs[0]?.args.slice(2)).toEqual(["--epochs", "1"]);
+        expect(command.runs[0]?.args[0]).toBe("json");
+        expect(command.runs[0]?.args).toHaveLength(2);
+        const payload = command.storePayloads[0];
+        expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
+        expect(payload?.command.store.epochs).toBe(1);
+        expect(command.tempFileBytes).toEqual([validBytes]);
+    });
+
+    it("omits epochs from the Walrus JSON store payload when epochs are not configured", async () => {
+        const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
+        const runner = new WalrusCliStoreRunner(
+            {
+                cliPath: "/opt/sonari/bin/walrus",
+            },
+            command,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
+
+        expect(command.runs[0]?.args[0]).toBe("json");
+        const payload = command.storePayloads[0];
+        expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
+        expect(payload?.command.store).not.toHaveProperty("epochs");
         expect(command.tempFileBytes).toEqual([validBytes]);
     });
 
     it("logs Walrus CLI success context without exposing environment values", async () => {
         const command = new RecordingWalrusCommandRunner(
-            "Success: stored\nBlob ID: testBlob_123456\n",
+            walrusJsonStdout("testBlob_123456"),
             "progress: stored\n",
         );
         const logger = new RecordingSourceArchiverLogger();
@@ -356,7 +377,7 @@ describe("source archiver Walrus store", () => {
             walrusBlobId: "testBlob_123456",
             stdout: {
                 truncated: false,
-                text: "Success: stored\nBlob ID: testBlob_123456\n",
+                text: walrusJsonStdout("testBlob_123456"),
             },
             stderr: {
                 truncated: false,
@@ -598,6 +619,15 @@ class RecordingWalrusStoreRunner implements WalrusStoreRunner {
     }
 }
 
+interface WalrusJsonStorePayload {
+    command: {
+        store: {
+            files: string[];
+            epochs?: number;
+        };
+    };
+}
+
 class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
     readonly runs: Array<{
         cliPath: string;
@@ -605,6 +635,8 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
         timeoutMs: number;
         env?: Record<string, string>;
     }> = [];
+    readonly storePayloads: WalrusJsonStorePayload[] = [];
+    readonly artifactPaths: string[] = [];
     readonly tempFileBytes: Uint8Array[] = [];
 
     failRun?: {
@@ -629,10 +661,13 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
         env?: Record<string, string>;
     }): Promise<{ stdout: string; stderr: string }> {
         this.runs.push(input);
-        const artifactPath = input.args[1];
+        const payload = parseWalrusJsonStorePayload(input.args[1]);
+        this.storePayloads.push(payload);
+        const artifactPath = payload.command.store.files[0];
         if (artifactPath === undefined) {
-            throw new Error("artifact path missing");
+            throw new Error("Walrus JSON payload command.store.files was empty");
         }
+        this.artifactPaths.push(artifactPath);
         this.tempFileBytes.push(new Uint8Array(await readFile(artifactPath)));
         if (this.failRun !== undefined) {
             const error = new Error(this.failRun.message) as Error & {
@@ -670,6 +705,53 @@ async function verifiedArtifact() {
     });
 }
 
+function walrusJsonStdout(blobId: string): string {
+    return JSON.stringify({
+        blobStoreResult: {
+            alreadyCertified: {
+                blobId,
+            },
+        },
+    });
+}
+
 function sha256Hex(bytes: Uint8Array): string {
     return `0x${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function parseWalrusJsonStorePayload(payloadJson: string | undefined): WalrusJsonStorePayload {
+    if (payloadJson === undefined) {
+        throw new Error("Walrus JSON payload missing");
+    }
+    const payload = JSON.parse(payloadJson) as unknown;
+    if (!isRecord(payload)) {
+        throw new Error("Walrus JSON payload must be an object");
+    }
+    const command = payload.command;
+    if (!isRecord(command)) {
+        throw new Error("Walrus JSON payload command missing");
+    }
+    const store = command.store;
+    if (
+        !isRecord(store) ||
+        !Array.isArray(store.files) ||
+        !store.files.every((file) => typeof file === "string")
+    ) {
+        throw new Error("Walrus JSON payload command.store.files missing");
+    }
+    if (store.epochs !== undefined && typeof store.epochs !== "number") {
+        throw new Error("Walrus JSON payload command.store.epochs must be a number");
+    }
+    return {
+        command: {
+            store: {
+                files: store.files,
+                ...(store.epochs === undefined ? {} : { epochs: store.epochs }),
+            },
+        },
+    };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
 }
