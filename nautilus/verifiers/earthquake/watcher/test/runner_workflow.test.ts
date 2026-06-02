@@ -9,6 +9,7 @@ import {
 import {
     BCS_ENUMS,
     type EnclaveVerificationMetadata,
+    type RawDataEntry,
     type TeeCoreResult,
 } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
@@ -1122,6 +1123,44 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("records oversized source re-fetch as source archive integrity failure", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const archive = new RecordingSourceArchiveAdapter(new TextEncoder().encode("source bytes"));
+        archive.oversizeFetch = true;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive: archive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+        expect(archive.puts).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "integrity_failed",
+        });
+    });
+
     it("records retryable source archive failures without mutating the TEE result", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -1255,6 +1294,28 @@ describe("AWS runner workflow helper", () => {
             "arn:aws:secretsmanager:source-archiver-token",
             "arn:aws:secretsmanager:source-archiver-token",
         ]);
+    });
+
+    it("passes an abort signal to source archiver HTTP requests", async () => {
+        let observedSignal: AbortSignal | undefined;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            observedSignal = init?.signal ?? undefined;
+            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+                status: 200,
+            });
+        }) as typeof fetch;
+        try {
+            await new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                entry: firstRawDataEntry(
+                    finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+                ),
+                artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+        expect(observedSignal).toBeInstanceOf(AbortSignal);
     });
 
     it("classifies HTTP archiver integrity and retryable failures by status", async () => {
@@ -1837,13 +1898,19 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
     readonly archived: Array<{ artifactS3Key: string; walrusBlobId: string }> = [];
     failFetch = false;
     failS3 = false;
+    oversizeFetch = false;
     walrusBlobId = "testBlob_123456";
 
     readonly fetcher = {
-        fetchBytes: async (sourceUri: string): Promise<Uint8Array> => {
-            this.fetches.push(sourceUri);
+        fetchBytes: async (entry: RawDataEntry): Promise<Uint8Array> => {
+            this.fetches.push(entry.source_uri);
             if (this.failFetch) {
                 throw new Error("source fetch unavailable");
+            }
+            if (this.oversizeFetch) {
+                throw new IntegritySourceArchiveError(
+                    `source size exceeded signed size for ${entry.source_uri}`,
+                );
             }
             return this.bytes;
         },

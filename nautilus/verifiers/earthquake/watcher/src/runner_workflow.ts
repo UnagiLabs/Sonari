@@ -55,6 +55,8 @@ import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
 
 const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
+const SOURCE_FETCH_TIMEOUT_MS = 30_000;
+const SOURCE_ARCHIVER_HTTP_TIMEOUT_MS = 55_000;
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -111,7 +113,7 @@ export interface S3ClientLike {
 }
 
 export interface SourceFetcherLike {
-    fetchBytes(sourceUri: string): Promise<Uint8Array>;
+    fetchBytes(entry: RawDataEntry): Promise<Uint8Array>;
 }
 
 export interface WalrusSourceArchiverLike {
@@ -1083,14 +1085,19 @@ class AwsS3Client implements S3ClientLike {
 }
 
 class FetchSourceFetcher implements SourceFetcherLike {
-    async fetchBytes(sourceUri: string): Promise<Uint8Array> {
-        const response = await fetch(sourceUri);
+    async fetchBytes(entry: RawDataEntry): Promise<Uint8Array> {
+        const response = await fetchWithTimeout(
+            entry.source_uri,
+            {},
+            SOURCE_FETCH_TIMEOUT_MS,
+            `source re-fetch timed out for ${entry.source_uri}`,
+        );
         if (!response.ok) {
             throw new RetryableSourceArchiveError(
-                `source re-fetch failed for ${sourceUri}: HTTP ${response.status}`,
+                `source re-fetch failed for ${entry.source_uri}: HTTP ${response.status}`,
             );
         }
-        return new Uint8Array(await response.arrayBuffer());
+        return readResponseBytesWithLimit(response, entry.size_bytes, entry.source_uri);
     }
 }
 
@@ -1107,16 +1114,21 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
         entry: RawDataEntry;
         artifactS3Key: string;
     }): Promise<{ walrusBlobId: string }> {
-        const response = await fetch(this.endpoint, {
-            method: "POST",
-            headers: await this.headers(),
-            body: JSON.stringify({
-                artifact_s3_key: input.artifactS3Key,
-                expected_walrus_blob_id: input.entry.walrus_blob_id,
-                source_hash: input.entry.source_hash,
-                size_bytes: input.entry.size_bytes,
-            }),
-        });
+        const response = await fetchWithTimeout(
+            this.endpoint,
+            {
+                method: "POST",
+                headers: await this.headers(),
+                body: JSON.stringify({
+                    artifact_s3_key: input.artifactS3Key,
+                    expected_walrus_blob_id: input.entry.walrus_blob_id,
+                    source_hash: input.entry.source_hash,
+                    size_bytes: input.entry.size_bytes,
+                }),
+            },
+            SOURCE_ARCHIVER_HTTP_TIMEOUT_MS,
+            "Walrus source archiver request timed out",
+        );
         if (!response.ok) {
             const message = `Walrus source archiver failed: HTTP ${response.status}`;
             if (response.status === 409 || response.status === 422) {
@@ -1158,6 +1170,69 @@ class UnconfiguredWalrusSourceArchiver implements WalrusSourceArchiverLike {
     async archiveAndVerify(): Promise<{ walrusBlobId: string }> {
         throw new RetryableSourceArchiveError("Walrus source archiver is not configured");
     }
+}
+
+async function fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    timeoutMessage: string,
+): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+        if (isAbortError(error)) {
+            throw new RetryableSourceArchiveError(timeoutMessage);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function readResponseBytesWithLimit(
+    response: Response,
+    expectedSizeBytes: number,
+    sourceUri: string,
+): Promise<Uint8Array> {
+    if (response.body === null) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.byteLength > expectedSizeBytes) {
+            throw new IntegritySourceArchiveError(
+                `source size exceeded signed size for ${sourceUri}`,
+            );
+        }
+        return bytes;
+    }
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    for await (const chunk of response.body) {
+        const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+        totalBytes += bytes.byteLength;
+        if (totalBytes > expectedSizeBytes) {
+            throw new IntegritySourceArchiveError(
+                `source size exceeded signed size for ${sourceUri}`,
+            );
+        }
+        chunks.push(bytes);
+    }
+    return concatBytes(chunks, totalBytes);
+}
+
+function concatBytes(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {
+    const output = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return output;
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
 }
 
 class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
@@ -1401,7 +1476,7 @@ async function archiveFinalizedSources(input: {
     const artifactS3Keys: string[] = [];
     for (const [index, entry] of manifest.entries.entries()) {
         try {
-            const bytes = await input.archive.fetcher.fetchBytes(entry.source_uri);
+            const bytes = await input.archive.fetcher.fetchBytes(entry);
             verifySourceBytes(entry, bytes);
             const key = sourceArtifactS3Key({
                 sourceEventId: input.sourceEventId,
