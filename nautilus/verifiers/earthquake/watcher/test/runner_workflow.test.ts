@@ -9,6 +9,8 @@ import {
 import {
     BCS_ENUMS,
     type EnclaveVerificationMetadata,
+    type RawDataEntry,
+    type RawDataManifest,
     type TeeCoreResult,
 } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
@@ -16,14 +18,17 @@ import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     handler as runnerWorkflowHandler,
+    HttpWalrusSourceArchiver,
     type AutoScalingClientLike,
     type EnclaveRegistrationAdapter,
     type EnclaveRegistrationClient,
+    IntegritySourceArchiveError,
     SuiEnclaveRegistrationAdapter,
     type Ec2ClientLike,
     readEnclaveRegistrationConfigFromEnv,
     readRelayerConfigFromEnv,
     type RelayerSignerSecretReader,
+    RetryableSourceArchiveError,
     type S3ClientLike,
     type SourceArchiveAdapter,
     type SsmClientLike,
@@ -1056,7 +1061,9 @@ describe("AWS runner workflow helper", () => {
                 `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
             ],
         });
-        expect(sourceArchive.fetches).toEqual(["https://source.test/detail.geojson"]);
+        expect(sourceArchive.fetches).toEqual([
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
+        ]);
         expect(sourceArchive.puts).toEqual([
             {
                 bucket: "sonari-results",
@@ -1070,6 +1077,98 @@ describe("AWS runner workflow helper", () => {
             source_archive_status: "success",
             source_archive_error_code: null,
         });
+    });
+
+    it("rejects source manifests that do not match the signed raw data hash", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const bytes = new TextEncoder().encode("source bytes");
+        const result = finalizedResultWithRawManifest(bytes);
+        result.payload.raw_data_hash = `0x${"99".repeat(32)}`;
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+        expect(sourceArchive.fetches).toEqual([]);
+        expect(sourceArchive.puts).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "integrity_failed",
+        });
+    });
+
+    it("rejects source re-fetch URLs outside the allowed USGS HTTPS scope", async () => {
+        const invalidSourceUris = [
+            "http://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://example.test/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
+        ];
+        const originalFetch = globalThis.fetch;
+        let fetchCalls = 0;
+        globalThis.fetch = (async () => {
+            fetchCalls += 1;
+            return new Response(new TextEncoder().encode("source bytes"));
+        }) as typeof fetch;
+        try {
+            for (const sourceUri of invalidSourceUris) {
+                const repository = new InMemoryStateRepository();
+                await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+                await repository.markWorkflowStarted(
+                    "us7000sonari",
+                    "earthquake-us7000sonari-1",
+                    1_800_000_000_001,
+                );
+                const result = finalizedResultWithRawManifest(
+                    new TextEncoder().encode("source bytes"),
+                    { sourceUri },
+                );
+                const s3 = new RecordingS3Client();
+                const handler = createRunnerControlHandler({
+                    autoscaling: new RecordingAutoScalingClient(),
+                    ec2: new RecordingEc2Client(),
+                    ssm: new RecordingSsmClient(),
+                    s3,
+                    repository,
+                    now: () => 1_800_000_002_000,
+                    config: baseConfig(),
+                });
+
+                await expect(
+                    handler({
+                        action: "archive_sources",
+                        source_event_id: "us7000sonari",
+                        attempt: 1,
+                        result,
+                    }),
+                ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+                expect(s3.puts).toEqual([]);
+            }
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+        expect(fetchCalls).toBe(0);
     });
 
     it("records source archive integrity failures and blocks relayer", async () => {
@@ -1119,6 +1218,44 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("records oversized source re-fetch as source archive integrity failure", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const archive = new RecordingSourceArchiveAdapter(new TextEncoder().encode("source bytes"));
+        archive.oversizeFetch = true;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive: archive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+        expect(archive.puts).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "integrity_failed",
+        });
+    });
+
     it("records retryable source archive failures without mutating the TEE result", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -1160,6 +1297,148 @@ describe("AWS runner workflow helper", () => {
             payload_bcs_hex: result.payload_bcs_hex,
             signature: result.signature,
         });
+    });
+
+    it("sends a runner-only token to the HTTP source archiver", async () => {
+        const fetchCalls: Array<{ url: string; headers: Record<string, string>; body: unknown }> =
+            [];
+        const secretReader = new RecordingRelayerSignerSecretReader("archiver-token");
+        const archiver = new HttpWalrusSourceArchiver("https://archiver.test/store", {
+            secretArn: "arn:aws:secretsmanager:source-archiver-token",
+            secretReader,
+        });
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            fetchCalls.push({
+                url: String(url),
+                headers: normalizeHeaders(init?.headers),
+                body: JSON.parse(String(init?.body)) as unknown,
+            });
+            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+                status: 200,
+            });
+        }) as typeof fetch;
+        try {
+            await expect(
+                archiver.archiveAndVerify({
+                    entry: firstRawDataEntry(
+                        finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+                    ),
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).resolves.toEqual({ walrusBlobId: "testBlob_123456" });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        expect(fetchCalls).toEqual([
+            {
+                url: "https://archiver.test/store",
+                headers: {
+                    "content-type": "application/json",
+                    "x-sonari-source-archiver-token": "archiver-token",
+                },
+                body: {
+                    artifact_s3_key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                    expected_walrus_blob_id: "testBlob_123456",
+                    source_hash: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+                    size_bytes: "source bytes".length,
+                },
+            },
+        ]);
+        expect(secretReader.secretReads).toEqual([
+            "arn:aws:secretsmanager:source-archiver-token",
+        ]);
+    });
+
+    it("does not cache the source archiver token across HTTP calls", async () => {
+        const secrets = new QueueingSecretReader(["first-token", "second-token"]);
+        const archiver = new HttpWalrusSourceArchiver("https://archiver.test/store", {
+            secretArn: "arn:aws:secretsmanager:source-archiver-token",
+            secretReader: secrets,
+        });
+        const headers: Record<string, string>[] = [];
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            headers.push(normalizeHeaders(init?.headers));
+            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+                status: 200,
+            });
+        }) as typeof fetch;
+        try {
+            const entry = firstRawDataEntry(
+                finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+            );
+            await archiver.archiveAndVerify({
+                entry,
+                artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+            });
+            await archiver.archiveAndVerify({
+                entry,
+                artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+
+        expect(headers.map((value) => value["x-sonari-source-archiver-token"])).toEqual([
+            "first-token",
+            "second-token",
+        ]);
+        expect(secrets.secretReads).toEqual([
+            "arn:aws:secretsmanager:source-archiver-token",
+            "arn:aws:secretsmanager:source-archiver-token",
+        ]);
+    });
+
+    it("passes an abort signal to source archiver HTTP requests", async () => {
+        let observedSignal: AbortSignal | undefined;
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+            observedSignal = init?.signal ?? undefined;
+            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+                status: 200,
+            });
+        }) as typeof fetch;
+        try {
+            await new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                entry: firstRawDataEntry(
+                    finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+                ),
+                artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+            });
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+        expect(observedSignal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("classifies HTTP archiver integrity and retryable failures by status", async () => {
+        const originalFetch = globalThis.fetch;
+        const entry = firstRawDataEntry(
+            finalizedResultWithRawManifest(new TextEncoder().encode("source bytes")),
+        );
+        try {
+            globalThis.fetch = (async () =>
+                new Response("mismatch", { status: 422 })) as typeof fetch;
+            await expect(
+                new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                    entry,
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).rejects.toBeInstanceOf(IntegritySourceArchiveError);
+
+            globalThis.fetch = (async () =>
+                new Response("unavailable", { status: 503 })) as typeof fetch;
+            await expect(
+                new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                    entry,
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).rejects.toBeInstanceOf(RetryableSourceArchiveError);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
     });
 
     it("marks dry-run relayer as failed when RELAYER_NETWORK is missing", async () => {
@@ -1584,31 +1863,86 @@ function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
 
 function finalizedResultWithRawManifest(
     bytes: Uint8Array,
+    options: { sourceUri?: string } = {},
 ): Extract<TeeCoreResult, { status: "finalized" }> {
     const hash = `0x${sha256Hex(bytes)}`;
+    const manifest: RawDataManifest = {
+        entries: [
+            {
+                name: "USGS",
+                event_id: "us7000sonari",
+                product: "detail_geojson",
+                uri: "walrus://blob/testBlob_123456",
+                content_hash: hash,
+                source_uri:
+                    options.sourceUri ??
+                    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
+                walrus_blob_id: "testBlob_123456",
+                source_hash: hash,
+                size_bytes: bytes.byteLength,
+            },
+        ],
+        oracle_version: 1,
+    };
+    const result = finalizedResult();
     return {
-        ...finalizedResult(),
-        raw_data_manifest: {
-            entries: [
-                {
-                    name: "USGS",
-                    event_id: "us7000sonari",
-                    product: "detail_geojson",
-                    uri: "walrus://blob/testBlob_123456",
-                    content_hash: hash,
-                    source_uri: "https://source.test/detail.geojson",
-                    walrus_blob_id: "testBlob_123456",
-                    source_hash: hash,
-                    size_bytes: bytes.byteLength,
-                },
-            ],
-            oracle_version: 1,
+        ...result,
+        payload: {
+            ...result.payload,
+            raw_data_hash: rawDataManifestHash(manifest),
         },
+        raw_data_manifest: manifest,
     };
 }
 
 function sha256Hex(bytes: Uint8Array): string {
     return createHash("sha256").update(bytes).digest("hex");
+}
+
+function rawDataManifestHash(manifest: RawDataManifest): string {
+    return `0x${createHash("sha256").update(canonicalRawDataManifestJson(manifest)).digest("hex")}`;
+}
+
+function canonicalRawDataManifestJson(manifest: RawDataManifest): string {
+    return JSON.stringify({
+        entries: manifest.entries.map((entry) => ({
+            name: entry.name,
+            event_id: entry.event_id,
+            product: entry.product,
+            uri: entry.uri,
+            content_hash: entry.content_hash,
+            source_uri: entry.source_uri,
+            walrus_blob_id: entry.walrus_blob_id,
+            source_hash: entry.source_hash,
+            size_bytes: entry.size_bytes,
+        })),
+        oracle_version: manifest.oracle_version,
+    });
+}
+
+function normalizeHeaders(headers: RequestInit["headers"] | undefined): Record<string, string> {
+    if (headers === undefined) {
+        return {};
+    }
+    if (headers instanceof Headers) {
+        return Object.fromEntries(headers.entries());
+    }
+    if (Array.isArray(headers)) {
+        return Object.fromEntries(headers);
+    }
+    return Object.fromEntries(
+        Object.entries(headers).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+        ),
+    );
+}
+
+function firstRawDataEntry(result: Extract<TeeCoreResult, { status: "finalized" }>) {
+    const entry = result.raw_data_manifest?.entries[0];
+    if (entry === undefined) {
+        throw new Error("fixture raw_data_manifest entry missing");
+    }
+    return entry;
 }
 
 class RecordingAutoScalingClient implements AutoScalingClientLike {
@@ -1669,6 +2003,8 @@ class RecordingSsmClient implements SsmClientLike {
 }
 
 class RecordingS3Client implements S3ClientLike {
+    readonly puts: Array<{ bucket: string; key: string; bytes: Uint8Array }> = [];
+
     constructor(private readonly options: { body?: string } = {}) {}
 
     async getObjectText(): Promise<string> {
@@ -1681,6 +2017,14 @@ class RecordingS3Client implements S3ClientLike {
             })
         );
     }
+
+    async putObjectBytes(input: {
+        bucket: string;
+        key: string;
+        bytes: Uint8Array;
+    }): Promise<void> {
+        this.puts.push(input);
+    }
 }
 
 class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
@@ -1689,13 +2033,19 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
     readonly archived: Array<{ artifactS3Key: string; walrusBlobId: string }> = [];
     failFetch = false;
     failS3 = false;
+    oversizeFetch = false;
     walrusBlobId = "testBlob_123456";
 
     readonly fetcher = {
-        fetchBytes: async (sourceUri: string): Promise<Uint8Array> => {
-            this.fetches.push(sourceUri);
+        fetchBytes: async (entry: RawDataEntry): Promise<Uint8Array> => {
+            this.fetches.push(entry.source_uri);
             if (this.failFetch) {
                 throw new Error("source fetch unavailable");
+            }
+            if (this.oversizeFetch) {
+                throw new IntegritySourceArchiveError(
+                    `source size exceeded signed size for ${entry.source_uri}`,
+                );
             }
             return this.bytes;
         },
@@ -1796,6 +2146,21 @@ class RecordingRelayerSignerSecretReader implements RelayerSignerSecretReader {
     async getSecretString(secretArn: string): Promise<string> {
         this.secretReads.push(secretArn);
         return this.secret;
+    }
+}
+
+class QueueingSecretReader implements RelayerSignerSecretReader {
+    readonly secretReads: string[] = [];
+
+    constructor(private readonly secrets: string[]) {}
+
+    async getSecretString(secretArn: string): Promise<string> {
+        this.secretReads.push(secretArn);
+        const secret = this.secrets.shift();
+        if (secret === undefined) {
+            throw new Error("secret queue is empty");
+        }
+        return secret;
     }
 }
 

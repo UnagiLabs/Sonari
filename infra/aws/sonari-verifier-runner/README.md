@@ -18,6 +18,18 @@ test "$ACTUAL_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 
 既存 stack を正として復旧する場合は、`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` の `required_names` と job-level `env` を source of truth にし、`aws cloudformation describe-stacks --stack-name sonari-verifier-runner-dev` の Parameters から stack 固有値を同期します。GitHub variables には AWS 側 resource ARN だけを設定し、credential material は入れません。
 
+source archiver を有効にする dev stack では、次の Actions variables も必須です。値は ARN だけを置き、token、wallet、config の中身は GitHub variables に入れません。
+
+- `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN`
+- `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN`
+- `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_LAYER_ARN`
+
+`SOURCE_ARCHIVER_TOKEN_SECRET_ARN` は RunnerControl と archiver Lambda が共有する呼び出し token です。Function URL はこの token header がない request を拒否します。
+
+`SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN` は Walrus CLI 実行に必要な環境変数を JSON object として持ちます。secret は archiver Lambda だけが読みます。
+
+`SOURCE_ARCHIVER_WALRUS_LAYER_ARN` は `/opt/bin/walrus` を提供する Lambda layer です。TEE と runner EC2 には Walrus wallet、config、store 用 secret を置きません。
+
 OIDC role の trust policy は、`repo:UnagiLabs/Sonari:environment:aws-sonari-verifier-runner-dev` だけを許可します。旧 `aws-earthquake-runner-dev` environment は統合 runner への移行後に削除済みの前提です。
 
 devnet / testnet の dummy World ID proof では、任意 variables として World ID proof mode を `dummy`、relayer network を `testnet` に設定します。`NITRO_ENCLAVE_PCR3` は runner role ARN から下記の手順で再計算し、stack parameter と一致させてください。
@@ -91,6 +103,9 @@ pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
   --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256" \
+  --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN" \
+  --source-archiver-walrus-env-secret-arn "$SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN" \
+  --source-archiver-walrus-layer-arn "$SOURCE_ARCHIVER_WALRUS_LAYER_ARN" \
   --relayer-network "${RELAYER_NETWORK:-testnet}" \
   --world-id-proof-mode "${WORLD_ID_PROOF_MODE:-dummy}" \
   --prefix sonari-verifier-runner \
@@ -155,6 +170,9 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
   --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256" \
+  --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN" \
+  --source-archiver-walrus-env-secret-arn "$SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN" \
+  --source-archiver-walrus-layer-arn "$SOURCE_ARCHIVER_WALRUS_LAYER_ARN" \
   --relayer-network mainnet --world-id-proof-mode dummy \
   --out /tmp/sonari-verifier-runner-mainnet-dummy-plan.json; then
   echo "mainnet dummy proof plan unexpectedly succeeded" >&2
@@ -182,6 +200,8 @@ batch_schedule_name="$(stack_output BatchScheduleName)"
 manual_watcher_lambda_name="$(stack_output ManualWatcherLambdaName)"
 submit_verification_lambda_name="$(stack_output SubmitVerificationLambdaName)"
 runner_log_group_name="$(stack_output RunnerLogGroupName)"
+source_archiver_lambda_name="$(stack_output SourceArchiverLambdaName)"
+source_archiver_url="$(stack_output SourceArchiverFunctionUrlOutput)"
 ```
 
 地震 manual workflow:
@@ -201,6 +221,10 @@ aws stepfunctions list-executions \
   --status-filter SUCCEEDED \
   --max-results 1
 ```
+
+`pnpm aws:smoke:earthquake-manual` は DynamoDB row から `source_archive_summary` を出力します。`source_archive_status` が `success` であること、`relayer_mode` が `dry_run` であること、`relayer_digest` と `disaster_event_object_id` が `null` であることを確認します。
+
+archiver Lambda の CloudWatch logs では、source artifact ごとに Walrus store が成功していることを確認します。request/response summary には blob id だけを残し、token、wallet、config、private key は出しません。
 
 Membership dummy proof smoke は devnet または testnet 専用です。`pnpm identity:smoke` と同じ request shape の dummy proof payload を使い、submit Lambda を invoke して membership workflow が成功することを確認します。
 

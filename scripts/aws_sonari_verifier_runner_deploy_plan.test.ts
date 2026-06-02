@@ -21,6 +21,11 @@ const validInput = {
     membershipTeeArtifactSha256: validMembershipTeeSha256,
     membershipEifBucket: "membership-eif-artifacts",
     membershipEifSha256: validMembershipEifSha256,
+    sourceArchiverTokenSecretArn:
+        "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-token",
+    sourceArchiverWalrusEnvSecretArn:
+        "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-walrus-env",
+    sourceArchiverWalrusLayerArn: "arn:aws:lambda:us-west-2:595103996064:layer:sonari-walrus-cli:1",
     relayerNetwork: "testnet",
     worldIdProofMode: "dummy",
 } as const;
@@ -83,6 +88,27 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         ).toThrow("Invalid membership EIF SHA-256");
     });
 
+    it("validates source archiver deployment ARNs", () => {
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                sourceArchiverTokenSecretArn: "not-an-arn",
+            }),
+        ).toThrow("Invalid source archiver token secret ARN");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                sourceArchiverWalrusEnvSecretArn: "not-an-arn",
+            }),
+        ).toThrow("Invalid source archiver Walrus environment secret ARN");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                sourceArchiverWalrusLayerArn: "not-an-arn",
+            }),
+        ).toThrow("Invalid source archiver Walrus Lambda layer ARN");
+    });
+
     it("keeps schedules disabled and emits CloudFormation parameter override args", () => {
         const plan = buildAwsSonariVerifierRunnerDeployPlan(validInput);
 
@@ -114,6 +140,9 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `TeeEifSha256=${validMembershipEifSha256}`,
                 `GitCommitSha=${validCommitSha}`,
                 "ScheduleState=DISABLED",
+                `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
+                `SourceArchiverWalrusEnvSecretArn=${validInput.sourceArchiverWalrusEnvSecretArn}`,
+                `SourceArchiverWalrusLayerArn=${validInput.sourceArchiverWalrusLayerArn}`,
             ]),
         );
     });
@@ -153,6 +182,12 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 validInput.membershipEifBucket,
                 "--membership-eif-sha256",
                 validMembershipEifSha256,
+                "--source-archiver-token-secret-arn",
+                validInput.sourceArchiverTokenSecretArn,
+                "--source-archiver-walrus-env-secret-arn",
+                validInput.sourceArchiverWalrusEnvSecretArn,
+                "--source-archiver-walrus-layer-arn",
+                validInput.sourceArchiverWalrusLayerArn,
                 "--relayer-network",
                 "mainnet",
                 "--world-id-proof-mode",

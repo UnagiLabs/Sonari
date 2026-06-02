@@ -26,10 +26,12 @@ import {
 } from "@sonari/earthquake-relayer";
 import {
     EARTHQUAKE_VERIFIER_CONFIG_KEY,
+    type EarthquakeOraclePayload,
     type EnclaveVerificationMetadata,
     ERROR_CODES,
     type OracleErrorCode,
     type RawDataEntry,
+    type RawDataManifest,
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
@@ -55,6 +57,8 @@ import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import { DynamoDbStateRepository, type StateRepository } from "./state.js";
 
 const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
+const SOURCE_FETCH_TIMEOUT_MS = 30_000;
+const SOURCE_ARCHIVER_HTTP_TIMEOUT_MS = 55_000;
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -111,7 +115,7 @@ export interface S3ClientLike {
 }
 
 export interface SourceFetcherLike {
-    fetchBytes(sourceUri: string): Promise<Uint8Array>;
+    fetchBytes(entry: RawDataEntry): Promise<Uint8Array>;
 }
 
 export interface WalrusSourceArchiverLike {
@@ -1083,38 +1087,57 @@ class AwsS3Client implements S3ClientLike {
 }
 
 class FetchSourceFetcher implements SourceFetcherLike {
-    async fetchBytes(sourceUri: string): Promise<Uint8Array> {
-        const response = await fetch(sourceUri);
+    async fetchBytes(entry: RawDataEntry): Promise<Uint8Array> {
+        assertAllowedSourceUri(entry);
+        const response = await fetchWithTimeout(
+            entry.source_uri,
+            {},
+            SOURCE_FETCH_TIMEOUT_MS,
+            `source re-fetch timed out for ${entry.source_uri}`,
+        );
         if (!response.ok) {
             throw new RetryableSourceArchiveError(
-                `source re-fetch failed for ${sourceUri}: HTTP ${response.status}`,
+                `source re-fetch failed for ${entry.source_uri}: HTTP ${response.status}`,
             );
         }
-        return new Uint8Array(await response.arrayBuffer());
+        return readResponseBytesWithLimit(response, entry.size_bytes, entry.source_uri);
     }
 }
 
-class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
-    constructor(private readonly endpoint: string) {}
+export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
+    constructor(
+        private readonly endpoint: string,
+        private readonly auth?: {
+            secretArn: string;
+            secretReader: RelayerSignerSecretReader;
+        },
+    ) {}
 
     async archiveAndVerify(input: {
         entry: RawDataEntry;
         artifactS3Key: string;
     }): Promise<{ walrusBlobId: string }> {
-        const response = await fetch(this.endpoint, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                artifact_s3_key: input.artifactS3Key,
-                expected_walrus_blob_id: input.entry.walrus_blob_id,
-                source_hash: input.entry.source_hash,
-                size_bytes: input.entry.size_bytes,
-            }),
-        });
+        const response = await fetchWithTimeout(
+            this.endpoint,
+            {
+                method: "POST",
+                headers: await this.headers(),
+                body: JSON.stringify({
+                    artifact_s3_key: input.artifactS3Key,
+                    expected_walrus_blob_id: input.entry.walrus_blob_id,
+                    source_hash: input.entry.source_hash,
+                    size_bytes: input.entry.size_bytes,
+                }),
+            },
+            SOURCE_ARCHIVER_HTTP_TIMEOUT_MS,
+            "Walrus source archiver request timed out",
+        );
         if (!response.ok) {
-            throw new RetryableSourceArchiveError(
-                `Walrus source archiver failed: HTTP ${response.status}`,
-            );
+            const message = `Walrus source archiver failed: HTTP ${response.status}`;
+            if (response.status === 409 || response.status === 422) {
+                throw new IntegritySourceArchiveError(message);
+            }
+            throw new RetryableSourceArchiveError(message);
         }
         const body = (await response.json()) as unknown;
         if (!isRecord(body) || typeof body.walrus_blob_id !== "string") {
@@ -1122,12 +1145,164 @@ class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
         }
         return { walrusBlobId: body.walrus_blob_id };
     }
+
+    private async headers(): Promise<Record<string, string>> {
+        const headers: Record<string, string> = { "content-type": "application/json" };
+        if (this.auth === undefined) {
+            return headers;
+        }
+        headers["x-sonari-source-archiver-token"] = await this.token();
+        return headers;
+    }
+
+    private async token(): Promise<string> {
+        if (this.auth === undefined) {
+            throw new RetryableSourceArchiveError("source archiver auth is not configured");
+        }
+        const token = (await this.auth.secretReader.getSecretString(this.auth.secretArn)).trim();
+        if (token.length === 0) {
+            throw new RetryableSourceArchiveError(
+                `${this.auth.secretArn} did not contain SecretString`,
+            );
+        }
+        return token;
+    }
 }
 
 class UnconfiguredWalrusSourceArchiver implements WalrusSourceArchiverLike {
     async archiveAndVerify(): Promise<{ walrusBlobId: string }> {
         throw new RetryableSourceArchiveError("Walrus source archiver is not configured");
     }
+}
+
+async function fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+    timeoutMessage: string,
+): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+        if (isAbortError(error)) {
+            throw new RetryableSourceArchiveError(timeoutMessage);
+        }
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function readResponseBytesWithLimit(
+    response: Response,
+    expectedSizeBytes: number,
+    sourceUri: string,
+): Promise<Uint8Array> {
+    if (response.body === null) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.byteLength > expectedSizeBytes) {
+            throw new IntegritySourceArchiveError(
+                `source size exceeded signed size for ${sourceUri}`,
+            );
+        }
+        return bytes;
+    }
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    for await (const chunk of response.body) {
+        const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+        totalBytes += bytes.byteLength;
+        if (totalBytes > expectedSizeBytes) {
+            throw new IntegritySourceArchiveError(
+                `source size exceeded signed size for ${sourceUri}`,
+            );
+        }
+        chunks.push(bytes);
+    }
+    return concatBytes(chunks, totalBytes);
+}
+
+function concatBytes(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {
+    const output = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return output;
+}
+
+function isAbortError(error: unknown): boolean {
+    return error instanceof Error && error.name === "AbortError";
+}
+
+function assertAllowedSourceUri(entry: RawDataEntry): void {
+    if (entry.name !== "USGS") {
+        throw new IntegritySourceArchiveError("source archive entry is not a USGS source");
+    }
+    let url: URL;
+    try {
+        url = new URL(entry.source_uri);
+    } catch {
+        throw new IntegritySourceArchiveError(`source URI is not a valid URL for ${entry.product}`);
+    }
+    if (
+        url.protocol !== "https:" ||
+        url.hostname !== "earthquake.usgs.gov" ||
+        url.port !== "" ||
+        url.username !== "" ||
+        url.password !== ""
+    ) {
+        throw new IntegritySourceArchiveError(`source URI is outside allowed USGS HTTPS scope`);
+    }
+    if (entry.product === "detail_geojson" && isAllowedUsgsDetailUri(url, entry.event_id)) {
+        return;
+    }
+    if (entry.product === "shakemap_grid_xml" && isAllowedUsgsShakemapGridUri(url)) {
+        return;
+    }
+    throw new IntegritySourceArchiveError(`source URI is not allowed for ${entry.product}`);
+}
+
+function isAllowedUsgsDetailUri(url: URL, eventId: string): boolean {
+    if (url.pathname === `/earthquakes/feed/v1.0/detail/${eventId}.geojson` && url.search === "") {
+        return true;
+    }
+    if (url.pathname !== "/fdsnws/event/1/query") {
+        return false;
+    }
+    const keys = [...url.searchParams.keys()];
+    return (
+        keys.length === 2 &&
+        keys.includes("eventid") &&
+        keys.includes("format") &&
+        url.searchParams.get("eventid") === eventId &&
+        url.searchParams.get("format") === "geojson"
+    );
+}
+
+function isAllowedUsgsShakemapGridUri(url: URL): boolean {
+    if (url.search !== "") {
+        return false;
+    }
+    const parts = url.pathname.split("/");
+    const [empty, productPrefix, productType, code, source, version, download, file] = parts;
+    return (
+        parts.length === 8 &&
+        empty === "" &&
+        productPrefix === "product" &&
+        productType === "shakemap" &&
+        code !== undefined &&
+        code.length > 0 &&
+        source !== undefined &&
+        source.length > 0 &&
+        version !== undefined &&
+        version.length > 0 &&
+        download === "download" &&
+        (file === "grid.xml" || file === "grid.xml.zip")
+    );
 }
 
 class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
@@ -1315,14 +1490,29 @@ function buildSourceArchiveFromConfig(options: RunnerControlHandlerOptions): Sou
     if (options.s3.putObjectBytes === undefined) {
         throw new Error("source archive requires S3 byte staging support");
     }
+    const sourceArchiverUrl = process.env.SOURCE_ARCHIVER_URL;
+    const sourceArchiverTokenSecretArn = process.env.SOURCE_ARCHIVER_TOKEN_SECRET_ARN;
+    if (
+        sourceArchiverUrl !== undefined &&
+        sourceArchiverUrl.length > 0 &&
+        (sourceArchiverTokenSecretArn === undefined || sourceArchiverTokenSecretArn.length === 0)
+    ) {
+        throw new Error("SOURCE_ARCHIVER_TOKEN_SECRET_ARN is required with SOURCE_ARCHIVER_URL");
+    }
+    const sourceArchiverAuth =
+        sourceArchiverTokenSecretArn === undefined || sourceArchiverTokenSecretArn.length === 0
+            ? undefined
+            : {
+                  secretArn: sourceArchiverTokenSecretArn,
+                  secretReader: new AwsRelayerSignerSecretReader(),
+              };
     return {
         fetcher: new FetchSourceFetcher(),
         s3: { putObjectBytes: options.s3.putObjectBytes.bind(options.s3) },
         walrus:
-            process.env.SOURCE_ARCHIVER_URL === undefined ||
-            process.env.SOURCE_ARCHIVER_URL.length === 0
+            sourceArchiverUrl === undefined || sourceArchiverUrl.length === 0
                 ? new UnconfiguredWalrusSourceArchiver()
-                : new HttpWalrusSourceArchiver(process.env.SOURCE_ARCHIVER_URL),
+                : new HttpWalrusSourceArchiver(sourceArchiverUrl, sourceArchiverAuth),
     };
 }
 
@@ -1353,10 +1543,19 @@ async function archiveFinalizedSources(input: {
             message: "finalized result is missing raw_data_manifest",
         };
     }
+    const payload = validation.value.payload as EarthquakeOraclePayload;
+    const manifestHash = rawDataManifestHash(manifest);
+    if (manifestHash !== payload.raw_data_hash) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: "raw_data_manifest does not match signed raw_data_hash",
+        };
+    }
     const artifactS3Keys: string[] = [];
     for (const [index, entry] of manifest.entries.entries()) {
         try {
-            const bytes = await input.archive.fetcher.fetchBytes(entry.source_uri);
+            const bytes = await input.archive.fetcher.fetchBytes(entry);
             verifySourceBytes(entry, bytes);
             const key = sourceArtifactS3Key({
                 sourceEventId: input.sourceEventId,
@@ -1403,6 +1602,27 @@ function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {
     }
 }
 
+function rawDataManifestHash(manifest: RawDataManifest): string {
+    return `0x${createHash("sha256").update(canonicalRawDataManifestJson(manifest)).digest("hex")}`;
+}
+
+function canonicalRawDataManifestJson(manifest: RawDataManifest): string {
+    return JSON.stringify({
+        entries: manifest.entries.map((entry) => ({
+            name: entry.name,
+            event_id: entry.event_id,
+            product: entry.product,
+            uri: entry.uri,
+            content_hash: entry.content_hash,
+            source_uri: entry.source_uri,
+            walrus_blob_id: entry.walrus_blob_id,
+            source_hash: entry.source_hash,
+            size_bytes: entry.size_bytes,
+        })),
+        oracle_version: manifest.oracle_version,
+    });
+}
+
 function sourceArtifactS3Key(input: {
     sourceEventId: string;
     attempt: number | undefined;
@@ -1422,8 +1642,8 @@ function sanitizeS3KeySegment(value: string): string {
     return value.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 96);
 }
 
-class RetryableSourceArchiveError extends Error {}
-class IntegritySourceArchiveError extends Error {}
+export class RetryableSourceArchiveError extends Error {}
+export class IntegritySourceArchiveError extends Error {}
 
 function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;

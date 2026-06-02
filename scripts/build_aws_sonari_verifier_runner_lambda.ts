@@ -294,6 +294,12 @@ function readDomainNitroCommand(verifierKind: VerifierKind): string {
 }
 `;
 
+const SOURCE_ARCHIVER_ENTRYPOINT = `
+export {
+    sourceArchiverHandler,
+} from "./nautilus/verifiers/earthquake/watcher/src/source_archiver.js";
+`;
+
 export interface BuildAwsSonariVerifierRunnerLambdaOptions {
     outPath?: string;
     keepWorkDir?: boolean;
@@ -320,6 +326,10 @@ export async function buildAwsSonariVerifierRunnerLambdaArtifact(
             sourcePath: path.join(workDir, "dist/src/runner_workflow.js"),
             zipPath: "dist/src/runner_workflow.js",
         },
+        {
+            sourcePath: path.join(workDir, "dist/src/source_archiver.js"),
+            zipPath: "dist/src/source_archiver.js",
+        },
     ];
 
     await rm(workDir, { recursive: true, force: true });
@@ -336,6 +346,11 @@ export async function buildAwsSonariVerifierRunnerLambdaArtifact(
             UNIFIED_RUNNER_WORKFLOW_ENTRYPOINT,
             "sonari_verifier_runner_workflow.ts",
             path.join(workDir, "dist/src/runner_workflow.js"),
+        ),
+        bundleEntrypoint(
+            SOURCE_ARCHIVER_ENTRYPOINT,
+            "sonari_source_archiver.ts",
+            path.join(workDir, "dist/src/source_archiver.js"),
         ),
     ]);
     await writeFile(

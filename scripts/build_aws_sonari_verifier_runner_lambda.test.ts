@@ -32,6 +32,7 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect([...entries.keys()].sort()).toEqual([
             "dist/src/lambda.js",
             "dist/src/runner_workflow.js",
+            "dist/src/source_archiver.js",
             "package.json",
         ]);
         expect(JSON.parse(entries.get("package.json")?.toString("utf8") ?? "")).toEqual({
@@ -40,6 +41,7 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
 
         const lambdaJs = entries.get("dist/src/lambda.js")?.toString("utf8") ?? "";
         const runnerWorkflowJs = entries.get("dist/src/runner_workflow.js")?.toString("utf8") ?? "";
+        const sourceArchiverJs = entries.get("dist/src/source_archiver.js")?.toString("utf8") ?? "";
 
         expect(lambdaJs).toContain("scheduledHandler");
         expect(lambdaJs).toContain("manualHandler");
@@ -55,6 +57,10 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(runnerWorkflowJs).toContain("UpdateItemCommand");
         expect(runnerWorkflowJs).toContain("DeleteItemCommand");
         expect(runnerWorkflowJs).toContain("function runnerLeaseStore()");
+        expect(sourceArchiverJs).toContain("sourceArchiverHandler");
+        expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN");
+        expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_TOKEN_SECRET_ARN");
+        expect(sourceArchiverJs).toContain("WalrusCliStoreRunner");
         expect(runnerWorkflowJs).not.toContain(
             "const leaseStore = new DynamoDbSharedRunnerLeaseStore",
         );
@@ -111,6 +117,7 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect([...entries.keys()].sort()).toEqual([
             "dist/src/lambda.js",
             "dist/src/runner_workflow.js",
+            "dist/src/source_archiver.js",
             "package.json",
         ]);
     });

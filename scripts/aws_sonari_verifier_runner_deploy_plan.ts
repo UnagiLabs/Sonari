@@ -24,6 +24,9 @@ const DEPLOY_PARAMETER_KEYS = [
     "TeeEifSha256",
     "GitCommitSha",
     "ScheduleState",
+    "SourceArchiverTokenSecretArn",
+    "SourceArchiverWalrusEnvSecretArn",
+    "SourceArchiverWalrusLayerArn",
 ] as const;
 
 type DeployParameterKey = (typeof DEPLOY_PARAMETER_KEYS)[number];
@@ -41,6 +44,9 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     membershipTeeArtifactSha256: string;
     membershipEifBucket: string;
     membershipEifSha256: string;
+    sourceArchiverTokenSecretArn: string;
+    sourceArchiverWalrusEnvSecretArn: string;
+    sourceArchiverWalrusLayerArn: string;
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
     prefix?: string;
@@ -87,6 +93,18 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
         TeeEifSha256: validateSha256(input.membershipEifSha256, "membership EIF SHA-256"),
         GitCommitSha: commitSha,
         ScheduleState: "DISABLED",
+        SourceArchiverTokenSecretArn: validateArn(
+            input.sourceArchiverTokenSecretArn,
+            "source archiver token secret ARN",
+        ),
+        SourceArchiverWalrusEnvSecretArn: validateArn(
+            input.sourceArchiverWalrusEnvSecretArn,
+            "source archiver Walrus environment secret ARN",
+        ),
+        SourceArchiverWalrusLayerArn: validateArn(
+            input.sourceArchiverWalrusLayerArn,
+            "source archiver Walrus Lambda layer ARN",
+        ),
     };
 
     return {
@@ -131,6 +149,13 @@ function validateS3KeyPrefix(value: string): string {
     return prefix;
 }
 
+function validateArn(value: string, label: string): string {
+    if (!/^arn:[A-Za-z0-9-]+:[A-Za-z0-9-]+:[A-Za-z0-9-]*:[0-9]{12}:.+/.test(value)) {
+        throw new Error(`Invalid ${label}: expected an AWS ARN`);
+    }
+    return value;
+}
+
 function validateWorldIdProofMode(
     relayerNetwork: SuiNetwork | undefined,
     worldIdProofMode: WorldIdProofMode | undefined,
@@ -151,6 +176,9 @@ type CliOptions = {
     membershipTeeArtifactSha256?: string;
     membershipEifBucket?: string;
     membershipEifSha256?: string;
+    sourceArchiverTokenSecretArn?: string;
+    sourceArchiverWalrusEnvSecretArn?: string;
+    sourceArchiverWalrusLayerArn?: string;
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
     prefix?: string;
@@ -169,7 +197,10 @@ async function main(): Promise<void> {
         options.membershipTeeBucket === undefined ||
         options.membershipTeeArtifactSha256 === undefined ||
         options.membershipEifBucket === undefined ||
-        options.membershipEifSha256 === undefined
+        options.membershipEifSha256 === undefined ||
+        options.sourceArchiverTokenSecretArn === undefined ||
+        options.sourceArchiverWalrusEnvSecretArn === undefined ||
+        options.sourceArchiverWalrusLayerArn === undefined
     ) {
         throw new Error(
             [
@@ -184,6 +215,9 @@ async function main(): Promise<void> {
                 "--membership-tee-sha256 <sha256>",
                 "--membership-eif-bucket <bucket>",
                 "--membership-eif-sha256 <sha256>",
+                "--source-archiver-token-secret-arn <arn>",
+                "--source-archiver-walrus-env-secret-arn <arn>",
+                "--source-archiver-walrus-layer-arn <arn>",
                 "[--relayer-network <mainnet|testnet|devnet>]",
                 "[--world-id-proof-mode <real|dummy>]",
                 "[--prefix <prefix>]",
@@ -203,6 +237,9 @@ async function main(): Promise<void> {
         membershipTeeArtifactSha256: options.membershipTeeArtifactSha256,
         membershipEifBucket: options.membershipEifBucket,
         membershipEifSha256: options.membershipEifSha256,
+        sourceArchiverTokenSecretArn: options.sourceArchiverTokenSecretArn,
+        sourceArchiverWalrusEnvSecretArn: options.sourceArchiverWalrusEnvSecretArn,
+        sourceArchiverWalrusLayerArn: options.sourceArchiverWalrusLayerArn,
         ...(options.relayerNetwork === undefined ? {} : { relayerNetwork: options.relayerNetwork }),
         ...(options.worldIdProofMode === undefined
             ? {}
@@ -261,6 +298,15 @@ function parseArgs(args: string[]): CliOptions {
                 break;
             case "--membership-eif-sha256":
                 options.membershipEifSha256 = next;
+                break;
+            case "--source-archiver-token-secret-arn":
+                options.sourceArchiverTokenSecretArn = next;
+                break;
+            case "--source-archiver-walrus-env-secret-arn":
+                options.sourceArchiverWalrusEnvSecretArn = next;
+                break;
+            case "--source-archiver-walrus-layer-arn":
+                options.sourceArchiverWalrusLayerArn = next;
                 break;
             case "--relayer-network":
                 options.relayerNetwork = parseSuiNetwork(next);

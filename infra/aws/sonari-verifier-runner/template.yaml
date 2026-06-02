@@ -40,6 +40,30 @@ Parameters:
     Default: 7
   RunnerTokenSecretArn:
     Type: String
+  SourceArchiverTokenSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager ARN containing the runner-only token accepted by the source archiver Function URL.
+  SourceArchiverWalrusEnvSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager ARN containing JSON environment variables for Walrus CLI store. The secret is read only by the source archiver Lambda.
+  SourceArchiverWalrusLayerArn:
+    Type: String
+    Default: ""
+    Description: Lambda layer ARN that provides the Walrus CLI binary for the source archiver.
+  SourceArchiverWalrusCliPath:
+    Type: String
+    Default: /opt/bin/walrus
+    Description: Walrus CLI path inside the source archiver Lambda runtime.
+  SourceArchiverWalrusStoreTimeoutMs:
+    Type: Number
+    Default: 55000
+    Description: Walrus store command timeout for each source artifact.
+  SourceArchiverWalrusEpochs:
+    Type: Number
+    Default: 1
+    Description: Walrus store epochs passed to the CLI.
   NitroEnclaveProcessCommand:
     Type: String
     Default: /opt/sonari/bin/run-sonari-verifier
@@ -169,6 +193,10 @@ Parameters:
 
 Conditions:
   HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
+  HasSourceArchiverConfig: !And
+    - !Not [!Equals [!Ref SourceArchiverTokenSecretArn, ""]]
+    - !Not [!Equals [!Ref SourceArchiverWalrusEnvSecretArn, ""]]
+    - !Not [!Equals [!Ref SourceArchiverWalrusLayerArn, ""]]
 
 Resources:
   EventsTable:
@@ -843,6 +871,9 @@ Resources:
                 Action: s3:GetObject
                 Resource: !Sub ${RunnerResultBucket.Arn}/results/*
               - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/source-artifacts/*
+              - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
@@ -858,6 +889,39 @@ Resources:
                   Action: secretsmanager:GetSecretValue
                   Resource: !Ref RelayerSignerSecretArn
                 - !Ref AWS::NoValue
+              - !If
+                - HasSourceArchiverConfig
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref SourceArchiverTokenSecretArn
+                - !Ref AWS::NoValue
+
+  SourceArchiverLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasSourceArchiverConfig
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ReadSourceArtifactsAndWalrusSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${RunnerResultBucket.Arn}/source-artifacts/*
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref SourceArchiverTokenSecretArn
+                  - !Ref SourceArchiverWalrusEnvSecretArn
 
   RunnerStateMachineRole:
     Type: AWS::IAM::Role
@@ -1033,6 +1097,56 @@ Resources:
           RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
           RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
           RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
+          SOURCE_ARCHIVER_URL: !If [HasSourceArchiverConfig, !GetAtt SourceArchiverFunctionUrl.FunctionUrl, ""]
+          SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]
+
+  SourceArchiverLambda:
+    Type: AWS::Lambda::Function
+    Condition: HasSourceArchiverConfig
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/source_archiver.sourceArchiverHandler
+      Role: !GetAtt SourceArchiverLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 512
+      Layers:
+        - !Ref SourceArchiverWalrusLayerArn
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          RESULT_BUCKET: !Ref RunnerResultBucket
+          SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !Ref SourceArchiverTokenSecretArn
+          SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN: !Ref SourceArchiverWalrusEnvSecretArn
+          SOURCE_ARCHIVER_WALRUS_CLI: !Ref SourceArchiverWalrusCliPath
+          SOURCE_ARCHIVER_WALRUS_TIMEOUT_MS: !Ref SourceArchiverWalrusStoreTimeoutMs
+          SOURCE_ARCHIVER_WALRUS_EPOCHS: !Ref SourceArchiverWalrusEpochs
+
+  SourceArchiverFunctionUrl:
+    Type: AWS::Lambda::Url
+    Condition: HasSourceArchiverConfig
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref SourceArchiverLambda
+
+  SourceArchiverFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasSourceArchiverConfig
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref SourceArchiverLambda
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  SourceArchiverFunctionInvokeUrlPermission:
+    Type: AWS::Lambda::Permission
+    Condition: HasSourceArchiverConfig
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SourceArchiverLambda
+      Principal: "*"
+      InvokedViaFunctionUrl: true
 
   EarthquakeRunnerStateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -1434,5 +1548,11 @@ Outputs:
     Value: !Ref BatchVerifierLambda
   RunnerControlLambdaName:
     Value: !Ref RunnerControlLambda
+  SourceArchiverLambdaName:
+    Condition: HasSourceArchiverConfig
+    Value: !Ref SourceArchiverLambda
+  SourceArchiverFunctionUrlOutput:
+    Condition: HasSourceArchiverConfig
+    Value: !GetAtt SourceArchiverFunctionUrl.FunctionUrl
   SigningMaterialKmsKeyId:
     Value: !Ref SigningMaterialKmsKey
