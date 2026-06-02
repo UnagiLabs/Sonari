@@ -14,6 +14,13 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
     }
 }
 
+function expectAdminCallIncludesSender(source: string, functionName: string): void {
+    const pattern = new RegExp(
+        `sui client call[\\s\\S]*?--sender "\\$ADMIN_ADDRESS"[\\s\\S]*?--function ${functionName}`,
+    );
+    expect(source).toMatch(pattern);
+}
+
 describe("AWS Sonari verifier runner README", () => {
     it("documents manual deploy with the validated deploy plan and commit-scoped artifacts", async () => {
         const readme = await readReadme();
@@ -126,9 +133,13 @@ describe("AWS Sonari verifier runner README", () => {
             "Relayer wallet は AdminCap を持ちません",
             "`VerifierConfigCreated` と `VerifierConfigPcrsUpdated`",
             "`VerifierConfigDisabled`",
+            "この event は PCR0/1/2 を持たないため",
             "pnpm check:move",
             "本番 AWS 実行はこの手順の必須検証ではありません",
         ]);
+        expectAdminCallIncludesSender(readme, "create_earthquake_verifier_config");
+        expectAdminCallIncludesSender(readme, "update_earthquake_verifier_config_pcrs");
+        expectAdminCallIncludesSender(readme, "disable_earthquake_verifier_config");
     });
 
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
