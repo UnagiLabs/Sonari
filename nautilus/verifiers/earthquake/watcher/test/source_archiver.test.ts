@@ -7,6 +7,7 @@ import {
     parseSourceArchiverEvent,
     parseWalrusBlobId,
     SourceArchiverError,
+    type SourceArchiverLogEvent,
     storeVerifiedSourceArtifact,
     WalrusCliStoreRunner,
     type SourceArtifactS3Reader,
@@ -200,6 +201,107 @@ describe("source archiver Walrus store", () => {
         expect(command.runs[0]?.args.slice(2)).toEqual(["--epochs", "1"]);
         expect(command.tempFileBytes).toEqual([validBytes]);
     });
+
+    it("logs Walrus CLI success context without exposing environment values", async () => {
+        const command = new RecordingWalrusCommandRunner(
+            "Success: stored\nBlob ID: testBlob_123456\n",
+            "progress: stored\n",
+        );
+        const logger = new RecordingSourceArchiverLogger();
+        const runner = new WalrusCliStoreRunner(
+            {
+                cliPath: "/opt/sonari/bin/walrus",
+                timeoutMs: 12_000,
+                epochs: 1,
+                env: {
+                    WALRUS_CONFIG: "/tmp/walrus.yaml",
+                    WALRUS_CONTEXT: "devnet",
+                },
+            },
+            command,
+            logger.log,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
+
+        expect(logger.events).toHaveLength(2);
+        expect(logger.events[0]).toMatchObject({
+            event: "source_archiver.walrus_store.start",
+            artifactS3Key: validRequest.artifact_s3_key,
+            sizeBytes: validRequest.size_bytes,
+            sourceHash: validRequest.source_hash,
+            expectedWalrusBlobId: validRequest.expected_walrus_blob_id,
+            cliPath: "/opt/sonari/bin/walrus",
+            timeoutMs: 12_000,
+            epochs: 1,
+            envKeys: ["WALRUS_CONFIG", "WALRUS_CONTEXT"],
+        });
+        expect(logger.events[0]).not.toHaveProperty("env");
+        expect(logger.events[1]).toMatchObject({
+            event: "source_archiver.walrus_store.success",
+            walrusBlobId: "testBlob_123456",
+            stdout: {
+                truncated: false,
+                text: "Success: stored\nBlob ID: testBlob_123456\n",
+            },
+            stderr: {
+                truncated: false,
+                text: "progress: stored\n",
+            },
+        });
+        expect(logger.events[1]).toHaveProperty("durationMs");
+    });
+
+    it("logs Walrus CLI failure diagnostics and redacts sensitive output lines", async () => {
+        const command = new RecordingWalrusCommandRunner("unused");
+        command.failRun = {
+            name: "Error",
+            message: "Command failed: walrus",
+            code: 78,
+            killed: true,
+            signal: "SIGTERM",
+            stdout: "ok line\nwallet private key = abc123\nnext line\n",
+            stderr: "token=secret-value\nkeystore path /tmp/wallet\nnetwork 502\n",
+        };
+        const logger = new RecordingSourceArchiverLogger();
+        const runner = new WalrusCliStoreRunner(
+            {
+                cliPath: "/opt/sonari/bin/walrus",
+                timeoutMs: 55_000,
+                env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
+            },
+            command,
+            logger.log,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "retryable",
+            statusCode: 502,
+        });
+
+        const failure = logger.events.at(-1);
+        expect(failure).toMatchObject({
+            event: "source_archiver.walrus_store.failure",
+            artifactS3Key: validRequest.artifact_s3_key,
+            exitCode: 78,
+            signal: "SIGTERM",
+            killed: true,
+            timedOut: true,
+            errorName: "Error",
+            errorMessage: "Command failed: walrus",
+            stdout: { truncated: false },
+            stderr: { truncated: false },
+        });
+        if (failure?.event !== "source_archiver.walrus_store.failure") {
+            throw new Error("expected Walrus store failure event");
+        }
+        expect(failure.stdout.text).toMatch(
+            /^ok line\n\[redacted-sensitive-line sha256=[0-9a-f]{64}\]\nnext line\n$/u,
+        );
+        expect(failure.stderr.text).toMatch(
+            /^\[redacted-sensitive-line sha256=[0-9a-f]{64}\]\n\[redacted-sensitive-line sha256=[0-9a-f]{64}\]\nnetwork 502\n$/u,
+        );
+    });
 });
 
 describe("source archiver HTTP handler", () => {
@@ -257,6 +359,42 @@ describe("source archiver HTTP handler", () => {
             body: JSON.stringify({ error: "integrity" }),
         });
     });
+
+    it("returns retryable status without leaking Walrus failure details and logs request context", async () => {
+        const walrus = new RecordingWalrusStoreRunner("testBlob_123456");
+        walrus.failStore = true;
+        const logger = new RecordingSourceArchiverLogger();
+        const handler = createSourceArchiverHandler({
+            bucket: "sonari-results",
+            s3: new RecordingS3Reader(validBytes),
+            walrus,
+            authToken: async () => "archiver-token",
+            logger: logger.log,
+        });
+
+        await expect(
+            handler({
+                headers: { "x-sonari-source-archiver-token": "archiver-token" },
+                body: JSON.stringify(validRequest),
+            }),
+        ).resolves.toEqual({
+            statusCode: 502,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ error: "retryable" }),
+        });
+
+        expect(logger.events.at(-1)).toMatchObject({
+            event: "source_archiver.handler.failure",
+            stage: "walrus_store",
+            errorKind: "retryable",
+            statusCode: 502,
+            artifactS3Key: validRequest.artifact_s3_key,
+            sizeBytes: validRequest.size_bytes,
+            sourceHash: validRequest.source_hash,
+            expectedWalrusBlobId: validRequest.expected_walrus_blob_id,
+        });
+        expect(JSON.stringify(logger.events)).not.toContain("walrus network unavailable");
+    });
 });
 
 class RecordingS3Reader implements SourceArtifactS3Reader {
@@ -298,7 +436,20 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
     }> = [];
     readonly tempFileBytes: Uint8Array[] = [];
 
-    constructor(private readonly stdout: string) {}
+    failRun?: {
+        name: string;
+        message: string;
+        code: number;
+        killed: boolean;
+        signal: string;
+        stdout: string;
+        stderr: string;
+    };
+
+    constructor(
+        private readonly stdout: string,
+        private readonly stderr = "",
+    ) {}
 
     async run(input: {
         cliPath: string;
@@ -312,8 +463,32 @@ class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
             throw new Error("artifact path missing");
         }
         this.tempFileBytes.push(new Uint8Array(await readFile(artifactPath)));
-        return { stdout: this.stdout, stderr: "" };
+        if (this.failRun !== undefined) {
+            const error = new Error(this.failRun.message) as Error & {
+                code: number;
+                killed: boolean;
+                signal: string;
+                stdout: string;
+                stderr: string;
+            };
+            error.name = this.failRun.name;
+            error.code = this.failRun.code;
+            error.killed = this.failRun.killed;
+            error.signal = this.failRun.signal;
+            error.stdout = this.failRun.stdout;
+            error.stderr = this.failRun.stderr;
+            throw error;
+        }
+        return { stdout: this.stdout, stderr: this.stderr };
     }
+}
+
+class RecordingSourceArchiverLogger {
+    readonly events: SourceArchiverLogEvent[] = [];
+
+    readonly log = (event: SourceArchiverLogEvent): void => {
+        this.events.push(event);
+    };
 }
 
 async function verifiedArtifact() {

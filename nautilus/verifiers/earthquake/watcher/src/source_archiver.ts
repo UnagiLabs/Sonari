@@ -11,6 +11,9 @@ const SOURCE_ARTIFACT_PREFIX = "source-artifacts/";
 const SOURCE_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 const WALRUS_BLOB_ID_PATTERN = /^[A-Za-z0-9_-]{8,256}$/;
 const DEFAULT_WALRUS_STORE_TIMEOUT_MS = 55_000;
+const CLI_OUTPUT_SUMMARY_MAX_CHARS = 4096;
+const SENSITIVE_OUTPUT_LINE_PATTERN =
+    /\b(token|secret|private|keystore|wallet|credential|password|api[_-]?key)\b/iu;
 
 const execFileAsync = promisify(execFile);
 
@@ -79,12 +82,68 @@ export interface SecretStringReader {
     getSecretString(secretArn: string): Promise<string>;
 }
 
+export interface CliOutputSummary {
+    text: string;
+    truncated: boolean;
+}
+
+interface SourceArchiverRequestLogContext {
+    artifactS3Key: string;
+    sizeBytes: number;
+    sourceHash: string;
+    expectedWalrusBlobId: string;
+}
+
+export type SourceArchiverHandlerFailureStage =
+    | "auth"
+    | "request_parse"
+    | "load_artifact"
+    | "walrus_store"
+    | "unexpected";
+
+export type SourceArchiverLogEvent =
+    | (SourceArchiverRequestLogContext & {
+          event: "source_archiver.walrus_store.start";
+          cliPath: string;
+          timeoutMs: number;
+          epochs?: number;
+          envKeys: string[];
+      })
+    | (SourceArchiverRequestLogContext & {
+          event: "source_archiver.walrus_store.success";
+          walrusBlobId: string;
+          durationMs: number;
+          stdout: CliOutputSummary;
+          stderr: CliOutputSummary;
+      })
+    | (SourceArchiverRequestLogContext & {
+          event: "source_archiver.walrus_store.failure";
+          durationMs: number;
+          exitCode?: number | string;
+          signal?: string;
+          killed?: boolean;
+          timedOut: boolean;
+          errorName: string;
+          errorMessage: string;
+          stdout: CliOutputSummary;
+          stderr: CliOutputSummary;
+      })
+    | (Partial<SourceArchiverRequestLogContext> & {
+          event: "source_archiver.handler.failure";
+          stage: SourceArchiverHandlerFailureStage;
+          errorKind: SourceArchiverErrorKind;
+          statusCode: number;
+      });
+
+export type SourceArchiverLogger = (event: SourceArchiverLogEvent) => void;
+
 export class WalrusCliStoreRunner implements WalrusStoreRunner {
     private readonly timeoutMs: number;
 
     constructor(
         private readonly config: WalrusCliStoreConfig,
         private readonly commandRunner: WalrusStoreCommandRunner = new NodeWalrusStoreCommandRunner(),
+        private readonly logger: SourceArchiverLogger = defaultSourceArchiverLogger,
     ) {
         this.timeoutMs = config.timeoutMs ?? DEFAULT_WALRUS_STORE_TIMEOUT_MS;
         if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs <= 0) {
@@ -109,6 +168,8 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
     async store(input: VerifiedSourceArtifact): Promise<string> {
         const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-source-archiver-"));
         const artifactPath = path.join(tempDir, "source-artifact.bin");
+        const startedAt = Date.now();
+        const context = sourceArchiverRequestLogContext(input.request);
         try {
             await writeFile(artifactPath, input.bytes);
             const args = ["store", artifactPath];
@@ -128,12 +189,31 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
             if (this.config.env !== undefined) {
                 commandInput.env = this.config.env;
             }
+            this.logger({
+                event: "source_archiver.walrus_store.start",
+                ...context,
+                cliPath: this.config.cliPath,
+                timeoutMs: this.timeoutMs,
+                ...(this.config.epochs === undefined ? {} : { epochs: this.config.epochs }),
+                envKeys: Object.keys(this.config.env ?? {}).sort(),
+            });
             const output = await this.commandRunner.run(commandInput);
-            return parseWalrusBlobId(output.stdout);
+            const blobId = parseWalrusBlobId(output.stdout);
+            this.logger({
+                event: "source_archiver.walrus_store.success",
+                ...context,
+                walrusBlobId: blobId,
+                durationMs: durationMsSince(startedAt),
+                stdout: summarizeCliOutput(output.stdout),
+                stderr: summarizeCliOutput(output.stderr),
+            });
+            return blobId;
         } catch (error) {
             if (error instanceof SourceArchiverError) {
+                this.logger(walrusStoreFailureLogEvent(context, startedAt, error));
                 throw error;
             }
+            this.logger(walrusStoreFailureLogEvent(context, startedAt, error));
             const message = error instanceof Error ? error.message : String(error);
             throw new SourceArchiverError(`Walrus store failed: ${message}`, "retryable", 502);
         } finally {
@@ -163,22 +243,43 @@ export function createSourceArchiverHandler(input: {
     s3: SourceArtifactS3Reader;
     walrus: WalrusStoreRunner;
     authToken: () => Promise<string>;
+    logger?: SourceArchiverLogger;
 }): (event: SourceArchiverHttpEvent) => Promise<SourceArchiverHttpResponse> {
+    const logger = input.logger ?? defaultSourceArchiverLogger;
     return async (event) => {
+        let stage: SourceArchiverHandlerFailureStage = "auth";
+        let request: SourceArchiverRequest | undefined;
         try {
             await verifyArchiverToken(event, input.authToken);
-            const request = parseSourceArchiverEvent(event);
+            stage = "request_parse";
+            request = parseSourceArchiverEvent(event);
+            stage = "load_artifact";
             const artifact = await loadVerifiedSourceArtifact({
                 bucket: input.bucket,
                 request,
                 s3: input.s3,
             });
+            stage = "walrus_store";
             const stored = await storeVerifiedSourceArtifact({ artifact, walrus: input.walrus });
             return jsonResponse(200, { walrus_blob_id: stored.walrusBlobId });
         } catch (error) {
             if (error instanceof SourceArchiverError) {
+                logger({
+                    event: "source_archiver.handler.failure",
+                    ...(request === undefined ? {} : sourceArchiverRequestLogContext(request)),
+                    stage,
+                    errorKind: error.kind,
+                    statusCode: error.statusCode,
+                });
                 return jsonResponse(error.statusCode, { error: error.kind });
             }
+            logger({
+                event: "source_archiver.handler.failure",
+                ...(request === undefined ? {} : sourceArchiverRequestLogContext(request)),
+                stage: "unexpected",
+                errorKind: "retryable",
+                statusCode: 500,
+            });
             return jsonResponse(500, { error: "retryable" });
         }
     };
@@ -188,6 +289,7 @@ export async function sourceArchiverHandler(
     event: SourceArchiverHttpEvent,
 ): Promise<SourceArchiverHttpResponse> {
     const secrets = new AwsSecretStringReader();
+    const logger = defaultSourceArchiverLogger;
     const handler = createSourceArchiverHandler({
         bucket: requiredEnv("RESULT_BUCKET"),
         s3: new AwsSourceArtifactS3Reader(),
@@ -205,9 +307,12 @@ export async function sourceArchiverHandler(
                             secrets,
                         ),
                     }),
+                    new NodeWalrusStoreCommandRunner(),
+                    logger,
                 ).store(artifact),
         },
         authToken: () => secrets.getSecretString(requiredEnv("SOURCE_ARCHIVER_TOKEN_SECRET_ARN")),
+        logger,
     });
     return handler(event);
 }
@@ -312,6 +417,100 @@ export function parseWalrusBlobId(output: string): string {
         );
     }
     return validateWalrusBlobIdFromOutput(fallback);
+}
+
+function sourceArchiverRequestLogContext(
+    request: SourceArchiverRequest,
+): SourceArchiverRequestLogContext {
+    return {
+        artifactS3Key: request.artifactS3Key,
+        sizeBytes: request.sizeBytes,
+        sourceHash: request.sourceHash,
+        expectedWalrusBlobId: request.expectedWalrusBlobId,
+    };
+}
+
+function walrusStoreFailureLogEvent(
+    context: SourceArchiverRequestLogContext,
+    startedAt: number,
+    error: unknown,
+): SourceArchiverLogEvent {
+    const durationMs = durationMsSince(startedAt);
+    return {
+        event: "source_archiver.walrus_store.failure",
+        ...context,
+        durationMs,
+        ...optionalProperty("exitCode", readErrorStringOrNumberProperty(error, "code")),
+        ...optionalProperty("signal", readErrorStringProperty(error, "signal")),
+        ...optionalProperty("killed", readErrorBooleanProperty(error, "killed")),
+        timedOut: readErrorBooleanProperty(error, "killed") === true,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stdout: summarizeCliOutput(readErrorStringProperty(error, "stdout") ?? ""),
+        stderr: summarizeCliOutput(readErrorStringProperty(error, "stderr") ?? ""),
+    };
+}
+
+function summarizeCliOutput(output: string): CliOutputSummary {
+    const redacted = output
+        .split(/\r?\n/u)
+        .map((line) => {
+            if (!SENSITIVE_OUTPUT_LINE_PATTERN.test(line)) {
+                return line;
+            }
+            return `[redacted-sensitive-line sha256=${createHash("sha256").update(line).digest("hex")}]`;
+        })
+        .join("\n");
+    if (redacted.length <= CLI_OUTPUT_SUMMARY_MAX_CHARS) {
+        return { text: redacted, truncated: false };
+    }
+    return {
+        text: redacted.slice(0, CLI_OUTPUT_SUMMARY_MAX_CHARS),
+        truncated: true,
+    };
+}
+
+function durationMsSince(startedAt: number): number {
+    return Math.max(0, Date.now() - startedAt);
+}
+
+function defaultSourceArchiverLogger(event: SourceArchiverLogEvent): void {
+    console.log(JSON.stringify(event));
+}
+
+function optionalProperty<Key extends string, Value>(
+    key: Key,
+    value: Value | undefined,
+): Partial<Record<Key, Value>> {
+    return value === undefined ? {} : ({ [key]: value } as Record<Key, Value>);
+}
+
+function readErrorStringOrNumberProperty(error: unknown, key: string): string | number | undefined {
+    const value = readErrorProperty(error, key);
+    return typeof value === "string" || typeof value === "number" ? value : undefined;
+}
+
+function readErrorStringProperty(error: unknown, key: string): string | undefined {
+    const value = readErrorProperty(error, key);
+    if (typeof value === "string") {
+        return value;
+    }
+    if (Buffer.isBuffer(value)) {
+        return value.toString("utf8");
+    }
+    return undefined;
+}
+
+function readErrorBooleanProperty(error: unknown, key: string): boolean | undefined {
+    const value = readErrorProperty(error, key);
+    return typeof value === "boolean" ? value : undefined;
+}
+
+function readErrorProperty(error: unknown, key: string): unknown {
+    if (!isRecord(error)) {
+        return undefined;
+    }
+    return error[key];
 }
 
 async function readSourceArtifact(input: {
