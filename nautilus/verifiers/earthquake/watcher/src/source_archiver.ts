@@ -737,10 +737,7 @@ export async function readWalrusCliStoreSecret(
     reader: SecretStringReader,
 ): Promise<
     Required<Pick<WalrusCliStoreConfig, "walrusClientConfigYaml">> &
-        Pick<
-            WalrusCliStoreConfig,
-            "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson"
-        >
+        Pick<WalrusCliStoreConfig, "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson">
 > {
     let parsed: unknown;
     try {
@@ -764,10 +761,7 @@ export async function readWalrusCliStoreSecret(
     }
 
     const config: Required<Pick<WalrusCliStoreConfig, "walrusClientConfigYaml">> &
-        Pick<
-            WalrusCliStoreConfig,
-            "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson"
-        > = {
+        Pick<WalrusCliStoreConfig, "walrusContext" | "suiWalletConfigYaml" | "suiKeystoreJson"> = {
         walrusClientConfigYaml: readRequiredSecretString(
             parsed,
             "SONARI_WALRUS_CLIENT_CONFIG_YAML",
@@ -841,9 +835,7 @@ async function writePrivateFile(filePath: string, contents: string | Uint8Array)
 function normalizeSuiWalletConfigYaml(walletConfigYaml: string, keystorePath: string): string {
     const fileEntryPattern = /^(\s*File:\s*).+$/mu;
     if (!fileEntryPattern.test(walletConfigYaml)) {
-        throw sourceArchiverConfigurationError(
-            "Sui wallet config must use a file-backed keystore",
-        );
+        throw sourceArchiverConfigurationError("Sui wallet config must use a file-backed keystore");
     }
     return walletConfigYaml.replace(fileEntryPattern, `$1${keystorePath}`);
 }
