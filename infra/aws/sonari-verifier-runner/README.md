@@ -136,6 +136,22 @@ aws cloudformation deploy \
 
 GitHub Actions では、同じ値を environment variable の `AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET` に設定します。空の場合、CloudFormation の `RelayerTarget` は空文字のままです。
 
+## Earthquake PCR config の admin 入口
+
+Earthquake verifier の PCR config は、既存の `admin.move` 関数で管理します。既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません。
+
+| 操作 | 関数 | 権限 |
+| --- | --- | --- |
+| 初回登録 | `admin::create_earthquake_verifier_config` | `&AdminCap` |
+| PCR 更新 | `admin::update_earthquake_verifier_config_pcrs` | `&AdminCap` |
+| 緊急停止 | `admin::disable_earthquake_verifier_config` | `&AdminCap` |
+
+これらの関数は外部 transaction から呼べる `public fun` です。ただし、成功には `&AdminCap` が必要です。AdminCap を持たない wallet は、呼び出しを試せても config を変更できません。
+
+`metadata_verifier` 側の PCR config 関数は package 内部用です。外部運用では `admin` module だけを入口にします。
+
+AWS Runner は `metadata_verifier::register_enclave_instance` を呼びます。Relayer は `accessor::create_disaster_event_from_signed_payload` を呼びます。どちらも AdminCap を持たず、登録済み PCR と attestation、または登録済み enclave instance の署名で検証されます。
+
 `NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
 
 地震 verifier は Nautilus の server pattern に合わせ、EIF 内で起動時に enclave-local な Ed25519 key を生成し、NSM attestation document の `public_key` にその public key を入れます。runner host は `/opt/sonari/bin/run-earthquake-enclave` から VSOCK で `/health_check`、`/get_attestation`、`/process_data` を呼びます。host は Walrus / Sui config を bootstrap するだけで、finalized payload の署名鍵は host に置きません。

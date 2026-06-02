@@ -79,6 +79,20 @@ describe("AWS Sonari verifier runner README", () => {
         ]);
     });
 
+    it("documents existing AdminCap-gated earthquake PCR config entrypoints", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "admin::create_earthquake_verifier_config",
+            "admin::update_earthquake_verifier_config_pcrs",
+            "admin::disable_earthquake_verifier_config",
+            "`&AdminCap`",
+            "既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません",
+            "metadata_verifier::register_enclave_instance",
+            "accessor::create_disaster_event_from_signed_payload",
+        ]);
+    });
+
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
         const readme = await readReadme();
 
