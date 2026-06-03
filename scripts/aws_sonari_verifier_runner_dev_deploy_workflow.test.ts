@@ -118,6 +118,31 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         ]);
     });
 
+    it("does not expose relayer deployment variables to test steps", async () => {
+        const workflow = await readWorkflow();
+        const jobEnvMatch = workflow.match(/    env:\n([\s\S]*?)\n\n    steps:/u);
+
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_MODE");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_TARGET");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_REGISTRY");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_VERIFIER_REGISTRY");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_GRPC_URL");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_SENDER_ADDRESS");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_SIGNER_SECRET_ARN");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_ALLOW_SUBMIT");
+
+        expectContainsAll(workflow, [
+            "RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
+            "RELAYER_TARGET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
+            "RELAYER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
+            "RELAYER_VERIFIER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
+            "RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
+            "RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
+            "RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}",
+            "RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}",
+        ]);
+    });
+
     it("uploads commit-scoped artifacts under one Sonari verifier runner prefix", async () => {
         const workflow = await readWorkflow();
         const githubSha = "$" + "{GITHUB_SHA}";
