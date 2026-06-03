@@ -17,6 +17,9 @@ use sonari_tee_core::enclave::{
     VsockListener, enclave_attestation_response, error_response,
     generate_ephemeral_signing_key_seed, handle_connection, health_check_response,
 };
+use sonari_tee_core::registry::{
+    IDENTITY_ATTESTATION_PUBLIC_KEY_LABEL, IDENTITY_VERIFIER_CONFIG_KEY,
+};
 use sonari_tee_core::{
     LocalEd25519Signer, PayloadSigner, SignatureArtifact, non_empty_env, signing_key_seed_from_env,
     to_hex,
@@ -27,17 +30,11 @@ const PRODUCTION_SIGNING_KEY_SEED_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED";
 const PRODUCTION_SIGNING_KEY_SEED_FILE_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED_FILE";
 
 /// Byte string the enclave signs to derive its embedded attestation public key.
-const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = b"sonari-membership-attestation-public-key";
-
-/// On-chain verifier config key for the identity (membership) verifier family.
 ///
-/// The worker supplies the registration metadata (config key/version) on the
-/// `/process_data` request; the server validates that the supplied
-/// `verifier_config_key` matches this identity family key and fails closed on a
-/// mismatch so a foreign family's metadata can never be echoed into an identity
-/// result. The config key/version supply stays in the orchestration layer; the
-/// handler never touches it.
-const IDENTITY_VERIFIER_CONFIG_KEY: u64 = 2;
+/// Sourced from the shared verifier registry so the label has a single
+/// definition (see `sonari_tee_core::registry`); the registry's uniqueness
+/// tests guarantee it does not collide with another verifier's label.
+const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = IDENTITY_ATTESTATION_PUBLIC_KEY_LABEL;
 
 #[derive(Debug, Parser)]
 #[command(name = "membership-tee")]

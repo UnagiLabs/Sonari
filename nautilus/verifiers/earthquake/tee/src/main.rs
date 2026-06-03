@@ -5,6 +5,7 @@ use sonari_tee_core::enclave::{
     VsockListener, enclave_attestation_response, error_response,
     generate_ephemeral_signing_key_seed, handle_connection, health_check_response,
 };
+use sonari_tee_core::registry::EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL;
 use sonari_tee_core::{
     DEV_SIGNING_KEY_SEED_HEX, LocalEd25519Signer, PayloadSigner, parse_seed,
     signing_key_seed_from_env,
@@ -23,7 +24,11 @@ use tee::{
 };
 
 /// Byte string the enclave signs to derive its embedded attestation public key.
-const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = b"sonari-earthquake-attestation-public-key";
+///
+/// Sourced from the shared verifier registry so the label has a single
+/// definition (see `sonari_tee_core::registry`); the registry's uniqueness
+/// tests guarantee it does not collide with another verifier's label.
+const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL;
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate deterministic Sonari USGS oracle artifacts")]

@@ -1,6 +1,7 @@
 mod artifacts;
 mod crypto;
 pub mod enclave;
+pub mod registry;
 mod seed;
 
 pub use artifacts::SignatureArtifact;
