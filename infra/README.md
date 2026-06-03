@@ -108,6 +108,88 @@ SONARI_VERIFIER_REGISTRY_ID=<VerifierRegistry object ID>
 admin private key は更新先に含めません。
 SourceArchiver private key secret も、admin account 変更だけでは変更しません。
 
+## GitHub Actions がやること
+
+AWS dev stack の deploy は GitHub Actions で行います。
+管理者が AWS CLI で CloudFormation deploy を直接実行する必要はありません。
+
+使う workflow:
+
+```text
+.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml
+```
+
+この workflow は次を行います。
+
+- Lambda / earthquake TEE / earthquake EIF / membership TEE / membership EIF を build する
+- earthquake EIF の PCR0 / PCR1 / PCR2 を読み取り、GitHub Actions summary に表示する
+- artifact を S3 に upload する
+- CloudFormation stack を更新する
+- deploy 後に ASG が止まっていること、schedule が disabled のままであることを確認する
+
+submit を有効にする場合、GitHub Actions variables は次の形にします。
+
+```text
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE=submit
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT=true
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK=testnet
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL=https://fullnode.testnet.sui.io:443
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS=<relayer signer address>
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN=<relayer signer secret ARN>
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY=<DisasterRegistry object ID>
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY=<VerifierRegistry object ID>
+```
+
+## 管理者が必ず手でやること
+
+GitHub Actions の外で必要なのは、AdminCap が必要な Sui 操作だけです。
+
+1. contract publish
+
+GitHub Actions は contract を publish しません。
+publish は admin wallet で手動実行します。
+
+2. publish 後の object ID を GitHub Actions variables に入れる
+
+`PACKAGE_ID`、`DisasterRegistry`、`VerifierRegistry` などを新しい publish 結果に合わせます。
+
+3. earthquake PCR を VerifierRegistry に登録する
+
+GitHub Actions の run summary に出た PCR0 / PCR1 / PCR2 を使います。
+`VerifierRegistry` に config がまだない場合は `create_earthquake_verifier_config`、すでにある場合は `update_earthquake_verifier_config_pcrs` を使います。
+
+```bash
+sui client \
+  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
+  --client.env testnet \
+  call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function create_earthquake_verifier_config \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$PCR0" "0x$PCR1" "0x$PCR2" \
+  --gas-budget 100000000
+```
+
+更新する場合:
+
+```bash
+sui client \
+  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
+  --client.env testnet \
+  call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function update_earthquake_verifier_config_pcrs \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$PCR0" "0x$PCR1" "0x$PCR2" \
+  --gas-budget 100000000
+```
+
+4. relayer signer に testnet SUI を入れる
+
+submit では `RELAYER_SIGNER_SECRET_ARN` の private key から復元される address が gas を払います。
+この address に testnet SUI がないと、Disaster event 作成 transaction は失敗します。
+
 ## Publish しない場所
 
 次では contract publish しません。

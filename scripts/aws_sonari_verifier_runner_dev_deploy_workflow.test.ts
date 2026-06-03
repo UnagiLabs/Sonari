@@ -104,6 +104,14 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "pnpm build:aws-sonari-verifier-runner-lambda",
             "pnpm build:aws-earthquake-tee-artifact",
             "pnpm build:aws-earthquake-eif",
+            "Read earthquake EIF measurements",
+            "nitro-cli describe-eif",
+            "--eif-path dist/aws/earthquake-tee.eif",
+            "dist/aws/earthquake-tee-measurements.json",
+            "EARTHQUAKE_EIF_PCR0",
+            "EARTHQUAKE_EIF_PCR1",
+            "EARTHQUAKE_EIF_PCR2",
+            "Earthquake EIF PCRs",
             "pnpm build:aws-membership-identity-tee-artifact",
             "pnpm build:aws-membership-identity-eif",
             "NITRO_CLI_TAG: v1.4.4",
@@ -179,6 +187,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'validate_sha256 "membership TEE artifact" dist/aws/membership-identity-tee-artifact.tar.gz',
             'validate_sha256 "membership EIF" dist/aws/membership-identity-tee.eif',
             '[[ "$digest" =~ ^[0-9a-f]{64}$ ]]',
+            "for pcr_name in EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2",
+            '[[ ! "${!pcr_name}" =~ ^[0-9a-f]{96}$ ]]',
         ]);
     });
 

@@ -316,6 +316,64 @@ jobs:
       - name: Build earthquake EIF
         run: pnpm build:aws-earthquake-eif
 
+      - name: Read earthquake EIF measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nitro-cli describe-eif \
+            --eif-path dist/aws/earthquake-tee.eif \
+            > dist/aws/earthquake-tee-measurements.json
+          cat dist/aws/earthquake-tee-measurements.json
+
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+
+          const raw = await readFile("dist/aws/earthquake-tee-measurements.json", "utf8");
+          const jsonStart = raw.indexOf("{");
+          if (jsonStart === -1) {
+            throw new Error("earthquake EIF measurements did not contain JSON");
+          }
+          const parsed = JSON.parse(raw.slice(jsonStart));
+          const measurements = parsed.Measurements;
+          if (typeof measurements !== "object" || measurements === null) {
+            throw new Error("earthquake EIF measurements are missing Measurements");
+          }
+
+          function readPcr(name) {
+            const value = measurements[name];
+            if (typeof value !== "string" || !/^[0-9a-fA-F]{96}$/.test(value)) {
+              throw new Error(`earthquake EIF ${name} must be a 48-byte SHA-384 hex string`);
+            }
+            return value.toLowerCase();
+          }
+
+          const pcr0 = readPcr("PCR0");
+          const pcr1 = readPcr("PCR1");
+          const pcr2 = readPcr("PCR2");
+          await appendFile(
+            process.env.GITHUB_ENV,
+            `EARTHQUAKE_EIF_PCR0=${pcr0}\nEARTHQUAKE_EIF_PCR1=${pcr1}\nEARTHQUAKE_EIF_PCR2=${pcr2}\n`,
+            "utf8",
+          );
+          await appendFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              "### Earthquake EIF PCRs",
+              "",
+              "| PCR | Value |",
+              "| --- | --- |",
+              `| PCR0 | \`${pcr0}\` |`,
+              `| PCR1 | \`${pcr1}\` |`,
+              `| PCR2 | \`${pcr2}\` |`,
+              "",
+              "Use these values for the Sui `VerifierRegistry` earthquake config.",
+              "",
+            ].join("\n"),
+            "utf8",
+          );
+          NODE
+
       - name: Build membership identity TEE artifact
         run: pnpm build:aws-membership-identity-tee-artifact
 
@@ -357,6 +415,13 @@ jobs:
           earthquake_eif_sha256="$(validate_sha256 "earthquake EIF" dist/aws/earthquake-tee.eif)"
           membership_tee_artifact_sha256="$(validate_sha256 "membership TEE artifact" dist/aws/membership-identity-tee-artifact.tar.gz)"
           membership_eif_sha256="$(validate_sha256 "membership EIF" dist/aws/membership-identity-tee.eif)"
+
+          for pcr_name in EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2; do
+            if [[ ! "${!pcr_name}" =~ ^[0-9a-f]{96}$ ]]; then
+              echo "$pcr_name is required before artifact upload" >&2
+              exit 1
+            fi
+          done
 
           aws s3 cp dist/aws/sonari-verifier-runner-lambda.zip "s3://$ARTIFACT_BUCKET/$lambda_key"
           aws s3 cp dist/aws/earthquake-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/$earthquake_tee_key"
