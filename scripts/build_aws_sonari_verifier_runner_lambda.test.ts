@@ -58,9 +58,10 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(runnerWorkflowJs).toContain("DeleteItemCommand");
         expect(runnerWorkflowJs).toContain("function runnerLeaseStore()");
         expect(sourceArchiverJs).toContain("sourceArchiverHandler");
-        expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN");
+        expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN");
         expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_TOKEN_SECRET_ARN");
-        expect(sourceArchiverJs).toContain("WalrusCliStoreRunner");
+        expect(sourceArchiverJs).toContain("WalrusSdkStoreRunner");
+        expect(sourceArchiverJs).not.toContain("WalrusCliStoreRunner");
         expect(runnerWorkflowJs).not.toContain(
             "const leaseStore = new DynamoDbSharedRunnerLeaseStore",
         );

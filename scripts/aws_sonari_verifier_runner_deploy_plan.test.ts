@@ -1,10 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import {
-    buildAwsSonariVerifierRunnerDeployPlan,
-    SOURCE_ARCHIVER_WALRUS_CLI_PATH,
-} from "./aws_sonari_verifier_runner_deploy_plan.js";
+import { buildAwsSonariVerifierRunnerDeployPlan } from "./aws_sonari_verifier_runner_deploy_plan.js";
 
 const execFileAsync = promisify(execFile);
 const validCommitSha = "0123456789abcdef0123456789abcdef01234567";
@@ -26,9 +23,8 @@ const validInput = {
     membershipEifSha256: validMembershipEifSha256,
     sourceArchiverTokenSecretArn:
         "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-token",
-    sourceArchiverWalrusEnvSecretArn:
-        "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-walrus-env",
-    sourceArchiverWalrusLayerArn: "arn:aws:lambda:us-west-2:595103996064:layer:sonari-walrus-cli:1",
+    sourceArchiverPrivateKeySecretArn:
+        "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-private-key",
     relayerNetwork: "testnet",
     worldIdProofMode: "dummy",
 } as const;
@@ -101,15 +97,9 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(() =>
             buildAwsSonariVerifierRunnerDeployPlan({
                 ...validInput,
-                sourceArchiverWalrusEnvSecretArn: "not-an-arn",
+                sourceArchiverPrivateKeySecretArn: "not-an-arn",
             }),
-        ).toThrow("Invalid source archiver Walrus environment secret ARN");
-        expect(() =>
-            buildAwsSonariVerifierRunnerDeployPlan({
-                ...validInput,
-                sourceArchiverWalrusLayerArn: "not-an-arn",
-            }),
-        ).toThrow("Invalid source archiver Walrus Lambda layer ARN");
+        ).toThrow("Invalid source archiver private key secret ARN");
     });
 
     it("keeps schedules disabled and emits CloudFormation parameter override args", () => {
@@ -144,9 +134,13 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `GitCommitSha=${validCommitSha}`,
                 "ScheduleState=DISABLED",
                 `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
-                `SourceArchiverWalrusEnvSecretArn=${validInput.sourceArchiverWalrusEnvSecretArn}`,
-                `SourceArchiverWalrusLayerArn=${validInput.sourceArchiverWalrusLayerArn}`,
-                `SourceArchiverWalrusCliPath=${SOURCE_ARCHIVER_WALRUS_CLI_PATH}`,
+                `SourceArchiverPrivateKeySecretArn=${validInput.sourceArchiverPrivateKeySecretArn}`,
+                "SourceArchiverSuiNetwork=testnet",
+                "SourceArchiverSuiRpcUrl=https://fullnode.testnet.sui.io:443",
+                "SourceArchiverWalrusUploadRelayUrl=https://upload-relay.testnet.walrus.space",
+                "SourceArchiverWalrusUploadRelayTipMaxMist=1000",
+                "SourceArchiverWalrusEpochs=1",
+                "SourceArchiverWalrusDeletable=false",
             ]),
         );
     });
@@ -188,10 +182,8 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 validMembershipEifSha256,
                 "--source-archiver-token-secret-arn",
                 validInput.sourceArchiverTokenSecretArn,
-                "--source-archiver-walrus-env-secret-arn",
-                validInput.sourceArchiverWalrusEnvSecretArn,
-                "--source-archiver-walrus-layer-arn",
-                validInput.sourceArchiverWalrusLayerArn,
+                "--source-archiver-private-key-secret-arn",
+                validInput.sourceArchiverPrivateKeySecretArn,
                 "--relayer-network",
                 "mainnet",
                 "--world-id-proof-mode",

@@ -81,16 +81,13 @@ export async function runVerifySourceArchiver(
         parameters,
         "SourceArchiverTokenSecretArn",
     );
-    const sourceArchiverWalrusSecretArn = requireParameter(
+    const sourceArchiverPrivateKeySecretArn = requireParameter(
         parameters,
-        "SourceArchiverWalrusEnvSecretArn",
+        "SourceArchiverPrivateKeySecretArn",
     );
     const token = await getSecretString(aws, sourceArchiverTokenSecretArn);
-    const walrusSecret = await getSecretString(aws, sourceArchiverWalrusSecretArn);
-    const forbiddenLogValues = secretValuesForLogLeakCheck([
-        token,
-        ...secretStringValues(walrusSecret),
-    ]);
+    const privateKey = await getSecretString(aws, sourceArchiverPrivateKeySecretArn);
+    const forbiddenLogValues = secretValuesForLogLeakCheck([token, privateKey]);
     const expectedWalrusBlobId =
         options.blobIdForBytes === undefined
             ? await walrusBlobIdForBytes(artifactBytes, {
@@ -330,18 +327,6 @@ function readLogMessages(value: unknown): string[] {
         .filter((message): message is string => typeof message === "string");
 }
 
-function secretStringValues(secretString: string): string[] {
-    try {
-        const parsed = JSON.parse(secretString) as unknown;
-        if (!isRecord(parsed)) {
-            return [secretString];
-        }
-        return Object.values(parsed).filter((value): value is string => typeof value === "string");
-    } catch {
-        return [secretString];
-    }
-}
-
 function secretValuesForLogLeakCheck(values: readonly string[]): string[] {
     return values.filter((value) => value.length >= 8);
 }
@@ -367,8 +352,7 @@ function assertSourceArchiverConfigured(
 ): void {
     const requiredParameters = [
         "SourceArchiverTokenSecretArn",
-        "SourceArchiverWalrusEnvSecretArn",
-        "SourceArchiverWalrusLayerArn",
+        "SourceArchiverPrivateKeySecretArn",
     ];
     const requiredOutputs = ["SourceArchiverLambdaName", "SourceArchiverFunctionUrlOutput"];
     const missingParameters = requiredParameters.filter((key) => {

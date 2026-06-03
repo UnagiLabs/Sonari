@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { SOURCE_ARCHIVER_WALRUS_CLI_PATH } from "./aws_sonari_verifier_runner_deploy_plan.js";
 
 const templatePath = path.join(process.cwd(), "infra/aws/sonari-verifier-runner/template.yaml");
 
@@ -157,6 +156,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
 
     it("keeps only the earthquake Walrus blob-id CLI in the runner environment", async () => {
         const template = await readTemplate();
+        const runnerLaunchTemplate = template.slice(
+            template.indexOf("RunnerLaunchTemplate:"),
+            template.indexOf("RunnerAutoScalingGroup:"),
+        );
 
         expect(template).toContain("EarthquakeTeeEifS3Bucket:");
         expect(template).toContain("EarthquakeTeeEifS3Key:");
@@ -185,34 +188,45 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             'exec "$' +
                 '{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"',
         );
-        expect(template).not.toContain("WalrusConfigSecretArn:");
-        expect(template).not.toContain("SuiWalletConfigSecretArn:");
-        expect(template).not.toContain("SuiKeystoreSecretArn:");
-        expect(template).not.toContain("WalrusAggregatorUrl:");
-        expect(template).not.toContain("WalrusUploadRelayUrl:");
-        expect(template).not.toContain("WalrusContext:");
-        expect(template).not.toContain("SONARI_WALRUS_CONFIG");
-        expect(template).not.toContain("SONARI_WALRUS_WALLET");
-        expect(template).not.toContain("SONARI_WALRUS_CONTEXT");
-        expect(template).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
-        expect(template).not.toContain("SONARI_WALRUS_UPLOAD_RELAY");
+        expect(runnerLaunchTemplate).not.toContain("WalrusConfigSecretArn:");
+        expect(runnerLaunchTemplate).not.toContain("SuiWalletConfigSecretArn:");
+        expect(runnerLaunchTemplate).not.toContain("SuiKeystoreSecretArn:");
+        expect(runnerLaunchTemplate).not.toContain("WalrusAggregatorUrl:");
+        expect(runnerLaunchTemplate).not.toContain("WalrusUploadRelayUrl:");
+        expect(runnerLaunchTemplate).not.toContain("WalrusContext:");
+        expect(runnerLaunchTemplate).not.toContain("SONARI_WALRUS_CONFIG");
+        expect(runnerLaunchTemplate).not.toContain("SONARI_WALRUS_WALLET");
+        expect(runnerLaunchTemplate).not.toContain("SONARI_WALRUS_CONTEXT");
+        expect(runnerLaunchTemplate).not.toContain("SONARI_WALRUS_AGGREGATOR_URL");
+        expect(runnerLaunchTemplate).not.toContain("SONARI_WALRUS_UPLOAD_RELAY");
     });
 
-    it("adds a token-protected source archiver Lambda with isolated Walrus secrets", async () => {
+    it("adds a token-protected source archiver Lambda with isolated SDK private key secret", async () => {
         const template = await readTemplate();
 
         expect(template).toContain("SourceArchiverTokenSecretArn:");
-        expect(template).toContain("SourceArchiverWalrusEnvSecretArn:");
-        expect(template).toContain("SourceArchiverWalrusLayerArn:");
+        expect(template).toContain("SourceArchiverPrivateKeySecretArn:");
+        expect(template).toContain("SourceArchiverSuiNetwork:");
+        expect(template).toContain("SourceArchiverSuiRpcUrl:");
+        expect(template).toContain("SourceArchiverWalrusUploadRelayUrl:");
+        expect(template).toContain("SourceArchiverWalrusUploadRelayTipMaxMist:");
+        expect(template).toContain("SourceArchiverWalrusEpochs:");
+        expect(template).toContain("SourceArchiverWalrusDeletable:");
         expect(template).toContain("HasSourceArchiverConfig:");
         expect(template).toContain("SourceArchiverLambdaRole:");
         expect(template).toContain("SourceArchiverLambda:");
         expect(template).toContain("Handler: dist/src/source_archiver.sourceArchiverHandler");
         expect(template).toContain("SourceArchiverFunctionUrl:");
         expect(template).toContain("SourceArchiverFunctionUrlPermission:");
-        expect(template).toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN:");
-        expect(template).toContain("SOURCE_ARCHIVER_WALRUS_CLI:");
-        expect(template).toContain(`Default: ${SOURCE_ARCHIVER_WALRUS_CLI_PATH}`);
+        expect(template).toContain("SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN:");
+        expect(template).toContain("SUI_NETWORK:");
+        expect(template).toContain("SUI_RPC_URL:");
+        expect(template).toContain("WALRUS_UPLOAD_RELAY_URL:");
+        expect(template).toContain("WALRUS_UPLOAD_RELAY_TIP_MAX_MIST:");
+        expect(template).toContain("WALRUS_EPOCHS:");
+        expect(template).toContain("WALRUS_DELETABLE:");
+        expect(template).toContain("Default: https://fullnode.testnet.sui.io:443");
+        expect(template).toContain("Default: https://upload-relay.testnet.walrus.space");
         expect(template).toContain("SourceArchiverLambdaName:");
         expect(template).toContain("SourceArchiverFunctionUrlOutput:");
         expect(template).toContain("Action: s3:GetObject");
@@ -220,13 +234,17 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             "Resource: !Sub $" + "{RunnerResultBucket.Arn}/source-artifacts/*",
         );
         expect(template).toContain("- !Ref SourceArchiverTokenSecretArn");
-        expect(template).toContain("- !Ref SourceArchiverWalrusEnvSecretArn");
+        expect(template).toContain("- !Ref SourceArchiverPrivateKeySecretArn");
+        expect(template).not.toContain("SourceArchiverWalrusEnvSecretArn:");
+        expect(template).not.toContain("SourceArchiverWalrusLayerArn:");
+        expect(template).not.toContain("SourceArchiverWalrusCliPath:");
+        expect(template).not.toContain("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN:");
+        expect(template).not.toContain("SOURCE_ARCHIVER_WALRUS_CLI:");
 
         const runnerRoleStart = template.indexOf("RunnerRole:");
         const watcherRoleStart = template.indexOf("WatcherLambdaRole:");
         const runnerRole = template.slice(runnerRoleStart, watcherRoleStart);
-        expect(runnerRole).not.toContain("SourceArchiverWalrusEnvSecretArn");
-        expect(runnerRole).not.toContain("SourceArchiverWalrusLayerArn");
+        expect(runnerRole).not.toContain("SourceArchiverPrivateKeySecretArn");
     });
 
     it("configures earthquake enclave egress through a parent CONNECT proxy and local bridge", async () => {

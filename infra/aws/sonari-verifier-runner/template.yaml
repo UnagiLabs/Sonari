@@ -44,26 +44,40 @@ Parameters:
     Type: String
     Default: ""
     Description: Secrets Manager ARN containing the runner-only token accepted by the source archiver Function URL.
-  SourceArchiverWalrusEnvSecretArn:
+  SourceArchiverPrivateKeySecretArn:
     Type: String
     Default: ""
-    Description: Secrets Manager ARN containing JSON environment variables for Walrus CLI store. The secret is read only by the source archiver Lambda.
-  SourceArchiverWalrusLayerArn:
+    Description: Secrets Manager ARN containing only the raw SourceArchiver ED25519 suiprivkey value. The secret is read only by the source archiver Lambda.
+  SourceArchiverSuiNetwork:
     Type: String
-    Default: ""
-    Description: Lambda layer ARN that provides the Walrus CLI binary for the source archiver.
-  SourceArchiverWalrusCliPath:
+    Default: testnet
+    AllowedValues:
+      - mainnet
+      - testnet
+    Description: Sui network used by the SourceArchiver Walrus SDK client.
+  SourceArchiverSuiRpcUrl:
     Type: String
-    Default: /opt/bin/walrus-real
-    Description: Walrus CLI binary path inside the source archiver Lambda runtime.
-  SourceArchiverWalrusStoreTimeoutMs:
+    Default: https://fullnode.testnet.sui.io:443
+    Description: Sui JSON-RPC URL used by the SourceArchiver Walrus SDK client.
+  SourceArchiverWalrusUploadRelayUrl:
+    Type: String
+    Default: https://upload-relay.testnet.walrus.space
+    Description: Walrus upload relay URL used by the SourceArchiver Walrus SDK client.
+  SourceArchiverWalrusUploadRelayTipMaxMist:
     Type: Number
-    Default: 55000
-    Description: Walrus store command timeout for each source artifact.
+    Default: 1000
+    Description: Maximum upload relay tip in MIST for SourceArchiver Walrus SDK writes.
   SourceArchiverWalrusEpochs:
     Type: Number
     Default: 1
-    Description: Walrus store epochs passed to the CLI.
+    Description: Walrus storage epochs passed to the SourceArchiver Walrus SDK write.
+  SourceArchiverWalrusDeletable:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "false"
+      - "true"
+    Description: Whether SourceArchiver Walrus SDK writes should create deletable blob objects.
   NitroEnclaveProcessCommand:
     Type: String
     Default: /opt/sonari/bin/run-sonari-verifier
@@ -195,8 +209,7 @@ Conditions:
   HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
   HasSourceArchiverConfig: !And
     - !Not [!Equals [!Ref SourceArchiverTokenSecretArn, ""]]
-    - !Not [!Equals [!Ref SourceArchiverWalrusEnvSecretArn, ""]]
-    - !Not [!Equals [!Ref SourceArchiverWalrusLayerArn, ""]]
+    - !Not [!Equals [!Ref SourceArchiverPrivateKeySecretArn, ""]]
 
 Resources:
   EventsTable:
@@ -921,7 +934,7 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource:
                   - !Ref SourceArchiverTokenSecretArn
-                  - !Ref SourceArchiverWalrusEnvSecretArn
+                  - !Ref SourceArchiverPrivateKeySecretArn
 
   RunnerStateMachineRole:
     Type: AWS::IAM::Role
@@ -1109,8 +1122,6 @@ Resources:
       Role: !GetAtt SourceArchiverLambdaRole.Arn
       Timeout: 60
       MemorySize: 512
-      Layers:
-        - !Ref SourceArchiverWalrusLayerArn
       Code:
         S3Bucket: !Ref LambdaCodeS3Bucket
         S3Key: !Ref LambdaCodeS3Key
@@ -1118,10 +1129,13 @@ Resources:
         Variables:
           RESULT_BUCKET: !Ref RunnerResultBucket
           SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !Ref SourceArchiverTokenSecretArn
-          SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN: !Ref SourceArchiverWalrusEnvSecretArn
-          SOURCE_ARCHIVER_WALRUS_CLI: !Ref SourceArchiverWalrusCliPath
-          SOURCE_ARCHIVER_WALRUS_TIMEOUT_MS: !Ref SourceArchiverWalrusStoreTimeoutMs
-          SOURCE_ARCHIVER_WALRUS_EPOCHS: !Ref SourceArchiverWalrusEpochs
+          SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN: !Ref SourceArchiverPrivateKeySecretArn
+          SUI_NETWORK: !Ref SourceArchiverSuiNetwork
+          SUI_RPC_URL: !Ref SourceArchiverSuiRpcUrl
+          WALRUS_UPLOAD_RELAY_URL: !Ref SourceArchiverWalrusUploadRelayUrl
+          WALRUS_UPLOAD_RELAY_TIP_MAX_MIST: !Ref SourceArchiverWalrusUploadRelayTipMaxMist
+          WALRUS_EPOCHS: !Ref SourceArchiverWalrusEpochs
+          WALRUS_DELETABLE: !Ref SourceArchiverWalrusDeletable
 
   SourceArchiverFunctionUrl:
     Type: AWS::Lambda::Url

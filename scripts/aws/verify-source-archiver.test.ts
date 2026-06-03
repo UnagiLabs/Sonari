@@ -38,7 +38,7 @@ describe("AWS SourceArchiver verification script", () => {
                 "scheduler:get-schedule:watcher-schedule",
                 "scheduler:get-schedule:batch-schedule",
                 "secretsmanager:get-secret-value:source-archiver-token-secret",
-                "secretsmanager:get-secret-value:source-archiver-walrus-secret",
+                "secretsmanager:get-secret-value:source-archiver-private-key-secret",
                 "s3api:put-object",
                 "lambda:invoke",
                 "logs:filter-log-events:success",
@@ -132,14 +132,8 @@ class RecordingAwsCli implements AwsCli {
                 return { State: "DISABLED" };
             case "secretsmanager:get-secret-value:source-archiver-token-secret":
                 return { SecretString: "source-archiver-token" };
-            case "secretsmanager:get-secret-value:source-archiver-walrus-secret":
-                return {
-                    SecretString: JSON.stringify({
-                        SONARI_WALRUS_CLIENT_CONFIG_YAML: "walrus-secret-config-yaml",
-                        SONARI_SUI_WALLET_CONFIG_YAML: "wallet-secret-config-yaml",
-                        SONARI_SUI_KEYSTORE_JSON: "keystore-secret-json",
-                    }),
-                };
+            case "secretsmanager:get-secret-value:source-archiver-private-key-secret":
+                return { SecretString: "suiprivkey-test-secret-value" };
             case "s3api:put-object":
                 this.putObjectKeys.push(args[args.indexOf("--key") + 1] ?? "");
                 return {};
@@ -177,7 +171,7 @@ class RecordingAwsCli implements AwsCli {
                     events: [
                         {
                             message: this.options.leakSecretInLogs
-                                ? "walrus-secret-config-yaml"
+                                ? "suiprivkey-test-secret-value"
                                 : "source_archiver.walrus_store.success",
                         },
                     ],
@@ -237,12 +231,8 @@ function stackResponse(input: { sourceArchiverConfigured: boolean }): unknown {
                   ParameterValue: "source-archiver-token-secret",
               },
               {
-                  ParameterKey: "SourceArchiverWalrusEnvSecretArn",
-                  ParameterValue: "source-archiver-walrus-secret",
-              },
-              {
-                  ParameterKey: "SourceArchiverWalrusLayerArn",
-                  ParameterValue: "source-archiver-walrus-layer",
+                  ParameterKey: "SourceArchiverPrivateKeySecretArn",
+                  ParameterValue: "source-archiver-private-key-secret",
               },
           ]
         : [
@@ -251,11 +241,7 @@ function stackResponse(input: { sourceArchiverConfigured: boolean }): unknown {
                   ParameterValue: "",
               },
               {
-                  ParameterKey: "SourceArchiverWalrusEnvSecretArn",
-                  ParameterValue: "",
-              },
-              {
-                  ParameterKey: "SourceArchiverWalrusLayerArn",
+                  ParameterKey: "SourceArchiverPrivateKeySecretArn",
                   ParameterValue: "",
               },
           ];
