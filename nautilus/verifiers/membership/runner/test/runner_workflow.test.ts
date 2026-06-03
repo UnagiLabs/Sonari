@@ -748,3 +748,320 @@ function fakeSuiRequest() {
         ] as [string, string, string, string, string, string, number[], number[], number[]],
     };
 }
+
+// STEP 3: attestation → register → process_data flow
+describe("membership runner attestation/register/process_data flow", () => {
+    const fakeAttestationHex = `0x${"ab".repeat(100)}`;
+    const fakePublicKey = `0x${"cc".repeat(32)}`;
+    const fakeRegistrationMetadata = {
+        verifier_config_key: 2,
+        verifier_config_version: 1,
+        enclave_instance_public_key: `0x${"cc".repeat(32)}`,
+    };
+
+    it("dispatches get_attestation command and returns attestation result via S3", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({ commandId: "cmd-attest" });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client({
+                [`results/${job.row.job_id}/${baseNowMs + 2}.json`]: JSON.stringify({
+                    attestation_document_hex: fakeAttestationHex,
+                    public_key: fakePublicKey,
+                }),
+            }),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        const dispatched = await handler({
+            action: "dispatch_get_attestation_command",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+        } as never);
+        expect(dispatched).toMatchObject({
+            job_id: job.row.job_id,
+            instance_id: "i-runner",
+            command_id: "cmd-attest",
+        });
+
+        const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+        expect(sentCommand).toContain('"action":"get_attestation"');
+
+        const attestationResult = await handler({
+            action: "read_attestation_result",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+        } as never);
+        expect(attestationResult).toMatchObject({
+            attestation: {
+                attestation_document_hex: fakeAttestationHex,
+                public_key: fakePublicKey,
+            },
+        });
+    });
+
+    it("register_enclave_instance calls EnclaveRegistrationAdapter with config_key=2 and returns registration_metadata", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const enclaveRegistration = new RecordingEnclaveRegistrationAdapter(
+            fakeRegistrationMetadata,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            enclaveRegistration,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        const result = await handler({
+            action: "register_enclave_instance",
+            job_id: job.row.job_id,
+            attempt: 1,
+            attestation: {
+                attestation_document_hex: fakeAttestationHex,
+                public_key: fakePublicKey,
+            },
+        } as never);
+
+        expect(result).toMatchObject({
+            job_id: job.row.job_id,
+            registration_metadata: {
+                verifier_config_key: 2,
+                verifier_config_version: 1,
+                enclave_instance_public_key: fakePublicKey,
+            },
+        });
+        expect(enclaveRegistration.calls).toHaveLength(1);
+        expect(enclaveRegistration.calls[0]).toMatchObject({
+            attestationDocumentHex: fakeAttestationHex,
+            publicKey: fakePublicKey,
+        });
+    });
+
+    it("register_enclave_instance throws when enclaveRegistration adapter is not configured", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "register_enclave_instance",
+                job_id: job.row.job_id,
+                attempt: 1,
+                attestation: {
+                    attestation_document_hex: fakeAttestationHex,
+                    public_key: fakePublicKey,
+                },
+            } as never),
+        ).rejects.toThrow(/enclave registration is not configured/);
+    });
+
+    it("dispatch_process_data_command injects registration_metadata with verifier_config_key=2 into TEE input", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({ commandId: "cmd-process" });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        const result = await handler({
+            action: "dispatch_process_data_command",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+            registration_metadata: fakeRegistrationMetadata,
+        } as never);
+
+        expect(result).toMatchObject({
+            job_id: job.row.job_id,
+            instance_id: "i-runner",
+            command_id: "cmd-process",
+        });
+
+        const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+        expect(sentCommand).toContain('"action":"process_data"');
+        expect(sentCommand).toContain('"registration_metadata"');
+        expect(sentCommand).toContain('"verifier_config_key":2');
+    });
+
+    it("dispatch_process_data_command validates registration_metadata has verifier_config_key=2", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_process_data_command",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-runner",
+                registration_metadata: {
+                    verifier_config_key: 1, // wrong - should be 2
+                    verifier_config_version: 1,
+                    enclave_instance_public_key: fakePublicKey,
+                },
+            } as never),
+        ).rejects.toThrow(/enclave registration metadata is malformed/);
+    });
+
+    it("full attestation→register→process_data flow returns correct result with verifier_kind preserved", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({
+            commandId: "cmd-attest",
+            invocationStatus: "Success",
+        });
+        const enclaveRegistration = new RecordingEnclaveRegistrationAdapter(
+            fakeRegistrationMetadata,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client({
+                [`results/${job.row.job_id}/${baseNowMs + 2}.json`]: JSON.stringify({
+                    attestation_document_hex: fakeAttestationHex,
+                    public_key: fakePublicKey,
+                }),
+            }),
+            repository,
+            enclaveRegistration,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        // Step 1: dispatch get_attestation
+        const dispatchResult = await handler({
+            action: "dispatch_get_attestation_command",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+        } as never);
+        expect(dispatchResult).toMatchObject({ verifier_kind: "membership_identity" });
+
+        // Step 2: read attestation result
+        const attestResult = await handler({
+            action: "read_attestation_result",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+        } as never);
+        expect(attestResult).toMatchObject({
+            verifier_kind: "membership_identity",
+            attestation: { public_key: fakePublicKey },
+        });
+
+        const attestation =
+            "attestation" in attestResult ? attestResult.attestation : neverAttestation();
+
+        // Step 3: register enclave instance
+        const registerResult = await handler({
+            action: "register_enclave_instance",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            attestation,
+        } as never);
+        expect(registerResult).toMatchObject({
+            verifier_kind: "membership_identity",
+            registration_metadata: { verifier_config_key: 2 },
+        });
+
+        const registrationMetadata =
+            "registration_metadata" in registerResult
+                ? registerResult.registration_metadata
+                : neverMetadata();
+
+        // Step 4: dispatch process_data with registration_metadata
+        const processResult = await handler({
+            action: "dispatch_process_data_command",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+            registration_metadata: registrationMetadata,
+        } as never);
+        expect(processResult).toMatchObject({
+            verifier_kind: "membership_identity",
+            instance_id: "i-runner",
+            command_id: "cmd-attest",
+        });
+
+        const processCommand = ssm.sentCommands.find((c) =>
+            c.shellCommand.includes('"action":"process_data"'),
+        );
+        expect(processCommand).toBeDefined();
+        expect(processCommand?.shellCommand).toContain('"verifier_config_key":2');
+    });
+});
+
+class RecordingEnclaveRegistrationAdapter {
+    readonly calls: Array<{ jobId: string; attestationDocumentHex: string; publicKey: string }> =
+        [];
+
+    constructor(
+        private readonly metadata: {
+            verifier_config_key: number;
+            verifier_config_version: number;
+            enclave_instance_public_key: string;
+        },
+    ) {}
+
+    async register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<typeof this.metadata> {
+        this.calls.push(input);
+        return this.metadata;
+    }
+}
+
+function neverAttestation(): never {
+    throw new Error("expected attestation in result");
+}
+
+function neverMetadata(): never {
+    throw new Error("expected registration_metadata in result");
+}

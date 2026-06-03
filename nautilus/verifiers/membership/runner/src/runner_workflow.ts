@@ -15,11 +15,15 @@ import {
 import { encodeIdentityVerificationResultBcsHex } from "@sonari/membership-verifier-shared";
 import {
     dispatchRunnerCommand,
+    type EnclaveAttestationResult,
+    type EnclaveVerificationMetadata,
     findReadyRunnerInstance,
     MEMBERSHIP_IDENTITY_VERIFIER_KIND,
     parseExpectedVerifierKind,
     pollRunnerCommand,
+    readEnclaveAttestation,
     readRunnerResultText,
+    requireRegistrationMetadata,
     setRunnerDesiredCapacity,
     withVerifierKind,
 } from "@sonari/verifier-contracts";
@@ -118,6 +122,16 @@ export interface SuiSubmissionAdapter {
     ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>>;
 }
 
+export const MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY = 2;
+
+export interface EnclaveRegistrationAdapter {
+    register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata>;
+}
+
 export type MembershipTeeResult = VerifiedMembershipTeeResult | StatusOnlyMembershipTeeResult;
 
 export interface VerifiedMembershipTeeResult extends IdentityVerificationResultFields {
@@ -157,6 +171,31 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
     (
         | { action: "start_instance"; job_id: string; attempt?: number | undefined }
         | { action: "find_ready_instance"; job_id: string; attempt?: number | undefined }
+        | {
+              action: "dispatch_get_attestation_command";
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+          }
+        | {
+              action: "read_attestation_result";
+              job_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
+              action: "register_enclave_instance";
+              job_id: string;
+              attempt?: number | undefined;
+              attestation: EnclaveAttestationResult;
+          }
+        | {
+              action: "dispatch_process_data_command";
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              registration_metadata: EnclaveVerificationMetadata;
+          }
         | {
               action: "dispatch_tee_command";
               job_id: string;
@@ -221,6 +260,16 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               job_id: string;
               attempt?: number | undefined;
+              attestation: EnclaveAttestationResult;
+          }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
+              registration_metadata: EnclaveVerificationMetadata;
+          }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
               instance_id?: string | undefined;
               command_id?: string | undefined;
               result_s3_key?: string | undefined;
@@ -251,6 +300,7 @@ export interface RunnerControlHandlerOptions {
     readonly s3: S3ClientLike;
     readonly repository?: VerificationJobRepository | undefined;
     readonly suiSubmission?: SuiSubmissionAdapter | undefined;
+    readonly enclaveRegistration?: EnclaveRegistrationAdapter | undefined;
     readonly now?: (() => number) | undefined;
     readonly config: RunnerWorkflowConfig;
 }
@@ -297,6 +347,99 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     job_id: event.job_id,
                     attempt: event.attempt,
                     instance_id: instanceId,
+                });
+            }
+            case "dispatch_get_attestation_command": {
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, true);
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.job_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs: nowMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            jobId: event.job_id,
+                            requestJson: JSON.stringify({ action: "get_attestation" }),
+                            dispatchTimestampMs: nowMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, true);
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
+            }
+            case "read_attestation_result": {
+                await requireCurrentWorkflowAttempt(options, event, true);
+                const text = await readRunnerResultText(options.s3, {
+                    bucket: options.config.resultBucket,
+                    key: event.result_s3_key,
+                });
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    attestation: readEnclaveAttestation(JSON.parse(text) as unknown),
+                });
+            }
+            case "register_enclave_instance": {
+                const registrar = options.enclaveRegistration;
+                if (registrar === undefined) {
+                    throw new Error("enclave registration is not configured");
+                }
+                const attestation = readEnclaveAttestation(event.attestation);
+                await requireCurrentWorkflowAttempt(options, event, true);
+                const registered = requireRegistrationMetadata(
+                    await registrar.register({
+                        jobId: event.job_id,
+                        attestationDocumentHex: attestation.attestation_document_hex,
+                        publicKey: attestation.public_key,
+                    }),
+                    MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY,
+                );
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    registration_metadata: registered,
+                });
+            }
+            case "dispatch_process_data_command": {
+                const nowMs = options.now?.() ?? Date.now();
+                const row = await requireCurrentWorkflowAttempt(options, event, true);
+                const requestJson = readValidatedRequestJson(row);
+                const registrationMetadata = requireRegistrationMetadata(
+                    event.registration_metadata,
+                    MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY,
+                );
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.job_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs: nowMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            jobId: event.job_id,
+                            requestJson,
+                            dispatchTimestampMs: nowMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                            registrationMetadata,
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, true);
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
                 });
             }
             case "dispatch_tee_command": {
@@ -725,11 +868,20 @@ function buildSsmShellCommand(input: {
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
+    registrationMetadata?: EnclaveVerificationMetadata | undefined;
 }): string {
     const tempResultPath = `/tmp/sonari-membership-tee-result-${input.jobId}-${input.dispatchTimestampMs}.json`;
     const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
         .map(shellSingleQuote)
         .join(" ");
+    const teeInput =
+        input.registrationMetadata === undefined
+            ? input.requestJson
+            : JSON.stringify({
+                  action: "process_data",
+                  payload: JSON.parse(input.requestJson) as unknown,
+                  registration_metadata: input.registrationMetadata,
+              });
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
@@ -748,7 +900,7 @@ function buildSsmShellCommand(input: {
         'test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"',
         "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_ENCLAVE_STDIO_BRIDGE SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
-        `printf '%s' ${shellSingleQuote(input.requestJson)} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
+        `printf '%s' ${shellSingleQuote(teeInput)} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
