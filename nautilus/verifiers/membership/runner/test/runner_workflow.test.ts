@@ -171,9 +171,8 @@ describe("membership runner workflow", () => {
         expect(readiness).toContain("SONARI_WORLD_ID_APP_ID is required");
         expect(readiness).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required");
         expect(readiness).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS is required");
-        expect(readiness).toContain("SONARI_ENCLAVE_STDIO_BRIDGE is required");
+        expect(readiness).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID is required");
         expect(readiness).toContain('test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"');
-        expect(readiness).toContain('test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"');
         expect(readiness).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
     });
 
@@ -216,7 +215,7 @@ describe("membership runner workflow", () => {
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
         );
         expect(command).toContain(
-            "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_ENCLAVE_STDIO_BRIDGE SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+            "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         );
         expect(command).toContain(
             `printf '%s' ${shellSingleQuote(row?.request_json ?? "")} | '/opt/sonari/bin/run-membership-identity-enclave'`,
@@ -560,14 +559,11 @@ describe("membership runner workflow", () => {
         expect(template).toContain("{TeeEifS3Key}'");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
-        expect(template).toContain(
-            "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
-        );
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
         expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
         expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
         expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
-        expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
         expect(template).toContain("systemctl enable --now sonari-world-id-vsock-proxy.service");
         expect(template).toContain(
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
@@ -575,6 +571,90 @@ describe("membership runner workflow", () => {
         expect(template).toContain("SONARI_WORLD_ID_UPSTREAM_API_BASE");
         expect(template).toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
         expect(template).toContain("touch /opt/sonari/bootstrap-complete");
+    });
+    // STEP 4: VSOCK server request dispatch
+    describe("membership runner VSOCK server dispatch", () => {
+        it("run-membership-identity-enclave routes stdin action to VSOCK /get_attestation and /process_data endpoints", async () => {
+            const template = await readFile(
+                new URL(
+                    "../../../../../infra/aws/membership-identity-runner/template.yaml",
+                    import.meta.url,
+                ),
+                "utf8",
+            );
+
+            // The wrapper script must route get_attestation to /get_attestation and
+            // process_data to /process_data via VSOCK-CONNECT (socat/equivalent).
+            expect(template).toContain("/get_attestation");
+            expect(template).toContain("/process_data");
+            expect(template).toContain("VSOCK-CONNECT");
+            expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
+        });
+
+        it("dispatch_get_attestation_command sends action=get_attestation via stdin to the enclave wrapper", async () => {
+            const repository = new InMemoryVerificationJobRepository();
+            const job = await repository.upsertRequest(validRequest(), baseNowMs);
+            await repository.claimNextDue(baseNowMs + 1);
+            const ssm = new RecordingSsmClient({ commandId: "cmd-attest-4" });
+            const handler = createRunnerControlHandler({
+                autoscaling: new RecordingAutoScalingClient(),
+                ec2: new RecordingEc2Client(),
+                ssm,
+                s3: new RecordingS3Client(),
+                repository,
+                now: () => baseNowMs + 2,
+                config: baseConfig(),
+            });
+
+            await handler({
+                action: "dispatch_get_attestation_command",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-runner",
+            } as never);
+
+            const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+            // Must send {"action":"get_attestation"} to the wrapper (stdin)
+            expect(sentCommand).toContain('"action":"get_attestation"');
+            // one-shot subprocess stdin passthrough (raw requestJson) must not remain
+            expect(sentCommand).not.toContain("nitroEnclaveProcessCommand");
+        });
+
+        it("dispatch_process_data_command sends action=process_data with registration_metadata via stdin", async () => {
+            const repository = new InMemoryVerificationJobRepository();
+            const job = await repository.upsertRequest(validRequest(), baseNowMs);
+            await repository.claimNextDue(baseNowMs + 1);
+            const fakeRegistrationMetadata = {
+                verifier_config_key: 2,
+                verifier_config_version: 1,
+                enclave_instance_public_key: `0x${"cc".repeat(32)}`,
+            };
+            const ssm = new RecordingSsmClient({ commandId: "cmd-process-4" });
+            const handler = createRunnerControlHandler({
+                autoscaling: new RecordingAutoScalingClient(),
+                ec2: new RecordingEc2Client(),
+                ssm,
+                s3: new RecordingS3Client(),
+                repository,
+                now: () => baseNowMs + 2,
+                config: baseConfig(),
+            });
+
+            await handler({
+                action: "dispatch_process_data_command",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-runner",
+                registration_metadata: fakeRegistrationMetadata,
+            } as never);
+
+            const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+            expect(sentCommand).toContain('"action":"process_data"');
+            expect(sentCommand).toContain('"registration_metadata"');
+            expect(sentCommand).toContain('"verifier_config_key":2');
+            // one-shot subprocess stdin passthrough (raw requestJson) must not remain
+            expect(sentCommand).not.toContain("nitroEnclaveProcessCommand");
+        });
     });
 });
 

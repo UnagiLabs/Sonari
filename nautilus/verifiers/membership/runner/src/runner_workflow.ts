@@ -359,7 +359,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             jobId: event.job_id,
-                            requestJson: JSON.stringify({ action: "get_attestation" }),
+                            teeInput: { action: "get_attestation" },
                             dispatchTimestampMs: nowMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -424,12 +424,15 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             jobId: event.job_id,
-                            requestJson,
+                            teeInput: {
+                                action: "process_data",
+                                payload: JSON.parse(requestJson) as unknown,
+                                registration_metadata: registrationMetadata,
+                            },
                             dispatchTimestampMs: nowMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
                             nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
-                            registrationMetadata,
                         }),
                 });
                 await requireCurrentWorkflowAttempt(options, event, true);
@@ -453,7 +456,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             jobId: event.job_id,
-                            requestJson,
+                            teeInput: JSON.parse(requestJson) as unknown,
                             dispatchTimestampMs: nowMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -863,25 +866,17 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
 
 function buildSsmShellCommand(input: {
     jobId: string;
-    requestJson: string;
+    teeInput: unknown;
     dispatchTimestampMs: number;
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
-    registrationMetadata?: EnclaveVerificationMetadata | undefined;
 }): string {
     const tempResultPath = `/tmp/sonari-membership-tee-result-${input.jobId}-${input.dispatchTimestampMs}.json`;
     const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
         .map(shellSingleQuote)
         .join(" ");
-    const teeInput =
-        input.registrationMetadata === undefined
-            ? input.requestJson
-            : JSON.stringify({
-                  action: "process_data",
-                  payload: JSON.parse(input.requestJson) as unknown,
-                  registration_metadata: input.registrationMetadata,
-              });
+    const teeInput = input.teeInput;
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
@@ -891,16 +886,15 @@ function buildSsmShellCommand(input: {
         buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_KMS_KEY_ID"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
-        buildRequiredShellEnvCheck("SONARI_ENCLAVE_STDIO_BRIDGE"),
+        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
         'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        'test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"',
-        "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_ENCLAVE_STDIO_BRIDGE SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+        "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
-        `printf '%s' ${shellSingleQuote(teeInput)} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
@@ -915,13 +909,12 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_KMS_KEY_ID"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
-        buildRequiredShellEnvCheck("SONARI_ENCLAVE_STDIO_BRIDGE"),
+        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
         'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        'test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"',
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
         "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
     ].join("\n");
