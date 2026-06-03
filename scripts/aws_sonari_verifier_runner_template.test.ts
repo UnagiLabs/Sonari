@@ -285,6 +285,57 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("walrus_upload_relay_host");
     });
 
+    it("keeps the earthquake CONNECT proxy and vsock-proxy egress lines unchanged", async () => {
+        const template = await readTemplate();
+
+        // The earthquake egress path (CONNECT proxy on 18081, vsock-proxy 18080 ->
+        // 127.0.0.1:18081, usgs.gov allowlist) must remain byte-for-byte stable so
+        // STEP 2's World ID egress unification never perturbs the earthquake route.
+        expect(template).toContain(
+            "ExecStart=/opt/sonari/bin/sonari-earthquake-egress-connect-proxy --listen-port 18081 --allowlist-file /opt/sonari/earthquake-egress-allowlist",
+        );
+        expect(template).toContain("ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081");
+        expect(template).toContain(
+            "printf '%s\\n' \"earthquake.usgs.gov:443\" >/opt/sonari/earthquake-egress-allowlist",
+        );
+        // Exactly one earthquake CONNECT proxy and one earthquake vsock proxy unit.
+        expect(
+            template.match(/sonari-earthquake-egress-connect-proxy\.service/g)?.length ?? 0,
+        ).toBeGreaterThanOrEqual(1);
+        expect(
+            template.match(/ExecStart=\$vsock_proxy_path 18080 127\.0\.0\.1 18081/g)?.length ?? 0,
+        ).toBe(1);
+    });
+
+    it("routes World ID egress through https plus the shared egress proxy, not a localhost http base", async () => {
+        const template = await readTemplate();
+
+        // The membership TEE pins the World ID API base to https://developer.world.org
+        // (#128). The host must hand the canonical https base straight to the enclave
+        // and steer the TCP connection through the egress proxy, exactly like the
+        // earthquake egress model -- never a host-controlled http://127.0.0.1 base.
+        expect(template).not.toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
+        expect(template).not.toContain("http://127.0.0.1:8000");
+        expect(template).toContain(
+            "printf 'SONARI_WORLD_ID_API_BASE=%q\\n' \"$world_id_api_base\"",
+        );
+        // The canonical https base must keep its https scheme on the wire.
+        expect(template).toContain("Default: https://developer.world.org");
+        // World ID HTTPS traffic is forwarded through the same explicit egress proxy
+        // as earthquake (http://127.0.0.1:18080), whose host-side allowlist gates the
+        // destination -- the host never opens a separate localhost World ID tunnel.
+        expect(template).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        // The World ID API host is appended to the shared egress allowlist so the
+        // CONNECT proxy permits exactly the canonical World ID destination on 443.
+        expect(template).toContain(
+            "printf '%s\\n' \"$world_id_api_host:443\" >>/opt/sonari/earthquake-egress-allowlist",
+        );
+        // The legacy host-controlled localhost World ID tunnel (vsock-proxy 8000 ->
+        // host:443) and its upstream-base env are gone; egress is unified on the proxy.
+        expect(template).not.toContain("SONARI_WORLD_ID_UPSTREAM_API_BASE");
+        expect(template).not.toContain("$vsock_proxy_path 8000 $world_id_api_host 443");
+    });
+
     it("retains membership World ID, EIF, KMS attestation, and ciphertext configuration", async () => {
         const template = await readTemplate();
 

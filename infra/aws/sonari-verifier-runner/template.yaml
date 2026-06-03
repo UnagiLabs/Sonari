@@ -657,6 +657,7 @@ Resources:
             SONARI_EARTHQUAKE_CONNECT_PROXY
             chmod 0500 /opt/sonari/bin/sonari-earthquake-egress-connect-proxy
             printf '%s\n' "earthquake.usgs.gov:443" >/opt/sonari/earthquake-egress-allowlist
+            printf '%s\n' "$world_id_api_host:443" >>/opt/sonari/earthquake-egress-allowlist
             if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
               printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
             fi
@@ -709,17 +710,17 @@ Resources:
               systemctl daemon-reload
               systemctl enable --now sonari-world-id-vsock-proxy.service
             else
-              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
+              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<'SONARI_VSOCK_PROXY'
             [Unit]
-            Description=Sonari World ID API vsock proxy for membership identity enclave
-            After=network-online.target nitro-enclaves-allocator.service
-            Wants=network-online.target nitro-enclaves-allocator.service
+            Description=Sonari World ID egress readiness gate bound to the shared egress vsock proxy
+            After=sonari-earthquake-egress-vsock-proxy.service
+            Wants=sonari-earthquake-egress-vsock-proxy.service
+            BindsTo=sonari-earthquake-egress-vsock-proxy.service
 
             [Service]
-            Type=simple
-            Restart=always
-            RestartSec=2
-            ExecStart=$vsock_proxy_path 8000 $world_id_api_host 443
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/bin/true
 
             [Install]
             WantedBy=multi-user.target
@@ -742,8 +743,8 @@ Resources:
               echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
-              printf 'SONARI_WORLD_ID_UPSTREAM_API_BASE=%q\n' "$world_id_api_base"
-              echo "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000"
+              printf 'SONARI_WORLD_ID_API_BASE=%q\n' "$world_id_api_base"
+              echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
               printf 'SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$membership_command"
