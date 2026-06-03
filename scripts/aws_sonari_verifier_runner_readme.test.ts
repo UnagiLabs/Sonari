@@ -147,6 +147,40 @@ describe("AWS Sonari verifier runner README", () => {
         expectAdminCallIncludesSender(readme, "disable_earthquake_verifier_config");
     });
 
+    it("documents existing AdminCap-gated membership identity PCR config entrypoints", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "admin::create_identity_verifier_config",
+            "admin::update_identity_verifier_config_pcrs",
+            "admin::disable_identity_verifier_config",
+        ]);
+    });
+
+    it("documents membership identity EIF PCR extraction and Move byte-vector format", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "pnpm build:aws-membership-identity-eif",
+            "### Membership Identity EIF PCRs",
+            "nitro-cli describe-eif",
+        ]);
+    });
+
+    it("documents membership identity AdminCap PCR transactions and register/update semantics", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "--function create_identity_verifier_config",
+            "--function update_identity_verifier_config_pcrs",
+            "--function disable_identity_verifier_config",
+            "全部 dry-run は登録済み enclave state を要するため不可",
+        ]);
+        expectAdminCallIncludesSender(readme, "create_identity_verifier_config");
+        expectAdminCallIncludesSender(readme, "update_identity_verifier_config_pcrs");
+        expectAdminCallIncludesSender(readme, "disable_identity_verifier_config");
+    });
+
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
         const readme = await readReadme();
 
