@@ -72,13 +72,48 @@ impl std::error::Error for HandlerError {}
 
 /// Output a [`ProcessDataHandler`] produces for a single request.
 ///
-/// `payload_bcs` are the canonical bytes the server will sign; `result_json`
-/// is the display/result envelope returned to the caller. The handler does not
-/// sign, attest, perform I/O, or inject registration metadata.
+/// The variant encodes whether the server must sign the result, removing the
+/// historical "empty `payload_bcs` means do not sign" sentinel:
+///
+/// * [`ProcessOutput::Signable`] carries the canonical `payload_bcs` the server
+///   signs plus the `result_json` envelope. A finalized result MUST use this
+///   variant so the server cannot fail open by returning an unsigned 200.
+/// * [`ProcessOutput::Unsigned`] carries only the `result_json` envelope for
+///   non-finalized results (pending / rejected) that are never signed.
+///
+/// The handler never signs, attests, performs I/O, or injects registration
+/// metadata; it only chooses the variant that matches the result.
 #[derive(Debug, Clone)]
-pub struct ProcessOutput {
-    pub payload_bcs: Vec<u8>,
-    pub result_json: serde_json::Value,
+pub enum ProcessOutput {
+    /// Result that is returned verbatim without a signature.
+    Unsigned { result_json: serde_json::Value },
+    /// Result whose `payload_bcs` the server must sign before responding.
+    Signable {
+        payload_bcs: Vec<u8>,
+        result_json: serde_json::Value,
+    },
+}
+
+impl ProcessOutput {
+    /// Builds a non-finalized output the server returns without signing.
+    pub fn unsigned(result_json: serde_json::Value) -> Self {
+        Self::Unsigned { result_json }
+    }
+
+    /// Builds a finalized output whose `payload_bcs` the server must sign.
+    pub fn signable(payload_bcs: Vec<u8>, result_json: serde_json::Value) -> Self {
+        Self::Signable {
+            payload_bcs,
+            result_json,
+        }
+    }
+
+    /// Borrows the result envelope regardless of variant.
+    pub fn result_json(&self) -> &serde_json::Value {
+        match self {
+            Self::Unsigned { result_json } | Self::Signable { result_json, .. } => result_json,
+        }
+    }
 }
 
 /// Verifier-specific request processing contract.
@@ -154,13 +189,13 @@ mod tests {
             if input.is_empty() {
                 return Err(HandlerError::new("EMPTY_INPUT", "input was empty"));
             }
-            Ok(ProcessOutput {
-                payload_bcs: input.to_vec(),
-                result_json: serde_json::json!({
+            Ok(ProcessOutput::signable(
+                input.to_vec(),
+                serde_json::json!({
                     "proxy": ctx.get("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
                     "len": input.len(),
                 }),
-            })
+            ))
         }
     }
 
@@ -185,12 +220,39 @@ mod tests {
 
         let output = handler.process(b"abc", &ctx).unwrap();
 
-        assert_eq!(output.payload_bcs, b"abc");
-        assert_eq!(output.result_json.get("len").unwrap(), 3);
+        let ProcessOutput::Signable {
+            payload_bcs,
+            result_json,
+        } = output
+        else {
+            panic!("echo handler must emit a signable output");
+        };
+        assert_eq!(payload_bcs, b"abc");
+        assert_eq!(result_json.get("len").unwrap(), 3);
         assert_eq!(
-            output.result_json.get("proxy").and_then(|v| v.as_str()),
+            result_json.get("proxy").and_then(|v| v.as_str()),
             Some("http://proxy:8080")
         );
+    }
+
+    #[test]
+    fn process_output_variants_expose_result_json_and_carry_signing_intent() {
+        let unsigned = ProcessOutput::unsigned(serde_json::json!({"status": "pending_source"}));
+        assert!(matches!(unsigned, ProcessOutput::Unsigned { .. }));
+        assert_eq!(unsigned.result_json()["status"], "pending_source");
+
+        let signable =
+            ProcessOutput::signable(vec![0x01, 0x02], serde_json::json!({"status": "finalized"}));
+        let ProcessOutput::Signable {
+            payload_bcs,
+            result_json,
+        } = &signable
+        else {
+            panic!("signable constructor must build a signable variant");
+        };
+        assert_eq!(payload_bcs, &vec![0x01, 0x02]);
+        assert_eq!(result_json["status"], "finalized");
+        assert_eq!(signable.result_json()["status"], "finalized");
     }
 
     #[test]

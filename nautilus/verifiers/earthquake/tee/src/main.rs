@@ -148,18 +148,19 @@ fn production_result(
     // Validate the raw worker request shape before any network fetch so callers
     // get the same early errors as before delegating to the handler.
     let _ = tee::WorkerToTeeRequest::from_json_value(request_json.clone())?;
-    let handler = EarthquakeProcessHandler::new();
+    let handler = earthquake_handler_from_env();
     let output = handler
         .process(&serde_json::to_vec(&request_json)?, &tee_context_from_env())
         .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
     let signer = LocalEd25519Signer::new(seed);
-    Ok(finalize_process_output(output, &signer, None))
+    finalize_process_output(output, &signer, None)
 }
 
 #[derive(Clone)]
 struct EnclaveState {
     signing_key_seed: [u8; 32],
     ctx: TeeContext,
+    archive_config: Option<WalrusCliSourceArchiveConfig>,
 }
 
 fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -167,9 +168,12 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
     if !args.skip_bootstrap {
         receive_bootstrap_config(args.bootstrap_port)?;
     }
+    // Resolve env-derived configuration once at startup (orchestration layer)
+    // so per-request handlers never read the process environment.
     let state = EnclaveState {
         signing_key_seed,
         ctx: tee_context_from_env(),
+        archive_config: WalrusCliSourceArchiveConfig::from_env().ok(),
     };
     let listener = VsockListener::bind(args.port)?;
     eprintln!(
@@ -199,6 +203,21 @@ fn tee_context_from_env() -> TeeContext {
     }
 }
 
+/// Builds an earthquake handler with the Walrus archive configuration resolved
+/// from the bootstrap-populated environment in this orchestration layer.
+///
+/// Reading the environment here (rather than inside the handler's `process`
+/// path) keeps env access confined to bootstrap/orchestration. The config is
+/// only required to finalize a request; if it cannot be resolved (e.g. the
+/// shard count is absent on a non-finalized path) the handler is built without
+/// it and fails closed only when a finalized result actually needs to archive.
+fn earthquake_handler_from_env() -> EarthquakeProcessHandler {
+    match WalrusCliSourceArchiveConfig::from_env() {
+        Ok(config) => EarthquakeProcessHandler::with_archive_config(config),
+        Err(_) => EarthquakeProcessHandler::new(),
+    }
+}
+
 /// Routes a single enclave request, owning signing, attestation, and
 /// registration-metadata injection so the handler stays domain-only.
 fn route_request(
@@ -215,15 +234,18 @@ fn route_request(
             ))
         }
         ("POST", "/process_data") => {
-            let envelope: ProcessDataEnvelope = serde_json::from_slice(&request.body)?;
-            let handler = EarthquakeProcessHandler::new();
+            let envelope = parse_process_data_envelope(&request.body)?;
+            let handler = match state.archive_config.clone() {
+                Some(config) => EarthquakeProcessHandler::with_archive_config(config),
+                None => EarthquakeProcessHandler::new(),
+            };
             let output = handler
                 .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
             let signer = LocalEd25519Signer::new(state.signing_key_seed);
             Ok((
                 200,
-                finalize_process_output(output, &signer, Some(envelope.registration_metadata)),
+                finalize_process_output(output, &signer, Some(envelope.registration_metadata))?,
             ))
         }
         _ => Ok((
@@ -233,29 +255,71 @@ fn route_request(
     }
 }
 
+/// Action tag the worker sets on the `/process_data` request body.
+const PROCESS_DATA_ACTION: &str = "process_data";
+
 /// Worker-supplied `process_data` request envelope.
+///
+/// The outer body wire shape is `{action, payload, registration_metadata}`
+/// (see `scripts/aws/shared.ts::buildEarthquakeWrapperInput`). `deny_unknown_fields`
+/// rejects any extra field and a missing `action` is rejected by serde, so the
+/// route fails closed on malformed envelopes instead of silently dropping
+/// unexpected input.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProcessDataEnvelope {
+    action: String,
     payload: serde_json::Value,
     registration_metadata: EnclaveRegistrationMetadata,
 }
 
-/// Server-owned finalization: signs the handler's `payload_bcs` and injects the
-/// registration metadata into the result envelope, preserving byte order.
+/// Parses and validates the `/process_data` request body, rejecting unknown
+/// fields and any `action` other than [`PROCESS_DATA_ACTION`] (fail-closed).
+fn parse_process_data_envelope(
+    body: &[u8],
+) -> Result<ProcessDataEnvelope, Box<dyn std::error::Error>> {
+    let envelope: ProcessDataEnvelope = serde_json::from_slice(body)?;
+    if envelope.action != PROCESS_DATA_ACTION {
+        return Err(format!(
+            "unexpected /process_data action `{}`; expected `{PROCESS_DATA_ACTION}`",
+            envelope.action
+        )
+        .into());
+    }
+    Ok(envelope)
+}
+
+/// Server-owned finalization: signs a [`ProcessOutput::Signable`] payload and
+/// injects the registration metadata into the result envelope, preserving byte
+/// order. [`ProcessOutput::Unsigned`] envelopes are returned verbatim.
 ///
-/// For finalized results the handler emits empty `signature` / `public_key`
-/// placeholders; overwriting those existing keys keeps their canonical position
-/// because `serde_json` preserves key order. Registration metadata is appended
-/// last, matching the historical flattened layout.
+/// The handler emits the [`ProcessOutput::Signable`] variant for finalized
+/// results with empty `signature` / `public_key` placeholders; overwriting those
+/// existing keys keeps their canonical position because `serde_json` preserves
+/// key order. Registration metadata is appended last, matching the historical
+/// flattened layout. A finalized result that lacks a non-empty signable payload
+/// is rejected upstream in `process_output_from_oracle`, so a signable result
+/// always carries signing bytes here (fail-closed).
 fn finalize_process_output<S: PayloadSigner>(
     output: ProcessOutput,
     signer: &S,
     registration_metadata: Option<EnclaveRegistrationMetadata>,
-) -> serde_json::Value {
-    let mut result = output.result_json;
-    if !output.payload_bcs.is_empty() {
-        let signature = signer.sign_payload(&output.payload_bcs);
-        if let Some(object) = result.as_object_mut() {
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    match output {
+        ProcessOutput::Unsigned { result_json } => Ok(result_json),
+        ProcessOutput::Signable {
+            payload_bcs,
+            mut result_json,
+        } => {
+            if payload_bcs.is_empty() {
+                return Err(
+                    "signable process output must carry non-empty BCS payload to sign".into(),
+                );
+            }
+            let object = result_json
+                .as_object_mut()
+                .ok_or("signable process output result must be a JSON object")?;
+            let signature = signer.sign_payload(&payload_bcs);
             object.insert(
                 "signature".to_owned(),
                 serde_json::Value::String(signature.signature),
@@ -267,9 +331,9 @@ fn finalize_process_output<S: PayloadSigner>(
             if let Some(metadata) = registration_metadata {
                 inject_registration_metadata(object, &metadata);
             }
+            Ok(result_json)
         }
     }
-    result
 }
 
 fn inject_registration_metadata(
@@ -362,16 +426,12 @@ fn production_action_result(
             registration_metadata,
         } => {
             let seed = strict_signing_key_seed(signing_key_seed)?;
-            let handler = EarthquakeProcessHandler::new();
+            let handler = earthquake_handler_from_env();
             let output = handler
                 .process(&serde_json::to_vec(&payload)?, &tee_context_from_env())
                 .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
             let signer = LocalEd25519Signer::new(seed);
-            Ok(finalize_process_output(
-                output,
-                &signer,
-                Some(registration_metadata),
-            ))
+            finalize_process_output(output, &signer, Some(registration_metadata))
         }
     }
 }
@@ -668,10 +728,7 @@ mod tests {
                 entries: Vec::new(),
             },
         };
-        ProcessOutput {
-            payload_bcs: vec![0x01],
-            result_json: serde_json::to_value(&result).unwrap(),
-        }
+        ProcessOutput::signable(vec![0x01], serde_json::to_value(&result).unwrap())
     }
 
     #[test]
@@ -737,7 +794,8 @@ mod tests {
             enclave_instance_public_key: format!("0x{}", "77".repeat(32)),
         };
 
-        let value = finalize_process_output(finalized_process_output(), &signer, Some(metadata));
+        let value = finalize_process_output(finalized_process_output(), &signer, Some(metadata))
+            .expect("signable output should finalize");
 
         let object = value.as_object().expect("result should be an object");
         // signature / public_key keep their canonical position (no reordering);
@@ -767,18 +825,202 @@ mod tests {
     #[test]
     fn finalize_process_output_leaves_non_finalized_result_unsigned() {
         let signer = LocalEd25519Signer::new([7u8; 32]);
-        let output = ProcessOutput {
-            payload_bcs: Vec::new(),
-            result_json: serde_json::json!({
-                "status": "pending_source",
-                "source_event_id": "us7000abcd",
-                "error_code": "USGS_DETAIL_UNAVAILABLE",
-            }),
-        };
+        let output = ProcessOutput::unsigned(serde_json::json!({
+            "status": "pending_source",
+            "source_event_id": "us7000abcd",
+            "error_code": "USGS_DETAIL_UNAVAILABLE",
+        }));
 
-        let value = finalize_process_output(output, &signer, None);
+        let value =
+            finalize_process_output(output, &signer, None).expect("unsigned output is verbatim");
 
         assert_eq!(value["status"], "pending_source");
         assert!(value.get("signature").is_none());
+    }
+
+    #[test]
+    fn finalize_process_output_rejects_signable_output_with_empty_payload() {
+        let signer = LocalEd25519Signer::new([7u8; 32]);
+        // A signable output with no bytes to sign is a contract violation; the
+        // server must fail closed rather than emit an unsigned 200.
+        let output = ProcessOutput::signable(
+            Vec::new(),
+            serde_json::json!({
+                "status": "finalized",
+                "signature": "",
+                "public_key": "",
+            }),
+        );
+
+        let error = finalize_process_output(output, &signer, None)
+            .expect_err("empty signable payload must fail closed");
+
+        assert!(
+            error.to_string().contains("non-empty BCS payload"),
+            "error: {error}"
+        );
+    }
+
+    /// Mirrors the real wire body produced by
+    /// `scripts/aws/shared.ts::buildEarthquakeWrapperInput`.
+    fn process_data_wire_body() -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "action": "process_data",
+            "payload": {
+                "source_event_id": "us7000sonari",
+                "hazard_type": 1,
+                "primary_source": 1,
+                "geo_resolution": 7,
+            },
+            "registration_metadata": {
+                "verifier_config_key": 1,
+                "verifier_config_version": 10,
+                "enclave_instance_public_key": format!("0x{}", "77".repeat(32)),
+            },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn parse_process_data_envelope_accepts_real_wire_body() {
+        let envelope = parse_process_data_envelope(&process_data_wire_body())
+            .expect("the real wire body must be accepted unchanged");
+
+        assert_eq!(envelope.action, "process_data");
+        assert_eq!(envelope.payload["source_event_id"], "us7000sonari");
+        assert_eq!(envelope.registration_metadata.verifier_config_key, 1);
+        assert_eq!(envelope.registration_metadata.verifier_config_version, 10);
+    }
+
+    #[test]
+    fn parse_process_data_envelope_rejects_unknown_field() {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&process_data_wire_body()).unwrap();
+        body.as_object_mut()
+            .unwrap()
+            .insert("rogue".to_owned(), serde_json::json!("x"));
+
+        let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+            .expect_err("unknown outer field must be rejected");
+
+        assert!(
+            error.to_string().contains("rogue") || error.to_string().contains("unknown field"),
+            "error: {error}"
+        );
+    }
+
+    #[test]
+    fn parse_process_data_envelope_rejects_missing_action() {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&process_data_wire_body()).unwrap();
+        body.as_object_mut().unwrap().remove("action");
+
+        let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+            .expect_err("missing action must be rejected");
+
+        assert!(error.to_string().contains("action"), "error: {error}");
+    }
+
+    #[test]
+    fn parse_process_data_envelope_rejects_wrong_action() {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&process_data_wire_body()).unwrap();
+        body.as_object_mut()
+            .unwrap()
+            .insert("action".to_owned(), serde_json::json!("get_attestation"));
+
+        let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+            .expect_err("an unexpected action must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("unexpected /process_data action"),
+            "error: {error}"
+        );
+    }
+
+    const E2E_SEED: [u8; 32] = [7u8; 32];
+    const E2E_FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
+
+    fn e2e_finalized_input() -> tee::UsgsOracleInput {
+        let detail_json = fs::read(format!("{E2E_FIXTURE_DIR}/input/usgs_detail.json"))
+            .expect("fixture detail should be readable");
+        let observed_at_ms = serde_json::from_slice::<serde_json::Value>(&detail_json)
+            .unwrap()
+            .get("properties")
+            .and_then(|p| p.get("updated"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap();
+        let grid = fs::read(format!("{E2E_FIXTURE_DIR}/input/usgs_grid.xml"))
+            .expect("fixture grid should be readable");
+        tee::UsgsOracleInput {
+            case_id: "usgs/finalized_minimal".to_owned(),
+            detail_json,
+            grid_xml: Some(grid.clone()),
+            raw_grid_bytes: Some(grid),
+            observed_at_ms,
+            raw_detail_uri:
+                "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
+                    .to_owned(),
+            raw_grid_uri: Some(
+                "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
+                    .to_owned(),
+            ),
+            raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
+            affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json"
+                .to_owned(),
+        }
+    }
+
+    fn e2e_registration_metadata() -> EnclaveRegistrationMetadata {
+        EnclaveRegistrationMetadata {
+            verifier_config_key: 1,
+            verifier_config_version: 10,
+            enclave_instance_public_key: format!("0x{}", "77".repeat(32)),
+        }
+    }
+
+    /// Drives the new handler+server finalization path end-to-end (fixture
+    /// detail/grid, fixed seed, fixed registration metadata) and pins the exact
+    /// serialized JSON bytes so any future wire drift in the
+    /// `process_output_from_oracle` -> `finalize_process_output` path is caught.
+    #[test]
+    fn finalized_server_path_serialized_bytes_are_byte_stable() {
+        let oracle_output =
+            tee::process_usgs(e2e_finalized_input()).expect("fixture should finalize");
+        let process_output = tee::server::process_output_from_oracle(oracle_output)
+            .expect("finalized conversion should succeed");
+        let signer = LocalEd25519Signer::new(E2E_SEED);
+
+        let value =
+            finalize_process_output(process_output, &signer, Some(e2e_registration_metadata()))
+                .expect("finalized output should sign");
+        let serialized = serde_json::to_string(&value).expect("result should serialize");
+
+        let golden = include_str!("testdata/finalized_server_path.golden.json").trim_end();
+        assert_eq!(
+            serialized, golden,
+            "finalized server-path bytes drifted from golden vector"
+        );
+    }
+
+    /// Pins the `get_attestation` response JSON for a fixed seed and document so
+    /// the route's wire shape, key order, and seed-derived public key stay
+    /// byte-stable across refactors.
+    #[test]
+    fn get_attestation_response_bytes_are_byte_stable_for_fixed_seed() {
+        let document = [0xABu8, 0xCD, 0xEF];
+        let signer = LocalEd25519Signer::new(E2E_SEED);
+        let signature = signer.sign_payload(ATTESTATION_PUBLIC_KEY_LABEL);
+        let value =
+            sonari_tee_core::enclave::attestation_response_json(&document, &signature.public_key);
+        let serialized = serde_json::to_string(&value).expect("attestation should serialize");
+
+        let golden = include_str!("testdata/get_attestation.golden.json").trim_end();
+        assert_eq!(
+            serialized, golden,
+            "get_attestation bytes drifted from golden vector"
+        );
     }
 }

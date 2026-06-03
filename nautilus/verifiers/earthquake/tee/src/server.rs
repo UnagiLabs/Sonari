@@ -64,13 +64,32 @@ pub enum TeeJsonResult {
 /// Implements the shared [`ProcessDataHandler`] contract by running the USGS /
 /// ShakeMap verification pipeline and emitting the unsigned BCS payload. It
 /// carries no signing key, attestation logic, or transport state.
+///
+/// The Walrus source-archive configuration is resolved once in the orchestration
+/// layer (`main.rs`) and injected at construction; the handler never reads the
+/// process environment during `process` (the egress proxy still arrives through
+/// [`TeeContext`]). This keeps env access confined to bootstrap/orchestration.
 #[derive(Debug, Clone, Default)]
-pub struct EarthquakeProcessHandler;
+pub struct EarthquakeProcessHandler {
+    archive_config: Option<WalrusCliSourceArchiveConfig>,
+}
 
 impl EarthquakeProcessHandler {
-    /// Builds a stateless earthquake handler.
+    /// Builds a handler without an injected Walrus archive configuration.
+    ///
+    /// Finalized requests require an archive configuration; use
+    /// [`EarthquakeProcessHandler::with_archive_config`] for the server path.
     pub fn new() -> Self {
-        Self
+        Self {
+            archive_config: None,
+        }
+    }
+
+    /// Builds a handler with the orchestration-resolved Walrus archive config.
+    pub fn with_archive_config(archive_config: WalrusCliSourceArchiveConfig) -> Self {
+        Self {
+            archive_config: Some(archive_config),
+        }
     }
 }
 
@@ -80,29 +99,40 @@ impl ProcessDataHandler for EarthquakeProcessHandler {
             serde_json::from_slice(input).map_err(|error| process_failed(error.to_string()))?;
         let request = WorkerToTeeRequest::from_json_value(payload)
             .map_err(|error| process_failed(error.to_string()))?;
-        let output = run_earthquake_pipeline(request, ctx)?;
+        let output = run_earthquake_pipeline(request, ctx, self.archive_config.as_ref())?;
         process_output_from_oracle(output)
     }
 }
 
 /// Converts an [`OracleOutput`] into the [`ProcessOutput`] returned to the server.
 ///
-/// `payload_bcs` is the canonical unsigned BCS payload the server signs;
-/// non-finalized results carry empty payload bytes.
+/// Finalized results become a [`ProcessOutput::Signable`] carrying the canonical
+/// unsigned BCS payload the server must sign; a finalized output without those
+/// bytes is rejected (fail-closed) so the server can never emit an unsigned 200
+/// for a finalized result. Non-finalized results become a
+/// [`ProcessOutput::Unsigned`] envelope that is returned verbatim.
 pub fn process_output_from_oracle(output: OracleOutput) -> Result<ProcessOutput, HandlerError> {
-    let payload_bcs = output.unsigned_bcs_payload.clone().unwrap_or_default();
+    let is_finalized = output.result.status == OracleStatus::Finalized;
+    let payload_bcs = output.unsigned_bcs_payload.clone();
     let result = output_to_tee_json(output)?;
     let result_json =
         serde_json::to_value(&result).map_err(|error| process_failed(error.to_string()))?;
-    Ok(ProcessOutput {
-        payload_bcs,
-        result_json,
-    })
+    if is_finalized {
+        let payload_bcs = payload_bcs
+            .filter(|bytes| !bytes.is_empty())
+            .ok_or_else(|| {
+                process_failed("finalized output is missing the unsigned BCS payload to sign")
+            })?;
+        Ok(ProcessOutput::signable(payload_bcs, result_json))
+    } else {
+        Ok(ProcessOutput::unsigned(result_json))
+    }
 }
 
 fn run_earthquake_pipeline(
     request: WorkerToTeeRequest,
     ctx: &TeeContext,
+    archive_config: Option<&WalrusCliSourceArchiveConfig>,
 ) -> Result<OracleOutput, HandlerError> {
     let detail_url = usgs_detail_url(&request.source_event_id);
     let client = production_http_client(ctx).map_err(|error| process_failed(error.to_string()))?;
@@ -144,11 +174,11 @@ fn run_earthquake_pipeline(
         return Ok(preliminary);
     }
 
-    let archive = WalrusCliSourceArchive::new(
-        WalrusCliSourceArchiveConfig::from_env()
-            .map_err(|error| process_failed(error.to_string()))?,
-    )
-    .map_err(|error| process_failed(error.to_string()))?;
+    let archive_config = archive_config.cloned().ok_or_else(|| {
+        process_failed("finalized request requires an injected Walrus archive configuration")
+    })?;
+    let archive = WalrusCliSourceArchive::new(archive_config)
+        .map_err(|error| process_failed(error.to_string()))?;
     process_usgs_archived(input, &archive).map_err(|error| process_failed(error.to_string()))
 }
 
@@ -407,7 +437,7 @@ mod tests {
     };
     use crate::core::types::UsgsOracleInput;
     use crate::process_usgs;
-    use sonari_tee_core::{ProcessDataHandler, TeeContext};
+    use sonari_tee_core::{ProcessDataHandler, ProcessOutput, TeeContext};
     use std::fs;
     use std::path::Path;
 
@@ -491,9 +521,49 @@ mod tests {
 
         let output = process_output_from_oracle(unsigned).expect("conversion should succeed");
 
-        assert_eq!(output.payload_bcs, expected_bytes);
-        assert_eq!(output.result_json["status"], "finalized");
-        assert_eq!(output.result_json["signature"], UNSIGNED_PLACEHOLDER);
+        let ProcessOutput::Signable {
+            payload_bcs,
+            result_json,
+        } = output
+        else {
+            panic!("finalized output must be signable");
+        };
+        assert_eq!(payload_bcs, expected_bytes);
+        assert_eq!(result_json["status"], "finalized");
+        assert_eq!(result_json["signature"], UNSIGNED_PLACEHOLDER);
+    }
+
+    #[test]
+    fn process_output_rejects_finalized_result_without_unsigned_bcs_payload() {
+        let mut unsigned = process_usgs(finalized_input()).expect("fixture should finalize");
+        assert_eq!(unsigned.result.status, crate::OracleStatus::Finalized);
+        // Simulate a finalized result whose signable bytes went missing: the
+        // server must fail closed rather than return an unsigned 200.
+        unsigned.unsigned_bcs_payload = None;
+
+        let error = process_output_from_oracle(unsigned)
+            .expect_err("finalized output without BCS payload must fail closed");
+
+        assert_eq!(error.error_code, "AWS_RUNNER_PROCESS_FAILED");
+        assert!(
+            error.message.contains("unsigned BCS payload"),
+            "message: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn process_output_returns_unsigned_envelope_for_non_finalized_result() {
+        let mut output = process_usgs(finalized_input()).expect("fixture should finalize");
+        output.result.status = crate::OracleStatus::PendingSource;
+        output.result.error_code = Some("USGS_DETAIL_UNAVAILABLE".to_owned());
+        output.unsigned_bcs_payload = None;
+
+        let process_output =
+            process_output_from_oracle(output).expect("non-finalized conversion should succeed");
+
+        assert!(matches!(process_output, ProcessOutput::Unsigned { .. }));
+        assert_eq!(process_output.result_json()["status"], "pending_source");
     }
 
     #[test]
