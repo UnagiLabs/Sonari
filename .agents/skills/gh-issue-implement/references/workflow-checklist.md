@@ -42,7 +42,10 @@ Use this checklist while running `gh-issue-implement`.
    - test results
    - concise summary
 10. Cleanup and final report:
-   - `manage-worktree.sh remove` was executed after PR creation
+   - `git -C <worktree-path> status --short` was empty before cleanup
+   - `git worktree remove <worktree-path>` was executed after PR creation
+   - `git branch -d feature/issue-<issue-number>-<slug>` was executed for the local branch
    - target worktree no longer appears in `git worktree list`
    - target feature branch no longer appears in `git branch --list`
+   - remote branch was left in place for the PR
    - final user report was sent only after cleanup completed
