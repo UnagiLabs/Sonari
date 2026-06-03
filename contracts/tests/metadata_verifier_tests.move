@@ -924,7 +924,7 @@ fun assert_enclave_signed_bytes_accepts_identity_family_config() {
         valid_pcr0(),
         valid_pcr1(),
         valid_pcr2(),
-        &mut ctx,
+        &ctx,
     );
     metadata_verifier::add_enclave_instance_for_config_for_testing(
         &mut registry,
@@ -960,14 +960,14 @@ fun earthquake_and_identity_enclave_instances_do_not_interfere() {
         valid_pcr0(),
         valid_pcr1(),
         valid_pcr2(),
-        &mut ctx,
+        &ctx,
     );
     metadata_verifier::create_identity_verifier_config_for_testing(
         &mut registry,
         updated_pcr0(),
         updated_pcr1(),
         updated_pcr2(),
-        &mut ctx,
+        &ctx,
     );
     metadata_verifier::add_enclave_instance_for_config_for_testing(
         &mut registry,
@@ -1013,7 +1013,7 @@ fun assert_enclave_signed_bytes_rejects_family_mismatch() {
         valid_pcr0(),
         valid_pcr1(),
         valid_pcr2(),
-        &mut ctx,
+        &ctx,
     );
     metadata_verifier::add_enclave_instance_for_config_for_testing(
         &mut registry,
@@ -1036,6 +1036,49 @@ fun assert_enclave_signed_bytes_rejects_family_mismatch() {
     metadata_verifier::destroy_verifier_registry_for_testing(registry);
 }
 
+// expected_family と config_key が別 family を指す取り違えを reject する。
+// identity instance(family=IDENTITY) に対し expected_family=IDENTITY を渡しつつ
+// config_key だけ earthquake(=1) を指定する。両 config の config_version は初期 1 で
+// 一致するため、config の family 帰属チェックが無いと誤受理される。
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierFamilyMismatch)]
+fun assert_enclave_signed_bytes_rejects_config_key_family_mismatch() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::create_earthquake_verifier_config_for_testing(
+        &mut registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        &ctx,
+    );
+    metadata_verifier::create_identity_verifier_config_for_testing(
+        &mut registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        &ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_config_for_testing(
+        &mut registry,
+        metadata_verifier::identity_v1_config_key(),
+        identity_signed_public_key(),
+        nitro_fixture_expires_at_ms(),
+        &mut ctx,
+    );
+
+    let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(
+        &registry,
+        reader::verifier_family_identity(),
+        metadata_verifier::earthquake_v1_config_key(),
+        &identity_signed_message(),
+        &identity_signed_signature(),
+        &identity_signed_public_key(),
+        nitro_fixture_timestamp_ms(),
+    );
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
 #[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceConfigMismatch)]
 fun assert_enclave_signed_bytes_rejects_config_version_mismatch() {
     let (mut registry, mut ctx) = direct_initialized();
@@ -1045,7 +1088,7 @@ fun assert_enclave_signed_bytes_rejects_config_version_mismatch() {
         valid_pcr0(),
         valid_pcr1(),
         valid_pcr2(),
-        &mut ctx,
+        &ctx,
     );
     metadata_verifier::add_enclave_instance_for_config_for_testing(
         &mut registry,
@@ -1059,7 +1102,7 @@ fun assert_enclave_signed_bytes_rejects_config_version_mismatch() {
         updated_pcr0(),
         updated_pcr1(),
         updated_pcr2(),
-        &mut ctx,
+        &ctx,
     );
 
     let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(

@@ -363,6 +363,10 @@ public(package) fun assert_enclave_signed_bytes(
 
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
     let config = registry.configs.get(&config_key);
+    assert!(
+        config.verifier_family == expected_family,
+        EVerifierFamilyMismatch,
+    );
     assert!(config.enabled, EVerifierConfigAlreadyDisabled);
     assert!(
         instance.config_version == config.config_version,
