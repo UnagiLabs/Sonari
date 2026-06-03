@@ -126,9 +126,38 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         ]);
     });
 
+    it("reads membership identity EIF measurements and writes PCR0/1/2 to run summary", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "Read membership identity EIF measurements",
+            "--eif-path dist/aws/membership-identity-tee.eif",
+            "dist/aws/membership-identity-tee-measurements.json",
+            "MEMBERSHIP_IDENTITY_EIF_PCR0",
+            "MEMBERSHIP_IDENTITY_EIF_PCR1",
+            "MEMBERSHIP_IDENTITY_EIF_PCR2",
+            "Membership Identity EIF PCRs",
+        ]);
+    });
+
+    it("earthquake EIF measurements step is unchanged after membership step addition", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "Read earthquake EIF measurements",
+            "--eif-path dist/aws/earthquake-tee.eif",
+            "dist/aws/earthquake-tee-measurements.json",
+            "EARTHQUAKE_EIF_PCR0",
+            "EARTHQUAKE_EIF_PCR1",
+            "EARTHQUAKE_EIF_PCR2",
+            "Earthquake EIF PCRs",
+            "Use these values for the Sui `VerifierRegistry` earthquake config.",
+        ]);
+    });
+
     it("does not expose relayer deployment variables to test steps", async () => {
         const workflow = await readWorkflow();
-        const jobEnvMatch = workflow.match(/    env:\n([\s\S]*?)\n\n    steps:/u);
+        const jobEnvMatch = workflow.match(/ {4}env:\n([\s\S]*?)\n\n {4}steps:/u);
 
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_MODE");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_TARGET");
@@ -140,14 +169,18 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_ALLOW_SUBMIT");
 
         expectContainsAll(workflow, [
-            "RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
-            "RELAYER_TARGET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
-            "RELAYER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
-            "RELAYER_VERIFIER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
-            "RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
-            "RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
-            "RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}",
-            "RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}",
+            "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
+            "RELAYER_TARGET: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
+            "RELAYER_REGISTRY: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
+            "RELAYER_VERIFIER_REGISTRY: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
+            "RELAYER_GRPC_URL: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
+            "RELAYER_SENDER_ADDRESS: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
+            "RELAYER_SIGNER_SECRET_ARN: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}",
+            "RELAYER_ALLOW_SUBMIT: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}",
         ]);
     });
 
@@ -188,7 +221,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'validate_sha256 "membership EIF" dist/aws/membership-identity-tee.eif',
             '[[ "$digest" =~ ^[0-9a-f]{64}$ ]]',
             "for pcr_name in EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2",
-            '[[ ! "${!pcr_name}" =~ ^[0-9a-f]{96}$ ]]',
+            '[[ ! "$' + '{!pcr_name}" =~ ^[0-9a-f]{96}$ ]]',
         ]);
     });
 
@@ -308,5 +341,53 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         const workflow = await readWorkflow();
 
         expect(workflow).not.toContain("set -x");
+    });
+
+    it("passes identity relayer env to Deploy CloudFormation stack step and keeps earthquake unchanged", async () => {
+        const workflow = await readWorkflow();
+
+        // Identity env vars must be wired from GitHub variables into the deploy step
+        expect(workflow).toContain(
+            "IDENTITY_RELAYER_MODE: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_PACKAGE_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_REGISTRY_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_VERIFIER_REGISTRY_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}",
+        );
+
+        // Identity env must be forwarded as CloudFormation parameters in the deploy step
+        expect(workflow).toContain("IdentityRelayerMode=$IDENTITY_RELAYER_MODE");
+        expect(workflow).toContain("SonariIdentityPackageId=$SONARI_IDENTITY_PACKAGE_ID");
+        expect(workflow).toContain("SonariIdentityPauseStateId=$SONARI_IDENTITY_PAUSE_STATE_ID");
+        expect(workflow).toContain("SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID");
+        expect(workflow).toContain("SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID");
+        expect(workflow).toContain("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID");
+
+        // Earthquake RELAYER_* wiring must remain unchanged
+        expect(workflow).toContain(
+            "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
+        );
+        expect(workflow).toContain(
+            "RELAYER_NETWORK: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}",
+        );
+        expect(workflow).toContain("RelayerMode=$RELAYER_MODE");
+        expect(workflow).toContain("RelayerNetwork=$RELAYER_NETWORK");
     });
 });

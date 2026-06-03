@@ -24,7 +24,7 @@ Parameters:
     Default: rate(5 minutes)
   MembershipScheduleExpression:
     Type: String
-    Default: rate(1 minute)
+    Default: rate(1 day)
   ScheduleState:
     Type: String
     Default: DISABLED
@@ -204,6 +204,38 @@ Parameters:
       - "false"
       - "true"
     Description: Must be true before RELAYER_MODE=submit can send a Sui transaction.
+  IdentityRelayerMode:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - dry_run
+      - submit
+    Description: Leave empty to skip the membership identity relayer. Use dry_run or submit for finalized TEE results.
+  SonariIdentityPackageId:
+    Type: String
+    Default: ""
+    Description: Sui package ID for the membership identity Move module.
+  SonariIdentityPauseStateId:
+    Type: String
+    Default: ""
+    Description: PauseState object ID for the membership identity accessor call.
+  SonariIdentityRegistryId:
+    Type: String
+    Default: ""
+    Description: IdentityRegistry object ID for the membership identity accessor call.
+  SonariMembershipRegistryId:
+    Type: String
+    Default: ""
+    Description: MembershipRegistry object ID for the membership identity accessor call.
+  SonariVerifierRegistryId:
+    Type: String
+    Default: ""
+    Description: VerifierRegistry object ID used for membership identity relayer and enclave registration.
+  SonariSuiClockId:
+    Type: String
+    Default: "0x6"
+    Description: Sui clock object ID for the membership identity accessor call. Defaults to 0x6.
 
 Conditions:
   HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
@@ -546,7 +578,14 @@ Resources:
               source /opt/sonari/runner.env
               set +a
             fi
-            exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
+            case "${SONARI_VERIFIER_KIND:-earthquake}" in
+              "membership_identity")
+                exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}"
+                ;;
+              *)
+                exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
+                ;;
+            esac
             SONARI_VERIFIER_DISPATCH
             chmod 0500 /opt/sonari/bin/run-sonari-verifier
             nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
@@ -650,6 +689,7 @@ Resources:
             SONARI_EARTHQUAKE_CONNECT_PROXY
             chmod 0500 /opt/sonari/bin/sonari-earthquake-egress-connect-proxy
             printf '%s\n' "earthquake.usgs.gov:443" >/opt/sonari/earthquake-egress-allowlist
+            printf '%s\n' "$world_id_api_host:443" >>/opt/sonari/earthquake-egress-allowlist
             if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
               printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
             fi
@@ -702,17 +742,17 @@ Resources:
               systemctl daemon-reload
               systemctl enable --now sonari-world-id-vsock-proxy.service
             else
-              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
+              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<'SONARI_VSOCK_PROXY'
             [Unit]
-            Description=Sonari World ID API vsock proxy for membership identity enclave
-            After=network-online.target nitro-enclaves-allocator.service
-            Wants=network-online.target nitro-enclaves-allocator.service
+            Description=Sonari World ID egress readiness gate bound to the shared egress vsock proxy
+            After=sonari-earthquake-egress-vsock-proxy.service
+            Wants=sonari-earthquake-egress-vsock-proxy.service
+            BindsTo=sonari-earthquake-egress-vsock-proxy.service
 
             [Service]
-            Type=simple
-            Restart=always
-            RestartSec=2
-            ExecStart=$vsock_proxy_path 8000 $world_id_api_host 443
+            Type=oneshot
+            RemainAfterExit=yes
+            ExecStart=/bin/true
 
             [Install]
             WantedBy=multi-user.target
@@ -732,11 +772,12 @@ Resources:
               echo "SONARI_EARTHQUAKE_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $earthquake_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
+              echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
               echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
-              printf 'SONARI_WORLD_ID_UPSTREAM_API_BASE=%q\n' "$world_id_api_base"
-              echo "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000"
+              printf 'SONARI_WORLD_ID_API_BASE=%q\n' "$world_id_api_base"
+              echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
               printf 'SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$membership_command"
@@ -1110,6 +1151,13 @@ Resources:
           RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
           RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
           RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
+          IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
+          SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
+          SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId
+          SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId
+          SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId
+          SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId
+          SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId
           SOURCE_ARCHIVER_URL: !If [HasSourceArchiverConfig, !GetAtt SourceArchiverFunctionUrl.FunctionUrl, ""]
           SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]
 

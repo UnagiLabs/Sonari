@@ -147,6 +147,40 @@ describe("AWS Sonari verifier runner README", () => {
         expectAdminCallIncludesSender(readme, "disable_earthquake_verifier_config");
     });
 
+    it("documents existing AdminCap-gated membership identity PCR config entrypoints", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "admin::create_identity_verifier_config",
+            "admin::update_identity_verifier_config_pcrs",
+            "admin::disable_identity_verifier_config",
+        ]);
+    });
+
+    it("documents membership identity EIF PCR extraction and Move byte-vector format", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "pnpm build:aws-membership-identity-eif",
+            "### Membership Identity EIF PCRs",
+            "nitro-cli describe-eif",
+        ]);
+    });
+
+    it("documents membership identity AdminCap PCR transactions and register/update semantics", async () => {
+        const readme = await readReadme();
+
+        expectContainsAll(readme, [
+            "--function create_identity_verifier_config",
+            "--function update_identity_verifier_config_pcrs",
+            "--function disable_identity_verifier_config",
+            "全部 dry-run は登録済み enclave state を要するため不可",
+        ]);
+        expectAdminCallIncludesSender(readme, "create_identity_verifier_config");
+        expectAdminCallIncludesSender(readme, "update_identity_verifier_config_pcrs");
+        expectAdminCallIncludesSender(readme, "disable_identity_verifier_config");
+    });
+
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
         const readme = await readReadme();
 
@@ -192,5 +226,56 @@ describe("AWS Sonari verifier runner README", () => {
         expect(readme).not.toMatch(/private credential/i);
         expect(readme).not.toContain("AWS_ACCESS_KEY_ID");
         expect(readme).not.toContain("AWS_SECRET_ACCESS_KEY");
+    });
+
+    it("documents the replication units required to add a third verifier_kind", async () => {
+        const readme = await readReadme();
+
+        // The section must name the CloudFormation Parameters block to duplicate
+        // (TeeArtifact bucket/key/sha256, Eif bucket/key/sha256,
+        // NitroEnclaveProcessCommand, and optionally ScheduleExpression).
+        expectContainsAll(readme, [
+            "3 例目",
+            "TeeArtifactS3Bucket",
+            "TeeArtifactS3Key",
+            "TeeArtifactSha256",
+            "TeeEifS3Bucket",
+            "TeeEifS3Key",
+            "TeeEifSha256",
+            "NitroEnclaveProcessCommand",
+        ]);
+
+        // The dispatcher extension point must be listed explicitly.
+        expectContainsAll(readme, [
+            "run-sonari-verifier",
+            "SONARI_VERIFIER_KIND",
+            "case",
+            "enclave wrapper",
+        ]);
+
+        // The Lambda env namespace extension must be called out.
+        expectContainsAll(readme, ["RunnerControlLambda", "env namespace"]);
+
+        // StateMachine and schedule duplication must be mentioned.
+        expectContainsAll(readme, ["StateMachine", "ScheduleExpression", "BatchSchedule"]);
+
+        // The runner src SONARI_VERIFIER_KIND export must be mentioned.
+        expectContainsAll(readme, ["buildSsmShellCommand", "SONARI_VERIFIER_KIND"]);
+
+        // The deploy workflow steps for the new kind must be mentioned.
+        expectContainsAll(readme, ["pnpm build:aws-", "EIF", "PCR"]);
+    });
+
+    it("documents that earthquake RELAYER_* namespace must not be changed when adding a new verifier", async () => {
+        const readme = await readReadme();
+
+        // The README must make clear that earthquake RELAYER_* env vars are
+        // earthquake-specific and must not be renamed or moved when a third
+        // verifier_kind is added.
+        expectContainsAll(readme, ["RELAYER_MODE", "RELAYER_NETWORK", "earthquake"]);
+
+        // The README must mention that the earthquake schedule default rate(5 minutes)
+        // must not be changed when extending to a third verifier kind.
+        expect(readme).toContain("rate(5 minutes)");
     });
 });

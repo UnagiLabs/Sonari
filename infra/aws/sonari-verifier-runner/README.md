@@ -229,6 +229,102 @@ sui client call \
 
 この手順の PR 前検証では `pnpm check:move` と README test を実行します。本番 AWS 実行はこの手順の必須検証ではありません。実 stack で attestation flow を確認する場合は、別 issue で ASG cleanup と schedule disabled を gate にします。
 
+## Membership identity PCR config の admin 入口
+
+Membership identity verifier の PCR config は、`admin.move` 内の次の関数で管理します。earthquake と同じく、既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません。
+
+| 操作 | 関数 | 権限 |
+| --- | --- | --- |
+| 初回登録（real submit） | `admin::create_identity_verifier_config` | `&AdminCap` |
+| PCR 更新（real submit） | `admin::update_identity_verifier_config_pcrs` | `&AdminCap` |
+| 緊急停止 | `admin::disable_identity_verifier_config` | `&AdminCap` |
+
+これらの関数は外部 transaction から呼べる `public fun` です。ただし、成功には `&AdminCap` が必要です。AdminCap を持たない wallet は、呼び出しを試せても config を変更できません。
+
+**register（real submit）と update（dry-run）の semantics（#129 案A）:** `create_identity_verifier_config` は VerifierRegistry に membership identity config を新規作成する real submit です。`update_identity_verifier_config_pcrs` は登録済み config の PCR を更新する real submit です。全部 dry-run は登録済み enclave state を要するため不可です。初回は必ず `create_identity_verifier_config` で実 submit してください。更新時の `update_identity_verifier_config_pcrs` も実 submit です。smoke test の dummy proof は実際の config 登録とは無関係で、devnet/testnet 専用の動作確認に使います。
+
+### Membership identity EIF から PCR を取得する
+
+Membership identity EIF を作るときは、先に `pnpm build:aws-membership-identity-eif` を実行します。この script は内部で `nitro-cli build-enclave` を呼び、build output に PCR0 / PCR1 / PCR2 を出します。
+
+GitHub Actions deploy workflow を使った場合は、run summary の `### Membership Identity EIF PCRs` セクションに PCR の値が表示されます。手元で EIF を build した場合は、次のコマンドで PCR を取得できます。
+
+```bash
+nitro-cli describe-eif \
+  --eif-path dist/aws/membership-identity-tee.eif
+```
+
+PCR0 / PCR1 / PCR2 は 48 byte SHA-384 measurement です。Move の `vector<u8>` へ渡すときは、`0x` なしの hex を 2 桁ずつ byte に分けます。
+
+例:
+
+```text
+PCR0 hex: 0102...3030
+Move byte vector: vector[0x01, 0x02, ..., 0x30, 0x30]
+```
+
+MembershipIdentityTeeEifSha256 は EIF file の SHA-256 checksum です。S3 から EC2 が取得した EIF file の改ざん検知に使います。PCR0/1/2 は attestation document の measurement です。Move の `VerifierConfig` は PCR0/1/2 を見て、起動中の enclave が登録済み code/config かを確認します。
+
+### Membership identity AdminCap transaction
+
+AdminCap を持つ管理者 wallet は AWS に置きません。PCR config の登録、更新、停止は、デプロイ時に Codex が動く管理端末の project-local admin wallet から実行します。AdminCap の秘密鍵や wallet config は AWS Runner、EC2、Lambda、SSM、AWS Secrets Manager に入れてはいけません。
+
+次の値を確認してから admin transaction を実行します（earthquake と同じ変数セットを使います）。
+
+```bash
+PACKAGE_ID="<published-package-id>"
+ADMIN_ADDRESS="<admin-wallet-address>"
+ADMIN_CAP_ID="<admin-cap-object-id>"
+VERIFIER_REGISTRY_ID="<verifier-registry-object-id>"
+PCR0_VECTOR='[1,2,3]'
+PCR1_VECTOR='[4,5,6]'
+PCR2_VECTOR='[7,8,9]'
+```
+
+`PCR*_VECTOR` は、48 byte PCR hex を decimal byte 配列へ変換した値です。EIF build 後に GitHub Actions run summary または `nitro-cli describe-eif` で取得した値を使います。
+
+初回登録（real submit）:
+
+```bash
+sui client call \
+  --sender "$ADMIN_ADDRESS" \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function create_identity_verifier_config \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "$PCR0_VECTOR" "$PCR1_VECTOR" "$PCR2_VECTOR" \
+  --gas-budget 100000000
+```
+
+検証コードや measurement 対象 config を変えた後の PCR 更新（real submit）:
+
+```bash
+sui client call \
+  --sender "$ADMIN_ADDRESS" \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function update_identity_verifier_config_pcrs \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "$PCR0_VECTOR" "$PCR1_VECTOR" "$PCR2_VECTOR" \
+  --gas-budget 100000000
+```
+
+問題発生時の緊急停止:
+
+```bash
+sui client call \
+  --sender "$ADMIN_ADDRESS" \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function disable_identity_verifier_config \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" \
+  --gas-budget 100000000
+```
+
+登録または更新後は transaction digest の event を確認します。`VerifierConfigCreated` と `VerifierConfigPcrsUpdated` では、actor が `ADMIN_ADDRESS` であること、PCR と config version が想定通りであることを確認します。
+
+緊急停止後は `VerifierConfigDisabled` を確認します。この event は PCR0/1/2 を持たないため、actor が `ADMIN_ADDRESS` であること、config version が停止対象と一致することを確認します。
+
+この手順の PR 前検証では `pnpm check:move` と README test を実行します。本番 AWS 実行はこの手順の必須検証ではありません。実 stack で attestation flow を確認する場合は、別 issue で ASG cleanup と schedule disabled を gate にします。
+
 `NitroEnclaveImageSha384` は EIF の `PCR0` measurement です。`NitroEnclavePcr3` は、48 個の NUL byte に deterministic runner role ARN を続けた値の SHA-384 digest です。
 
 地震 verifier は Nautilus の server pattern に合わせ、EIF 内で起動時に enclave-local な Ed25519 key を生成し、NSM attestation document の `public_key` にその public key を入れます。runner host は `/opt/sonari/bin/run-earthquake-enclave` から VSOCK で `/health_check`、`/get_attestation`、`/process_data` を呼びます。host は Walrus / Sui config を bootstrap するだけで、finalized payload の署名鍵は host に置きません。
@@ -436,3 +532,81 @@ Smoke と cleanup 後の期待 idle state:
 ## Rollback 手順
 
 Rollback は Git revert と redeploy で行います。問題の commit を revert し、その reverted tree から artifact set を rebuild し、`sonari-verifier-runner/<commit>/` に upload し、deploy plan を再生成して同じ CloudFormation deploy command を実行します。古い runner stack は rollback dependency ではありません。
+
+## 3 例目の verifier_kind を追加するときの手順
+
+新しい verifier_kind（例: `new_verifier`）を追加するには、以下の単位を丸ごと複製して調整してください。
+
+### 1. CloudFormation Parameters の複製
+
+下記の Parameter ペアを `template.yaml` の `Parameters:` ブロックに追加します。
+
+- TEE artifact: `TeeArtifactS3Bucket`・`TeeArtifactS3Key`・`TeeArtifactSha256` の形式で新種名を prefix に付けた 3 パラメータ（例: `NewVerifierTeeArtifactS3Bucket` など）
+- EIF: `TeeEifS3Bucket`・`TeeEifS3Key`・`TeeEifSha256` の形式で 3 パラメータ
+- NitroEnclaveProcessCommand: 新 wrapper のデフォルトパスを持つ 1 パラメータ
+- ScheduleExpression: 独自スケジュールが必要な場合のみ 1 パラメータ
+
+### 2. dispatcher (`run-sonari-verifier`) の拡張
+
+EC2 user-data 内の `run-sonari-verifier` スクリプト（`SONARI_VERIFIER_KIND` で分岐する `case` 文）に新しい kind の `case` を追加します。
+
+```bash
+case "${SONARI_VERIFIER_KIND:-earthquake}" in
+  "membership_identity")
+    exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}"
+    ;;
+  "new_verifier")
+    exec "${!SONARI_NEW_VERIFIER_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-new-verifier-enclave}"
+    ;;
+  *)
+    exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
+    ;;
+esac
+```
+
+### 3. enclave wrapper スクリプトの追加
+
+user-data に `run-new-verifier-enclave` の wrapper スクリプトを追加します。`run-membership-identity-enclave` を template として複製し、EIF path 変数名を新 kind に合わせて変更してください。
+
+### 4. runner.env の env namespace
+
+`runner.env` 書き込みブロックに新 kind のエントリを追加します。
+
+- `SONARI_<KIND>_ENCLAVE_CID=${NitroEnclaveCid}` — 共有 NitroEnclaveCid から出力
+- `SONARI_<KIND>_EIF_PATH` — 新 EIF のダウンロードパス
+- `SONARI_<KIND>_NITRO_RUN_ENCLAVE_ARGS` — `nitro-cli run-enclave` 引数
+
+### 5. RunnerControlLambda の env namespace
+
+`RunnerControlLambda` の `Environment.Variables` に新 kind 専用の Parameters を参照する env var を追加します。earthquake の `RELAYER_*` namespace と membership の `IDENTITY_RELAYER_*` / `SONARI_IDENTITY_*` namespace は変更しないでください。新 kind には独立した namespace を付与します。
+
+### 6. StateMachine の複製
+
+`EarthquakeRunnerStateMachine` または `MembershipRunnerStateMachine` を template として複製し、新しい `NewVerifierRunnerStateMachine` リソースを追加します。`verifier_kind` の初期 Input を `"new_verifier"` に変更します。
+
+### 7. BatchSchedule の追加
+
+`BatchSchedule` に相当する新しい EventBridge スケジュールリソースを追加し、`MembershipScheduleExpression` と同様に `ScheduleExpression` パラメータを作成します。スケジュールの `State` は共有の `ScheduleState` パラメータ（既定 `DISABLED`）を参照します。
+
+### 8. runner src の `SONARI_VERIFIER_KIND` export
+
+`buildSsmShellCommand`（runner src）の新 kind 向け呼び出し箇所で `SONARI_VERIFIER_KIND=new_verifier` を `export` するよう追加します。earthquake は `runner_workflow.ts` の SSM dispatch で直接 set するのではなく enclave wrapper が使う既定値で処理し、membership は `buildSsmShellCommand` で `export SONARI_VERIFIER_KIND=membership_identity` を先頭に追加します。
+
+### 9. deploy workflow の追加ステップ
+
+`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` に次を追加します。
+
+- `pnpm build:aws-new-verifier-tee-artifact` — TEE artifact ビルド
+- `pnpm build:aws-new-verifier-eif` — EIF ビルドと PCR サマリ出力
+- S3 upload ステップ（`sonari-verifier-runner/$COMMIT_SHA/new-verifier-tee-artifact.tar.gz` と `new-verifier-tee.eif`）
+- `deploy_plan.ts` への `--new-verifier-tee-sha256` と `--new-verifier-eif-sha256` 引数
+- CloudFormation の parameter override 追加
+
+## Earthquake 経路の非回帰制約
+
+earthquake の runner / relayer / deploy / egress 経路は、新しい verifier_kind を追加しても変更しないでください。
+
+- **RELAYER_MODE / RELAYER_NETWORK** など `RELAYER_*` namespace の env var は earthquake 専用です。新 kind の relayer には独自 namespace を使い、`RELAYER_*` を流用または改名しないでください。
+- **rate(5 minutes)** — earthquake の `ScheduleExpression` デフォルトは `rate(5 minutes)` を保持してください。membership の `MembershipScheduleExpression` デフォルト `rate(1 day)` も変更しないでください。
+- **egress proxy** — earthquake の CONNECT proxy（port 18081）と vsock-proxy（18080 → 127.0.0.1:18081）は `earthquake.usgs.gov:443` allowlist とともに変更しないでください。
+- **enclave CID** — `SONARI_EARTHQUAKE_ENCLAVE_CID` は `${NitroEnclaveCid}` から出力する 1 行を保持してください。

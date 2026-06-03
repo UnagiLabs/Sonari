@@ -91,6 +91,30 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"verifier_kind": "membership_identity"');
     });
 
+    it("dispatches the shared run-sonari-verifier entry by verifier kind", async () => {
+        const template = await readTemplate();
+        const dispatcherStart = template.indexOf("cat >/opt/sonari/bin/run-sonari-verifier");
+        const heredocBodyStart = template.indexOf("\n", dispatcherStart);
+        const dispatcherEnd = template.indexOf("SONARI_VERIFIER_DISPATCH", heredocBodyStart);
+        const dispatcher = template.slice(dispatcherStart, dispatcherEnd);
+
+        expect(dispatcherStart).toBeGreaterThan(-1);
+        expect(dispatcherEnd).toBeGreaterThan(dispatcherStart);
+
+        // membership path selects the membership identity enclave wrapper.
+        expect(dispatcher).toContain('"membership_identity"');
+        expect(dispatcher).toContain(
+            "$" +
+                "{!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}",
+        );
+
+        // earthquake path remains the earthquake enclave wrapper, unchanged.
+        expect(dispatcher).toContain(
+            "$" +
+                "{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}",
+        );
+    });
+
     it("waits and retries when shared runner capacity is leased by another workflow", async () => {
         const template = await readTemplate();
         const capacityChoiceCount = template.match(/"RunnerCapacityAvailable": \{/g)?.length ?? 0;
@@ -261,6 +285,57 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("walrus_upload_relay_host");
     });
 
+    it("keeps the earthquake CONNECT proxy and vsock-proxy egress lines unchanged", async () => {
+        const template = await readTemplate();
+
+        // The earthquake egress path (CONNECT proxy on 18081, vsock-proxy 18080 ->
+        // 127.0.0.1:18081, usgs.gov allowlist) must remain byte-for-byte stable so
+        // STEP 2's World ID egress unification never perturbs the earthquake route.
+        expect(template).toContain(
+            "ExecStart=/opt/sonari/bin/sonari-earthquake-egress-connect-proxy --listen-port 18081 --allowlist-file /opt/sonari/earthquake-egress-allowlist",
+        );
+        expect(template).toContain("ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081");
+        expect(template).toContain(
+            "printf '%s\\n' \"earthquake.usgs.gov:443\" >/opt/sonari/earthquake-egress-allowlist",
+        );
+        // Exactly one earthquake CONNECT proxy and one earthquake vsock proxy unit.
+        expect(
+            template.match(/sonari-earthquake-egress-connect-proxy\.service/g)?.length ?? 0,
+        ).toBeGreaterThanOrEqual(1);
+        expect(
+            template.match(/ExecStart=\$vsock_proxy_path 18080 127\.0\.0\.1 18081/g)?.length ?? 0,
+        ).toBe(1);
+    });
+
+    it("routes World ID egress through https plus the shared egress proxy, not a localhost http base", async () => {
+        const template = await readTemplate();
+
+        // The membership TEE pins the World ID API base to https://developer.world.org
+        // (#128). The host must hand the canonical https base straight to the enclave
+        // and steer the TCP connection through the egress proxy, exactly like the
+        // earthquake egress model -- never a host-controlled http://127.0.0.1 base.
+        expect(template).not.toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
+        expect(template).not.toContain("http://127.0.0.1:8000");
+        expect(template).toContain(
+            "printf 'SONARI_WORLD_ID_API_BASE=%q\\n' \"$world_id_api_base\"",
+        );
+        // The canonical https base must keep its https scheme on the wire.
+        expect(template).toContain("Default: https://developer.world.org");
+        // World ID HTTPS traffic is forwarded through the same explicit egress proxy
+        // as earthquake (http://127.0.0.1:18080), whose host-side allowlist gates the
+        // destination -- the host never opens a separate localhost World ID tunnel.
+        expect(template).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        // The World ID API host is appended to the shared egress allowlist so the
+        // CONNECT proxy permits exactly the canonical World ID destination on 443.
+        expect(template).toContain(
+            "printf '%s\\n' \"$world_id_api_host:443\" >>/opt/sonari/earthquake-egress-allowlist",
+        );
+        // The legacy host-controlled localhost World ID tunnel (vsock-proxy 8000 ->
+        // host:443) and its upstream-base env are gone; egress is unified on the proxy.
+        expect(template).not.toContain("SONARI_WORLD_ID_UPSTREAM_API_BASE");
+        expect(template).not.toContain("$vsock_proxy_path 8000 $world_id_api_host 443");
+    });
+
     it("retains membership World ID, EIF, KMS attestation, and ciphertext configuration", async () => {
         const template = await readTemplate();
 
@@ -292,6 +367,64 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 
+    it("exports the membership enclave CID to runner.env from the shared NitroEnclaveCid", async () => {
+        const template = await readTemplate();
+
+        // The membership SSM commands (buildSsmShellCommand /
+        // buildRunnerBootstrapReadinessShellCommand) require
+        // SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID. The host must export it from the
+        // shared NitroEnclaveCid parameter, exactly like the earthquake CID, since
+        // both verifier kinds share one EC2 capacity pool and one enclave CID.
+        expect(template).toContain(
+            "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=$" + "{NitroEnclaveCid}",
+        );
+        // The earthquake CID export must stay byte-for-byte unchanged.
+        expect(template).toContain("SONARI_EARTHQUAKE_ENCLAVE_CID=$" + "{NitroEnclaveCid}");
+        // Both CID exports resolve from the same shared NitroEnclaveCid parameter so
+        // the membership readiness/dispatch env checks and the earthquake wrapper agree.
+        expect(
+            template.match(/SONARI_EARTHQUAKE_ENCLAVE_CID=\$\{NitroEnclaveCid\}/g)?.length ?? 0,
+        ).toBe(1);
+        expect(
+            template.match(/SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=\$\{NitroEnclaveCid\}/g)
+                ?.length ?? 0,
+        ).toBe(1);
+    });
+
+    it("passes identity relayer env to RunnerControlLambda with namespace separation from earthquake", async () => {
+        const template = await readTemplate();
+
+        // Identity-specific Parameters
+        expect(template).toContain("IdentityRelayerMode:");
+        expect(template).toContain("SonariIdentityPackageId:");
+        expect(template).toContain("SonariIdentityPauseStateId:");
+        expect(template).toContain("SonariIdentityRegistryId:");
+        expect(template).toContain("SonariMembershipRegistryId:");
+        expect(template).toContain("SonariVerifierRegistryId:");
+        expect(template).toContain("SonariSuiClockId:");
+
+        // Identity-specific env vars in RunnerControlLambda Environment
+        expect(template).toContain("IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode");
+        expect(template).toContain("SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId");
+        expect(template).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId",
+        );
+        expect(template).toContain("SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId");
+        expect(template).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId",
+        );
+        expect(template).toContain("SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId");
+        expect(template).toContain("SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId");
+
+        // Earthquake RELAYER_* namespace must remain unchanged
+        expect(template).toContain("RELAYER_MODE: !Ref RelayerMode");
+        expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
+        expect(template).toContain("RELAYER_GRPC_URL: !Ref RelayerGrpcUrl");
+        expect(template).toContain("RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress");
+        expect(template).toContain("RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn");
+        expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
+    });
+
     it("exposes key unified stack outputs without leaking ciphertext object names", async () => {
         const template = await readTemplate();
 
@@ -316,5 +449,21 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SourceArchiverFunctionUrlOutput:");
         expect(template).not.toContain("SigningSeedCiphertextS3KeyOutput");
         expect(template).not.toContain("SigningSeedCiphertextS3BucketOutput");
+    });
+
+    it("defaults membership schedule to once per day and keeps earthquake schedule unchanged", async () => {
+        const template = await readTemplate();
+
+        // membership は 1 日 1 回が既定
+        expect(template).toContain("MembershipScheduleExpression:");
+        expect(template).toContain("Default: rate(1 day)");
+
+        // earthquake は既定のまま変えない（rate(5 minutes) を保持）
+        expect(template).toContain("ScheduleExpression:");
+        expect(template).toContain("Default: rate(5 minutes)");
+
+        // 両 schedule の State 制御は共有 ScheduleState パラメータを参照する
+        const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
+        expect(scheduleStateUsageCount).toBe(2);
     });
 });
