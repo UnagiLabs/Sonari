@@ -14,7 +14,6 @@ import {
     SSMClient,
 } from "@aws-sdk/client-ssm";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
-import { Transaction } from "@mysten/sui/transactions";
 import {
     buildRelayerRequestPreview,
     createEd25519SuiSignerFromPrivateKey,
@@ -36,12 +35,19 @@ import {
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
 import {
+    createSuiEnclaveRegistrationTransaction,
     dispatchRunnerCommand,
     EARTHQUAKE_VERIFIER_KIND,
     findReadyRunnerInstance,
+    isHexBytes,
+    normalizeHex,
     parseExpectedVerifierKind,
+    parseHexByteVector,
     pollRunnerCommand,
+    readEnclaveAttestation,
+    readEnclaveRegistrationMetadata,
     readRunnerResultText,
+    requireRegistrationMetadata,
     setRunnerDesiredCapacity,
     withVerifierKind,
 } from "@sonari/verifier-contracts";
@@ -604,6 +610,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         attestationDocumentHex: attestation.attestation_document_hex,
                         publicKey: attestation.public_key,
                     }),
+                    EARTHQUAKE_VERIFIER_CONFIG_KEY,
                 );
                 if (
                     normalizeHex(registered.enclave_instance_public_key) !==
@@ -621,6 +628,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 assertValidUsgsSourceEventId(event.source_event_id);
                 const registrationMetadata = requireRegistrationMetadata(
                     event.registration_metadata,
+                    EARTHQUAKE_VERIFIER_CONFIG_KEY,
                 );
                 const dispatchTimestampMs = options.now?.() ?? Date.now();
                 await requireCurrentWorkflowAttempt(options, event, {
@@ -1407,7 +1415,11 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
             include: { effects: true, events: true },
         });
         const events = readSuccessfulEnclaveRegistrationEvents(response);
-        const metadata = readEnclaveRegistrationMetadata(events);
+        const metadata = readEnclaveRegistrationMetadata(events, {
+            expectedFamily: 3,
+            expectedVersion: 1,
+            configKey: EARTHQUAKE_VERIFIER_CONFIG_KEY,
+        });
         if (normalizeHex(metadata.enclave_instance_public_key) !== normalizeHex(input.publicKey)) {
             throw new Error("registered enclave public key does not match attestation");
         }
@@ -2104,30 +2116,6 @@ function validateSuiNetworkGrpcUrl(network: SuiNetwork, grpcUrl: string, fieldNa
     }
 }
 
-function createSuiEnclaveRegistrationTransaction(input: {
-    target: string;
-    verifierRegistry: string;
-    attestationDocumentBytes: number[];
-    expiresAtMs: number;
-    senderAddress: string;
-}): Transaction {
-    const tx = new Transaction();
-    tx.setSender(input.senderAddress);
-    const document = tx.moveCall({
-        target: "0x2::nitro_attestation::load_nitro_attestation",
-        arguments: [tx.pure.vector("u8", input.attestationDocumentBytes), tx.object.clock()],
-    });
-    tx.moveCall({
-        target: input.target,
-        arguments: [tx.object(input.verifierRegistry), document, tx.pure.u64(input.expiresAtMs)],
-    });
-    return tx;
-}
-
-function parseHexByteVector(value: string): number[] {
-    return Array.from(Buffer.from(normalizeHex(value), "hex"));
-}
-
 function readSuccessfulEnclaveRegistrationEvents(
     response: EnclaveRegistrationExecutionResponse,
 ): EnclaveRegistrationEvent[] {
@@ -2184,89 +2172,6 @@ function readExecutionErrorMessage(value: unknown): string | undefined {
     return undefined;
 }
 
-function readEnclaveRegistrationMetadata(
-    events: EnclaveRegistrationEvent[],
-): EnclaveVerificationMetadata {
-    const event = events.find(isEnclaveInstanceRegisteredEvent);
-    if (event === undefined) {
-        throw new Error("Sui response did not include EnclaveInstanceRegistered event");
-    }
-    const json = readEventJson(event);
-    if (!isRecord(json)) {
-        throw new Error("EnclaveInstanceRegistered event was malformed");
-    }
-    const verifierFamily = readSafeIntegerField(json, "verifier_family");
-    const verifierVersion = readSafeIntegerField(json, "verifier_version");
-    const configVersion = readSafeIntegerField(json, "config_version");
-    const publicKey = readHexByteVectorField(json.public_key);
-    if (verifierFamily !== 3 || verifierVersion !== 1 || configVersion === undefined) {
-        throw new Error("EnclaveInstanceRegistered event did not match earthquake verifier v1");
-    }
-    if (publicKey === undefined) {
-        throw new Error("EnclaveInstanceRegistered event public key was malformed");
-    }
-    return {
-        verifier_config_key: EARTHQUAKE_VERIFIER_CONFIG_KEY,
-        verifier_config_version: configVersion,
-        enclave_instance_public_key: publicKey,
-    };
-}
-
-function isEnclaveInstanceRegisteredEvent(event: EnclaveRegistrationEvent): boolean {
-    const eventType = typeof event.eventType === "string" ? event.eventType : event.type;
-    return (
-        typeof eventType === "string" &&
-        eventType.endsWith("::metadata_verifier::EnclaveInstanceRegistered")
-    );
-}
-
-function readEventJson(event: EnclaveRegistrationEvent): unknown {
-    return event.json ?? event.parsedJson;
-}
-
-function readSafeIntegerField(input: Record<string, unknown>, key: string): number | undefined {
-    const value = input[key];
-    if (typeof value === "number" && Number.isSafeInteger(value)) {
-        return value;
-    }
-    if (typeof value === "string" && /^[0-9]+$/.test(value)) {
-        const parsed = Number(value);
-        return Number.isSafeInteger(parsed) ? parsed : undefined;
-    }
-    return undefined;
-}
-
-function readHexByteVectorField(input: unknown): string | undefined {
-    if (isHexBytes(input, 32)) {
-        return `0x${normalizeHex(input)}`;
-    }
-    if (typeof input === "string") {
-        const decoded = decodeBase64ByteVector(input);
-        if (decoded !== undefined) {
-            return `0x${decoded.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-        }
-    }
-    if (
-        Array.isArray(input) &&
-        input.length === 32 &&
-        input.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
-    ) {
-        return `0x${input.map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-    }
-    return undefined;
-}
-
-function decodeBase64ByteVector(input: string): number[] | undefined {
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(input) || input.length % 4 !== 0) {
-        return undefined;
-    }
-    const decoded = Buffer.from(input, "base64");
-    if (decoded.length !== 32 || decoded.toString("base64") !== input) {
-        return undefined;
-    }
-    return Array.from(decoded);
-}
-
 function readEnclaveHealthCheck(input: unknown): EnclaveHealthCheckResult {
     if (
         !isRecord(input) ||
@@ -2281,57 +2186,8 @@ function readEnclaveHealthCheck(input: unknown): EnclaveHealthCheckResult {
     };
 }
 
-function readEnclaveAttestation(input: unknown): EnclaveAttestationResult {
-    if (
-        !isRecord(input) ||
-        !isHexBytes(input.attestation_document_hex) ||
-        !isHexBytes(input.public_key, 32)
-    ) {
-        throw new Error("enclave attestation is malformed");
-    }
-    return {
-        attestation_document_hex: input.attestation_document_hex,
-        public_key: input.public_key,
-    };
-}
-
-function requireRegistrationMetadata(input: unknown): EnclaveVerificationMetadata {
-    if (
-        !isRecord(input) ||
-        input.verifier_config_key !== EARTHQUAKE_VERIFIER_CONFIG_KEY ||
-        !isSafeIntegerInRange(input.verifier_config_version, 1, Number.MAX_SAFE_INTEGER) ||
-        !isHexBytes(input.enclave_instance_public_key, 32)
-    ) {
-        throw new Error("enclave registration metadata is malformed");
-    }
-    return {
-        verifier_config_key: input.verifier_config_key,
-        verifier_config_version: input.verifier_config_version,
-        enclave_instance_public_key: input.enclave_instance_public_key,
-    };
-}
-
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function isSafeIntegerInRange(value: unknown, min: number, max: number): value is number {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= min && value <= max;
-}
-
-function isHexBytes(value: unknown, expectedBytes?: number): value is string {
-    if (typeof value !== "string" || !/^(?:0x)?[0-9a-fA-F]+$/.test(value)) {
-        return false;
-    }
-    const hex = value.startsWith("0x") ? value.slice(2) : value;
-    if (hex.length === 0 || hex.length % 2 !== 0) {
-        return false;
-    }
-    return expectedBytes === undefined || hex.length === expectedBytes * 2;
-}
-
-function normalizeHex(value: string): string {
-    return (value.startsWith("0x") ? value.slice(2) : value).toLowerCase();
 }
 
 function isNonEmptyString(input: string | undefined): input is string {

@@ -10,5 +10,8 @@
     "scripts": {
         "typecheck": "tsc -b --noEmit",
         "test": "vitest run src"
+    },
+    "dependencies": {
+        "@mysten/sui": "^2.16.3"
     }
 }

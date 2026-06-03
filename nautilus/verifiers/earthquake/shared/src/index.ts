@@ -195,7 +195,7 @@ export interface RawDataEntry {
 }
 
 export interface EnclaveVerificationMetadata {
-    verifier_config_key: typeof EARTHQUAKE_VERIFIER_CONFIG_KEY;
+    verifier_config_key: number;
     verifier_config_version: number;
     enclave_instance_public_key: string;
 }

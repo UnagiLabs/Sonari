@@ -174,27 +174,39 @@ export interface BatchVerifierHandlerResult {
 export function createBatchVerifierHandler(options: BatchVerifierHandlerOptions) {
     return async function batchVerifierHandler(): Promise<BatchVerifierHandlerResult> {
         const nowMs = options.now?.() ?? Date.now();
-        const job = await options.repository.claimNextDue(nowMs);
-        if (job === null) {
-            return { workflow_started: 0 };
+        let workflowStarted = 0;
+        for (;;) {
+            const job = await options.repository.claimNextDue(nowMs);
+            if (job === null) {
+                break;
+            }
+            workflowStarted += await processOneJob(options, nowMs, job);
         }
-        try {
-            await options.workflow.start({
-                jobId: job.jobId,
-                executionName: job.executionName,
-                attempt: job.attempt,
-            });
-        } catch (error) {
-            await options.repository.markRetry(
-                job.jobId,
-                nowMs,
-                nowMs + DEFAULT_RETRY_BACKOFF_MS,
-                error instanceof Error ? error.message : String(error),
-            );
-            return { workflow_started: 0 };
-        }
-        return { workflow_started: 1 };
+        return { workflow_started: workflowStarted };
     };
+}
+
+async function processOneJob(
+    options: BatchVerifierHandlerOptions,
+    nowMs: number,
+    job: DueVerificationJob,
+): Promise<number> {
+    try {
+        await options.workflow.start({
+            jobId: job.jobId,
+            executionName: job.executionName,
+            attempt: job.attempt,
+        });
+        return 1;
+    } catch (error) {
+        await options.repository.markRetry(
+            job.jobId,
+            nowMs,
+            nowMs + DEFAULT_RETRY_BACKOFF_MS,
+            error instanceof Error ? error.message : String(error),
+        );
+        return 0;
+    }
 }
 
 export class InMemoryVerificationJobRepository implements VerificationJobRepository {

@@ -6,6 +6,8 @@ import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     type Ec2ClientLike,
+    readEnclaveRegistrationConfigFromEnv,
+    readSuiSubmissionConfigFromEnv,
     handler as runnerWorkflowHandler,
     type S3ClientLike,
     type SsmClientLike,
@@ -171,9 +173,8 @@ describe("membership runner workflow", () => {
         expect(readiness).toContain("SONARI_WORLD_ID_APP_ID is required");
         expect(readiness).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required");
         expect(readiness).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS is required");
-        expect(readiness).toContain("SONARI_ENCLAVE_STDIO_BRIDGE is required");
+        expect(readiness).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID is required");
         expect(readiness).toContain('test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"');
-        expect(readiness).toContain('test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"');
         expect(readiness).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
     });
 
@@ -216,7 +217,7 @@ describe("membership runner workflow", () => {
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
         );
         expect(command).toContain(
-            "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_ENCLAVE_STDIO_BRIDGE SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+            "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         );
         expect(command).toContain(
             `printf '%s' ${shellSingleQuote(row?.request_json ?? "")} | '/opt/sonari/bin/run-membership-identity-enclave'`,
@@ -476,6 +477,7 @@ describe("membership runner workflow", () => {
                 payload_bcs_hex: "0x010203",
                 signature: `0x${"11".repeat(64)}`,
                 public_key: `0x${"22".repeat(32)}`,
+                membership_id: validRequest().membership_id, // dynamic: from verifiedTeeResult
             },
         ]);
     });
@@ -560,14 +562,11 @@ describe("membership runner workflow", () => {
         expect(template).toContain("{TeeEifS3Key}'");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
-        expect(template).toContain(
-            "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
-        );
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
         expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
         expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
         expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
-        expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
         expect(template).toContain("systemctl enable --now sonari-world-id-vsock-proxy.service");
         expect(template).toContain(
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
@@ -575,6 +574,90 @@ describe("membership runner workflow", () => {
         expect(template).toContain("SONARI_WORLD_ID_UPSTREAM_API_BASE");
         expect(template).toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
         expect(template).toContain("touch /opt/sonari/bootstrap-complete");
+    });
+    // STEP 4: VSOCK server request dispatch
+    describe("membership runner VSOCK server dispatch", () => {
+        it("run-membership-identity-enclave routes stdin action to VSOCK /get_attestation and /process_data endpoints", async () => {
+            const template = await readFile(
+                new URL(
+                    "../../../../../infra/aws/membership-identity-runner/template.yaml",
+                    import.meta.url,
+                ),
+                "utf8",
+            );
+
+            // The wrapper script must route get_attestation to /get_attestation and
+            // process_data to /process_data via VSOCK-CONNECT (socat/equivalent).
+            expect(template).toContain("/get_attestation");
+            expect(template).toContain("/process_data");
+            expect(template).toContain("VSOCK-CONNECT");
+            expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
+        });
+
+        it("dispatch_get_attestation_command sends action=get_attestation via stdin to the enclave wrapper", async () => {
+            const repository = new InMemoryVerificationJobRepository();
+            const job = await repository.upsertRequest(validRequest(), baseNowMs);
+            await repository.claimNextDue(baseNowMs + 1);
+            const ssm = new RecordingSsmClient({ commandId: "cmd-attest-4" });
+            const handler = createRunnerControlHandler({
+                autoscaling: new RecordingAutoScalingClient(),
+                ec2: new RecordingEc2Client(),
+                ssm,
+                s3: new RecordingS3Client(),
+                repository,
+                now: () => baseNowMs + 2,
+                config: baseConfig(),
+            });
+
+            await handler({
+                action: "dispatch_get_attestation_command",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-runner",
+            } as never);
+
+            const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+            // Must send {"action":"get_attestation"} to the wrapper (stdin)
+            expect(sentCommand).toContain('"action":"get_attestation"');
+            // one-shot subprocess stdin passthrough (raw requestJson) must not remain
+            expect(sentCommand).not.toContain("nitroEnclaveProcessCommand");
+        });
+
+        it("dispatch_process_data_command sends action=process_data with registration_metadata via stdin", async () => {
+            const repository = new InMemoryVerificationJobRepository();
+            const job = await repository.upsertRequest(validRequest(), baseNowMs);
+            await repository.claimNextDue(baseNowMs + 1);
+            const fakeRegistrationMetadata = {
+                verifier_config_key: 2,
+                verifier_config_version: 1,
+                enclave_instance_public_key: `0x${"cc".repeat(32)}`,
+            };
+            const ssm = new RecordingSsmClient({ commandId: "cmd-process-4" });
+            const handler = createRunnerControlHandler({
+                autoscaling: new RecordingAutoScalingClient(),
+                ec2: new RecordingEc2Client(),
+                ssm,
+                s3: new RecordingS3Client(),
+                repository,
+                now: () => baseNowMs + 2,
+                config: baseConfig(),
+            });
+
+            await handler({
+                action: "dispatch_process_data_command",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-runner",
+                registration_metadata: fakeRegistrationMetadata,
+            } as never);
+
+            const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+            expect(sentCommand).toContain('"action":"process_data"');
+            expect(sentCommand).toContain('"registration_metadata"');
+            expect(sentCommand).toContain('"verifier_config_key":2');
+            // one-shot subprocess stdin passthrough (raw requestJson) must not remain
+            expect(sentCommand).not.toContain("nitroEnclaveProcessCommand");
+        });
     });
 });
 
@@ -616,6 +699,122 @@ function verifiedTeeResult() {
         signed_statement_hash: validRequest().signed_statement_hash,
     };
 }
+
+// STEP 7: env namespace separation, dynamic membershipPassId, stop_instance, register adapter wiring
+describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => {
+    it("stop_instance sets desiredCapacity to 0 (per-job EC2 lifecycle)", async () => {
+        const autoscaling = new RecordingAutoScalingClient();
+        const handler = createRunnerControlHandler({
+            autoscaling,
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        const result = await handler({
+            action: "stop_instance",
+            job_id: "job-stop-7",
+            attempt: 1,
+        });
+
+        expect(result).toMatchObject({ capacity: 0 });
+        expect(autoscaling.capacities).toContain(0);
+    });
+
+    it("IDENTITY_RELAYER_MODE is used (not RELAYER_MODE) to activate submission config", () => {
+        const originalEnv = { ...process.env };
+        try {
+            delete process.env.RELAYER_MODE;
+            delete process.env.IDENTITY_RELAYER_MODE;
+
+            // Without any env var: should return undefined
+            const noMode = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(noMode).toBeUndefined();
+
+            // RELAYER_MODE alone must NOT activate config (namespace separation)
+            process.env.RELAYER_MODE = "dry_run";
+            const withOldKey = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(withOldKey).toBeUndefined();
+            delete process.env.RELAYER_MODE;
+
+            // IDENTITY_RELAYER_MODE activates config
+            process.env.IDENTITY_RELAYER_MODE = "dry_run";
+            const withNewKey = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(withNewKey).not.toBeUndefined();
+            expect(withNewKey?.mode).toBe("dry_run");
+        } finally {
+            // restore
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+
+    it("SONARI_MEMBERSHIP_PASS_ID is not required for submission config (dynamic membershipPassId)", () => {
+        const originalEnv = { ...process.env };
+        try {
+            process.env.IDENTITY_RELAYER_MODE = "dry_run";
+            process.env.SONARI_IDENTITY_PACKAGE_ID = "0xpkg";
+            process.env.SONARI_IDENTITY_PAUSE_STATE_ID = "0xpause";
+            process.env.SONARI_IDENTITY_REGISTRY_ID = "0xidentity";
+            process.env.SONARI_MEMBERSHIP_REGISTRY_ID = "0xmembership";
+            process.env.SONARI_VERIFIER_REGISTRY_ID = "0xverifier";
+            delete process.env.SONARI_MEMBERSHIP_PASS_ID; // must NOT be required
+
+            const config = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(config).not.toBeUndefined();
+            // No configurationError from missing SONARI_MEMBERSHIP_PASS_ID
+            expect(config?.configurationError).not.toContain("SONARI_MEMBERSHIP_PASS_ID");
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+
+    it("readEnclaveRegistrationConfigFromEnv derives target and verifierRegistry from Sui env vars", () => {
+        const originalEnv = { ...process.env };
+        try {
+            process.env.IDENTITY_RELAYER_MODE = "submit";
+            process.env.SONARI_IDENTITY_PACKAGE_ID = "0xpkg";
+            process.env.SONARI_VERIFIER_REGISTRY_ID = "0xreg";
+            process.env.RELAYER_ALLOW_SUBMIT = "true";
+
+            const config = readEnclaveRegistrationConfigFromEnv(noopSecretReader);
+            expect(config).not.toBeUndefined();
+            expect(config?.target).toContain("register_enclave_instance_for_config");
+            expect(config?.target).toContain("0xpkg");
+            expect(config?.verifierRegistry).toBe("0xreg");
+            expect(config?.allowSubmit).toBe(true);
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+
+    it("readEnclaveRegistrationConfigFromEnv returns undefined when IDENTITY_RELAYER_MODE is unset", () => {
+        const originalEnv = { ...process.env };
+        try {
+            delete process.env.IDENTITY_RELAYER_MODE;
+            const config = readEnclaveRegistrationConfigFromEnv(noopSecretReader);
+            expect(config).toBeUndefined();
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+});
+
+const noopSecretReader = {
+    getSecretString: async (_arn: string) => "",
+};
 
 class RecordingAutoScalingClient implements AutoScalingClientLike {
     readonly capacities: number[] = [];
@@ -747,4 +946,321 @@ function fakeSuiRequest() {
             Array.from({ length: 32 }, () => 0x22),
         ] as [string, string, string, string, string, string, number[], number[], number[]],
     };
+}
+
+// STEP 3: attestation → register → process_data flow
+describe("membership runner attestation/register/process_data flow", () => {
+    const fakeAttestationHex = `0x${"ab".repeat(100)}`;
+    const fakePublicKey = `0x${"cc".repeat(32)}`;
+    const fakeRegistrationMetadata = {
+        verifier_config_key: 2,
+        verifier_config_version: 1,
+        enclave_instance_public_key: `0x${"cc".repeat(32)}`,
+    };
+
+    it("dispatches get_attestation command and returns attestation result via S3", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({ commandId: "cmd-attest" });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client({
+                [`results/${job.row.job_id}/${baseNowMs + 2}.json`]: JSON.stringify({
+                    attestation_document_hex: fakeAttestationHex,
+                    public_key: fakePublicKey,
+                }),
+            }),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        const dispatched = await handler({
+            action: "dispatch_get_attestation_command",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+        } as never);
+        expect(dispatched).toMatchObject({
+            job_id: job.row.job_id,
+            instance_id: "i-runner",
+            command_id: "cmd-attest",
+        });
+
+        const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+        expect(sentCommand).toContain('"action":"get_attestation"');
+
+        const attestationResult = await handler({
+            action: "read_attestation_result",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+        } as never);
+        expect(attestationResult).toMatchObject({
+            attestation: {
+                attestation_document_hex: fakeAttestationHex,
+                public_key: fakePublicKey,
+            },
+        });
+    });
+
+    it("register_enclave_instance calls EnclaveRegistrationAdapter with config_key=2 and returns registration_metadata", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const enclaveRegistration = new RecordingEnclaveRegistrationAdapter(
+            fakeRegistrationMetadata,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            enclaveRegistration,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        const result = await handler({
+            action: "register_enclave_instance",
+            job_id: job.row.job_id,
+            attempt: 1,
+            attestation: {
+                attestation_document_hex: fakeAttestationHex,
+                public_key: fakePublicKey,
+            },
+        } as never);
+
+        expect(result).toMatchObject({
+            job_id: job.row.job_id,
+            registration_metadata: {
+                verifier_config_key: 2,
+                verifier_config_version: 1,
+                enclave_instance_public_key: fakePublicKey,
+            },
+        });
+        expect(enclaveRegistration.calls).toHaveLength(1);
+        expect(enclaveRegistration.calls[0]).toMatchObject({
+            attestationDocumentHex: fakeAttestationHex,
+            publicKey: fakePublicKey,
+        });
+    });
+
+    it("register_enclave_instance throws when enclaveRegistration adapter is not configured", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "register_enclave_instance",
+                job_id: job.row.job_id,
+                attempt: 1,
+                attestation: {
+                    attestation_document_hex: fakeAttestationHex,
+                    public_key: fakePublicKey,
+                },
+            } as never),
+        ).rejects.toThrow(/enclave registration is not configured/);
+    });
+
+    it("dispatch_process_data_command injects registration_metadata with verifier_config_key=2 into TEE input", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({ commandId: "cmd-process" });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        const result = await handler({
+            action: "dispatch_process_data_command",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+            registration_metadata: fakeRegistrationMetadata,
+        } as never);
+
+        expect(result).toMatchObject({
+            job_id: job.row.job_id,
+            instance_id: "i-runner",
+            command_id: "cmd-process",
+        });
+
+        const sentCommand = ssm.sentCommands[0]?.shellCommand ?? "";
+        expect(sentCommand).toContain('"action":"process_data"');
+        expect(sentCommand).toContain('"registration_metadata"');
+        expect(sentCommand).toContain('"verifier_config_key":2');
+    });
+
+    it("dispatch_process_data_command validates registration_metadata has verifier_config_key=2", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dispatch_process_data_command",
+                job_id: job.row.job_id,
+                attempt: 1,
+                instance_id: "i-runner",
+                registration_metadata: {
+                    verifier_config_key: 1, // wrong - should be 2
+                    verifier_config_version: 1,
+                    enclave_instance_public_key: fakePublicKey,
+                },
+            } as never),
+        ).rejects.toThrow(/enclave registration metadata is malformed/);
+    });
+
+    it("full attestation→register→process_data flow returns correct result with verifier_kind preserved", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const ssm = new RecordingSsmClient({
+            commandId: "cmd-attest",
+            invocationStatus: "Success",
+        });
+        const enclaveRegistration = new RecordingEnclaveRegistrationAdapter(
+            fakeRegistrationMetadata,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3: new RecordingS3Client({
+                [`results/${job.row.job_id}/${baseNowMs + 2}.json`]: JSON.stringify({
+                    attestation_document_hex: fakeAttestationHex,
+                    public_key: fakePublicKey,
+                }),
+            }),
+            repository,
+            enclaveRegistration,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        // Step 1: dispatch get_attestation
+        const dispatchResult = await handler({
+            action: "dispatch_get_attestation_command",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+        } as never);
+        expect(dispatchResult).toMatchObject({ verifier_kind: "membership_identity" });
+
+        // Step 2: read attestation result
+        const attestResult = await handler({
+            action: "read_attestation_result",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result_s3_key: `results/${job.row.job_id}/${baseNowMs + 2}.json`,
+        } as never);
+        expect(attestResult).toMatchObject({
+            verifier_kind: "membership_identity",
+            attestation: { public_key: fakePublicKey },
+        });
+
+        const attestation =
+            "attestation" in attestResult ? attestResult.attestation : neverAttestation();
+
+        // Step 3: register enclave instance
+        const registerResult = await handler({
+            action: "register_enclave_instance",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            attestation,
+        } as never);
+        expect(registerResult).toMatchObject({
+            verifier_kind: "membership_identity",
+            registration_metadata: { verifier_config_key: 2 },
+        });
+
+        const registrationMetadata =
+            "registration_metadata" in registerResult
+                ? registerResult.registration_metadata
+                : neverMetadata();
+
+        // Step 4: dispatch process_data with registration_metadata
+        const processResult = await handler({
+            action: "dispatch_process_data_command",
+            verifier_kind: "membership_identity",
+            job_id: job.row.job_id,
+            attempt: 1,
+            instance_id: "i-runner",
+            registration_metadata: registrationMetadata,
+        } as never);
+        expect(processResult).toMatchObject({
+            verifier_kind: "membership_identity",
+            instance_id: "i-runner",
+            command_id: "cmd-attest",
+        });
+
+        const processCommand = ssm.sentCommands.find((c) =>
+            c.shellCommand.includes('"action":"process_data"'),
+        );
+        expect(processCommand).toBeDefined();
+        expect(processCommand?.shellCommand).toContain('"verifier_config_key":2');
+    });
+});
+
+class RecordingEnclaveRegistrationAdapter {
+    readonly calls: Array<{ jobId: string; attestationDocumentHex: string; publicKey: string }> =
+        [];
+
+    constructor(
+        private readonly metadata: {
+            verifier_config_key: number;
+            verifier_config_version: number;
+            enclave_instance_public_key: string;
+        },
+    ) {}
+
+    async register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<typeof this.metadata> {
+        this.calls.push(input);
+        return this.metadata;
+    }
+}
+
+function neverAttestation(): never {
+    throw new Error("expected attestation in result");
+}
+
+function neverMetadata(): never {
+    throw new Error("expected registration_metadata in result");
 }

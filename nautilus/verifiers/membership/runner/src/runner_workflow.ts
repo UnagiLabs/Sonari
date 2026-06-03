@@ -15,11 +15,15 @@ import {
 import { encodeIdentityVerificationResultBcsHex } from "@sonari/membership-verifier-shared";
 import {
     dispatchRunnerCommand,
+    type EnclaveAttestationResult,
+    type EnclaveVerificationMetadata,
     findReadyRunnerInstance,
     MEMBERSHIP_IDENTITY_VERIFIER_KIND,
     parseExpectedVerifierKind,
     pollRunnerCommand,
+    readEnclaveAttestation,
     readRunnerResultText,
+    requireRegistrationMetadata,
     setRunnerDesiredCapacity,
     withVerifierKind,
 } from "@sonari/verifier-contracts";
@@ -40,6 +44,8 @@ import {
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitSuccess,
     type IdentityVerificationSuiResult,
+    SuiEnclaveRegistrationAdapter,
+    type SuiEnclaveRegistrationConfig,
     type SuiNetwork,
     submitIdentityVerificationPayload,
 } from "./sui_submission.js";
@@ -58,7 +64,6 @@ export interface RunnerSuiSubmissionConfig {
     readonly identityRegistryId: string;
     readonly membershipRegistryId: string;
     readonly verifierRegistryId: string;
-    readonly membershipPassId: string;
     readonly clockId: string;
     readonly network?: SuiNetwork | undefined;
     readonly grpcUrl?: string | undefined;
@@ -107,6 +112,7 @@ export interface SignedIdentityPayloadForRelayer {
     readonly payload_bcs_hex: string;
     readonly signature: string;
     readonly public_key: string;
+    readonly membership_id: string;
 }
 
 export interface SuiSubmissionAdapter {
@@ -116,6 +122,16 @@ export interface SuiSubmissionAdapter {
     submit(
         result: SignedIdentityPayloadForRelayer,
     ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>>;
+}
+
+export const MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY = 2;
+
+export interface EnclaveRegistrationAdapter {
+    register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata>;
 }
 
 export type MembershipTeeResult = VerifiedMembershipTeeResult | StatusOnlyMembershipTeeResult;
@@ -157,6 +173,31 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
     (
         | { action: "start_instance"; job_id: string; attempt?: number | undefined }
         | { action: "find_ready_instance"; job_id: string; attempt?: number | undefined }
+        | {
+              action: "dispatch_get_attestation_command";
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+          }
+        | {
+              action: "read_attestation_result";
+              job_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
+              action: "register_enclave_instance";
+              job_id: string;
+              attempt?: number | undefined;
+              attestation: EnclaveAttestationResult;
+          }
+        | {
+              action: "dispatch_process_data_command";
+              job_id: string;
+              attempt?: number | undefined;
+              instance_id: string;
+              registration_metadata: EnclaveVerificationMetadata;
+          }
         | {
               action: "dispatch_tee_command";
               job_id: string;
@@ -221,6 +262,16 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               job_id: string;
               attempt?: number | undefined;
+              attestation: EnclaveAttestationResult;
+          }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
+              registration_metadata: EnclaveVerificationMetadata;
+          }
+        | {
+              job_id: string;
+              attempt?: number | undefined;
               instance_id?: string | undefined;
               command_id?: string | undefined;
               result_s3_key?: string | undefined;
@@ -251,6 +302,7 @@ export interface RunnerControlHandlerOptions {
     readonly s3: S3ClientLike;
     readonly repository?: VerificationJobRepository | undefined;
     readonly suiSubmission?: SuiSubmissionAdapter | undefined;
+    readonly enclaveRegistration?: EnclaveRegistrationAdapter | undefined;
     readonly now?: (() => number) | undefined;
     readonly config: RunnerWorkflowConfig;
 }
@@ -299,6 +351,102 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     instance_id: instanceId,
                 });
             }
+            case "dispatch_get_attestation_command": {
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, true);
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.job_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs: nowMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            jobId: event.job_id,
+                            teeInput: { action: "get_attestation" },
+                            dispatchTimestampMs: nowMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, true);
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
+            }
+            case "read_attestation_result": {
+                await requireCurrentWorkflowAttempt(options, event, true);
+                const text = await readRunnerResultText(options.s3, {
+                    bucket: options.config.resultBucket,
+                    key: event.result_s3_key,
+                });
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    attestation: readEnclaveAttestation(JSON.parse(text) as unknown),
+                });
+            }
+            case "register_enclave_instance": {
+                const registrar = options.enclaveRegistration;
+                if (registrar === undefined) {
+                    throw new Error("enclave registration is not configured");
+                }
+                const attestation = readEnclaveAttestation(event.attestation);
+                await requireCurrentWorkflowAttempt(options, event, true);
+                const registered = requireRegistrationMetadata(
+                    await registrar.register({
+                        jobId: event.job_id,
+                        attestationDocumentHex: attestation.attestation_document_hex,
+                        publicKey: attestation.public_key,
+                    }),
+                    MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY,
+                );
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    registration_metadata: registered,
+                });
+            }
+            case "dispatch_process_data_command": {
+                const nowMs = options.now?.() ?? Date.now();
+                const row = await requireCurrentWorkflowAttempt(options, event, true);
+                const requestJson = readValidatedRequestJson(row);
+                const registrationMetadata = requireRegistrationMetadata(
+                    event.registration_metadata,
+                    MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY,
+                );
+                const dispatched = await dispatchRunnerCommand(options.ssm, {
+                    workflowId: event.job_id,
+                    instanceId: event.instance_id,
+                    dispatchTimestampMs: nowMs,
+                    buildShellCommand: (resultS3Key) =>
+                        buildSsmShellCommand({
+                            jobId: event.job_id,
+                            teeInput: {
+                                action: "process_data",
+                                payload: JSON.parse(requestJson) as unknown,
+                                registration_metadata: registrationMetadata,
+                            },
+                            dispatchTimestampMs: nowMs,
+                            resultBucket: options.config.resultBucket,
+                            resultS3Key,
+                            nitroEnclaveProcessCommand: options.config.nitroEnclaveProcessCommand,
+                        }),
+                });
+                await requireCurrentWorkflowAttempt(options, event, true);
+                return retainVerifierKind({
+                    job_id: event.job_id,
+                    attempt: event.attempt,
+                    instance_id: event.instance_id,
+                    command_id: dispatched.commandId,
+                    result_s3_key: dispatched.resultS3Key,
+                    command_poll_count: dispatched.commandPollCount,
+                });
+            }
             case "dispatch_tee_command": {
                 const nowMs = options.now?.() ?? Date.now();
                 const row = await requireCurrentWorkflowAttempt(options, event, true);
@@ -310,7 +458,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             jobId: event.job_id,
-                            requestJson,
+                            teeInput: JSON.parse(requestJson) as unknown,
                             dispatchTimestampMs: nowMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -696,6 +844,16 @@ class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
     }
 }
 
+function buildEnclaveRegistrationAdapter(secretReader: RelayerSignerSecretReader): {
+    enclaveRegistration?: EnclaveRegistrationAdapter;
+} {
+    const config = readEnclaveRegistrationConfigFromEnv(secretReader);
+    if (config === undefined) {
+        return {};
+    }
+    return { enclaveRegistration: new SuiEnclaveRegistrationAdapter(config) };
+}
+
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
     parseExpectedVerifierKind(
         (event as { verifier_kind?: unknown }).verifier_kind,
@@ -715,12 +873,13 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
             nitroEnclaveProcessCommand: requiredEnv("NITRO_ENCLAVE_PROCESS_COMMAND"),
             suiSubmission: readSuiSubmissionConfigFromEnv(new AwsRelayerSignerSecretReader()),
         },
+        ...buildEnclaveRegistrationAdapter(new AwsRelayerSignerSecretReader()),
     })(event);
 }
 
 function buildSsmShellCommand(input: {
     jobId: string;
-    requestJson: string;
+    teeInput: unknown;
     dispatchTimestampMs: number;
     resultBucket: string;
     resultS3Key: string;
@@ -730,6 +889,7 @@ function buildSsmShellCommand(input: {
     const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
         .map(shellSingleQuote)
         .join(" ");
+    const teeInput = input.teeInput;
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
@@ -739,16 +899,15 @@ function buildSsmShellCommand(input: {
         buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_KMS_KEY_ID"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
-        buildRequiredShellEnvCheck("SONARI_ENCLAVE_STDIO_BRIDGE"),
+        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
         'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        'test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"',
-        "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_ENCLAVE_STDIO_BRIDGE SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+        "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
-        `printf '%s' ${shellSingleQuote(input.requestJson)} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
@@ -763,13 +922,12 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_KMS_KEY_ID"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
-        buildRequiredShellEnvCheck("SONARI_ENCLAVE_STDIO_BRIDGE"),
+        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
         'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        'test -x "$SONARI_ENCLAVE_STDIO_BRIDGE"',
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
         "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
     ].join("\n");
@@ -958,7 +1116,6 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
             identityRegistryId: this.config.identityRegistryId,
             membershipRegistryId: this.config.membershipRegistryId,
             verifierRegistryId: this.config.verifierRegistryId,
-            membershipPassId: this.config.membershipPassId,
             clockId: this.config.clockId,
             ...(this.config.network === undefined ? {} : { network: this.config.network }),
             ...(this.config.grpcUrl === undefined ? {} : { grpcUrl: this.config.grpcUrl }),
@@ -980,6 +1137,7 @@ function signedPayloadForRelayer(
         payload_bcs_hex: result.payload_bcs_hex,
         signature: result.signature,
         public_key: result.public_key,
+        membership_id: result.membership_id,
     };
 }
 
@@ -993,7 +1151,7 @@ function buildSuiSubmissionFromConfig(
 export function readSuiSubmissionConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
 ): RunnerSuiSubmissionConfig | undefined {
-    const mode = process.env.RELAYER_MODE;
+    const mode = process.env.IDENTITY_RELAYER_MODE;
     if (mode === undefined || mode.length === 0) {
         return undefined;
     }
@@ -1005,9 +1163,8 @@ export function readSuiSubmissionConfigFromEnv(
             identityRegistryId: "",
             membershipRegistryId: "",
             verifierRegistryId: "",
-            membershipPassId: "",
             clockId: "0x6",
-            configurationError: `Unsupported RELAYER_MODE: ${mode}`,
+            configurationError: `Unsupported IDENTITY_RELAYER_MODE: ${mode}`,
         };
     }
 
@@ -1016,7 +1173,8 @@ export function readSuiSubmissionConfigFromEnv(
     const identityRegistryId = process.env.SONARI_IDENTITY_REGISTRY_ID ?? "";
     const membershipRegistryId = process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "";
     const verifierRegistryId = process.env.SONARI_VERIFIER_REGISTRY_ID ?? "";
-    const membershipPassId = process.env.SONARI_MEMBERSHIP_PASS_ID ?? "";
+    // SONARI_MEMBERSHIP_PASS_ID is removed: membershipPassId is resolved dynamically from
+    // the verified result's membership_id field at submission time.
     const clockId = process.env.SONARI_SUI_CLOCK_ID ?? "0x6";
     let configurationError: string | undefined;
     const missingObjectFields = (
@@ -1026,7 +1184,6 @@ export function readSuiSubmissionConfigFromEnv(
             ["SONARI_IDENTITY_REGISTRY_ID", identityRegistryId],
             ["SONARI_MEMBERSHIP_REGISTRY_ID", membershipRegistryId],
             ["SONARI_VERIFIER_REGISTRY_ID", verifierRegistryId],
-            ["SONARI_MEMBERSHIP_PASS_ID", membershipPassId],
         ] satisfies Array<readonly [string, string]>
     )
         .filter(([, value]) => value.length === 0)
@@ -1065,13 +1222,65 @@ export function readSuiSubmissionConfigFromEnv(
         identityRegistryId,
         membershipRegistryId,
         verifierRegistryId,
-        membershipPassId,
         clockId,
         ...(configurationError === undefined ? {} : { configurationError }),
         ...(network === undefined ? {} : { network }),
         ...(grpcUrl === undefined ? {} : { grpcUrl }),
         ...(senderAddress === undefined ? {} : { senderAddress }),
         ...(allowSubmit === undefined ? {} : { allowSubmit }),
+        ...(loadSigner === undefined ? {} : { loadSigner }),
+    };
+}
+
+export function readEnclaveRegistrationConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): SuiEnclaveRegistrationConfig | undefined {
+    const mode = process.env.IDENTITY_RELAYER_MODE;
+    if (mode === undefined || mode.length === 0) {
+        return undefined;
+    }
+    const packageId = process.env.SONARI_IDENTITY_PACKAGE_ID ?? "";
+    const verifierRegistry = process.env.SONARI_VERIFIER_REGISTRY_ID ?? "";
+    const allowSubmit = process.env.RELAYER_ALLOW_SUBMIT === "true";
+    let configurationError: string | undefined;
+
+    if (packageId.length === 0) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "SONARI_IDENTITY_PACKAGE_ID is required for enclave registration",
+        );
+    }
+    if (verifierRegistry.length === 0) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "SONARI_VERIFIER_REGISTRY_ID is required for enclave registration",
+        );
+    }
+
+    const target = `${packageId}::metadata_verifier::register_enclave_instance_for_config`;
+    const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+    const grpcUrl = process.env.RELAYER_GRPC_URL;
+    const instanceTtlMs = 24 * 60 * 60 * 1000; // 24 hours per enclave instance
+
+    let loadSigner: (() => Promise<IdentityVerificationSigner>) | undefined;
+    if (mode === "submit") {
+        const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+        if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+            loadSigner = async () =>
+                createEd25519SuiSignerFromPrivateKey(
+                    await secretReader.getSecretString(signerSecretArn),
+                );
+        }
+    }
+
+    return {
+        target,
+        verifierRegistry,
+        allowSubmit,
+        instanceTtlMs,
+        ...(configurationError === undefined ? {} : { configurationError }),
+        ...(network === undefined ? {} : { network }),
+        ...(grpcUrl === undefined ? {} : { grpcUrl }),
         ...(loadSigner === undefined ? {} : { loadSigner }),
     };
 }
