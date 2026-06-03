@@ -578,7 +578,7 @@ Resources:
               source /opt/sonari/runner.env
               set +a
             fi
-            case "${SONARI_VERIFIER_KIND:-earthquake}" in
+            case "${!SONARI_VERIFIER_KIND:-earthquake}" in
               "membership_identity")
                 exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}"
                 ;;

@@ -466,4 +466,31 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
         expect(scheduleStateUsageCount).toBe(2);
     });
+
+    it("escapes bash parameter expansions so every Fn::Sub variable name stays valid", async () => {
+        const template = await readTemplate();
+
+        // CloudFormation Fn::Sub only accepts [A-Za-z0-9_.:] in a variable name.
+        // Bash expansions inside the UserData !Sub (e.g. ${VAR:-default}) must be
+        // written as ${!VAR:-default} so CloudFormation emits the literal ${...}
+        // instead of resolving an invalid variable name. A bare ${VAR:-x} fails
+        // CreateChangeSet with "variable names in Fn::Sub syntax must contain only
+        // alphanumeric characters, underscores, periods, and colons".
+        const invalidSubstitutions: string[] = [];
+        for (const match of template.matchAll(/\$\{(!?)([^}]*)\}/g)) {
+            const isEscaped = match[1] === "!";
+            const variableName = match[2] ?? "";
+            if (isEscaped) {
+                continue;
+            }
+            if (!/^[A-Za-z0-9_.:]+$/.test(variableName)) {
+                invalidSubstitutions.push(variableName);
+            }
+        }
+
+        expect(invalidSubstitutions).toEqual([]);
+        // The shared dispatcher selects the verifier kind via an escaped expansion
+        // so CloudFormation does not treat "SONARI_VERIFIER_KIND:-earthquake" as a var.
+        expect(template).toContain('case "$' + '{!SONARI_VERIFIER_KIND:-earthquake}" in');
+    });
 });
