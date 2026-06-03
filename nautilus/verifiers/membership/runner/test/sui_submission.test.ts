@@ -6,6 +6,10 @@ import {
     type IdentityVerificationSubmitClient,
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitTransaction,
+    SuiEnclaveRegistrationAdapter,
+    type SuiEnclaveRegistrationClient,
+    type SuiEnclaveRegistrationConfig,
+    type SuiEnclaveRegistrationEvent,
     submitIdentityVerificationPayload,
 } from "../src/sui_submission.js";
 
@@ -155,6 +159,228 @@ describe("membership identity Sui submission", () => {
                 digest: "submit-digest",
             },
         });
+    });
+});
+
+describe("SuiEnclaveRegistrationAdapter (case A: register=real submit)", () => {
+    const IDENTITY_VERIFIER_CONFIG_KEY = 2;
+    const IDENTITY_VERIFIER_FAMILY = 4;
+    const IDENTITY_VERIFIER_VERSION = 1;
+
+    const packageId = "0xpkg";
+    const verifierRegistryId = "0xreg";
+
+    function makeFakeRegistrationClient(opts: {
+        succeed: boolean;
+        events?: SuiEnclaveRegistrationEvent[];
+    }): SuiEnclaveRegistrationClient {
+        return {
+            signAndExecuteTransaction: async () => {
+                if (!opts.succeed) {
+                    return {
+                        $kind: "FailedTransaction" as const,
+                        FailedTransaction: {
+                            status: { success: false, error: "Move tx failed" },
+                            effects: {},
+                            events: [],
+                        },
+                    };
+                }
+                return {
+                    $kind: "Transaction" as const,
+                    Transaction: {
+                        status: { success: true as const, error: null },
+                        effects: { status: { success: true } },
+                        events: opts.events ?? [],
+                    },
+                };
+            },
+        };
+    }
+
+    function makeRegistrationEvent(overrides?: {
+        verifier_family?: number;
+        verifier_version?: number;
+        config_version?: number;
+        public_key?: number[];
+    }): SuiEnclaveRegistrationEvent {
+        return {
+            type: "0xpkg::metadata_verifier::EnclaveInstanceRegistered",
+            json: {
+                verifier_family: overrides?.verifier_family ?? IDENTITY_VERIFIER_FAMILY,
+                verifier_version: overrides?.verifier_version ?? IDENTITY_VERIFIER_VERSION,
+                config_version: overrides?.config_version ?? 1,
+                public_key: overrides?.public_key ?? Array.from({ length: 32 }, () => 0xab),
+            },
+        };
+    }
+
+    function fakeSigner(): import("@mysten/sui/cryptography").Signer {
+        return createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+    }
+
+    function baseRegistrationConfig(
+        overrides?: Partial<SuiEnclaveRegistrationConfig>,
+    ): SuiEnclaveRegistrationConfig {
+        return {
+            target: `${packageId}::metadata_verifier::register_enclave_instance_for_config`,
+            verifierRegistry: verifierRegistryId,
+            allowSubmit: true,
+            instanceTtlMs: 60_000,
+            now: () => 1_000_000,
+            signer: fakeSigner(),
+            ...overrides,
+        };
+    }
+
+    it("register target contains register_enclave_instance_for_config and configKey=2 is propagated", async () => {
+        // The target in config must encode register_enclave_instance_for_config
+        expect(
+            baseRegistrationConfig().target.endsWith(
+                "::metadata_verifier::register_enclave_instance_for_config",
+            ),
+        ).toBe(true);
+
+        const client = makeFakeRegistrationClient({
+            succeed: true,
+            events: [makeRegistrationEvent()],
+        });
+
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            ...baseRegistrationConfig(),
+            client,
+        });
+
+        // Call register and verify it returns correct config key
+        const metadata = await adapter.register({
+            jobId: "job-1",
+            attestationDocumentHex: `0x${"aa".repeat(100)}`,
+            publicKey: `0x${"ab".repeat(32)}`,
+        });
+
+        expect(metadata.verifier_config_key).toBe(IDENTITY_VERIFIER_CONFIG_KEY);
+        expect(metadata.verifier_config_version).toBeGreaterThan(0);
+        expect(metadata.enclave_instance_public_key).toBe(`0x${"ab".repeat(32)}`);
+    });
+
+    it("register calls signAndExecuteTransaction (real submit, not dry-run)", async () => {
+        let signAndExecuteCalled = false;
+        const client: SuiEnclaveRegistrationClient = {
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalled = true;
+                return {
+                    $kind: "Transaction" as const,
+                    Transaction: {
+                        status: { success: true as const, error: null },
+                        effects: { status: { success: true } },
+                        events: [makeRegistrationEvent()],
+                    },
+                };
+            },
+        };
+
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            ...baseRegistrationConfig(),
+            client,
+        });
+
+        await adapter.register({
+            jobId: "job-2",
+            attestationDocumentHex: `0x${"cc".repeat(50)}`,
+            publicKey: `0x${"ab".repeat(32)}`,
+        });
+
+        // Case A: register is always real submit (signAndExecuteTransaction)
+        expect(signAndExecuteCalled).toBe(true);
+    });
+
+    it("register parses EnclaveInstanceRegistered event with family=4, version=1, configKey=2", async () => {
+        const client = makeFakeRegistrationClient({
+            succeed: true,
+            events: [
+                makeRegistrationEvent({
+                    verifier_family: IDENTITY_VERIFIER_FAMILY,
+                    verifier_version: IDENTITY_VERIFIER_VERSION,
+                    config_version: 3,
+                    public_key: Array.from({ length: 32 }, () => 0xab),
+                }),
+            ],
+        });
+
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            ...baseRegistrationConfig(),
+            client,
+        });
+
+        const metadata = await adapter.register({
+            jobId: "job-3",
+            attestationDocumentHex: `0x${"dd".repeat(80)}`,
+            publicKey: `0x${"ab".repeat(32)}`,
+        });
+
+        expect(metadata).toEqual({
+            verifier_config_key: IDENTITY_VERIFIER_CONFIG_KEY,
+            verifier_config_version: 3,
+            enclave_instance_public_key: `0x${"ab".repeat(32)}`,
+        });
+    });
+
+    it("register rejects wrong family or version in EnclaveInstanceRegistered event", async () => {
+        const wrongFamilyClient = makeFakeRegistrationClient({
+            succeed: true,
+            events: [makeRegistrationEvent({ verifier_family: 3 })], // earthquake family
+        });
+
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            ...baseRegistrationConfig(),
+            client: wrongFamilyClient,
+        });
+
+        await expect(
+            adapter.register({
+                jobId: "job-4",
+                attestationDocumentHex: `0x${"ee".repeat(60)}`,
+                publicKey: `0x${"ab".repeat(32)}`,
+            }),
+        ).rejects.toThrow();
+    });
+
+    it("register fails when public key in event does not match attestation", async () => {
+        const differentKey = Array.from({ length: 32 }, () => 0xcd); // different from 0xab
+        const client = makeFakeRegistrationClient({
+            succeed: true,
+            events: [makeRegistrationEvent({ public_key: differentKey })],
+        });
+
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            ...baseRegistrationConfig(),
+            client,
+        });
+
+        await expect(
+            adapter.register({
+                jobId: "job-5",
+                attestationDocumentHex: `0x${"ff".repeat(40)}`,
+                publicKey: `0x${"ab".repeat(32)}`, // different from event
+            }),
+        ).rejects.toThrow("registered enclave public key does not match attestation");
+    });
+
+    it("register fails when allowSubmit is false (case A requires real submit)", async () => {
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            ...baseRegistrationConfig(),
+            allowSubmit: false,
+        });
+
+        await expect(
+            adapter.register({
+                jobId: "job-6",
+                attestationDocumentHex: `0x${"aa".repeat(50)}`,
+                publicKey: `0x${"ab".repeat(32)}`,
+            }),
+        ).rejects.toThrow();
     });
 });
 

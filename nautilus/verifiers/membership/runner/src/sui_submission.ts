@@ -2,6 +2,16 @@ import { decodeSuiPrivateKey, type Signer } from "@mysten/sui/cryptography";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import {
+    createSuiEnclaveRegistrationTransaction,
+    type EnclaveRegistrationEvent,
+    type EnclaveRegistrationExecutionResponse,
+    type EnclaveVerificationMetadata,
+    isHexBytes,
+    normalizeHex,
+    parseHexByteVector,
+    readEnclaveRegistrationMetadata,
+} from "@sonari/verifier-contracts";
 
 export const RELAYER_SUBMIT_FAILED = "RELAYER_SUBMIT_FAILED";
 export const MOVE_REJECTED = "MOVE_REJECTED";
@@ -498,6 +508,189 @@ function moveRejected<T = never>(message: string): IdentityVerificationSuiResult
 
 function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+// ============================================================
+// Enclave registration (case A: real submit)
+// ============================================================
+
+export const IDENTITY_VERIFIER_CONFIG_KEY = 2;
+export const IDENTITY_VERIFIER_FAMILY = 4;
+export const IDENTITY_VERIFIER_VERSION = 1;
+
+export type SuiEnclaveRegistrationEvent = EnclaveRegistrationEvent;
+export type SuiEnclaveRegistrationExecutionResponse = EnclaveRegistrationExecutionResponse;
+
+export interface SuiEnclaveRegistrationClient {
+    signAndExecuteTransaction(input: {
+        transaction: unknown;
+        signer: IdentityVerificationSigner;
+        include: { effects: true; events: true };
+    }): Promise<SuiEnclaveRegistrationExecutionResponse>;
+}
+
+export interface SuiEnclaveRegistrationConfig {
+    readonly target: string;
+    readonly verifierRegistry: string;
+    readonly allowSubmit: boolean;
+    readonly instanceTtlMs: number;
+    readonly configurationError?: string | undefined;
+    readonly signer?: IdentityVerificationSigner | undefined;
+    readonly client?: SuiEnclaveRegistrationClient | undefined;
+    readonly transaction?: unknown;
+    readonly loadSigner?: (() => Promise<IdentityVerificationSigner>) | undefined;
+    readonly network?: SuiNetwork | undefined;
+    readonly grpcUrl?: string | undefined;
+    readonly senderAddress?: string | undefined;
+    readonly now?: (() => number) | undefined;
+}
+
+/**
+ * Case A: enclave register is always a real submit (no dry-run).
+ * update_identity_verification semantics are unchanged.
+ */
+export class SuiEnclaveRegistrationAdapter {
+    constructor(private readonly config: SuiEnclaveRegistrationConfig) {}
+
+    async register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata> {
+        if (this.config.configurationError !== undefined) {
+            throw new Error(this.config.configurationError);
+        }
+        if (!this.config.allowSubmit) {
+            throw new Error(
+                "enclave registration requires allowSubmit=true (case A: register is always real submit)",
+            );
+        }
+        const network = this.config.network;
+        const grpcUrl = this.config.grpcUrl;
+
+        if (!isHexBytes(input.attestationDocumentHex)) {
+            throw new Error("attestation_document_hex must be hex encoded");
+        }
+        if (!isHexBytes(input.publicKey, 32)) {
+            throw new Error("attestation public_key must be 32 bytes");
+        }
+        if (!Number.isSafeInteger(this.config.instanceTtlMs) || this.config.instanceTtlMs <= 0) {
+            throw new Error("instanceTtlMs must be a positive safe integer");
+        }
+
+        const signer = this.config.signer ?? (await this.config.loadSigner?.());
+        const resolvedSenderAddress =
+            signer !== undefined ? signer.toSuiAddress() : this.config.senderAddress;
+        if (!isNonEmptyString(resolvedSenderAddress)) {
+            throw new Error(
+                "enclave registration requires a signer or senderAddress with a valid Sui address",
+            );
+        }
+
+        const nowMs = this.config.now?.() ?? Date.now();
+        const expiresAtMs = nowMs + this.config.instanceTtlMs;
+        if (!Number.isSafeInteger(expiresAtMs)) {
+            throw new Error("enclave instance expiry exceeded safe integer range");
+        }
+
+        const client: SuiEnclaveRegistrationClient =
+            this.config.client ??
+            (() => {
+                if (!isNonEmptyString(network) || !isNonEmptyString(grpcUrl)) {
+                    throw new Error(
+                        "enclave registration requires network and grpcUrl when no client is provided",
+                    );
+                }
+                return new SuiGrpcClient({
+                    network: network as SuiNetwork,
+                    baseUrl: grpcUrl,
+                }) as unknown as SuiEnclaveRegistrationClient;
+            })();
+
+        const transaction =
+            this.config.transaction ??
+            createSuiEnclaveRegistrationTransaction({
+                target: this.config.target,
+                verifierRegistry: this.config.verifierRegistry,
+                attestationDocumentBytes: parseHexByteVector(input.attestationDocumentHex),
+                expiresAtMs,
+                senderAddress: resolvedSenderAddress,
+                configKey: IDENTITY_VERIFIER_CONFIG_KEY,
+            });
+
+        // Case A: always real submit, never dry-run
+        const resolvedSigner = signer;
+        if (resolvedSigner === undefined) {
+            throw new Error(
+                "enclave registration requires a signer (loadSigner or signer) for real submit",
+            );
+        }
+
+        const response = await client.signAndExecuteTransaction({
+            transaction,
+            signer: resolvedSigner,
+            include: { effects: true, events: true },
+        });
+
+        const events = readSuccessfulEnclaveRegistrationEvents(response);
+        const metadata = readEnclaveRegistrationMetadata(events, {
+            expectedFamily: IDENTITY_VERIFIER_FAMILY,
+            expectedVersion: IDENTITY_VERIFIER_VERSION,
+            configKey: IDENTITY_VERIFIER_CONFIG_KEY,
+        });
+
+        if (normalizeHex(metadata.enclave_instance_public_key) !== normalizeHex(input.publicKey)) {
+            throw new Error("registered enclave public key does not match attestation");
+        }
+
+        return metadata;
+    }
+}
+
+function readSuccessfulEnclaveRegistrationEvents(
+    response: SuiEnclaveRegistrationExecutionResponse,
+): SuiEnclaveRegistrationEvent[] {
+    if (!isRecord(response)) {
+        throw new Error("Sui response was not an object");
+    }
+    if (response.$kind === "FailedTransaction") {
+        const status = isRecord(response.FailedTransaction)
+            ? readEnclaveExecutionStatus(response.FailedTransaction.status)
+            : undefined;
+        throw new Error(status?.errorMessage ?? "Move transaction failed");
+    }
+    if (response.$kind !== "Transaction" || !isRecord(response.Transaction)) {
+        throw new Error("Sui response used an unknown transaction result shape");
+    }
+    const status = readEnclaveExecutionStatus(response.Transaction.status);
+    if (status?.success === false) {
+        throw new Error(status.errorMessage ?? "Move transaction reported failure");
+    }
+    if (status?.success !== true) {
+        throw new Error("Sui response did not include transaction status");
+    }
+    if (!isRecord(response.Transaction.effects)) {
+        throw new Error("Sui response did not include transaction effects");
+    }
+    return Array.isArray(response.Transaction.events)
+        ? (response.Transaction.events as SuiEnclaveRegistrationEvent[]).filter(isRecord)
+        : [];
+}
+
+function readEnclaveExecutionStatus(
+    value: unknown,
+):
+    | { readonly success: true; readonly errorMessage?: undefined }
+    | { readonly success: false; readonly errorMessage?: string }
+    | undefined {
+    if (!isRecord(value) || typeof value.success !== "boolean") {
+        return undefined;
+    }
+    if (value.success) {
+        return { success: true };
+    }
+    const errorMessage = readExecutionErrorMessage(value.error);
+    return errorMessage === undefined ? { success: false } : { success: false, errorMessage };
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {
