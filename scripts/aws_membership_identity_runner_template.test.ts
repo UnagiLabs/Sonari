@@ -141,4 +141,28 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(runnerTaskCount).toBeGreaterThan(0);
         expect(verifierKindParameterCount).toBe(runnerTaskCount);
     });
+
+    it("wires the attestation -> register -> process_data -> dry-run submission flow in the state machine", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // FindReadyInstance now hands off to the attestation/register chain, not the legacy
+        // single-shot dispatch_tee_command path.
+        expect(template).toContain('"Next": "DispatchGetAttestationCommand"');
+        expect(template).not.toContain('"action": "dispatch_tee_command"');
+
+        // attestation -> register(config_key=2) -> process_data(registration_metadata) wiring.
+        expect(template).toContain('"action": "dispatch_get_attestation_command"');
+        expect(template).toContain('"action": "read_attestation_result"');
+        expect(template).toContain('"action": "register_enclave_instance"');
+        expect(template).toContain('"attestation.$": "$.attestation_result.attestation"');
+        expect(template).toContain('"action": "dispatch_process_data_command"');
+        expect(template).toContain(
+            '"registration_metadata.$": "$.registration_result.registration_metadata"',
+        );
+
+        // 案A: verified result は identity update を dry-run で提出する。
+        expect(template).toContain('"Next": "SuiSubmissionChoice"');
+        expect(template).toContain('"action": "dry_run_sui_submission"');
+        expect(template).toContain('"StringEquals": "verified", "Next": "DryRunSuiSubmission"');
+    });
 });

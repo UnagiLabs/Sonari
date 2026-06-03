@@ -649,14 +649,58 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
-              "Next": "DispatchTeeCommand",
+              "Next": "DispatchGetAttestationCommand",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
-            "DispatchTeeCommand": {
+            "DispatchGetAttestationCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_get_attestation_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Next": "WaitForAttestationCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForAttestationCommand": { "Type": "Wait", "Seconds": 30, "Next": "PollAttestationCommand" },
+            "PollAttestationCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Next": "AttestationCommandComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "AttestationCommandComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.command_status", "StringEquals": "SUCCEEDED", "Next": "ReadAttestationResult" },
+                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" },
+                { "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }
+              ],
+              "Default": "WaitForAttestationCommand"
+            },
+            "ReadAttestationResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_attestation_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "ResultPath": "$.attestation_result",
+              "Next": "RegisterEnclaveInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "RegisterEnclaveInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_enclave_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "attestation.$": "$.attestation_result.attestation" },
+              "ResultPath": "$.registration_result",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Next": "DispatchProcessDataCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DispatchProcessDataCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_process_data_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "registration_metadata.$": "$.registration_result.registration_metadata" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
               "Next": "WaitForCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -689,8 +733,22 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
-              "Next": "StopInstance",
+              "Next": "SuiSubmissionChoice",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "SuiSubmissionChoice": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.result.status", "StringEquals": "verified", "Next": "DryRunSuiSubmission" }
+              ],
+              "Default": "StopInstance"
+            },
+            "DryRunSuiSubmission": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dry_run_sui_submission", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "MarkFailed": {
               "Type": "Task",
