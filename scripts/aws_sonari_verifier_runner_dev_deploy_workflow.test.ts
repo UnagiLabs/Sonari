@@ -157,7 +157,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
     it("does not expose relayer deployment variables to test steps", async () => {
         const workflow = await readWorkflow();
-        const jobEnvMatch = workflow.match(/    env:\n([\s\S]*?)\n\n    steps:/u);
+        const jobEnvMatch = workflow.match(/ {4}env:\n([\s\S]*?)\n\n {4}steps:/u);
 
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_MODE");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_TARGET");
@@ -169,14 +169,18 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_ALLOW_SUBMIT");
 
         expectContainsAll(workflow, [
-            "RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
-            "RELAYER_TARGET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
-            "RELAYER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
-            "RELAYER_VERIFIER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
-            "RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
-            "RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
-            "RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}",
-            "RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}",
+            "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
+            "RELAYER_TARGET: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
+            "RELAYER_REGISTRY: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
+            "RELAYER_VERIFIER_REGISTRY: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
+            "RELAYER_GRPC_URL: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
+            "RELAYER_SENDER_ADDRESS: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
+            "RELAYER_SIGNER_SECRET_ARN: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}",
+            "RELAYER_ALLOW_SUBMIT: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}",
         ]);
     });
 
@@ -217,7 +221,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'validate_sha256 "membership EIF" dist/aws/membership-identity-tee.eif',
             '[[ "$digest" =~ ^[0-9a-f]{64}$ ]]',
             "for pcr_name in EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2",
-            '[[ ! "${!pcr_name}" =~ ^[0-9a-f]{96}$ ]]',
+            '[[ ! "$' + '{!pcr_name}" =~ ^[0-9a-f]{96}$ ]]',
         ]);
     });
 
@@ -344,22 +348,28 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         // Identity env vars must be wired from GitHub variables into the deploy step
         expect(workflow).toContain(
-            "IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}",
+            "IDENTITY_RELAYER_MODE: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}",
         );
         expect(workflow).toContain(
-            "SONARI_IDENTITY_PACKAGE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}",
+            "SONARI_IDENTITY_PACKAGE_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}",
         );
         expect(workflow).toContain(
-            "SONARI_IDENTITY_PAUSE_STATE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}",
+            "SONARI_IDENTITY_PAUSE_STATE_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}",
         );
         expect(workflow).toContain(
-            "SONARI_IDENTITY_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}",
+            "SONARI_IDENTITY_REGISTRY_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}",
         );
         expect(workflow).toContain(
-            "SONARI_MEMBERSHIP_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}",
+            "SONARI_MEMBERSHIP_REGISTRY_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}",
         );
         expect(workflow).toContain(
-            "SONARI_VERIFIER_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}",
+            "SONARI_VERIFIER_REGISTRY_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}",
         );
 
         // Identity env must be forwarded as CloudFormation parameters in the deploy step
@@ -372,10 +382,10 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         // Earthquake RELAYER_* wiring must remain unchanged
         expect(workflow).toContain(
-            "RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
+            "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
         );
         expect(workflow).toContain(
-            "RELAYER_NETWORK: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}",
+            "RELAYER_NETWORK: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}",
         );
         expect(workflow).toContain("RelayerMode=$RELAYER_MODE");
         expect(workflow).toContain("RelayerNetwork=$RELAYER_NETWORK");
