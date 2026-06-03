@@ -1,10 +1,24 @@
 use std::fs::File;
 use std::io::{Read, Write};
 
+/// Maximum request header bytes accumulated before the `\r\n\r\n` boundary.
+const MAX_HEADER_SIZE: usize = 1024 * 1024;
+
+/// Maximum request body bytes the enclave will accumulate for a single request.
+///
+/// The enclave runs with fixed memory, so an unbounded `Content-Length` body is a
+/// DoS vector. The real `process_data` envelopes are small JSON documents (the
+/// worker passes URIs, not bulk data, and the enclave fetches large artifacts via
+/// the egress proxy), so a 1 MiB ceiling (matching [`MAX_HEADER_SIZE`]) leaves
+/// generous headroom while bounding memory. A `Content-Length` above this is
+/// rejected before any body bytes are read.
+const MAX_BODY_SIZE: usize = 1024 * 1024;
+
 /// Minimal HTTP/1.1 request parsed off a stream.
 ///
 /// Only the fields the enclave routing needs are retained: method, path and the
 /// raw request body bytes.
+#[derive(Debug)]
 pub struct HttpRequest {
     pub method: String,
     pub path: String,
@@ -13,8 +27,14 @@ pub struct HttpRequest {
 
 /// Reads a single HTTP request from `stream`.
 ///
-/// Headers are read until the `\r\n\r\n` boundary, then exactly
-/// `Content-Length` body bytes are consumed.
+/// Headers are read until the `\r\n\r\n` boundary (capped at [`MAX_HEADER_SIZE`]),
+/// then exactly `Content-Length` body bytes are consumed after rejecting any
+/// declared length above [`MAX_BODY_SIZE`].
+///
+/// Future work: the server spawns one thread per accepted connection
+/// ([`crate::enclave::server::handle_connection`]); a max-concurrent-connection
+/// cap is out of scope here because the enclave peer is the limited Nitro parent,
+/// but it should be added if the trust boundary widens.
 pub fn read_http_request(stream: &mut File) -> Result<HttpRequest, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 4096];
@@ -29,7 +49,7 @@ pub fn read_http_request(stream: &mut File) -> Result<HttpRequest, Box<dyn std::
             header_end = index;
             break;
         }
-        if bytes.len() > 1024 * 1024 {
+        if bytes.len() > MAX_HEADER_SIZE {
             return Err("HTTP headers exceeded max size".into());
         }
     }
@@ -49,6 +69,12 @@ pub fn read_http_request(stream: &mut File) -> Result<HttpRequest, Box<dyn std::
             }
         })
         .unwrap_or(0);
+    if content_length > MAX_BODY_SIZE {
+        return Err(format!(
+            "HTTP body Content-Length {content_length} exceeds max body size {MAX_BODY_SIZE}"
+        )
+        .into());
+    }
     let body_start = header_end + 4;
     while bytes.len() < body_start + content_length {
         let read = stream.read(&mut buffer)?;
@@ -144,5 +170,38 @@ mod tests {
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/get_attestation");
         assert!(request.body.is_empty());
+    }
+
+    #[test]
+    fn read_http_request_rejects_content_length_above_max_body_size() {
+        // A Content-Length above the enclave body limit must be rejected before any
+        // body bytes are accumulated, so an adversarial peer cannot exhaust the
+        // enclave's fixed memory by declaring an enormous body.
+        let over_limit = super::MAX_BODY_SIZE + 1;
+        let raw = format!(
+            "POST /process_data HTTP/1.1\r\ncontent-type: application/json\r\nContent-Length: {over_limit}\r\n\r\n"
+        );
+        let mut stream = temp_stream(raw.as_bytes());
+
+        let error = read_http_request(&mut stream)
+            .expect_err("an over-limit Content-Length must be rejected");
+
+        assert!(
+            error.to_string().contains("body") && error.to_string().contains("max"),
+            "error: {error}"
+        );
+    }
+
+    #[test]
+    fn read_http_request_accepts_body_at_max_body_size_boundary() {
+        // A small body well within the limit is still accepted unchanged, proving
+        // the limit only rejects over-limit declarations (no behaviour change for
+        // the real, small process_data envelopes).
+        let raw = b"POST /process_data HTTP/1.1\r\nContent-Length: 12\r\n\r\n{\"action\":1}";
+        let mut stream = temp_stream(raw);
+
+        let request = read_http_request(&mut stream).expect("an in-limit body must be accepted");
+
+        assert_eq!(request.body, b"{\"action\":1}");
     }
 }

@@ -5,7 +5,9 @@ use sonari_tee_core::enclave::{
     VsockListener, enclave_attestation_response, error_response,
     generate_ephemeral_signing_key_seed, handle_connection, health_check_response,
 };
-use sonari_tee_core::registry::EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL;
+use sonari_tee_core::registry::{
+    EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL, EARTHQUAKE_VERIFIER_CONFIG_KEY,
+};
 use sonari_tee_core::{
     DEV_SIGNING_KEY_SEED_HEX, LocalEd25519Signer, PayloadSigner, parse_seed,
     signing_key_seed_from_env,
@@ -279,7 +281,10 @@ struct ProcessDataEnvelope {
 }
 
 /// Parses and validates the `/process_data` request body, rejecting unknown
-/// fields and any `action` other than [`PROCESS_DATA_ACTION`] (fail-closed).
+/// fields, any `action` other than [`PROCESS_DATA_ACTION`], and any registration
+/// metadata whose `verifier_config_key` is not the earthquake family key
+/// (fail-closed). Mirrors the identity verifier's family check so a worker-supplied
+/// foreign config_key can never be injected into a signed earthquake output.
 fn parse_process_data_envelope(
     body: &[u8],
 ) -> Result<ProcessDataEnvelope, Box<dyn std::error::Error>> {
@@ -291,7 +296,25 @@ fn parse_process_data_envelope(
         )
         .into());
     }
+    verify_earthquake_config_key(&envelope.registration_metadata)?;
     Ok(envelope)
+}
+
+/// Fails closed unless the registration metadata's `verifier_config_key` is the
+/// earthquake family key, so the orchestration layer never signs a result whose
+/// injected config_key belongs to another verifier family.
+fn verify_earthquake_config_key(
+    metadata: &EnclaveRegistrationMetadata,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config_key = metadata.verifier_config_key;
+    if config_key != EARTHQUAKE_VERIFIER_CONFIG_KEY {
+        return Err(format!(
+            "registration metadata verifier_config_key {config_key} does not match the earthquake \
+             family key {EARTHQUAKE_VERIFIER_CONFIG_KEY}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Server-owned finalization: signs a [`ProcessOutput::Signable`] payload and
@@ -418,7 +441,7 @@ fn production_action_result(
             let document = non_empty_env("SONARI_TEE_ATTESTATION_DOCUMENT_HEX")
                 .ok_or("SONARI_TEE_ATTESTATION_DOCUMENT_HEX is required for get_attestation")?;
             let signer = LocalEd25519Signer::new(seed);
-            let signature = signer.sign_payload(b"sonari-earthquake-attestation-public-key");
+            let signature = signer.sign_payload(ATTESTATION_PUBLIC_KEY_LABEL);
             let public_key =
                 non_empty_env("SONARI_TEE_ATTESTATION_PUBLIC_KEY").unwrap_or(signature.public_key);
             Ok(serde_json::json!({
@@ -430,6 +453,7 @@ fn production_action_result(
             payload,
             registration_metadata,
         } => {
+            verify_earthquake_config_key(&registration_metadata)?;
             let seed = strict_signing_key_seed(signing_key_seed)?;
             let handler = earthquake_handler_from_env();
             let output = handler
@@ -887,6 +911,21 @@ mod tests {
     }
 
     #[test]
+    fn attestation_public_key_label_matches_the_registry_value() {
+        // The legacy GetAttestation path must sign the registry-sourced label, not
+        // a divergent literal, so the embedded public key stays consistent with the
+        // server path. The byte value is unchanged (registry aggregation only).
+        assert_eq!(
+            ATTESTATION_PUBLIC_KEY_LABEL,
+            sonari_tee_core::registry::EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL
+        );
+        assert_eq!(
+            ATTESTATION_PUBLIC_KEY_LABEL,
+            b"sonari-earthquake-attestation-public-key"
+        );
+    }
+
+    #[test]
     fn parse_process_data_envelope_accepts_real_wire_body() {
         let envelope = parse_process_data_envelope(&process_data_wire_body())
             .expect("the real wire body must be accepted unchanged");
@@ -941,6 +980,45 @@ mod tests {
             error
                 .to_string()
                 .contains("unexpected /process_data action"),
+            "error: {error}"
+        );
+    }
+
+    #[test]
+    fn parse_process_data_envelope_rejects_foreign_verifier_config_key_family() {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&process_data_wire_body()).unwrap();
+        // The identity family key (2) must be rejected: a worker-supplied foreign
+        // config_key must never be injected into a signed earthquake output.
+        body["registration_metadata"]["verifier_config_key"] = serde_json::json!(2);
+
+        let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+            .expect_err("a non-earthquake verifier_config_key must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match the earthquake family key"),
+            "error: {error}"
+        );
+    }
+
+    #[test]
+    fn production_action_process_data_rejects_foreign_verifier_config_key_family() {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&process_data_wire_body()).unwrap();
+        body["registration_metadata"]["verifier_config_key"] = serde_json::json!(2);
+
+        let error = production_action_result(
+            body,
+            Some("0x0707070707070707070707070707070707070707070707070707070707070707".to_owned()),
+        )
+        .expect_err("a non-earthquake verifier_config_key must be rejected on the action path");
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match the earthquake family key"),
             "error: {error}"
         );
     }

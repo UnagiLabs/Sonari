@@ -32,7 +32,11 @@ use sonari_tee_core::{
 
 /// Egress proxy URL configuration key resolved by the shared server and read
 /// from the [`TeeContext`] (never from the process environment inside `process`).
-pub const EGRESS_PROXY_URL_KEY: &str = "SONARI_WORLD_ID_EGRESS_PROXY_URL";
+///
+/// This is a re-export of [`crate::WORLD_ID_EGRESS_PROXY_URL_ENV`] so the env key
+/// has a single source of truth: a rename of the canonical definition cannot
+/// silently desynchronise this alias and break the bootstrap-to-handler wiring.
+pub use crate::WORLD_ID_EGRESS_PROXY_URL_ENV as EGRESS_PROXY_URL_KEY;
 
 /// Placeholder string the handler writes into `signature` / `public_key`.
 ///
@@ -289,6 +293,18 @@ mod tests {
                 "signal_hash": "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268",
             },
         })
+    }
+
+    #[test]
+    fn egress_proxy_url_key_is_the_single_world_id_definition() {
+        // The egress proxy env key has a single source of truth in
+        // `verify::world_id`; `server::EGRESS_PROXY_URL_KEY` must re-export it so a
+        // rename cannot silently desynchronise the two and break wiring.
+        assert_eq!(
+            EGRESS_PROXY_URL_KEY,
+            crate::WORLD_ID_EGRESS_PROXY_URL_ENV,
+            "server EGRESS_PROXY_URL_KEY must equal the world_id egress proxy env key"
+        );
     }
 
     #[test]

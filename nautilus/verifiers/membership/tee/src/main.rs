@@ -6,10 +6,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use membership_tee::server::{EGRESS_PROXY_URL_KEY, IdentityProcessHandler};
 use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityProvider,
-    IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
-    WORLD_ID_APP_ID_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
-    WorldIdVerificationStatus, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
-    process_identity_with_verifier,
+    IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_BASE_CANONICAL,
+    WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
+    WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
+    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
 };
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::enclave::{
@@ -234,24 +234,31 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
 
 /// Resolves the bootstrap-populated env into the per-connection enclave state.
 ///
-/// The canonical World ID base URL (`https://developer.world.org`) and app id are
-/// read here; the egress proxy URL is injected through the [`TeeContext`] so the
-/// handler's verifier can route HTTPS through the host-side egress proxy without
-/// the handler reading the environment itself.
+/// The World ID base URL is **pinned** to the canonical
+/// [`WORLD_ID_API_BASE_CANONICAL`] (`https://developer.world.org`) on this
+/// production server path and is never read from the host/bootstrap env, so an
+/// adversarial host cannot redirect the signed-result origin to an arbitrary
+/// https base. Only the egress proxy URL is host-variable (injected through the
+/// [`TeeContext`]), mirroring the earthquake egress model where the base is fixed
+/// and the proxy merely steers the TCP connection. The app id is still read from
+/// the bootstrap env; the egress proxy is resolved into the [`TeeContext`].
 fn enclave_state_from_env(
     ephemeral_signing_key_seed: [u8; 32],
 ) -> Result<EnclaveState, Box<dyn std::error::Error>> {
-    let world_id_base_url = non_empty_env(WORLD_ID_API_BASE_ENV).ok_or(format!(
-        "{WORLD_ID_API_BASE_ENV} is required for server mode"
-    ))?;
     let world_id_app_id = non_empty_env(WORLD_ID_APP_ID_ENV)
         .ok_or(format!("{WORLD_ID_APP_ID_ENV} is required for server mode"))?;
     Ok(EnclaveState {
         ephemeral_signing_key_seed,
         ctx: tee_context_from_env(),
-        world_id_base_url,
+        world_id_base_url: server_world_id_base_url(),
         world_id_app_id,
     })
+}
+
+/// Returns the canonical World ID base URL the production server path signs
+/// against, independent of any host/bootstrap-supplied env value.
+fn server_world_id_base_url() -> String {
+    WORLD_ID_API_BASE_CANONICAL.to_owned()
 }
 
 /// Builds the dependency-injection context from the bootstrap-populated env.
@@ -416,16 +423,32 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
     let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
-    set_env_before_server(WORLD_ID_API_BASE_ENV, &config.world_id_api_base);
+    // The World ID base URL is intentionally NOT installed from the host-supplied
+    // bootstrap config: the production server path pins it to
+    // `WORLD_ID_API_BASE_CANONICAL` so the host cannot redirect the signed-result
+    // origin. The field is still accepted on the wire for backward compatibility.
     set_env_before_server(WORLD_ID_APP_ID_ENV, &config.world_id_app_id);
-    if let Some(proxy) = config.egress_proxy_url.as_deref() {
-        set_env_before_server(EGRESS_PROXY_URL_KEY, proxy);
-    }
+    apply_egress_proxy_env(config.egress_proxy_url.as_deref());
     Ok(())
+}
+
+/// Installs or clears the egress proxy env from the bootstrap config.
+///
+/// `Some(proxy)` installs the host-supplied proxy; `None` explicitly clears the
+/// env so a stale proxy from a prior run can never leak into [`TeeContext`],
+/// leaving the egress direct (mirrors earthquake's always-set behaviour).
+fn apply_egress_proxy_env(egress_proxy_url: Option<&str>) {
+    match egress_proxy_url {
+        Some(proxy) => set_env_before_server(EGRESS_PROXY_URL_KEY, proxy),
+        None => unset_env_before_server(EGRESS_PROXY_URL_KEY),
+    }
 }
 
 #[derive(Debug, Deserialize)]
 struct BootstrapConfig {
+    /// Accepted for backward compatibility but ignored: the server path pins the
+    /// World ID base to [`WORLD_ID_API_BASE_CANONICAL`].
+    #[allow(dead_code)]
     world_id_api_base: String,
     world_id_app_id: String,
     egress_proxy_url: Option<String>,
@@ -436,6 +459,14 @@ fn set_env_before_server(name: &str, value: &str) {
     // the process environment when bootstrap values are installed.
     unsafe {
         env::set_var(name, value);
+    }
+}
+
+fn unset_env_before_server(name: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap clears a stale value.
+    unsafe {
+        env::remove_var(name);
     }
 }
 
@@ -1073,6 +1104,85 @@ mod tests {
                 serialized, golden,
                 "get_attestation bytes drifted from golden vector"
             );
+        }
+    }
+
+    /// Tests that mutate the process environment to exercise the bootstrap and
+    /// server-state resolution. They serialise on a shared lock because the
+    /// process environment is global state shared across the test binary.
+    mod bootstrap_env {
+        use super::super::{
+            EnclaveState, apply_egress_proxy_env, enclave_state_from_env, server_world_id_base_url,
+            set_env_before_server, tee_context_from_env, unset_env_before_server,
+        };
+        use membership_tee::server::EGRESS_PROXY_URL_KEY;
+        use membership_tee::{WORLD_ID_API_BASE_CANONICAL, WORLD_ID_APP_ID_ENV};
+        use std::sync::Mutex;
+
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+        const TEST_SEED: [u8; 32] = [7u8; 32];
+
+        #[test]
+        fn server_world_id_base_is_canonical_and_ignores_env() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            // An adversarial host sets a foreign https base; the production server
+            // path must still pin the canonical World ID base so the signed-result
+            // origin cannot be redirected.
+            set_env_before_server(
+                membership_tee::WORLD_ID_API_BASE_ENV,
+                "https://attacker.example.com",
+            );
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+
+            assert_eq!(server_world_id_base_url(), WORLD_ID_API_BASE_CANONICAL);
+
+            let state =
+                enclave_state_from_env(TEST_SEED).expect("server state should resolve from env");
+            let EnclaveState {
+                world_id_base_url, ..
+            } = state;
+            assert_eq!(
+                world_id_base_url, WORLD_ID_API_BASE_CANONICAL,
+                "server base must be canonical regardless of env override"
+            );
+
+            unset_env_before_server(membership_tee::WORLD_ID_API_BASE_ENV);
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+        }
+
+        #[test]
+        fn bootstrap_with_no_proxy_clears_stale_egress_proxy_env() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            // A prior run left a stale proxy in the env.
+            set_env_before_server(EGRESS_PROXY_URL_KEY, "http://stale.proxy:8080");
+            // The new bootstrap supplies no proxy, so the bootstrap proxy handling
+            // must clear the env and the resolved context must carry no egress proxy
+            // (egress stays direct) rather than reusing the stale proxy.
+            apply_egress_proxy_env(None);
+
+            let ctx = tee_context_from_env();
+            assert!(
+                ctx.get(EGRESS_PROXY_URL_KEY).is_none(),
+                "a None bootstrap proxy must yield a direct (proxy-free) context"
+            );
+
+            unset_env_before_server(EGRESS_PROXY_URL_KEY);
+        }
+
+        #[test]
+        fn bootstrap_with_proxy_installs_it_into_the_context() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            apply_egress_proxy_env(Some("http://127.0.0.1:18080"));
+
+            let ctx = tee_context_from_env();
+            assert_eq!(
+                ctx.get(EGRESS_PROXY_URL_KEY),
+                Some("http://127.0.0.1:18080"),
+                "a supplied bootstrap proxy must be installed into the context"
+            );
+
+            unset_env_before_server(EGRESS_PROXY_URL_KEY);
         }
     }
 }

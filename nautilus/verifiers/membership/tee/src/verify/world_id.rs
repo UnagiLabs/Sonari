@@ -4,6 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
+/// Canonical World ID API base URL the production server path pins.
+///
+/// The production server (`Server` subcommand) signs results bound to the World
+/// ID developer API, so the base URL must never be host/bootstrap-controlled:
+/// only the egress proxy ([`WORLD_ID_EGRESS_PROXY_URL_ENV`]) is variable, exactly
+/// like the earthquake egress model (canonical URL fixed, proxy steers TCP).
+/// This value satisfies [`normalize_base_url`]'s `https` requirement.
+pub const WORLD_ID_API_BASE_CANONICAL: &str = "https://developer.world.org";
 pub const WORLD_ID_APP_ID_ENV: &str = "SONARI_WORLD_ID_APP_ID";
 /// Optional egress proxy URL the enclave routes World ID HTTPS traffic through.
 ///
