@@ -32,6 +32,23 @@ pub fn process_usgs_with_source_archive(
     archive: &impl SourceArchive,
     signer: &impl PayloadSigner,
 ) -> Result<OracleOutput, SourceArchiveError> {
+    let mut output = process_usgs_archived(input, archive)?;
+    if let Some(payload) = output.unsigned_bcs_payload.as_ref() {
+        output.signature = Some(signer.sign_payload(payload));
+    }
+    Ok(output)
+}
+
+/// Archives the raw sources and produces the unsigned finalized output.
+///
+/// This is the signing-free core of [`process_usgs_with_source_archive`]: it
+/// stores the raw detail / grid bytes through `archive` and rebuilds the
+/// payload with the resulting references, but leaves `signature` empty so the
+/// caller (e.g. the enclave server) owns key management and signing.
+pub fn process_usgs_archived(
+    input: UsgsOracleInput,
+    archive: &impl SourceArchive,
+) -> Result<OracleOutput, SourceArchiveError> {
     let output = process_usgs_inner(input.clone(), None)?;
     if output.result.status != OracleStatus::Finalized {
         return Ok(output);
@@ -60,11 +77,7 @@ pub fn process_usgs_with_source_archive(
         grid_source_uri: raw_grid_uri,
         grid_ref,
     };
-    let mut output = process_usgs_inner(input, Some(archive_refs))?;
-    if let Some(payload) = output.unsigned_bcs_payload.as_ref() {
-        output.signature = Some(signer.sign_payload(payload));
-    }
-    Ok(output)
+    Ok(process_usgs_inner(input, Some(archive_refs))?)
 }
 
 fn process_usgs_inner(

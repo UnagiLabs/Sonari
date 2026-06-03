@@ -2,6 +2,7 @@ mod compute;
 mod core;
 mod crypto;
 mod encoding;
+pub mod server;
 mod source;
 
 pub use compute::intensity::{cell_band, mmi_decimal_to_x100, p90_x100};
@@ -12,8 +13,8 @@ pub use core::artifacts::{
     SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 pub use core::processing::{
-    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer,
-    process_usgs_with_source_archive,
+    process_usgs, process_usgs_archived, process_usgs_from_worker_request,
+    process_usgs_with_signer, process_usgs_with_source_archive,
 };
 pub use core::source_archive::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, SourceArchive, SourceArchiveError, WalrusCliSourceArchive,

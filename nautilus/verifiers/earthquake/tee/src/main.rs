@@ -1,27 +1,29 @@
 use clap::{Parser, Subcommand};
-use nsm_api::api::{Request as NsmRequest, Response as NsmResponse};
-use nsm_api::driver;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use sonari_tee_core::enclave::{
+    EnclaveRegistrationMetadata, HttpRequest, ProcessDataHandler, ProcessOutput, TeeContext,
+    VsockListener, enclave_attestation_response, error_response,
+    generate_ephemeral_signing_key_seed, handle_connection, health_check_response,
+};
 use sonari_tee_core::{
-    DEV_SIGNING_KEY_SEED_HEX, PayloadSigner, parse_seed, signing_key_seed_from_env,
+    DEV_SIGNING_KEY_SEED_HEX, LocalEd25519Signer, PayloadSigner, parse_seed,
+    signing_key_seed_from_env,
 };
 use std::env;
 use std::fs;
-use std::fs::File;
-use std::io::{self, Read, Write};
-use std::os::fd::{FromRawFd, RawFd};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tee::server::{EGRESS_PROXY_URL_KEY, EarthquakeProcessHandler};
 use tee::{
-    DEFAULT_WALRUS_CLI_TIMEOUT_MS, LocalEd25519Signer, OracleOutput, UsgsOracleInput,
-    WalrusCliSourceArchive, WalrusCliSourceArchiveConfig, canonical_json_bytes,
-    grid_xml_from_artifact, parse_command_timeout_ms, parse_n_shards,
-    process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
+    DEFAULT_WALRUS_CLI_TIMEOUT_MS, OracleOutput, UsgsOracleInput, WalrusCliSourceArchive,
+    WalrusCliSourceArchiveConfig, canonical_json_bytes, grid_xml_from_artifact,
+    parse_command_timeout_ms, parse_n_shards, process_usgs_with_signer,
+    process_usgs_with_source_archive,
 };
 
-const PRODUCTION_FETCH_TIMEOUT_MS: u64 = 30_000;
+/// Byte string the enclave signs to derive its embedded attestation public key.
+const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = b"sonari-earthquake-attestation-public-key";
 
 #[derive(Debug, Parser)]
 #[command(about = "Generate deterministic Sonari USGS oracle artifacts")]
@@ -143,21 +145,32 @@ fn production_result(
         return production_action_result(request_json, args.signing_key_seed);
     }
     let seed = strict_signing_key_seed(args.signing_key_seed)?;
-    let request = tee::WorkerToTeeRequest::from_json_value(request_json)?;
-    production_worker_request_result(request, seed, None)
+    // Validate the raw worker request shape before any network fetch so callers
+    // get the same early errors as before delegating to the handler.
+    let _ = tee::WorkerToTeeRequest::from_json_value(request_json.clone())?;
+    let handler = EarthquakeProcessHandler::new();
+    let output = handler
+        .process(&serde_json::to_vec(&request_json)?, &tee_context_from_env())
+        .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
+    let signer = LocalEd25519Signer::new(seed);
+    Ok(finalize_process_output(output, &signer, None))
 }
 
 #[derive(Clone)]
 struct EnclaveState {
     signing_key_seed: [u8; 32],
+    ctx: TeeContext,
 }
 
 fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
     let signing_key_seed = generate_ephemeral_signing_key_seed()?;
-    let state = EnclaveState { signing_key_seed };
     if !args.skip_bootstrap {
         receive_bootstrap_config(args.bootstrap_port)?;
     }
+    let state = EnclaveState {
+        signing_key_seed,
+        ctx: tee_context_from_env(),
+    };
     let listener = VsockListener::bind(args.port)?;
     eprintln!(
         "sonari earthquake nautilus server listening on vsock port {}",
@@ -167,18 +180,114 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
         let stream = listener.accept()?;
         let state = state.clone();
         thread::spawn(move || {
-            if let Err(error) = handle_vsock_http_connection(stream, state) {
+            if let Err(error) = handle_connection(stream, |request| route_request(request, &state))
+            {
                 eprintln!("sonari earthquake nautilus request failed: {error}");
             }
         });
     }
 }
 
-fn generate_ephemeral_signing_key_seed() -> Result<[u8; 32], Box<dyn std::error::Error>> {
-    let mut file = File::open("/dev/urandom")?;
-    let mut seed = [0u8; 32];
-    file.read_exact(&mut seed)?;
-    Ok(seed)
+/// Builds the dependency-injection context from the bootstrap-populated env.
+///
+/// The handler resolves the egress proxy through this context instead of
+/// reading the process environment directly.
+fn tee_context_from_env() -> TeeContext {
+    match non_empty_env(EGRESS_PROXY_URL_KEY) {
+        Some(proxy) => TeeContext::with_env([(EGRESS_PROXY_URL_KEY, proxy)]),
+        None => TeeContext::new(),
+    }
+}
+
+/// Routes a single enclave request, owning signing, attestation, and
+/// registration-metadata injection so the handler stays domain-only.
+fn route_request(
+    request: HttpRequest,
+    state: &EnclaveState,
+) -> Result<(u16, serde_json::Value), Box<dyn std::error::Error>> {
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/health_check") => Ok((200, health_check_response())),
+        ("GET", "/get_attestation") => {
+            let signer = LocalEd25519Signer::new(state.signing_key_seed);
+            Ok((
+                200,
+                enclave_attestation_response(&signer, ATTESTATION_PUBLIC_KEY_LABEL)?,
+            ))
+        }
+        ("POST", "/process_data") => {
+            let envelope: ProcessDataEnvelope = serde_json::from_slice(&request.body)?;
+            let handler = EarthquakeProcessHandler::new();
+            let output = handler
+                .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
+                .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
+            let signer = LocalEd25519Signer::new(state.signing_key_seed);
+            Ok((
+                200,
+                finalize_process_output(output, &signer, Some(envelope.registration_metadata)),
+            ))
+        }
+        _ => Ok((
+            404,
+            error_response("AWS_RUNNER_PROCESS_FAILED", "not found"),
+        )),
+    }
+}
+
+/// Worker-supplied `process_data` request envelope.
+#[derive(Debug, Deserialize)]
+struct ProcessDataEnvelope {
+    payload: serde_json::Value,
+    registration_metadata: EnclaveRegistrationMetadata,
+}
+
+/// Server-owned finalization: signs the handler's `payload_bcs` and injects the
+/// registration metadata into the result envelope, preserving byte order.
+///
+/// For finalized results the handler emits empty `signature` / `public_key`
+/// placeholders; overwriting those existing keys keeps their canonical position
+/// because `serde_json` preserves key order. Registration metadata is appended
+/// last, matching the historical flattened layout.
+fn finalize_process_output<S: PayloadSigner>(
+    output: ProcessOutput,
+    signer: &S,
+    registration_metadata: Option<EnclaveRegistrationMetadata>,
+) -> serde_json::Value {
+    let mut result = output.result_json;
+    if !output.payload_bcs.is_empty() {
+        let signature = signer.sign_payload(&output.payload_bcs);
+        if let Some(object) = result.as_object_mut() {
+            object.insert(
+                "signature".to_owned(),
+                serde_json::Value::String(signature.signature),
+            );
+            object.insert(
+                "public_key".to_owned(),
+                serde_json::Value::String(signature.public_key),
+            );
+            if let Some(metadata) = registration_metadata {
+                inject_registration_metadata(object, &metadata);
+            }
+        }
+    }
+    result
+}
+
+fn inject_registration_metadata(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    metadata: &EnclaveRegistrationMetadata,
+) {
+    object.insert(
+        "verifier_config_key".to_owned(),
+        serde_json::Value::from(metadata.verifier_config_key),
+    );
+    object.insert(
+        "verifier_config_version".to_owned(),
+        serde_json::Value::from(metadata.verifier_config_version),
+    );
+    object.insert(
+        "enclave_instance_public_key".to_owned(),
+        serde_json::Value::String(metadata.enclave_instance_public_key.clone()),
+    );
 }
 
 fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>> {
@@ -215,255 +324,6 @@ fn set_env_before_server(name: &str, value: &str) {
     }
 }
 
-fn handle_vsock_http_connection(
-    mut stream: File,
-    state: EnclaveState,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let request = read_http_request(&mut stream)?;
-    let (status_code, body) = handle_vsock_http_request(request, state);
-    write_http_json_response(&mut stream, status_code, &body)?;
-    Ok(())
-}
-
-fn handle_vsock_http_request(
-    request: HttpRequest,
-    state: EnclaveState,
-) -> (u16, serde_json::Value) {
-    match catch_unwind(AssertUnwindSafe(|| {
-        route_vsock_http_request(request, state)
-    })) {
-        Ok(Ok(response)) => response,
-        Ok(Err(error)) => (
-            500,
-            serde_json::json!({
-                "error_code": "AWS_RUNNER_PROCESS_FAILED",
-                "message": error.to_string(),
-            }),
-        ),
-        Err(payload) => (
-            500,
-            serde_json::json!({
-                "error_code": "AWS_RUNNER_PROCESS_FAILED",
-                "message": panic_message(payload),
-            }),
-        ),
-    }
-}
-
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return format!("panic: {message}");
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return format!("panic: {message}");
-    }
-    "panic: unknown payload".to_owned()
-}
-
-fn route_vsock_http_request(
-    request: HttpRequest,
-    state: EnclaveState,
-) -> Result<(u16, serde_json::Value), Box<dyn std::error::Error>> {
-    let (status_code, body) = match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/health_check") => (
-            200,
-            serde_json::json!({
-                "status": "healthy",
-                "external_sources_reachable": true,
-            }),
-        ),
-        ("GET", "/get_attestation") => (200, enclave_attestation_response(&state)?),
-        ("POST", "/process_data") => {
-            let request_json: serde_json::Value = serde_json::from_slice(&request.body)?;
-            (
-                200,
-                production_action_result(request_json, Some(to_hex_seed(&state.signing_key_seed)))?,
-            )
-        }
-        _ => (
-            404,
-            serde_json::json!({
-                "error_code": "AWS_RUNNER_PROCESS_FAILED",
-                "message": "not found",
-            }),
-        ),
-    };
-    Ok((status_code, body))
-}
-
-fn enclave_attestation_response(
-    state: &EnclaveState,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let signer = LocalEd25519Signer::new(state.signing_key_seed);
-    let signature = signer.sign_payload(b"sonari-earthquake-attestation-public-key");
-    let public_key_bytes = hex::decode(signature.public_key.trim_start_matches("0x"))?;
-    let fd = driver::nsm_init();
-    let request = NsmRequest::Attestation {
-        user_data: None,
-        nonce: None,
-        public_key: Some(serde_bytes::ByteBuf::from(public_key_bytes)),
-    };
-    let response = driver::nsm_process_request(fd, request);
-    driver::nsm_exit(fd);
-    match response {
-        NsmResponse::Attestation { document } => Ok(serde_json::json!({
-            "attestation_document_hex": format!("0x{}", hex::encode(document)),
-            "public_key": signature.public_key,
-        })),
-        _ => Err("unexpected NSM attestation response".into()),
-    }
-}
-
-fn to_hex_seed(seed: &[u8; 32]) -> String {
-    format!("0x{}", hex::encode(seed))
-}
-
-struct HttpRequest {
-    method: String,
-    path: String,
-    body: Vec<u8>,
-}
-
-fn read_http_request(stream: &mut File) -> Result<HttpRequest, Box<dyn std::error::Error>> {
-    let mut bytes = Vec::new();
-    let mut buffer = [0u8; 4096];
-    let header_end;
-    loop {
-        let read = stream.read(&mut buffer)?;
-        if read == 0 {
-            return Err("connection closed before HTTP headers".into());
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-        if let Some(index) = find_header_end(&bytes) {
-            header_end = index;
-            break;
-        }
-        if bytes.len() > 1024 * 1024 {
-            return Err("HTTP headers exceeded max size".into());
-        }
-    }
-    let header_text = std::str::from_utf8(&bytes[..header_end])?;
-    let mut lines = header_text.split("\r\n");
-    let request_line = lines.next().ok_or("missing HTTP request line")?;
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().ok_or("missing HTTP method")?.to_owned();
-    let path = parts.next().ok_or("missing HTTP path")?.to_owned();
-    let content_length = lines
-        .filter_map(|line| line.split_once(':'))
-        .find_map(|(name, value)| {
-            if name.eq_ignore_ascii_case("content-length") {
-                value.trim().parse::<usize>().ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or(0);
-    let body_start = header_end + 4;
-    while bytes.len() < body_start + content_length {
-        let read = stream.read(&mut buffer)?;
-        if read == 0 {
-            return Err("connection closed before HTTP body".into());
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-    }
-    Ok(HttpRequest {
-        method,
-        path,
-        body: bytes[body_start..body_start + content_length].to_vec(),
-    })
-}
-
-fn find_header_end(bytes: &[u8]) -> Option<usize> {
-    bytes.windows(4).position(|window| window == b"\r\n\r\n")
-}
-
-fn write_http_json_response(
-    stream: &mut File,
-    status_code: u16,
-    body: &serde_json::Value,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let body_bytes = serde_json::to_vec(body)?;
-    let reason = if status_code == 200 { "OK" } else { "Error" };
-    write!(
-        stream,
-        "HTTP/1.1 {status_code} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-        body_bytes.len()
-    )?;
-    stream.write_all(&body_bytes)?;
-    Ok(())
-}
-
-struct VsockListener {
-    fd: RawFd,
-}
-
-impl VsockListener {
-    fn bind(port: u32) -> Result<Self, Box<dyn std::error::Error>> {
-        let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-        let addr = SockAddrVm {
-            svm_family: AF_VSOCK as libc::sa_family_t,
-            svm_reserved1: 0,
-            svm_port: port,
-            svm_cid: VMADDR_CID_ANY,
-            svm_zero: [0; 4],
-        };
-        let bind_result = unsafe {
-            libc::bind(
-                fd,
-                (&addr as *const SockAddrVm).cast::<libc::sockaddr>(),
-                std::mem::size_of::<SockAddrVm>() as libc::socklen_t,
-            )
-        };
-        if bind_result < 0 {
-            let error = io::Error::last_os_error();
-            unsafe {
-                libc::close(fd);
-            }
-            return Err(error.into());
-        }
-        let listen_result = unsafe { libc::listen(fd, 128) };
-        if listen_result < 0 {
-            let error = io::Error::last_os_error();
-            unsafe {
-                libc::close(fd);
-            }
-            return Err(error.into());
-        }
-        Ok(Self { fd })
-    }
-
-    fn accept(&self) -> Result<File, Box<dyn std::error::Error>> {
-        let fd = unsafe { libc::accept(self.fd, std::ptr::null_mut(), std::ptr::null_mut()) };
-        if fd < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-        Ok(unsafe { File::from_raw_fd(fd) })
-    }
-}
-
-impl Drop for VsockListener {
-    fn drop(&mut self) {
-        unsafe {
-            libc::close(self.fd);
-        }
-    }
-}
-
-const AF_VSOCK: libc::c_int = 40;
-const VMADDR_CID_ANY: u32 = 0xFFFF_FFFF;
-
-#[repr(C)]
-struct SockAddrVm {
-    svm_family: libc::sa_family_t,
-    svm_reserved1: u16,
-    svm_port: u32,
-    svm_cid: u32,
-    svm_zero: [u8; 4],
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum ProductionAction {
@@ -473,13 +333,6 @@ enum ProductionAction {
         payload: serde_json::Value,
         registration_metadata: EnclaveRegistrationMetadata,
     },
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct EnclaveRegistrationMetadata {
-    verifier_config_key: u64,
-    verifier_config_version: u64,
-    enclave_instance_public_key: String,
 }
 
 fn production_action_result(
@@ -509,140 +362,18 @@ fn production_action_result(
             registration_metadata,
         } => {
             let seed = strict_signing_key_seed(signing_key_seed)?;
-            let request = tee::WorkerToTeeRequest::from_json_value(payload)?;
-            production_worker_request_result(request, seed, Some(registration_metadata))
+            let handler = EarthquakeProcessHandler::new();
+            let output = handler
+                .process(&serde_json::to_vec(&payload)?, &tee_context_from_env())
+                .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
+            let signer = LocalEd25519Signer::new(seed);
+            Ok(finalize_process_output(
+                output,
+                &signer,
+                Some(registration_metadata),
+            ))
         }
     }
-}
-
-fn production_worker_request_result(
-    request: tee::WorkerToTeeRequest,
-    seed: [u8; 32],
-    registration_metadata: Option<EnclaveRegistrationMetadata>,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let detail_url = usgs_detail_url(&request.source_event_id);
-    let client = production_http_client()?;
-    let detail_json = match client.get(&detail_url).send().and_then(|response| {
-        if response.status().is_success() {
-            response.bytes()
-        } else {
-            Err(response.error_for_status().unwrap_err())
-        }
-    }) {
-        Ok(bytes) => bytes.to_vec(),
-        Err(_) => {
-            return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
-                source_event_id: request.source_event_id,
-                error_code: "USGS_DETAIL_UNAVAILABLE",
-            })?);
-        }
-    };
-    let detail_value: serde_json::Value = match serde_json::from_slice(&detail_json) {
-        Ok(value) => value,
-        Err(_) => {
-            return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
-                source_event_id: request.source_event_id,
-                error_code: "USGS_DETAIL_UNAVAILABLE",
-            })?);
-        }
-    };
-    let Some(canonical_source_event_id) =
-        canonical_usgs_detail_id_for_request(&detail_value, &request.source_event_id)
-    else {
-        return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
-            source_event_id: request.source_event_id,
-            error_code: "USGS_DETAIL_UNAVAILABLE",
-        })?);
-    };
-
-    let grid = match preferred_grid_uri_from_detail(&detail_value) {
-        Some(uri) => match fetch_grid(&client, &uri) {
-            Ok(grid) => Some(grid),
-            Err(_) => {
-                return Ok(serde_json::to_value(TeeJsonResult::PendingSource {
-                    source_event_id: request.source_event_id,
-                    error_code: "SHAKEMAP_GRID_UNAVAILABLE",
-                })?);
-            }
-        },
-        None => None,
-    };
-    let source_event_id = canonical_source_event_id.to_owned();
-    let observed_at_ms = current_unix_time_ms()?;
-    let parts = ProductionInputParts {
-        source_event_id,
-        detail_json,
-        grid_xml: grid.as_ref().map(|item| item.grid_xml.clone()),
-        raw_grid_bytes: grid.as_ref().map(|item| item.raw_grid_bytes.clone()),
-        raw_grid_uri: grid.as_ref().map(|item| item.raw_grid_uri.clone()),
-    };
-    let input = build_production_input(parts, observed_at_ms);
-    let preliminary = process_usgs_from_worker_request(request, input.clone())?;
-    if preliminary.result.status != tee::OracleStatus::Finalized {
-        return Ok(serde_json::to_value(output_to_tee_json(preliminary)?)?);
-    }
-
-    let signer = LocalEd25519Signer::new(seed);
-    let archive = WalrusCliSourceArchive::new(WalrusCliSourceArchiveConfig::from_env()?)?;
-    let output = process_usgs_with_source_archive(input, &archive, &signer)?;
-    let mut result = output_to_tee_json(output)?;
-    if let (TeeJsonResult::Finalized { metadata, .. }, Some(registration_metadata)) =
-        (&mut result, registration_metadata)
-    {
-        *metadata = Some(registration_metadata);
-    }
-    Ok(serde_json::to_value(result)?)
-}
-
-struct ProductionInputParts {
-    source_event_id: String,
-    detail_json: Vec<u8>,
-    grid_xml: Option<Vec<u8>>,
-    raw_grid_bytes: Option<Vec<u8>>,
-    raw_grid_uri: Option<String>,
-}
-
-fn build_production_input(parts: ProductionInputParts, observed_at_ms: u64) -> UsgsOracleInput {
-    let id = &parts.source_event_id;
-    UsgsOracleInput {
-        case_id: format!("usgs-live/{id}"),
-        detail_json: parts.detail_json,
-        grid_xml: parts.grid_xml,
-        raw_grid_bytes: parts.raw_grid_bytes,
-        observed_at_ms,
-        raw_detail_uri: usgs_detail_url(id),
-        raw_grid_uri: parts.raw_grid_uri,
-        raw_data_uri: format!("ipfs://sonari/live/{id}/raw_data_manifest.json"),
-        affected_cells_uri: format!("ipfs://sonari/live/{id}/affected_cells.json"),
-    }
-}
-
-fn canonical_usgs_detail_id_for_request<'a>(
-    detail: &'a serde_json::Value,
-    request_source_event_id: &str,
-) -> Option<&'a str> {
-    let canonical_id = detail.get("id").and_then(serde_json::Value::as_str)?;
-    if canonical_id == request_source_event_id {
-        return Some(canonical_id);
-    }
-    let ids = detail
-        .get("properties")
-        .and_then(|properties| properties.get("ids"))
-        .and_then(serde_json::Value::as_str)?;
-    if ids
-        .split(',')
-        .map(str::trim)
-        .any(|alias| alias == request_source_event_id)
-    {
-        return Some(canonical_id);
-    }
-    None
-}
-
-fn usgs_detail_url(source_event_id: &str) -> String {
-    format!(
-        "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid={source_event_id}&format=geojson"
-    )
 }
 
 fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -655,15 +386,6 @@ fn production_request_bytes(input: Option<PathBuf>) -> Result<Vec<u8>, Box<dyn s
     Ok(bytes)
 }
 
-fn current_unix_time_ms() -> Result<u64, Box<dyn std::error::Error>> {
-    let elapsed = SystemTime::now().duration_since(UNIX_EPOCH)?;
-    Ok(elapsed
-        .as_secs()
-        .checked_mul(1_000)
-        .and_then(|millis| millis.checked_add(u64::from(elapsed.subsec_millis())))
-        .ok_or("current time is outside u64 millisecond range")?)
-}
-
 fn strict_signing_key_seed(
     explicit_seed: Option<String>,
 ) -> Result<[u8; 32], Box<dyn std::error::Error>> {
@@ -673,180 +395,6 @@ fn strict_signing_key_seed(
         "SONARI_TEE_SIGNING_KEY_SEED_FILE",
         false,
     )?)
-}
-
-struct FetchedGrid {
-    grid_xml: Vec<u8>,
-    raw_grid_bytes: Vec<u8>,
-    raw_grid_uri: String,
-}
-
-fn production_http_client() -> Result<reqwest::blocking::Client, reqwest::Error> {
-    let mut builder = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(PRODUCTION_FETCH_TIMEOUT_MS));
-    if let Some(proxy_url) = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL") {
-        builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
-    }
-    builder.build()
-}
-
-fn fetch_grid(
-    client: &reqwest::blocking::Client,
-    uri: &str,
-) -> Result<FetchedGrid, Box<dyn std::error::Error>> {
-    let bytes = match client.get(uri).send().and_then(|response| {
-        if response.status().is_success() {
-            response.bytes()
-        } else {
-            Err(response.error_for_status().unwrap_err())
-        }
-    }) {
-        Ok(bytes) => bytes.to_vec(),
-        Err(_) => {
-            return Err("SHAKEMAP_GRID_UNAVAILABLE".into());
-        }
-    };
-    let grid_xml = grid_xml_from_artifact(uri, &bytes)?;
-    Ok(FetchedGrid {
-        grid_xml,
-        raw_grid_bytes: bytes,
-        raw_grid_uri: uri.to_owned(),
-    })
-}
-
-fn preferred_grid_uri_from_detail(detail: &serde_json::Value) -> Option<String> {
-    let products = detail
-        .get("properties")?
-        .get("products")?
-        .get("shakemap")?
-        .as_array()?;
-    let selected = products
-        .iter()
-        .max_by(|left, right| product_sort_key(left).cmp(&product_sort_key(right)))?;
-    let contents = selected.get("contents")?.as_object()?;
-    contents
-        .get("download/grid.xml.zip")
-        .or_else(|| contents.get("download/grid.xml"))
-        .and_then(|content| content.get("url"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-}
-
-fn product_sort_key(product: &serde_json::Value) -> (u64, u64, u64, String, String, String) {
-    let properties = product
-        .get("properties")
-        .unwrap_or(&serde_json::Value::Null);
-    (
-        product
-            .get("preferredWeight")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0),
-        properties
-            .get("version")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(0),
-        product
-            .get("updateTime")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0),
-        product
-            .get("source")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        product
-            .get("code")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-        product
-            .get("status")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-    )
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-enum TeeJsonResult {
-    PendingSource {
-        source_event_id: String,
-        error_code: &'static str,
-    },
-    PendingMmi {
-        source_event_id: String,
-        error_code: String,
-    },
-    Rejected {
-        source_event_id: String,
-        error_code: String,
-    },
-    Finalized {
-        payload: Box<tee::UnsignedPayload>,
-        payload_bcs_hex: String,
-        signature: String,
-        public_key: String,
-        raw_data_manifest: tee::RawDataManifest,
-        #[serde(flatten, skip_serializing_if = "Option::is_none")]
-        metadata: Option<EnclaveRegistrationMetadata>,
-    },
-}
-
-fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Box<dyn std::error::Error>> {
-    match output.result.status {
-        tee::OracleStatus::Finalized => {
-            let payload = output
-                .unsigned_payload
-                .ok_or("finalized output is missing unsigned payload")?;
-            let payload_bcs_hex = output
-                .expected_hashes
-                .ok_or("finalized output is missing expected hashes")?
-                .unsigned_bcs_payload_hex;
-            let signature = output
-                .signature
-                .ok_or("finalized output is missing signature")?;
-            let raw_data_manifest = output
-                .raw_data_manifest
-                .ok_or("finalized output is missing raw data manifest")?;
-            Ok(TeeJsonResult::Finalized {
-                payload: Box::new(payload),
-                payload_bcs_hex,
-                signature: signature.signature,
-                public_key: signature.public_key,
-                raw_data_manifest,
-                metadata: None,
-            })
-        }
-        tee::OracleStatus::PendingSource => Ok(TeeJsonResult::PendingSource {
-            source_event_id: output.result.source_event_id,
-            error_code: static_error_code(output.result.error_code)?,
-        }),
-        tee::OracleStatus::PendingMmi => Ok(TeeJsonResult::PendingMmi {
-            source_event_id: output.result.source_event_id,
-            error_code: output
-                .result
-                .error_code
-                .ok_or("pending_mmi requires error_code")?,
-        }),
-        tee::OracleStatus::Rejected => Ok(TeeJsonResult::Rejected {
-            source_event_id: output.result.source_event_id,
-            error_code: output
-                .result
-                .error_code
-                .ok_or("rejected requires error_code")?,
-        }),
-    }
-}
-
-fn static_error_code(value: Option<String>) -> Result<&'static str, Box<dyn std::error::Error>> {
-    match value.as_deref() {
-        Some("SHAKEMAP_PRODUCT_MISSING") => Ok("SHAKEMAP_PRODUCT_MISSING"),
-        Some("SHAKEMAP_GRID_UNAVAILABLE") => Ok("SHAKEMAP_GRID_UNAVAILABLE"),
-        Some("USGS_DETAIL_UNAVAILABLE") => Ok("USGS_DETAIL_UNAVAILABLE"),
-        _ => Err("pending_source requires a supported error_code".into()),
-    }
 }
 
 fn low_level_input(cli: Cli) -> Result<RunConfig, Box<dyn std::error::Error>> {
@@ -1074,10 +622,10 @@ fn write_pretty(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tee::server::TeeJsonResult;
 
-    #[test]
-    fn tee_json_result_preserves_payload_field_order_after_value_conversion() {
-        let payload = tee::UnsignedPayload {
+    fn sample_unsigned_payload() -> tee::UnsignedPayload {
+        tee::UnsignedPayload {
             intent: 1,
             oracle_version: 1,
             event_uid: format!("0x{}", "11".repeat(32)),
@@ -1106,10 +654,30 @@ mod tests {
             cell_aggregation: 1,
             intensity_scale: 1,
             freshness_deadline_ms: 1_700_021_700_000,
-        };
+        }
+    }
 
+    fn finalized_process_output() -> ProcessOutput {
         let result = TeeJsonResult::Finalized {
-            payload: Box::new(payload),
+            payload: Box::new(sample_unsigned_payload()),
+            payload_bcs_hex: "0x01".to_owned(),
+            signature: tee::server::UNSIGNED_PLACEHOLDER.to_owned(),
+            public_key: tee::server::UNSIGNED_PLACEHOLDER.to_owned(),
+            raw_data_manifest: tee::RawDataManifest {
+                oracle_version: 1,
+                entries: Vec::new(),
+            },
+        };
+        ProcessOutput {
+            payload_bcs: vec![0x01],
+            result_json: serde_json::to_value(&result).unwrap(),
+        }
+    }
+
+    #[test]
+    fn tee_json_result_preserves_payload_field_order_after_value_conversion() {
+        let value = serde_json::to_value(TeeJsonResult::Finalized {
+            payload: Box::new(sample_unsigned_payload()),
             payload_bcs_hex: "0x01".to_owned(),
             signature: format!("0x{}", "66".repeat(64)),
             public_key: format!("0x{}", "77".repeat(32)),
@@ -1117,13 +685,8 @@ mod tests {
                 oracle_version: 1,
                 entries: Vec::new(),
             },
-            metadata: Some(EnclaveRegistrationMetadata {
-                verifier_config_key: 1,
-                verifier_config_version: 10,
-                enclave_instance_public_key: format!("0x{}", "77".repeat(32)),
-            }),
-        };
-        let value = serde_json::to_value(result).expect("TEE result should serialize");
+        })
+        .expect("TEE result should serialize");
         let payload = value
             .get("payload")
             .and_then(serde_json::Value::as_object)
@@ -1166,41 +729,56 @@ mod tests {
     }
 
     #[test]
-    fn build_production_input_uses_injected_observed_at_ms() {
-        let properties_updated_ms = 1_700_000_000_000_u64;
-        let injected_observed_at_ms = 1_800_000_000_000_u64;
-        assert_ne!(
-            properties_updated_ms, injected_observed_at_ms,
-            "test must distinguish the injected clock from properties.updated"
-        );
-
-        let detail_json =
-            format!(r#"{{"id":"us7000abcd","properties":{{"updated":{properties_updated_ms}}}}}"#)
-                .into_bytes();
-        let parts = ProductionInputParts {
-            source_event_id: "us7000abcd".to_owned(),
-            detail_json,
-            grid_xml: None,
-            raw_grid_bytes: None,
-            raw_grid_uri: None,
+    fn finalize_process_output_signs_payload_and_keeps_canonical_key_order() {
+        let signer = LocalEd25519Signer::new([7u8; 32]);
+        let metadata = EnclaveRegistrationMetadata {
+            verifier_config_key: 1,
+            verifier_config_version: 10,
+            enclave_instance_public_key: format!("0x{}", "77".repeat(32)),
         };
 
-        let input = build_production_input(parts, injected_observed_at_ms);
+        let value = finalize_process_output(finalized_process_output(), &signer, Some(metadata));
 
-        assert_eq!(input.observed_at_ms, injected_observed_at_ms);
-        assert_ne!(input.observed_at_ms, properties_updated_ms);
-        assert_eq!(input.case_id, "usgs-live/us7000abcd");
+        let object = value.as_object().expect("result should be an object");
+        // signature / public_key keep their canonical position (no reordering);
+        // registration metadata is appended last like the historical flatten.
+        let keys = object.keys().map(String::as_str).collect::<Vec<_>>();
         assert_eq!(
-            input.raw_detail_uri,
-            "https://earthquake.usgs.gov/fdsnws/event/1/query?eventid=us7000abcd&format=geojson"
+            keys,
+            [
+                "status",
+                "payload",
+                "payload_bcs_hex",
+                "signature",
+                "public_key",
+                "raw_data_manifest",
+                "verifier_config_key",
+                "verifier_config_version",
+                "enclave_instance_public_key",
+            ]
         );
-        assert_eq!(
-            input.raw_data_uri,
-            "ipfs://sonari/live/us7000abcd/raw_data_manifest.json"
-        );
-        assert_eq!(
-            input.affected_cells_uri,
-            "ipfs://sonari/live/us7000abcd/affected_cells.json"
-        );
+        let expected = signer.sign_payload(&[0x01]);
+        assert_eq!(object["signature"], expected.signature);
+        assert_eq!(object["public_key"], expected.public_key);
+        assert_eq!(object["verifier_config_key"], 1);
+        assert_eq!(object["verifier_config_version"], 10);
+    }
+
+    #[test]
+    fn finalize_process_output_leaves_non_finalized_result_unsigned() {
+        let signer = LocalEd25519Signer::new([7u8; 32]);
+        let output = ProcessOutput {
+            payload_bcs: Vec::new(),
+            result_json: serde_json::json!({
+                "status": "pending_source",
+                "source_event_id": "us7000abcd",
+                "error_code": "USGS_DETAIL_UNAVAILABLE",
+            }),
+        };
+
+        let value = finalize_process_output(output, &signer, None);
+
+        assert_eq!(value["status"], "pending_source");
+        assert!(value.get("signature").is_none());
     }
 }
