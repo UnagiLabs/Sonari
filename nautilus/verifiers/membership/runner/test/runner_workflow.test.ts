@@ -219,6 +219,9 @@ describe("membership runner workflow", () => {
         expect(command).toContain(
             "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         );
+        // The shared run-sonari-verifier dispatcher selects the membership enclave
+        // only when SONARI_VERIFIER_KIND is set; the SSM dispatch must export it.
+        expect(command).toContain("export SONARI_VERIFIER_KIND=membership_identity");
         expect(command).toContain(
             `printf '%s' ${shellSingleQuote(row?.request_json ?? "")} | '/opt/sonari/bin/run-membership-identity-enclave'`,
         );

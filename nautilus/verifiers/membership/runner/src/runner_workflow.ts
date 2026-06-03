@@ -906,6 +906,7 @@ function buildSsmShellCommand(input: {
         'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
         "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+        `export SONARI_VERIFIER_KIND=${MEMBERSHIP_IDENTITY_VERIFIER_KIND}`,
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
         `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
