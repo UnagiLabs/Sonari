@@ -4,7 +4,22 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
+/// Canonical World ID API base URL the production server path pins.
+///
+/// The production server (`Server` subcommand) signs results bound to the World
+/// ID developer API, so the base URL must never be host/bootstrap-controlled:
+/// only the egress proxy ([`WORLD_ID_EGRESS_PROXY_URL_ENV`]) is variable, exactly
+/// like the earthquake egress model (canonical URL fixed, proxy steers TCP).
+/// This value satisfies [`normalize_base_url`]'s `https` requirement.
+pub const WORLD_ID_API_BASE_CANONICAL: &str = "https://developer.world.org";
 pub const WORLD_ID_APP_ID_ENV: &str = "SONARI_WORLD_ID_APP_ID";
+/// Optional egress proxy URL the enclave routes World ID HTTPS traffic through.
+///
+/// The canonical [`WORLD_ID_API_BASE_ENV`] stays `https://developer.world.org`
+/// so TLS verification and the verify path are unchanged; this proxy only steers
+/// where the TCP connection is forwarded so the host-side proxy enforces the
+/// egress allowlist (mirrors the earthquake egress proxy approach).
+pub const WORLD_ID_EGRESS_PROXY_URL_ENV: &str = "SONARI_WORLD_ID_EGRESS_PROXY_URL";
 pub const WORLD_ID_ACTION: &str = "sonari_membership_register_v1";
 pub const WORLD_ID_MAX_AGE_SECONDS: u64 = 604_800;
 pub const WORLD_ID_USER_AGENT: &str = "sonari-membership-tee/0.1";
@@ -47,16 +62,37 @@ impl CloudWorldIdVerifier {
         base_url: impl Into<String>,
         app_id: impl Into<String>,
     ) -> Result<Self, IdentityError> {
+        Self::with_proxy(base_url, app_id, None)
+    }
+
+    /// Builds a verifier that routes its HTTPS traffic through an optional egress
+    /// proxy while keeping the canonical `base_url` for TLS and path building.
+    ///
+    /// A `None` or blank `egress_proxy_url` yields a direct client (identical to
+    /// [`CloudWorldIdVerifier::new`]); a non-empty value installs an explicit
+    /// reqwest proxy so the host-side proxy enforces the egress allowlist.
+    pub fn with_proxy(
+        base_url: impl Into<String>,
+        app_id: impl Into<String>,
+        egress_proxy_url: Option<&str>,
+    ) -> Result<Self, IdentityError> {
         let base_url = normalize_base_url(base_url.into())?;
         let app_id = normalize_app_id(app_id.into())?;
-        let client = reqwest::blocking::Client::builder()
+        let mut builder = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
             .user_agent(WORLD_ID_USER_AGENT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|error| {
-                IdentityError::Request(format!("World ID HTTP client build failed: {error}"))
+            .redirect(reqwest::redirect::Policy::none());
+        if let Some(proxy_url) = non_empty_proxy(egress_proxy_url) {
+            let proxy = reqwest::Proxy::all(proxy_url).map_err(|error| {
+                IdentityError::Request(format!(
+                    "{WORLD_ID_EGRESS_PROXY_URL_ENV} is not a valid egress proxy URL: {error}"
+                ))
             })?;
+            builder = builder.proxy(proxy);
+        }
+        let client = builder.build().map_err(|error| {
+            IdentityError::Request(format!("World ID HTTP client build failed: {error}"))
+        })?;
 
         Ok(Self {
             base_url,
@@ -179,6 +215,10 @@ fn normalize_base_url(base_url: String) -> Result<Url, IdentityError> {
     Ok(parsed)
 }
 
+fn non_empty_proxy(proxy_url: Option<&str>) -> Option<&str> {
+    proxy_url.map(str::trim).filter(|value| !value.is_empty())
+}
+
 fn normalize_app_id(app_id: String) -> Result<String, IdentityError> {
     let trimmed = app_id.trim().to_owned();
     if trimmed.is_empty()
@@ -293,6 +333,49 @@ mod tests {
         assert_eq!(json["nullifier_hash"], "12345678901234567890");
         assert_eq!(json["max_age"], WORLD_ID_MAX_AGE_SECONDS);
         assert!(json.get("app_id").is_none());
+    }
+
+    #[test]
+    fn world_id_verifier_keeps_canonical_url_when_routed_through_egress_proxy() {
+        // The canonical World ID base URL must stay https://developer.world.org so
+        // TLS verification and the verify path are unchanged; the egress proxy only
+        // controls where the TCP connection is forwarded (host-side egress allowlist).
+        let verifier = CloudWorldIdVerifier::with_proxy(
+            "https://developer.world.org",
+            "app_staging_123",
+            Some("http://127.0.0.1:18080"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            verifier.verification_url(),
+            "https://developer.world.org/api/v2/verify/app_staging_123"
+        );
+    }
+
+    #[test]
+    fn world_id_verifier_rejects_invalid_egress_proxy_url() {
+        let error = CloudWorldIdVerifier::with_proxy(
+            "https://developer.world.org",
+            "app_staging_123",
+            Some("::not-a-url::"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("egress proxy"));
+    }
+
+    #[test]
+    fn world_id_verifier_treats_empty_proxy_as_no_proxy() {
+        let verifier = CloudWorldIdVerifier::with_proxy(
+            "https://developer.world.org",
+            "app_staging_123",
+            Some("   "),
+        )
+        .expect("blank proxy must be treated as no proxy");
+        assert_eq!(
+            verifier.verification_url(),
+            "https://developer.world.org/api/v2/verify/app_staging_123"
+        );
     }
 
     #[test]

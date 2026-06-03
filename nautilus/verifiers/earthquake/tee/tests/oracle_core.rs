@@ -957,6 +957,59 @@ fn production_cli_returns_configured_attestation_action() {
 }
 
 #[test]
+fn production_cli_get_attestation_output_is_byte_stable_for_fixed_seed_and_document() {
+    // Fixed seed, fixed document, and no explicit public key: the public key is
+    // derived from the seed so the route output is fully deterministic. Pinning
+    // the exact JSON bytes catches any wire drift in the get_attestation route.
+    let attestation_document_hex = format!("0x{}", "ab".repeat(96));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .env(
+            "SONARI_TEE_ATTESTATION_DOCUMENT_HEX",
+            &attestation_document_hex,
+        )
+        .env_remove("SONARI_TEE_ATTESTATION_PUBLIC_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"get_attestation"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    // The dev seed [7u8; 32] derives this Ed25519 public key; it is the same key
+    // pinned in the finalized fixture's signature.json, proving byte fidelity.
+    let expected = serde_json::json!({
+        "attestation_document_hex": attestation_document_hex,
+        "public_key": "0xea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+    });
+    assert_eq!(result, expected);
+    let keys = result
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["attestation_document_hex", "public_key"]);
+}
+
+#[test]
 fn production_cli_requires_registration_metadata_for_process_data_action() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
         .arg("production")
