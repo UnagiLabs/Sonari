@@ -367,6 +367,30 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 
+    it("exports the membership enclave CID to runner.env from the shared NitroEnclaveCid", async () => {
+        const template = await readTemplate();
+
+        // The membership SSM commands (buildSsmShellCommand /
+        // buildRunnerBootstrapReadinessShellCommand) require
+        // SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID. The host must export it from the
+        // shared NitroEnclaveCid parameter, exactly like the earthquake CID, since
+        // both verifier kinds share one EC2 capacity pool and one enclave CID.
+        expect(template).toContain(
+            "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=$" + "{NitroEnclaveCid}",
+        );
+        // The earthquake CID export must stay byte-for-byte unchanged.
+        expect(template).toContain("SONARI_EARTHQUAKE_ENCLAVE_CID=$" + "{NitroEnclaveCid}");
+        // Both CID exports resolve from the same shared NitroEnclaveCid parameter so
+        // the membership readiness/dispatch env checks and the earthquake wrapper agree.
+        expect(
+            template.match(/SONARI_EARTHQUAKE_ENCLAVE_CID=\$\{NitroEnclaveCid\}/g)?.length ?? 0,
+        ).toBe(1);
+        expect(
+            template.match(/SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=\$\{NitroEnclaveCid\}/g)
+                ?.length ?? 0,
+        ).toBe(1);
+    });
+
     it("exposes key unified stack outputs without leaking ciphertext object names", async () => {
         const template = await readTemplate();
 
