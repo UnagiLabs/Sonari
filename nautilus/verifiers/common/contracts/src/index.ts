@@ -492,10 +492,18 @@ export function createSuiEnclaveRegistrationTransaction(input: {
         target: "0x2::nitro_attestation::load_nitro_attestation",
         arguments: [tx.pure.vector("u8", input.attestationDocumentBytes), tx.object.clock()],
     });
-    const args = [tx.object(input.verifierRegistry), document, tx.pure.u64(input.expiresAtMs)];
-    if (input.configKey !== undefined) {
-        args.push(tx.pure.u64(input.configKey));
-    }
+    // register_enclave_instance(registry, document, expires_at_ms)
+    // register_enclave_instance_for_config(registry, config_key, document, expires_at_ms)
+    // so config_key is the SECOND argument when present, not appended last.
+    const args =
+        input.configKey !== undefined
+            ? [
+                  tx.object(input.verifierRegistry),
+                  tx.pure.u64(input.configKey),
+                  document,
+                  tx.pure.u64(input.expiresAtMs),
+              ]
+            : [tx.object(input.verifierRegistry), document, tx.pure.u64(input.expiresAtMs)];
     tx.moveCall({
         target: input.target,
         arguments: args,

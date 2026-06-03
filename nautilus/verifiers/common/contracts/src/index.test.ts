@@ -368,18 +368,33 @@ describe("createSuiEnclaveRegistrationTransaction", () => {
         expect(serialized).toContain("register_enclave_instance");
     });
 
-    it("creates a Transaction with configKey when provided (adds one extra u64 input)", () => {
-        const txWithout = createSuiEnclaveRegistrationTransaction(validInput);
-        const txWith = createSuiEnclaveRegistrationTransaction({ ...validInput, configKey: 42 });
-        // configKey is appended as an extra u64 argument, so the input count grows by one.
-        expect(txWith.getData().inputs.length).toBe(txWithout.getData().inputs.length + 1);
+    const registrationArgs = (tx: ReturnType<typeof createSuiEnclaveRegistrationTransaction>) => {
+        const command = tx.getData().commands.at(-1);
+        if (command?.$kind !== "MoveCall") {
+            throw new Error("expected the registration MoveCall to be the last command");
+        }
+        return command.MoveCall.arguments;
+    };
+
+    it("places config_key as the second argument before the document", () => {
+        // register_enclave_instance_for_config(registry, config_key, document, expires_at_ms)
+        const args = registrationArgs(
+            createSuiEnclaveRegistrationTransaction({ ...validInput, configKey: 42 }),
+        );
+        expect(args).toHaveLength(4);
+        expect(args[0]?.$kind).toBe("Input"); // registry object
+        expect(args[1]?.$kind).toBe("Input"); // config_key (pure u64)
+        expect(args[2]?.$kind).toBe("Result"); // document (load_nitro_attestation)
+        expect(args[3]?.$kind).toBe("Input"); // expires_at_ms (pure u64)
     });
 
-    it("creates Transaction without configKey when not provided (earthquake-compatible)", () => {
-        const txWith = createSuiEnclaveRegistrationTransaction({ ...validInput, configKey: 1 });
-        const txWithout = createSuiEnclaveRegistrationTransaction(validInput);
-        // Earthquake path passes no configKey: it must produce a strictly smaller input set.
-        expect(txWithout.getData().inputs.length).toBe(txWith.getData().inputs.length - 1);
+    it("omits config_key for the earthquake-compatible ABI", () => {
+        // register_enclave_instance(registry, document, expires_at_ms)
+        const args = registrationArgs(createSuiEnclaveRegistrationTransaction(validInput));
+        expect(args).toHaveLength(3);
+        expect(args[0]?.$kind).toBe("Input"); // registry object
+        expect(args[1]?.$kind).toBe("Result"); // document immediately after registry
+        expect(args[2]?.$kind).toBe("Input"); // expires_at_ms (pure u64)
     });
 });
 
