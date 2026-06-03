@@ -32,8 +32,7 @@ jobs:
       AMI_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_AMI_ID }}
       RUNNER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RUNNER_TOKEN_SECRET_ARN }}
       SOURCE_ARCHIVER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN }}
-      SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN }}
-      SOURCE_ARCHIVER_WALRUS_LAYER_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_LAYER_ARN }}
+      SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN }}
       SIGNING_SEED_CIPHERTEXT_S3_BUCKET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_BUCKET }}
       SIGNING_SEED_CIPHERTEXT_S3_KEY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_KEY }}
       NITRO_ENCLAVE_IMAGE_SHA384: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_IMAGE_SHA384 }}
@@ -75,8 +74,7 @@ jobs:
             AMI_ID
             RUNNER_TOKEN_SECRET_ARN
             SOURCE_ARCHIVER_TOKEN_SECRET_ARN
-            SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN
-            SOURCE_ARCHIVER_WALRUS_LAYER_ARN
+            SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN
             SIGNING_SEED_CIPHERTEXT_S3_BUCKET
             SIGNING_SEED_CIPHERTEXT_S3_KEY
             NITRO_ENCLAVE_IMAGE_SHA384
@@ -384,8 +382,7 @@ jobs:
             --membership-eif-bucket "$ARTIFACT_BUCKET"
             --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256"
             --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN"
-            --source-archiver-walrus-env-secret-arn "$SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN"
-            --source-archiver-walrus-layer-arn "$SOURCE_ARCHIVER_WALRUS_LAYER_ARN"
+            --source-archiver-private-key-secret-arn "$SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN"
             --prefix "$S3_PREFIX"
             --out dist/aws/sonari-verifier-runner-deploy-plan.json
           )
@@ -422,8 +419,13 @@ jobs:
             "GitCommitSha",
             "ScheduleState",
             "SourceArchiverTokenSecretArn",
-            "SourceArchiverWalrusEnvSecretArn",
-            "SourceArchiverWalrusLayerArn",
+            "SourceArchiverPrivateKeySecretArn",
+            "SourceArchiverSuiNetwork",
+            "SourceArchiverSuiRpcUrl",
+            "SourceArchiverWalrusUploadRelayUrl",
+            "SourceArchiverWalrusUploadRelayTipMaxMist",
+            "SourceArchiverWalrusEpochs",
+            "SourceArchiverWalrusDeletable",
           ];
           for (const key of requiredParameterKeys) {
             if (

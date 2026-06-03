@@ -1,5 +1,6 @@
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
@@ -7,11 +8,15 @@ import { ZipFile } from "yazl";
 
 const DEFAULT_OUTPUT_PATH = "dist/aws/sonari-verifier-runner-lambda.zip";
 const DEFAULT_WORK_DIR = ".build/aws-sonari-verifier-runner-lambda";
+const EARTHQUAKE_WATCHER_PACKAGE_DIR = "nautilus/verifiers/earthquake/watcher";
+const WALRUS_SDK_PACKAGE = "@mysten/walrus";
+const WALRUS_WASM_PACKAGE = "@mysten/walrus-wasm";
 const ZIP_ENTRY_MTIME = new Date("1980-01-01T00:00:00.000Z");
 const REQUIRE_BANNER = [
     'import { createRequire } from "node:module";',
     "const require = createRequire(import.meta.url);",
 ].join("\n");
+const require = createRequire(import.meta.url);
 
 const UNIFIED_LAMBDA_ENTRYPOINT = `
 export {
@@ -353,6 +358,10 @@ export async function buildAwsSonariVerifierRunnerLambdaArtifact(
             path.join(workDir, "dist/src/source_archiver.js"),
         ),
     ]);
+    const walrusWasmEntries = await collectDirectoryZipEntries(
+        resolveWalrusWasmPackageRoot(),
+        "node_modules/@mysten/walrus-wasm",
+    );
     await writeFile(
         path.join(workDir, "package.json"),
         `${JSON.stringify({ type: "module" }, null, 2)}\n`,
@@ -360,6 +369,7 @@ export async function buildAwsSonariVerifierRunnerLambdaArtifact(
     );
     await createZip(outPath, [
         ...zipEntries,
+        ...walrusWasmEntries,
         {
             sourcePath: path.join(workDir, "package.json"),
             zipPath: "package.json",
@@ -428,9 +438,43 @@ async function bundleEntrypoint(contents: string, sourcefile: string, outfile: s
             js: REQUIRE_BANNER,
         },
         packages: "bundle",
+        external: [WALRUS_WASM_PACKAGE],
         legalComments: "none",
         logLevel: "silent",
     });
+}
+
+function resolveWalrusWasmPackageRoot(): string {
+    const walrusPackageEntry = require.resolve(WALRUS_SDK_PACKAGE, {
+        paths: [path.resolve(EARTHQUAKE_WATCHER_PACKAGE_DIR)],
+    });
+    const walrusPackageRoot = path.resolve(path.dirname(walrusPackageEntry), "..");
+    const walrusWasmPackageEntry = require.resolve(WALRUS_WASM_PACKAGE, {
+        paths: [walrusPackageRoot],
+    });
+    return path.dirname(walrusWasmPackageEntry);
+}
+
+async function collectDirectoryZipEntries(sourceDir: string, zipDir: string): Promise<ZipEntry[]> {
+    const entries: ZipEntry[] = [];
+
+    async function visit(currentSourceDir: string, currentZipDir: string): Promise<void> {
+        const dirEntries = await readdir(currentSourceDir, { withFileTypes: true });
+        for (const dirEntry of dirEntries) {
+            const sourcePath = path.join(currentSourceDir, dirEntry.name);
+            const zipPath = path.posix.join(currentZipDir, dirEntry.name);
+            if (dirEntry.isDirectory()) {
+                await visit(sourcePath, zipPath);
+                continue;
+            }
+            if (dirEntry.isFile()) {
+                entries.push({ sourcePath, zipPath });
+            }
+        }
+    }
+
+    await visit(sourceDir, zipDir);
+    return entries;
 }
 
 async function createZip(outPath: string, entries: readonly ZipEntry[]): Promise<void> {

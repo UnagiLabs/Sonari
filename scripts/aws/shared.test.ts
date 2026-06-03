@@ -24,6 +24,11 @@ describe("AWS script shared helpers", () => {
                                 "arn:aws:states:us-west-2:595103996064:stateMachine:runner",
                         },
                         { OutputKey: "ManualWatcherLambdaName", OutputValue: "manual-watcher" },
+                        { OutputKey: "SourceArchiverLambdaName", OutputValue: "source-archiver" },
+                        {
+                            OutputKey: "SourceArchiverFunctionUrlOutput",
+                            OutputValue: "https://source-archiver.lambda-url.test/",
+                        },
                         { OutputKey: "RunnerResultBucketName", OutputValue: "runner-results" },
                         { OutputKey: "DeployedGitCommitSha", OutputValue: "abc123" },
                         { OutputKey: "LambdaCodeS3KeyOutput", OutputValue: "lambda.zip" },
@@ -38,6 +43,10 @@ describe("AWS script shared helpers", () => {
         expect(outputs.EventsTableName).toBe("events-table");
         expect(outputs.EarthquakeRunnerStateMachineArn).toContain("stateMachine:runner");
         expect(outputs.ManualWatcherLambdaName).toBe("manual-watcher");
+        expect(outputs.SourceArchiverLambdaName).toBe("source-archiver");
+        expect(outputs.SourceArchiverFunctionUrlOutput).toBe(
+            "https://source-archiver.lambda-url.test/",
+        );
         expect(outputs.RunnerResultBucketName).toBe("runner-results");
         expect(outputs.DeployedGitCommitSha).toBe("abc123");
         expect(outputs.LambdaCodeS3KeyOutput).toBe("lambda.zip");

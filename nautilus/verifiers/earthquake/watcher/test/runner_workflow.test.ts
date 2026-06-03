@@ -20,6 +20,7 @@ import {
     handler as runnerWorkflowHandler,
     HttpWalrusSourceArchiver,
     type AutoScalingClientLike,
+    ConfigurationSourceArchiveError,
     type EnclaveRegistrationAdapter,
     type EnclaveRegistrationClient,
     IntegritySourceArchiveError,
@@ -1299,6 +1300,46 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("records source archiver configuration failures without scheduling a retry", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        const archive = new RecordingSourceArchiveAdapter(new TextEncoder().encode("source bytes"));
+        archive.failWalrusConfiguration = true;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive: archive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "configuration_failed" });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "configuration_failed",
+            error_code: "SOURCE_ARCHIVE_CONFIGURATION_FAILED",
+            next_retry_at_ms: null,
+        });
+    });
+
     it("sends a runner-only token to the HTTP source archiver", async () => {
         const fetchCalls: Array<{ url: string; headers: Record<string, string>; body: unknown }> =
             [];
@@ -1436,6 +1477,18 @@ describe("AWS runner workflow helper", () => {
                     artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
                 }),
             ).rejects.toBeInstanceOf(RetryableSourceArchiveError);
+
+            globalThis.fetch = (async () =>
+                new Response(JSON.stringify({ error: "configuration" }), {
+                    status: 500,
+                    headers: { "content-type": "application/json" },
+                })) as typeof fetch;
+            await expect(
+                new HttpWalrusSourceArchiver("https://archiver.test/store").archiveAndVerify({
+                    entry,
+                    artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
+                }),
+            ).rejects.toBeInstanceOf(ConfigurationSourceArchiveError);
         } finally {
             globalThis.fetch = originalFetch;
         }
@@ -2033,6 +2086,7 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
     readonly archived: Array<{ artifactS3Key: string; walrusBlobId: string }> = [];
     failFetch = false;
     failS3 = false;
+    failWalrusConfiguration = false;
     oversizeFetch = false;
     walrusBlobId = "testBlob_123456";
 
@@ -2068,6 +2122,9 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
         archiveAndVerify: async (input: {
             artifactS3Key: string;
         }): Promise<{ walrusBlobId: string }> => {
+            if (this.failWalrusConfiguration) {
+                throw new ConfigurationSourceArchiveError("SourceArchiver configuration failed");
+            }
             this.archived.push({
                 artifactS3Key: input.artifactS3Key,
                 walrusBlobId: this.walrusBlobId,

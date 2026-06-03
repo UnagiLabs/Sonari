@@ -54,7 +54,11 @@ import {
     type RelayerSuccess,
 } from "./relayer_preview.js";
 import { assertValidUsgsSourceEventId } from "./source_event_id.js";
-import { DynamoDbStateRepository, type StateRepository } from "./state.js";
+import {
+    DynamoDbStateRepository,
+    type SourceArchiveStateUpdate,
+    type StateRepository,
+} from "./state.js";
 
 const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
 const SOURCE_FETCH_TIMEOUT_MS = 30_000;
@@ -370,7 +374,12 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
-              source_archive: "skipped" | "success" | "retryable_failed" | "integrity_failed";
+              source_archive:
+                  | "skipped"
+                  | "success"
+                  | "configuration_failed"
+                  | "retryable_failed"
+                  | "integrity_failed";
               source_artifact_s3_keys: string[];
               result: TeeCoreResult;
           }
@@ -785,20 +794,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const stateUpdate =
                     archived.status === "success"
                         ? { status: "success" as const, artifactS3Keys: archived.artifactS3Keys }
-                        : archived.status === "retryable_failed"
-                          ? {
-                                status: "retryable_failed" as const,
-                                artifactS3Keys: archived.artifactS3Keys,
-                                errorCode: "SOURCE_ARCHIVE_RETRYABLE_FAILED" as const,
-                                retryableNextRetryAtMs: nowMs + SOURCE_ARCHIVE_RETRY_BACKOFF_MS,
-                                message: archived.message,
-                            }
-                          : {
-                                status: "integrity_failed" as const,
-                                artifactS3Keys: archived.artifactS3Keys,
-                                errorCode: "SOURCE_ARCHIVE_INTEGRITY_FAILED" as const,
-                                message: archived.message,
-                            };
+                        : sourceArchiveFailureStateUpdate(archived, nowMs);
                 const marked = await repository.markSourceArchiveResult(
                     event.source_event_id,
                     stateUpdate,
@@ -1134,6 +1130,9 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
         );
         if (!response.ok) {
             const message = `Walrus source archiver failed: HTTP ${response.status}`;
+            if ((await readSourceArchiverErrorKind(response)) === "configuration") {
+                throw new ConfigurationSourceArchiveError(message);
+            }
             if (response.status === 409 || response.status === 422) {
                 throw new IntegritySourceArchiveError(message);
             }
@@ -1166,6 +1165,24 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
             );
         }
         return token;
+    }
+}
+
+async function readSourceArchiverErrorKind(
+    response: Response,
+): Promise<"configuration" | "integrity" | "retryable" | undefined> {
+    try {
+        const body = (await response.json()) as unknown;
+        if (!isRecord(body)) {
+            return undefined;
+        }
+        return body.error === "configuration" ||
+            body.error === "integrity" ||
+            body.error === "retryable"
+            ? body.error
+            : undefined;
+    } catch {
+        return undefined;
     }
 }
 
@@ -1519,10 +1536,39 @@ function buildSourceArchiveFromConfig(options: RunnerControlHandlerOptions): Sou
 type SourceArchiveAttemptResult =
     | { status: "success"; artifactS3Keys: string[] }
     | {
-          status: "retryable_failed" | "integrity_failed";
+          status: "configuration_failed" | "retryable_failed" | "integrity_failed";
           artifactS3Keys: string[];
           message: string;
       };
+
+function sourceArchiveFailureStateUpdate(
+    archived: Extract<SourceArchiveAttemptResult, { message: string }>,
+    nowMs: number,
+): SourceArchiveStateUpdate {
+    if (archived.status === "retryable_failed") {
+        return {
+            status: "retryable_failed",
+            artifactS3Keys: archived.artifactS3Keys,
+            errorCode: "SOURCE_ARCHIVE_RETRYABLE_FAILED",
+            retryableNextRetryAtMs: nowMs + SOURCE_ARCHIVE_RETRY_BACKOFF_MS,
+            message: archived.message,
+        };
+    }
+    if (archived.status === "configuration_failed") {
+        return {
+            status: "configuration_failed",
+            artifactS3Keys: archived.artifactS3Keys,
+            errorCode: "SOURCE_ARCHIVE_CONFIGURATION_FAILED",
+            message: archived.message,
+        };
+    }
+    return {
+        status: "integrity_failed",
+        artifactS3Keys: archived.artifactS3Keys,
+        errorCode: "SOURCE_ARCHIVE_INTEGRITY_FAILED",
+        message: archived.message,
+    };
+}
 
 async function archiveFinalizedSources(input: {
     sourceEventId: string;
@@ -1581,6 +1627,13 @@ async function archiveFinalizedSources(input: {
         } catch (error) {
             if (error instanceof IntegritySourceArchiveError) {
                 return { status: "integrity_failed", artifactS3Keys, message: error.message };
+            }
+            if (error instanceof ConfigurationSourceArchiveError) {
+                return {
+                    status: "configuration_failed",
+                    artifactS3Keys,
+                    message: error.message,
+                };
             }
             return {
                 status: "retryable_failed",
@@ -1644,6 +1697,7 @@ function sanitizeS3KeySegment(value: string): string {
 
 export class RetryableSourceArchiveError extends Error {}
 export class IntegritySourceArchiveError extends Error {}
+export class ConfigurationSourceArchiveError extends Error {}
 
 function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;

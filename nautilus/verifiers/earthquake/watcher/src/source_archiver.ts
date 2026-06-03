@@ -1,23 +1,25 @@
-import { execFile } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { promisify } from "node:util";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import { decodeSuiPrivateKey, type Signer } from "@mysten/sui/cryptography";
+import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { type WriteBlobStep, walrus } from "@mysten/walrus";
 
 const SOURCE_ARTIFACT_PREFIX = "source-artifacts/";
 const SOURCE_HASH_PATTERN = /^0x[0-9a-f]{64}$/;
 const WALRUS_BLOB_ID_PATTERN = /^[A-Za-z0-9_-]{8,256}$/;
-const DEFAULT_WALRUS_STORE_TIMEOUT_MS = 55_000;
-const CLI_OUTPUT_SUMMARY_MAX_CHARS = 4096;
+const SUI_OBJECT_ID_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+const DEFAULT_SUI_NETWORK: WalrusSdkNetwork = "testnet";
+const DEFAULT_SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
+const DEFAULT_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.space";
+const DEFAULT_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = 1_000;
+const DEFAULT_WALRUS_EPOCHS = 1;
+const DEFAULT_WALRUS_DELETABLE = false;
 const SENSITIVE_OUTPUT_LINE_PATTERN =
-    /\b(token|secret|private|keystore|wallet|credential|password|api[_-]?key)\b/iu;
+    /\b(token|secret|private|keystore|wallet|credential|password|api[_-]?key|suiprivkey)\b/iu;
 
-const execFileAsync = promisify(execFile);
-
-export type SourceArchiverErrorKind = "bad_request" | "integrity" | "retryable";
+export type SourceArchiverErrorKind = "bad_request" | "configuration" | "integrity" | "retryable";
 
 export class SourceArchiverError extends Error {
     constructor(
@@ -46,24 +48,56 @@ export interface VerifiedSourceArtifact {
     bytes: Uint8Array;
 }
 
+export interface WalrusStoreResult {
+    walrusBlobId: string;
+    walrusBlobObjectId?: string;
+    walrusTxDigest?: string;
+}
+
 export interface WalrusStoreRunner {
-    store(input: VerifiedSourceArtifact): Promise<string>;
+    /**
+     * Implementations may throw arbitrary errors; storeVerifiedSourceArtifact
+     * normalizes them into SourceArchiverError at this interface boundary.
+     */
+    store(input: VerifiedSourceArtifact): Promise<WalrusStoreResult>;
 }
 
-export interface WalrusStoreCommandRunner {
-    run(input: {
-        cliPath: string;
-        args: string[];
-        timeoutMs: number;
-        env?: Record<string, string>;
-    }): Promise<{ stdout: string; stderr: string }>;
+export type WalrusSdkNetwork = "mainnet" | "testnet";
+
+export interface WalrusSdkStoreConfig {
+    suiPrivateKey: string;
+    suiNetwork?: WalrusSdkNetwork | undefined;
+    suiRpcUrl?: string | undefined;
+    uploadRelayUrl?: string | undefined;
+    uploadRelayTipMaxMist?: number | undefined;
+    epochs?: number | undefined;
+    deletable?: boolean | undefined;
 }
 
-export interface WalrusCliStoreConfig {
-    cliPath: string;
-    timeoutMs?: number;
-    epochs?: number;
-    env?: Record<string, string>;
+export interface WalrusSdkStoreClient {
+    walrus: {
+        writeBlob(input: {
+            blob: Uint8Array;
+            signer: Signer;
+            epochs: number;
+            deletable: boolean;
+            onStep?: (step: WriteBlobStep) => void | Promise<void>;
+        }): Promise<{
+            blobId: string;
+            blobObject: {
+                id: string;
+            };
+        }>;
+    };
+}
+
+export interface WalrusSdkStoreClientFactory {
+    create(input: {
+        suiNetwork: WalrusSdkNetwork;
+        suiRpcUrl: string;
+        uploadRelayUrl: string;
+        uploadRelayTipMaxMist: number;
+    }): WalrusSdkStoreClient;
 }
 
 export interface SourceArchiverHttpEvent {
@@ -80,11 +114,6 @@ export interface SourceArchiverHttpResponse {
 
 export interface SecretStringReader {
     getSecretString(secretArn: string): Promise<string>;
-}
-
-export interface CliOutputSummary {
-    text: string;
-    truncated: boolean;
 }
 
 interface SourceArchiverRequestLogContext {
@@ -104,29 +133,25 @@ export type SourceArchiverHandlerFailureStage =
 export type SourceArchiverLogEvent =
     | (SourceArchiverRequestLogContext & {
           event: "source_archiver.walrus_store.start";
-          cliPath: string;
-          timeoutMs: number;
-          epochs?: number;
-          envKeys: string[];
+          suiNetwork: WalrusSdkNetwork;
+          suiRpcUrl: string;
+          uploadRelayUrl: string;
+          uploadRelayTipMaxMist: number;
+          epochs: number;
+          deletable: boolean;
       })
     | (SourceArchiverRequestLogContext & {
           event: "source_archiver.walrus_store.success";
           walrusBlobId: string;
+          walrusBlobObjectId?: string;
+          walrusTxDigest?: string;
           durationMs: number;
-          stdout: CliOutputSummary;
-          stderr: CliOutputSummary;
       })
     | (SourceArchiverRequestLogContext & {
           event: "source_archiver.walrus_store.failure";
           durationMs: number;
-          exitCode?: number | string;
-          signal?: string;
-          killed?: boolean;
-          timedOut: boolean;
           errorName: string;
           errorMessage: string;
-          stdout: CliOutputSummary;
-          stderr: CliOutputSummary;
       })
     | (Partial<SourceArchiverRequestLogContext> & {
           event: "source_archiver.handler.failure";
@@ -137,78 +162,112 @@ export type SourceArchiverLogEvent =
 
 export type SourceArchiverLogger = (event: SourceArchiverLogEvent) => void;
 
-export class WalrusCliStoreRunner implements WalrusStoreRunner {
-    private readonly timeoutMs: number;
+class DefaultWalrusSdkStoreClientFactory implements WalrusSdkStoreClientFactory {
+    create(input: {
+        suiNetwork: WalrusSdkNetwork;
+        suiRpcUrl: string;
+        uploadRelayUrl: string;
+        uploadRelayTipMaxMist: number;
+    }): WalrusSdkStoreClient {
+        return new SuiJsonRpcClient({
+            url: input.suiRpcUrl,
+            network: input.suiNetwork,
+        }).$extend(
+            walrus({
+                uploadRelay: {
+                    host: input.uploadRelayUrl,
+                    sendTip: { max: input.uploadRelayTipMaxMist },
+                },
+            }),
+        );
+    }
+}
+
+export class WalrusSdkStoreRunner implements WalrusStoreRunner {
+    private readonly signer: Signer;
+    private readonly suiNetwork: WalrusSdkNetwork;
+    private readonly suiRpcUrl: string;
+    private readonly uploadRelayUrl: string;
+    private readonly uploadRelayTipMaxMist: number;
+    private readonly epochs: number;
+    private readonly deletable: boolean;
 
     constructor(
-        private readonly config: WalrusCliStoreConfig,
-        private readonly commandRunner: WalrusStoreCommandRunner = new NodeWalrusStoreCommandRunner(),
+        config: WalrusSdkStoreConfig,
+        private readonly clientFactory: WalrusSdkStoreClientFactory = new DefaultWalrusSdkStoreClientFactory(),
         private readonly logger: SourceArchiverLogger = defaultSourceArchiverLogger,
     ) {
-        this.timeoutMs = config.timeoutMs ?? DEFAULT_WALRUS_STORE_TIMEOUT_MS;
-        if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs <= 0) {
-            throw new SourceArchiverError(
-                "Walrus store timeout must be a positive integer",
-                "retryable",
-                500,
-            );
-        }
-        if (
-            config.epochs !== undefined &&
-            (!Number.isSafeInteger(config.epochs) || config.epochs <= 0)
-        ) {
-            throw new SourceArchiverError(
-                "Walrus store epochs must be a positive integer",
-                "retryable",
-                500,
-            );
-        }
+        this.signer = signerFromRawSuiPrivateKey(config.suiPrivateKey);
+        this.suiNetwork = validateSuiNetwork(config.suiNetwork ?? DEFAULT_SUI_NETWORK);
+        this.suiRpcUrl = validateUrl(config.suiRpcUrl ?? DEFAULT_SUI_RPC_URL, "Sui RPC URL");
+        this.uploadRelayUrl = validateUrl(
+            config.uploadRelayUrl ?? DEFAULT_WALRUS_UPLOAD_RELAY_URL,
+            "Walrus upload relay URL",
+        );
+        this.uploadRelayTipMaxMist = validateNonNegativeInteger(
+            config.uploadRelayTipMaxMist ?? DEFAULT_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST,
+            "Walrus upload relay tip max MIST",
+        );
+        this.epochs = validatePositiveInteger(
+            config.epochs ?? DEFAULT_WALRUS_EPOCHS,
+            "Walrus epochs",
+        );
+        this.deletable = config.deletable ?? DEFAULT_WALRUS_DELETABLE;
     }
 
-    async store(input: VerifiedSourceArtifact): Promise<string> {
-        const tempDir = await mkdtemp(path.join(tmpdir(), "sonari-source-archiver-"));
-        const artifactPath = path.join(tempDir, "source-artifact.bin");
+    async store(input: VerifiedSourceArtifact): Promise<WalrusStoreResult> {
         const startedAt = Date.now();
         const context = sourceArchiverRequestLogContext(input.request);
+        this.logger({
+            event: "source_archiver.walrus_store.start",
+            ...context,
+            suiNetwork: this.suiNetwork,
+            suiRpcUrl: this.suiRpcUrl,
+            uploadRelayUrl: this.uploadRelayUrl,
+            uploadRelayTipMaxMist: this.uploadRelayTipMaxMist,
+            epochs: this.epochs,
+            deletable: this.deletable,
+        });
+
+        let registeredBlobObjectId: string | undefined;
+        let registeredTxDigest: string | undefined;
         try {
-            await writeFile(artifactPath, input.bytes);
-            const storeCommand: { files: string[]; epochs?: number } = { files: [artifactPath] };
-            if (this.config.epochs !== undefined) {
-                storeCommand.epochs = this.config.epochs;
-            }
-            const args = ["json", JSON.stringify({ command: { store: storeCommand } })];
-            const commandInput: {
-                cliPath: string;
-                args: string[];
-                timeoutMs: number;
-                env?: Record<string, string>;
-            } = {
-                cliPath: this.config.cliPath,
-                args,
-                timeoutMs: this.timeoutMs,
-            };
-            if (this.config.env !== undefined) {
-                commandInput.env = this.config.env;
-            }
-            this.logger({
-                event: "source_archiver.walrus_store.start",
-                ...context,
-                cliPath: this.config.cliPath,
-                timeoutMs: this.timeoutMs,
-                ...(this.config.epochs === undefined ? {} : { epochs: this.config.epochs }),
-                envKeys: Object.keys(this.config.env ?? {}).sort(),
+            const client = this.clientFactory.create({
+                suiNetwork: this.suiNetwork,
+                suiRpcUrl: this.suiRpcUrl,
+                uploadRelayUrl: this.uploadRelayUrl,
+                uploadRelayTipMaxMist: this.uploadRelayTipMaxMist,
             });
-            const output = await this.commandRunner.run(commandInput);
-            const blobId = parseWalrusStoreResult(output.stdout);
+            const result = await client.walrus.writeBlob({
+                blob: input.bytes,
+                signer: this.signer,
+                epochs: this.epochs,
+                deletable: this.deletable,
+                onStep: (step) => {
+                    if (step.step !== "registered") {
+                        return;
+                    }
+                    registeredBlobObjectId = step.blobObjectId;
+                    registeredTxDigest = step.txDigest;
+                },
+            });
+            const walrusBlobId = validateWalrusBlobIdFromOutput(result.blobId);
+            const walrusBlobObjectId = readWalrusBlobObjectId(
+                result.blobObject.id,
+                registeredBlobObjectId,
+            );
+            const storeResult = {
+                walrusBlobId,
+                ...optionalProperty("walrusBlobObjectId", walrusBlobObjectId),
+                ...optionalProperty("walrusTxDigest", registeredTxDigest),
+            };
             this.logger({
                 event: "source_archiver.walrus_store.success",
                 ...context,
-                walrusBlobId: blobId,
+                ...storeResult,
                 durationMs: durationMsSince(startedAt),
-                stdout: summarizeCliOutput(output.stdout),
-                stderr: summarizeCliOutput(output.stderr),
             });
-            return blobId;
+            return storeResult;
         } catch (error) {
             if (error instanceof SourceArchiverError) {
                 this.logger(walrusStoreFailureLogEvent(context, startedAt, error));
@@ -216,26 +275,8 @@ export class WalrusCliStoreRunner implements WalrusStoreRunner {
             }
             this.logger(walrusStoreFailureLogEvent(context, startedAt, error));
             const message = error instanceof Error ? error.message : String(error);
-            throw new SourceArchiverError(`Walrus store failed: ${message}`, "retryable", 502);
-        } finally {
-            await rm(tempDir, { recursive: true, force: true });
+            throw new SourceArchiverError(`Walrus SDK store failed: ${message}`, "retryable", 502);
         }
-    }
-}
-
-export class NodeWalrusStoreCommandRunner implements WalrusStoreCommandRunner {
-    async run(input: {
-        cliPath: string;
-        args: string[];
-        timeoutMs: number;
-        env?: Record<string, string>;
-    }): Promise<{ stdout: string; stderr: string }> {
-        const output = await execFileAsync(input.cliPath, input.args, {
-            timeout: input.timeoutMs,
-            maxBuffer: 1024 * 1024,
-            env: input.env === undefined ? process.env : { ...process.env, ...input.env },
-        });
-        return { stdout: output.stdout, stderr: output.stderr };
     }
 }
 
@@ -262,7 +303,11 @@ export function createSourceArchiverHandler(input: {
             });
             stage = "walrus_store";
             const stored = await storeVerifiedSourceArtifact({ artifact, walrus: input.walrus });
-            return jsonResponse(200, { walrus_blob_id: stored.walrusBlobId });
+            return jsonResponse(200, {
+                walrus_blob_id: stored.walrusBlobId,
+                ...optionalProperty("walrus_blob_object_id", stored.walrusBlobObjectId),
+                ...optionalProperty("walrus_tx_digest", stored.walrusTxDigest),
+            });
         } catch (error) {
             if (error instanceof SourceArchiverError) {
                 logger({
@@ -289,26 +334,29 @@ export function createSourceArchiverHandler(input: {
 export async function sourceArchiverHandler(
     event: SourceArchiverHttpEvent,
 ): Promise<SourceArchiverHttpResponse> {
-    const secrets = new AwsSecretStringReader();
+    const secrets = defaultAwsSecretStringReader();
     const logger = defaultSourceArchiverLogger;
     const handler = createSourceArchiverHandler({
         bucket: requiredEnv("RESULT_BUCKET"),
-        s3: new AwsSourceArtifactS3Reader(),
+        s3: defaultAwsSourceArtifactS3Reader(),
         walrus: {
             store: async (artifact) =>
-                new WalrusCliStoreRunner(
-                    walrusCliStoreConfig({
-                        cliPath: requiredEnv("SOURCE_ARCHIVER_WALRUS_CLI"),
-                        timeoutMs: readOptionalPositiveIntegerEnv(
-                            "SOURCE_ARCHIVER_WALRUS_TIMEOUT_MS",
-                        ),
-                        epochs: readOptionalPositiveIntegerEnv("SOURCE_ARCHIVER_WALRUS_EPOCHS"),
-                        env: await readWalrusEnvironmentSecret(
-                            requiredEnv("SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN"),
+                new WalrusSdkStoreRunner(
+                    walrusSdkStoreConfig({
+                        suiPrivateKey: await readWalrusPrivateKeySecret(
+                            requiredEnv("SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN"),
                             secrets,
                         ),
+                        suiNetwork: readSuiNetworkEnv("SUI_NETWORK"),
+                        suiRpcUrl: readOptionalStringEnv("SUI_RPC_URL"),
+                        uploadRelayUrl: readOptionalStringEnv("WALRUS_UPLOAD_RELAY_URL"),
+                        uploadRelayTipMaxMist: readOptionalNonNegativeIntegerEnv(
+                            "WALRUS_UPLOAD_RELAY_TIP_MAX_MIST",
+                        ),
+                        epochs: readOptionalPositiveIntegerEnv("WALRUS_EPOCHS"),
+                        deletable: readOptionalBooleanEnv("WALRUS_DELETABLE"),
                     }),
-                    new NodeWalrusStoreCommandRunner(),
+                    defaultWalrusSdkStoreClientFactory(),
                     logger,
                 ).store(artifact),
         },
@@ -377,13 +425,13 @@ export async function loadVerifiedSourceArtifact(input: {
 export async function storeVerifiedSourceArtifact(input: {
     artifact: VerifiedSourceArtifact;
     walrus: WalrusStoreRunner;
-}): Promise<{ walrusBlobId: string }> {
+}): Promise<WalrusStoreResult> {
     try {
-        const walrusBlobId = await input.walrus.store(input.artifact);
-        if (walrusBlobId !== input.artifact.request.expectedWalrusBlobId) {
+        const stored = await input.walrus.store(input.artifact);
+        if (stored.walrusBlobId !== input.artifact.request.expectedWalrusBlobId) {
             throw integrityFailure("Walrus store result did not match expected blob id");
         }
-        return { walrusBlobId };
+        return stored;
     } catch (error) {
         if (error instanceof SourceArchiverError) {
             throw error;
@@ -393,106 +441,42 @@ export async function storeVerifiedSourceArtifact(input: {
     }
 }
 
-export function parseWalrusStoreResult(output: string): string {
-    const parsedJson = parseJsonOutput(output);
-    if (parsedJson !== undefined) {
-        const jsonResults = readWalrusStoreResults(parsedJson);
-        if (jsonResults.length > 1) {
-            throw new SourceArchiverError(
-                "Walrus store output included multiple store results",
-                "retryable",
-                502,
-            );
-        }
-        const jsonBlobIds = readWalrusStoreResultBlobIds(jsonResults[0]);
-        if (jsonBlobIds.length === 1) {
-            return validateWalrusBlobIdFromOutput(jsonBlobIds[0] ?? "");
-        }
-        if (jsonBlobIds.length > 1) {
-            throw new SourceArchiverError(
-                "Walrus store output included multiple blob ids",
-                "retryable",
-                502,
-            );
-        }
-        throw missingWalrusBlobId();
+export async function readWalrusPrivateKeySecret(
+    secretArn: string,
+    reader: SecretStringReader,
+): Promise<string> {
+    const secret = (await reader.getSecretString(secretArn)).trim();
+    if (secret.length === 0) {
+        throw sourceArchiverConfigurationError(`${secretArn} must contain a raw Sui private key`);
     }
-
-    const labeled = output
-        .split(/\r?\n/u)
-        .map((line) => line.trim())
-        .find((line) => line.startsWith("Blob ID:"))
-        ?.slice("Blob ID:".length)
-        .trim();
-    if (labeled !== undefined && labeled.length > 0) {
-        return validateWalrusBlobIdFromOutput(labeled);
+    if (!secret.startsWith("suiprivkey")) {
+        throw sourceArchiverConfigurationError(
+            `${secretArn} must contain only a raw suiprivkey value`,
+        );
     }
-
-    throw missingWalrusBlobId();
+    signerFromRawSuiPrivateKey(secret);
+    return secret;
 }
 
-export function parseWalrusBlobId(output: string): string {
-    return parseWalrusStoreResult(output);
-}
-
-function parseJsonOutput(output: string): unknown | undefined {
-    const trimmed = output.trim();
-    if (trimmed.length === 0) {
-        return undefined;
+function signerFromRawSuiPrivateKey(privateKey: string): Signer {
+    const trimmed = privateKey.trim();
+    if (trimmed.length === 0 || !trimmed.startsWith("suiprivkey")) {
+        throw sourceArchiverConfigurationError(
+            "SourceArchiver private key must be a raw suiprivkey",
+        );
     }
     try {
-        return JSON.parse(trimmed) as unknown;
-    } catch {
-        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            throw new SourceArchiverError(
-                "Walrus store output looked like JSON but was malformed",
-                "retryable",
-                502,
-            );
+        const decoded = decodeSuiPrivateKey(trimmed);
+        if (decoded.scheme !== "ED25519") {
+            throw sourceArchiverConfigurationError("SourceArchiver private key must use ED25519");
         }
-        return undefined;
+        return Ed25519Keypair.fromSecretKey(decoded.secretKey);
+    } catch (error) {
+        if (error instanceof SourceArchiverError) {
+            throw error;
+        }
+        throw sourceArchiverConfigurationError("SourceArchiver private key is invalid");
     }
-}
-
-function readWalrusStoreResults(output: unknown): unknown[] {
-    if (Array.isArray(output)) {
-        return output;
-    }
-    return [output];
-}
-
-function readWalrusStoreResultBlobIds(output: unknown): string[] {
-    if (!isRecord(output)) {
-        return [];
-    }
-    const blobStoreResult = output.blobStoreResult;
-    if (!isRecord(blobStoreResult)) {
-        return [];
-    }
-
-    const blobIds: string[] = [];
-    const alreadyCertified = blobStoreResult.alreadyCertified;
-    if (isRecord(alreadyCertified) && typeof alreadyCertified.blobId === "string") {
-        blobIds.push(alreadyCertified.blobId);
-    }
-
-    const newlyCreated = blobStoreResult.newlyCreated;
-    if (!isRecord(newlyCreated)) {
-        return blobIds;
-    }
-    const blobObject = newlyCreated.blobObject;
-    if (isRecord(blobObject) && typeof blobObject.blobId === "string") {
-        blobIds.push(blobObject.blobId);
-    }
-    return blobIds;
-}
-
-function missingWalrusBlobId(): SourceArchiverError {
-    return new SourceArchiverError(
-        "Walrus store output did not include a blob id",
-        "retryable",
-        502,
-    );
 }
 
 function sourceArchiverRequestLogContext(
@@ -511,21 +495,14 @@ function walrusStoreFailureLogEvent(
     startedAt: number,
     error: unknown,
 ): SourceArchiverLogEvent {
-    const durationMs = durationMsSince(startedAt);
     return {
         event: "source_archiver.walrus_store.failure",
         ...context,
-        durationMs,
-        ...optionalProperty("exitCode", readErrorStringOrNumberProperty(error, "code")),
-        ...optionalProperty("signal", readErrorStringProperty(error, "signal")),
-        ...optionalProperty("killed", readErrorBooleanProperty(error, "killed")),
-        timedOut: readErrorBooleanProperty(error, "killed") === true,
+        durationMs: durationMsSince(startedAt),
         errorName: error instanceof Error ? error.name : typeof error,
         errorMessage: redactSensitiveErrorMessage(
             error instanceof Error ? error.message : String(error),
         ),
-        stdout: summarizeCliOutput(readErrorStringProperty(error, "stdout") ?? ""),
-        stderr: summarizeCliOutput(readErrorStringProperty(error, "stderr") ?? ""),
     };
 }
 
@@ -534,25 +511,6 @@ function redactSensitiveErrorMessage(message: string): string {
         return message;
     }
     return `[redacted-sensitive-message sha256=${createHash("sha256").update(message).digest("hex")}]`;
-}
-
-function summarizeCliOutput(output: string): CliOutputSummary {
-    const redacted = output
-        .split(/\r?\n/u)
-        .map((line) => {
-            if (!SENSITIVE_OUTPUT_LINE_PATTERN.test(line)) {
-                return line;
-            }
-            return `[redacted-sensitive-line sha256=${createHash("sha256").update(line).digest("hex")}]`;
-        })
-        .join("\n");
-    if (redacted.length <= CLI_OUTPUT_SUMMARY_MAX_CHARS) {
-        return { text: redacted, truncated: false };
-    }
-    return {
-        text: redacted.slice(0, CLI_OUTPUT_SUMMARY_MAX_CHARS),
-        truncated: true,
-    };
 }
 
 function durationMsSince(startedAt: number): number {
@@ -568,34 +526,6 @@ function optionalProperty<Key extends string, Value>(
     value: Value | undefined,
 ): Partial<Record<Key, Value>> {
     return value === undefined ? {} : ({ [key]: value } as Record<Key, Value>);
-}
-
-function readErrorStringOrNumberProperty(error: unknown, key: string): string | number | undefined {
-    const value = readErrorProperty(error, key);
-    return typeof value === "string" || typeof value === "number" ? value : undefined;
-}
-
-function readErrorStringProperty(error: unknown, key: string): string | undefined {
-    const value = readErrorProperty(error, key);
-    if (typeof value === "string") {
-        return value;
-    }
-    if (Buffer.isBuffer(value)) {
-        return value.toString("utf8");
-    }
-    return undefined;
-}
-
-function readErrorBooleanProperty(error: unknown, key: string): boolean | undefined {
-    const value = readErrorProperty(error, key);
-    return typeof value === "boolean" ? value : undefined;
-}
-
-function readErrorProperty(error: unknown, key: string): unknown {
-    if (!isRecord(error)) {
-        return undefined;
-    }
-    return error[key];
 }
 
 async function readSourceArtifact(input: {
@@ -707,59 +637,144 @@ class AwsSecretStringReader implements SecretStringReader {
     }
 }
 
-async function readWalrusEnvironmentSecret(
-    secretArn: string,
-    reader: SecretStringReader,
-): Promise<Record<string, string>> {
-    const parsed = JSON.parse(await reader.getSecretString(secretArn)) as unknown;
-    if (!isRecord(parsed)) {
-        throw new Error(`${secretArn} must contain a JSON object`);
-    }
-    return Object.fromEntries(
-        Object.entries(parsed).filter((entry): entry is [string, string] => {
-            const [key, value] = entry;
-            return key.length > 0 && typeof value === "string" && value.length > 0;
-        }),
-    );
+let awsSourceArtifactS3Reader: SourceArtifactS3Reader | undefined;
+let awsSecretStringReader: SecretStringReader | undefined;
+let walrusSdkStoreClientFactory: WalrusSdkStoreClientFactory | undefined;
+
+function defaultAwsSourceArtifactS3Reader(): SourceArtifactS3Reader {
+    awsSourceArtifactS3Reader ??= new AwsSourceArtifactS3Reader();
+    return awsSourceArtifactS3Reader;
+}
+
+function defaultAwsSecretStringReader(): SecretStringReader {
+    awsSecretStringReader ??= new AwsSecretStringReader();
+    return awsSecretStringReader;
+}
+
+function defaultWalrusSdkStoreClientFactory(): WalrusSdkStoreClientFactory {
+    walrusSdkStoreClientFactory ??= new DefaultWalrusSdkStoreClientFactory();
+    return walrusSdkStoreClientFactory;
+}
+
+function sourceArchiverConfigurationError(message: string): SourceArchiverError {
+    return new SourceArchiverError(message, "configuration", 500);
 }
 
 function requiredEnv(name: string): string {
     const value = process.env[name];
     if (value === undefined || value.length === 0) {
-        throw new Error(`${name} is required`);
+        throw sourceArchiverConfigurationError(`${name} is required`);
     }
     return value;
 }
 
-function readOptionalPositiveIntegerEnv(name: string): number | undefined {
+function readOptionalStringEnv(name: string): string | undefined {
     const value = process.env[name];
-    if (value === undefined || value.length === 0) {
-        return undefined;
-    }
-    const parsed = Number(value);
-    if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-        throw new Error(`${name} must be a positive integer`);
-    }
-    return parsed;
+    return value === undefined || value.length === 0 ? undefined : value;
 }
 
-function walrusCliStoreConfig(input: {
-    cliPath: string;
-    timeoutMs: number | undefined;
-    epochs: number | undefined;
-    env: Record<string, string>;
-}): WalrusCliStoreConfig {
-    const config: WalrusCliStoreConfig = {
-        cliPath: input.cliPath,
-        env: input.env,
+function readSuiNetworkEnv(name: string): WalrusSdkNetwork | undefined {
+    const value = readOptionalStringEnv(name);
+    if (value === undefined) {
+        return undefined;
+    }
+    return validateSuiNetwork(value);
+}
+
+function readOptionalPositiveIntegerEnv(name: string): number | undefined {
+    const value = readOptionalStringEnv(name);
+    if (value === undefined) {
+        return undefined;
+    }
+    return validatePositiveInteger(Number(value), name);
+}
+
+function readOptionalNonNegativeIntegerEnv(name: string): number | undefined {
+    const value = readOptionalStringEnv(name);
+    if (value === undefined) {
+        return undefined;
+    }
+    return validateNonNegativeInteger(Number(value), name);
+}
+
+function readOptionalBooleanEnv(name: string): boolean | undefined {
+    const value = readOptionalStringEnv(name);
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === "true") {
+        return true;
+    }
+    if (value === "false") {
+        return false;
+    }
+    throw sourceArchiverConfigurationError(`${name} must be true or false`);
+}
+
+function walrusSdkStoreConfig(input: WalrusSdkStoreConfig): WalrusSdkStoreConfig {
+    return {
+        suiPrivateKey: input.suiPrivateKey,
+        ...(input.suiNetwork === undefined ? {} : { suiNetwork: input.suiNetwork }),
+        ...(input.suiRpcUrl === undefined ? {} : { suiRpcUrl: input.suiRpcUrl }),
+        ...(input.uploadRelayUrl === undefined ? {} : { uploadRelayUrl: input.uploadRelayUrl }),
+        ...(input.uploadRelayTipMaxMist === undefined
+            ? {}
+            : { uploadRelayTipMaxMist: input.uploadRelayTipMaxMist }),
+        ...(input.epochs === undefined ? {} : { epochs: input.epochs }),
+        ...(input.deletable === undefined ? {} : { deletable: input.deletable }),
     };
-    if (input.timeoutMs !== undefined) {
-        config.timeoutMs = input.timeoutMs;
+}
+
+function validateSuiNetwork(value: string): WalrusSdkNetwork {
+    if (value === "mainnet" || value === "testnet") {
+        return value;
     }
-    if (input.epochs !== undefined) {
-        config.epochs = input.epochs;
+    throw sourceArchiverConfigurationError("SUI_NETWORK must be mainnet or testnet");
+}
+
+function validateUrl(value: string, label: string): string {
+    const trimmed = value.trim();
+    try {
+        const url = new URL(trimmed);
+        if (url.protocol !== "https:") {
+            throw new Error("expected https");
+        }
+        return trimmed.replace(/\/$/u, "");
+    } catch {
+        throw sourceArchiverConfigurationError(`${label} must be a valid https URL`);
     }
-    return config;
+}
+
+function validatePositiveInteger(value: number, label: string): number {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+        throw sourceArchiverConfigurationError(`${label} must be a positive integer`);
+    }
+    return value;
+}
+
+function validateNonNegativeInteger(value: number, label: string): number {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw sourceArchiverConfigurationError(`${label} must be a non-negative integer`);
+    }
+    return value;
+}
+
+function readWalrusBlobObjectId(
+    returnedBlobObjectId: string | undefined,
+    registeredBlobObjectId: string | undefined,
+): string | undefined {
+    const blobObjectId = returnedBlobObjectId ?? registeredBlobObjectId;
+    if (blobObjectId === undefined) {
+        return undefined;
+    }
+    if (!SUI_OBJECT_ID_PATTERN.test(blobObjectId)) {
+        throw new SourceArchiverError(
+            "Walrus SDK returned an invalid blob object id",
+            "retryable",
+            502,
+        );
+    }
+    return blobObjectId;
 }
 
 function readString(body: Record<string, unknown>, key: string): string {
@@ -780,11 +795,7 @@ function integrityFailure(message: string): SourceArchiverError {
 
 function validateWalrusBlobIdFromOutput(blobId: string): string {
     if (!WALRUS_BLOB_ID_PATTERN.test(blobId)) {
-        throw new SourceArchiverError(
-            "Walrus store output included an invalid blob id",
-            "retryable",
-            502,
-        );
+        throw new SourceArchiverError("Walrus SDK returned an invalid blob id", "retryable", 502);
     }
     return blobId;
 }

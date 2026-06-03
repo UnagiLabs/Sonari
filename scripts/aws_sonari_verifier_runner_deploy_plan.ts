@@ -7,6 +7,12 @@ const EARTHQUAKE_TEE_ARTIFACT_FILE_NAME = "earthquake-tee-artifact.tar.gz";
 const EARTHQUAKE_EIF_FILE_NAME = "earthquake-tee.eif";
 const MEMBERSHIP_TEE_ARTIFACT_FILE_NAME = "membership-identity-tee-artifact.tar.gz";
 const MEMBERSHIP_EIF_FILE_NAME = "membership-identity-tee.eif";
+const DEFAULT_SOURCE_ARCHIVER_SUI_NETWORK = "testnet";
+const DEFAULT_SOURCE_ARCHIVER_SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
+const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.space";
+const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = "1000";
+const DEFAULT_SOURCE_ARCHIVER_WALRUS_EPOCHS = "1";
+const DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE = false;
 const DEPLOY_PARAMETER_KEYS = [
     "LambdaCodeS3Bucket",
     "LambdaCodeS3Key",
@@ -25,12 +31,18 @@ const DEPLOY_PARAMETER_KEYS = [
     "GitCommitSha",
     "ScheduleState",
     "SourceArchiverTokenSecretArn",
-    "SourceArchiverWalrusEnvSecretArn",
-    "SourceArchiverWalrusLayerArn",
+    "SourceArchiverPrivateKeySecretArn",
+    "SourceArchiverSuiNetwork",
+    "SourceArchiverSuiRpcUrl",
+    "SourceArchiverWalrusUploadRelayUrl",
+    "SourceArchiverWalrusUploadRelayTipMaxMist",
+    "SourceArchiverWalrusEpochs",
+    "SourceArchiverWalrusDeletable",
 ] as const;
 
 type DeployParameterKey = (typeof DEPLOY_PARAMETER_KEYS)[number];
 type SuiNetwork = "mainnet" | "testnet" | "devnet";
+type SourceArchiverSuiNetwork = "mainnet" | "testnet";
 type WorldIdProofMode = "real" | "dummy";
 
 export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
@@ -45,8 +57,13 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     membershipEifBucket: string;
     membershipEifSha256: string;
     sourceArchiverTokenSecretArn: string;
-    sourceArchiverWalrusEnvSecretArn: string;
-    sourceArchiverWalrusLayerArn: string;
+    sourceArchiverPrivateKeySecretArn: string;
+    sourceArchiverSuiNetwork?: SourceArchiverSuiNetwork;
+    sourceArchiverSuiRpcUrl?: string;
+    sourceArchiverWalrusUploadRelayUrl?: string;
+    sourceArchiverWalrusUploadRelayTipMaxMist?: number;
+    sourceArchiverWalrusEpochs?: number;
+    sourceArchiverWalrusDeletable?: boolean;
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
     prefix?: string;
@@ -97,13 +114,36 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
             input.sourceArchiverTokenSecretArn,
             "source archiver token secret ARN",
         ),
-        SourceArchiverWalrusEnvSecretArn: validateArn(
-            input.sourceArchiverWalrusEnvSecretArn,
-            "source archiver Walrus environment secret ARN",
+        SourceArchiverPrivateKeySecretArn: validateArn(
+            input.sourceArchiverPrivateKeySecretArn,
+            "source archiver private key secret ARN",
         ),
-        SourceArchiverWalrusLayerArn: validateArn(
-            input.sourceArchiverWalrusLayerArn,
-            "source archiver Walrus Lambda layer ARN",
+        SourceArchiverSuiNetwork:
+            input.sourceArchiverSuiNetwork ?? DEFAULT_SOURCE_ARCHIVER_SUI_NETWORK,
+        SourceArchiverSuiRpcUrl: validateHttpsUrl(
+            input.sourceArchiverSuiRpcUrl ?? DEFAULT_SOURCE_ARCHIVER_SUI_RPC_URL,
+            "source archiver Sui RPC URL",
+        ),
+        SourceArchiverWalrusUploadRelayUrl: validateHttpsUrl(
+            input.sourceArchiverWalrusUploadRelayUrl ??
+                DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_URL,
+            "source archiver Walrus upload relay URL",
+        ),
+        SourceArchiverWalrusUploadRelayTipMaxMist: String(
+            validateNonNegativeInteger(
+                input.sourceArchiverWalrusUploadRelayTipMaxMist ??
+                    Number(DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST),
+                "source archiver Walrus upload relay tip max MIST",
+            ),
+        ),
+        SourceArchiverWalrusEpochs: String(
+            validatePositiveInteger(
+                input.sourceArchiverWalrusEpochs ?? Number(DEFAULT_SOURCE_ARCHIVER_WALRUS_EPOCHS),
+                "source archiver Walrus epochs",
+            ),
+        ),
+        SourceArchiverWalrusDeletable: String(
+            input.sourceArchiverWalrusDeletable ?? DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE,
         ),
     };
 
@@ -156,6 +196,33 @@ function validateArn(value: string, label: string): string {
     return value;
 }
 
+function validateHttpsUrl(value: string, label: string): string {
+    const trimmed = value.trim();
+    try {
+        const url = new URL(trimmed);
+        if (url.protocol !== "https:") {
+            throw new Error("expected https");
+        }
+        return trimmed.replace(/\/$/u, "");
+    } catch {
+        throw new Error(`Invalid ${label}: expected an https URL`);
+    }
+}
+
+function validatePositiveInteger(value: number, label: string): number {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+        throw new Error(`Invalid ${label}: expected a positive integer`);
+    }
+    return value;
+}
+
+function validateNonNegativeInteger(value: number, label: string): number {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`Invalid ${label}: expected a non-negative integer`);
+    }
+    return value;
+}
+
 function validateWorldIdProofMode(
     relayerNetwork: SuiNetwork | undefined,
     worldIdProofMode: WorldIdProofMode | undefined,
@@ -177,8 +244,13 @@ type CliOptions = {
     membershipEifBucket?: string;
     membershipEifSha256?: string;
     sourceArchiverTokenSecretArn?: string;
-    sourceArchiverWalrusEnvSecretArn?: string;
-    sourceArchiverWalrusLayerArn?: string;
+    sourceArchiverPrivateKeySecretArn?: string;
+    sourceArchiverSuiNetwork?: SourceArchiverSuiNetwork;
+    sourceArchiverSuiRpcUrl?: string;
+    sourceArchiverWalrusUploadRelayUrl?: string;
+    sourceArchiverWalrusUploadRelayTipMaxMist?: number;
+    sourceArchiverWalrusEpochs?: number;
+    sourceArchiverWalrusDeletable?: boolean;
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
     prefix?: string;
@@ -199,8 +271,7 @@ async function main(): Promise<void> {
         options.membershipEifBucket === undefined ||
         options.membershipEifSha256 === undefined ||
         options.sourceArchiverTokenSecretArn === undefined ||
-        options.sourceArchiverWalrusEnvSecretArn === undefined ||
-        options.sourceArchiverWalrusLayerArn === undefined
+        options.sourceArchiverPrivateKeySecretArn === undefined
     ) {
         throw new Error(
             [
@@ -216,8 +287,13 @@ async function main(): Promise<void> {
                 "--membership-eif-bucket <bucket>",
                 "--membership-eif-sha256 <sha256>",
                 "--source-archiver-token-secret-arn <arn>",
-                "--source-archiver-walrus-env-secret-arn <arn>",
-                "--source-archiver-walrus-layer-arn <arn>",
+                "--source-archiver-private-key-secret-arn <arn>",
+                "[--source-archiver-sui-network <mainnet|testnet>]",
+                "[--source-archiver-sui-rpc-url <url>]",
+                "[--source-archiver-walrus-upload-relay-url <url>]",
+                "[--source-archiver-walrus-upload-relay-tip-max-mist <mist>]",
+                "[--source-archiver-walrus-epochs <epochs>]",
+                "[--source-archiver-walrus-deletable <true|false>]",
                 "[--relayer-network <mainnet|testnet|devnet>]",
                 "[--world-id-proof-mode <real|dummy>]",
                 "[--prefix <prefix>]",
@@ -238,8 +314,28 @@ async function main(): Promise<void> {
         membershipEifBucket: options.membershipEifBucket,
         membershipEifSha256: options.membershipEifSha256,
         sourceArchiverTokenSecretArn: options.sourceArchiverTokenSecretArn,
-        sourceArchiverWalrusEnvSecretArn: options.sourceArchiverWalrusEnvSecretArn,
-        sourceArchiverWalrusLayerArn: options.sourceArchiverWalrusLayerArn,
+        sourceArchiverPrivateKeySecretArn: options.sourceArchiverPrivateKeySecretArn,
+        ...(options.sourceArchiverSuiNetwork === undefined
+            ? {}
+            : { sourceArchiverSuiNetwork: options.sourceArchiverSuiNetwork }),
+        ...(options.sourceArchiverSuiRpcUrl === undefined
+            ? {}
+            : { sourceArchiverSuiRpcUrl: options.sourceArchiverSuiRpcUrl }),
+        ...(options.sourceArchiverWalrusUploadRelayUrl === undefined
+            ? {}
+            : { sourceArchiverWalrusUploadRelayUrl: options.sourceArchiverWalrusUploadRelayUrl }),
+        ...(options.sourceArchiverWalrusUploadRelayTipMaxMist === undefined
+            ? {}
+            : {
+                  sourceArchiverWalrusUploadRelayTipMaxMist:
+                      options.sourceArchiverWalrusUploadRelayTipMaxMist,
+              }),
+        ...(options.sourceArchiverWalrusEpochs === undefined
+            ? {}
+            : { sourceArchiverWalrusEpochs: options.sourceArchiverWalrusEpochs }),
+        ...(options.sourceArchiverWalrusDeletable === undefined
+            ? {}
+            : { sourceArchiverWalrusDeletable: options.sourceArchiverWalrusDeletable }),
         ...(options.relayerNetwork === undefined ? {} : { relayerNetwork: options.relayerNetwork }),
         ...(options.worldIdProofMode === undefined
             ? {}
@@ -302,11 +398,26 @@ function parseArgs(args: string[]): CliOptions {
             case "--source-archiver-token-secret-arn":
                 options.sourceArchiverTokenSecretArn = next;
                 break;
-            case "--source-archiver-walrus-env-secret-arn":
-                options.sourceArchiverWalrusEnvSecretArn = next;
+            case "--source-archiver-private-key-secret-arn":
+                options.sourceArchiverPrivateKeySecretArn = next;
                 break;
-            case "--source-archiver-walrus-layer-arn":
-                options.sourceArchiverWalrusLayerArn = next;
+            case "--source-archiver-sui-network":
+                options.sourceArchiverSuiNetwork = parseSourceArchiverSuiNetwork(next);
+                break;
+            case "--source-archiver-sui-rpc-url":
+                options.sourceArchiverSuiRpcUrl = next;
+                break;
+            case "--source-archiver-walrus-upload-relay-url":
+                options.sourceArchiverWalrusUploadRelayUrl = next;
+                break;
+            case "--source-archiver-walrus-upload-relay-tip-max-mist":
+                options.sourceArchiverWalrusUploadRelayTipMaxMist = parseIntegerOption(arg, next);
+                break;
+            case "--source-archiver-walrus-epochs":
+                options.sourceArchiverWalrusEpochs = parseIntegerOption(arg, next);
+                break;
+            case "--source-archiver-walrus-deletable":
+                options.sourceArchiverWalrusDeletable = parseBooleanOption(arg, next);
                 break;
             case "--relayer-network":
                 options.relayerNetwork = parseSuiNetwork(next);
@@ -334,6 +445,31 @@ function parseSuiNetwork(value: string): SuiNetwork {
         return value;
     }
     throw new Error("--relayer-network must be mainnet, testnet, or devnet");
+}
+
+function parseSourceArchiverSuiNetwork(value: string): SourceArchiverSuiNetwork {
+    if (value === "mainnet" || value === "testnet") {
+        return value;
+    }
+    throw new Error("--source-archiver-sui-network must be mainnet or testnet");
+}
+
+function parseIntegerOption(name: string, value: string): number {
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) {
+        throw new Error(`${name} must be an integer`);
+    }
+    return parsed;
+}
+
+function parseBooleanOption(name: string, value: string): boolean {
+    if (value === "true") {
+        return true;
+    }
+    if (value === "false") {
+        return false;
+    }
+    throw new Error(`${name} must be true or false`);
 }
 
 function parseWorldIdProofMode(value: string): WorldIdProofMode {

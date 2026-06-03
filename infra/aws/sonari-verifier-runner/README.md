@@ -18,17 +18,16 @@ test "$ACTUAL_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 
 既存 stack を正として復旧する場合は、`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` の `required_names` と job-level `env` を source of truth にし、`aws cloudformation describe-stacks --stack-name sonari-verifier-runner-dev` の Parameters から stack 固有値を同期します。GitHub variables には AWS 側 resource ARN だけを設定し、credential material は入れません。
 
-source archiver を有効にする dev stack では、次の Actions variables も必須です。値は ARN だけを置き、token、wallet、config の中身は GitHub variables に入れません。
+source archiver を有効にする dev stack では、次の Actions variables も必須です。値は ARN だけを置き、token や private key の中身は GitHub variables に入れません。
 
 - `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN`
-- `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN`
-- `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_WALRUS_LAYER_ARN`
+- `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN`
 
 `SOURCE_ARCHIVER_TOKEN_SECRET_ARN` は RunnerControl と archiver Lambda が共有する呼び出し token です。Function URL はこの token header がない request を拒否します。
 
-`SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN` は Walrus CLI 実行に必要な環境変数を JSON object として持ちます。secret は archiver Lambda だけが読みます。
+`SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN` は SourceArchiver 専用 hot wallet の raw ED25519 `suiprivkey...` だけを含む secret を指します。JSON、YAML、Sui wallet config、keystore JSON は受け付けません。SourceArchiver は `@mysten/walrus` SDK で `WALRUS_UPLOAD_RELAY_URL` に upload relay 書き込みを行い、既定値は `SUI_NETWORK=testnet`、`SUI_RPC_URL=https://fullnode.testnet.sui.io:443`、`WALRUS_UPLOAD_RELAY_URL=https://upload-relay.testnet.walrus.space`、`WALRUS_UPLOAD_RELAY_TIP_MAX_MIST=1000`、`WALRUS_EPOCHS=1`、`WALRUS_DELETABLE=false` です。secret 本文と private key はログへ出しません。
 
-`SOURCE_ARCHIVER_WALRUS_LAYER_ARN` は `/opt/bin/walrus` を提供する Lambda layer です。TEE と runner EC2 には Walrus wallet、config、store 用 secret を置きません。
+SourceArchiver Lambda は Walrus CLI layer を使いません。TEE 内の deterministic blob-id 計算用 Walrus CLI は維持しますが、Lambda upload path は SDK のみです。TEE と runner EC2 には Walrus wallet、config、store 用 secret を置きません。
 
 OIDC role の trust policy は、`repo:UnagiLabs/Sonari:environment:aws-sonari-verifier-runner-dev` だけを許可します。旧 `aws-earthquake-runner-dev` environment は統合 runner への移行後に削除済みの前提です。
 
@@ -104,8 +103,7 @@ pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
   --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256" \
   --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN" \
-  --source-archiver-walrus-env-secret-arn "$SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN" \
-  --source-archiver-walrus-layer-arn "$SOURCE_ARCHIVER_WALRUS_LAYER_ARN" \
+  --source-archiver-private-key-secret-arn "$SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN" \
   --relayer-network "${RELAYER_NETWORK:-testnet}" \
   --world-id-proof-mode "${WORLD_ID_PROOF_MODE:-dummy}" \
   --prefix sonari-verifier-runner \
@@ -264,8 +262,7 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
   --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256" \
   --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN" \
-  --source-archiver-walrus-env-secret-arn "$SOURCE_ARCHIVER_WALRUS_ENV_SECRET_ARN" \
-  --source-archiver-walrus-layer-arn "$SOURCE_ARCHIVER_WALRUS_LAYER_ARN" \
+  --source-archiver-private-key-secret-arn "$SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN" \
   --relayer-network mainnet --world-id-proof-mode dummy \
   --out /tmp/sonari-verifier-runner-mainnet-dummy-plan.json; then
   echo "mainnet dummy proof plan unexpectedly succeeded" >&2

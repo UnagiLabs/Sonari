@@ -1,18 +1,22 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
 import { describe, expect, it } from "vitest";
 import {
     createSourceArchiverHandler,
     loadVerifiedSourceArtifact,
     parseSourceArchiverEvent,
-    parseWalrusBlobId,
-    parseWalrusStoreResult,
+    readWalrusPrivateKeySecret,
     SourceArchiverError,
     type SourceArchiverLogEvent,
+    type SecretStringReader,
     storeVerifiedSourceArtifact,
-    WalrusCliStoreRunner,
     type SourceArtifactS3Reader,
-    type WalrusStoreCommandRunner,
+    type WalrusSdkStoreClient,
+    type WalrusSdkStoreConfig,
+    type WalrusSdkStoreClientFactory,
+    WalrusSdkStoreRunner,
+    type WalrusStoreResult,
     type WalrusStoreRunner,
 } from "../src/source_archiver.js";
 
@@ -23,6 +27,8 @@ const validRequest = {
     source_hash: sha256Hex(validBytes),
     size_bytes: validBytes.byteLength,
 };
+const validBlobObjectId = `0x${"1".repeat(64)}`;
+const validTxDigest = "5UGQGJ9nvy9M2LaWqfXWsm8YkK9fnmWwW7dpqgGNtMqF";
 
 describe("source archiver request parsing", () => {
     it("parses a valid RunnerControl request body", () => {
@@ -134,12 +140,18 @@ describe("source archiver S3 verification", () => {
 });
 
 describe("source archiver Walrus store", () => {
-    it("stores verified bytes and returns the expected blob id", async () => {
+    it("stores verified bytes and returns the expected blob id metadata", async () => {
         const artifact = await verifiedArtifact();
-        const walrus = new RecordingWalrusStoreRunner("testBlob_123456");
+        const walrus = new RecordingWalrusStoreRunner({
+            walrusBlobId: "testBlob_123456",
+            walrusBlobObjectId: validBlobObjectId,
+            walrusTxDigest: validTxDigest,
+        });
 
         await expect(storeVerifiedSourceArtifact({ artifact, walrus })).resolves.toEqual({
             walrusBlobId: "testBlob_123456",
+            walrusBlobObjectId: validBlobObjectId,
+            walrusTxDigest: validTxDigest,
         });
         expect(walrus.stores).toEqual([artifact]);
     });
@@ -148,7 +160,7 @@ describe("source archiver Walrus store", () => {
         await expect(
             storeVerifiedSourceArtifact({
                 artifact: await verifiedArtifact(),
-                walrus: new RecordingWalrusStoreRunner("otherBlob_123456"),
+                walrus: new RecordingWalrusStoreRunner({ walrusBlobId: "otherBlob_123456" }),
             }),
         ).rejects.toMatchObject({
             kind: "integrity",
@@ -157,7 +169,7 @@ describe("source archiver Walrus store", () => {
     });
 
     it("classifies Walrus store failure as retryable", async () => {
-        const walrus = new RecordingWalrusStoreRunner("testBlob_123456");
+        const walrus = new RecordingWalrusStoreRunner({ walrusBlobId: "testBlob_123456" });
         walrus.failStore = true;
 
         await expect(
@@ -171,282 +183,174 @@ describe("source archiver Walrus store", () => {
         });
     });
 
-    it("parses Walrus JSON store output with an already certified blob id", () => {
-        expect(
-            parseWalrusStoreResult(
-                JSON.stringify([
-                    {
-                        path: "/tmp/source-artifact.bin",
-                        blobStoreResult: {
-                            alreadyCertified: {
-                                blobId: "testBlob_123456",
-                            },
-                        },
-                    },
-                ]),
-            ),
-        ).toBe("testBlob_123456");
+    it("accepts only a raw ED25519 suiprivkey secret", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+
+        await expect(
+            readWalrusPrivateKeySecret("secret-arn", new RecordingSecretStringReader(privateKey)),
+        ).resolves.toBe(privateKey);
+
+        const rejectedSecrets = [
+            "",
+            JSON.stringify({ SONARI_WALRUS_CLIENT_CONFIG_YAML: "default_context: testnet\n" }),
+            "keystore:\n  File: /tmp/sui.keystore\n",
+            Secp256k1Keypair.generate().getSecretKey(),
+            "suiprivkey-not-valid",
+        ];
+        for (const secret of rejectedSecrets) {
+            await expect(
+                readWalrusPrivateKeySecret(
+                    "secret-arn",
+                    new RecordingSecretStringReader(secret),
+                ),
+            ).rejects.toMatchObject({
+                kind: "configuration",
+                statusCode: 500,
+            });
+        }
     });
 
-    it("parses Walrus JSON store output with a newly created blob object id", () => {
-        expect(
-            parseWalrusStoreResult(
-                JSON.stringify([
-                    {
-                        path: "/tmp/source-artifact.bin",
-                        blobStoreResult: {
-                            newlyCreated: {
-                                blobObject: {
-                                    blobId: "testBlob_123456",
-                                },
-                            },
-                        },
-                    },
-                ]),
-            ),
-        ).toBe("testBlob_123456");
-    });
-
-    it("validates blob ids parsed from Walrus JSON store output", () => {
-        expect(() =>
-            parseWalrusStoreResult(
-                JSON.stringify({
-                    blobStoreResult: {
-                        alreadyCertified: {
-                            blobId: "bad/blob/id",
-                        },
-                    },
-                }),
-            ),
-        ).toThrow(SourceArchiverError);
-    });
-
-    it("classifies empty Walrus stdout as retryable", () => {
-        expect(() => parseWalrusStoreResult("")).toThrow(SourceArchiverError);
-        expect(() => parseWalrusStoreResult("")).toThrow(
-            expect.objectContaining({
-                kind: "retryable",
-                statusCode: 502,
-            }),
-        );
-    });
-
-    it("classifies malformed JSON-looking Walrus stdout as retryable without human fallback", () => {
-        expect(() =>
-            parseWalrusStoreResult('{"blobStoreResult":\nBlob ID: testBlob_123456\n'),
-        ).toThrow(
-            expect.objectContaining({
-                kind: "retryable",
-                statusCode: 502,
-            }),
-        );
-    });
-
-    it("classifies Walrus JSON output missing a blob id as retryable", () => {
-        expect(() =>
-            parseWalrusStoreResult(
-                JSON.stringify([
-                    {
-                        path: "/tmp/source-artifact.bin",
-                        blobStoreResult: {
-                            newlyCreated: {
-                                blobObject: {},
-                            },
-                        },
-                    },
-                ]),
-            ),
-        ).toThrow(
-            expect.objectContaining({
-                kind: "retryable",
-                statusCode: 502,
-            }),
-        );
-    });
-
-    it("classifies Walrus JSON output with multiple store results as retryable", () => {
-        expect(() =>
-            parseWalrusStoreResult(
-                JSON.stringify([
-                    {
-                        path: "/tmp/source-a.bin",
-                        blobStoreResult: {
-                            alreadyCertified: {
-                                blobId: "testBlob_123456",
-                            },
-                        },
-                    },
-                    {
-                        path: "/tmp/source-b.bin",
-                        blobStoreResult: {
-                            alreadyCertified: {
-                                blobId: "otherBlob_123456",
-                            },
-                        },
-                    },
-                ]),
-            ),
-        ).toThrow(
-            expect.objectContaining({
-                kind: "retryable",
-                statusCode: 502,
-            }),
-        );
-    });
-
-    it("classifies ambiguous Walrus JSON output with multiple blob ids as retryable", () => {
-        expect(() =>
-            parseWalrusStoreResult(
-                JSON.stringify({
-                    blobStoreResult: {
-                        alreadyCertified: {
-                            blobId: "testBlob_123456",
-                        },
-                        newlyCreated: {
-                            blobObject: {
-                                blobId: "otherBlob_123456",
-                            },
-                        },
-                    },
-                }),
-            ),
-        ).toThrow(
-            expect.objectContaining({
-                kind: "retryable",
-                statusCode: 502,
-            }),
-        );
-    });
-
-    it("falls back only to explicit Blob ID human output", () => {
-        expect(parseWalrusStoreResult("Success: stored\nBlob ID: testBlob_123456\n")).toBe(
-            "testBlob_123456",
-        );
-        expect(parseWalrusBlobId("Success: stored\nBlob ID: testBlob_123456\n")).toBe(
-            "testBlob_123456",
-        );
-        expect(() => parseWalrusStoreResult("Success: stored\ntestBlob_123456\n")).toThrow(
-            SourceArchiverError,
-        );
-        expect(() => parseWalrusStoreResult("Success: stored\n")).toThrow(SourceArchiverError);
-    });
-
-    it("runs walrus JSON store with a temp file containing the source bytes and configured epochs", async () => {
-        const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
-        const runner = new WalrusCliStoreRunner(
-            {
-                cliPath: "/opt/sonari/bin/walrus",
-                timeoutMs: 12_000,
-                epochs: 1,
-                env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
-            },
-            command,
-        );
-
-        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
-        expect(command.runs).toHaveLength(1);
-        expect(command.runs[0]).toMatchObject({
-            cliPath: "/opt/sonari/bin/walrus",
-            timeoutMs: 12_000,
-            env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
+    it("writes blobs with the SDK upload relay defaults and returns object metadata", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+            txDigest: validTxDigest,
         });
-        expect(command.runs[0]?.args[0]).toBe("json");
-        expect(command.runs[0]?.args).toHaveLength(2);
-        const payload = command.storePayloads[0];
-        expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
-        expect(payload?.command.store.epochs).toBe(1);
-        expect(command.tempFileBytes).toEqual([validBytes]);
-    });
-
-    it("omits epochs from the Walrus JSON store payload when epochs are not configured", async () => {
-        const command = new RecordingWalrusCommandRunner(walrusJsonStdout("testBlob_123456"));
-        const runner = new WalrusCliStoreRunner(
-            {
-                cliPath: "/opt/sonari/bin/walrus",
-            },
-            command,
-        );
-
-        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
-
-        expect(command.runs[0]?.args[0]).toBe("json");
-        const payload = command.storePayloads[0];
-        expect(payload?.command.store.files).toEqual([command.artifactPaths[0]]);
-        expect(payload?.command.store).not.toHaveProperty("epochs");
-        expect(command.tempFileBytes).toEqual([validBytes]);
-    });
-
-    it("logs Walrus CLI success context without exposing environment values", async () => {
-        const command = new RecordingWalrusCommandRunner(
-            walrusJsonStdout("testBlob_123456"),
-            "progress: stored\n",
-        );
         const logger = new RecordingSourceArchiverLogger();
-        const runner = new WalrusCliStoreRunner(
-            {
-                cliPath: "/opt/sonari/bin/walrus",
-                timeoutMs: 12_000,
-                epochs: 1,
-                env: {
-                    WALRUS_CONFIG: "/tmp/walrus.yaml",
-                    WALRUS_CONTEXT: "devnet",
-                },
-            },
-            command,
-            logger.log,
-        );
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, logger.log);
 
-        await expect(runner.store(await verifiedArtifact())).resolves.toBe("testBlob_123456");
-
-        expect(logger.events).toHaveLength(2);
-        expect(logger.events[0]).toMatchObject({
-            event: "source_archiver.walrus_store.start",
-            artifactS3Key: validRequest.artifact_s3_key,
-            sizeBytes: validRequest.size_bytes,
-            sourceHash: validRequest.source_hash,
-            expectedWalrusBlobId: validRequest.expected_walrus_blob_id,
-            cliPath: "/opt/sonari/bin/walrus",
-            timeoutMs: 12_000,
-            epochs: 1,
-            envKeys: ["WALRUS_CONFIG", "WALRUS_CONTEXT"],
-        });
-        expect(logger.events[0]).not.toHaveProperty("env");
-        expect(logger.events[1]).toMatchObject({
-            event: "source_archiver.walrus_store.success",
+        await expect(runner.store(await verifiedArtifact())).resolves.toEqual({
             walrusBlobId: "testBlob_123456",
-            stdout: {
-                truncated: false,
-                text: walrusJsonStdout("testBlob_123456"),
-            },
-            stderr: {
-                truncated: false,
-                text: "progress: stored\n",
-            },
+            walrusBlobObjectId: validBlobObjectId,
+            walrusTxDigest: validTxDigest,
         });
-        expect(logger.events[1]).toHaveProperty("durationMs");
+
+        expect(sdk.creates).toEqual([
+            {
+                suiNetwork: "testnet",
+                suiRpcUrl: "https://fullnode.testnet.sui.io:443",
+                uploadRelayUrl: "https://upload-relay.testnet.walrus.space",
+                uploadRelayTipMaxMist: 1_000,
+            },
+        ]);
+        expect(sdk.writeBlobInputs).toHaveLength(1);
+        expect(sdk.writeBlobInputs[0]).toMatchObject({
+            blob: validBytes,
+            epochs: 1,
+            deletable: false,
+        });
+        expect(sdk.writeBlobInputs[0]?.signer).toBeDefined();
+        expect(logger.events).toEqual([
+            expect.objectContaining({
+                event: "source_archiver.walrus_store.start",
+                suiNetwork: "testnet",
+                suiRpcUrl: "https://fullnode.testnet.sui.io:443",
+                uploadRelayUrl: "https://upload-relay.testnet.walrus.space",
+                uploadRelayTipMaxMist: 1_000,
+                epochs: 1,
+                deletable: false,
+            }),
+            expect.objectContaining({
+                event: "source_archiver.walrus_store.success",
+                walrusBlobId: "testBlob_123456",
+                walrusBlobObjectId: validBlobObjectId,
+                walrusTxDigest: validTxDigest,
+            }),
+        ]);
+        expect(JSON.stringify(logger.events)).not.toContain(privateKey);
     });
 
-    it("logs Walrus CLI failure diagnostics and redacts sensitive output lines", async () => {
-        const command = new RecordingWalrusCommandRunner("unused");
-        command.failRun = {
-            name: "Error",
-            message: "Command failed: walrus",
-            code: 78,
-            killed: true,
-            signal: "SIGTERM",
-            stdout: "ok line\nwallet private key = abc123\nnext line\n",
-            stderr: "token=secret-value\nkeystore path /tmp/wallet\nnetwork 502\n",
-        };
-        const logger = new RecordingSourceArchiverLogger();
-        const runner = new WalrusCliStoreRunner(
+    it("passes explicit SDK network, RPC, relay, tip cap, epochs, and deletable config", async () => {
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+        });
+        const runner = new WalrusSdkStoreRunner(
             {
-                cliPath: "/opt/sonari/bin/walrus",
-                timeoutMs: 55_000,
-                env: { WALRUS_CONFIG: "/tmp/walrus.yaml" },
+                suiPrivateKey: Ed25519Keypair.generate().getSecretKey(),
+                suiNetwork: "mainnet",
+                suiRpcUrl: "https://fullnode.mainnet.sui.io:443",
+                uploadRelayUrl: "https://upload-relay.mainnet.walrus.space/",
+                uploadRelayTipMaxMist: 2_000,
+                epochs: 3,
+                deletable: true,
             },
-            command,
-            logger.log,
+            sdk,
         );
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toMatchObject({
+            walrusBlobId: "testBlob_123456",
+        });
+
+        expect(sdk.creates).toEqual([
+            {
+                suiNetwork: "mainnet",
+                suiRpcUrl: "https://fullnode.mainnet.sui.io:443",
+                uploadRelayUrl: "https://upload-relay.mainnet.walrus.space",
+                uploadRelayTipMaxMist: 2_000,
+            },
+        ]);
+        expect(sdk.writeBlobInputs[0]).toMatchObject({
+            blob: validBytes,
+            epochs: 3,
+            deletable: true,
+        });
+    });
+
+    it("rejects unsupported SDK network and unsafe numeric config fail-closed", () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const cases: Array<Partial<WalrusSdkStoreConfig>> = [
+            { suiNetwork: "devnet" as WalrusSdkStoreConfig["suiNetwork"] },
+            { suiRpcUrl: "http://fullnode.testnet.sui.io:443" },
+            { uploadRelayUrl: "ftp://upload-relay.testnet.walrus.space" },
+            { uploadRelayTipMaxMist: -1 },
+            { epochs: 0 },
+        ];
+
+        for (const config of cases) {
+            expect(
+                () =>
+                    new WalrusSdkStoreRunner({
+                        suiPrivateKey: privateKey,
+                        ...config,
+                    }),
+            ).toThrow(
+                expect.objectContaining({
+                    kind: "configuration",
+                    statusCode: 500,
+                }),
+            );
+        }
+    });
+
+    it("classifies invalid SDK blob metadata as retryable", async () => {
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "bad/blob/id",
+            blobObjectId: validBlobObjectId,
+        });
+        const runner = new WalrusSdkStoreRunner(
+            { suiPrivateKey: Ed25519Keypair.generate().getSecretKey() },
+            sdk,
+        );
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "retryable",
+            statusCode: 502,
+        });
+    });
+
+    it("logs SDK failure diagnostics and redacts sensitive error messages", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+        });
+        sdk.failWrite = new Error(
+            `upload relay failed with private key ${privateKey} token=abc password=secret`,
+        );
+        const logger = new RecordingSourceArchiverLogger();
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, logger.log);
 
         await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
             kind: "retryable",
@@ -456,34 +360,52 @@ describe("source archiver Walrus store", () => {
         const failure = logger.events.at(-1);
         expect(failure).toMatchObject({
             event: "source_archiver.walrus_store.failure",
-            artifactS3Key: validRequest.artifact_s3_key,
-            exitCode: 78,
-            signal: "SIGTERM",
-            killed: true,
-            timedOut: true,
             errorName: "Error",
-            errorMessage: "Command failed: walrus",
-            stdout: { truncated: false },
-            stderr: { truncated: false },
         });
         if (failure?.event !== "source_archiver.walrus_store.failure") {
             throw new Error("expected Walrus store failure event");
         }
-        expect(failure.stdout.text).toMatch(
-            /^ok line\n\[redacted-sensitive-line sha256=[0-9a-f]{64}\]\nnext line\n$/u,
+        expect(failure.errorMessage).toMatch(
+            /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
         );
-        expect(failure.stderr.text).toMatch(
-            /^\[redacted-sensitive-line sha256=[0-9a-f]{64}\]\n\[redacted-sensitive-line sha256=[0-9a-f]{64}\]\nnetwork 502\n$/u,
-        );
+        expect(JSON.stringify(logger.events)).not.toContain(privateKey);
     });
 });
 
 describe("source archiver HTTP handler", () => {
-    it("returns the stored blob id for an authorized valid request", async () => {
+    it("returns the stored blob id and optional metadata for an authorized valid request", async () => {
         const handler = createSourceArchiverHandler({
             bucket: "sonari-results",
             s3: new RecordingS3Reader(validBytes),
-            walrus: new RecordingWalrusStoreRunner("testBlob_123456"),
+            walrus: new RecordingWalrusStoreRunner({
+                walrusBlobId: "testBlob_123456",
+                walrusBlobObjectId: validBlobObjectId,
+                walrusTxDigest: validTxDigest,
+            }),
+            authToken: async () => "archiver-token",
+        });
+
+        await expect(
+            handler({
+                headers: { "x-sonari-source-archiver-token": "archiver-token" },
+                body: JSON.stringify(validRequest),
+            }),
+        ).resolves.toEqual({
+            statusCode: 200,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                walrus_blob_id: "testBlob_123456",
+                walrus_blob_object_id: validBlobObjectId,
+                walrus_tx_digest: validTxDigest,
+            }),
+        });
+    });
+
+    it("preserves the existing minimal success response when SDK metadata is absent", async () => {
+        const handler = createSourceArchiverHandler({
+            bucket: "sonari-results",
+            s3: new RecordingS3Reader(validBytes),
+            walrus: new RecordingWalrusStoreRunner({ walrusBlobId: "testBlob_123456" }),
             authToken: async () => "archiver-token",
         });
 
@@ -504,7 +426,7 @@ describe("source archiver HTTP handler", () => {
         const handler = createSourceArchiverHandler({
             bucket: "sonari-results",
             s3,
-            walrus: new RecordingWalrusStoreRunner("testBlob_123456"),
+            walrus: new RecordingWalrusStoreRunner({ walrusBlobId: "testBlob_123456" }),
             authToken: async () => "archiver-token",
         });
 
@@ -518,7 +440,7 @@ describe("source archiver HTTP handler", () => {
         const handler = createSourceArchiverHandler({
             bucket: "sonari-results",
             s3: new RecordingS3Reader(new TextEncoder().encode("tampered")),
-            walrus: new RecordingWalrusStoreRunner("testBlob_123456"),
+            walrus: new RecordingWalrusStoreRunner({ walrusBlobId: "testBlob_123456" }),
             authToken: async () => "archiver-token",
         });
 
@@ -535,7 +457,7 @@ describe("source archiver HTTP handler", () => {
     });
 
     it("returns retryable status without leaking Walrus failure details and logs request context", async () => {
-        const walrus = new RecordingWalrusStoreRunner("testBlob_123456");
+        const walrus = new RecordingWalrusStoreRunner({ walrusBlobId: "testBlob_123456" });
         walrus.failStore = true;
         const logger = new RecordingSourceArchiverLogger();
         const handler = createSourceArchiverHandler({
@@ -569,63 +491,6 @@ describe("source archiver HTTP handler", () => {
         });
         expect(JSON.stringify(logger.events)).not.toContain("walrus network unavailable");
     });
-
-    it("returns retryable status and redacts sensitive Walrus CLI error messages", async () => {
-        const command = new RecordingWalrusCommandRunner("unused");
-        command.failRun = {
-            name: "Error",
-            message:
-                "Command failed: /opt/sonari/bin/walrus store /tmp/source token=abc private keystore wallet password api key",
-            code: 1,
-            killed: false,
-            signal: "SIGTERM",
-            stdout: "",
-            stderr: "",
-        };
-        const logger = new RecordingSourceArchiverLogger();
-        const handler = createSourceArchiverHandler({
-            bucket: "sonari-results",
-            s3: new RecordingS3Reader(validBytes),
-            walrus: new WalrusCliStoreRunner(
-                {
-                    cliPath: "/opt/sonari/bin/walrus",
-                    timeoutMs: 55_000,
-                },
-                command,
-                logger.log,
-            ),
-            authToken: async () => "archiver-token",
-            logger: logger.log,
-        });
-
-        const response = await handler({
-            headers: { "x-sonari-source-archiver-token": "archiver-token" },
-            body: JSON.stringify(validRequest),
-        });
-
-        expect(response).toEqual({
-            statusCode: 502,
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ error: "retryable" }),
-        });
-        const failure = logger.events.find(
-            (event) => event.event === "source_archiver.walrus_store.failure",
-        );
-        expect(failure).toMatchObject({
-            event: "source_archiver.walrus_store.failure",
-            errorName: "Error",
-        });
-        if (failure?.event !== "source_archiver.walrus_store.failure") {
-            throw new Error("expected Walrus store failure event");
-        }
-        expect(failure.errorMessage).toMatch(
-            /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
-        );
-        const serializedResponse = JSON.stringify(response);
-        expect(serializedResponse).not.toContain("/opt/sonari/bin/walrus");
-        expect(serializedResponse).not.toContain("token=abc");
-        expect(serializedResponse).not.toContain("password");
-    });
 });
 
 class RecordingS3Reader implements SourceArtifactS3Reader {
@@ -647,84 +512,65 @@ class RecordingWalrusStoreRunner implements WalrusStoreRunner {
     readonly stores: Awaited<ReturnType<typeof verifiedArtifact>>[] = [];
     failStore = false;
 
-    constructor(private readonly walrusBlobId: string) {}
+    constructor(private readonly result: WalrusStoreResult) {}
 
-    async store(input: Awaited<ReturnType<typeof verifiedArtifact>>): Promise<string> {
+    async store(input: Awaited<ReturnType<typeof verifiedArtifact>>): Promise<WalrusStoreResult> {
         this.stores.push(input);
         if (this.failStore) {
             throw new Error("walrus network unavailable");
         }
-        return this.walrusBlobId;
+        return this.result;
     }
 }
 
-interface WalrusJsonStorePayload {
-    command: {
-        store: {
-            files: string[];
-            epochs?: number;
-        };
-    };
-}
-
-class RecordingWalrusCommandRunner implements WalrusStoreCommandRunner {
-    readonly runs: Array<{
-        cliPath: string;
-        args: string[];
-        timeoutMs: number;
-        env?: Record<string, string>;
+class RecordingWalrusSdkClientFactory implements WalrusSdkStoreClientFactory {
+    readonly creates: Array<{
+        suiNetwork: "mainnet" | "testnet";
+        suiRpcUrl: string;
+        uploadRelayUrl: string;
+        uploadRelayTipMaxMist: number;
     }> = [];
-    readonly storePayloads: WalrusJsonStorePayload[] = [];
-    readonly artifactPaths: string[] = [];
-    readonly tempFileBytes: Uint8Array[] = [];
-
-    failRun?: {
-        name: string;
-        message: string;
-        code: number;
-        killed: boolean;
-        signal: string;
-        stdout: string;
-        stderr: string;
-    };
+    readonly writeBlobInputs: Array<Parameters<WalrusSdkStoreClient["walrus"]["writeBlob"]>[0]> =
+        [];
+    failWrite?: Error;
 
     constructor(
-        private readonly stdout: string,
-        private readonly stderr = "",
+        private readonly result: {
+            blobId: string;
+            blobObjectId: string;
+            txDigest?: string;
+        },
     ) {}
 
-    async run(input: {
-        cliPath: string;
-        args: string[];
-        timeoutMs: number;
-        env?: Record<string, string>;
-    }): Promise<{ stdout: string; stderr: string }> {
-        this.runs.push(input);
-        const payload = parseWalrusJsonStorePayload(input.args[1]);
-        this.storePayloads.push(payload);
-        const artifactPath = payload.command.store.files[0];
-        if (artifactPath === undefined) {
-            throw new Error("Walrus JSON payload command.store.files was empty");
-        }
-        this.artifactPaths.push(artifactPath);
-        this.tempFileBytes.push(new Uint8Array(await readFile(artifactPath)));
-        if (this.failRun !== undefined) {
-            const error = new Error(this.failRun.message) as Error & {
-                code: number;
-                killed: boolean;
-                signal: string;
-                stdout: string;
-                stderr: string;
-            };
-            error.name = this.failRun.name;
-            error.code = this.failRun.code;
-            error.killed = this.failRun.killed;
-            error.signal = this.failRun.signal;
-            error.stdout = this.failRun.stdout;
-            error.stderr = this.failRun.stderr;
-            throw error;
-        }
-        return { stdout: this.stdout, stderr: this.stderr };
+    create(input: {
+        suiNetwork: "mainnet" | "testnet";
+        suiRpcUrl: string;
+        uploadRelayUrl: string;
+        uploadRelayTipMaxMist: number;
+    }): WalrusSdkStoreClient {
+        this.creates.push(input);
+        return {
+            walrus: {
+                writeBlob: async (writeInput) => {
+                    this.writeBlobInputs.push(writeInput);
+                    if (this.failWrite !== undefined) {
+                        throw this.failWrite;
+                    }
+                    await writeInput.onStep?.({
+                        step: "registered",
+                        blobId: this.result.blobId,
+                        blobObjectId: this.result.blobObjectId,
+                        txDigest: this.result.txDigest ?? validTxDigest,
+                    });
+                    return {
+                        blobId: this.result.blobId,
+                        blobObject: {
+                            id: this.result.blobObjectId,
+                        },
+                    };
+                },
+            },
+        };
     }
 }
 
@@ -736,6 +582,14 @@ class RecordingSourceArchiverLogger {
     };
 }
 
+class RecordingSecretStringReader implements SecretStringReader {
+    constructor(private readonly secretString: string) {}
+
+    async getSecretString(): Promise<string> {
+        return this.secretString;
+    }
+}
+
 async function verifiedArtifact() {
     return loadVerifiedSourceArtifact({
         bucket: "sonari-results",
@@ -744,56 +598,6 @@ async function verifiedArtifact() {
     });
 }
 
-function walrusJsonStdout(blobId: string): string {
-    return JSON.stringify([
-        {
-            path: "/tmp/source-artifact.bin",
-            blobStoreResult: {
-                alreadyCertified: {
-                    blobId,
-                },
-            },
-        },
-    ]);
-}
-
 function sha256Hex(bytes: Uint8Array): string {
     return `0x${createHash("sha256").update(bytes).digest("hex")}`;
-}
-
-function parseWalrusJsonStorePayload(payloadJson: string | undefined): WalrusJsonStorePayload {
-    if (payloadJson === undefined) {
-        throw new Error("Walrus JSON payload missing");
-    }
-    const payload = JSON.parse(payloadJson) as unknown;
-    if (!isRecord(payload)) {
-        throw new Error("Walrus JSON payload must be an object");
-    }
-    const command = payload.command;
-    if (!isRecord(command)) {
-        throw new Error("Walrus JSON payload command missing");
-    }
-    const store = command.store;
-    if (
-        !isRecord(store) ||
-        !Array.isArray(store.files) ||
-        !store.files.every((file) => typeof file === "string")
-    ) {
-        throw new Error("Walrus JSON payload command.store.files missing");
-    }
-    if (store.epochs !== undefined && typeof store.epochs !== "number") {
-        throw new Error("Walrus JSON payload command.store.epochs must be a number");
-    }
-    return {
-        command: {
-            store: {
-                files: store.files,
-                ...(store.epochs === undefined ? {} : { epochs: store.epochs }),
-            },
-        },
-    };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null;
 }

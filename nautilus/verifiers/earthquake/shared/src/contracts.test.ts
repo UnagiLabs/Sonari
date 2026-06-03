@@ -175,6 +175,7 @@ describe("oracle schema contracts", () => {
             "AWS_RUNNER_CONTRACT_INVALID",
             "RELAYER_SUBMIT_FAILED",
             "MOVE_REJECTED",
+            "SOURCE_ARCHIVE_CONFIGURATION_FAILED",
             "SOURCE_ARCHIVE_RETRYABLE_FAILED",
             "SOURCE_ARCHIVE_INTEGRITY_FAILED",
             "REJECTED_AUTO_TRIGGER",

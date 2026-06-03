@@ -38,6 +38,8 @@ const STACK_OUTPUT_KEYS = [
     "SubmitVerificationLambdaName",
     "BatchVerifierLambdaName",
     "RunnerControlLambdaName",
+    "SourceArchiverLambdaName",
+    "SourceArchiverFunctionUrlOutput",
     "SigningMaterialKmsKeyId",
 ] as const;
 
@@ -569,6 +571,6 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
