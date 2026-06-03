@@ -91,6 +91,30 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"verifier_kind": "membership_identity"');
     });
 
+    it("dispatches the shared run-sonari-verifier entry by verifier kind", async () => {
+        const template = await readTemplate();
+        const dispatcherStart = template.indexOf("cat >/opt/sonari/bin/run-sonari-verifier");
+        const heredocBodyStart = template.indexOf("\n", dispatcherStart);
+        const dispatcherEnd = template.indexOf("SONARI_VERIFIER_DISPATCH", heredocBodyStart);
+        const dispatcher = template.slice(dispatcherStart, dispatcherEnd);
+
+        expect(dispatcherStart).toBeGreaterThan(-1);
+        expect(dispatcherEnd).toBeGreaterThan(dispatcherStart);
+
+        // membership path selects the membership identity enclave wrapper.
+        expect(dispatcher).toContain('"membership_identity"');
+        expect(dispatcher).toContain(
+            "$" +
+                "{!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}",
+        );
+
+        // earthquake path remains the earthquake enclave wrapper, unchanged.
+        expect(dispatcher).toContain(
+            "$" +
+                "{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}",
+        );
+    });
+
     it("waits and retries when shared runner capacity is leased by another workflow", async () => {
         const template = await readTemplate();
         const capacityChoiceCount = template.match(/"RunnerCapacityAvailable": \{/g)?.length ?? 0;

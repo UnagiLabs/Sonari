@@ -546,7 +546,14 @@ Resources:
               source /opt/sonari/runner.env
               set +a
             fi
-            exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
+            case "${SONARI_VERIFIER_KIND:-earthquake}" in
+              "membership_identity")
+                exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}"
+                ;;
+              *)
+                exec "${!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"
+                ;;
+            esac
             SONARI_VERIFIER_DISPATCH
             chmod 0500 /opt/sonari/bin/run-sonari-verifier
             nitro_enclave_process_command=$(cat <<'SONARI_COMMAND'
