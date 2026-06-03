@@ -169,9 +169,9 @@ EarthquakeTeeEifSha256 は EIF file の SHA-256 checksum です。S3 から EC2 
 
 ### AdminCap transaction と鍵分離
 
-AdminCap を持つ管理者 wallet は AWS に置きません。PCR config の登録、更新、停止は、デプロイ時に Codex が動く管理端末から実行します。AdminCap の秘密鍵や wallet config は AWS Runner、EC2、Lambda、SSM、AWS Secrets Manager に入れてはいけません。
+AdminCap を持つ管理者 wallet は AWS に置きません。PCR config の登録、更新、停止は、デプロイ時に Codex が動く管理端末の project-local admin wallet から実行します。AdminCap の秘密鍵や wallet config は AWS Runner、EC2、Lambda、SSM、AWS Secrets Manager に入れてはいけません。
 
-Relayer wallet は AdminCap を持ちません。Relayer wallet は `accessor::create_disaster_event_from_signed_payload` の submit だけに使います。
+Relayer wallet は AdminCap を持ちません。Relayer wallet は `accessor::create_disaster_event_from_signed_payload` の submit だけに使います。SourceArchiver 用 hot wallet をローカルで扱う場合も admin wallet とは分離し、AWS Secrets Manager の `sonari/walrus-archiver/private-key` は raw `suiprivkey...` secret だけを保持します。
 
 次の値を確認してから admin transaction を実行します。
 
