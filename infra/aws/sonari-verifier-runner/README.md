@@ -18,10 +18,12 @@ test "$ACTUAL_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 
 既存 stack を正として復旧する場合は、`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` の `required_names` と job-level `env` を source of truth にし、`aws cloudformation describe-stacks --stack-name sonari-verifier-runner-dev` の Parameters から stack 固有値を同期します。GitHub variables には AWS 側 resource ARN だけを設定し、credential material は入れません。
 
-source archiver を有効にする dev stack では、次の Actions variables も必須です。値は ARN だけを置き、token や private key の中身は GitHub variables に入れません。
+source archiver を有効にする dev stack では、次の Actions variables を使います。値は ARN だけを置き、token や private key の中身は GitHub variables に入れません。
 
 - `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN`
 - `AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN`
+
+既存 stack の復旧では、`AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN` が未設定でも、workflow が AWS account 検証後に CloudFormation parameter `SourceArchiverPrivateKeySecretArn` から ARN を復旧します。GitHub variable と stack parameter のどちらにも値がない場合は fail-closed します。新規 stack 作成時は復旧元の parameter がないため、GitHub variable を設定してください。
 
 `SOURCE_ARCHIVER_TOKEN_SECRET_ARN` は RunnerControl と archiver Lambda が共有する呼び出し token です。Function URL はこの token header がない request を拒否します。
 

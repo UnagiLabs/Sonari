@@ -74,7 +74,6 @@ jobs:
             AMI_ID
             RUNNER_TOKEN_SECRET_ARN
             SOURCE_ARCHIVER_TOKEN_SECRET_ARN
-            SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN
             SIGNING_SEED_CIPHERTEXT_S3_BUCKET
             SIGNING_SEED_CIPHERTEXT_S3_KEY
             NITRO_ENCLAVE_IMAGE_SHA384
@@ -152,6 +151,29 @@ jobs:
           fi
           echo "OIDC role resolved to an unexpected AWS account" >&2
           exit 1
+
+      - name: Resolve SourceArchiver private key secret ARN
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_archiver_private_key_secret_arn="${SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN:-}"
+          if [[ -z "$source_archiver_private_key_secret_arn" ]]; then
+            source_archiver_private_key_secret_arn="$(aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Parameters[?ParameterKey=='SourceArchiverPrivateKeySecretArn'].ParameterValue | [0]" \
+              --output text)"
+            if [[ "$source_archiver_private_key_secret_arn" == "None" ]]; then
+              source_archiver_private_key_secret_arn=""
+            fi
+          fi
+
+          if [[ ! "$source_archiver_private_key_secret_arn" =~ ^arn:[A-Za-z0-9-]+:secretsmanager:[A-Za-z0-9-]+:[0-9]{12}:secret:.+ ]]; then
+            echo "SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN must be set or recoverable from the dev stack SourceArchiverPrivateKeySecretArn parameter" >&2
+            exit 1
+          fi
+
+          printf 'SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN=%s\n' "$source_archiver_private_key_secret_arn" >> "$GITHUB_ENV"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6

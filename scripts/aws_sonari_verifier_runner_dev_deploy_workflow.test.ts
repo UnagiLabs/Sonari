@@ -81,7 +81,15 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "expected_runner_role_arn",
             'digest.update(b"\\0" * 48)',
             '[[ "$' + '{NITRO_ENCLAVE_PCR3,,}" != "$expected_pcr3" ]]',
+            "Resolve SourceArchiver private key secret ARN",
+            "aws cloudformation describe-stacks",
+            "SourceArchiverPrivateKeySecretArn",
+            "SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN must be set or recoverable from the dev stack SourceArchiverPrivateKeySecretArn parameter",
+            "SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN=%s",
         ]);
+
+        const requiredNamesMatch = workflow.match(/required_names=\(\n([\s\S]*?)\n {10}\)/u);
+        expect(requiredNamesMatch?.[1]).not.toContain("SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN");
     });
 
     it("builds every verifier runner deployment artifact", async () => {
