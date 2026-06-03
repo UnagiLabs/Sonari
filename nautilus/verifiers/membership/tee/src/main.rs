@@ -1,18 +1,43 @@
+use std::env;
 use std::io::{self, Read};
+use std::thread;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use membership_tee::server::{EGRESS_PROXY_URL_KEY, IdentityProcessHandler};
 use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityProvider,
-    IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_UNAVAILABLE,
-    WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
-    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
+    IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
+    WORLD_ID_APP_ID_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
+    WorldIdVerificationStatus, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
+    process_identity_with_verifier,
 };
-use serde::Serialize;
-use sonari_tee_core::{LocalEd25519Signer, SignatureArtifact, signing_key_seed_from_env, to_hex};
+use serde::{Deserialize, Serialize};
+use sonari_tee_core::enclave::{
+    EnclaveRegistrationMetadata, HttpRequest, ProcessDataHandler, ProcessOutput, TeeContext,
+    VsockListener, enclave_attestation_response, error_response,
+    generate_ephemeral_signing_key_seed, handle_connection, health_check_response,
+};
+use sonari_tee_core::{
+    LocalEd25519Signer, PayloadSigner, SignatureArtifact, non_empty_env, signing_key_seed_from_env,
+    to_hex,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PRODUCTION_SIGNING_KEY_SEED_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED";
 const PRODUCTION_SIGNING_KEY_SEED_FILE_ENV: &str = "SONARI_TEE_SIGNING_KEY_SEED_FILE";
+
+/// Byte string the enclave signs to derive its embedded attestation public key.
+const ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = b"sonari-membership-attestation-public-key";
+
+/// On-chain verifier config key for the identity (membership) verifier family.
+///
+/// The worker supplies the registration metadata (config key/version) on the
+/// `/process_data` request; the server validates that the supplied
+/// `verifier_config_key` matches this identity family key and fails closed on a
+/// mismatch so a foreign family's metadata can never be echoed into an identity
+/// result. The config key/version supply stays in the orchestration layer; the
+/// handler never touches it.
+const IDENTITY_VERIFIER_CONFIG_KEY: u64 = 2;
 
 #[derive(Debug, Parser)]
 #[command(name = "membership-tee")]
@@ -28,6 +53,23 @@ struct Cli {
 enum Command {
     Fixture(FixtureArgs),
     Production,
+    Server(ServerArgs),
+}
+
+/// Production Nautilus server mode.
+///
+/// Unlike the legacy `Fixture` / `Production` CLI routes (which sign with a
+/// fixed/dev or env-provided seed for local/legacy use), the server mode signs
+/// every finalized result with an enclave-local ephemeral key generated at
+/// startup. No fixed seed is ever read on this path.
+#[derive(Debug, Parser)]
+struct ServerArgs {
+    #[arg(long, default_value_t = 3000)]
+    port: u32,
+    #[arg(long, default_value_t = 7777)]
+    bootstrap_port: u32,
+    #[arg(long)]
+    skip_bootstrap: bool,
 }
 
 #[derive(Debug, Parser)]
@@ -69,6 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&result)?);
             Ok(())
         }
+        Some(Command::Server(args)) => run_nautilus_server(args),
         None => Err("membership-tee requires a subcommand or --encode-only".into()),
     }
 }
@@ -150,6 +193,253 @@ fn current_unix_ms() -> Result<u64, Box<dyn std::error::Error>> {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
 
     Ok(duration.as_millis().try_into()?)
+}
+
+/// Per-connection enclave state for the production server path.
+///
+/// The signing seed is the enclave-local ephemeral key generated at startup; no
+/// fixed/dev seed is reachable from this state (legacy fixed-seed signing lives
+/// only on the `Fixture` / `Production` CLI routes).
+#[derive(Clone)]
+struct EnclaveState {
+    ephemeral_signing_key_seed: [u8; 32],
+    ctx: TeeContext,
+    world_id_base_url: String,
+    world_id_app_id: String,
+}
+
+/// Runs the production Nautilus server: ephemeral key signing, NSM attestation,
+/// World ID egress proxy via [`TeeContext`], and registration-metadata injection.
+fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let ephemeral_signing_key_seed = generate_ephemeral_signing_key_seed()?;
+    if !args.skip_bootstrap {
+        receive_bootstrap_config(args.bootstrap_port)?;
+    }
+    // Resolve env-derived configuration once at startup (orchestration layer) so
+    // per-request handlers never read the process environment.
+    let state = enclave_state_from_env(ephemeral_signing_key_seed)?;
+    let listener = VsockListener::bind(args.port)?;
+    eprintln!(
+        "sonari membership nautilus server listening on vsock port {}",
+        args.port
+    );
+    loop {
+        let stream = listener.accept()?;
+        let state = state.clone();
+        thread::spawn(move || {
+            if let Err(error) = handle_connection(stream, |request| route_request(request, &state))
+            {
+                eprintln!("sonari membership nautilus request failed: {error}");
+            }
+        });
+    }
+}
+
+/// Resolves the bootstrap-populated env into the per-connection enclave state.
+///
+/// The canonical World ID base URL (`https://developer.world.org`) and app id are
+/// read here; the egress proxy URL is injected through the [`TeeContext`] so the
+/// handler's verifier can route HTTPS through the host-side egress proxy without
+/// the handler reading the environment itself.
+fn enclave_state_from_env(
+    ephemeral_signing_key_seed: [u8; 32],
+) -> Result<EnclaveState, Box<dyn std::error::Error>> {
+    let world_id_base_url = non_empty_env(WORLD_ID_API_BASE_ENV).ok_or(format!(
+        "{WORLD_ID_API_BASE_ENV} is required for server mode"
+    ))?;
+    let world_id_app_id = non_empty_env(WORLD_ID_APP_ID_ENV)
+        .ok_or(format!("{WORLD_ID_APP_ID_ENV} is required for server mode"))?;
+    Ok(EnclaveState {
+        ephemeral_signing_key_seed,
+        ctx: tee_context_from_env(),
+        world_id_base_url,
+        world_id_app_id,
+    })
+}
+
+/// Builds the dependency-injection context from the bootstrap-populated env.
+///
+/// The handler resolves the egress proxy through this context instead of reading
+/// the process environment directly.
+fn tee_context_from_env() -> TeeContext {
+    match non_empty_env(EGRESS_PROXY_URL_KEY) {
+        Some(proxy) => TeeContext::with_env([(EGRESS_PROXY_URL_KEY, proxy)]),
+        None => TeeContext::new(),
+    }
+}
+
+/// Routes a single enclave request, owning signing, attestation, and
+/// registration-metadata injection so the handler stays domain-only.
+fn route_request(
+    request: HttpRequest,
+    state: &EnclaveState,
+) -> Result<(u16, serde_json::Value), Box<dyn std::error::Error>> {
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/health_check") => Ok((200, health_check_response())),
+        ("GET", "/get_attestation") => {
+            let signer = LocalEd25519Signer::new(state.ephemeral_signing_key_seed);
+            Ok((
+                200,
+                enclave_attestation_response(&signer, ATTESTATION_PUBLIC_KEY_LABEL)?,
+            ))
+        }
+        ("POST", "/process_data") => {
+            let envelope = parse_process_data_envelope(&request.body)?;
+            let handler =
+                IdentityProcessHandler::new(&state.world_id_base_url, &state.world_id_app_id);
+            let output = handler
+                .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
+                .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
+            let signer = LocalEd25519Signer::new(state.ephemeral_signing_key_seed);
+            Ok((
+                200,
+                finalize_process_output(output, &signer, Some(envelope.registration_metadata))?,
+            ))
+        }
+        _ => Ok((
+            404,
+            error_response("AWS_RUNNER_PROCESS_FAILED", "not found"),
+        )),
+    }
+}
+
+/// Action tag the worker sets on the `/process_data` request body.
+const PROCESS_DATA_ACTION: &str = "process_data";
+
+/// Worker-supplied `process_data` request envelope.
+///
+/// The outer body wire shape is `{action, payload, registration_metadata}`.
+/// `deny_unknown_fields` rejects any extra field and a missing `action` is
+/// rejected by serde, so the route fails closed on malformed envelopes.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessDataEnvelope {
+    action: String,
+    payload: serde_json::Value,
+    registration_metadata: EnclaveRegistrationMetadata,
+}
+
+/// Parses and validates the `/process_data` request body, rejecting unknown
+/// fields, any `action` other than [`PROCESS_DATA_ACTION`], and any registration
+/// metadata whose `verifier_config_key` is not the identity family key
+/// (fail-closed). The config key/version supply still comes from the worker
+/// (orchestration layer); the handler never touches it.
+fn parse_process_data_envelope(
+    body: &[u8],
+) -> Result<ProcessDataEnvelope, Box<dyn std::error::Error>> {
+    let envelope: ProcessDataEnvelope = serde_json::from_slice(body)?;
+    if envelope.action != PROCESS_DATA_ACTION {
+        return Err(format!(
+            "unexpected /process_data action `{}`; expected `{PROCESS_DATA_ACTION}`",
+            envelope.action
+        )
+        .into());
+    }
+    let config_key = envelope.registration_metadata.verifier_config_key;
+    if config_key != IDENTITY_VERIFIER_CONFIG_KEY {
+        return Err(format!(
+            "registration metadata verifier_config_key {config_key} does not match the identity \
+             family key {IDENTITY_VERIFIER_CONFIG_KEY}"
+        )
+        .into());
+    }
+    Ok(envelope)
+}
+
+/// Server-owned finalization: signs a [`ProcessOutput::Signable`] payload with the
+/// ephemeral key and injects the registration metadata into the result envelope,
+/// preserving byte order. [`ProcessOutput::Unsigned`] envelopes are returned
+/// verbatim.
+///
+/// The handler emits the [`ProcessOutput::Signable`] variant for verified results
+/// with empty `signature` / `public_key` placeholders; overwriting those existing
+/// keys keeps their canonical position because `serde_json` preserves key order
+/// (the `preserve_order` feature). Registration metadata is appended last. A
+/// verified result that lacks a non-empty signable payload is rejected upstream
+/// in `process_output_from_identity`, so a signable result always carries signing
+/// bytes here (fail-closed).
+fn finalize_process_output<S: PayloadSigner>(
+    output: ProcessOutput,
+    signer: &S,
+    registration_metadata: Option<EnclaveRegistrationMetadata>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    match output {
+        ProcessOutput::Unsigned { result_json } => Ok(result_json),
+        ProcessOutput::Signable {
+            payload_bcs,
+            mut result_json,
+        } => {
+            if payload_bcs.is_empty() {
+                return Err(
+                    "signable process output must carry non-empty BCS payload to sign".into(),
+                );
+            }
+            let object = result_json
+                .as_object_mut()
+                .ok_or("signable process output result must be a JSON object")?;
+            let signature = signer.sign_payload(&payload_bcs);
+            object.insert(
+                "signature".to_owned(),
+                serde_json::Value::String(signature.signature),
+            );
+            object.insert(
+                "public_key".to_owned(),
+                serde_json::Value::String(signature.public_key),
+            );
+            if let Some(metadata) = registration_metadata {
+                inject_registration_metadata(object, &metadata);
+            }
+            Ok(result_json)
+        }
+    }
+}
+
+fn inject_registration_metadata(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    metadata: &EnclaveRegistrationMetadata,
+) {
+    object.insert(
+        "verifier_config_key".to_owned(),
+        serde_json::Value::from(metadata.verifier_config_key),
+    );
+    object.insert(
+        "verifier_config_version".to_owned(),
+        serde_json::Value::from(metadata.verifier_config_version),
+    );
+    object.insert(
+        "enclave_instance_public_key".to_owned(),
+        serde_json::Value::String(metadata.enclave_instance_public_key.clone()),
+    );
+}
+
+fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let listener = VsockListener::bind(port)?;
+    eprintln!("waiting for sonari membership bootstrap config on vsock port {port}");
+    let mut stream = listener.accept()?;
+    let mut bytes = Vec::new();
+    stream.read_to_end(&mut bytes)?;
+    let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
+    set_env_before_server(WORLD_ID_API_BASE_ENV, &config.world_id_api_base);
+    set_env_before_server(WORLD_ID_APP_ID_ENV, &config.world_id_app_id);
+    if let Some(proxy) = config.egress_proxy_url.as_deref() {
+        set_env_before_server(EGRESS_PROXY_URL_KEY, proxy);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapConfig {
+    world_id_api_base: String,
+    world_id_app_id: String,
+    egress_proxy_url: Option<String>,
+}
+
+fn set_env_before_server(name: &str, value: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap values are installed.
+    unsafe {
+        env::set_var(name, value);
+    }
 }
 
 #[derive(Debug)]
@@ -413,6 +703,379 @@ mod tests {
                 assert_eq!(error_code, WORLD_ID_VERIFICATION_FAILED);
             }
             other => panic!("expected rejected output, got {other:?}"),
+        }
+    }
+
+    mod server_mode {
+        use super::super::{
+            ATTESTATION_PUBLIC_KEY_LABEL, EnclaveState, IDENTITY_VERIFIER_CONFIG_KEY,
+            ProcessDataEnvelope, finalize_process_output, parse_process_data_envelope,
+            route_request,
+        };
+        use membership_tee::server::{
+            EGRESS_PROXY_URL_KEY, UNSIGNED_PLACEHOLDER, process_with_verifier,
+        };
+        use membership_tee::{
+            VERIFIER_FAMILY, WORLD_ID_ACTION, WORLD_ID_API_UNAVAILABLE, WorldIdProofRequest,
+            WorldIdVerificationStatus, WorldIdVerifier,
+        };
+        use sonari_tee_core::enclave::{EnclaveRegistrationMetadata, ProcessOutput, TeeContext};
+        use sonari_tee_core::{LocalEd25519Signer, PayloadSigner};
+
+        const SERVER_SEED: [u8; 32] = [7u8; 32];
+
+        struct MockWorldIdVerifier {
+            status: WorldIdVerificationStatus,
+        }
+
+        impl WorldIdVerifier for MockWorldIdVerifier {
+            fn expected_app_id(&self) -> &str {
+                "app_staging_123"
+            }
+
+            fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
+                self.status.clone()
+            }
+        }
+
+        fn registration_metadata() -> EnclaveRegistrationMetadata {
+            EnclaveRegistrationMetadata {
+                verifier_config_key: IDENTITY_VERIFIER_CONFIG_KEY,
+                verifier_config_version: 10,
+                enclave_instance_public_key: format!("0x{}", "77".repeat(32)),
+            }
+        }
+
+        fn world_id_request() -> membership_tee::IdentityVerifyRequest {
+            membership_tee::IdentityVerifyRequest {
+                registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_owned(),
+                membership_id: "0x2222222222222222222222222222222222222222222222222222222222222222"
+                    .to_owned(),
+                owner: "0x3333333333333333333333333333333333333333333333333333333333333333"
+                    .to_owned(),
+                provider: membership_tee::IdentityProvider::WorldId,
+                issued_at_ms: None,
+                validity_ms: None,
+                terms_version: 1,
+                signed_statement_hash:
+                    "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
+                world_id: Some(WorldIdProofRequest {
+                    world_app_id: "app_staging_123".to_owned(),
+                    nullifier_hash: "12345678901234567890".to_owned(),
+                    merkle_root: "987654321".to_owned(),
+                    proof: "0xproof".to_owned(),
+                    verification_level: "orb".to_owned(),
+                    action: WORLD_ID_ACTION.to_owned(),
+                    signal_hash:
+                        "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
+                            .to_owned(),
+                }),
+            }
+        }
+
+        fn process_data_wire_body() -> Vec<u8> {
+            serde_json::to_vec(&serde_json::json!({
+                "action": "process_data",
+                "payload": {
+                    "registry_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                    "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+                    "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+                    "provider": "world_id",
+                    "issued_at_ms": null,
+                    "validity_ms": null,
+                    "terms_version": 1,
+                    "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+                    "world_id": {
+                        "world_app_id": "app_staging_123",
+                        "nullifier_hash": "12345678901234567890",
+                        "merkle_root": "987654321",
+                        "proof": "0xproof",
+                        "verification_level": "orb",
+                        "action": WORLD_ID_ACTION,
+                        "signal_hash": "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268",
+                    },
+                },
+                "registration_metadata": {
+                    "verifier_config_key": IDENTITY_VERIFIER_CONFIG_KEY,
+                    "verifier_config_version": 10,
+                    "enclave_instance_public_key": format!("0x{}", "77".repeat(32)),
+                },
+            }))
+            .unwrap()
+        }
+
+        #[test]
+        fn identity_verifier_config_key_is_two() {
+            assert_eq!(IDENTITY_VERIFIER_CONFIG_KEY, 2);
+        }
+
+        #[test]
+        fn finalize_signs_verified_payload_with_ephemeral_key_and_injects_registration_metadata() {
+            let output = process_with_verifier(
+                world_id_request(),
+                &MockWorldIdVerifier {
+                    status: WorldIdVerificationStatus::Verified,
+                },
+                1_900_000_000_000,
+            )
+            .expect("verified output is signable");
+            let ProcessOutput::Signable { payload_bcs, .. } = &output else {
+                panic!("verified output must be signable");
+            };
+            let payload_bcs = payload_bcs.clone();
+
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+            let value = finalize_process_output(output, &signer, Some(registration_metadata()))
+                .expect("signable output should finalize");
+
+            let expected = signer.sign_payload(&payload_bcs);
+            assert_eq!(value["signature"], expected.signature);
+            assert_eq!(value["public_key"], expected.public_key);
+            // Registration metadata is injected at the JSON top level (outside the
+            // BCS payload, which is unchanged), with config_key = 2.
+            assert_eq!(value["verifier_config_key"], IDENTITY_VERIFIER_CONFIG_KEY);
+            assert_eq!(value["verifier_config_version"], 10);
+            assert_eq!(
+                value["enclave_instance_public_key"],
+                format!("0x{}", "77".repeat(32))
+            );
+            // The injected registration metadata is appended after the wire fields.
+            let object = value.as_object().unwrap();
+            let keys = object.keys().map(String::as_str).collect::<Vec<_>>();
+            let last_three = &keys[keys.len() - 3..];
+            assert_eq!(
+                last_three,
+                [
+                    "verifier_config_key",
+                    "verifier_config_version",
+                    "enclave_instance_public_key",
+                ]
+            );
+        }
+
+        #[test]
+        fn finalize_leaves_non_verified_result_unsigned_without_metadata() {
+            let output = process_with_verifier(
+                world_id_request(),
+                &MockWorldIdVerifier {
+                    status: WorldIdVerificationStatus::PendingSource {
+                        error_code: WORLD_ID_API_UNAVAILABLE.to_owned(),
+                    },
+                },
+                1_900_000_000_000,
+            )
+            .unwrap();
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+
+            let value = finalize_process_output(output, &signer, Some(registration_metadata()))
+                .expect("unsigned output is verbatim");
+
+            assert_eq!(value["status"], "pending_source");
+            assert!(value.get("signature").is_none());
+            assert!(value.get("verifier_config_key").is_none());
+        }
+
+        #[test]
+        fn server_path_signs_only_with_the_injected_ephemeral_signer_not_a_fixed_seed() {
+            // Two different ephemeral seeds must produce two different signatures
+            // for the same payload, proving the server signs with the per-enclave
+            // ephemeral key handed in (never a fixed/dev seed baked into the path).
+            let make_value = |seed: [u8; 32]| {
+                let output = process_with_verifier(
+                    world_id_request(),
+                    &MockWorldIdVerifier {
+                        status: WorldIdVerificationStatus::Verified,
+                    },
+                    1_900_000_000_000,
+                )
+                .unwrap();
+                finalize_process_output(
+                    output,
+                    &LocalEd25519Signer::new(seed),
+                    Some(registration_metadata()),
+                )
+                .unwrap()
+            };
+
+            let signed_a = make_value([7u8; 32]);
+            let signed_b = make_value([9u8; 32]);
+            assert_ne!(signed_a["signature"], signed_b["signature"]);
+            assert_ne!(signed_a["public_key"], signed_b["public_key"]);
+            // Neither placeholder leaks into the signed output.
+            assert_ne!(signed_a["signature"], UNSIGNED_PLACEHOLDER);
+            assert_ne!(signed_a["public_key"], UNSIGNED_PLACEHOLDER);
+        }
+
+        #[test]
+        fn route_get_attestation_signs_label_with_ephemeral_key() {
+            // /get_attestation derives its embedded public key from the ephemeral
+            // signing key over the membership attestation label; assert the
+            // response public_key matches the seed-derived key. (NSM is exercised
+            // only inside an enclave, so we validate the public key derivation via
+            // the byte-stable golden test below.)
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+            let signature = signer.sign_payload(ATTESTATION_PUBLIC_KEY_LABEL);
+            let value = sonari_tee_core::enclave::attestation_response_json(
+                &[0xABu8, 0xCD, 0xEF],
+                &signature.public_key,
+            );
+            assert_eq!(value["public_key"], signature.public_key);
+        }
+
+        #[test]
+        fn attestation_label_is_membership_specific() {
+            assert_eq!(
+                ATTESTATION_PUBLIC_KEY_LABEL,
+                b"sonari-membership-attestation-public-key"
+            );
+        }
+
+        #[test]
+        fn parse_envelope_accepts_real_wire_body() {
+            let envelope: ProcessDataEnvelope =
+                parse_process_data_envelope(&process_data_wire_body())
+                    .expect("the real wire body must be accepted");
+            assert_eq!(envelope.action, "process_data");
+            assert_eq!(envelope.payload["provider"], "world_id");
+            assert_eq!(envelope.registration_metadata.verifier_config_key, 2);
+        }
+
+        #[test]
+        fn parse_envelope_rejects_unknown_outer_field() {
+            let mut body: serde_json::Value =
+                serde_json::from_slice(&process_data_wire_body()).unwrap();
+            body.as_object_mut()
+                .unwrap()
+                .insert("rogue".to_owned(), serde_json::json!("x"));
+            let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+                .expect_err("unknown outer field must be rejected");
+            assert!(
+                error.to_string().contains("rogue") || error.to_string().contains("unknown field"),
+                "error: {error}"
+            );
+        }
+
+        #[test]
+        fn parse_envelope_rejects_foreign_verifier_config_key_family() {
+            let mut body: serde_json::Value =
+                serde_json::from_slice(&process_data_wire_body()).unwrap();
+            body["registration_metadata"]["verifier_config_key"] = serde_json::json!(1);
+            let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+                .expect_err("a non-identity verifier_config_key must be rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("does not match the identity family key"),
+                "error: {error}"
+            );
+        }
+
+        #[test]
+        fn parse_envelope_rejects_wrong_action() {
+            let mut body: serde_json::Value =
+                serde_json::from_slice(&process_data_wire_body()).unwrap();
+            body.as_object_mut()
+                .unwrap()
+                .insert("action".to_owned(), serde_json::json!("get_attestation"));
+            let error = parse_process_data_envelope(&serde_json::to_vec(&body).unwrap())
+                .expect_err("an unexpected action must be rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("unexpected /process_data action"),
+                "error: {error}"
+            );
+        }
+
+        #[test]
+        fn route_process_data_signs_and_injects_metadata_end_to_end() {
+            let state = EnclaveState {
+                ephemeral_signing_key_seed: SERVER_SEED,
+                ctx: TeeContext::new(),
+                world_id_base_url: "https://developer.world.org".to_owned(),
+                world_id_app_id: "app_staging_123".to_owned(),
+            };
+            // The base URL is unreachable in tests so the real World ID call maps
+            // to pending_source: this still proves the route wires the handler,
+            // returns 200, and leaves a non-verified result unsigned.
+            let request = sonari_tee_core::enclave::HttpRequest {
+                method: "POST".to_owned(),
+                path: "/process_data".to_owned(),
+                body: process_data_wire_body(),
+            };
+            let (status, value) = route_request(request, &state).expect("route should succeed");
+            assert_eq!(status, 200);
+            assert!(
+                value["status"] == "pending_source" || value["status"] == "verified",
+                "unexpected status: {}",
+                value["status"]
+            );
+        }
+
+        #[test]
+        fn route_unknown_path_is_not_found() {
+            let state = EnclaveState {
+                ephemeral_signing_key_seed: SERVER_SEED,
+                ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:18080")]),
+                world_id_base_url: "https://developer.world.org".to_owned(),
+                world_id_app_id: "app_staging_123".to_owned(),
+            };
+            let request = sonari_tee_core::enclave::HttpRequest {
+                method: "GET".to_owned(),
+                path: "/unknown".to_owned(),
+                body: Vec::new(),
+            };
+            let (status, value) = route_request(request, &state).expect("route should succeed");
+            assert_eq!(status, 404);
+            assert_eq!(value["error_code"], "AWS_RUNNER_PROCESS_FAILED");
+        }
+
+        /// Pins the verified server-path serialized JSON bytes (mock-verified World
+        /// ID, fixed ephemeral seed, fixed registration metadata) so any future
+        /// wire drift in process_with_verifier -> finalize_process_output is caught.
+        #[test]
+        fn verified_server_path_serialized_bytes_are_byte_stable() {
+            let output = process_with_verifier(
+                world_id_request(),
+                &MockWorldIdVerifier {
+                    status: WorldIdVerificationStatus::Verified,
+                },
+                1_900_000_000_000,
+            )
+            .expect("verified output is signable");
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+            let value = finalize_process_output(output, &signer, Some(registration_metadata()))
+                .expect("verified output should sign");
+            let serialized = serde_json::to_string(&value).expect("result should serialize");
+
+            let golden = include_str!("testdata/verified_server_path.golden.json").trim_end();
+            assert_eq!(
+                serialized, golden,
+                "verified server-path bytes drifted from golden vector"
+            );
+            // Sanity: the signed result still carries the identity contract markers.
+            assert_eq!(value["verifier_family"], VERIFIER_FAMILY);
+        }
+
+        /// Pins the get_attestation response JSON for a fixed seed and document so
+        /// the route's wire shape, key order, and seed-derived public key stay
+        /// byte-stable across refactors.
+        #[test]
+        fn get_attestation_response_bytes_are_byte_stable_for_fixed_seed() {
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+            let signature = signer.sign_payload(ATTESTATION_PUBLIC_KEY_LABEL);
+            let value = sonari_tee_core::enclave::attestation_response_json(
+                &[0xABu8, 0xCD, 0xEF],
+                &signature.public_key,
+            );
+            let serialized = serde_json::to_string(&value).expect("attestation should serialize");
+
+            let golden = include_str!("testdata/get_attestation.golden.json").trim_end();
+            assert_eq!(
+                serialized, golden,
+                "get_attestation bytes drifted from golden vector"
+            );
         }
     }
 }
