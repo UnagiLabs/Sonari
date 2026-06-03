@@ -18,7 +18,7 @@ const pauseStateId = "0x111";
 const identityRegistryId = "0x222";
 const membershipRegistryId = "0x333";
 const verifierRegistryId = "0x444";
-const membershipPassId = "0x555";
+// membershipPassId removed: now derived dynamically from verified result.membership_id
 const clockId = "0x6";
 const network = "testnet";
 const grpcUrl = "https://fullnode.testnet.sui.io:443";
@@ -28,6 +28,7 @@ describe("membership identity Sui submission", () => {
     it("builds update_identity_verification arguments from signed TEE bytes only", () => {
         const result = buildIdentityVerificationSuiRequest(verifiedResult(), baseConfig());
 
+        const expectedMembershipPassId = `0x${"55".repeat(32)}`; // from verifiedResult().membership_id
         expect(result).toEqual({
             ok: true,
             value: {
@@ -37,14 +38,14 @@ describe("membership identity Sui submission", () => {
                 identityRegistryId,
                 membershipRegistryId,
                 verifierRegistryId,
-                membershipPassId,
+                membershipPassId: expectedMembershipPassId,
                 clockId,
                 arguments: [
                     pauseStateId,
                     identityRegistryId,
                     membershipRegistryId,
                     verifierRegistryId,
-                    membershipPassId,
+                    expectedMembershipPassId,
                     clockId,
                     [1, 2, 3],
                     Array.from({ length: 64 }, () => 0x11),
@@ -161,6 +162,93 @@ describe("membership identity Sui submission", () => {
         });
     });
 });
+
+describe("STEP 7: dynamic membershipPassId from verified result.membership_id", () => {
+    const dynamicMembershipId = `0x${"aa".repeat(32)}`; // 32 bytes = Sui object id
+
+    it("buildIdentityVerificationSuiRequest uses membership_id from input, not config", () => {
+        const input = {
+            ...verifiedResult(),
+            membership_id: dynamicMembershipId,
+        };
+        // Config has no membershipPassId (or a different value - should be ignored)
+        const config = configWithoutMembershipPass();
+        const result = buildIdentityVerificationSuiRequest(input, config);
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        // args[4] must be the dynamic membership_id from input
+        expect(result.value.arguments[4]).toBe(dynamicMembershipId);
+        // membershipPassId in the result must equal input's membership_id
+        expect(result.value.membershipPassId).toBe(dynamicMembershipId);
+    });
+
+    it("different membership_id values produce different tx.object targets", () => {
+        const id1 = `0x${"11".repeat(32)}`;
+        const id2 = `0x${"22".repeat(32)}`;
+        const config = configWithoutMembershipPass();
+
+        const result1 = buildIdentityVerificationSuiRequest(
+            { ...verifiedResult(), membership_id: id1 },
+            config,
+        );
+        const result2 = buildIdentityVerificationSuiRequest(
+            { ...verifiedResult(), membership_id: id2 },
+            config,
+        );
+
+        expect(result1.ok && result2.ok).toBe(true);
+        if (!result1.ok || !result2.ok) return;
+        expect(result1.value.arguments[4]).toBe(id1);
+        expect(result2.value.arguments[4]).toBe(id2);
+        expect(result1.value.arguments[4]).not.toBe(result2.value.arguments[4]);
+    });
+
+    it("membership_id must be valid 32-byte hex; invalid format is rejected", () => {
+        const config = configWithoutMembershipPass();
+
+        // invalid: not hex
+        const bad1 = buildIdentityVerificationSuiRequest(
+            { ...verifiedResult(), membership_id: "not-hex" },
+            config,
+        );
+        expect(bad1.ok).toBe(false);
+
+        // invalid: wrong byte count (31 bytes)
+        const bad2 = buildIdentityVerificationSuiRequest(
+            { ...verifiedResult(), membership_id: `0x${"aa".repeat(31)}` },
+            config,
+        );
+        expect(bad2.ok).toBe(false);
+
+        // valid: 32 bytes
+        const good = buildIdentityVerificationSuiRequest(
+            { ...verifiedResult(), membership_id: `0x${"aa".repeat(32)}` },
+            config,
+        );
+        expect(good.ok).toBe(true);
+    });
+
+    it("SONARI_MEMBERSHIP_PASS_ID env is not required when membership_id is in input", () => {
+        // config has no membershipPassId field at all - must still work
+        const config = configWithoutMembershipPass();
+        const input = { ...verifiedResult(), membership_id: `0x${"bb".repeat(32)}` };
+        const result = buildIdentityVerificationSuiRequest(input, config);
+        expect(result.ok).toBe(true);
+    });
+});
+
+// Helper: config without membershipPassId (field removed from IdentityVerificationSubmitConfig)
+function configWithoutMembershipPass(): IdentityVerificationSubmitConfig {
+    return {
+        packageId,
+        pauseStateId,
+        identityRegistryId,
+        membershipRegistryId,
+        verifierRegistryId,
+        clockId,
+    };
+}
 
 describe("SuiEnclaveRegistrationAdapter (case A: register=real submit)", () => {
     const IDENTITY_VERIFIER_CONFIG_KEY = 2;
@@ -391,7 +479,6 @@ function baseConfig(): IdentityVerificationSubmitConfig {
         identityRegistryId,
         membershipRegistryId,
         verifierRegistryId,
-        membershipPassId,
         clockId,
     };
 }
@@ -403,7 +490,7 @@ function verifiedResult(): Record<string, unknown> {
         signature: `0x${"11".repeat(64)}`,
         public_key: `0x${"22".repeat(32)}`,
         intent: "ignored by relayer",
-        membership_id: "ignored by relayer",
+        membership_id: `0x${"55".repeat(32)}`, // valid 32-byte Sui object id used as membershipPassId
     };
 }
 

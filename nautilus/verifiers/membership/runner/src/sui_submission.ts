@@ -32,7 +32,6 @@ export interface IdentityVerificationSubmitConfig {
     readonly identityRegistryId: string;
     readonly membershipRegistryId: string;
     readonly verifierRegistryId: string;
-    readonly membershipPassId: string;
     readonly clockId: string;
     readonly network?: SuiNetwork;
     readonly grpcUrl?: string;
@@ -122,6 +121,7 @@ interface ParsedSignedIdentityPayload {
     readonly payloadBcsBytes: number[];
     readonly signatureBytes: number[];
     readonly publicKeyBytes: number[];
+    readonly membershipIdBytes: number[];
 }
 
 interface NormalizedTransactionResult {
@@ -154,13 +154,15 @@ export function buildIdentityVerificationSuiRequest(
         return configResult;
     }
 
+    // membership_id from the verified result is used as the dynamic membershipPassId (Sui object id)
+    const membershipPassId = `0x${Buffer.from(parsed.value.membershipIdBytes).toString("hex")}`;
     const target = `${config.packageId}::accessor::update_identity_verification`;
     const args: IdentityVerificationSuiRequest["arguments"] = [
         config.pauseStateId,
         config.identityRegistryId,
         config.membershipRegistryId,
         config.verifierRegistryId,
-        config.membershipPassId,
+        membershipPassId,
         config.clockId,
         [...parsed.value.payloadBcsBytes],
         [...parsed.value.signatureBytes],
@@ -176,7 +178,7 @@ export function buildIdentityVerificationSuiRequest(
             identityRegistryId: config.identityRegistryId,
             membershipRegistryId: config.membershipRegistryId,
             verifierRegistryId: config.verifierRegistryId,
-            membershipPassId: config.membershipPassId,
+            membershipPassId,
             clockId: config.clockId,
             arguments: args,
         },
@@ -344,6 +346,19 @@ function parseSignedIdentityPayload(
     if (!publicKeyBytes.ok) {
         return publicKeyBytes;
     }
+    // membership_id is a Sui object id (32 bytes) used as the dynamic membershipPassId
+    if (typeof input.membership_id !== "string") {
+        return relayerSubmitFailed("Verified membership TEE result requires membership_id");
+    }
+    const SUI_OBJECT_ID_BYTES = 32;
+    const membershipIdBytes = parseHexBytes(
+        input.membership_id,
+        "membership_id",
+        SUI_OBJECT_ID_BYTES,
+    );
+    if (!membershipIdBytes.ok) {
+        return membershipIdBytes;
+    }
 
     return {
         ok: true,
@@ -351,6 +366,7 @@ function parseSignedIdentityPayload(
             payloadBcsBytes: payloadBcsBytes.value,
             signatureBytes: signatureBytes.value,
             publicKeyBytes: publicKeyBytes.value,
+            membershipIdBytes: membershipIdBytes.value,
         },
     };
 }
@@ -364,7 +380,6 @@ function validateRequestConfig(
         ["identityRegistryId", config.identityRegistryId],
         ["membershipRegistryId", config.membershipRegistryId],
         ["verifierRegistryId", config.verifierRegistryId],
-        ["membershipPassId", config.membershipPassId],
         ["clockId", config.clockId],
     ]
         .filter(([, value]) => !isNonEmptyString(value))

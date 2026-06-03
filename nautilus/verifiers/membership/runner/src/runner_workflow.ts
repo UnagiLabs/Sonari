@@ -44,6 +44,8 @@ import {
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitSuccess,
     type IdentityVerificationSuiResult,
+    SuiEnclaveRegistrationAdapter,
+    type SuiEnclaveRegistrationConfig,
     type SuiNetwork,
     submitIdentityVerificationPayload,
 } from "./sui_submission.js";
@@ -62,7 +64,6 @@ export interface RunnerSuiSubmissionConfig {
     readonly identityRegistryId: string;
     readonly membershipRegistryId: string;
     readonly verifierRegistryId: string;
-    readonly membershipPassId: string;
     readonly clockId: string;
     readonly network?: SuiNetwork | undefined;
     readonly grpcUrl?: string | undefined;
@@ -111,6 +112,7 @@ export interface SignedIdentityPayloadForRelayer {
     readonly payload_bcs_hex: string;
     readonly signature: string;
     readonly public_key: string;
+    readonly membership_id: string;
 }
 
 export interface SuiSubmissionAdapter {
@@ -842,6 +844,16 @@ class AwsRelayerSignerSecretReader implements RelayerSignerSecretReader {
     }
 }
 
+function buildEnclaveRegistrationAdapter(secretReader: RelayerSignerSecretReader): {
+    enclaveRegistration?: EnclaveRegistrationAdapter;
+} {
+    const config = readEnclaveRegistrationConfigFromEnv(secretReader);
+    if (config === undefined) {
+        return {};
+    }
+    return { enclaveRegistration: new SuiEnclaveRegistrationAdapter(config) };
+}
+
 export async function handler(event: RunnerControlEvent): Promise<RunnerControlResult> {
     parseExpectedVerifierKind(
         (event as { verifier_kind?: unknown }).verifier_kind,
@@ -861,6 +873,7 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
             nitroEnclaveProcessCommand: requiredEnv("NITRO_ENCLAVE_PROCESS_COMMAND"),
             suiSubmission: readSuiSubmissionConfigFromEnv(new AwsRelayerSignerSecretReader()),
         },
+        ...buildEnclaveRegistrationAdapter(new AwsRelayerSignerSecretReader()),
     })(event);
 }
 
@@ -1103,7 +1116,6 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
             identityRegistryId: this.config.identityRegistryId,
             membershipRegistryId: this.config.membershipRegistryId,
             verifierRegistryId: this.config.verifierRegistryId,
-            membershipPassId: this.config.membershipPassId,
             clockId: this.config.clockId,
             ...(this.config.network === undefined ? {} : { network: this.config.network }),
             ...(this.config.grpcUrl === undefined ? {} : { grpcUrl: this.config.grpcUrl }),
@@ -1125,6 +1137,7 @@ function signedPayloadForRelayer(
         payload_bcs_hex: result.payload_bcs_hex,
         signature: result.signature,
         public_key: result.public_key,
+        membership_id: result.membership_id,
     };
 }
 
@@ -1138,7 +1151,7 @@ function buildSuiSubmissionFromConfig(
 export function readSuiSubmissionConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
 ): RunnerSuiSubmissionConfig | undefined {
-    const mode = process.env.RELAYER_MODE;
+    const mode = process.env.IDENTITY_RELAYER_MODE;
     if (mode === undefined || mode.length === 0) {
         return undefined;
     }
@@ -1150,9 +1163,8 @@ export function readSuiSubmissionConfigFromEnv(
             identityRegistryId: "",
             membershipRegistryId: "",
             verifierRegistryId: "",
-            membershipPassId: "",
             clockId: "0x6",
-            configurationError: `Unsupported RELAYER_MODE: ${mode}`,
+            configurationError: `Unsupported IDENTITY_RELAYER_MODE: ${mode}`,
         };
     }
 
@@ -1161,7 +1173,8 @@ export function readSuiSubmissionConfigFromEnv(
     const identityRegistryId = process.env.SONARI_IDENTITY_REGISTRY_ID ?? "";
     const membershipRegistryId = process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "";
     const verifierRegistryId = process.env.SONARI_VERIFIER_REGISTRY_ID ?? "";
-    const membershipPassId = process.env.SONARI_MEMBERSHIP_PASS_ID ?? "";
+    // SONARI_MEMBERSHIP_PASS_ID is removed: membershipPassId is resolved dynamically from
+    // the verified result's membership_id field at submission time.
     const clockId = process.env.SONARI_SUI_CLOCK_ID ?? "0x6";
     let configurationError: string | undefined;
     const missingObjectFields = (
@@ -1171,7 +1184,6 @@ export function readSuiSubmissionConfigFromEnv(
             ["SONARI_IDENTITY_REGISTRY_ID", identityRegistryId],
             ["SONARI_MEMBERSHIP_REGISTRY_ID", membershipRegistryId],
             ["SONARI_VERIFIER_REGISTRY_ID", verifierRegistryId],
-            ["SONARI_MEMBERSHIP_PASS_ID", membershipPassId],
         ] satisfies Array<readonly [string, string]>
     )
         .filter(([, value]) => value.length === 0)
@@ -1210,13 +1222,65 @@ export function readSuiSubmissionConfigFromEnv(
         identityRegistryId,
         membershipRegistryId,
         verifierRegistryId,
-        membershipPassId,
         clockId,
         ...(configurationError === undefined ? {} : { configurationError }),
         ...(network === undefined ? {} : { network }),
         ...(grpcUrl === undefined ? {} : { grpcUrl }),
         ...(senderAddress === undefined ? {} : { senderAddress }),
         ...(allowSubmit === undefined ? {} : { allowSubmit }),
+        ...(loadSigner === undefined ? {} : { loadSigner }),
+    };
+}
+
+export function readEnclaveRegistrationConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): SuiEnclaveRegistrationConfig | undefined {
+    const mode = process.env.IDENTITY_RELAYER_MODE;
+    if (mode === undefined || mode.length === 0) {
+        return undefined;
+    }
+    const packageId = process.env.SONARI_IDENTITY_PACKAGE_ID ?? "";
+    const verifierRegistry = process.env.SONARI_VERIFIER_REGISTRY_ID ?? "";
+    const allowSubmit = process.env.RELAYER_ALLOW_SUBMIT === "true";
+    let configurationError: string | undefined;
+
+    if (packageId.length === 0) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "SONARI_IDENTITY_PACKAGE_ID is required for enclave registration",
+        );
+    }
+    if (verifierRegistry.length === 0) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "SONARI_VERIFIER_REGISTRY_ID is required for enclave registration",
+        );
+    }
+
+    const target = `${packageId}::metadata_verifier::register_enclave_instance_for_config`;
+    const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+    const grpcUrl = process.env.RELAYER_GRPC_URL;
+    const instanceTtlMs = 24 * 60 * 60 * 1000; // 24 hours per enclave instance
+
+    let loadSigner: (() => Promise<IdentityVerificationSigner>) | undefined;
+    if (mode === "submit") {
+        const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+        if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+            loadSigner = async () =>
+                createEd25519SuiSignerFromPrivateKey(
+                    await secretReader.getSecretString(signerSecretArn),
+                );
+        }
+    }
+
+    return {
+        target,
+        verifierRegistry,
+        allowSubmit,
+        instanceTtlMs,
+        ...(configurationError === undefined ? {} : { configurationError }),
+        ...(network === undefined ? {} : { network }),
+        ...(grpcUrl === undefined ? {} : { grpcUrl }),
         ...(loadSigner === undefined ? {} : { loadSigner }),
     };
 }

@@ -6,6 +6,8 @@ import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     type Ec2ClientLike,
+    readEnclaveRegistrationConfigFromEnv,
+    readSuiSubmissionConfigFromEnv,
     handler as runnerWorkflowHandler,
     type S3ClientLike,
     type SsmClientLike,
@@ -475,6 +477,7 @@ describe("membership runner workflow", () => {
                 payload_bcs_hex: "0x010203",
                 signature: `0x${"11".repeat(64)}`,
                 public_key: `0x${"22".repeat(32)}`,
+                membership_id: validRequest().membership_id, // dynamic: from verifiedTeeResult
             },
         ]);
     });
@@ -696,6 +699,122 @@ function verifiedTeeResult() {
         signed_statement_hash: validRequest().signed_statement_hash,
     };
 }
+
+// STEP 7: env namespace separation, dynamic membershipPassId, stop_instance, register adapter wiring
+describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => {
+    it("stop_instance sets desiredCapacity to 0 (per-job EC2 lifecycle)", async () => {
+        const autoscaling = new RecordingAutoScalingClient();
+        const handler = createRunnerControlHandler({
+            autoscaling,
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            config: baseConfig(),
+        });
+
+        const result = await handler({
+            action: "stop_instance",
+            job_id: "job-stop-7",
+            attempt: 1,
+        });
+
+        expect(result).toMatchObject({ capacity: 0 });
+        expect(autoscaling.capacities).toContain(0);
+    });
+
+    it("IDENTITY_RELAYER_MODE is used (not RELAYER_MODE) to activate submission config", () => {
+        const originalEnv = { ...process.env };
+        try {
+            delete process.env.RELAYER_MODE;
+            delete process.env.IDENTITY_RELAYER_MODE;
+
+            // Without any env var: should return undefined
+            const noMode = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(noMode).toBeUndefined();
+
+            // RELAYER_MODE alone must NOT activate config (namespace separation)
+            process.env.RELAYER_MODE = "dry_run";
+            const withOldKey = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(withOldKey).toBeUndefined();
+            delete process.env.RELAYER_MODE;
+
+            // IDENTITY_RELAYER_MODE activates config
+            process.env.IDENTITY_RELAYER_MODE = "dry_run";
+            const withNewKey = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(withNewKey).not.toBeUndefined();
+            expect(withNewKey?.mode).toBe("dry_run");
+        } finally {
+            // restore
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+
+    it("SONARI_MEMBERSHIP_PASS_ID is not required for submission config (dynamic membershipPassId)", () => {
+        const originalEnv = { ...process.env };
+        try {
+            process.env.IDENTITY_RELAYER_MODE = "dry_run";
+            process.env.SONARI_IDENTITY_PACKAGE_ID = "0xpkg";
+            process.env.SONARI_IDENTITY_PAUSE_STATE_ID = "0xpause";
+            process.env.SONARI_IDENTITY_REGISTRY_ID = "0xidentity";
+            process.env.SONARI_MEMBERSHIP_REGISTRY_ID = "0xmembership";
+            process.env.SONARI_VERIFIER_REGISTRY_ID = "0xverifier";
+            delete process.env.SONARI_MEMBERSHIP_PASS_ID; // must NOT be required
+
+            const config = readSuiSubmissionConfigFromEnv(noopSecretReader);
+            expect(config).not.toBeUndefined();
+            // No configurationError from missing SONARI_MEMBERSHIP_PASS_ID
+            expect(config?.configurationError).not.toContain("SONARI_MEMBERSHIP_PASS_ID");
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+
+    it("readEnclaveRegistrationConfigFromEnv derives target and verifierRegistry from Sui env vars", () => {
+        const originalEnv = { ...process.env };
+        try {
+            process.env.IDENTITY_RELAYER_MODE = "submit";
+            process.env.SONARI_IDENTITY_PACKAGE_ID = "0xpkg";
+            process.env.SONARI_VERIFIER_REGISTRY_ID = "0xreg";
+            process.env.RELAYER_ALLOW_SUBMIT = "true";
+
+            const config = readEnclaveRegistrationConfigFromEnv(noopSecretReader);
+            expect(config).not.toBeUndefined();
+            expect(config?.target).toContain("register_enclave_instance_for_config");
+            expect(config?.target).toContain("0xpkg");
+            expect(config?.verifierRegistry).toBe("0xreg");
+            expect(config?.allowSubmit).toBe(true);
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+
+    it("readEnclaveRegistrationConfigFromEnv returns undefined when IDENTITY_RELAYER_MODE is unset", () => {
+        const originalEnv = { ...process.env };
+        try {
+            delete process.env.IDENTITY_RELAYER_MODE;
+            const config = readEnclaveRegistrationConfigFromEnv(noopSecretReader);
+            expect(config).toBeUndefined();
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
+});
+
+const noopSecretReader = {
+    getSecretString: async (_arn: string) => "",
+};
 
 class RecordingAutoScalingClient implements AutoScalingClientLike {
     readonly capacities: number[] = [];
