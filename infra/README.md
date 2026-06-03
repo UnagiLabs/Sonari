@@ -185,7 +185,43 @@ sui client \
   --gas-budget 100000000
 ```
 
-4. relayer signer に testnet SUI を入れる
+4. identity PCR を VerifierRegistry に登録する
+
+identity verifier は earthquake と同じ `VerifierRegistry` に、別の config として載ります。
+identity の config は config_key=2、family=IDENTITY です。
+earthquake の config（config_key=1、family=EARTHQUAKE_ORACLE）とは別枠なので、両方を登録できます。
+
+実際の identity PCR0 / PCR1 / PCR2 は AWS deploy フェーズで membership identity TEE の EIF から確定します。
+ここでは admin tx の API 手順だけを earthquake と並べて記録します。実 PCR 値が出たら同じ手順で登録します。
+`VerifierRegistry` に identity config がまだない場合は `create_identity_verifier_config`、すでにある場合は `update_identity_verifier_config_pcrs` を使います。
+
+```bash
+sui client \
+  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
+  --client.env testnet \
+  call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function create_identity_verifier_config \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$PCR0" "0x$PCR1" "0x$PCR2" \
+  --gas-budget 100000000
+```
+
+更新する場合:
+
+```bash
+sui client \
+  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
+  --client.env testnet \
+  call \
+  --package "$PACKAGE_ID" \
+  --module admin \
+  --function update_identity_verifier_config_pcrs \
+  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$PCR0" "0x$PCR1" "0x$PCR2" \
+  --gas-budget 100000000
+```
+
+5. relayer signer に testnet SUI を入れる
 
 submit では `RELAYER_SIGNER_SECRET_ARN` の private key から復元される address が gas を払います。
 この address に testnet SUI がないと、Disaster event 作成 transaction は失敗します。
