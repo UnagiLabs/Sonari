@@ -22,6 +22,7 @@ const NOW_MS: u64 = 1_800_000_000_000;
 const ISSUED_AT_MS: u64 = 1_800_000_000_000;
 const EXPIRES_AT_MS: u64 = 1_831_536_000_000;
 const INSTANCE_EXPIRES_AT_MS: u64 = 1_900_000_000_000;
+const INSTANCE_EXPIRED_AT_MS: u64 = 1_700_000_000_000;
 const HOME_CELL: u64 = 608_819_013_597_790_207;
 const GEO_RESOLUTION: u8 = 7;
 const ALLOWLIST_VERSION: u64 = 1;
@@ -314,6 +315,47 @@ fun stale_identity_enclave_instance_after_config_update_is_rejected() {
     clock.destroy_for_testing();
 }
 
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierConfigAlreadyDisabled)]
+fun disabled_identity_config_is_rejected_at_public_accessor() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    create_identity_config(&mut scenario);
+    add_identity_instance(&mut scenario, identity_public_key());
+    disable_identity_config(&mut scenario);
+
+    submit_identity_result(
+        &mut scenario,
+        &clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        kyc_signature(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceExpired)]
+fun expired_identity_enclave_instance_is_rejected_at_public_accessor() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    create_identity_config(&mut scenario);
+    add_expired_identity_instance(&mut scenario, identity_public_key());
+
+    submit_identity_result(
+        &mut scenario,
+        &clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        kyc_signature(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
 #[test, expected_failure(abort_code = admin::EGlobalPaused)]
 fun global_pause_blocks_signed_identity_update() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
@@ -501,6 +543,41 @@ fun add_identity_instance(scenario: &mut test_scenario::Scenario, public_key: ve
             metadata_verifier::identity_v1_config_key(),
             public_key,
             INSTANCE_EXPIRES_AT_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun add_expired_identity_instance(
+    scenario: &mut test_scenario::Scenario,
+    public_key: vector<u8>,
+) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        metadata_verifier::add_enclave_instance_for_config_for_testing(
+            &mut verifier_registry,
+            metadata_verifier::identity_v1_config_key(),
+            public_key,
+            INSTANCE_EXPIRED_AT_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun disable_identity_config(scenario: &mut test_scenario::Scenario) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::disable_identity_verifier_config(
+            &cap,
+            &mut verifier_registry,
             scenario.ctx(),
         );
         scenario.return_to_sender(cap);

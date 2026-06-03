@@ -1118,6 +1118,34 @@ fun assert_enclave_signed_bytes_rejects_config_version_mismatch() {
     metadata_verifier::destroy_verifier_registry_for_testing(registry);
 }
 
+// identity は enclave 署名ルートへ移行済みのため、旧 VerifierKey ルート
+// (assert_signed_bytes) は identity family を構造的に reject しなければならない。
+// identity-family の VerifierKey が登録済みでも、署名が一致しても、family ガードが
+// 署名検証より前に発火して fail-closed になることを固定する。
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierFamilyMismatch)]
+fun assert_signed_bytes_rejects_identity_family_legacy_route() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::add_verifier_key_for_testing(
+        &mut registry,
+        reader::verifier_family_identity(),
+        reader::verifier_version_v1(),
+        identity_signed_public_key(),
+        &mut ctx,
+    );
+
+    metadata_verifier::assert_signed_bytes(
+        &registry,
+        reader::verifier_family_identity(),
+        reader::verifier_version_v1(),
+        &identity_signed_message(),
+        &identity_signed_signature(),
+        &identity_signed_public_key(),
+    );
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
 #[test, expected_failure(abort_code = metadata_verifier::EEnclavePcrMismatch)]
 fun identity_enclave_registration_rejects_pcr_mismatch() {
     let mut scenario = initialized();

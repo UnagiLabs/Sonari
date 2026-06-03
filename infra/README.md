@@ -227,6 +227,19 @@ sui client \
   --gas-budget 100000000
 ```
 
+config の登録だけでは identity 更新はまだ通りません。
+`accessor::update_identity_verification` は VerifierKey ではなく enclave 署名ルート
+（`assert_enclave_signed_bytes`）で検証するため、identity config（config_key=2）に対応する
+`EnclaveInstance` が `VerifierRegistry` に登録されている必要があります。
+登録が無いと identity 更新は `EEnclaveInstanceNotRegistered` で fail-closed になります。
+
+この enclave instance 登録は、identity TEE が起動時に Nitro attestation を添えて
+`metadata_verifier::register_enclave_instance_for_config`（`config_key=2`）を自分で呼ぶことで行われます。
+earthquake 側が `register_enclave_instance`（config_key=1 相当）で自己登録するのと同じモデルで、
+AdminCap は不要です。authorization は admin が config に登録した PCR allowlist と
+attestation の PCR 一致で担保され、PCR が config と一致しない attestation は登録時点で reject されます。
+admin が手で行うのは上記 config（PCR）の登録までで、instance 登録は identity TEE 側の運用フローに含まれます。
+
 5. relayer signer に testnet SUI を入れる
 
 submit では `RELAYER_SIGNER_SECRET_ARN` の private key から復元される address が gas を払います。

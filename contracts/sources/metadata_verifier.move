@@ -321,6 +321,11 @@ public(package) fun assert_signed_bytes(
     assert_signature_length(signature);
     assert_allowed_verifier_family(expected_family);
     assert_allowed_verifier_version(expected_version);
+    // identity は enclave 署名ルート（assert_enclave_signed_bytes）へ移行済み。
+    // 旧 VerifierKey ルートは identity の enabled / expiry / config_version /
+    // config-family 整合チェックを通さないため、identity family がこのルートを
+    // 通ることを構造的に禁止し、将来の package 内誤用を fail-closed で防ぐ。
+    assert!(expected_family != VERIFIER_FAMILY_IDENTITY, EVerifierFamilyMismatch);
     assert!(registry.keys.contains(public_key), EVerifierKeyNotRegistered);
 
     let key = registry.keys.get(public_key);
