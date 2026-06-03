@@ -21,6 +21,8 @@ const RELAYER: address = @0xB0B;
 const NOW_MS: u64 = 1_800_000_000_000;
 const ISSUED_AT_MS: u64 = 1_800_000_000_000;
 const EXPIRES_AT_MS: u64 = 1_831_536_000_000;
+const INSTANCE_EXPIRES_AT_MS: u64 = 1_900_000_000_000;
+const INSTANCE_EXPIRED_AT_MS: u64 = 1_700_000_000_000;
 const HOME_CELL: u64 = 608_819_013_597_790_207;
 const GEO_RESOLUTION: u8 = 7;
 const ALLOWLIST_VERSION: u64 = 1;
@@ -84,7 +86,7 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_MS);
     let mut scenario = initialized_with_registered_member();
-    add_identity_verifier_key_with_public_key(&mut scenario, rust_fixture_public_key());
+    add_identity_enclave_instance_with_public_key(&mut scenario, rust_fixture_public_key());
 
     scenario.next_tx(RELAYER);
     {
@@ -254,12 +256,93 @@ fun signed_identity_result_replay_is_rejected_at_public_accessor() {
     clock.destroy_for_testing();
 }
 
-#[test, expected_failure(abort_code = metadata_verifier::EVerifierKeyDisabled)]
-fun disabled_identity_verifier_key_is_rejected() {
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceDisabled)]
+fun disabled_identity_enclave_instance_is_rejected() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_MS);
     let mut scenario = initialized_with_registered_member();
-    add_disabled_identity_verifier_key(&mut scenario);
+    add_disabled_identity_enclave_instance(&mut scenario);
+
+    submit_identity_result(
+        &mut scenario,
+        &clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        kyc_signature(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceNotRegistered)]
+fun unregistered_identity_enclave_instance_is_rejected() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    create_identity_config(&mut scenario);
+
+    submit_identity_result(
+        &mut scenario,
+        &clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        kyc_signature(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceConfigMismatch)]
+fun stale_identity_enclave_instance_after_config_update_is_rejected() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    create_identity_config(&mut scenario);
+    add_identity_instance(&mut scenario, identity_public_key());
+    update_identity_config_pcrs(&mut scenario);
+
+    submit_identity_result(
+        &mut scenario,
+        &clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        kyc_signature(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierConfigAlreadyDisabled)]
+fun disabled_identity_config_is_rejected_at_public_accessor() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    create_identity_config(&mut scenario);
+    add_identity_instance(&mut scenario, identity_public_key());
+    disable_identity_config(&mut scenario);
+
+    submit_identity_result(
+        &mut scenario,
+        &clock,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        kyc_signature(),
+    );
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceExpired)]
+fun expired_identity_enclave_instance_is_rejected_at_public_accessor() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NOW_MS);
+    let mut scenario = initialized_with_registered_member();
+    create_identity_config(&mut scenario);
+    add_expired_identity_instance(&mut scenario, identity_public_key());
 
     submit_identity_result(
         &mut scenario,
@@ -418,14 +501,56 @@ fun source_hash(): vector<u8> {
 }
 
 fun add_identity_verifier_key(scenario: &mut test_scenario::Scenario) {
-    add_identity_verifier_key_with_public_key(scenario, identity_public_key());
+    add_identity_enclave_instance_with_public_key(scenario, identity_public_key());
 }
 
 fun add_step5_identity_verifier_key(scenario: &mut test_scenario::Scenario) {
-    add_identity_verifier_key_with_public_key(scenario, step5_public_key());
+    add_identity_enclave_instance_with_public_key(scenario, step5_public_key());
 }
 
-fun add_identity_verifier_key_with_public_key(
+fun add_identity_enclave_instance_with_public_key(
+    scenario: &mut test_scenario::Scenario,
+    public_key: vector<u8>,
+) {
+    create_identity_config(scenario);
+    add_identity_instance(scenario, public_key);
+}
+
+fun create_identity_config(scenario: &mut test_scenario::Scenario) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        metadata_verifier::create_identity_verifier_config_for_testing(
+            &mut verifier_registry,
+            identity_pcr0(),
+            identity_pcr1(),
+            identity_pcr2(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun add_identity_instance(scenario: &mut test_scenario::Scenario, public_key: vector<u8>) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        metadata_verifier::add_enclave_instance_for_config_for_testing(
+            &mut verifier_registry,
+            metadata_verifier::identity_v1_config_key(),
+            public_key,
+            INSTANCE_EXPIRES_AT_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun add_expired_identity_instance(
     scenario: &mut test_scenario::Scenario,
     public_key: vector<u8>,
 ) {
@@ -433,11 +558,57 @@ fun add_identity_verifier_key_with_public_key(
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
+        metadata_verifier::add_enclave_instance_for_config_for_testing(
+            &mut verifier_registry,
+            metadata_verifier::identity_v1_config_key(),
+            public_key,
+            INSTANCE_EXPIRED_AT_MS,
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun disable_identity_config(scenario: &mut test_scenario::Scenario) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::disable_identity_verifier_config(
             &cap,
             &mut verifier_registry,
-            reader::verifier_family_identity(),
-            reader::verifier_version_v1(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun update_identity_config_pcrs(scenario: &mut test_scenario::Scenario) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        metadata_verifier::update_identity_verifier_config_pcrs_for_testing(
+            &mut verifier_registry,
+            updated_identity_pcr0(),
+            identity_pcr1(),
+            identity_pcr2(),
+            scenario.ctx(),
+        );
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(verifier_registry);
+    };
+}
+
+fun disable_identity_instance(scenario: &mut test_scenario::Scenario, public_key: vector<u8>) {
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        metadata_verifier::disable_enclave_instance_for_testing(
+            &mut verifier_registry,
             public_key,
             scenario.ctx(),
         );
@@ -446,28 +617,10 @@ fun add_identity_verifier_key_with_public_key(
     };
 }
 
-fun add_disabled_identity_verifier_key(scenario: &mut test_scenario::Scenario) {
-    scenario.next_tx(ADMIN);
-    {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
-        let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        admin::add_verifier_key(
-            &cap,
-            &mut verifier_registry,
-            reader::verifier_family_identity(),
-            reader::verifier_version_v1(),
-            identity_public_key(),
-            scenario.ctx(),
-        );
-        admin::disable_verifier_key(
-            &cap,
-            &mut verifier_registry,
-            identity_public_key(),
-            scenario.ctx(),
-        );
-        scenario.return_to_sender(cap);
-        test_scenario::return_shared(verifier_registry);
-    };
+fun add_disabled_identity_enclave_instance(scenario: &mut test_scenario::Scenario) {
+    create_identity_config(scenario);
+    add_identity_instance(scenario, identity_public_key());
+    disable_identity_instance(scenario, identity_public_key());
 }
 
 fun pause_global(scenario: &mut test_scenario::Scenario) {
@@ -702,6 +855,22 @@ fun identity_result_bcs(
 
 fun identity_public_key(): vector<u8> {
     x"ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+}
+
+fun identity_pcr0(): vector<u8> {
+    x"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f30"
+}
+
+fun identity_pcr1(): vector<u8> {
+    x"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
+
+fun identity_pcr2(): vector<u8> {
+    x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}
+
+fun updated_identity_pcr0(): vector<u8> {
+    x"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 }
 
 fun kyc_signature(): vector<u8> {

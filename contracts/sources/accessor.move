@@ -213,13 +213,14 @@ public fun update_identity_verification(
     );
 
     let now_ms = clock::timestamp_ms(clock);
-    metadata_verifier::assert_signed_bytes(
+    let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(
         verifier_registry,
         metadata_verifier::verifier_family_identity(),
-        metadata_verifier::verifier_version_v1(),
+        metadata_verifier::identity_v1_config_key(),
         &payload_bcs,
         &signature,
         &public_key,
+        now_ms,
     );
     let result = identity_result_v1::decode_verified(payload_bcs, now_ms);
     identity_registry::apply_identity_verification_result(
