@@ -363,7 +363,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
         expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
-        expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
+        // World ID readiness gate is a single unconditional oneshot unit bound to the
+        // shared egress vsock proxy (dev fixture and prod share one definition).
+        expect(template).toContain("Description=Sonari World ID egress readiness gate");
+        expect(template).toContain("BindsTo=sonari-earthquake-egress-vsock-proxy.service");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 
@@ -492,5 +495,88 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // The shared dispatcher selects the verifier kind via an escaped expansion
         // so CloudFormation does not treat "SONARI_VERIFIER_KIND:-earthquake" as a var.
         expect(template).toContain('case "$' + '{!SONARI_VERIFIER_KIND:-earthquake}" in');
+    });
+
+    it("keeps the rendered EC2 UserData within the 16384-byte limit", async () => {
+        const template = await readTemplate();
+
+        // EC2 LaunchTemplate UserData is limited to 16384 bytes after CloudFormation
+        // resolves the Fn::Base64 !Sub block. Exceeding it fails the stack update with
+        // InvalidUserData.Malformed (the shared runner pool keeps growing as verifier
+        // kinds are added, so guard the budget here instead of at deploy time).
+        const EC2_USER_DATA_LIMIT = 16384;
+
+        // Representative byte lengths of the dev-deploy parameter values that the
+        // UserData !Sub interpolates. Synthetic equal-length strings keep this test
+        // free of real infra identifiers while tracking the rendered byte size.
+        const representativeLength: Record<string, number> = {
+            EarthquakeNitroEnclaveProcessCommand: 38,
+            EarthquakeTeeEifS3Bucket: 58,
+            EarthquakeTeeEifS3Key: 82,
+            EarthquakeTeeEifSha256: 64,
+            MembershipNitroEnclaveProcessCommand: 47,
+            MembershipTeeArtifactS3Bucket: 58,
+            MembershipTeeArtifactS3Key: 103,
+            MembershipTeeArtifactSha256: 64,
+            NitroEnclaveCid: 2,
+            NitroEnclaveCpuCount: 1,
+            NitroEnclaveMemoryMiB: 4,
+            NitroEnclaveProcessCommand: 35,
+            RunnerTokenSecretArn: 106,
+            SigningMaterialKmsKey: 36,
+            SigningSeedCiphertextS3Bucket: 58,
+            SigningSeedCiphertextS3Key: 61,
+            TeeArtifactS3Bucket: 58,
+            TeeArtifactS3Key: 94,
+            TeeArtifactSha256: 64,
+            TeeEifS3Bucket: 58,
+            TeeEifS3Key: 91,
+            TeeEifSha256: 64,
+            WorldIdApiBase: 27,
+            WorldIdAppId: 17,
+        };
+
+        // Extract the "Fn::Base64: !Sub |" block and de-indent it the way a YAML
+        // literal block scalar does (strip the common leading indentation).
+        const templateLines = template.split("\n");
+        const startIndex = templateLines.findIndex((line) => line.includes("Fn::Base64: !Sub |"));
+        expect(startIndex).toBeGreaterThan(-1);
+        const baseIndent = templateLines[startIndex]?.match(/^ */)?.[0]?.length ?? 0;
+        const blockLines: string[] = [];
+        for (const line of templateLines.slice(startIndex + 1)) {
+            if (line.trim() === "") {
+                blockLines.push("");
+                continue;
+            }
+            const indent = line.match(/^ */)?.[0]?.length ?? 0;
+            if (indent <= baseIndent) {
+                break;
+            }
+            blockLines.push(line);
+        }
+        const contentIndent = baseIndent + 2;
+        const body = blockLines
+            .map((line) =>
+                line.length >= contentIndent ? line.slice(contentIndent) : line.trimStart(),
+            )
+            .join("\n");
+
+        // Resolve substitutions: ${!X} stays a literal ${X} (bash expansion), and a
+        // bare ${X} becomes a representative deploy value of the right byte length.
+        const rendered = body.replace(
+            /\$\{(!?)([^}]*)\}/g,
+            (_full: string, escapeMarker: string, name: string): string => {
+                if (escapeMarker === "!") {
+                    return `\${${name}}`;
+                }
+                const length = representativeLength[name];
+                if (length === undefined) {
+                    throw new Error(`UserData references an unmapped Fn::Sub parameter: ${name}`);
+                }
+                return "x".repeat(length);
+            },
+        );
+
+        expect(Buffer.byteLength(rendered, "utf8")).toBeLessThan(EC2_USER_DATA_LIMIT);
     });
 });

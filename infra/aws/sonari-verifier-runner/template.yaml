@@ -613,7 +613,6 @@ Resources:
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
             fi
-            sonari_dev_membership_stdio_bridge=0
             if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
               cat >/usr/local/bin/sonari-enclave-stdio <<'SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE'
             #!/bin/bash
@@ -622,7 +621,6 @@ Resources:
             exec /opt/sonari/membership-tee-artifact/bin/membership-tee fixture --world-id-status verified --world-app-id "$SONARI_WORLD_ID_APP_ID"
             SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE
               chmod 0500 /usr/local/bin/sonari-enclave-stdio
-              sonari_dev_membership_stdio_bridge=1
             fi
             vsock_proxy_path="$(command -v vsock-proxy || true)"
             if [ -z "$vsock_proxy_path" ]; then
@@ -726,27 +724,10 @@ Resources:
             systemctl daemon-reload
             systemctl enable --now sonari-earthquake-egress-connect-proxy.service
             systemctl enable --now sonari-earthquake-egress-vsock-proxy.service
-            if [ "$sonari_dev_membership_stdio_bridge" = "1" ]; then
-              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_DEV_VSOCK_PROXY
+            cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<'SONARI_VSOCK_PROXY'
             [Unit]
-            Description=Sonari dev fixture World ID proxy placeholder
-
-            [Service]
-            Type=oneshot
-            RemainAfterExit=yes
-            ExecStart=/bin/true
-
-            [Install]
-            WantedBy=multi-user.target
-            SONARI_DEV_VSOCK_PROXY
-              systemctl daemon-reload
-              systemctl enable --now sonari-world-id-vsock-proxy.service
-            else
-              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<'SONARI_VSOCK_PROXY'
-            [Unit]
-            Description=Sonari World ID egress readiness gate bound to the shared egress vsock proxy
+            Description=Sonari World ID egress readiness gate
             After=sonari-earthquake-egress-vsock-proxy.service
-            Wants=sonari-earthquake-egress-vsock-proxy.service
             BindsTo=sonari-earthquake-egress-vsock-proxy.service
 
             [Service]
@@ -757,9 +738,8 @@ Resources:
             [Install]
             WantedBy=multi-user.target
             SONARI_VSOCK_PROXY
-              systemctl daemon-reload
-              systemctl enable --now sonari-world-id-vsock-proxy.service
-            fi
+            systemctl daemon-reload
+            systemctl enable --now sonari-world-id-vsock-proxy.service
             {
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
