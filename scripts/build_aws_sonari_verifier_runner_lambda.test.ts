@@ -29,12 +29,22 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
 
         const entries = await readZipEntries(outPath);
 
-        expect([...entries.keys()].sort()).toEqual([
-            "dist/src/lambda.js",
-            "dist/src/runner_workflow.js",
-            "dist/src/source_archiver.js",
-            "package.json",
-        ]);
+        expect([...entries.keys()].sort()).toEqual(
+            expect.arrayContaining([
+                "dist/src/lambda.js",
+                "dist/src/runner_workflow.js",
+                "dist/src/source_archiver.js",
+                "node_modules/@mysten/walrus-wasm/index.js",
+                "node_modules/@mysten/walrus-wasm/index.mjs",
+                "node_modules/@mysten/walrus-wasm/nodejs/walrus_wasm.js",
+                "node_modules/@mysten/walrus-wasm/nodejs/walrus_wasm_bg.wasm",
+                "node_modules/@mysten/walrus-wasm/package.json",
+                "package.json",
+            ]),
+        );
+        expect([...entries.keys()].filter((entry) => entry.startsWith("dist/src/")).sort()).toEqual(
+            ["dist/src/lambda.js", "dist/src/runner_workflow.js", "dist/src/source_archiver.js"],
+        );
         expect(JSON.parse(entries.get("package.json")?.toString("utf8") ?? "")).toEqual({
             type: "module",
         });
@@ -61,6 +71,7 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN");
         expect(sourceArchiverJs).toContain("SOURCE_ARCHIVER_TOKEN_SECRET_ARN");
         expect(sourceArchiverJs).toContain("WalrusSdkStoreRunner");
+        expect(sourceArchiverJs).toContain('from "@mysten/walrus-wasm"');
         expect(sourceArchiverJs).not.toContain("WalrusCliStoreRunner");
         expect(runnerWorkflowJs).not.toContain(
             "const leaseStore = new DynamoDbSharedRunnerLeaseStore",
@@ -115,12 +126,18 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
 
         const entries = await readZipEntries(outPath);
 
-        expect([...entries.keys()].sort()).toEqual([
-            "dist/src/lambda.js",
-            "dist/src/runner_workflow.js",
-            "dist/src/source_archiver.js",
-            "package.json",
-        ]);
+        expect([...entries.keys()].sort()).toEqual(
+            expect.arrayContaining([
+                "dist/src/lambda.js",
+                "dist/src/runner_workflow.js",
+                "dist/src/source_archiver.js",
+                "node_modules/@mysten/walrus-wasm/nodejs/walrus_wasm_bg.wasm",
+                "package.json",
+            ]),
+        );
+        expect([...entries.keys()].filter((entry) => entry.startsWith("dist/src/")).sort()).toEqual(
+            ["dist/src/lambda.js", "dist/src/runner_workflow.js", "dist/src/source_archiver.js"],
+        );
     });
 });
 
