@@ -61,10 +61,12 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
         expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
         expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
-        expect(template).toContain(
-            "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio",
-        );
-        expect(template).toContain("test -x /usr/local/bin/sonari-enclave-stdio");
+        // VSOCK server mode: runner.env exposes the enclave CID and the wrapper
+        // routes stdin actions to the enclave over VSOCK instead of an stdio bridge.
+        expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
+        expect(template).toContain("/get_attestation");
+        expect(template).toContain("/process_data");
+        expect(template).toContain("VSOCK-CONNECT");
         expect(template).toContain(
             "GroupDescription: Sonari membership identity runner with SSM-only control plane",
         );
