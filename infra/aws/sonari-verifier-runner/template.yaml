@@ -24,7 +24,7 @@ Parameters:
     Default: rate(5 minutes)
   MembershipScheduleExpression:
     Type: String
-    Default: rate(1 minute)
+    Default: rate(1 day)
   ScheduleState:
     Type: String
     Default: DISABLED

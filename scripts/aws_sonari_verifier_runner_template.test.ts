@@ -450,4 +450,20 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SigningSeedCiphertextS3KeyOutput");
         expect(template).not.toContain("SigningSeedCiphertextS3BucketOutput");
     });
+
+    it("defaults membership schedule to once per day and keeps earthquake schedule unchanged", async () => {
+        const template = await readTemplate();
+
+        // membership は 1 日 1 回が既定
+        expect(template).toContain("MembershipScheduleExpression:");
+        expect(template).toContain("Default: rate(1 day)");
+
+        // earthquake は既定のまま変えない（rate(5 minutes) を保持）
+        expect(template).toContain("ScheduleExpression:");
+        expect(template).toContain("Default: rate(5 minutes)");
+
+        // 両 schedule の State 制御は共有 ScheduleState パラメータを参照する
+        const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
+        expect(scheduleStateUsageCount).toBe(2);
+    });
 });
