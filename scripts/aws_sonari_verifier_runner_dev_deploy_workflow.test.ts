@@ -126,6 +126,35 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         ]);
     });
 
+    it("reads membership identity EIF measurements and writes PCR0/1/2 to run summary", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "Read membership identity EIF measurements",
+            "--eif-path dist/aws/membership-identity-tee.eif",
+            "dist/aws/membership-identity-tee-measurements.json",
+            "MEMBERSHIP_IDENTITY_EIF_PCR0",
+            "MEMBERSHIP_IDENTITY_EIF_PCR1",
+            "MEMBERSHIP_IDENTITY_EIF_PCR2",
+            "Membership Identity EIF PCRs",
+        ]);
+    });
+
+    it("earthquake EIF measurements step is unchanged after membership step addition", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "Read earthquake EIF measurements",
+            "--eif-path dist/aws/earthquake-tee.eif",
+            "dist/aws/earthquake-tee-measurements.json",
+            "EARTHQUAKE_EIF_PCR0",
+            "EARTHQUAKE_EIF_PCR1",
+            "EARTHQUAKE_EIF_PCR2",
+            "Earthquake EIF PCRs",
+            "Use these values for the Sui `VerifierRegistry` earthquake config.",
+        ]);
+    });
+
     it("does not expose relayer deployment variables to test steps", async () => {
         const workflow = await readWorkflow();
         const jobEnvMatch = workflow.match(/    env:\n([\s\S]*?)\n\n    steps:/u);

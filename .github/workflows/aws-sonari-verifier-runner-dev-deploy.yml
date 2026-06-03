@@ -380,6 +380,64 @@ jobs:
       - name: Build membership identity EIF
         run: pnpm build:aws-membership-identity-eif
 
+      - name: Read membership identity EIF measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nitro-cli describe-eif \
+            --eif-path dist/aws/membership-identity-tee.eif \
+            > dist/aws/membership-identity-tee-measurements.json
+          cat dist/aws/membership-identity-tee-measurements.json
+
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+
+          const raw = await readFile("dist/aws/membership-identity-tee-measurements.json", "utf8");
+          const jsonStart = raw.indexOf("{");
+          if (jsonStart === -1) {
+            throw new Error("membership identity EIF measurements did not contain JSON");
+          }
+          const parsed = JSON.parse(raw.slice(jsonStart));
+          const measurements = parsed.Measurements;
+          if (typeof measurements !== "object" || measurements === null) {
+            throw new Error("membership identity EIF measurements are missing Measurements");
+          }
+
+          function readPcr(name) {
+            const value = measurements[name];
+            if (typeof value !== "string" || !/^[0-9a-fA-F]{96}$/.test(value)) {
+              throw new Error(`membership identity EIF ${name} must be a 48-byte SHA-384 hex string`);
+            }
+            return value.toLowerCase();
+          }
+
+          const pcr0 = readPcr("PCR0");
+          const pcr1 = readPcr("PCR1");
+          const pcr2 = readPcr("PCR2");
+          await appendFile(
+            process.env.GITHUB_ENV,
+            `MEMBERSHIP_IDENTITY_EIF_PCR0=${pcr0}\nMEMBERSHIP_IDENTITY_EIF_PCR1=${pcr1}\nMEMBERSHIP_IDENTITY_EIF_PCR2=${pcr2}\n`,
+            "utf8",
+          );
+          await appendFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              "### Membership Identity EIF PCRs",
+              "",
+              "| PCR | Value |",
+              "| --- | --- |",
+              `| PCR0 | \`${pcr0}\` |`,
+              `| PCR1 | \`${pcr1}\` |`,
+              `| PCR2 | \`${pcr2}\` |`,
+              "",
+              "Use these values for the Sui `VerifierRegistry` membership identity config.",
+              "",
+            ].join("\n"),
+            "utf8",
+          );
+          NODE
+
       - name: Upload build artifacts to S3
         shell: bash
         run: |
