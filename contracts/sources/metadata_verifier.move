@@ -15,6 +15,7 @@ const ED25519_PUBLIC_KEY_LENGTH: u64 = 32;
 const ED25519_SIGNATURE_LENGTH: u64 = 64;
 const PCR_LENGTH: u64 = 48;
 const EARTHQUAKE_V1_CONFIG_KEY: u64 = 1;
+const IDENTITY_V1_CONFIG_KEY: u64 = 2;
 
 const EInvalidPublicKeyLength: u64 = 0;
 const EInvalidSignatureLength: u64 = 1;
@@ -182,7 +183,16 @@ public(package) fun create_earthquake_verifier_config(
     pcr2: vector<u8>,
     ctx: &TxContext,
 ) {
-    create_earthquake_verifier_config_internal(registry, pcr0, pcr1, pcr2, ctx);
+    create_verifier_config_internal(
+        registry,
+        VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
+        VERIFIER_VERSION_V1,
+        earthquake_v1_config_key(),
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
 }
 
 public(package) fun update_earthquake_verifier_config_pcrs(
@@ -192,14 +202,64 @@ public(package) fun update_earthquake_verifier_config_pcrs(
     pcr2: vector<u8>,
     ctx: &TxContext,
 ) {
-    update_earthquake_verifier_config_pcrs_internal(registry, pcr0, pcr1, pcr2, ctx);
+    update_verifier_config_pcrs_internal(
+        registry,
+        earthquake_v1_config_key(),
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
 }
 
 public(package) fun disable_earthquake_verifier_config(
     registry: &mut VerifierRegistry,
     ctx: &TxContext,
 ) {
-    disable_earthquake_verifier_config_internal(registry, ctx);
+    disable_verifier_config_internal(registry, earthquake_v1_config_key(), ctx);
+}
+
+public(package) fun create_identity_verifier_config(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    create_verifier_config_internal(
+        registry,
+        VERIFIER_FAMILY_IDENTITY,
+        VERIFIER_VERSION_V1,
+        identity_v1_config_key(),
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
+}
+
+public(package) fun update_identity_verifier_config_pcrs(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    update_verifier_config_pcrs_internal(
+        registry,
+        identity_v1_config_key(),
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
+}
+
+public(package) fun disable_identity_verifier_config(
+    registry: &mut VerifierRegistry,
+    ctx: &TxContext,
+) {
+    disable_verifier_config_internal(registry, identity_v1_config_key(), ctx);
 }
 
 public fun register_enclave_instance(
@@ -360,8 +420,11 @@ fun add_verifier_key_internal(
     });
 }
 
-fun create_earthquake_verifier_config_internal(
+fun create_verifier_config_internal(
     registry: &mut VerifierRegistry,
+    verifier_family: u8,
+    verifier_version: u64,
+    config_key: u64,
     pcr0: vector<u8>,
     pcr1: vector<u8>,
     pcr2: vector<u8>,
@@ -370,7 +433,6 @@ fun create_earthquake_verifier_config_internal(
     assert_pcr(&pcr0);
     assert_pcr(&pcr1);
     assert_pcr(&pcr2);
-    let config_key = earthquake_v1_config_key();
     assert!(
         !registry.configs.contains(&config_key),
         EVerifierConfigAlreadyRegistered,
@@ -379,8 +441,8 @@ fun create_earthquake_verifier_config_internal(
     registry.configs.insert(
         config_key,
         VerifierConfig {
-            verifier_family: VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
-            verifier_version: VERIFIER_VERSION_V1,
+            verifier_family,
+            verifier_version,
             config_version: 1,
             pcr0,
             pcr1,
@@ -393,8 +455,8 @@ fun create_earthquake_verifier_config_internal(
     );
     event::emit(VerifierConfigCreated {
         registry_id: object::id(registry),
-        verifier_family: VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
-        verifier_version: VERIFIER_VERSION_V1,
+        verifier_family,
+        verifier_version,
         config_version: 1,
         pcr0,
         pcr1,
@@ -404,8 +466,9 @@ fun create_earthquake_verifier_config_internal(
     });
 }
 
-fun update_earthquake_verifier_config_pcrs_internal(
+fun update_verifier_config_pcrs_internal(
     registry: &mut VerifierRegistry,
+    config_key: u64,
     pcr0: vector<u8>,
     pcr1: vector<u8>,
     pcr2: vector<u8>,
@@ -414,7 +477,6 @@ fun update_earthquake_verifier_config_pcrs_internal(
     assert_pcr(&pcr0);
     assert_pcr(&pcr1);
     assert_pcr(&pcr2);
-    let config_key = earthquake_v1_config_key();
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
     let registry_id = object::id(registry);
     let (verifier_family, verifier_version, config_version, enabled) = {
@@ -465,11 +527,11 @@ fun disable_verifier_key_internal(
     });
 }
 
-fun disable_earthquake_verifier_config_internal(
+fun disable_verifier_config_internal(
     registry: &mut VerifierRegistry,
+    config_key: u64,
     ctx: &TxContext,
 ) {
-    let config_key = earthquake_v1_config_key();
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
     let registry_id = object::id(registry);
     let (verifier_family, verifier_version, config_version) = {
@@ -633,8 +695,12 @@ fun is_all_zero(bytes: &vector<u8>): bool {
     all_zero
 }
 
-fun earthquake_v1_config_key(): u64 {
+public(package) fun earthquake_v1_config_key(): u64 {
     EARTHQUAKE_V1_CONFIG_KEY
+}
+
+public(package) fun identity_v1_config_key(): u64 {
+    IDENTITY_V1_CONFIG_KEY
 }
 
 #[test_only]
@@ -778,7 +844,21 @@ public fun add_enclave_instance_for_testing(
 public fun earthquake_verifier_config_fields_for_testing(
     registry: &VerifierRegistry,
 ): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
-    let config_key = earthquake_v1_config_key();
+    verifier_config_fields_for_testing(registry, earthquake_v1_config_key())
+}
+
+#[test_only]
+public fun identity_verifier_config_fields_for_testing(
+    registry: &VerifierRegistry,
+): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
+    verifier_config_fields_for_testing(registry, identity_v1_config_key())
+}
+
+#[test_only]
+fun verifier_config_fields_for_testing(
+    registry: &VerifierRegistry,
+    config_key: u64,
+): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
     let config = registry.configs.get(&config_key);
     (

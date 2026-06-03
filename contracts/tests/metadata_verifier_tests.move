@@ -201,6 +201,206 @@ fun disabling_earthquake_verifier_config_flips_enabled_false() {
 }
 
 #[test]
+fun creates_identity_verifier_config_with_pcrs() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+
+        admin::create_identity_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+
+        let (family, verifier_version, config_version, pcr0, pcr1, pcr2, enabled) =
+            metadata_verifier::identity_verifier_config_fields_for_testing(&registry);
+        assert!(family == reader::verifier_family_identity());
+        assert!(verifier_version == reader::verifier_version_v1());
+        assert!(config_version == 1);
+        assert!(pcr0 == valid_pcr0());
+        assert!(pcr1 == valid_pcr1());
+        assert!(pcr2 == valid_pcr2());
+        assert!(enabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    let events = event::events_by_type<metadata_verifier::VerifierConfigCreated>();
+    assert!(events.length() == 1);
+    let (registry_id, family, verifier_version, config_version, pcr0, pcr1, pcr2, enabled, actor) =
+        metadata_verifier::verifier_config_created_event_fields(*events.borrow(0));
+    assert!(registry_id != object::id_from_address(@0x0));
+    assert!(family == reader::verifier_family_identity());
+    assert!(verifier_version == reader::verifier_version_v1());
+    assert!(config_version == 1);
+    assert!(pcr0 == valid_pcr0());
+    assert!(pcr1 == valid_pcr1());
+    assert!(pcr2 == valid_pcr2());
+    assert!(enabled);
+    assert!(actor == ADMIN);
+
+    scenario.end();
+}
+
+#[test]
+fun updating_identity_verifier_config_pcrs_increments_config_version() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::create_identity_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+        admin::update_identity_verifier_config_pcrs(
+            &cap,
+            &mut registry,
+            updated_pcr0(),
+            updated_pcr1(),
+            updated_pcr2(),
+            scenario.ctx(),
+        );
+
+        let (_, _, config_version, pcr0, pcr1, pcr2, enabled) =
+            metadata_verifier::identity_verifier_config_fields_for_testing(&registry);
+        assert!(config_version == 2);
+        assert!(pcr0 == updated_pcr0());
+        assert!(pcr1 == updated_pcr1());
+        assert!(pcr2 == updated_pcr2());
+        assert!(enabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    let events = event::events_by_type<metadata_verifier::VerifierConfigPcrsUpdated>();
+    assert!(events.length() == 1);
+    let (_, family, verifier_version, config_version, pcr0, pcr1, pcr2, enabled, actor) =
+        metadata_verifier::verifier_config_pcrs_updated_event_fields(*events.borrow(0));
+    assert!(family == reader::verifier_family_identity());
+    assert!(verifier_version == reader::verifier_version_v1());
+    assert!(config_version == 2);
+    assert!(pcr0 == updated_pcr0());
+    assert!(pcr1 == updated_pcr1());
+    assert!(pcr2 == updated_pcr2());
+    assert!(enabled);
+    assert!(actor == ADMIN);
+
+    scenario.end();
+}
+
+#[test]
+fun disabling_identity_verifier_config_flips_enabled_false() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::create_identity_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+        admin::disable_identity_verifier_config(&cap, &mut registry, scenario.ctx());
+
+        let (_, _, config_version, _, _, _, enabled) =
+            metadata_verifier::identity_verifier_config_fields_for_testing(&registry);
+        assert!(config_version == 1);
+        assert!(!enabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    let events = event::events_by_type<metadata_verifier::VerifierConfigDisabled>();
+    assert!(events.length() == 1);
+    let (_, family, verifier_version, config_version, actor) =
+        metadata_verifier::verifier_config_disabled_event_fields(*events.borrow(0));
+    assert!(family == reader::verifier_family_identity());
+    assert!(verifier_version == reader::verifier_version_v1());
+    assert!(config_version == 1);
+    assert!(actor == ADMIN);
+
+    scenario.end();
+}
+
+#[test]
+fun earthquake_and_identity_configs_coexist_independently() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+
+        admin::create_earthquake_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+        admin::create_identity_verifier_config(
+            &cap,
+            &mut registry,
+            updated_pcr0(),
+            updated_pcr1(),
+            updated_pcr2(),
+            scenario.ctx(),
+        );
+
+        let (earthquake_family, _, _, earthquake_pcr0, _, _, earthquake_enabled) =
+            metadata_verifier::earthquake_verifier_config_fields_for_testing(&registry);
+        assert!(earthquake_family == reader::verifier_family_earthquake_oracle());
+        assert!(earthquake_pcr0 == valid_pcr0());
+        assert!(earthquake_enabled);
+
+        let (identity_family, _, _, identity_pcr0, _, _, identity_enabled) =
+            metadata_verifier::identity_verifier_config_fields_for_testing(&registry);
+        assert!(identity_family == reader::verifier_family_identity());
+        assert!(identity_pcr0 == updated_pcr0());
+        assert!(identity_enabled);
+
+        assert!(
+            metadata_verifier::earthquake_v1_config_key()
+                != metadata_verifier::identity_v1_config_key(),
+        );
+
+        admin::disable_identity_verifier_config(&cap, &mut registry, scenario.ctx());
+
+        let (_, _, _, _, _, _, earthquake_still_enabled) =
+            metadata_verifier::earthquake_verifier_config_fields_for_testing(&registry);
+        assert!(earthquake_still_enabled);
+        let (_, _, _, _, _, _, identity_now_disabled) =
+            metadata_verifier::identity_verifier_config_fields_for_testing(&registry);
+        assert!(!identity_now_disabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.end();
+}
+
+#[test]
 fun verifier_registry_adds_and_disables_key_with_events() {
     let mut scenario = initialized();
 

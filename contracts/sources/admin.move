@@ -355,6 +355,42 @@ public fun disable_earthquake_verifier_config(
     metadata_verifier::disable_earthquake_verifier_config(registry, ctx);
 }
 
+public fun create_identity_verifier_config(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::create_identity_verifier_config(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+public fun update_identity_verifier_config_pcrs(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::update_identity_verifier_config_pcrs(
+        registry,
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
+}
+
+public fun disable_identity_verifier_config(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::disable_identity_verifier_config(registry, ctx);
+}
+
 public fun create_allowed_residence_cell_registry(
     cap: &mut AdminCap,
     root: vector<u8>,
