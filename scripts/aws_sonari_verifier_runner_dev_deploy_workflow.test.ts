@@ -309,4 +309,46 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         expect(workflow).not.toContain("set -x");
     });
+
+    it("passes identity relayer env to Deploy CloudFormation stack step and keeps earthquake unchanged", async () => {
+        const workflow = await readWorkflow();
+
+        // Identity env vars must be wired from GitHub variables into the deploy step
+        expect(workflow).toContain(
+            "IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_PACKAGE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_VERIFIER_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}",
+        );
+
+        // Identity env must be forwarded as CloudFormation parameters in the deploy step
+        expect(workflow).toContain("IdentityRelayerMode=$IDENTITY_RELAYER_MODE");
+        expect(workflow).toContain("SonariIdentityPackageId=$SONARI_IDENTITY_PACKAGE_ID");
+        expect(workflow).toContain("SonariIdentityPauseStateId=$SONARI_IDENTITY_PAUSE_STATE_ID");
+        expect(workflow).toContain("SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID");
+        expect(workflow).toContain("SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID");
+        expect(workflow).toContain("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID");
+
+        // Earthquake RELAYER_* wiring must remain unchanged
+        expect(workflow).toContain(
+            "RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
+        );
+        expect(workflow).toContain(
+            "RELAYER_NETWORK: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}",
+        );
+        expect(workflow).toContain("RelayerMode=$RELAYER_MODE");
+        expect(workflow).toContain("RelayerNetwork=$RELAYER_NETWORK");
+    });
 });

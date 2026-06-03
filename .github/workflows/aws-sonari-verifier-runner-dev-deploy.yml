@@ -531,6 +531,12 @@ jobs:
           RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
           RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
           RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}
+          IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}
+          SONARI_IDENTITY_PACKAGE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}
+          SONARI_IDENTITY_PAUSE_STATE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}
+          SONARI_IDENTITY_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}
+          SONARI_MEMBERSHIP_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}
+          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}
         run: |
           set -euo pipefail
           mapfile -t deploy_plan_parameter_overrides < <(
@@ -588,6 +594,24 @@ jobs:
           fi
           if [[ -n "${RELAYER_ALLOW_SUBMIT:-}" ]]; then
             extra_parameter_overrides+=("RelayerAllowSubmit=$RELAYER_ALLOW_SUBMIT")
+          fi
+          if [[ -n "${IDENTITY_RELAYER_MODE:-}" ]]; then
+            extra_parameter_overrides+=("IdentityRelayerMode=$IDENTITY_RELAYER_MODE")
+          fi
+          if [[ -n "${SONARI_IDENTITY_PACKAGE_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariIdentityPackageId=$SONARI_IDENTITY_PACKAGE_ID")
+          fi
+          if [[ -n "${SONARI_IDENTITY_PAUSE_STATE_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariIdentityPauseStateId=$SONARI_IDENTITY_PAUSE_STATE_ID")
+          fi
+          if [[ -n "${SONARI_IDENTITY_REGISTRY_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID")
+          fi
+          if [[ -n "${SONARI_MEMBERSHIP_REGISTRY_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID")
+          fi
+          if [[ -n "${SONARI_VERIFIER_REGISTRY_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID")
           fi
 
           aws cloudformation deploy \

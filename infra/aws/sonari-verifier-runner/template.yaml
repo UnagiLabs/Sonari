@@ -204,6 +204,38 @@ Parameters:
       - "false"
       - "true"
     Description: Must be true before RELAYER_MODE=submit can send a Sui transaction.
+  IdentityRelayerMode:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - dry_run
+      - submit
+    Description: Leave empty to skip the membership identity relayer. Use dry_run or submit for finalized TEE results.
+  SonariIdentityPackageId:
+    Type: String
+    Default: ""
+    Description: Sui package ID for the membership identity Move module.
+  SonariIdentityPauseStateId:
+    Type: String
+    Default: ""
+    Description: PauseState object ID for the membership identity accessor call.
+  SonariIdentityRegistryId:
+    Type: String
+    Default: ""
+    Description: IdentityRegistry object ID for the membership identity accessor call.
+  SonariMembershipRegistryId:
+    Type: String
+    Default: ""
+    Description: MembershipRegistry object ID for the membership identity accessor call.
+  SonariVerifierRegistryId:
+    Type: String
+    Default: ""
+    Description: VerifierRegistry object ID used for membership identity relayer and enclave registration.
+  SonariSuiClockId:
+    Type: String
+    Default: "0x6"
+    Description: Sui clock object ID for the membership identity accessor call. Defaults to 0x6.
 
 Conditions:
   HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
@@ -1119,6 +1151,13 @@ Resources:
           RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
           RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
           RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
+          IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
+          SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
+          SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId
+          SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId
+          SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId
+          SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId
+          SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId
           SOURCE_ARCHIVER_URL: !If [HasSourceArchiverConfig, !GetAtt SourceArchiverFunctionUrl.FunctionUrl, ""]
           SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]
 
