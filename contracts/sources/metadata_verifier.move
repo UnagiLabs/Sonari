@@ -268,7 +268,29 @@ public fun register_enclave_instance(
     expires_at_ms: u64,
     ctx: &mut TxContext,
 ) {
-    register_enclave_instance_internal(registry, document, expires_at_ms, ctx);
+    register_enclave_instance_internal(
+        registry,
+        earthquake_v1_config_key(),
+        document,
+        expires_at_ms,
+        ctx,
+    );
+}
+
+public fun register_enclave_instance_for_config(
+    registry: &mut VerifierRegistry,
+    config_key: u64,
+    document: NitroAttestationDocument,
+    expires_at_ms: u64,
+    ctx: &mut TxContext,
+) {
+    register_enclave_instance_internal(
+        registry,
+        config_key,
+        document,
+        expires_at_ms,
+        ctx,
+    );
 }
 
 public(package) fun disable_enclave_instance(
@@ -313,6 +335,8 @@ public(package) fun assert_signed_bytes(
 
 public(package) fun assert_enclave_signed_bytes(
     registry: &VerifierRegistry,
+    expected_family: u8,
+    config_key: u64,
     signed_bytes: &vector<u8>,
     signature: &vector<u8>,
     public_key: &vector<u8>,
@@ -329,7 +353,7 @@ public(package) fun assert_enclave_signed_bytes(
     assert!(instance.enabled, EEnclaveInstanceDisabled);
     assert!(instance.expires_at_ms > now_ms, EEnclaveInstanceExpired);
     assert!(
-        instance.verifier_family == VERIFIER_FAMILY_EARTHQUAKE_ORACLE,
+        instance.verifier_family == expected_family,
         EVerifierFamilyMismatch,
     );
     assert!(
@@ -337,7 +361,6 @@ public(package) fun assert_enclave_signed_bytes(
         EVerifierVersionMismatch,
     );
 
-    let config_key = earthquake_v1_config_key();
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
     let config = registry.configs.get(&config_key);
     assert!(config.enabled, EVerifierConfigAlreadyDisabled);
@@ -558,6 +581,7 @@ fun disable_verifier_config_internal(
 
 fun register_enclave_instance_internal(
     registry: &mut VerifierRegistry,
+    config_key: u64,
     document: NitroAttestationDocument,
     expires_at_ms: u64,
     ctx: &TxContext,
@@ -569,7 +593,6 @@ fun register_enclave_instance_internal(
         !registry.instances.contains(&public_key),
         EEnclaveInstanceAlreadyRegistered,
     );
-    let config_key = earthquake_v1_config_key();
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
 
     let config = registry.configs.get(&config_key);
@@ -796,7 +819,13 @@ public fun register_enclave_instance_for_testing(
     expires_at_ms: u64,
     ctx: &mut TxContext,
 ) {
-    register_enclave_instance_internal(registry, document, expires_at_ms, ctx);
+    register_enclave_instance_internal(
+        registry,
+        earthquake_v1_config_key(),
+        document,
+        expires_at_ms,
+        ctx,
+    );
 }
 
 #[test_only]
@@ -815,12 +844,28 @@ public fun add_enclave_instance_for_testing(
     expires_at_ms: u64,
     ctx: &mut TxContext,
 ) {
+    add_enclave_instance_for_config_for_testing(
+        registry,
+        earthquake_v1_config_key(),
+        public_key,
+        expires_at_ms,
+        ctx,
+    );
+}
+
+#[test_only]
+public fun add_enclave_instance_for_config_for_testing(
+    registry: &mut VerifierRegistry,
+    config_key: u64,
+    public_key: vector<u8>,
+    expires_at_ms: u64,
+    ctx: &mut TxContext,
+) {
     assert_public_key_length(&public_key);
     assert!(
         !registry.instances.contains(&public_key),
         EEnclaveInstanceAlreadyRegistered,
     );
-    let config_key = earthquake_v1_config_key();
     assert!(registry.configs.contains(&config_key), EVerifierConfigNotRegistered);
     let config = registry.configs.get(&config_key);
     assert!(config.enabled, EVerifierConfigAlreadyDisabled);
@@ -838,6 +883,39 @@ public fun add_enclave_instance_for_testing(
             disabled_at_ms: option::none(),
         },
     );
+}
+
+#[test_only]
+public fun create_earthquake_verifier_config_for_testing(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    create_earthquake_verifier_config(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+#[test_only]
+public fun create_identity_verifier_config_for_testing(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    create_identity_verifier_config(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+#[test_only]
+public fun update_identity_verifier_config_pcrs_for_testing(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    update_identity_verifier_config_pcrs(registry, pcr0, pcr1, pcr2, ctx);
 }
 
 #[test_only]

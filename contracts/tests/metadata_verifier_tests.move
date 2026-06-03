@@ -863,6 +863,270 @@ fun disabling_enclave_instance_flips_enabled_false() {
     scenario.end();
 }
 
+#[test]
+fun registers_identity_enclave_instance_for_config_key_two() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        let mut attestation_clock = clock::create_for_testing(scenario.ctx());
+        attestation_clock.set_for_testing(nitro_fixture_timestamp_ms());
+
+        admin::create_identity_verifier_config(
+            &cap,
+            &mut registry,
+            nitro_fixture_pcr0(),
+            nitro_fixture_pcr1(),
+            nitro_fixture_pcr2(),
+            scenario.ctx(),
+        );
+        let document = nitro_attestation::load_nitro_attestation(
+            nitro_attestation_payload(),
+            &attestation_clock,
+        );
+
+        metadata_verifier::register_enclave_instance_for_config(
+            &mut registry,
+            metadata_verifier::identity_v1_config_key(),
+            document,
+            nitro_fixture_expires_at_ms(),
+            scenario.ctx(),
+        );
+
+        let (family, verifier_version, config_version, public_key, enabled, _, expires_at_ms, _) =
+            metadata_verifier::enclave_instance_fields_for_testing(
+                &registry,
+                nitro_fixture_public_key(),
+            );
+        assert!(family == reader::verifier_family_identity());
+        assert!(verifier_version == reader::verifier_version_v1());
+        assert!(config_version == 1);
+        assert!(public_key == nitro_fixture_public_key());
+        assert!(enabled);
+        assert!(expires_at_ms == nitro_fixture_expires_at_ms());
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+        attestation_clock.destroy_for_testing();
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun assert_enclave_signed_bytes_accepts_identity_family_config() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::create_identity_verifier_config_for_testing(
+        &mut registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        &mut ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_config_for_testing(
+        &mut registry,
+        metadata_verifier::identity_v1_config_key(),
+        identity_signed_public_key(),
+        nitro_fixture_expires_at_ms(),
+        &mut ctx,
+    );
+
+    let (config_key, config_version, instance_public_key) =
+        metadata_verifier::assert_enclave_signed_bytes(
+            &registry,
+            reader::verifier_family_identity(),
+            metadata_verifier::identity_v1_config_key(),
+            &identity_signed_message(),
+            &identity_signed_signature(),
+            &identity_signed_public_key(),
+            nitro_fixture_timestamp_ms(),
+        );
+    assert!(config_key == metadata_verifier::identity_v1_config_key());
+    assert!(config_version == 1);
+    assert!(instance_public_key == identity_signed_public_key());
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
+#[test]
+fun earthquake_and_identity_enclave_instances_do_not_interfere() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::create_earthquake_verifier_config_for_testing(
+        &mut registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        &mut ctx,
+    );
+    metadata_verifier::create_identity_verifier_config_for_testing(
+        &mut registry,
+        updated_pcr0(),
+        updated_pcr1(),
+        updated_pcr2(),
+        &mut ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_config_for_testing(
+        &mut registry,
+        metadata_verifier::earthquake_v1_config_key(),
+        valid_public_key(),
+        nitro_fixture_expires_at_ms(),
+        &mut ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_config_for_testing(
+        &mut registry,
+        metadata_verifier::identity_v1_config_key(),
+        identity_signed_public_key(),
+        nitro_fixture_expires_at_ms(),
+        &mut ctx,
+    );
+
+    let (earthquake_family, _, _, earthquake_public_key, earthquake_enabled, _, _, _) =
+        metadata_verifier::enclave_instance_fields_for_testing(&registry, valid_public_key());
+    assert!(earthquake_family == reader::verifier_family_earthquake_oracle());
+    assert!(earthquake_public_key == valid_public_key());
+    assert!(earthquake_enabled);
+
+    let (identity_family, _, _, identity_public_key, identity_enabled, _, _, _) =
+        metadata_verifier::enclave_instance_fields_for_testing(
+            &registry,
+            identity_signed_public_key(),
+        );
+    assert!(identity_family == reader::verifier_family_identity());
+    assert!(identity_public_key == identity_signed_public_key());
+    assert!(identity_enabled);
+
+    assert!(valid_public_key() != identity_signed_public_key());
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EVerifierFamilyMismatch)]
+fun assert_enclave_signed_bytes_rejects_family_mismatch() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::create_identity_verifier_config_for_testing(
+        &mut registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        &mut ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_config_for_testing(
+        &mut registry,
+        metadata_verifier::identity_v1_config_key(),
+        identity_signed_public_key(),
+        nitro_fixture_expires_at_ms(),
+        &mut ctx,
+    );
+
+    let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(
+        &registry,
+        reader::verifier_family_earthquake_oracle(),
+        metadata_verifier::identity_v1_config_key(),
+        &identity_signed_message(),
+        &identity_signed_signature(),
+        &identity_signed_public_key(),
+        nitro_fixture_timestamp_ms(),
+    );
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclaveInstanceConfigMismatch)]
+fun assert_enclave_signed_bytes_rejects_config_version_mismatch() {
+    let (mut registry, mut ctx) = direct_initialized();
+
+    metadata_verifier::create_identity_verifier_config_for_testing(
+        &mut registry,
+        valid_pcr0(),
+        valid_pcr1(),
+        valid_pcr2(),
+        &mut ctx,
+    );
+    metadata_verifier::add_enclave_instance_for_config_for_testing(
+        &mut registry,
+        metadata_verifier::identity_v1_config_key(),
+        identity_signed_public_key(),
+        nitro_fixture_expires_at_ms(),
+        &mut ctx,
+    );
+    metadata_verifier::update_identity_verifier_config_pcrs_for_testing(
+        &mut registry,
+        updated_pcr0(),
+        updated_pcr1(),
+        updated_pcr2(),
+        &mut ctx,
+    );
+
+    let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(
+        &registry,
+        reader::verifier_family_identity(),
+        metadata_verifier::identity_v1_config_key(),
+        &identity_signed_message(),
+        &identity_signed_signature(),
+        &identity_signed_public_key(),
+        nitro_fixture_timestamp_ms(),
+    );
+
+    metadata_verifier::destroy_verifier_registry_for_testing(registry);
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EEnclavePcrMismatch)]
+fun identity_enclave_registration_rejects_pcr_mismatch() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        let mut attestation_clock = clock::create_for_testing(scenario.ctx());
+        attestation_clock.set_for_testing(nitro_fixture_timestamp_ms());
+
+        admin::create_identity_verifier_config(
+            &cap,
+            &mut registry,
+            updated_pcr0(),
+            nitro_fixture_pcr1(),
+            nitro_fixture_pcr2(),
+            scenario.ctx(),
+        );
+        let document = nitro_attestation::load_nitro_attestation(
+            nitro_attestation_payload(),
+            &attestation_clock,
+        );
+
+        metadata_verifier::register_enclave_instance_for_config(
+            &mut registry,
+            metadata_verifier::identity_v1_config_key(),
+            document,
+            nitro_fixture_expires_at_ms(),
+            scenario.ctx(),
+        );
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+        attestation_clock.destroy_for_testing();
+    };
+
+    scenario.end();
+}
+
+fun identity_signed_public_key(): vector<u8> {
+    x"49ce814297f828600eecb2af2973467c3123ccaa014880131403f6591578d25e"
+}
+
+fun identity_signed_signature(): vector<u8> {
+    x"34b345390b4733f9fa9adf06d2b0e37b0e4e0af576ba59c1e7d9048374a20bb75a1e0549c749166459233000c80dbfd010053255c17bcc84775fe3a2faeab603"
+}
+
+fun identity_signed_message(): vector<u8> {
+    x"6964656e746974792d6174746573746174696f6e2d7369676e65642d62797465732d666978747572652d7631"
+}
+
 fun initialized(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());

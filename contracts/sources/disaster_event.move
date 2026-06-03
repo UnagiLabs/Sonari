@@ -144,6 +144,8 @@ public(package) fun create_from_signed_payload(
     let (verifier_config_key, verifier_config_version, enclave_instance_public_key) =
         metadata_verifier::assert_enclave_signed_bytes(
             verifier_registry,
+            metadata_verifier::verifier_family_earthquake_oracle(),
+            metadata_verifier::earthquake_v1_config_key(),
             &payload_bcs,
             &signature,
             &public_key,
