@@ -1107,8 +1107,8 @@ Resources:
       Runtime: nodejs22.x
       Handler: dist/src/runner_workflow.handler
       Role: !GetAtt RunnerControlLambdaRole.Arn
-      Timeout: 60
-      MemorySize: 256
+      Timeout: 900
+      MemorySize: 512
       Code:
         S3Bucket: !Ref LambdaCodeS3Bucket
         S3Key: !Ref LambdaCodeS3Key
@@ -1148,7 +1148,7 @@ Resources:
       Runtime: nodejs22.x
       Handler: dist/src/source_archiver.sourceArchiverHandler
       Role: !GetAtt SourceArchiverLambdaRole.Arn
-      Timeout: 60
+      Timeout: 240
       MemorySize: 512
       Code:
         S3Bucket: !Ref LambdaCodeS3Bucket
@@ -1341,21 +1341,21 @@ Resources:
             "ApplyResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ArchiveSources",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ArchiveSources": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RelayerPreviewOrDryRun",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "RelayerPreviewOrDryRun": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RelayerResultComplete",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
@@ -1369,7 +1369,7 @@ Resources:
             "RecordRelayerSuccess": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result.$": "$.result", "relayer_success.$": "$.relayer_success" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
               "Next": "StopInstance",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]

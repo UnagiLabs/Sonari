@@ -9,6 +9,7 @@ import {
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
+    type EarthquakeOraclePayload,
     type OffchainStatus,
     type OracleErrorCode,
     type TeeCoreResult,
@@ -1977,7 +1978,7 @@ async function applyResultToRow(
 ): Promise<void> {
     if (result.status === "finalized") {
         const metadata = finalizedPayloadMetadata(result);
-        row.tee_result_json = JSON.stringify(result);
+        row.tee_result_json = JSON.stringify(compactTeeResultForState(result));
         row.updated_at_ms = nowMs;
         row.error_code = null;
         row.runner_phase = "complete";
@@ -1997,7 +1998,7 @@ async function applyResultToRow(
         row.walrus_archive_updated_at_ms = null;
         return;
     }
-    row.tee_result_json = JSON.stringify(result);
+    row.tee_result_json = JSON.stringify(compactTeeResultForState(result));
     row.updated_at_ms = nowMs;
     row.error_code = result.error_code;
     row.runner_phase = "complete";
@@ -2009,6 +2010,34 @@ async function applyResultToRow(
     row.status = result.status;
     row.retry_count += 1;
     row.next_retry_at_ms = pendingNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+}
+
+function compactTeeResultForState(result: TeeCoreResult): Record<string, unknown> {
+    if (result.status === "finalized") {
+        const payload = result.payload as EarthquakeOraclePayload;
+        return {
+            status: result.status,
+            source_event_id: payload.source_event_id,
+            payload: {
+                event_uid: payload.event_uid,
+                event_revision: payload.event_revision,
+                evidence_manifest_uri: payload.evidence_manifest_uri,
+                evidence_manifest_hash: payload.evidence_manifest_hash,
+                verified_at_ms: payload.verified_at_ms,
+            },
+            payload_bcs_hex: result.payload_bcs_hex,
+            signature: result.signature,
+            public_key: result.public_key,
+            verifier_config_key: result.verifier_config_key,
+            verifier_config_version: result.verifier_config_version,
+            enclave_instance_public_key: result.enclave_instance_public_key,
+        };
+    }
+    return {
+        status: result.status,
+        source_event_id: result.source_event_id,
+        error_code: result.error_code,
+    };
 }
 
 function applySourceArchiveResultToRow(

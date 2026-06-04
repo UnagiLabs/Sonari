@@ -89,7 +89,7 @@ ManualWatcher の smoke は、`pnpm aws:smoke:earthquake-manual` の終了だけ
 
 `AWS_RUNNER_PROCESS_FAILED` と `metadata_verifier::assert_attestation_pcr_matches` abort code 21 が出る場合、deployed EIF の PCR0/1/2 と Sui `VerifierRegistry` の earthquake config が一致していません。GitHub Actions deploy run の `Earthquake EIF PCRs` から PCR0/1/2 を取得し、AdminCap wallet で `admin::update_earthquake_verifier_config_pcrs` を実行します。更新後は config version と transaction digest を記録してから再実行します。
 
-`scripts/register-verifier-configs.sh` は、現行 Sui CLI の既存 config abort 表現が `with code 9` の場合、already registered 判定に引っかからない可能性があります。その場合は `admin::update_earthquake_verifier_config_pcrs` を直接実行するか、script の abort code 判定を別途改修します。
+`scripts/register-verifier-configs.sh` は、既存 config abort 表現の `with code 9` も already registered として扱い、create 失敗後に PCR update へ進みます。
 
 SourceArchiver 単体は `pnpm aws:verify:source-archiver` で先に確認します。ここで Walrus blob id が expected と一致し、success log が出ていれば、ManualWatcher smoke の失敗原因を runner / PCR / relayer 側へ切り分けやすくなります。
 

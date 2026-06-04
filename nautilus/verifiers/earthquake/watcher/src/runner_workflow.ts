@@ -72,7 +72,7 @@ import {
 
 const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
 const SOURCE_FETCH_TIMEOUT_MS = 30_000;
-const SOURCE_ARCHIVER_HTTP_TIMEOUT_MS = 55_000;
+const SOURCE_ARCHIVER_HTTP_TIMEOUT_MS = 210_000;
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -301,25 +301,25 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "apply_result";
               source_event_id: string;
               attempt?: number | undefined;
-              result: TeeCoreResult;
+              result_s3_key: string;
           }
         | {
               action: "archive_sources";
               source_event_id: string;
               attempt?: number | undefined;
-              result: TeeCoreResult;
+              result_s3_key: string;
           }
         | {
               action: "relayer_preview_or_dry_run";
               source_event_id: string;
               attempt?: number | undefined;
-              result: TeeCoreResult;
+              result_s3_key: string;
           }
         | {
               action: "record_relayer_success";
               source_event_id: string;
               attempt?: number | undefined;
-              result: TeeCoreResult;
+              result_s3_key: string;
               relayer_success: RelayerRecordSuccessInput;
           }
         | {
@@ -368,18 +368,25 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               command_poll_count?: number;
               command_status: "PENDING" | "SUCCEEDED" | "FAILED";
           }
-        | { source_event_id: string; attempt?: number | undefined; result: TeeCoreResult }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
+          }
         | {
               source_event_id: string;
               attempt?: number | undefined;
               applied: true;
-              result: TeeCoreResult;
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
           }
         | {
               source_event_id: string;
               attempt?: number | undefined;
               relayer: "skipped" | "failed";
-              result: TeeCoreResult;
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
           }
         | {
               source_event_id: string;
@@ -391,20 +398,23 @@ export type RunnerControlResult = RunnerControlVerifierKind &
                   | "retryable_failed"
                   | "integrity_failed";
               source_artifact_s3_keys: string[];
-              result: TeeCoreResult;
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
           }
         | {
               source_event_id: string;
               attempt?: number | undefined;
               relayer: "succeeded";
-              result: TeeCoreResult;
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
               relayer_success: RelayerRecordSuccessInput;
           }
         | {
               source_event_id: string;
               attempt?: number | undefined;
               relayer: "recorded";
-              result: TeeCoreResult;
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
           }
         | { source_event_id: string; attempt?: number | undefined; failed: true }
     );
@@ -730,14 +740,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     phase: "reading_result",
                     resultS3Key: event.result_s3_key,
                 });
-                const text = await readRunnerResultText(options.s3, {
-                    bucket: options.config.resultBucket,
-                    key: event.result_s3_key,
-                });
+                const result = await readTeeResultFromS3(options, event);
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
-                    result: parseTeeResult(text, event.source_event_id),
+                    result_s3_key: event.result_s3_key,
+                    result_status: result.status,
                 });
             }
             case "apply_result": {
@@ -745,13 +753,15 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const nowMs = options.now?.() ?? Date.now();
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "applying_result",
+                    resultS3Key: event.result_s3_key,
                     nowMs,
                 });
+                const result = await readTeeResultFromS3(options, event);
                 const applied = await repository.applyRunnerResult(
                     event.source_event_id,
-                    event.result,
+                    result,
                     nowMs,
-                    isPendingTeeResult(event.result) ? nowMs + HOUR_MS : undefined,
+                    isPendingTeeResult(result) ? nowMs + HOUR_MS : undefined,
                     event.attempt,
                 );
                 if (!applied) {
@@ -761,16 +771,19 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     applied: true,
-                    result: event.result,
+                    result_s3_key: event.result_s3_key,
+                    result_status: result.status,
                 });
             }
             case "archive_sources": {
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
-                if (event.result.status !== "finalized") {
+                const result = await readTeeResultFromS3(options, event);
+                if (result.status !== "finalized") {
                     await requireCurrentWorkflowAttempt(options, event, {
                         phase: "complete",
                         allowNonProcessing: true,
+                        resultS3Key: event.result_s3_key,
                         nowMs,
                     });
                     const marked = await repository.markSourceArchiveResult(
@@ -787,12 +800,14 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         attempt: event.attempt,
                         source_archive: "skipped",
                         source_artifact_s3_keys: [],
-                        result: event.result,
+                        result_s3_key: event.result_s3_key,
+                        result_status: result.status,
                     });
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "archiving_sources",
                     allowNonProcessing: true,
+                    resultS3Key: event.result_s3_key,
                     nowMs,
                 });
                 const archive = options.sourceArchive ?? buildSourceArchiveFromConfig(options);
@@ -800,7 +815,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     sourceEventId: event.source_event_id,
                     attempt: event.attempt,
                     resultBucket: options.config.resultBucket,
-                    result: event.result,
+                    result,
                     archive,
                 });
                 const stateUpdate =
@@ -821,23 +836,27 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     attempt: event.attempt,
                     source_archive: archived.status,
                     source_artifact_s3_keys: archived.artifactS3Keys,
-                    result: event.result,
+                    result_s3_key: event.result_s3_key,
+                    result_status: result.status,
                 });
             }
             case "relayer_preview_or_dry_run": {
                 const repository = requireRepository(options);
                 const relayer = options.relayer ?? buildRelayerFromConfig(options.config);
-                if (relayer === undefined || event.result.status !== "finalized") {
+                const result = await readTeeResultFromS3(options, event);
+                if (relayer === undefined || result.status !== "finalized") {
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "skipped",
-                        result: event.result,
+                        result_s3_key: event.result_s3_key,
+                        result_status: result.status,
                     });
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "complete",
                     allowNonProcessing: true,
+                    resultS3Key: event.result_s3_key,
                 });
                 const row = await repository.get(event.source_event_id);
                 if (row?.source_archive_status !== "success") {
@@ -845,30 +864,33 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "skipped",
-                        result: event.result,
+                        result_s3_key: event.result_s3_key,
+                        result_status: result.status,
                     });
                 }
                 const nowMs = options.now?.() ?? Date.now();
-                const result = await relayer.relay(event.result);
-                if (result.ok) {
+                const relayed = await relayer.relay(result);
+                if (relayed.ok) {
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
                         relayer: "succeeded",
-                        result: event.result,
-                        relayer_success: compactRelayerSuccess(result.value),
+                        result_s3_key: event.result_s3_key,
+                        result_status: result.status,
+                        relayer_success: compactRelayerSuccess(relayed.value),
                     });
                 }
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "complete",
                     nowMs,
+                    resultS3Key: event.result_s3_key,
                     allowNonProcessing: true,
                 });
                 const marked = await repository.markRelayerFailed(
                     event.source_event_id,
                     relayer.mode,
-                    result.error_code,
-                    result.message,
+                    relayed.error_code,
+                    relayed.message,
                     nowMs,
                     event.attempt,
                 );
@@ -879,7 +901,8 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "failed",
-                    result: event.result,
+                    result_s3_key: event.result_s3_key,
+                    result_status: result.status,
                 });
             }
             case "record_relayer_success": {
@@ -888,11 +911,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 await requireCurrentWorkflowAttempt(options, event, {
                     phase: "complete",
                     nowMs,
+                    resultS3Key: event.result_s3_key,
                     allowNonProcessing: true,
                 });
+                const result = await readTeeResultFromS3(options, event);
                 const marked = await repository.markRelayerSucceeded(
                     event.source_event_id,
-                    buildRelayerSuccessForRecord(event.relayer_success, event.result),
+                    buildRelayerSuccessForRecord(event.relayer_success, result),
                     nowMs,
                     event.attempt,
                 );
@@ -903,7 +928,8 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "recorded",
-                    result: event.result,
+                    result_s3_key: event.result_s3_key,
+                    result_status: result.status,
                 });
             }
             case "mark_failed": {
@@ -2076,6 +2102,24 @@ function parseTeeResult(text: string, expectedSourceEventId: string): TeeCoreRes
         return parsed as TeeCoreResult;
     }
     throw new Error("invalid TEE result");
+}
+
+async function readTeeResultFromS3(
+    options: RunnerControlHandlerOptions,
+    event: { source_event_id: string; result_s3_key: string },
+): Promise<TeeCoreResult> {
+    const inlineResult = (event as { result?: unknown }).result;
+    if (inlineResult !== undefined) {
+        return parseTeeResult(JSON.stringify(inlineResult), event.source_event_id);
+    }
+    if (!isNonEmptyString(event.result_s3_key)) {
+        throw new Error("result_s3_key is required");
+    }
+    const text = await readRunnerResultText(options.s3, {
+        bucket: options.config.resultBucket,
+        key: event.result_s3_key,
+    });
+    return parseTeeResult(text, event.source_event_id);
 }
 
 function isValidNonFinalizedTeeErrorCode(

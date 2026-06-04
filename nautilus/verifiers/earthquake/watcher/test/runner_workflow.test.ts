@@ -271,6 +271,10 @@ describe("AWS runner workflow helper", () => {
             new URL("../../../../../infra/aws/sonari-verifier-runner/template.yaml", import.meta.url),
             "utf8",
         );
+        const earthquakeStateMachine = template.slice(
+            template.indexOf("EarthquakeRunnerStateMachine:"),
+            template.indexOf("MembershipRunnerStateMachine:"),
+        );
 
         expect(template).toContain('echo "SONARI_WALRUS_N_SHARDS=1000"');
         expect(template).toContain("walrus_n_shards: $walrus_n_shards");
@@ -284,6 +288,18 @@ describe("AWS runner workflow helper", () => {
         expect(template.indexOf('"RelayerPreviewOrDryRun"')).toBeGreaterThan(
             template.indexOf('"ArchiveSources"'),
         );
+        expect(earthquakeStateMachine).toContain('"action": "apply_result"');
+        expect(earthquakeStateMachine).toContain('"action": "archive_sources"');
+        expect(earthquakeStateMachine).toContain('"action": "relayer_preview_or_dry_run"');
+        expect(earthquakeStateMachine).toContain('"action": "record_relayer_success"');
+        expect(earthquakeStateMachine).toContain('"result_s3_key.$": "$.result_s3_key"');
+        expect(earthquakeStateMachine).not.toContain('"result.$": "$.result"');
+        expect(template).toContain("RunnerControlLambda:");
+        expect(template).toContain("Handler: dist/src/runner_workflow.handler");
+        expect(template).toContain("Timeout: 900");
+        expect(template).toContain("SourceArchiverLambda:");
+        expect(template).toContain("Handler: dist/src/source_archiver.sourceArchiverHandler");
+        expect(template).toContain("Timeout: 240");
     });
 
     it("dispatches SSM command and polls pending/success states", async () => {
@@ -615,7 +631,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result: pendingSourceResult("us7000sonari"),
-            }),
+            } as never),
         ).rejects.toThrow(/stale runner workflow attempt/);
         await expect(
             handler({
@@ -674,7 +690,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result: finalizedResult(),
-            }),
+            } as never),
         ).rejects.toThrow(/stale runner workflow attempt/);
 
         expect(relayer.inputs).toEqual([]);
@@ -693,6 +709,7 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
+        const result = pendingSourceResult("us7000sonari");
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -974,14 +991,37 @@ describe("AWS runner workflow helper", () => {
             }),
         ).resolves.toMatchObject({
             source_event_id: "us7000sonari",
-            result: {
-                status: "finalized",
-                payload: { event_uid: hashedEventUid },
-            },
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+            result_status: "finalized",
         });
     });
 
-    it("applies TEE results to DynamoDB-compatible state and skips relayer when not configured", async () => {
+    it("keeps full TEE result bodies out of workflow task results", async () => {
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
+            config: baseConfig(),
+        });
+
+        const read = await handler({
+            action: "read_result",
+            source_event_id: "us7000sonari",
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+        });
+
+        expect(read).toMatchObject({
+            source_event_id: "us7000sonari",
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+            result_status: "finalized",
+        });
+        expect("result" in read).toBe(false);
+        expect(JSON.stringify(read).length).toBeLessThan(512);
+    });
+
+    it("applies TEE results from S3 to DynamoDB-compatible state and skips relayer when not configured", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
@@ -989,28 +1029,28 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
+        const result = pendingSourceResult("us7000sonari");
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
             ssm: new RecordingSsmClient(),
-            s3: new RecordingS3Client(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
             repository,
             now: () => 1_800_000_001_000,
             config: baseConfig(),
         });
-        const result = pendingSourceResult("us7000sonari");
 
         await handler({
             action: "apply_result",
             source_event_id: "us7000sonari",
             attempt: 1,
-            result,
+            result_s3_key: "results/us7000sonari/cmd-123.json",
         });
         const relayer = await handler({
             action: "relayer_preview_or_dry_run",
             source_event_id: "us7000sonari",
             attempt: 1,
-            result,
+            result_s3_key: "results/us7000sonari/cmd-123.json",
         });
 
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
@@ -1018,6 +1058,58 @@ describe("AWS runner workflow helper", () => {
             error_code: "SHAKEMAP_PRODUCT_MISSING",
         });
         expect(relayer).toMatchObject({ relayer: "skipped" });
+    });
+
+    it("stores only a compact finalized result summary in DynamoDB state", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const baseResult = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        const result = {
+            ...baseResult,
+            affected_cells: {
+                ...baseResult.affected_cells,
+                affected_cells: Array.from({ length: 20_000 }, (_, index) => ({
+                    h3_index: String(6_088_190_135_139_041_27n + BigInt(index)),
+                    intensity_value: 831,
+                    cell_band: 2,
+                })),
+            },
+        };
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
+            repository,
+            now: () => 1_800_000_001_000,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "apply_result",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+        });
+
+        const row = await repository.get("us7000sonari");
+        expect(row?.tee_result_json).not.toContain("affected_cells");
+        expect(row?.tee_result_json?.length).toBeLessThan(2_000);
+        expect(JSON.parse(row?.tee_result_json ?? "{}")).toMatchObject({
+            status: "finalized",
+            payload: {
+                evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
+                evidence_manifest_hash: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+            },
+            payload_bcs_hex: expect.any(String),
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
+        });
     });
 
     it("archives finalized source manifest entries before relayer work", async () => {
@@ -1050,13 +1142,13 @@ describe("AWS runner workflow helper", () => {
             source_event_id: "us7000sonari",
             attempt: 1,
             result,
-        });
+        } as never);
         const relayed = await handler({
             action: "relayer_preview_or_dry_run",
             source_event_id: "us7000sonari",
             attempt: 1,
             result,
-        });
+        } as never);
 
         expect(archived).toMatchObject({
             source_archive: "success",
@@ -1141,7 +1233,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "integrity_failed" });
         expect(sourceArchive.fetches).toEqual([]);
         expect(sourceArchive.puts).toEqual([]);
@@ -1222,7 +1314,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result: tamperedResult,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "integrity_failed" });
         expect(sourceArchive.fetches).toEqual([]);
         expect(sourceArchive.puts).toEqual([]);
@@ -1320,7 +1412,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result: tamperedResult,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "integrity_failed" });
         expect(sourceArchive.fetches).toEqual([]);
         expect(sourceArchive.puts).toEqual([]);
@@ -1372,7 +1464,7 @@ describe("AWS runner workflow helper", () => {
                         source_event_id: "us7000sonari",
                         attempt: 1,
                         result,
-                    }),
+                    } as never),
                 ).resolves.toMatchObject({ source_archive: "integrity_failed" });
                 expect(s3.puts).toEqual([]);
             }
@@ -1411,7 +1503,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "integrity_failed" });
         await expect(
             handler({
@@ -1419,7 +1511,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ relayer: "skipped" });
         expect(relayer.inputs).toEqual([]);
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
@@ -1458,7 +1550,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "integrity_failed" });
         expect(archive.puts).toEqual([]);
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
@@ -1497,7 +1589,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "retryable_failed" });
 
         expect(JSON.stringify(result)).toBe(originalJson);
@@ -1539,7 +1631,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ source_archive: "configuration_failed" });
 
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
@@ -1747,7 +1839,7 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
-            }),
+            } as never),
         ).resolves.toMatchObject({ relayer: "failed" });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             relayer_mode: "dry_run",
@@ -2021,7 +2113,7 @@ describe("AWS runner workflow helper", () => {
             source_event_id: "us7000sonari",
             attempt: 1,
             result,
-        });
+        } as never);
         expect(relayerResult).toMatchObject({
             relayer: "succeeded",
             relayer_success: {
@@ -2052,7 +2144,7 @@ describe("AWS runner workflow helper", () => {
                 attempt: 1,
                 result,
                 relayer_success: relayerResult.relayer_success,
-            }),
+            } as never),
         ).resolves.toMatchObject({ relayer: "recorded" });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "submitted",
