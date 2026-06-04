@@ -18,6 +18,19 @@ const DEFAULT_WALRUS_EPOCHS = 1;
 const DEFAULT_WALRUS_DELETABLE = false;
 const SENSITIVE_OUTPUT_LINE_PATTERN =
     /\b(token|secret|private|keystore|wallet|credential|password|api[_-]?key|suiprivkey)\b/iu;
+const ERROR_CAUSE_CHAIN_MAX_DEPTH = 5;
+const ERROR_STACK_TOP_MAX_LINES = 3;
+const ERROR_CAUSE_DIAGNOSTIC_KEYS = [
+    "code",
+    "errno",
+    "syscall",
+    "hostname",
+    "host",
+    "port",
+    "address",
+    "reason",
+    "type",
+] as const;
 
 export type SourceArchiverErrorKind = "bad_request" | "configuration" | "integrity" | "retryable";
 
@@ -123,6 +136,20 @@ interface SourceArchiverRequestLogContext {
     expectedWalrusBlobId: string;
 }
 
+interface SourceArchiverErrorCauseDiagnostic {
+    name: string;
+    message: string;
+    code?: string;
+    errno?: string;
+    syscall?: string;
+    hostname?: string;
+    host?: string;
+    port?: string;
+    address?: string;
+    reason?: string;
+    type?: string;
+}
+
 export type SourceArchiverHandlerFailureStage =
     | "auth"
     | "request_parse"
@@ -147,11 +174,23 @@ export type SourceArchiverLogEvent =
           walrusTxDigest?: string;
           durationMs: number;
       })
+    | {
+          event: "source_archiver.walrus_store.step";
+          step: WriteBlobStep["step"];
+          blobId: string;
+          blobObjectId?: string;
+          txDigest?: string;
+          durationMs: number;
+      }
     | (SourceArchiverRequestLogContext & {
           event: "source_archiver.walrus_store.failure";
           durationMs: number;
           errorName: string;
           errorMessage: string;
+          errorClass: string;
+          errorCode?: string;
+          errorCauseChain: SourceArchiverErrorCauseDiagnostic[];
+          stackTop: string[];
       })
     | (Partial<SourceArchiverRequestLogContext> & {
           event: "source_archiver.handler.failure";
@@ -244,6 +283,7 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
                 epochs: this.epochs,
                 deletable: this.deletable,
                 onStep: (step) => {
+                    this.logger(walrusStoreStepLogEvent(step, startedAt));
                     if (step.step !== "registered") {
                         return;
                     }
@@ -495,6 +535,7 @@ function walrusStoreFailureLogEvent(
     startedAt: number,
     error: unknown,
 ): SourceArchiverLogEvent {
+    const errorCode = readDiagnosticStringProperty(error, "code");
     return {
         event: "source_archiver.walrus_store.failure",
         ...context,
@@ -503,6 +544,10 @@ function walrusStoreFailureLogEvent(
         errorMessage: redactSensitiveErrorMessage(
             error instanceof Error ? error.message : String(error),
         ),
+        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        ...optionalProperty("errorCode", errorCode),
+        errorCauseChain: errorCauseChainDiagnostics(error),
+        stackTop: errorStackTop(error),
     };
 }
 
@@ -511,6 +556,99 @@ function redactSensitiveErrorMessage(message: string): string {
         return message;
     }
     return `[redacted-sensitive-message sha256=${createHash("sha256").update(message).digest("hex")}]`;
+}
+
+function walrusStoreStepLogEvent(step: WriteBlobStep, startedAt: number): SourceArchiverLogEvent {
+    return {
+        event: "source_archiver.walrus_store.step",
+        step: step.step,
+        blobId: step.blobId,
+        ...optionalProperty("blobObjectId", readWalrusStepBlobObjectId(step)),
+        ...optionalProperty("txDigest", readWalrusStepTxDigest(step)),
+        durationMs: durationMsSince(startedAt),
+    };
+}
+
+function readWalrusStepBlobObjectId(step: WriteBlobStep): string | undefined {
+    if (step.step === "registered" || step.step === "uploaded" || step.step === "certified") {
+        return step.blobObjectId;
+    }
+    return undefined;
+}
+
+function readWalrusStepTxDigest(step: WriteBlobStep): string | undefined {
+    if (step.step === "registered" || step.step === "uploaded") {
+        return step.txDigest;
+    }
+    return undefined;
+}
+
+function errorCauseChainDiagnostics(error: unknown): SourceArchiverErrorCauseDiagnostic[] {
+    const diagnostics: SourceArchiverErrorCauseDiagnostic[] = [];
+    let current: unknown = error;
+    for (let depth = 0; depth < ERROR_CAUSE_CHAIN_MAX_DEPTH; depth += 1) {
+        if (current === undefined || current === null) {
+            break;
+        }
+        diagnostics.push(errorCauseDiagnostic(current));
+        current = readUnknownProperty(current, "cause");
+    }
+    return diagnostics;
+}
+
+function errorCauseDiagnostic(error: unknown): SourceArchiverErrorCauseDiagnostic {
+    return {
+        name: error instanceof Error ? error.name : typeof error,
+        message: redactSensitiveErrorMessage(
+            error instanceof Error ? error.message : String(error),
+        ),
+        ...errorCauseDiagnosticProperties(error),
+    };
+}
+
+function errorCauseDiagnosticProperties(
+    error: unknown,
+): Partial<Pick<SourceArchiverErrorCauseDiagnostic, (typeof ERROR_CAUSE_DIAGNOSTIC_KEYS)[number]>> {
+    const diagnostics: Partial<
+        Pick<SourceArchiverErrorCauseDiagnostic, (typeof ERROR_CAUSE_DIAGNOSTIC_KEYS)[number]>
+    > = {};
+    for (const key of ERROR_CAUSE_DIAGNOSTIC_KEYS) {
+        const value = readDiagnosticStringProperty(error, key);
+        if (value !== undefined) {
+            diagnostics[key] = redactSensitiveErrorMessage(value);
+        }
+    }
+    return diagnostics;
+}
+
+function errorStackTop(error: unknown): string[] {
+    if (!(error instanceof Error) || error.stack === undefined) {
+        return [];
+    }
+    return error.stack
+        .split("\n")
+        .slice(0, ERROR_STACK_TOP_MAX_LINES)
+        .map((line) => redactSensitiveErrorMessage(line));
+}
+
+function readDiagnosticStringProperty(error: unknown, key: string): string | undefined {
+    const value = readUnknownProperty(error, key);
+    if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        typeof value === "bigint"
+    ) {
+        return String(value);
+    }
+    return undefined;
+}
+
+function readUnknownProperty(input: unknown, key: string): unknown {
+    if (!isRecord(input)) {
+        return undefined;
+    }
+    return input[key];
 }
 
 function durationMsSince(startedAt: number): number {

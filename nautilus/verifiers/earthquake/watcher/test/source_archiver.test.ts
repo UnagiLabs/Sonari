@@ -252,6 +252,14 @@ describe("source archiver Walrus store", () => {
                 deletable: false,
             }),
             expect.objectContaining({
+                event: "source_archiver.walrus_store.step",
+                step: "registered",
+                blobId: "testBlob_123456",
+                blobObjectId: validBlobObjectId,
+                txDigest: validTxDigest,
+                durationMs: expect.any(Number),
+            }),
+            expect.objectContaining({
                 event: "source_archiver.walrus_store.success",
                 walrusBlobId: "testBlob_123456",
                 walrusBlobObjectId: validBlobObjectId,
@@ -346,9 +354,31 @@ describe("source archiver Walrus store", () => {
             blobId: "testBlob_123456",
             blobObjectId: validBlobObjectId,
         });
-        sdk.failWrite = new Error(
-            `upload relay failed with private key ${privateKey} token=abc password=secret`,
+        const socketCause = Object.assign(
+            new Error(
+                `getaddrinfo ENOTFOUND upload-relay.testnet.walrus.space token=abc ${privateKey}`,
+            ),
+            {
+                code: "ENOTFOUND",
+                errno: -3008,
+                syscall: "getaddrinfo",
+                hostname: "upload-relay.testnet.walrus.space",
+                host: "upload-relay.testnet.walrus.space",
+                port: 443,
+                address: "203.0.113.10",
+                reason: "dns lookup failed",
+                type: "system",
+            },
         );
+        sdk.failWrite = Object.assign(
+            new TypeError(`fetch failed with private key ${privateKey}`, { cause: socketCause }),
+            {
+                code: "UND_ERR_SOCKET",
+            },
+        );
+        sdk.failWrite.stack = `TypeError: fetch failed with private key ${privateKey}
+    at walrus secret token frame
+    at writeBlob`;
         const logger = new RecordingSourceArchiverLogger();
         const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, logger.log);
 
@@ -360,12 +390,43 @@ describe("source archiver Walrus store", () => {
         const failure = logger.events.at(-1);
         expect(failure).toMatchObject({
             event: "source_archiver.walrus_store.failure",
-            errorName: "Error",
+            errorName: "TypeError",
+            errorClass: "TypeError",
+            errorCode: "UND_ERR_SOCKET",
+            errorCauseChain: [
+                expect.objectContaining({
+                    name: "TypeError",
+                    code: "UND_ERR_SOCKET",
+                }),
+                expect.objectContaining({
+                    name: "Error",
+                    code: "ENOTFOUND",
+                    errno: "-3008",
+                    syscall: "getaddrinfo",
+                    hostname: "upload-relay.testnet.walrus.space",
+                    host: "upload-relay.testnet.walrus.space",
+                    port: "443",
+                    address: "203.0.113.10",
+                    reason: "dns lookup failed",
+                    type: "system",
+                }),
+            ],
+            stackTop: [
+                expect.stringMatching(/^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u),
+                expect.stringMatching(/^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u),
+                "    at writeBlob",
+            ],
         });
         if (failure?.event !== "source_archiver.walrus_store.failure") {
             throw new Error("expected Walrus store failure event");
         }
         expect(failure.errorMessage).toMatch(
+            /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
+        );
+        expect(failure.errorCauseChain[0]?.message).toMatch(
+            /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
+        );
+        expect(failure.errorCauseChain[1]?.message).toMatch(
             /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
         );
         expect(JSON.stringify(logger.events)).not.toContain(privateKey);
