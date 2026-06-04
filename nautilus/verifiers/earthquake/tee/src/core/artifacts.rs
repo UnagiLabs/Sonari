@@ -47,6 +47,48 @@ pub struct StoredSourceRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvidenceManifest {
+    pub schema_version: u32,
+    pub oracle_version: u64,
+    pub event_uid: String,
+    pub event_revision: u32,
+    pub hazard_type: String,
+    pub source_event_id: String,
+    pub sources: Vec<EvidenceSource>,
+    pub earthquake: EarthquakeEvidence,
+    pub affected_cells: EvidenceAffectedCells,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvidenceSource {
+    pub source: String,
+    pub product: String,
+    pub source_uri: String,
+    pub artifact_uri: String,
+    pub content_hash: String,
+    pub size_bytes: u64,
+    pub source_updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EarthquakeEvidence {
+    pub title: String,
+    pub region: String,
+    pub occurred_at_ms: u64,
+    pub magnitude_x100: u64,
+    pub source_updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvidenceAffectedCells {
+    pub uri: String,
+    pub hash: String,
+    pub root: String,
+    pub count: u64,
+    pub geo_resolution: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AffectedCellsArtifact {
     pub event_uid: String,
     pub event_revision: u32,
@@ -71,30 +113,19 @@ pub struct UnsignedPayload {
     pub intent: u8,
     pub oracle_version: u64,
     pub event_uid: String,
-    pub hazard_type: u8,
-    pub status: u8,
     pub event_revision: u32,
     pub source_event_id: String,
     pub title: String,
     pub region: String,
     pub occurred_at_ms: u64,
-    pub magnitude_x100: u64,
-    pub verified_at_ms: u64,
-    pub source_updated_at_ms: u64,
-    pub primary_source: u8,
+    pub hazard_type: u8,
+    pub status: u8,
     pub severity_band: u8,
-    pub source_set_hash: String,
-    pub raw_data_hash: String,
-    pub raw_data_uri: String,
     pub affected_cells_root: String,
-    pub affected_cells_uri: String,
-    pub affected_cells_data_hash: String,
     pub affected_cell_count: u64,
-    pub geo_resolution: u8,
-    pub cells_generation_method: u8,
-    pub cell_metric: u8,
-    pub cell_aggregation: u8,
-    pub intensity_scale: u8,
+    pub evidence_manifest_uri: String,
+    pub evidence_manifest_hash: String,
+    pub verified_at_ms: u64,
     pub freshness_deadline_ms: u64,
 }
 
@@ -107,6 +138,7 @@ pub struct ExpectedHashes {
     pub affected_cells_data_hash: String,
     pub leaf_hashes: Vec<LeafHash>,
     pub affected_cells_root: String,
+    pub evidence_manifest_hash: String,
     pub unsigned_bcs_payload_hex: String,
 }
 

@@ -24,13 +24,17 @@ import {
     type SuiNetwork,
 } from "@sonari/earthquake-relayer";
 import {
+    type AffectedCellsArtifact,
+    computeAffectedCellsRootHex,
     EARTHQUAKE_VERIFIER_CONFIG_KEY,
     type EarthquakeOraclePayload,
     type EnclaveVerificationMetadata,
     ERROR_CODES,
+    type EvidenceManifest,
     type OracleErrorCode,
     type RawDataEntry,
     type RawDataManifest,
+    type StoredSourceRef,
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
@@ -1150,6 +1154,9 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
         if (!isRecord(body) || typeof body.walrus_blob_id !== "string") {
             throw new RetryableSourceArchiveError("Walrus source archiver returned invalid JSON");
         }
+        if (body.walrus_blob_id !== input.entry.walrus_blob_id) {
+            throw new IntegritySourceArchiveError("Walrus source archiver blob id mismatch");
+        }
         return { walrusBlobId: body.walrus_blob_id };
     }
 
@@ -1602,12 +1609,49 @@ async function archiveFinalizedSources(input: {
         };
     }
     const payload = validation.value.payload as EarthquakeOraclePayload;
-    const manifestHash = rawDataManifestHash(manifest);
-    if (manifestHash !== payload.raw_data_hash) {
+    const affectedCells = validation.value.affected_cells;
+    const evidenceManifest = validation.value.evidence_manifest;
+    const affectedCellsRef = validation.value.affected_cells_ref;
+    const evidenceManifestRef = validation.value.evidence_manifest_ref;
+    if (
+        affectedCells === undefined ||
+        evidenceManifest === undefined ||
+        affectedCellsRef === undefined ||
+        evidenceManifestRef === undefined
+    ) {
         return {
             status: "integrity_failed",
             artifactS3Keys: [],
-            message: "raw_data_manifest does not match signed raw_data_hash",
+            message: "finalized result is missing generated source artifact metadata",
+        };
+    }
+    const evidenceManifestBytes = canonicalJsonBytes(evidenceManifest);
+    if (
+        `0x${createHash("sha256").update(evidenceManifestBytes).digest("hex")}` !==
+        payload.evidence_manifest_hash
+    ) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: "evidence_manifest does not match signed evidence_manifest_hash",
+        };
+    }
+    const affectedCellsBytes = canonicalJsonBytes(affectedCells);
+    const bindingError = evidenceManifestBindingError({
+        payload,
+        rawDataManifest: manifest,
+        affectedCells,
+        affectedCellsBytes,
+        evidenceManifest,
+        evidenceManifestBytes,
+        affectedCellsRef,
+        evidenceManifestRef,
+    });
+    if (bindingError !== null) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: bindingError,
         };
     }
     const artifactS3Keys: string[] = [];
@@ -1654,7 +1698,195 @@ async function archiveFinalizedSources(input: {
             };
         }
     }
+    const generatedArtifacts = [
+        {
+            entry: generatedArtifactEntry({
+                sourceEventId: input.sourceEventId,
+                product: "affected_cells_json",
+                ref: affectedCellsRef,
+            }),
+            bytes: affectedCellsBytes,
+            fileName: "affected_cells.json" as const,
+        },
+        {
+            entry: generatedArtifactEntry({
+                sourceEventId: input.sourceEventId,
+                product: "evidence_manifest_json",
+                ref: evidenceManifestRef,
+            }),
+            bytes: evidenceManifestBytes,
+            fileName: "evidence_manifest.json" as const,
+        },
+    ];
+    for (const generated of generatedArtifacts) {
+        try {
+            verifySourceBytes(generated.entry, generated.bytes);
+            const key = generatedArtifactS3Key({
+                sourceEventId: input.sourceEventId,
+                attempt: input.attempt,
+                fileName: generated.fileName,
+            });
+            await input.archive.s3.putObjectBytes({
+                bucket: input.resultBucket,
+                key,
+                bytes: generated.bytes,
+            });
+            artifactS3Keys.push(key);
+            const archived = await input.archive.walrus.archiveAndVerify({
+                entry: generated.entry,
+                bytes: generated.bytes,
+                artifactS3Key: key,
+            });
+            if (archived.walrusBlobId !== generated.entry.walrus_blob_id) {
+                return {
+                    status: "integrity_failed",
+                    artifactS3Keys,
+                    message: `Walrus blob id mismatch for ${generated.entry.uri}`,
+                };
+            }
+        } catch (error) {
+            if (error instanceof IntegritySourceArchiveError) {
+                return { status: "integrity_failed", artifactS3Keys, message: error.message };
+            }
+            if (error instanceof ConfigurationSourceArchiveError) {
+                return {
+                    status: "configuration_failed",
+                    artifactS3Keys,
+                    message: error.message,
+                };
+            }
+            return {
+                status: "retryable_failed",
+                artifactS3Keys,
+                message: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
     return { status: "success", artifactS3Keys };
+}
+
+function evidenceManifestBindingError(input: {
+    payload: EarthquakeOraclePayload;
+    rawDataManifest: RawDataManifest;
+    affectedCells: AffectedCellsArtifact;
+    affectedCellsBytes: Uint8Array;
+    evidenceManifest: EvidenceManifest;
+    evidenceManifestBytes: Uint8Array;
+    affectedCellsRef: StoredSourceRef;
+    evidenceManifestRef: StoredSourceRef;
+}): string | null {
+    if (
+        input.evidenceManifest.schema_version !== 1 ||
+        input.evidenceManifest.oracle_version !== input.payload.oracle_version ||
+        input.evidenceManifest.event_uid !== input.payload.event_uid ||
+        input.evidenceManifest.event_revision !== input.payload.event_revision ||
+        input.evidenceManifest.hazard_type !== "EARTHQUAKE" ||
+        input.evidenceManifest.source_event_id !== input.payload.source_event_id ||
+        input.evidenceManifest.earthquake.title !== input.payload.title ||
+        input.evidenceManifest.earthquake.region !== input.payload.region ||
+        input.evidenceManifest.earthquake.occurred_at_ms !== input.payload.occurred_at_ms
+    ) {
+        return "evidence_manifest metadata does not match signed payload";
+    }
+
+    if (
+        input.payload.evidence_manifest_uri !== input.evidenceManifestRef.uri ||
+        input.payload.evidence_manifest_hash !== input.evidenceManifestRef.source_hash ||
+        input.evidenceManifestRef.size_bytes !== input.evidenceManifestBytes.byteLength
+    ) {
+        return "evidence_manifest_ref does not match signed payload or manifest bytes";
+    }
+
+    if (
+        input.affectedCells.event_uid !== input.payload.event_uid ||
+        input.affectedCells.event_revision !== input.payload.event_revision ||
+        input.affectedCells.oracle_version !== input.payload.oracle_version ||
+        input.affectedCells.geo_resolution !==
+            input.evidenceManifest.affected_cells.geo_resolution ||
+        input.affectedCells.cells_generation_method !== "shakemap_gridxml_h3_grid_point_p90_v1" ||
+        input.affectedCells.cell_metric !== "USGS_MMI" ||
+        input.affectedCells.cell_aggregation !== "GRID_POINT_P90" ||
+        input.affectedCells.intensity_scale !== "MMI_X100" ||
+        input.evidenceManifest.affected_cells.uri !== input.affectedCellsRef.uri ||
+        input.evidenceManifest.affected_cells.hash !== input.affectedCellsRef.source_hash ||
+        input.evidenceManifest.affected_cells.root !== input.payload.affected_cells_root ||
+        input.evidenceManifest.affected_cells.count !== input.payload.affected_cell_count ||
+        input.evidenceManifest.affected_cells.count !== input.affectedCells.affected_cells.length ||
+        input.evidenceManifest.affected_cells.geo_resolution !==
+            input.affectedCells.geo_resolution ||
+        input.affectedCellsRef.size_bytes !== input.affectedCellsBytes.byteLength ||
+        input.affectedCellsRef.source_hash !==
+            `0x${createHash("sha256").update(input.affectedCellsBytes).digest("hex")}`
+    ) {
+        return "evidence_manifest affected_cells metadata does not match generated artifact";
+    }
+    const affectedCellsRoot = computeAffectedCellsRootHex(input.affectedCells);
+    if (
+        affectedCellsRoot === null ||
+        affectedCellsRoot !== input.payload.affected_cells_root ||
+        affectedCellsRoot !== input.evidenceManifest.affected_cells.root
+    ) {
+        return "affected_cells artifact leaves do not match signed Merkle root";
+    }
+
+    const expectedSources = input.rawDataManifest.entries
+        .map((entry) => ({
+            source: entry.name,
+            product: entry.product,
+            source_uri: entry.source_uri,
+            artifact_uri: entry.uri,
+            content_hash: entry.content_hash,
+            size_bytes: entry.size_bytes,
+        }))
+        .sort(compareEvidenceSourceBinding);
+    const actualSources = input.evidenceManifest.sources
+        .map((source) => ({
+            source: source.source,
+            product: source.product,
+            source_uri: source.source_uri,
+            artifact_uri: source.artifact_uri,
+            content_hash: source.content_hash,
+            size_bytes: source.size_bytes,
+        }))
+        .sort(compareEvidenceSourceBinding);
+
+    if (expectedSources.length !== actualSources.length) {
+        return "evidence_manifest sources do not match raw_data_manifest entries";
+    }
+    for (const [index, expected] of expectedSources.entries()) {
+        const actual = actualSources[index];
+        if (
+            actual === undefined ||
+            actual.source !== expected.source ||
+            actual.product !== expected.product ||
+            actual.source_uri !== expected.source_uri ||
+            actual.artifact_uri !== expected.artifact_uri ||
+            actual.content_hash !== expected.content_hash ||
+            actual.size_bytes !== expected.size_bytes
+        ) {
+            return "evidence_manifest sources do not match raw_data_manifest entries";
+        }
+    }
+
+    return null;
+}
+
+function compareEvidenceSourceBinding(
+    left: Pick<
+        EvidenceManifest["sources"][number],
+        "source" | "product" | "source_uri" | "artifact_uri"
+    >,
+    right: Pick<
+        EvidenceManifest["sources"][number],
+        "source" | "product" | "source_uri" | "artifact_uri"
+    >,
+): number {
+    return (
+        left.source.localeCompare(right.source) ||
+        left.product.localeCompare(right.product) ||
+        left.source_uri.localeCompare(right.source_uri) ||
+        left.artifact_uri.localeCompare(right.artifact_uri)
+    );
 }
 
 function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {
@@ -1667,25 +1899,26 @@ function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {
     }
 }
 
-function rawDataManifestHash(manifest: RawDataManifest): string {
-    return `0x${createHash("sha256").update(canonicalRawDataManifestJson(manifest)).digest("hex")}`;
+function canonicalJsonBytes(value: AffectedCellsArtifact | EvidenceManifest): Uint8Array {
+    return new TextEncoder().encode(JSON.stringify(value));
 }
 
-function canonicalRawDataManifestJson(manifest: RawDataManifest): string {
-    return JSON.stringify({
-        entries: manifest.entries.map((entry) => ({
-            name: entry.name,
-            event_id: entry.event_id,
-            product: entry.product,
-            uri: entry.uri,
-            content_hash: entry.content_hash,
-            source_uri: entry.source_uri,
-            walrus_blob_id: entry.walrus_blob_id,
-            source_hash: entry.source_hash,
-            size_bytes: entry.size_bytes,
-        })),
-        oracle_version: manifest.oracle_version,
-    });
+function generatedArtifactEntry(input: {
+    sourceEventId: string;
+    product: "affected_cells_json" | "evidence_manifest_json";
+    ref: StoredSourceRef;
+}): RawDataEntry {
+    return {
+        name: "TEE",
+        event_id: input.sourceEventId,
+        product: input.product,
+        uri: input.ref.uri,
+        content_hash: input.ref.source_hash,
+        source_uri: input.ref.uri,
+        walrus_blob_id: input.ref.walrus_blob_id,
+        source_hash: input.ref.source_hash,
+        size_bytes: input.ref.size_bytes,
+    };
 }
 
 function sourceArtifactS3Key(input: {
@@ -1700,6 +1933,19 @@ function sourceArtifactS3Key(input: {
         input.sourceEventId,
         String(input.attempt ?? 1),
         `${input.index}-${sanitizeS3KeySegment(input.product)}-${input.sourceHash.slice(2).toLowerCase()}.bin`,
+    ].join("/");
+}
+
+function generatedArtifactS3Key(input: {
+    sourceEventId: string;
+    attempt: number | undefined;
+    fileName: "affected_cells.json" | "evidence_manifest.json";
+}): string {
+    return [
+        "source-artifacts",
+        input.sourceEventId,
+        String(input.attempt ?? 1),
+        input.fileName,
     ].join("/");
 }
 

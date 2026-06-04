@@ -30,10 +30,9 @@ public struct DisasterEvent has key {
     title: String,
     region: String,
     occurred_at_ms: u64,
-    magnitude_x100: u64,
-    primary_source: u8,
     hazard_type: u8,
     hazard_label: String,
+    severity_band: u8,
     oracle_version: u64,
     payload_bcs_hash: vector<u8>,
     payload_bcs: vector<u8>,
@@ -45,15 +44,11 @@ public struct DisasterEvent has key {
     verifier_config_version: u64,
     enclave_instance_public_key: vector<u8>,
     verified_at_ms: u64,
-    source_updated_at_ms: u64,
     freshness_deadline_ms: u64,
-    source_set_hash: vector<u8>,
-    raw_data_hash: vector<u8>,
-    raw_data_uri: String,
     affected_cells_root: vector<u8>,
-    affected_cells_data_hash: vector<u8>,
-    affected_cells_uri: String,
     affected_cell_count: u64,
+    evidence_manifest_uri: String,
+    evidence_manifest_hash: vector<u8>,
     created_at_ms: u64,
 }
 
@@ -96,10 +91,10 @@ public struct DisasterEventCreated has copy, drop {
     hazard_label: String,
     oracle_version: u64,
     payload_bcs_hash: vector<u8>,
-    raw_data_uri: String,
     affected_cells_root: vector<u8>,
-    affected_cells_uri: String,
     affected_cell_count: u64,
+    evidence_manifest_uri: String,
+    evidence_manifest_hash: vector<u8>,
     created_at_ms: u64,
     actor: address,
 }
@@ -264,10 +259,9 @@ fun create_from_verified_payload(
         title: string::utf8(payload::title(&payload)),
         region: string::utf8(payload::region(&payload)),
         occurred_at_ms: payload::occurred_at_ms(&payload),
-        magnitude_x100: payload::magnitude_x100(&payload),
-        primary_source: payload::primary_source(&payload),
         hazard_type: payload::hazard_type(&payload),
         hazard_label: hazard_label(payload::hazard_type(&payload)),
+        severity_band: payload::severity_band(&payload),
         oracle_version: payload::oracle_version(&payload),
         payload_bcs_hash: hash::sha2_256(payload_bcs),
         payload_bcs,
@@ -279,15 +273,11 @@ fun create_from_verified_payload(
         verifier_config_version,
         enclave_instance_public_key,
         verified_at_ms: payload::verified_at_ms(&payload),
-        source_updated_at_ms: payload::source_updated_at_ms(&payload),
         freshness_deadline_ms: payload::freshness_deadline_ms(&payload),
-        source_set_hash: payload::source_set_hash(&payload),
-        raw_data_hash: payload::raw_data_hash(&payload),
-        raw_data_uri: string::utf8(payload::raw_data_uri(&payload)),
         affected_cells_root: payload::affected_cells_root(&payload),
-        affected_cells_data_hash: payload::affected_cells_data_hash(&payload),
-        affected_cells_uri: string::utf8(payload::affected_cells_uri(&payload)),
         affected_cell_count: payload::affected_cell_count(&payload),
+        evidence_manifest_uri: string::utf8(payload::evidence_manifest_uri(&payload)),
+        evidence_manifest_hash: payload::evidence_manifest_hash(&payload),
         created_at_ms: ctx.epoch_timestamp_ms(),
     };
     let disaster_event_id = object::id(&disaster_event);
@@ -303,10 +293,10 @@ fun create_from_verified_payload(
         hazard_label: disaster_event.hazard_label,
         oracle_version: disaster_event.oracle_version,
         payload_bcs_hash: disaster_event.payload_bcs_hash,
-        raw_data_uri: disaster_event.raw_data_uri,
         affected_cells_root: disaster_event.affected_cells_root,
-        affected_cells_uri: disaster_event.affected_cells_uri,
         affected_cell_count: disaster_event.affected_cell_count,
+        evidence_manifest_uri: disaster_event.evidence_manifest_uri,
+        evidence_manifest_hash: disaster_event.evidence_manifest_hash,
         created_at_ms: disaster_event.created_at_ms,
         actor: ctx.sender(),
     });
@@ -370,10 +360,10 @@ public fun disaster_event_created_event_fields(
     String,
     String,
     vector<u8>,
+    vector<u8>,
+    u64,
     String,
     vector<u8>,
-    String,
-    u64,
     address,
 ) {
     let DisasterEventCreated {
@@ -387,10 +377,10 @@ public fun disaster_event_created_event_fields(
         hazard_label: _,
         oracle_version: _,
         payload_bcs_hash,
-        raw_data_uri,
         affected_cells_root,
-        affected_cells_uri,
         affected_cell_count,
+        evidence_manifest_uri,
+        evidence_manifest_hash,
         created_at_ms: _,
         actor,
     } = event;
@@ -401,10 +391,10 @@ public fun disaster_event_created_event_fields(
         title,
         region,
         payload_bcs_hash,
-        raw_data_uri,
         affected_cells_root,
-        affected_cells_uri,
         affected_cell_count,
+        evidence_manifest_uri,
+        evidence_manifest_hash,
         actor,
     )
 }
@@ -412,7 +402,7 @@ public fun disaster_event_created_event_fields(
 #[test_only]
 public fun certificate_identity_for_testing(
     disaster_event: &DisasterEvent,
-): (vector<u8>, u32, String, String, String, u64, u64, u8, u8, String, u64) {
+): (vector<u8>, u32, String, String, String, u64, u8, String, u8, u64) {
     (
         disaster_event.event_uid,
         disaster_event.event_revision,
@@ -420,10 +410,9 @@ public fun certificate_identity_for_testing(
         disaster_event.title,
         disaster_event.region,
         disaster_event.occurred_at_ms,
-        disaster_event.magnitude_x100,
-        disaster_event.primary_source,
         disaster_event.hazard_type,
         disaster_event.hazard_label,
+        disaster_event.severity_band,
         disaster_event.oracle_version,
     )
 }
@@ -451,28 +440,20 @@ public fun certificate_evidence_for_testing(
     vector<u8>,
     u64,
     u64,
+    vector<u8>,
     u64,
-    vector<u8>,
-    vector<u8>,
     String,
     vector<u8>,
-    vector<u8>,
-    String,
-    u64,
 ) {
     (
         disaster_event.payload_bcs_hash,
         disaster_event.payload_bcs,
         disaster_event.verified_at_ms,
-        disaster_event.source_updated_at_ms,
         disaster_event.freshness_deadline_ms,
-        disaster_event.source_set_hash,
-        disaster_event.raw_data_hash,
-        disaster_event.raw_data_uri,
         disaster_event.affected_cells_root,
-        disaster_event.affected_cells_data_hash,
-        disaster_event.affected_cells_uri,
         disaster_event.affected_cell_count,
+        disaster_event.evidence_manifest_uri,
+        disaster_event.evidence_manifest_hash,
     )
 }
 

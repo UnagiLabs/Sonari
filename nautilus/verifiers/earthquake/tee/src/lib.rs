@@ -8,7 +8,8 @@ mod source;
 pub use compute::intensity::{cell_band, mmi_decimal_to_x100, p90_x100};
 pub use compute::merkle::merkle_root_from_leaf_hashes;
 pub use core::artifacts::{
-    AffectedCellJson, AffectedCellsArtifact, ExpectedHashes, LeafHash, ProofStep, RawDataEntry,
+    AffectedCellJson, AffectedCellsArtifact, EarthquakeEvidence, EvidenceAffectedCells,
+    EvidenceManifest, EvidenceSource, ExpectedHashes, LeafHash, ProofStep, RawDataEntry,
     RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact, SourceEntry,
     SourceManifest, StoredSourceRef, UnsignedPayload,
 };

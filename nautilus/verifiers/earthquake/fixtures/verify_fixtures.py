@@ -58,6 +58,7 @@ FINALIZED_ONLY_FILES = {
     "sample_proof.json",
     "source_manifest.json",
     "raw_data_manifest.json",
+    "evidence_manifest.json",
     "expected_hashes.json",
 }
 
@@ -68,6 +69,8 @@ FORBIDDEN_NON_FINALIZED_FIELDS = {
     "payload_hash",
     "affected_cells_root",
     "affected_cells_data_hash",
+    "evidence_manifest_hash",
+    "evidence_manifest_uri",
     "raw_data_hash",
     "source_set_hash",
     "unsigned_bcs_payload_hex",
@@ -107,6 +110,40 @@ AFFECTED_ORDER = [
     "affected_cells",
 ]
 AFFECTED_CELL_ORDER = ["h3_index", "intensity_value", "cell_band"]
+EVIDENCE_ORDER = [
+    "schema_version",
+    "oracle_version",
+    "event_uid",
+    "event_revision",
+    "hazard_type",
+    "source_event_id",
+    "sources",
+    "earthquake",
+    "affected_cells",
+]
+EVIDENCE_SOURCE_ORDER = [
+    "source",
+    "product",
+    "source_uri",
+    "artifact_uri",
+    "content_hash",
+    "size_bytes",
+    "source_updated_at_ms",
+]
+EVIDENCE_EARTHQUAKE_ORDER = [
+    "title",
+    "region",
+    "occurred_at_ms",
+    "magnitude_x100",
+    "source_updated_at_ms",
+]
+EVIDENCE_AFFECTED_ORDER = [
+    "uri",
+    "hash",
+    "root",
+    "count",
+    "geo_resolution",
+]
 
 CELLS_GENERATION_METHOD = {"shakemap_gridxml_h3_grid_point_p90_v1": 1}
 CELL_METRIC = {"USGS_MMI": 1}
@@ -116,32 +153,36 @@ PAYLOAD_FIELD_ORDER = [
     "intent",
     "oracle_version",
     "event_uid",
-    "hazard_type",
-    "status",
     "event_revision",
     "source_event_id",
     "title",
     "region",
     "occurred_at_ms",
-    "magnitude_x100",
+    "hazard_type",
+    "status",
+    "severity_band",
+    "affected_cells_root",
+    "affected_cell_count",
+    "evidence_manifest_uri",
+    "evidence_manifest_hash",
     "verified_at_ms",
+    "freshness_deadline_ms",
+]
+OLD_PAYLOAD_FIELDS = {
+    "magnitude_x100",
     "source_updated_at_ms",
     "primary_source",
-    "severity_band",
     "source_set_hash",
     "raw_data_hash",
     "raw_data_uri",
-    "affected_cells_root",
     "affected_cells_uri",
     "affected_cells_data_hash",
-    "affected_cell_count",
     "geo_resolution",
     "cells_generation_method",
     "cell_metric",
     "cell_aggregation",
     "intensity_scale",
-    "freshness_deadline_ms",
-]
+}
 
 
 def load_json(path: Path) -> Any:
@@ -227,6 +268,22 @@ def canonical_json_bytes(value: Any, order: list[str], item_order: list[str] | N
     ).encode("utf-8")
 
 
+def canonical_evidence_manifest_bytes(value: dict[str, Any]) -> bytes:
+    ordered_value = ordered(value, EVIDENCE_ORDER)
+    ordered_value["sources"] = [
+        ordered(source, EVIDENCE_SOURCE_ORDER) for source in value["sources"]
+    ]
+    ordered_value["earthquake"] = ordered(value["earthquake"], EVIDENCE_EARTHQUAKE_ORDER)
+    ordered_value["affected_cells"] = ordered(
+        value["affected_cells"], EVIDENCE_AFFECTED_ORDER
+    )
+    return json.dumps(
+        ordered_value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 def uleb128(value: int) -> bytes:
     out = bytearray()
     while value >= 0x80:
@@ -285,14 +342,15 @@ def require_int_range(case_id: str, payload: dict[str, Any], field: str, minimum
 
 
 def validate_current_payload_contract(case_id: str, payload: dict[str, Any]) -> None:
+    old_fields = sorted(OLD_PAYLOAD_FIELDS.intersection(payload))
+    if old_fields:
+        fail(f"{case_id}: payload contains removed signed fields: {', '.join(old_fields)}")
     if list(payload.keys()) != PAYLOAD_FIELD_ORDER:
-        fail(f"{case_id}: payload field order must match current 28-field contract")
+        fail(f"{case_id}: payload field order must match current 17-field contract")
     for field in [
         "event_uid",
-        "source_set_hash",
-        "raw_data_hash",
         "affected_cells_root",
-        "affected_cells_data_hash",
+        "evidence_manifest_hash",
     ]:
         hex_bytes(payload[field])
     expected_enums = {
@@ -300,12 +358,6 @@ def validate_current_payload_contract(case_id: str, payload: dict[str, Any]) -> 
         "oracle_version": 1,
         "hazard_type": 1,
         "status": 3,
-        "primary_source": 1,
-        "geo_resolution": 7,
-        "cells_generation_method": 1,
-        "cell_metric": 1,
-        "cell_aggregation": 1,
-        "intensity_scale": 1,
     }
     for field, expected in expected_enums.items():
         if payload.get(field) != expected:
@@ -314,12 +366,10 @@ def validate_current_payload_contract(case_id: str, payload: dict[str, Any]) -> 
     require_utf8_len(case_id, payload, "source_event_id", 1, 96)
     require_utf8_len(case_id, payload, "title", 1, 160)
     require_utf8_len(case_id, payload, "region", 1, 160)
-    require_int_range(case_id, payload, "magnitude_x100", 1, 2000)
     require_int_range(case_id, payload, "severity_band", 1, 3)
-    require_utf8_len(case_id, payload, "raw_data_uri", 1, 512)
-    require_utf8_len(case_id, payload, "affected_cells_uri", 1, 512)
+    require_utf8_len(case_id, payload, "evidence_manifest_uri", 1, 512)
     require_int_range(case_id, payload, "affected_cell_count", 1, 1_000_000)
-    for field in ["occurred_at_ms", "verified_at_ms", "source_updated_at_ms", "freshness_deadline_ms"]:
+    for field in ["occurred_at_ms", "verified_at_ms", "freshness_deadline_ms"]:
         require_int_range(case_id, payload, field, 0, 2**64 - 1)
     if payload["freshness_deadline_ms"] != payload["verified_at_ms"] + FRESHNESS_WINDOW_MS:
         fail(f"{case_id}: freshness_deadline_ms must equal verified_at_ms + freshness window")
@@ -376,30 +426,19 @@ def payload_bcs(payload: dict[str, Any]) -> str:
             bcs_u8(payload["intent"]),
             bcs_u64(payload["oracle_version"]),
             hex_bytes(payload["event_uid"]),
-            bcs_u8(payload["hazard_type"]),
-            bcs_u8(payload["status"]),
             bcs_u32(payload["event_revision"]),
             bcs_vec_u8(payload["source_event_id"]),
             bcs_vec_u8(payload["title"]),
             bcs_vec_u8(payload["region"]),
             bcs_u64(payload["occurred_at_ms"]),
-            bcs_u64(payload["magnitude_x100"]),
-            bcs_u64(payload["verified_at_ms"]),
-            bcs_u64(payload["source_updated_at_ms"]),
-            bcs_u8(payload["primary_source"]),
+            bcs_u8(payload["hazard_type"]),
+            bcs_u8(payload["status"]),
             bcs_u8(payload["severity_band"]),
-            hex_bytes(payload["source_set_hash"]),
-            hex_bytes(payload["raw_data_hash"]),
-            bcs_vec_u8(payload["raw_data_uri"]),
             hex_bytes(payload["affected_cells_root"]),
-            bcs_vec_u8(payload["affected_cells_uri"]),
-            hex_bytes(payload["affected_cells_data_hash"]),
             bcs_u64(payload["affected_cell_count"]),
-            bcs_u8(payload["geo_resolution"]),
-            bcs_u8(payload["cells_generation_method"]),
-            bcs_u8(payload["cell_metric"]),
-            bcs_u8(payload["cell_aggregation"]),
-            bcs_u8(payload["intensity_scale"]),
+            bcs_vec_u8(payload["evidence_manifest_uri"]),
+            hex_bytes(payload["evidence_manifest_hash"]),
+            bcs_u64(payload["verified_at_ms"]),
             bcs_u64(payload["freshness_deadline_ms"]),
         ]
     )
@@ -488,23 +527,20 @@ def validate_payload_affected_cross_check(
         "event_uid",
         "event_revision",
         "oracle_version",
-        "geo_resolution",
     ]
     for field in direct_checks:
         if payload.get(field) != affected.get(field):
             fail(f"{case_id}: payload.{field} does not match affected_cells.{field}")
 
-    enum_checks = [
-        ("cells_generation_method", CELLS_GENERATION_METHOD),
-        ("cell_metric", CELL_METRIC),
-        ("intensity_scale", INTENSITY_SCALE),
-    ]
-    for field, values in enum_checks:
+    enum_checks = {
+        "cells_generation_method": CELLS_GENERATION_METHOD,
+        "cell_metric": CELL_METRIC,
+        "intensity_scale": INTENSITY_SCALE,
+    }
+    for field, values in enum_checks.items():
         affected_value = affected.get(field)
         if affected_value not in values:
             fail(f"{case_id}: affected_cells.{field} has unsupported value {affected_value!r}")
-        if payload.get(field) != values[affected_value]:
-            fail(f"{case_id}: payload.{field} does not match affected_cells.{field}")
 
 
 def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> None:
@@ -528,6 +564,7 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
     source = load_json(expected_dir / "source_manifest.json")
     raw_manifest = load_json(expected_dir / "raw_data_manifest.json")
     affected = load_json(expected_dir / "affected_cells.json")
+    evidence_manifest = load_json(expected_dir / "evidence_manifest.json")
     expected_hashes = load_json(expected_dir / "expected_hashes.json")
     sample_proof = load_json(expected_dir / "sample_proof.json")
     payload = load_json(expected_dir / "unsigned_payload.json")
@@ -565,9 +602,57 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         for cell in affected["affected_cells"]
     ]
     affected_cells_root = merkle_root([item["leaf_hash"] for item in leaf_hashes])
+    evidence_checks = {
+        "schema_version": 1,
+        "oracle_version": payload["oracle_version"],
+        "event_uid": payload["event_uid"],
+        "event_revision": payload["event_revision"],
+        "hazard_type": "EARTHQUAKE",
+        "source_event_id": payload["source_event_id"],
+    }
+    for key, value in evidence_checks.items():
+        if evidence_manifest.get(key) != value:
+            fail(f"{case_id}: evidence_manifest.{key} mismatch")
+    expected_sources = [
+        {
+            "source": entry["name"],
+            "product": entry["product"],
+            "source_uri": entry["source_uri"],
+            "artifact_uri": entry["uri"],
+            "content_hash": entry["content_hash"],
+            "size_bytes": entry["size_bytes"],
+            "source_updated_at_ms": detail["properties"]["updated"],
+        }
+        for entry in raw_manifest["entries"]
+    ]
+    if evidence_manifest.get("sources") != expected_sources:
+        fail(f"{case_id}: evidence_manifest.sources mismatch")
+    expected_affected_cells = {
+        "uri": f"ipfs://sonari/examples/{payload['source_event_id']}/affected_cells.json",
+        "hash": affected_cells_data_hash,
+        "root": affected_cells_root,
+        "count": len(affected["affected_cells"]),
+        "geo_resolution": affected["geo_resolution"],
+    }
+    if evidence_manifest.get("affected_cells") != expected_affected_cells:
+        fail(f"{case_id}: evidence_manifest.affected_cells mismatch")
+    expected_earthquake = {
+        "title": payload["title"],
+        "region": payload["region"],
+        "occurred_at_ms": payload["occurred_at_ms"],
+        "magnitude_x100": magnitude_x100(detail["properties"]["mag"]),
+        "source_updated_at_ms": detail["properties"]["updated"],
+    }
+    if evidence_manifest.get("earthquake") != expected_earthquake:
+        fail(f"{case_id}: evidence_manifest.earthquake mismatch")
+    evidence_bytes = canonical_evidence_manifest_bytes(evidence_manifest)
+    if (expected_dir / "evidence_manifest.json").read_bytes() != evidence_bytes:
+        fail(f"{case_id}: evidence_manifest.json is not canonical JSON bytes")
+    evidence_manifest_hash = sha256_hex(evidence_bytes)
     unsigned_bcs_payload_hex = payload_bcs(payload)
 
     computed = {
+        "event_uid": payload["event_uid"],
         "source_set_hash": source_set_hash,
         "raw_data_hash": raw_data_hash,
         "raw_source_content_hashes": [
@@ -580,6 +665,7 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         "affected_cells_data_hash": affected_cells_data_hash,
         "leaf_hashes": leaf_hashes,
         "affected_cells_root": affected_cells_root,
+        "evidence_manifest_hash": evidence_manifest_hash,
         "unsigned_bcs_payload_hex": unsigned_bcs_payload_hex,
     }
     for key, value in computed.items():
@@ -587,10 +673,8 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
             fail(f"{case_id}: expected_hashes.{key} mismatch")
 
     payload_checks = {
-        "source_set_hash": source_set_hash,
-        "raw_data_hash": raw_data_hash,
         "affected_cells_root": affected_cells_root,
-        "affected_cells_data_hash": affected_cells_data_hash,
+        "evidence_manifest_hash": evidence_manifest_hash,
         "affected_cell_count": len(affected["affected_cells"]),
     }
     for key, value in payload_checks.items():
@@ -611,7 +695,6 @@ def validate_finalized(case_id: str, case_dir: Path, result: dict[str, Any]) -> 
         "source_event_id": detail.get("id"),
         "title": properties.get("title"),
         "region": properties.get("place"),
-        "magnitude_x100": magnitude_x100(properties.get("mag")),
     }
     for key, value in usgs_checks.items():
         if payload.get(key) != value:

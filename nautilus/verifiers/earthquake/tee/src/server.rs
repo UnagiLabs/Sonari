@@ -7,7 +7,9 @@
 //! touches VSOCK/HTTP transport; those concerns belong to the shared server in
 //! `sonari_tee_core::enclave` and the orchestration in `main.rs`.
 
-use crate::core::artifacts::{RawDataManifest, UnsignedPayload};
+use crate::core::artifacts::{
+    AffectedCellsArtifact, EvidenceManifest, RawDataManifest, StoredSourceRef, UnsignedPayload,
+};
 use crate::{
     OracleOutput, OracleStatus, UsgsOracleInput, WalrusCliSourceArchive,
     WalrusCliSourceArchiveConfig, WorkerToTeeRequest, grid_xml_from_artifact,
@@ -56,6 +58,12 @@ pub enum TeeJsonResult {
         signature: String,
         public_key: String,
         raw_data_manifest: RawDataManifest,
+        affected_cells: Box<AffectedCellsArtifact>,
+        evidence_manifest: Box<EvidenceManifest>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        affected_cells_ref: Option<Box<StoredSourceRef>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evidence_manifest_ref: Option<Box<StoredSourceRef>>,
     },
 }
 
@@ -198,7 +206,10 @@ fn pending_source(source_event_id: &str, error_code: &str) -> Result<OracleOutpu
         },
         source_manifest: None,
         raw_data_manifest: None,
+        evidence_manifest: None,
         affected_cells: None,
+        affected_cells_ref: None,
+        evidence_manifest_ref: None,
         expected_hashes: None,
         sample_proof: None,
         unsigned_payload: None,
@@ -221,12 +232,22 @@ pub fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Handler
             let raw_data_manifest = output
                 .raw_data_manifest
                 .ok_or_else(|| process_failed("finalized output is missing raw data manifest"))?;
+            let affected_cells = output
+                .affected_cells
+                .ok_or_else(|| process_failed("finalized output is missing affected cells"))?;
+            let evidence_manifest = output
+                .evidence_manifest
+                .ok_or_else(|| process_failed("finalized output is missing evidence manifest"))?;
             Ok(TeeJsonResult::Finalized {
                 payload: Box::new(payload),
                 payload_bcs_hex,
                 signature: UNSIGNED_PLACEHOLDER.to_owned(),
                 public_key: UNSIGNED_PLACEHOLDER.to_owned(),
                 raw_data_manifest,
+                affected_cells: Box::new(affected_cells),
+                evidence_manifest: Box::new(evidence_manifest),
+                affected_cells_ref: output.affected_cells_ref.map(Box::new),
+                evidence_manifest_ref: output.evidence_manifest_ref.map(Box::new),
             })
         }
         OracleStatus::PendingSource => Ok(TeeJsonResult::PendingSource {
@@ -283,8 +304,6 @@ fn build_production_input(parts: ProductionInputParts, observed_at_ms: u64) -> U
         observed_at_ms,
         raw_detail_uri: usgs_detail_url(id),
         raw_grid_uri: parts.raw_grid_uri,
-        raw_data_uri: format!("ipfs://sonari/live/{id}/raw_data_manifest.json"),
-        affected_cells_uri: format!("ipfs://sonari/live/{id}/affected_cells.json"),
     }
 }
 
@@ -472,9 +491,6 @@ mod tests {
                 "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
                     .to_owned(),
             ),
-            raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
-            affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json"
-                .to_owned(),
         }
     }
 
@@ -510,6 +526,8 @@ mod tests {
                 "signature",
                 "public_key",
                 "raw_data_manifest",
+                "affected_cells",
+                "evidence_manifest",
             ]
         );
     }

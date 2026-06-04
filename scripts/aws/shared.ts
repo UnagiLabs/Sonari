@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,26 @@ const execFileAsync = promisify(execFile);
 export const DEFAULT_STACK = "sonari-verifier-runner-dev";
 export const DEFAULT_EXPECTED_ACCOUNT = "595103996064";
 export const DEFAULT_REGION = "us-west-2";
+
+const EARTHQUAKE_PAYLOAD_FIELD_ORDER = [
+    "intent",
+    "oracle_version",
+    "event_uid",
+    "event_revision",
+    "source_event_id",
+    "title",
+    "region",
+    "occurred_at_ms",
+    "hazard_type",
+    "status",
+    "severity_band",
+    "affected_cells_root",
+    "affected_cell_count",
+    "evidence_manifest_uri",
+    "evidence_manifest_hash",
+    "verified_at_ms",
+    "freshness_deadline_ms",
+] as const;
 
 const STACK_OUTPUT_KEYS = [
     "EventsTableName",
@@ -430,6 +451,60 @@ export function assertDirectEarthquakeWrapperResult(
     if (rawDataManifest.entries.length !== 2) {
         throw new Error("Expected raw_data_manifest.entries length to be 2");
     }
+    const payload = readRequiredRecord(value, "payload", "finalized result payload");
+    assertPayloadFieldOrder(payload);
+    const evidenceManifest = readRequiredRecord(
+        value,
+        "evidence_manifest",
+        "finalized result evidence_manifest",
+    );
+    const affectedCellsRef = readStoredSourceRef(value, "affected_cells_ref");
+    const evidenceManifestRef = readStoredSourceRef(value, "evidence_manifest_ref");
+    const evidenceManifestUri = readRequiredString(
+        payload,
+        "evidence_manifest_uri",
+        "payload.evidence_manifest_uri",
+    );
+    const evidenceManifestHash = readRequiredString(
+        payload,
+        "evidence_manifest_hash",
+        "payload.evidence_manifest_hash",
+    );
+    if (!evidenceManifestUri.startsWith("walrus://blob/")) {
+        throw new Error("Expected payload.evidence_manifest_uri to reference a Walrus blob");
+    }
+    if (evidenceManifestUri !== evidenceManifestRef.uri) {
+        throw new Error(
+            "Expected payload.evidence_manifest_uri to match evidence_manifest_ref.uri",
+        );
+    }
+    const actualManifestHash = `0x${createHash("sha256")
+        .update(JSON.stringify(evidenceManifest))
+        .digest("hex")}`;
+    if (actualManifestHash !== evidenceManifestHash) {
+        throw new Error("Expected evidence_manifest to match payload.evidence_manifest_hash");
+    }
+    const affectedCells = readRequiredRecord(
+        evidenceManifest,
+        "affected_cells",
+        "evidence_manifest.affected_cells",
+    );
+    if (
+        readRequiredString(affectedCells, "uri", "evidence_manifest.affected_cells.uri") !==
+        affectedCellsRef.uri
+    ) {
+        throw new Error(
+            "Expected evidence_manifest.affected_cells.uri to match affected_cells_ref.uri",
+        );
+    }
+    if (
+        readRequiredString(affectedCells, "hash", "evidence_manifest.affected_cells.hash") !==
+        affectedCellsRef.source_hash
+    ) {
+        throw new Error(
+            "Expected evidence_manifest.affected_cells.hash to match affected_cells_ref.source_hash",
+        );
+    }
 
     const actualPublicKey = readPublicKey(value);
     if (actualPublicKey !== expectedAttestationPublicKey) {
@@ -449,6 +524,52 @@ export function assertDirectEarthquakeWrapperResult(
         }
     }
     return value;
+}
+
+function assertPayloadFieldOrder(payload: Record<string, unknown>): void {
+    const actual = Object.keys(payload);
+    if (
+        actual.length !== EARTHQUAKE_PAYLOAD_FIELD_ORDER.length ||
+        actual.some((field, index) => field !== EARTHQUAKE_PAYLOAD_FIELD_ORDER[index])
+    ) {
+        throw new Error(
+            "Expected finalized payload field order to match current 17-field contract",
+        );
+    }
+}
+
+function readRequiredRecord(
+    value: Record<string, unknown>,
+    key: string,
+    label: string,
+): Record<string, unknown> {
+    const nested = value[key];
+    if (!isRecord(nested)) {
+        throw new Error(`Expected ${label}`);
+    }
+    return nested;
+}
+
+function readRequiredString(value: Record<string, unknown>, key: string, label: string): string {
+    const nested = value[key];
+    if (typeof nested !== "string" || nested.length === 0) {
+        throw new Error(`Expected ${label}`);
+    }
+    return nested;
+}
+
+function readStoredSourceRef(
+    value: Record<string, unknown>,
+    key: string,
+): {
+    uri: string;
+    source_hash: string;
+} {
+    const ref = readRequiredRecord(value, key, `finalized result ${key}`);
+    return {
+        uri: readRequiredString(ref, "uri", `${key}.uri`),
+        source_hash: readRequiredString(ref, "source_hash", `${key}.source_hash`),
+    };
 }
 
 export function readAttestationPublicKey(value: unknown): string {

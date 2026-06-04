@@ -2076,11 +2076,13 @@ function finalizedPayloadMetadata(result: Extract<TeeCoreResult, { status: "fina
     const payload = validation.value.payload as {
         event_uid: string;
         event_revision: number;
-        source_updated_at_ms: number;
+        verified_at_ms: number;
     };
     return {
         eventUid: payload.event_uid,
         eventRevision: payload.event_revision,
-        sourceUpdatedAtMs: payload.source_updated_at_ms,
+        sourceUpdatedAtMs:
+            validation.value.evidence_manifest?.earthquake.source_updated_at_ms ??
+            payload.verified_at_ms,
     };
 }
