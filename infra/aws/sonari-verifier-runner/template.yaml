@@ -1084,6 +1084,7 @@ Resources:
       Environment:
         Variables:
           VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+          SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId
 
   BatchVerifierLambda:
     Type: AWS::Lambda::Function

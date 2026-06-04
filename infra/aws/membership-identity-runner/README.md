@@ -157,6 +157,8 @@ mainnet live smoke では real World ID proof input を使います。
 - `world_id.signal_hash`
 
 request には `registry_id`、`membership_id`、`owner`、`terms_version`、`signed_statement_hash` も含める必要があります。
+`registry_id` は stack の `SonariIdentityRegistryId` / Lambda env の `SONARI_IDENTITY_REGISTRY_ID` と一致する必要があります。
+一致しない request は `verification_jobs` に保存せず、HTTP 400 で fail-closed します。
 
 devnet / testnet の場合のみ、dummy proof mode で同じ field を持つ experimental value を使えます。`SONARI_WORLD_ID_PROOF_MODE=dummy` を設定してください。`RELAYER_NETWORK=mainnet` の場合、live gate はこの mode を拒否します。
 

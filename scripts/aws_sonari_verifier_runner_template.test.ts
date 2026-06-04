@@ -47,6 +47,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("BatchSchedule:");
         expect(template).toContain("Handler: dist/src/lambda.submitVerificationHandler");
         expect(template).toContain("Handler: dist/src/lambda.batchVerifierHandler");
+        expect(template).toContain("SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId");
 
         expect(template).toContain("RunnerControlLambda:");
         expect(template).toContain("Handler: dist/src/runner_workflow.handler");
