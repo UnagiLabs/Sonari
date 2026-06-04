@@ -9,6 +9,9 @@ node_modules/
 __pycache__/
 .venv/
 dist/
+dapp/.next/
+dapp/next-env.d.ts
+dapp/out/
 site/.next/
 site/next-env.d.ts
 site/out/
