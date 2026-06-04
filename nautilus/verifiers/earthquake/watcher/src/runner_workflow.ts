@@ -24,13 +24,15 @@ import {
     type SuiNetwork,
 } from "@sonari/earthquake-relayer";
 import {
+    type AffectedCellsArtifact,
     EARTHQUAKE_VERIFIER_CONFIG_KEY,
     type EarthquakeOraclePayload,
     type EnclaveVerificationMetadata,
     ERROR_CODES,
+    type EvidenceManifest,
     type OracleErrorCode,
     type RawDataEntry,
-    type RawDataManifest,
+    type StoredSourceRef,
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
@@ -1150,6 +1152,9 @@ export class HttpWalrusSourceArchiver implements WalrusSourceArchiverLike {
         if (!isRecord(body) || typeof body.walrus_blob_id !== "string") {
             throw new RetryableSourceArchiveError("Walrus source archiver returned invalid JSON");
         }
+        if (body.walrus_blob_id !== input.entry.walrus_blob_id) {
+            throw new IntegritySourceArchiveError("Walrus source archiver blob id mismatch");
+        }
         return { walrusBlobId: body.walrus_blob_id };
     }
 
@@ -1602,12 +1607,31 @@ async function archiveFinalizedSources(input: {
         };
     }
     const payload = validation.value.payload as EarthquakeOraclePayload;
-    const manifestHash = rawDataManifestHash(manifest);
-    if (manifestHash !== payload.raw_data_hash) {
+    const affectedCells = validation.value.affected_cells;
+    const evidenceManifest = validation.value.evidence_manifest;
+    const affectedCellsRef = validation.value.affected_cells_ref;
+    const evidenceManifestRef = validation.value.evidence_manifest_ref;
+    if (
+        affectedCells === undefined ||
+        evidenceManifest === undefined ||
+        affectedCellsRef === undefined ||
+        evidenceManifestRef === undefined
+    ) {
         return {
             status: "integrity_failed",
             artifactS3Keys: [],
-            message: "raw_data_manifest does not match signed raw_data_hash",
+            message: "finalized result is missing generated source artifact metadata",
+        };
+    }
+    const evidenceManifestBytes = canonicalJsonBytes(evidenceManifest);
+    if (
+        `0x${createHash("sha256").update(evidenceManifestBytes).digest("hex")}` !==
+        payload.evidence_manifest_hash
+    ) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: "evidence_manifest does not match signed evidence_manifest_hash",
         };
     }
     const artifactS3Keys: string[] = [];
@@ -1654,6 +1678,70 @@ async function archiveFinalizedSources(input: {
             };
         }
     }
+    const generatedArtifacts = [
+        {
+            entry: generatedArtifactEntry({
+                sourceEventId: input.sourceEventId,
+                product: "affected_cells_json",
+                ref: affectedCellsRef,
+            }),
+            bytes: canonicalJsonBytes(affectedCells),
+            fileName: "affected_cells.json" as const,
+        },
+        {
+            entry: generatedArtifactEntry({
+                sourceEventId: input.sourceEventId,
+                product: "evidence_manifest_json",
+                ref: evidenceManifestRef,
+            }),
+            bytes: evidenceManifestBytes,
+            fileName: "evidence_manifest.json" as const,
+        },
+    ];
+    for (const generated of generatedArtifacts) {
+        try {
+            verifySourceBytes(generated.entry, generated.bytes);
+            const key = generatedArtifactS3Key({
+                sourceEventId: input.sourceEventId,
+                attempt: input.attempt,
+                fileName: generated.fileName,
+            });
+            await input.archive.s3.putObjectBytes({
+                bucket: input.resultBucket,
+                key,
+                bytes: generated.bytes,
+            });
+            artifactS3Keys.push(key);
+            const archived = await input.archive.walrus.archiveAndVerify({
+                entry: generated.entry,
+                bytes: generated.bytes,
+                artifactS3Key: key,
+            });
+            if (archived.walrusBlobId !== generated.entry.walrus_blob_id) {
+                return {
+                    status: "integrity_failed",
+                    artifactS3Keys,
+                    message: `Walrus blob id mismatch for ${generated.entry.uri}`,
+                };
+            }
+        } catch (error) {
+            if (error instanceof IntegritySourceArchiveError) {
+                return { status: "integrity_failed", artifactS3Keys, message: error.message };
+            }
+            if (error instanceof ConfigurationSourceArchiveError) {
+                return {
+                    status: "configuration_failed",
+                    artifactS3Keys,
+                    message: error.message,
+                };
+            }
+            return {
+                status: "retryable_failed",
+                artifactS3Keys,
+                message: error instanceof Error ? error.message : String(error),
+            };
+        }
+    }
     return { status: "success", artifactS3Keys };
 }
 
@@ -1667,25 +1755,26 @@ function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {
     }
 }
 
-function rawDataManifestHash(manifest: RawDataManifest): string {
-    return `0x${createHash("sha256").update(canonicalRawDataManifestJson(manifest)).digest("hex")}`;
+function canonicalJsonBytes(value: AffectedCellsArtifact | EvidenceManifest): Uint8Array {
+    return new TextEncoder().encode(JSON.stringify(value));
 }
 
-function canonicalRawDataManifestJson(manifest: RawDataManifest): string {
-    return JSON.stringify({
-        entries: manifest.entries.map((entry) => ({
-            name: entry.name,
-            event_id: entry.event_id,
-            product: entry.product,
-            uri: entry.uri,
-            content_hash: entry.content_hash,
-            source_uri: entry.source_uri,
-            walrus_blob_id: entry.walrus_blob_id,
-            source_hash: entry.source_hash,
-            size_bytes: entry.size_bytes,
-        })),
-        oracle_version: manifest.oracle_version,
-    });
+function generatedArtifactEntry(input: {
+    sourceEventId: string;
+    product: "affected_cells_json" | "evidence_manifest_json";
+    ref: StoredSourceRef;
+}): RawDataEntry {
+    return {
+        name: "TEE",
+        event_id: input.sourceEventId,
+        product: input.product,
+        uri: input.ref.uri,
+        content_hash: input.ref.source_hash,
+        source_uri: input.ref.uri,
+        walrus_blob_id: input.ref.walrus_blob_id,
+        source_hash: input.ref.source_hash,
+        size_bytes: input.ref.size_bytes,
+    };
 }
 
 function sourceArtifactS3Key(input: {
@@ -1700,6 +1789,19 @@ function sourceArtifactS3Key(input: {
         input.sourceEventId,
         String(input.attempt ?? 1),
         `${input.index}-${sanitizeS3KeySegment(input.product)}-${input.sourceHash.slice(2).toLowerCase()}.bin`,
+    ].join("/");
+}
+
+function generatedArtifactS3Key(input: {
+    sourceEventId: string;
+    attempt: number | undefined;
+    fileName: "affected_cells.json" | "evidence_manifest.json";
+}): string {
+    return [
+        "source-artifacts",
+        input.sourceEventId,
+        String(input.attempt ?? 1),
+        input.fileName,
     ].join("/");
 }
 

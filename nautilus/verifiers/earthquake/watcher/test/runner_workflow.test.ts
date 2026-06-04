@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
     createEd25519SuiSignerFromPrivateKey,
-    loadFixtureRelayerSubmitInput,
     type RelayerSubmitConfig,
 } from "@sonari/earthquake-relayer";
 import {
@@ -1060,6 +1059,8 @@ describe("AWS runner workflow helper", () => {
             source_archive: "success",
             source_artifact_s3_keys: [
                 `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
+                "source-artifacts/us7000sonari/1/affected_cells.json",
+                "source-artifacts/us7000sonari/1/evidence_manifest.json",
             ],
         });
         expect(sourceArchive.fetches).toEqual([
@@ -1071,6 +1072,30 @@ describe("AWS runner workflow helper", () => {
                 key: `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
                 bytes,
             },
+            {
+                bucket: "sonari-results",
+                key: "source-artifacts/us7000sonari/1/affected_cells.json",
+                bytes: jsonBytes(result.affected_cells),
+            },
+            {
+                bucket: "sonari-results",
+                key: "source-artifacts/us7000sonari/1/evidence_manifest.json",
+                bytes: jsonBytes(result.evidence_manifest),
+            },
+        ]);
+        expect(sourceArchive.archived).toEqual([
+            {
+                artifactS3Key: `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
+                walrusBlobId: "rawBlob_123456",
+            },
+            {
+                artifactS3Key: "source-artifacts/us7000sonari/1/affected_cells.json",
+                walrusBlobId: "cellsBlob_123456",
+            },
+            {
+                artifactS3Key: "source-artifacts/us7000sonari/1/evidence_manifest.json",
+                walrusBlobId: "manifestBlob_123456",
+            },
         ]);
         expect(relayed).toMatchObject({ relayer: "succeeded" });
         expect(relayer.inputs).toEqual([result]);
@@ -1080,7 +1105,7 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
-    it("rejects source manifests that do not match the signed raw data hash", async () => {
+    it("rejects evidence manifests that do not match the signed manifest hash", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
         await repository.markWorkflowStarted(
@@ -1090,7 +1115,7 @@ describe("AWS runner workflow helper", () => {
         );
         const bytes = new TextEncoder().encode("source bytes");
         const result = finalizedResultWithRawManifest(bytes);
-        result.payload.raw_data_hash = `0x${"99".repeat(32)}`;
+        result.payload.evidence_manifest_hash = `0x${"99".repeat(32)}`;
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
         const handler = createRunnerControlHandler({
@@ -1355,7 +1380,7 @@ describe("AWS runner workflow helper", () => {
                 headers: normalizeHeaders(init?.headers),
                 body: JSON.parse(String(init?.body)) as unknown,
             });
-            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+            return new Response(JSON.stringify({ walrus_blob_id: "rawBlob_123456" }), {
                 status: 200,
             });
         }) as typeof fetch;
@@ -1367,7 +1392,7 @@ describe("AWS runner workflow helper", () => {
                     ),
                     artifactS3Key: "source-artifacts/us7000sonari/1/0-detail.bin",
                 }),
-            ).resolves.toEqual({ walrusBlobId: "testBlob_123456" });
+            ).resolves.toEqual({ walrusBlobId: "rawBlob_123456" });
         } finally {
             globalThis.fetch = originalFetch;
         }
@@ -1381,7 +1406,7 @@ describe("AWS runner workflow helper", () => {
                 },
                 body: {
                     artifact_s3_key: "source-artifacts/us7000sonari/1/0-detail.bin",
-                    expected_walrus_blob_id: "testBlob_123456",
+                    expected_walrus_blob_id: "rawBlob_123456",
                     source_hash: expect.stringMatching(/^0x[0-9a-f]{64}$/),
                     size_bytes: "source bytes".length,
                 },
@@ -1402,7 +1427,7 @@ describe("AWS runner workflow helper", () => {
         const originalFetch = globalThis.fetch;
         globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
             headers.push(normalizeHeaders(init?.headers));
-            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+            return new Response(JSON.stringify({ walrus_blob_id: "rawBlob_123456" }), {
                 status: 200,
             });
         }) as typeof fetch;
@@ -1437,7 +1462,7 @@ describe("AWS runner workflow helper", () => {
         const originalFetch = globalThis.fetch;
         globalThis.fetch = (async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
             observedSignal = init?.signal ?? undefined;
-            return new Response(JSON.stringify({ walrus_blob_id: "testBlob_123456" }), {
+            return new Response(JSON.stringify({ walrus_blob_id: "rawBlob_123456" }), {
                 status: 200,
             });
         }) as typeof fetch;
@@ -1502,7 +1527,7 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         await repository.markSourceArchiveResult(
             "us7000sonari",
@@ -1726,7 +1751,7 @@ describe("AWS runner workflow helper", () => {
             "earthquake-us7000sonari-1",
             1_800_000_000_001,
         );
-        const result = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         await repository.markSourceArchiveResult(
             "us7000sonari",
@@ -1763,9 +1788,9 @@ describe("AWS runner workflow helper", () => {
                             registry: config.registry,
                             verifierRegistry: config.verifierRegistry,
                             clock: "0x6",
-                            verifierConfigKey: result.verifier_config_key,
-                            verifierConfigVersion: result.verifier_config_version,
-                            enclaveInstancePublicKey: result.enclave_instance_public_key,
+                            verifierConfigKey: 1,
+                            verifierConfigVersion: 1,
+                            enclaveInstancePublicKey: finalizedPublicKey,
                             arguments: [
                                 config.registry,
                                 config.verifierRegistry,
@@ -1779,9 +1804,9 @@ describe("AWS runner workflow helper", () => {
                                 registry: config.registry,
                                 verifierRegistry: config.verifierRegistry,
                                 clock: "0x6",
-                                verifierConfigKey: result.verifier_config_key,
-                                verifierConfigVersion: result.verifier_config_version,
-                                enclaveInstancePublicKey: result.enclave_instance_public_key,
+                                verifierConfigKey: 1,
+                                verifierConfigVersion: 1,
+                                enclaveInstancePublicKey: finalizedPublicKey,
                                 arguments: [
                                     config.registry,
                                     config.verifierRegistry,
@@ -1878,31 +1903,19 @@ function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
             intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
             oracle_version: 1,
             event_uid: `0x${"aa".repeat(32)}`,
-            hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
-            status: BCS_ENUMS.onchainStatus.FINALIZED,
             event_revision: 1,
             source_event_id: "us7000sonari",
             title: "M 7.1 - Sonari Fixture Earthquake",
             region: "Sonari Fixture Region",
             occurred_at_ms: 1_800_000_000_000,
-            magnitude_x100: 710,
-            verified_at_ms: 1_800_000_000_000,
-            source_updated_at_ms: 1_800_000_000_000,
-            primary_source: BCS_ENUMS.primarySource.USGS,
+            hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+            status: BCS_ENUMS.onchainStatus.FINALIZED,
             severity_band: 2,
-            source_set_hash: `0x${"11".repeat(32)}`,
-            raw_data_hash: `0x${"22".repeat(32)}`,
-            raw_data_uri: "walrus://raw",
             affected_cells_root: `0x${"33".repeat(32)}`,
-            affected_cells_uri: "walrus://cells",
-            affected_cells_data_hash: `0x${"44".repeat(32)}`,
             affected_cell_count: 1,
-            geo_resolution: 7,
-            cells_generation_method:
-                BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
-            cell_metric: BCS_ENUMS.cellMetric.USGS_MMI,
-            cell_aggregation: BCS_ENUMS.cellAggregation.GRID_POINT_P90,
-            intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
+            evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
+            evidence_manifest_hash: `0x${"55".repeat(32)}`,
+            verified_at_ms: 1_800_000_000_000,
             freshness_deadline_ms: 1_800_021_600_000,
         },
         payload_bcs_hex: finalizedPayloadBcsHex,
@@ -1925,26 +1938,89 @@ function finalizedResultWithRawManifest(
                 name: "USGS",
                 event_id: "us7000sonari",
                 product: "detail_geojson",
-                uri: "walrus://blob/testBlob_123456",
+                uri: "walrus://blob/rawBlob_123456",
                 content_hash: hash,
                 source_uri:
                     options.sourceUri ??
                     "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
-                walrus_blob_id: "testBlob_123456",
+                walrus_blob_id: "rawBlob_123456",
                 source_hash: hash,
                 size_bytes: bytes.byteLength,
             },
         ],
         oracle_version: 1,
     };
+    const affectedCells = {
+        event_uid: `0x${"aa".repeat(32)}`,
+        event_revision: 1,
+        oracle_version: 1,
+        geo_resolution: 7,
+        cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1",
+        cell_metric: "USGS_MMI",
+        cell_aggregation: "GRID_POINT_P90",
+        intensity_scale: "MMI_X100",
+        affected_cells: [{ h3_index: "608819013513904127", intensity_value: 831, cell_band: 2 }],
+    };
+    const affectedCellsBytes = jsonBytes(affectedCells);
+    const affectedCellsHash = `0x${sha256Hex(affectedCellsBytes)}`;
+    const affectedCellsRef = {
+        uri: "walrus://blob/cellsBlob_123456",
+        walrus_blob_id: "cellsBlob_123456",
+        source_hash: affectedCellsHash,
+        size_bytes: affectedCellsBytes.byteLength,
+    };
+    const evidenceManifest = {
+        schema_version: 1,
+        oracle_version: 1,
+        event_uid: `0x${"aa".repeat(32)}`,
+        event_revision: 1,
+        hazard_type: "EARTHQUAKE",
+        source_event_id: "us7000sonari",
+        sources: manifest.entries.map((entry) => ({
+            source: entry.name,
+            product: entry.product,
+            source_uri: entry.source_uri,
+            artifact_uri: entry.uri,
+            content_hash: entry.content_hash,
+            size_bytes: entry.size_bytes,
+            source_updated_at_ms: 1_800_000_000_000,
+        })),
+        earthquake: {
+            title: "M 7.1 - Sonari Fixture Earthquake",
+            region: "Sonari Fixture Region",
+            occurred_at_ms: 1_800_000_000_000,
+            magnitude_x100: 710,
+            source_updated_at_ms: 1_800_000_000_000,
+        },
+        affected_cells: {
+            uri: affectedCellsRef.uri,
+            hash: affectedCellsHash,
+            root: `0x${"33".repeat(32)}`,
+            count: 1,
+            geo_resolution: 7,
+        },
+    };
+    const evidenceManifestBytes = jsonBytes(evidenceManifest);
+    const evidenceManifestHash = `0x${sha256Hex(evidenceManifestBytes)}`;
+    const evidenceManifestRef = {
+        uri: "walrus://blob/manifestBlob_123456",
+        walrus_blob_id: "manifestBlob_123456",
+        source_hash: evidenceManifestHash,
+        size_bytes: evidenceManifestBytes.byteLength,
+    };
     const result = finalizedResult();
     return {
         ...result,
         payload: {
             ...result.payload,
-            raw_data_hash: rawDataManifestHash(manifest),
+            evidence_manifest_uri: evidenceManifestRef.uri,
+            evidence_manifest_hash: evidenceManifestHash,
         },
         raw_data_manifest: manifest,
+        affected_cells: affectedCells,
+        evidence_manifest: evidenceManifest,
+        affected_cells_ref: affectedCellsRef,
+        evidence_manifest_ref: evidenceManifestRef,
     };
 }
 
@@ -1952,25 +2028,8 @@ function sha256Hex(bytes: Uint8Array): string {
     return createHash("sha256").update(bytes).digest("hex");
 }
 
-function rawDataManifestHash(manifest: RawDataManifest): string {
-    return `0x${createHash("sha256").update(canonicalRawDataManifestJson(manifest)).digest("hex")}`;
-}
-
-function canonicalRawDataManifestJson(manifest: RawDataManifest): string {
-    return JSON.stringify({
-        entries: manifest.entries.map((entry) => ({
-            name: entry.name,
-            event_id: entry.event_id,
-            product: entry.product,
-            uri: entry.uri,
-            content_hash: entry.content_hash,
-            source_uri: entry.source_uri,
-            walrus_blob_id: entry.walrus_blob_id,
-            source_hash: entry.source_hash,
-            size_bytes: entry.size_bytes,
-        })),
-        oracle_version: manifest.oracle_version,
-    });
+function jsonBytes(value: unknown): Uint8Array {
+    return new TextEncoder().encode(JSON.stringify(value));
 }
 
 function normalizeHeaders(headers: RequestInit["headers"] | undefined): Record<string, string> {
@@ -2088,7 +2147,7 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
     failS3 = false;
     failWalrusConfiguration = false;
     oversizeFetch = false;
-    walrusBlobId = "testBlob_123456";
+    walrusBlobId: string | undefined;
 
     readonly fetcher = {
         fetchBytes: async (entry: RawDataEntry): Promise<Uint8Array> => {
@@ -2120,16 +2179,18 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
 
     readonly walrus = {
         archiveAndVerify: async (input: {
+            entry: RawDataEntry;
             artifactS3Key: string;
         }): Promise<{ walrusBlobId: string }> => {
             if (this.failWalrusConfiguration) {
                 throw new ConfigurationSourceArchiveError("SourceArchiver configuration failed");
             }
+            const walrusBlobId = this.walrusBlobId ?? input.entry.walrus_blob_id;
             this.archived.push({
                 artifactS3Key: input.artifactS3Key,
-                walrusBlobId: this.walrusBlobId,
+                walrusBlobId,
             });
-            return { walrusBlobId: this.walrusBlobId };
+            return { walrusBlobId };
         },
     };
 

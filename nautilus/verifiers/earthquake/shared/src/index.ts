@@ -2,30 +2,19 @@ export const PAYLOAD_FIELD_ORDER = [
     "intent",
     "oracle_version",
     "event_uid",
-    "hazard_type",
-    "status",
     "event_revision",
     "source_event_id",
     "title",
     "region",
     "occurred_at_ms",
-    "magnitude_x100",
-    "verified_at_ms",
-    "source_updated_at_ms",
-    "primary_source",
+    "hazard_type",
+    "status",
     "severity_band",
-    "source_set_hash",
-    "raw_data_hash",
-    "raw_data_uri",
     "affected_cells_root",
-    "affected_cells_uri",
-    "affected_cells_data_hash",
     "affected_cell_count",
-    "geo_resolution",
-    "cells_generation_method",
-    "cell_metric",
-    "cell_aggregation",
-    "intensity_scale",
+    "evidence_manifest_uri",
+    "evidence_manifest_hash",
+    "verified_at_ms",
     "freshness_deadline_ms",
 ] as const;
 
@@ -129,30 +118,19 @@ export interface EarthquakeOraclePayload {
     intent: number;
     oracle_version: number;
     event_uid: string;
-    hazard_type: number;
-    status: number;
     event_revision: number;
     source_event_id: string;
     title: string;
     region: string;
     occurred_at_ms: number;
-    magnitude_x100: number;
-    verified_at_ms: number;
-    source_updated_at_ms: number;
-    primary_source: number;
+    hazard_type: number;
+    status: number;
     severity_band: number;
-    source_set_hash: string;
-    raw_data_hash: string;
-    raw_data_uri: string;
     affected_cells_root: string;
-    affected_cells_uri: string;
-    affected_cells_data_hash: string;
     affected_cell_count: number;
-    geo_resolution: number;
-    cells_generation_method: number;
-    cell_metric: number;
-    cell_aggregation: number;
-    intensity_scale: number;
+    evidence_manifest_uri: string;
+    evidence_manifest_hash: string;
+    verified_at_ms: number;
     freshness_deadline_ms: number;
 }
 
@@ -172,6 +150,11 @@ export interface SignedFinalizedPayload {
     signature: string;
     public_key: string;
     raw_data_manifest?: RawDataManifest;
+    affected_cells?: AffectedCellsArtifact;
+    evidence_manifest?: EvidenceManifest;
+    affected_cells_ref?: StoredSourceRef;
+    evidence_manifest_ref?: StoredSourceRef;
+    expected_hashes?: Record<string, unknown>;
     verifier_config_key?: number;
     verifier_config_version?: number;
     enclave_instance_public_key?: string;
@@ -192,6 +175,61 @@ export interface RawDataEntry {
     walrus_blob_id: string;
     source_hash: string;
     size_bytes: number;
+}
+
+export interface StoredSourceRef {
+    uri: string;
+    walrus_blob_id: string;
+    source_hash: string;
+    size_bytes: number;
+}
+
+export interface AffectedCellsArtifact {
+    event_uid: string;
+    event_revision: number;
+    oracle_version: number;
+    geo_resolution: number;
+    cells_generation_method: string;
+    cell_metric: string;
+    cell_aggregation: string;
+    intensity_scale: string;
+    affected_cells: Array<{
+        h3_index: string;
+        intensity_value: number;
+        cell_band: number;
+    }>;
+}
+
+export interface EvidenceManifest {
+    schema_version: number;
+    oracle_version: number;
+    event_uid: string;
+    event_revision: number;
+    hazard_type: string;
+    source_event_id: string;
+    sources: Array<{
+        source: string;
+        product: string;
+        source_uri: string;
+        artifact_uri: string;
+        content_hash: string;
+        size_bytes: number;
+        source_updated_at_ms: number;
+    }>;
+    earthquake: {
+        title: string;
+        region: string;
+        occurred_at_ms: number;
+        magnitude_x100: number;
+        source_updated_at_ms: number;
+    };
+    affected_cells: {
+        uri: string;
+        hash: string;
+        root: string;
+        count: number;
+        geo_resolution: number;
+    };
 }
 
 export interface EnclaveVerificationMetadata {
@@ -276,6 +314,19 @@ function isHash32(value: unknown): value is string {
     return typeof value === "string" && HASH_32_PATTERN.test(value);
 }
 
+function isWalrusUriForBlobId(uri: unknown, blobId: unknown): boolean {
+    return (
+        typeof uri === "string" && typeof blobId === "string" && uri === `walrus://blob/${blobId}`
+    );
+}
+
+function isPayloadArtifactUri(value: unknown): value is string {
+    return (
+        typeof value === "string" &&
+        (value.startsWith("walrus://blob/") || value.startsWith("ipfs://sonari/examples/"))
+    );
+}
+
 function isHexBytes(value: unknown, expectedBytes?: number): value is string {
     if (typeof value !== "string" || !HEX_BYTES_PATTERN.test(value)) {
         return false;
@@ -308,24 +359,15 @@ function hasValidFinalizedPayload(payload: Record<string, unknown>): boolean {
         payload.intent !== BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE ||
         payload.oracle_version !== DEFAULT_ORACLE_CONTRACT.oracle_version ||
         payload.hazard_type !== BCS_ENUMS.hazardType.EARTHQUAKE ||
-        payload.status !== BCS_ENUMS.onchainStatus.FINALIZED ||
-        payload.primary_source !== BCS_ENUMS.primarySource.USGS ||
-        payload.geo_resolution !== DEFAULT_ORACLE_CONTRACT.geo_resolution ||
-        payload.cells_generation_method !==
-            BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1 ||
-        payload.cell_metric !== BCS_ENUMS.cellMetric.USGS_MMI ||
-        payload.cell_aggregation !== BCS_ENUMS.cellAggregation.GRID_POINT_P90 ||
-        payload.intensity_scale !== BCS_ENUMS.intensityScale.MMI_X100
+        payload.status !== BCS_ENUMS.onchainStatus.FINALIZED
     ) {
         return false;
     }
 
     if (
         !isHash32(payload.event_uid) ||
-        !isHash32(payload.source_set_hash) ||
-        !isHash32(payload.raw_data_hash) ||
         !isHash32(payload.affected_cells_root) ||
-        !isHash32(payload.affected_cells_data_hash)
+        !isHash32(payload.evidence_manifest_hash)
     ) {
         return false;
     }
@@ -336,13 +378,11 @@ function hasValidFinalizedPayload(payload: Record<string, unknown>): boolean {
         !isUtf8BytesInRange(payload.title, 1, 160) ||
         !isUtf8BytesInRange(payload.region, 1, 160) ||
         !isSafeNonNegativeInteger(payload.occurred_at_ms) ||
-        !isSafeIntegerInRange(payload.magnitude_x100, 1, 2000) ||
-        !isSafeNonNegativeInteger(payload.verified_at_ms) ||
-        !isSafeNonNegativeInteger(payload.source_updated_at_ms) ||
         !isSafeIntegerInRange(payload.severity_band, 1, 3) ||
-        !isUtf8BytesInRange(payload.raw_data_uri, 1, 512) ||
-        !isUtf8BytesInRange(payload.affected_cells_uri, 1, 512) ||
         !isSafeIntegerInRange(payload.affected_cell_count, 1, ONE_MILLION) ||
+        !isUtf8BytesInRange(payload.evidence_manifest_uri, 1, 512) ||
+        !isPayloadArtifactUri(payload.evidence_manifest_uri) ||
+        !isSafeNonNegativeInteger(payload.verified_at_ms) ||
         !isSafeNonNegativeInteger(payload.freshness_deadline_ms)
     ) {
         return false;
@@ -355,6 +395,101 @@ function hasValidFinalizedPayload(payload: Record<string, unknown>): boolean {
     }
 
     return freshnessDeadlineMs === verifiedAtMs + FRESHNESS_WINDOW_MS;
+}
+
+function hasValidStoredSourceRef(value: unknown): value is StoredSourceRef {
+    if (!isRecord(value)) {
+        return false;
+    }
+    return (
+        typeof value.walrus_blob_id === "string" &&
+        WALRUS_BLOB_ID_PATTERN.test(value.walrus_blob_id) &&
+        isWalrusUriForBlobId(value.uri, value.walrus_blob_id) &&
+        isHash32(value.source_hash) &&
+        isSafeIntegerInRange(value.size_bytes, 1, Number.MAX_SAFE_INTEGER)
+    );
+}
+
+function hasValidAffectedCellsArtifact(value: unknown): value is AffectedCellsArtifact {
+    if (
+        !isRecord(value) ||
+        !isHash32(value.event_uid) ||
+        !isSafeIntegerInRange(value.event_revision, 1, U32_MAX) ||
+        value.oracle_version !== DEFAULT_ORACLE_CONTRACT.oracle_version ||
+        value.geo_resolution !== DEFAULT_ORACLE_CONTRACT.geo_resolution ||
+        !isUtf8BytesInRange(value.cells_generation_method, 1, 96) ||
+        !isUtf8BytesInRange(value.cell_metric, 1, 64) ||
+        !isUtf8BytesInRange(value.cell_aggregation, 1, 64) ||
+        !isUtf8BytesInRange(value.intensity_scale, 1, 64) ||
+        !Array.isArray(value.affected_cells) ||
+        value.affected_cells.length === 0 ||
+        value.affected_cells.length > ONE_MILLION
+    ) {
+        return false;
+    }
+    return value.affected_cells.every(
+        (cell) =>
+            isRecord(cell) &&
+            isUtf8BytesInRange(cell.h3_index, 1, 32) &&
+            isSafeIntegerInRange(cell.intensity_value, 0, 20_000) &&
+            isSafeIntegerInRange(cell.cell_band, 1, 3),
+    );
+}
+
+function hasValidEvidenceManifest(value: unknown): value is EvidenceManifest {
+    if (
+        !isRecord(value) ||
+        value.schema_version !== 1 ||
+        value.oracle_version !== DEFAULT_ORACLE_CONTRACT.oracle_version ||
+        !isHash32(value.event_uid) ||
+        !isSafeIntegerInRange(value.event_revision, 1, U32_MAX) ||
+        value.hazard_type !== "EARTHQUAKE" ||
+        !isUtf8BytesInRange(value.source_event_id, 1, 96) ||
+        !Array.isArray(value.sources) ||
+        value.sources.length === 0 ||
+        value.sources.length > 16 ||
+        !hasValidEarthquakeEvidence(value.earthquake) ||
+        !hasValidEvidenceAffectedCells(value.affected_cells)
+    ) {
+        return false;
+    }
+    return value.sources.every(hasValidEvidenceSource);
+}
+
+function hasValidEvidenceSource(value: unknown): boolean {
+    return (
+        isRecord(value) &&
+        isUtf8BytesInRange(value.source, 1, 64) &&
+        isUtf8BytesInRange(value.product, 1, 96) &&
+        isUtf8BytesInRange(value.source_uri, 1, 2048) &&
+        isUtf8BytesInRange(value.artifact_uri, 1, 512) &&
+        isHash32(value.content_hash) &&
+        isSafeIntegerInRange(value.size_bytes, 1, Number.MAX_SAFE_INTEGER) &&
+        isSafeNonNegativeInteger(value.source_updated_at_ms)
+    );
+}
+
+function hasValidEarthquakeEvidence(value: unknown): boolean {
+    return (
+        isRecord(value) &&
+        isUtf8BytesInRange(value.title, 1, 160) &&
+        isUtf8BytesInRange(value.region, 1, 160) &&
+        isSafeNonNegativeInteger(value.occurred_at_ms) &&
+        isSafeIntegerInRange(value.magnitude_x100, 1, 2000) &&
+        isSafeNonNegativeInteger(value.source_updated_at_ms)
+    );
+}
+
+function hasValidEvidenceAffectedCells(value: unknown): boolean {
+    return (
+        isRecord(value) &&
+        typeof value.uri === "string" &&
+        value.uri.startsWith("walrus://blob/") &&
+        isHash32(value.hash) &&
+        isHash32(value.root) &&
+        isSafeIntegerInRange(value.count, 1, ONE_MILLION) &&
+        value.geo_resolution === DEFAULT_ORACLE_CONTRACT.geo_resolution
+    );
 }
 
 function hasValidRawDataManifest(value: unknown): value is RawDataManifest {
@@ -387,7 +522,7 @@ function hasValidRawDataEntry(value: unknown): value is RawDataEntry {
     }
     return (
         value.source_hash === value.content_hash &&
-        value.uri === `walrus://blob/${value.walrus_blob_id}`
+        isWalrusUriForBlobId(value.uri, value.walrus_blob_id)
     );
 }
 
@@ -508,6 +643,50 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
         };
     }
 
+    if (
+        input.affected_cells !== undefined &&
+        !hasValidAffectedCellsArtifact(input.affected_cells)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input affected_cells is malformed",
+        };
+    }
+
+    if (
+        input.evidence_manifest !== undefined &&
+        !hasValidEvidenceManifest(input.evidence_manifest)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input evidence_manifest is malformed",
+        };
+    }
+
+    if (
+        input.affected_cells_ref !== undefined &&
+        !hasValidStoredSourceRef(input.affected_cells_ref)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input affected_cells_ref is malformed",
+        };
+    }
+
+    if (
+        input.evidence_manifest_ref !== undefined &&
+        !hasValidStoredSourceRef(input.evidence_manifest_ref)
+    ) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer input evidence_manifest_ref is malformed",
+        };
+    }
+
     return {
         ok: true,
         value: {
@@ -519,6 +698,17 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             ...(input.raw_data_manifest === undefined
                 ? {}
                 : { raw_data_manifest: input.raw_data_manifest }),
+            ...(input.affected_cells === undefined ? {} : { affected_cells: input.affected_cells }),
+            ...(input.evidence_manifest === undefined
+                ? {}
+                : { evidence_manifest: input.evidence_manifest }),
+            ...(input.affected_cells_ref === undefined
+                ? {}
+                : { affected_cells_ref: input.affected_cells_ref }),
+            ...(input.evidence_manifest_ref === undefined
+                ? {}
+                : { evidence_manifest_ref: input.evidence_manifest_ref }),
+            ...(isRecord(input.expected_hashes) ? { expected_hashes: input.expected_hashes } : {}),
             verifier_config_key: input.verifier_config_key,
             verifier_config_version: input.verifier_config_version,
             enclave_instance_public_key: input.enclave_instance_public_key,

@@ -14,30 +14,19 @@ const currentPayload = {
     intent: 1,
     oracle_version: 1,
     event_uid: "0x1111111111111111111111111111111111111111111111111111111111111111",
-    hazard_type: 1,
-    status: 3,
     event_revision: 1,
     source_event_id: "us7000sonari",
     title: "M 7.24 - Test Event",
     region: "Test Region",
     occurred_at_ms: 1_704_067_200_000,
-    magnitude_x100: 724,
-    verified_at_ms: 1_704_151_200_000,
-    source_updated_at_ms: 1_704_151_200_000,
-    primary_source: 1,
+    hazard_type: 1,
+    status: 3,
     severity_band: 3,
-    source_set_hash: "0x2222222222222222222222222222222222222222222222222222222222222222",
-    raw_data_hash: "0x3333333333333333333333333333333333333333333333333333333333333333",
-    raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
     affected_cells_root: "0x4444444444444444444444444444444444444444444444444444444444444444",
-    affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json",
-    affected_cells_data_hash: "0x5555555555555555555555555555555555555555555555555555555555555555",
     affected_cell_count: 2,
-    geo_resolution: 7,
-    cells_generation_method: 1,
-    cell_metric: 1,
-    cell_aggregation: 1,
-    intensity_scale: 1,
+    evidence_manifest_uri: "walrus://blob/testManifest_123456",
+    evidence_manifest_hash: "0x5555555555555555555555555555555555555555555555555555555555555555",
+    verified_at_ms: 1_704_151_200_000,
     freshness_deadline_ms: 1_704_172_800_000,
 } as const satisfies Record<string, unknown>;
 
@@ -73,39 +62,82 @@ const validRawDataManifest = {
     oracle_version: 1,
 } as const;
 
+const validAffectedCells = {
+    event_uid: currentPayload.event_uid,
+    event_revision: 1,
+    oracle_version: 1,
+    geo_resolution: 7,
+    cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1",
+    cell_metric: "USGS_MMI",
+    cell_aggregation: "GRID_POINT_P90",
+    intensity_scale: "MMI_X100",
+    affected_cells: [{ h3_index: "608819013513904127", intensity_value: 831, cell_band: 3 }],
+} as const;
+
+const validEvidenceManifest = {
+    schema_version: 1,
+    oracle_version: 1,
+    event_uid: currentPayload.event_uid,
+    event_revision: 1,
+    hazard_type: "EARTHQUAKE",
+    source_event_id: "us7000sonari",
+    sources: [
+        {
+            source: "USGS",
+            product: "detail_geojson",
+            source_uri:
+                "https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
+            artifact_uri: "walrus://blob/testBlob_123456",
+            content_hash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            size_bytes: 1234,
+            source_updated_at_ms: 1_704_151_200_000,
+        },
+    ],
+    earthquake: {
+        title: "M 7.24 - Test Event",
+        region: "Test Region",
+        occurred_at_ms: 1_704_067_200_000,
+        magnitude_x100: 724,
+        source_updated_at_ms: 1_704_151_200_000,
+    },
+    affected_cells: {
+        uri: "walrus://blob/testCells_123456",
+        hash: "0x6666666666666666666666666666666666666666666666666666666666666666",
+        root: currentPayload.affected_cells_root,
+        count: 2,
+        geo_resolution: 7,
+    },
+} as const;
+
+const validStoredRef = {
+    uri: "walrus://blob/testCells_123456",
+    walrus_blob_id: "testCells_123456",
+    source_hash: "0x6666666666666666666666666666666666666666666666666666666666666666",
+    size_bytes: 2345,
+} as const;
+
 describe("oracle schema contracts", () => {
     it("keeps current payload field order aligned with the root schema", () => {
         expect(PAYLOAD_FIELD_ORDER).toEqual([
             "intent",
             "oracle_version",
             "event_uid",
-            "hazard_type",
-            "status",
             "event_revision",
             "source_event_id",
             "title",
             "region",
             "occurred_at_ms",
-            "magnitude_x100",
-            "verified_at_ms",
-            "source_updated_at_ms",
-            "primary_source",
+            "hazard_type",
+            "status",
             "severity_band",
-            "source_set_hash",
-            "raw_data_hash",
-            "raw_data_uri",
             "affected_cells_root",
-            "affected_cells_uri",
-            "affected_cells_data_hash",
             "affected_cell_count",
-            "geo_resolution",
-            "cells_generation_method",
-            "cell_metric",
-            "cell_aggregation",
-            "intensity_scale",
+            "evidence_manifest_uri",
+            "evidence_manifest_hash",
+            "verified_at_ms",
             "freshness_deadline_ms",
         ]);
-        expect(PAYLOAD_FIELD_ORDER).toHaveLength(28);
+        expect(PAYLOAD_FIELD_ORDER).toHaveLength(17);
         expect(Object.keys(currentPayload)).toEqual(PAYLOAD_FIELD_ORDER);
     });
 
@@ -129,13 +161,6 @@ describe("oracle schema contracts", () => {
         expect(BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE).toBe(currentPayload.intent);
         expect(BCS_ENUMS.hazardType.EARTHQUAKE).toBe(currentPayload.hazard_type);
         expect(BCS_ENUMS.onchainStatus.FINALIZED).toBe(currentPayload.status);
-        expect(BCS_ENUMS.primarySource.USGS).toBe(currentPayload.primary_source);
-        expect(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1).toBe(
-            currentPayload.cells_generation_method,
-        );
-        expect(BCS_ENUMS.cellMetric.USGS_MMI).toBe(currentPayload.cell_metric);
-        expect(BCS_ENUMS.cellAggregation.GRID_POINT_P90).toBe(currentPayload.cell_aggregation);
-        expect(BCS_ENUMS.intensityScale.MMI_X100).toBe(currentPayload.intensity_scale);
 
         expect(DEFAULT_ORACLE_CONTRACT.oracle_version).toBe(1);
         expect(DEFAULT_ORACLE_CONTRACT.geo_resolution).toBe(7);
@@ -273,15 +298,61 @@ describe("oracle boundary validators", () => {
             validateRelayerSubmitInput({
                 ...finalizedRelayerInput,
                 raw_data_manifest: validRawDataManifest,
+                affected_cells: validAffectedCells,
+                evidence_manifest: validEvidenceManifest,
+                affected_cells_ref: validStoredRef,
+                evidence_manifest_ref: {
+                    ...validStoredRef,
+                    uri: "walrus://blob/testManifest_123456",
+                    walrus_blob_id: "testManifest_123456",
+                    source_hash: currentPayload.evidence_manifest_hash,
+                },
             }),
         ).toEqual({
             ok: true,
             value: {
                 ...finalizedRelayerInput,
                 raw_data_manifest: validRawDataManifest,
+                affected_cells: validAffectedCells,
+                evidence_manifest: validEvidenceManifest,
+                affected_cells_ref: validStoredRef,
+                evidence_manifest_ref: {
+                    ...validStoredRef,
+                    uri: "walrus://blob/testManifest_123456",
+                    walrus_blob_id: "testManifest_123456",
+                    source_hash: currentPayload.evidence_manifest_hash,
+                },
             },
         });
         expect(Object.keys(currentPayload)).toEqual(PAYLOAD_FIELD_ORDER);
+    });
+
+    it("rejects old finalized payload artifact fields as malformed metadata", () => {
+        for (const oldField of [
+            "magnitude_x100",
+            "source_updated_at_ms",
+            "primary_source",
+            "source_set_hash",
+            "raw_data_hash",
+            "raw_data_uri",
+            "affected_cells_uri",
+            "affected_cells_data_hash",
+            "geo_resolution",
+            "cells_generation_method",
+            "cell_metric",
+            "cell_aggregation",
+            "intensity_scale",
+        ]) {
+            expect(
+                validateRelayerSubmitInput({
+                    ...finalizedRelayerInput,
+                    payload: { ...currentPayload, [oldField]: "old-contract-field" },
+                }),
+            ).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            });
+        }
     });
 
     it("rejects malformed raw data manifest references", () => {
@@ -318,21 +389,18 @@ describe("oracle boundary validators", () => {
             { title: "x".repeat(161) },
             { region: "" },
             { region: "x".repeat(161) },
-            { magnitude_x100: 0 },
-            { magnitude_x100: 2001 },
             { severity_band: 0 },
             { severity_band: 4 },
-            { raw_data_uri: "" },
-            { raw_data_uri: "x".repeat(513) },
-            { affected_cells_uri: "" },
-            { affected_cells_uri: "x".repeat(513) },
             { affected_cell_count: 0 },
             { affected_cell_count: 1_000_001 },
+            { evidence_manifest_uri: "" },
+            { evidence_manifest_uri: "ipfs://sonari/live/us7000sonari/evidence_manifest.json" },
+            { evidence_manifest_hash: "0x00" },
             { freshness_deadline_ms: currentPayload.verified_at_ms },
             { event_revision: 1.5 },
             { event_revision: Number.MAX_SAFE_INTEGER + 1 },
-            { source_updated_at_ms: 1_700_000_000_000.5 },
-            { source_updated_at_ms: Number.MAX_SAFE_INTEGER + 1 },
+            { verified_at_ms: 1_700_000_000_000.5 },
+            { verified_at_ms: Number.MAX_SAFE_INTEGER + 1 },
         ]) {
             expect(
                 validateRelayerSubmitInput({
