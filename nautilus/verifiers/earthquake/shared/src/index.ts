@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const PAYLOAD_FIELD_ORDER = [
     "intent",
     "oracle_version",
@@ -602,6 +604,60 @@ export function encodeEarthquakeOraclePayloadBcsBytes(
     ]);
 }
 
+export function computeAffectedCellsRootHex(affected: AffectedCellsArtifact): string | null {
+    const leafHashes: Uint8Array[] = [];
+    let previousH3: bigint | null = null;
+    for (const cell of affected.affected_cells) {
+        const h3Index = parseCanonicalU64Decimal(cell.h3_index);
+        if (h3Index === null || (previousH3 !== null && h3Index <= previousH3)) {
+            return null;
+        }
+        previousH3 = h3Index;
+        leafHashes.push(
+            sha256Bytes(
+                concatBytes([
+                    u8(0),
+                    hexBytes32(affected.event_uid),
+                    u32(affected.event_revision),
+                    u64BigInt(h3Index),
+                    u8(affected.geo_resolution),
+                    u8(BCS_ENUMS.cellMetric.USGS_MMI),
+                    u16(cell.intensity_value),
+                    u8(BCS_ENUMS.intensityScale.MMI_X100),
+                    u8(cell.cell_band),
+                    u8(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1),
+                    u64(affected.oracle_version),
+                ]),
+            ),
+        );
+    }
+
+    if (leafHashes.length === 0) {
+        return null;
+    }
+
+    let level = leafHashes;
+    while (level.length > 1) {
+        const next: Uint8Array[] = [];
+        for (let index = 0; index < level.length; index += 2) {
+            const left = level[index];
+            const right = level[index + 1];
+            if (left === undefined) {
+                return null;
+            }
+            if (right === undefined) {
+                next.push(left);
+                continue;
+            }
+            next.push(sha256Bytes(concatBytes([u8(1), left, right])));
+        }
+        level = next;
+    }
+
+    const root = level[0];
+    return root === undefined ? null : `0x${bytesToHex(root)}`;
+}
+
 export function validateRelayerSubmitInput(input: unknown): ValidationResult<RelayerSubmitInput> {
     if (!isRecord(input)) {
         return {
@@ -765,9 +821,21 @@ function u32(value: number): Uint8Array {
     return bytes;
 }
 
+function u16(value: number): Uint8Array {
+    const bytes = new Uint8Array(2);
+    new DataView(bytes.buffer).setUint16(0, value, true);
+    return bytes;
+}
+
 function u64(value: number): Uint8Array {
     const bytes = new Uint8Array(8);
     new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+    return bytes;
+}
+
+function u64BigInt(value: bigint): Uint8Array {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, value, true);
     return bytes;
 }
 
@@ -815,4 +883,16 @@ function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
 
 function bytesToHex(bytes: Uint8Array): string {
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function sha256Bytes(bytes: Uint8Array): Uint8Array {
+    return new Uint8Array(createHash("sha256").update(bytes).digest());
+}
+
+function parseCanonicalU64Decimal(value: string): bigint | null {
+    if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+        return null;
+    }
+    const parsed = BigInt(value);
+    return parsed <= 0xffff_ffff_ffff_ffffn ? parsed : null;
 }

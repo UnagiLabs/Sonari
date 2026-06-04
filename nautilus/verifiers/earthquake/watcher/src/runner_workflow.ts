@@ -25,6 +25,7 @@ import {
 } from "@sonari/earthquake-relayer";
 import {
     type AffectedCellsArtifact,
+    computeAffectedCellsRootHex,
     EARTHQUAKE_VERIFIER_CONFIG_KEY,
     type EarthquakeOraclePayload,
     type EnclaveVerificationMetadata,
@@ -1797,6 +1798,15 @@ function evidenceManifestBindingError(input: {
     }
 
     if (
+        input.affectedCells.event_uid !== input.payload.event_uid ||
+        input.affectedCells.event_revision !== input.payload.event_revision ||
+        input.affectedCells.oracle_version !== input.payload.oracle_version ||
+        input.affectedCells.geo_resolution !==
+            input.evidenceManifest.affected_cells.geo_resolution ||
+        input.affectedCells.cells_generation_method !== "shakemap_gridxml_h3_grid_point_p90_v1" ||
+        input.affectedCells.cell_metric !== "USGS_MMI" ||
+        input.affectedCells.cell_aggregation !== "GRID_POINT_P90" ||
+        input.affectedCells.intensity_scale !== "MMI_X100" ||
         input.evidenceManifest.affected_cells.uri !== input.affectedCellsRef.uri ||
         input.evidenceManifest.affected_cells.hash !== input.affectedCellsRef.source_hash ||
         input.evidenceManifest.affected_cells.root !== input.payload.affected_cells_root ||
@@ -1809,6 +1819,14 @@ function evidenceManifestBindingError(input: {
             `0x${createHash("sha256").update(input.affectedCellsBytes).digest("hex")}`
     ) {
         return "evidence_manifest affected_cells metadata does not match generated artifact";
+    }
+    const affectedCellsRoot = computeAffectedCellsRootHex(input.affectedCells);
+    if (
+        affectedCellsRoot === null ||
+        affectedCellsRoot !== input.payload.affected_cells_root ||
+        affectedCellsRoot !== input.evidenceManifest.affected_cells.root
+    ) {
+        return "affected_cells artifact leaves do not match signed Merkle root";
     }
 
     const expectedSources = input.rawDataManifest.entries

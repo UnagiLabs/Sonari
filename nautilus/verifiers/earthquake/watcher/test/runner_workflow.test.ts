@@ -13,6 +13,7 @@ import {
     type RawDataEntry,
     type RawDataManifest,
     type TeeCoreResult,
+    computeAffectedCellsRootHex,
     encodeEarthquakeOraclePayloadBcsHex,
 } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
@@ -1231,6 +1232,104 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("rejects affected-cells artifacts whose leaves do not match the signed root", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const bytes = new TextEncoder().encode("source bytes");
+        const result = finalizedResultWithRawManifest(bytes);
+        if (
+            result.affected_cells === undefined ||
+            result.affected_cells_ref === undefined ||
+            result.evidence_manifest === undefined ||
+            result.evidence_manifest_ref === undefined
+        ) {
+            throw new Error("fixture expected generated artifact metadata");
+        }
+        const affectedCell = result.affected_cells.affected_cells[0];
+        if (affectedCell === undefined) {
+            throw new Error("fixture expected affected cell leaf");
+        }
+        const affectedCells = {
+            ...result.affected_cells,
+            affected_cells: [
+                {
+                    ...affectedCell,
+                    cell_band: 1,
+                },
+            ],
+        };
+        const affectedCellsBytes = jsonBytes(affectedCells);
+        const affectedCellsHash = `0x${sha256Hex(affectedCellsBytes)}`;
+        const evidenceManifest: EvidenceManifest = {
+            ...result.evidence_manifest,
+            affected_cells: {
+                ...result.evidence_manifest.affected_cells,
+                hash: affectedCellsHash,
+            },
+        };
+        const evidenceManifestBytes = jsonBytes(evidenceManifest);
+        const evidenceManifestHash = `0x${sha256Hex(evidenceManifestBytes)}`;
+        const payload: EarthquakeOraclePayload = {
+            ...(result.payload as EarthquakeOraclePayload),
+            evidence_manifest_hash: evidenceManifestHash,
+        };
+        const tamperedResult: Extract<TeeCoreResult, { status: "finalized" }> = {
+            ...result,
+            payload,
+            payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
+            affected_cells: affectedCells,
+            affected_cells_ref: {
+                ...result.affected_cells_ref,
+                source_hash: affectedCellsHash,
+                size_bytes: affectedCellsBytes.byteLength,
+            },
+            evidence_manifest: evidenceManifest,
+            evidence_manifest_ref: {
+                ...result.evidence_manifest_ref,
+                source_hash: evidenceManifestHash,
+                size_bytes: evidenceManifestBytes.byteLength,
+            },
+        };
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            tamperedResult,
+            1_800_000_001_000,
+            undefined,
+            1,
+        );
+        const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result: tamperedResult,
+            }),
+        ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+        expect(sourceArchive.fetches).toEqual([]);
+        expect(sourceArchive.puts).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "integrity_failed",
+        });
+    });
+
     it("rejects source re-fetch URLs outside the allowed USGS HTTPS scope", async () => {
         const invalidSourceUris = [
             "http://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/us7000sonari.geojson",
@@ -2048,6 +2147,10 @@ function finalizedResultWithRawManifest(
         intensity_scale: "MMI_X100",
         affected_cells: [{ h3_index: "608819013513904127", intensity_value: 831, cell_band: 2 }],
     };
+    const affectedCellsRoot = computeAffectedCellsRootHex(affectedCells);
+    if (affectedCellsRoot === null) {
+        throw new Error("fixture affected cells should produce a Merkle root");
+    }
     const affectedCellsBytes = jsonBytes(affectedCells);
     const affectedCellsHash = `0x${sha256Hex(affectedCellsBytes)}`;
     const affectedCellsRef = {
@@ -2082,7 +2185,7 @@ function finalizedResultWithRawManifest(
         affected_cells: {
             uri: affectedCellsRef.uri,
             hash: affectedCellsHash,
-            root: `0x${"33".repeat(32)}`,
+            root: affectedCellsRoot,
             count: 1,
             geo_resolution: 7,
         },
@@ -2098,6 +2201,7 @@ function finalizedResultWithRawManifest(
     const result = finalizedResult();
     const payload: EarthquakeOraclePayload = {
         ...(result.payload as EarthquakeOraclePayload),
+        affected_cells_root: affectedCellsRoot,
         evidence_manifest_uri: evidenceManifestRef.uri,
         evidence_manifest_hash: evidenceManifestHash,
     };

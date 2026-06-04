@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     AFFECTED_CELL_LEAF_FIELD_ORDER,
     BCS_ENUMS,
+    computeAffectedCellsRootHex,
     DEFAULT_ORACLE_CONTRACT,
     ERROR_CODES,
     encodeEarthquakeOraclePayloadBcsHex,
@@ -156,6 +157,21 @@ describe("oracle schema contracts", () => {
             "oracle_version",
         ]);
         expect(AFFECTED_CELL_LEAF_FIELD_ORDER).toHaveLength(10);
+        expect(
+            computeAffectedCellsRootHex({
+                ...validAffectedCells,
+                affected_cells: [...validAffectedCells.affected_cells],
+            }),
+        ).toMatch(/^0x[0-9a-f]{64}$/);
+        expect(
+            computeAffectedCellsRootHex({
+                ...validAffectedCells,
+                affected_cells: [
+                    { h3_index: "2", intensity_value: 831, cell_band: 3 },
+                    { h3_index: "1", intensity_value: 831, cell_band: 3 },
+                ],
+            }),
+        ).toBeNull();
     });
 
     it("pins numeric enum and default values used by the current BCS payload", () => {
