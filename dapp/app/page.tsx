@@ -141,6 +141,8 @@ const values = [
 const trustItems = [
     "Donating does not create claim rights.",
     "Top donors get recognition, not payout priority.",
+    "Relief is paid to the verified Membership SBT owner.",
+    "KYC and World ID follow the same full-support route.",
     "Pause, oracle, and sponsor controls are visible.",
     "Sponsor logos require verification and approval.",
 ];
