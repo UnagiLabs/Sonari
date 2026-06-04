@@ -21,6 +21,18 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
     }
 }
 
+function readPushPaths(workflow: string): string[] {
+    const pathsMatch = workflow.match(/ {4}paths:\n((?: {6}- .+\n)+)/u);
+    const pathsBlock = pathsMatch?.[1];
+    if (pathsBlock === undefined) {
+        return [];
+    }
+    return pathsBlock
+        .trimEnd()
+        .split("\n")
+        .map((line) => line.trim().replace(/^- /u, ""));
+}
+
 describe("AWS Sonari verifier runner dev deploy workflow", () => {
     it("does not keep the legacy earthquake runner deploy workflow", async () => {
         await expect(access(legacyEarthquakeWorkflowPath)).rejects.toThrow();
@@ -40,6 +52,69 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         ]);
         expect(workflow).not.toContain("pull_request:");
         expect(workflow).not.toContain("aws-sonari-verifier-runner-prod");
+    });
+
+    it("filters main pushes to AWS deploy artifact and CloudFormation inputs", async () => {
+        const workflow = await readWorkflow();
+        const pushPaths = readPushPaths(workflow);
+
+        expectContainsAll(workflow, [
+            "push:",
+            "branches:",
+            "- main",
+            "paths:",
+            "workflow_dispatch:",
+        ]);
+        expect(workflow).not.toContain("pull_request:");
+        expect(pushPaths).toEqual(
+            expect.arrayContaining([
+                ".github/workflows/aws-sonari-verifier-runner-dev-deploy.yml",
+                "infra/aws/sonari-verifier-runner/template.yaml",
+                "scripts/build_aws_*.ts",
+                "scripts/aws_sonari_verifier_runner_deploy_plan.ts",
+                "scripts/tsconfig.json",
+                "nautilus/verifiers/common/contracts/src/**",
+                "nautilus/verifiers/earthquake/shared/src/**",
+                "nautilus/verifiers/earthquake/watcher/src/**",
+                "nautilus/verifiers/earthquake/relayer/src/**",
+                "nautilus/verifiers/earthquake/tee/src/**",
+                "nautilus/verifiers/membership/shared/src/**",
+                "nautilus/verifiers/membership/runner/src/**",
+                "nautilus/verifiers/membership/tee/src/**",
+                "nautilus/verifiers/shared-tee/src/**",
+                "nautilus/verifiers/common/contracts/package.json",
+                "nautilus/verifiers/common/contracts/tsconfig.json",
+                "nautilus/verifiers/earthquake/shared/package.json",
+                "nautilus/verifiers/earthquake/shared/tsconfig.json",
+                "nautilus/verifiers/earthquake/watcher/package.json",
+                "nautilus/verifiers/earthquake/watcher/tsconfig.json",
+                "nautilus/verifiers/earthquake/relayer/package.json",
+                "nautilus/verifiers/earthquake/relayer/tsconfig.json",
+                "nautilus/verifiers/earthquake/tee/Cargo.toml",
+                "nautilus/verifiers/membership/shared/package.json",
+                "nautilus/verifiers/membership/shared/tsconfig.json",
+                "nautilus/verifiers/membership/runner/package.json",
+                "nautilus/verifiers/membership/runner/tsconfig.json",
+                "nautilus/verifiers/membership/tee/Cargo.toml",
+                "nautilus/verifiers/shared-tee/Cargo.toml",
+                "package.json",
+                "pnpm-lock.yaml",
+                "tsconfig.json",
+                "Cargo.toml",
+                "Cargo.lock",
+            ]),
+        );
+        expect(pushPaths).not.toEqual(expect.arrayContaining(["docs/**"]));
+        expect(pushPaths).not.toEqual(
+            expect.arrayContaining([
+                "README.md",
+                "infra/aws/sonari-verifier-runner/README.md",
+                "dapp/**",
+                "contracts/**",
+                "nautilus/verifiers/earthquake/watcher/test/**",
+                "nautilus/verifiers/membership/tee/tests/**",
+            ]),
+        );
     });
 
     it("uses GitHub OIDC and only dev-prefixed GitHub variables for AWS access", async () => {

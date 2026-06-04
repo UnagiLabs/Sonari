@@ -4,6 +4,41 @@ on:
   push:
     branches:
       - main
+    paths:
+      - .github/workflows/aws-sonari-verifier-runner-dev-deploy.yml
+      - infra/aws/sonari-verifier-runner/template.yaml
+      - scripts/build_aws_*.ts
+      - scripts/aws_sonari_verifier_runner_deploy_plan.ts
+      - scripts/tsconfig.json
+      - nautilus/verifiers/common/contracts/package.json
+      - nautilus/verifiers/common/contracts/tsconfig.json
+      - nautilus/verifiers/common/contracts/src/**
+      - nautilus/verifiers/earthquake/shared/package.json
+      - nautilus/verifiers/earthquake/shared/tsconfig.json
+      - nautilus/verifiers/earthquake/shared/src/**
+      - nautilus/verifiers/earthquake/watcher/package.json
+      - nautilus/verifiers/earthquake/watcher/tsconfig.json
+      - nautilus/verifiers/earthquake/watcher/src/**
+      - nautilus/verifiers/earthquake/relayer/package.json
+      - nautilus/verifiers/earthquake/relayer/tsconfig.json
+      - nautilus/verifiers/earthquake/relayer/src/**
+      - nautilus/verifiers/earthquake/tee/Cargo.toml
+      - nautilus/verifiers/earthquake/tee/src/**
+      - nautilus/verifiers/membership/shared/package.json
+      - nautilus/verifiers/membership/shared/tsconfig.json
+      - nautilus/verifiers/membership/shared/src/**
+      - nautilus/verifiers/membership/runner/package.json
+      - nautilus/verifiers/membership/runner/tsconfig.json
+      - nautilus/verifiers/membership/runner/src/**
+      - nautilus/verifiers/membership/tee/Cargo.toml
+      - nautilus/verifiers/membership/tee/src/**
+      - nautilus/verifiers/shared-tee/Cargo.toml
+      - nautilus/verifiers/shared-tee/src/**
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.json
+      - Cargo.toml
+      - Cargo.lock
   workflow_dispatch:
 
 permissions:
