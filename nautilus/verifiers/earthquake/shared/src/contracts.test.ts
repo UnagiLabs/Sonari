@@ -4,6 +4,7 @@ import {
     BCS_ENUMS,
     DEFAULT_ORACLE_CONTRACT,
     ERROR_CODES,
+    encodeEarthquakeOraclePayloadBcsHex,
     OFFCHAIN_STATUSES,
     PAYLOAD_FIELD_ORDER,
     validateRelayerSubmitInput,
@@ -30,7 +31,7 @@ const currentPayload = {
     freshness_deadline_ms: 1_704_172_800_000,
 } as const satisfies Record<string, unknown>;
 
-const validPayloadBcsHex = "0x01";
+const validPayloadBcsHex = encodeEarthquakeOraclePayloadBcsHex(currentPayload);
 const validSignature = `0x${"11".repeat(64)}`;
 const validPublicKey = `0x${"22".repeat(32)}`;
 const finalizedRelayerInput = {
@@ -419,6 +420,12 @@ describe("oracle boundary validators", () => {
             { payload_bcs_hex: "" },
             { payload_bcs_hex: "0x0" },
             { payload_bcs_hex: "0xzz" },
+            {
+                payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex({
+                    ...currentPayload,
+                    severity_band: 2,
+                }),
+            },
             { signature: "" },
             { signature: `0x${"11".repeat(63)}` },
             { public_key: "" },

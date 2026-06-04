@@ -8,9 +8,12 @@ import {
 import {
     BCS_ENUMS,
     type EnclaveVerificationMetadata,
+    type EarthquakeOraclePayload,
+    type EvidenceManifest,
     type RawDataEntry,
     type RawDataManifest,
     type TeeCoreResult,
+    encodeEarthquakeOraclePayloadBcsHex,
 } from "@sonari/earthquake-shared";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
@@ -41,7 +44,6 @@ const earthquakeRelayerTarget = "0x123::accessor::create_disaster_event_from_sig
 const earthquakeRelayerRegistry = "0xregistry";
 const earthquakeRelayerVerifierRegistry = "0xverifier";
 const earthquakeRelayerClock = "0x6";
-const finalizedPayloadBcsHex = "0x01";
 const finalizedSignature = `0x${"11".repeat(64)}`;
 const finalizedPublicKey = `0x${"22".repeat(32)}`;
 const attestationDocumentHex = `0x${"aa".repeat(96)}`;
@@ -1116,6 +1118,9 @@ describe("AWS runner workflow helper", () => {
         const bytes = new TextEncoder().encode("source bytes");
         const result = finalizedResultWithRawManifest(bytes);
         result.payload.evidence_manifest_hash = `0x${"99".repeat(32)}`;
+        result.payload_bcs_hex = encodeEarthquakeOraclePayloadBcsHex(
+            result.payload as EarthquakeOraclePayload,
+        );
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
         const handler = createRunnerControlHandler({
@@ -1135,6 +1140,87 @@ describe("AWS runner workflow helper", () => {
                 source_event_id: "us7000sonari",
                 attempt: 1,
                 result,
+            }),
+        ).resolves.toMatchObject({ source_archive: "integrity_failed" });
+        expect(sourceArchive.fetches).toEqual([]);
+        expect(sourceArchive.puts).toEqual([]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            source_archive_status: "integrity_failed",
+        });
+    });
+
+    it("rejects evidence manifests whose source list does not match archived raw entries", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const bytes = new TextEncoder().encode("source bytes");
+        const result = finalizedResultWithRawManifest(bytes);
+        if (
+            result.evidence_manifest === undefined ||
+            result.evidence_manifest_ref === undefined
+        ) {
+            throw new Error("fixture expected evidence manifest metadata");
+        }
+        const source = result.evidence_manifest.sources[0];
+        if (source === undefined) {
+            throw new Error("fixture expected evidence manifest source");
+        }
+        const evidenceManifest: EvidenceManifest = {
+            ...result.evidence_manifest,
+            sources: [
+                {
+                    ...source,
+                    artifact_uri: "walrus://blob/otherRawBlob_123456",
+                },
+            ],
+        };
+        const evidenceManifestBytes = jsonBytes(evidenceManifest);
+        const evidenceManifestHash = `0x${sha256Hex(evidenceManifestBytes)}`;
+        const payload: EarthquakeOraclePayload = {
+            ...(result.payload as EarthquakeOraclePayload),
+            evidence_manifest_hash: evidenceManifestHash,
+        };
+        const tamperedResult: Extract<TeeCoreResult, { status: "finalized" }> = {
+            ...result,
+            payload,
+            payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
+            evidence_manifest: evidenceManifest,
+            evidence_manifest_ref: {
+                ...result.evidence_manifest_ref,
+                source_hash: evidenceManifestHash,
+                size_bytes: evidenceManifestBytes.byteLength,
+            },
+        };
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            tamperedResult,
+            1_800_000_001_000,
+            undefined,
+            1,
+        );
+        const sourceArchive = new RecordingSourceArchiveAdapter(bytes);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            sourceArchive,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "archive_sources",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result: tamperedResult,
             }),
         ).resolves.toMatchObject({ source_archive: "integrity_failed" });
         expect(sourceArchive.fetches).toEqual([]);
@@ -1897,28 +1983,29 @@ function pendingSourceResult(sourceEventId: string): TeeCoreResult {
 }
 
 function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
+    const payload: EarthquakeOraclePayload = {
+        intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
+        oracle_version: 1,
+        event_uid: `0x${"aa".repeat(32)}`,
+        event_revision: 1,
+        source_event_id: "us7000sonari",
+        title: "M 7.1 - Sonari Fixture Earthquake",
+        region: "Sonari Fixture Region",
+        occurred_at_ms: 1_800_000_000_000,
+        hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+        status: BCS_ENUMS.onchainStatus.FINALIZED,
+        severity_band: 2,
+        affected_cells_root: `0x${"33".repeat(32)}`,
+        affected_cell_count: 1,
+        evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
+        evidence_manifest_hash: `0x${"55".repeat(32)}`,
+        verified_at_ms: 1_800_000_000_000,
+        freshness_deadline_ms: 1_800_021_600_000,
+    };
     return {
         status: "finalized",
-        payload: {
-            intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
-            oracle_version: 1,
-            event_uid: `0x${"aa".repeat(32)}`,
-            event_revision: 1,
-            source_event_id: "us7000sonari",
-            title: "M 7.1 - Sonari Fixture Earthquake",
-            region: "Sonari Fixture Region",
-            occurred_at_ms: 1_800_000_000_000,
-            hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
-            status: BCS_ENUMS.onchainStatus.FINALIZED,
-            severity_band: 2,
-            affected_cells_root: `0x${"33".repeat(32)}`,
-            affected_cell_count: 1,
-            evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
-            evidence_manifest_hash: `0x${"55".repeat(32)}`,
-            verified_at_ms: 1_800_000_000_000,
-            freshness_deadline_ms: 1_800_021_600_000,
-        },
-        payload_bcs_hex: finalizedPayloadBcsHex,
+        payload,
+        payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
         signature: finalizedSignature,
         public_key: finalizedPublicKey,
         verifier_config_key: 1,
@@ -2009,13 +2096,15 @@ function finalizedResultWithRawManifest(
         size_bytes: evidenceManifestBytes.byteLength,
     };
     const result = finalizedResult();
+    const payload: EarthquakeOraclePayload = {
+        ...(result.payload as EarthquakeOraclePayload),
+        evidence_manifest_uri: evidenceManifestRef.uri,
+        evidence_manifest_hash: evidenceManifestHash,
+    };
     return {
         ...result,
-        payload: {
-            ...result.payload,
-            evidence_manifest_uri: evidenceManifestRef.uri,
-            evidence_manifest_hash: evidenceManifestHash,
-        },
+        payload,
+        payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
         raw_data_manifest: manifest,
         affected_cells: affectedCells,
         evidence_manifest: evidenceManifest,

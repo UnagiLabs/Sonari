@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { BCS_ENUMS, type TeeCoreResult } from "@sonari/earthquake-shared";
+import {
+    BCS_ENUMS,
+    type EarthquakeOraclePayload,
+    type TeeCoreResult,
+    encodeEarthquakeOraclePayloadBcsHex,
+} from "@sonari/earthquake-shared";
 import {
     buildEarthquakeVerifierRequest,
     createDefaultScheduledHandlerFromEnv,
@@ -20,7 +25,7 @@ import type { UsgsEarthquakeCandidate } from "../src/usgs.js";
 
 const baseNow = 1_800_000_000_000;
 const manualAuthToken = ["manual", "test", "token"].join("-");
-const finalizedPayloadBcsHex = "0x01";
+const finalizedPayloadBcsHex = encodeEarthquakeOraclePayloadBcsHex(finalizedPayload());
 const finalizedSignature = `0x${"11".repeat(64)}`;
 const finalizedPublicKey = `0x${"22".repeat(32)}`;
 const passthroughSourceEventIdResolver = async ({ sourceEventId }: { sourceEventId: string }) => ({
@@ -2047,33 +2052,38 @@ function escapeRegExp(input: string): string {
 }
 
 function finalizedResult(): TeeCoreResult {
+    const payload = finalizedPayload();
     return {
         status: "finalized",
-        payload: {
-            intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
-            oracle_version: 1,
-            event_uid: `0x${"aa".repeat(32)}`,
-            event_revision: 1,
-            source_event_id: "us7000sonari",
-            title: "M 7.1 - Sonari Fixture Earthquake",
-            region: "Sonari Fixture Region",
-            occurred_at_ms: baseNow,
-            hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
-            status: BCS_ENUMS.onchainStatus.FINALIZED,
-            severity_band: 2,
-            affected_cells_root: `0x${"33".repeat(32)}`,
-            affected_cell_count: 1,
-            evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
-            evidence_manifest_hash: `0x${"55".repeat(32)}`,
-            verified_at_ms: baseNow,
-            freshness_deadline_ms: baseNow + 21_600_000,
-        },
-        payload_bcs_hex: finalizedPayloadBcsHex,
+        payload,
+        payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
         signature: finalizedSignature,
         public_key: finalizedPublicKey,
         verifier_config_key: 1,
         verifier_config_version: 1,
         enclave_instance_public_key: finalizedPublicKey,
+    };
+}
+
+function finalizedPayload(): EarthquakeOraclePayload {
+    return {
+        intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
+        oracle_version: 1,
+        event_uid: `0x${"aa".repeat(32)}`,
+        event_revision: 1,
+        source_event_id: "us7000sonari",
+        title: "M 7.1 - Sonari Fixture Earthquake",
+        region: "Sonari Fixture Region",
+        occurred_at_ms: baseNow,
+        hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+        status: BCS_ENUMS.onchainStatus.FINALIZED,
+        severity_band: 2,
+        affected_cells_root: `0x${"33".repeat(32)}`,
+        affected_cell_count: 1,
+        evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
+        evidence_manifest_hash: `0x${"55".repeat(32)}`,
+        verified_at_ms: baseNow,
+        freshness_deadline_ms: baseNow + 21_600_000,
     };
 }
 

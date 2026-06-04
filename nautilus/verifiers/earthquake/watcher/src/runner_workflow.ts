@@ -32,6 +32,7 @@ import {
     type EvidenceManifest,
     type OracleErrorCode,
     type RawDataEntry,
+    type RawDataManifest,
     type StoredSourceRef,
     type TeeCoreResult,
     validateRelayerSubmitInput,
@@ -1634,6 +1635,24 @@ async function archiveFinalizedSources(input: {
             message: "evidence_manifest does not match signed evidence_manifest_hash",
         };
     }
+    const affectedCellsBytes = canonicalJsonBytes(affectedCells);
+    const bindingError = evidenceManifestBindingError({
+        payload,
+        rawDataManifest: manifest,
+        affectedCells,
+        affectedCellsBytes,
+        evidenceManifest,
+        evidenceManifestBytes,
+        affectedCellsRef,
+        evidenceManifestRef,
+    });
+    if (bindingError !== null) {
+        return {
+            status: "integrity_failed",
+            artifactS3Keys: [],
+            message: bindingError,
+        };
+    }
     const artifactS3Keys: string[] = [];
     for (const [index, entry] of manifest.entries.entries()) {
         try {
@@ -1685,7 +1704,7 @@ async function archiveFinalizedSources(input: {
                 product: "affected_cells_json",
                 ref: affectedCellsRef,
             }),
-            bytes: canonicalJsonBytes(affectedCells),
+            bytes: affectedCellsBytes,
             fileName: "affected_cells.json" as const,
         },
         {
@@ -1743,6 +1762,113 @@ async function archiveFinalizedSources(input: {
         }
     }
     return { status: "success", artifactS3Keys };
+}
+
+function evidenceManifestBindingError(input: {
+    payload: EarthquakeOraclePayload;
+    rawDataManifest: RawDataManifest;
+    affectedCells: AffectedCellsArtifact;
+    affectedCellsBytes: Uint8Array;
+    evidenceManifest: EvidenceManifest;
+    evidenceManifestBytes: Uint8Array;
+    affectedCellsRef: StoredSourceRef;
+    evidenceManifestRef: StoredSourceRef;
+}): string | null {
+    if (
+        input.evidenceManifest.schema_version !== 1 ||
+        input.evidenceManifest.oracle_version !== input.payload.oracle_version ||
+        input.evidenceManifest.event_uid !== input.payload.event_uid ||
+        input.evidenceManifest.event_revision !== input.payload.event_revision ||
+        input.evidenceManifest.hazard_type !== "EARTHQUAKE" ||
+        input.evidenceManifest.source_event_id !== input.payload.source_event_id ||
+        input.evidenceManifest.earthquake.title !== input.payload.title ||
+        input.evidenceManifest.earthquake.region !== input.payload.region ||
+        input.evidenceManifest.earthquake.occurred_at_ms !== input.payload.occurred_at_ms
+    ) {
+        return "evidence_manifest metadata does not match signed payload";
+    }
+
+    if (
+        input.payload.evidence_manifest_uri !== input.evidenceManifestRef.uri ||
+        input.payload.evidence_manifest_hash !== input.evidenceManifestRef.source_hash ||
+        input.evidenceManifestRef.size_bytes !== input.evidenceManifestBytes.byteLength
+    ) {
+        return "evidence_manifest_ref does not match signed payload or manifest bytes";
+    }
+
+    if (
+        input.evidenceManifest.affected_cells.uri !== input.affectedCellsRef.uri ||
+        input.evidenceManifest.affected_cells.hash !== input.affectedCellsRef.source_hash ||
+        input.evidenceManifest.affected_cells.root !== input.payload.affected_cells_root ||
+        input.evidenceManifest.affected_cells.count !== input.payload.affected_cell_count ||
+        input.evidenceManifest.affected_cells.count !== input.affectedCells.affected_cells.length ||
+        input.evidenceManifest.affected_cells.geo_resolution !==
+            input.affectedCells.geo_resolution ||
+        input.affectedCellsRef.size_bytes !== input.affectedCellsBytes.byteLength ||
+        input.affectedCellsRef.source_hash !==
+            `0x${createHash("sha256").update(input.affectedCellsBytes).digest("hex")}`
+    ) {
+        return "evidence_manifest affected_cells metadata does not match generated artifact";
+    }
+
+    const expectedSources = input.rawDataManifest.entries
+        .map((entry) => ({
+            source: entry.name,
+            product: entry.product,
+            source_uri: entry.source_uri,
+            artifact_uri: entry.uri,
+            content_hash: entry.content_hash,
+            size_bytes: entry.size_bytes,
+        }))
+        .sort(compareEvidenceSourceBinding);
+    const actualSources = input.evidenceManifest.sources
+        .map((source) => ({
+            source: source.source,
+            product: source.product,
+            source_uri: source.source_uri,
+            artifact_uri: source.artifact_uri,
+            content_hash: source.content_hash,
+            size_bytes: source.size_bytes,
+        }))
+        .sort(compareEvidenceSourceBinding);
+
+    if (expectedSources.length !== actualSources.length) {
+        return "evidence_manifest sources do not match raw_data_manifest entries";
+    }
+    for (const [index, expected] of expectedSources.entries()) {
+        const actual = actualSources[index];
+        if (
+            actual === undefined ||
+            actual.source !== expected.source ||
+            actual.product !== expected.product ||
+            actual.source_uri !== expected.source_uri ||
+            actual.artifact_uri !== expected.artifact_uri ||
+            actual.content_hash !== expected.content_hash ||
+            actual.size_bytes !== expected.size_bytes
+        ) {
+            return "evidence_manifest sources do not match raw_data_manifest entries";
+        }
+    }
+
+    return null;
+}
+
+function compareEvidenceSourceBinding(
+    left: Pick<
+        EvidenceManifest["sources"][number],
+        "source" | "product" | "source_uri" | "artifact_uri"
+    >,
+    right: Pick<
+        EvidenceManifest["sources"][number],
+        "source" | "product" | "source_uri" | "artifact_uri"
+    >,
+): number {
+    return (
+        left.source.localeCompare(right.source) ||
+        left.product.localeCompare(right.product) ||
+        left.source_uri.localeCompare(right.source_uri) ||
+        left.artifact_uri.localeCompare(right.artifact_uri)
+    );
 }
 
 function verifySourceBytes(entry: RawDataEntry, bytes: Uint8Array): void {

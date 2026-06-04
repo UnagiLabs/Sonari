@@ -574,6 +574,34 @@ export function validateEarthquakeVerifierRequest(
     return validateWorkerToTeeRequest(input);
 }
 
+export function encodeEarthquakeOraclePayloadBcsHex(payload: EarthquakeOraclePayload): string {
+    return `0x${bytesToHex(encodeEarthquakeOraclePayloadBcsBytes(payload))}`;
+}
+
+export function encodeEarthquakeOraclePayloadBcsBytes(
+    payload: EarthquakeOraclePayload,
+): Uint8Array {
+    return concatBytes([
+        u8(payload.intent),
+        u64(payload.oracle_version),
+        hexBytes32(payload.event_uid),
+        u32(payload.event_revision),
+        utf8Vector(payload.source_event_id),
+        utf8Vector(payload.title),
+        utf8Vector(payload.region),
+        u64(payload.occurred_at_ms),
+        u8(payload.hazard_type),
+        u8(payload.status),
+        u8(payload.severity_band),
+        hexBytes32(payload.affected_cells_root),
+        u64(payload.affected_cell_count),
+        utf8Vector(payload.evidence_manifest_uri),
+        hexBytes32(payload.evidence_manifest_hash),
+        u64(payload.verified_at_ms),
+        u64(payload.freshness_deadline_ms),
+    ]);
+}
+
 export function validateRelayerSubmitInput(input: unknown): ValidationResult<RelayerSubmitInput> {
     if (!isRecord(input)) {
         return {
@@ -616,6 +644,17 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             ok: false,
             error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
             message: "Relayer input requires BCS payload bytes, signature, and public key",
+        };
+    }
+
+    const encodedPayloadBcsHex = encodeEarthquakeOraclePayloadBcsHex(
+        input.payload as unknown as EarthquakeOraclePayload,
+    );
+    if (normalizeHexBytes(input.payload_bcs_hex) !== normalizeHexBytes(encodedPayloadBcsHex)) {
+        return {
+            ok: false,
+            error_code: "RELAYER_REQUIRES_FINALIZED_PAYLOAD",
+            message: "Relayer payload_bcs_hex does not match payload",
         };
     }
 
@@ -714,4 +753,66 @@ export function validateRelayerSubmitInput(input: unknown): ValidationResult<Rel
             enclave_instance_public_key: input.enclave_instance_public_key,
         },
     };
+}
+
+function u8(value: number): Uint8Array {
+    return Uint8Array.of(value);
+}
+
+function u32(value: number): Uint8Array {
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setUint32(0, value, true);
+    return bytes;
+}
+
+function u64(value: number): Uint8Array {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, BigInt(value), true);
+    return bytes;
+}
+
+function utf8Vector(value: string): Uint8Array {
+    const bytes = textEncoder.encode(value);
+    return concatBytes([uleb128(bytes.byteLength), bytes]);
+}
+
+function uleb128(value: number): Uint8Array {
+    const bytes: number[] = [];
+    let remaining = value;
+    do {
+        let byte = remaining & 0x7f;
+        remaining = Math.floor(remaining / 128);
+        if (remaining > 0) {
+            byte |= 0x80;
+        }
+        bytes.push(byte);
+    } while (remaining > 0);
+    return Uint8Array.from(bytes);
+}
+
+function hexBytes32(value: string): Uint8Array {
+    const normalized = normalizeHexBytes(value);
+    if (normalized.length !== 64) {
+        throw new Error("expected 32-byte hex value");
+    }
+    const bytes = new Uint8Array(32);
+    for (let index = 0; index < bytes.length; index += 1) {
+        bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
+    }
+    return bytes;
+}
+
+function concatBytes(chunks: readonly Uint8Array[]): Uint8Array {
+    const length = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+    const output = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return output;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
