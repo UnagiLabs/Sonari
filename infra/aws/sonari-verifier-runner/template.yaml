@@ -1084,6 +1084,37 @@ Resources:
       Environment:
         Variables:
           VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+          SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId
+
+  SubmitVerificationFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref SubmitVerificationLambda
+      Cors:
+        AllowHeaders:
+          - content-type
+        AllowMethods:
+          - POST
+        AllowOrigins:
+          - "*"
+        MaxAge: 300
+
+  SubmitVerificationFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref SubmitVerificationLambda
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  SubmitVerificationFunctionInvokeUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SubmitVerificationLambda
+      Principal: "*"
+      InvokedViaFunctionUrl: true
 
   BatchVerifierLambda:
     Type: AWS::Lambda::Function
@@ -1586,6 +1617,8 @@ Outputs:
     Value: !Ref ManualWatcherLambda
   SubmitVerificationLambdaName:
     Value: !Ref SubmitVerificationLambda
+  SubmitVerificationFunctionUrlOutput:
+    Value: !GetAtt SubmitVerificationFunctionUrl.FunctionUrl
   BatchVerifierLambdaName:
     Value: !Ref BatchVerifierLambda
   RunnerControlLambdaName:

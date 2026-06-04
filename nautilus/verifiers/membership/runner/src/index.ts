@@ -98,6 +98,7 @@ export interface LambdaHttpResponse {
 export interface SubmitVerificationHandlerOptions {
     readonly repository: VerificationJobRepository;
     readonly now?: () => number;
+    readonly expectedRegistryId?: string;
 }
 
 export function createSubmitVerificationHandler(options: SubmitVerificationHandlerOptions) {
@@ -108,6 +109,13 @@ export function createSubmitVerificationHandler(options: SubmitVerificationHandl
         const request = parseIdentityVerifyRequest(parsed);
         if (!request.ok) {
             return jsonResponse(400, { ok: false, message: request.message });
+        }
+        const registryMatch = validateExpectedRegistryId(
+            request.value.registry_id,
+            options.expectedRegistryId,
+        );
+        if (!registryMatch.ok) {
+            return jsonResponse(400, { ok: false, message: registryMatch.message });
         }
 
         const result = await options.repository.upsertRequest(
@@ -739,7 +747,24 @@ function parseHex32(value: unknown, field: string): ParseResult<string> {
     if (typeof value !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(value)) {
         return parseError(`${field} must be a 32-byte 0x-prefixed hex string`);
     }
-    return parseOk(value);
+    return parseOk(value.toLowerCase());
+}
+
+function validateExpectedRegistryId(
+    requestRegistryId: string,
+    expectedRegistryId: string | undefined,
+): ParseResult<undefined> {
+    if (expectedRegistryId === undefined) {
+        return parseOk(undefined);
+    }
+    const expected = parseHex32(expectedRegistryId, "configured identity registry");
+    if (!expected.ok) {
+        return parseError("configured identity registry must be a 32-byte 0x-prefixed hex string");
+    }
+    if (requestRegistryId !== expected.value) {
+        return parseError("registry_id does not match configured identity registry");
+    }
+    return parseOk(undefined);
 }
 
 function parseOptionalU64(value: unknown, field: string): ParseResult<number | undefined> {

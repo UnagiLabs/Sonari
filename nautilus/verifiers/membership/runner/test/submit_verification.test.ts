@@ -31,6 +31,7 @@ describe("SubmitVerification Lambda", () => {
         const handler = createSubmitVerificationHandler({
             repository,
             now: () => baseNowMs,
+            expectedRegistryId: validRequest().registry_id,
         });
 
         const response = await handler({ body: JSON.stringify(validRequest()) });
@@ -57,6 +58,25 @@ describe("SubmitVerification Lambda", () => {
                 tx_digest: null,
             },
         ]);
+    });
+
+    it("rejects requests for a registry that does not match AWS configuration", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+            expectedRegistryId: `0x${"aa".repeat(32)}`,
+        });
+
+        const response = await handler({ body: JSON.stringify(validRequest()) });
+        const body = JSON.parse(response.body) as { ok: boolean; message: string };
+
+        expect(response.statusCode).toBe(400);
+        expect(body).toEqual({
+            ok: false,
+            message: "registry_id does not match configured identity registry",
+        });
+        await expect(repository.all()).resolves.toEqual([]);
     });
 
     it("returns the existing job on duplicate submit without replacing tx digest", async () => {
