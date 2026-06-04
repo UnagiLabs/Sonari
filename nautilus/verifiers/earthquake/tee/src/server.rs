@@ -58,12 +58,12 @@ pub enum TeeJsonResult {
         signature: String,
         public_key: String,
         raw_data_manifest: RawDataManifest,
-        affected_cells: AffectedCellsArtifact,
-        evidence_manifest: EvidenceManifest,
+        affected_cells: Box<AffectedCellsArtifact>,
+        evidence_manifest: Box<EvidenceManifest>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        affected_cells_ref: Option<StoredSourceRef>,
+        affected_cells_ref: Option<Box<StoredSourceRef>>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        evidence_manifest_ref: Option<StoredSourceRef>,
+        evidence_manifest_ref: Option<Box<StoredSourceRef>>,
     },
 }
 
@@ -244,10 +244,10 @@ pub fn output_to_tee_json(output: OracleOutput) -> Result<TeeJsonResult, Handler
                 signature: UNSIGNED_PLACEHOLDER.to_owned(),
                 public_key: UNSIGNED_PLACEHOLDER.to_owned(),
                 raw_data_manifest,
-                affected_cells,
-                evidence_manifest,
-                affected_cells_ref: output.affected_cells_ref,
-                evidence_manifest_ref: output.evidence_manifest_ref,
+                affected_cells: Box::new(affected_cells),
+                evidence_manifest: Box::new(evidence_manifest),
+                affected_cells_ref: output.affected_cells_ref.map(Box::new),
+                evidence_manifest_ref: output.evidence_manifest_ref.map(Box::new),
             })
         }
         OracleStatus::PendingSource => Ok(TeeJsonResult::PendingSource {

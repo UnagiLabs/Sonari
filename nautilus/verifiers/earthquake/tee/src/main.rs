@@ -773,8 +773,8 @@ mod tests {
                 oracle_version: 1,
                 entries: Vec::new(),
             },
-            affected_cells: sample_affected_cells(),
-            evidence_manifest: sample_evidence_manifest(),
+            affected_cells: Box::new(sample_affected_cells()),
+            evidence_manifest: Box::new(sample_evidence_manifest()),
             affected_cells_ref: None,
             evidence_manifest_ref: None,
         };
@@ -792,8 +792,8 @@ mod tests {
                 oracle_version: 1,
                 entries: Vec::new(),
             },
-            affected_cells: sample_affected_cells(),
-            evidence_manifest: sample_evidence_manifest(),
+            affected_cells: Box::new(sample_affected_cells()),
+            evidence_manifest: Box::new(sample_evidence_manifest()),
             affected_cells_ref: None,
             evidence_manifest_ref: None,
         })
