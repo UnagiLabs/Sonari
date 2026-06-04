@@ -11,8 +11,7 @@ type IconName =
     | "sprout"
     | "verified"
     | "waves"
-    | "bolt"
-    | "settings";
+    | "bolt";
 
 type Sponsor = {
     name: string;
@@ -42,7 +41,7 @@ type Donor = {
 const impactStats = [
     { label: "Total donated", value: "$3.2M", meta: "+ $48,200 in 24h" },
     { label: "Relief delivered", value: "$1.2M", meta: "1,291 verified claims" },
-    { label: "Active pools", value: "3", meta: "Main, earthquake, operations" },
+    { label: "Active pools", value: "2", meta: "Main and earthquake" },
     { label: "Verified events", value: "14", meta: "USGS source data" },
 ];
 
@@ -84,23 +83,12 @@ const pools: Pool[] = [
         image: "/assets/donation_earthquake.png",
         imageAlt: "Earthquake relief supplies",
     },
-    {
-        name: "Operations Pool",
-        description: "Funds infrastructure, oracle operations, and audits.",
-        balance: "$96K",
-        received: "$142K received",
-        delivered: "$46K delivered",
-        percent: 68,
-        icon: "settings",
-        image: "/assets/donation_student.png",
-        imageAlt: "Students receiving continuity support",
-    },
 ];
 
 const individualDonors: Donor[] = [
     { name: "haru.sui", amount: "$89,400", meta: "41 donations, Earthquake" },
     { name: "Anonymous Donor", amount: "$52,100", meta: "19 donations, Main" },
-    { name: "matcha_dev", amount: "$34,200", meta: "52 donations, Earthquake and Ops" },
+    { name: "matcha_dev", amount: "$34,200", meta: "52 donations, Earthquake" },
 ];
 
 const corporateDonors: Donor[] = [
@@ -569,7 +557,6 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
         eye: "Eye",
         heart: "Heart",
         lock: "Lock",
-        settings: "Settings",
         shield: "Shield",
         sprout: "Sprout",
         verified: "Verified",
@@ -633,14 +620,6 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
                     <title>{iconTitle[name]}</title>
                     <rect height="11" rx="2" width="18" x="3" y="11" />
                     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-            );
-        case "settings":
-            return (
-                <svg {...props}>
-                    <title>{iconTitle[name]}</title>
-                    <circle cx="12" cy="12" r="3" />
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.36.17.74.27 1.13.27H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
             );
         case "shield":

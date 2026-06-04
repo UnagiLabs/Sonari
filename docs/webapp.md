@@ -241,7 +241,6 @@ Sonari全体の状態を1画面で見せる。
 - Latest DisasterEvent
 - Main Pool balance
 - Earthquake Pool balance
-- Operations Pool balance
 - Recent Donations
 - Recent Claims
 - Recent Impact Receipts
@@ -273,7 +272,6 @@ Sonari全体の状態を1画面で見せる。
 |---|---|
 | General Donation | 100% Main Pool |
 | Earthquake Donation | Designated Relief Pool + Main Pool split |
-| Operations Donation | 100% Operations Pool |
 
 ### 表示項目
 
@@ -636,7 +634,6 @@ Poolの透明性を表示する。
 
 - Main Pool
 - Earthquake Relief Pool
-- Operations Pool
 - Campaign Pools
 - Total received
 - Total paid out
@@ -928,7 +925,7 @@ Oracle / Watcher / TEE / Relayer の状態確認。
     type PoolSummary = {
       poolId: string;
       name: string;
-      type: "main" | "earthquake" | "operations" | "campaign";
+      type: "main" | "earthquake" | "campaign";
       balance: bigint;
       totalReceived: bigint;
       totalPaidOut: bigint;
@@ -1052,7 +1049,6 @@ OK:
 
 - donate_general_usdc
 - donate_designated_usdc
-- donate_operations_usdc
 - MembershipPass registration
 - Claim relief
 

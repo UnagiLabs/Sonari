@@ -17,7 +17,7 @@ function DashboardPage({ nav }) {
       <div className="stats-grid">
         <StatCard label="Total donated" value={D.fmtUSD(D.impactStats.totalDonated)} meta={<><span style={{ color: 'var(--ok)' }}>↑ 2.1%</span> · last 7d</>} />
         <StatCard label="Total paid out" value={D.fmtUSD(D.impactStats.totalPaidOut)} meta={<>{D.fmt(D.impactStats.verifiedClaims)} claims · 96% delivery</>} />
-        <StatCard label="Active pools" value="3" meta="Main · Earthquake · Ops" />
+        <StatCard label="Active pools" value="2" meta="Main · Earthquake" />
         <StatCard label="Active programs" value="2" meta="Earthquake Relief · Community Aid" />
       </div>
 
@@ -185,12 +185,10 @@ function DonatePage({ nav }) {
   const donationTypes = [
     { id: 'general', title: 'General donation', desc: '100% to Main Pool', icon: 'heart' },
     { id: 'designated', title: 'Earthquake relief', desc: 'Split: Earthquake + Main', icon: 'bolt' },
-    { id: 'operations', title: 'Operations support', desc: '100% to Operations', icon: 'settings' },
   ];
 
   const splitInfo = useMemo(() => {
     if (type === 'general') return [{ pool: 'Main Pool', pct: 100, amount }];
-    if (type === 'operations') return [{ pool: 'Operations Pool', pct: 100, amount }];
     return [
       { pool: 'Earthquake Pool', pct: 80, amount: amount * 0.8 },
       { pool: 'Main Pool',       pct: 20, amount: amount * 0.2 },
@@ -417,7 +415,7 @@ function DonorPage({ nav }) {
               { date: 'May 22, 2026', pool: 'Earthquake Pool', tx: '0x7f9c…1284', type: 'Designated', amount: 5000 },
               { date: 'May 18, 2026', pool: 'Earthquake Pool', tx: '0x2a44…8d22', type: 'Designated', amount: 12000 },
               { date: 'May 12, 2026', pool: 'Main Pool', tx: '0xab12…ff04', type: 'General', amount: 2500 },
-              { date: 'May 04, 2026', pool: 'Operations', tx: '0x91ee…6c08', type: 'Operations', amount: 500 },
+              { date: 'May 04, 2026', pool: 'Earthquake Pool', tx: '0x91ee…6c08', type: 'Designated', amount: 500 },
               { date: 'Apr 27, 2026', pool: 'Main Pool', tx: '0x3322…aa18', type: 'General', amount: 8000 },
             ].map((h, i) => (
               <div key={i} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 140px 120px 120px', padding: '14px 20px', borderTop: i === 0 ? 'none' : '1px solid var(--line)', fontSize: 14, alignItems: 'center' }}>

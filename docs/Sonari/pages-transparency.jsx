@@ -289,7 +289,7 @@ function ReceiptsPage({ nav }) {
                 <div>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 6 }}>
                     <Tag variant="ok" dot>Delivered</Tag>
-                    <Tag variant="info">{r.pool === 'eq' ? 'Earthquake Pool' : r.pool === 'main' ? 'Main Pool' : 'Operations'}</Tag>
+                    <Tag variant="info">{r.pool === 'eq' ? 'Earthquake Pool' : 'Main Pool'}</Tag>
                   </div>
                   <div style={{ fontWeight: 600 }}>{r.program}</div>
                   <div className="mono receipt-id" style={{ marginTop: 4 }}>

@@ -37,7 +37,7 @@ const dashboardSnapshot = {
     metrics: [
         { label: "Total donated", value: "$3.2M", detail: "+ $48,200 in 24h" },
         { label: "Total aid delivered", value: "$1.2M", detail: "1,291 verified claims" },
-        { label: "Active pools", value: "3", detail: "Main, earthquake, operations" },
+        { label: "Active pools", value: "2", detail: "Main and earthquake" },
         { label: "Impact receipts", value: "1,291", detail: "Public, anonymized records" },
     ],
     pools: [
@@ -59,16 +59,6 @@ const dashboardSnapshot = {
             reserved: "$88K",
             available: "$554K",
             percentAvailable: 66,
-            status: "active" as const,
-        },
-        {
-            name: "Operations Pool",
-            balance: "$96K",
-            received: "$142K",
-            paidOut: "$46K",
-            reserved: "$12K",
-            available: "$84K",
-            percentAvailable: 68,
             status: "active" as const,
         },
     ],
@@ -153,7 +143,12 @@ const dashboardSnapshot = {
             meta: "Corporate · Earthquake, Main",
             amount: "$524,800",
         },
-        { rank: 2, name: "Kibou Capital", meta: "Corporate · Main, Ops", amount: "$412,300" },
+        {
+            rank: 2,
+            name: "Kibou Capital",
+            meta: "Corporate · Main, Earthquake",
+            amount: "$412,300",
+        },
         {
             rank: 3,
             name: "Midori Logistics",

@@ -28,23 +28,22 @@ window.SonariData = (() => {
 
   const donors = [
     { rank: 1, name: 'Aizome Foundation', type: 'corporate', tier: 'gold', total: 524800, count: 84, pools: ['Main', 'Earthquake'], when: '2h ago' },
-    { rank: 2, name: 'Kibou Capital',     type: 'corporate', tier: 'gold', total: 412300, count: 62, pools: ['Main', 'Earthquake', 'Ops'], when: '5h ago' },
+    { rank: 2, name: 'Kibou Capital',     type: 'corporate', tier: 'gold', total: 412300, count: 62, pools: ['Main', 'Earthquake'], when: '5h ago' },
     { rank: 3, name: 'haru.sui',          type: 'individual', tier: 'gold', total: 89400, count: 41, pools: ['Earthquake'], when: '1h ago' },
     { rank: 4, name: 'Midori Logistics',  type: 'corporate', tier: 'gold', total: 76250, count: 28, pools: ['Main', 'Earthquake'], when: '12h ago' },
     { rank: 5, name: 'Anonymous Donor',   type: 'individual', tier: 'silver', total: 52100, count: 19, anon: true, pools: ['Main'], when: '3h ago' },
     { rank: 6, name: 'Hinode Bank',       type: 'corporate', tier: 'silver', total: 48900, count: 36, pools: ['Main'], when: '2d ago' },
-    { rank: 7, name: 'matcha_dev',        type: 'individual', tier: 'silver', total: 34200, count: 52, pools: ['Earthquake', 'Ops'], when: '4h ago' },
+    { rank: 7, name: 'matcha_dev',        type: 'individual', tier: 'silver', total: 34200, count: 52, pools: ['Earthquake'], when: '4h ago' },
     { rank: 8, name: 'Tsuyu Insurance',   type: 'corporate', tier: 'silver', total: 28750, count: 15, pools: ['Main'], when: '1d ago' },
     { rank: 9, name: 'sakura.eth',        type: 'individual', tier: 'silver', total: 21800, count: 33, pools: ['Earthquake'], when: '8h ago' },
     { rank: 10, name: 'Anonymous Donor',  type: 'individual', tier: 'bronze', total: 18200, count: 11, anon: true, pools: ['Main'], when: '6h ago' },
-    { rank: 11, name: 'Sora Networks',    type: 'corporate', tier: 'bronze', total: 16400, count: 24, pools: ['Main', 'Ops'], when: '3d ago' },
+    { rank: 11, name: 'Sora Networks',    type: 'corporate', tier: 'bronze', total: 16400, count: 24, pools: ['Main'], when: '3d ago' },
     { rank: 12, name: 'tsuki_kawa',       type: 'individual', tier: 'bronze', total: 14250, count: 22, pools: ['Earthquake'], when: '1d ago' },
   ];
 
   const pools = [
     { id: 'main', name: 'Main Pool', type: 'main', balance: 1284000, received: 2104000, paidOut: 820000, reserved: 124000, status: 'active', desc: 'General relief reserves across all programs.' },
     { id: 'eq',   name: 'Earthquake Relief Pool', type: 'earthquake', balance: 642800, received: 980200, paidOut: 337400, reserved: 88500, status: 'active', desc: 'Reserved for finalized earthquake events.' },
-    { id: 'ops',  name: 'Operations Pool', type: 'operations', balance: 96400, received: 142600, paidOut: 46200, reserved: 12000, status: 'active', desc: 'Funds infrastructure, oracle, and audits.' },
   ];
 
   const events = [
@@ -67,7 +66,7 @@ window.SonariData = (() => {
     { who: 'Aizome Foundation', type: 'corporate', amount: 25000, pool: 'Earthquake', when: '4 min ago' },
     { who: 'haru.sui',          type: 'individual', amount: 1200, pool: 'Earthquake', when: '11 min ago' },
     { who: 'Anonymous Donor',   type: 'individual', amount: 80, pool: 'Main', when: '18 min ago', anon: true },
-    { who: 'matcha_dev',        type: 'individual', amount: 240, pool: 'Ops', when: '24 min ago' },
+    { who: 'matcha_dev',        type: 'individual', amount: 240, pool: 'Earthquake', when: '24 min ago' },
     { who: 'Kibou Capital',     type: 'corporate', amount: 12000, pool: 'Main', when: '38 min ago' },
     { who: 'sakura.eth',        type: 'individual', amount: 65, pool: 'Earthquake', when: '52 min ago' },
   ];
@@ -78,7 +77,7 @@ window.SonariData = (() => {
     impactStats: {
       totalDonated: 3226800,
       totalPaidOut: 1203600,
-      activePools: 3,
+      activePools: 2,
       verifiedClaims: 1291,
     },
   };

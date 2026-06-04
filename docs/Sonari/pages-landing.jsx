@@ -51,7 +51,7 @@ function LandingPage({ nav }) {
           <div className="stats-grid">
             <StatCard label="Total donated" value={D.fmtUSD(stats.totalDonated)} meta={<><span style={{ color: 'var(--ok)' }}>↑ $48,200</span> in 24h</>} />
             <StatCard label="Total relief delivered" value={D.fmtUSD(stats.totalPaidOut)} meta={<>across {D.fmt(stats.verifiedClaims)} verified claims</>} />
-            <StatCard label="Active pools" value={stats.activePools} meta="Main · Earthquake · Operations" />
+            <StatCard label="Active pools" value={stats.activePools} meta="Main · Earthquake" />
             <StatCard label="Verified events" value="14" meta="from USGS &amp; JMA · last 90 days" />
           </div>
         </div>

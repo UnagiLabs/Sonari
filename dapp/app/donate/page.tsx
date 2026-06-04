@@ -37,12 +37,6 @@ const donationTypes: DonationType[] = [
         description: "Directs most funds to the selected disaster relief pool.",
         destination: "80% Relief Pool / 20% Main Pool",
     },
-    {
-        id: "operations",
-        label: "Operations",
-        description: "Funds infrastructure, monitoring, and receipt operations.",
-        destination: "100% Operations Pool",
-    },
 ];
 
 const poolOptions: PoolOption[] = [
@@ -59,18 +53,11 @@ const poolOptions: PoolOption[] = [
         balance: "$642K",
         detail: "Finalized disaster support",
     },
-    {
-        id: "operations-pool",
-        label: "Operations Pool",
-        balance: "$96K",
-        detail: "System and verification costs",
-    },
 ];
 
 const splitPreview: PreviewRow[] = [
     { label: "Main Pool", value: "$80.00", detail: "Transparent reserve for verified aid" },
     { label: "Relief Pool", value: "$320.00", detail: "Selected earthquake relief campaign" },
-    { label: "Operations", value: "$0.00", detail: "No operations allocation in this mode" },
 ];
 
 const resultPreview = [
