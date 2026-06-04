@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <style>
+      .bg { fill: #fbfbfd; }
+      .title { font: 700 36px sans-serif; fill: #172033; }
+      .subtitle { font: 500 18px sans-serif; fill: #546174; }
+      .laneTitle { font: 700 22px sans-serif; fill: #172033; }
+      .boxTitle { font: 700 18px sans-serif; fill: #172033; }
+      .boxText { font: 500 15px sans-serif; fill: #293244; }
+      .small { font: 500 13px sans-serif; fill: #5d6878; }
+      .note { font: 600 15px sans-serif; fill: #172033; }
+      .card { fill: white; stroke: #d8deea; stroke-width: 2; rx: 18; }
+      .earth { fill: #eaf4ff; stroke: #82b9f7; }
+      .member { fill: #eef8ef; stroke: #87c58e; }
+      .common { fill: #fff6e5; stroke: #efbd62; }
+      .tee { fill: #f2edff; stroke: #a58ae8; }
+      .sui { fill: #edf7fb; stroke: #7fc7dd; }
+      .warn { fill: #fff0f0; stroke: #ef8f8f; }
+      .arrow { stroke: #6b7485; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .arrow2 { stroke: #3f6d99; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #8a94a6; stroke-width: 2.5; fill: none; stroke-dasharray: 8 7; marker-end: url(#arrow); }
+      .label { font: 700 13px sans-serif; fill: #3d4656; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#6b7485"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="1600" height="1000"/>
+  <text x="800" y="52" text-anchor="middle" class="title">Sonari Nautilus の処理フロー</text>
+  <text x="800" y="84" text-anchor="middle" class="subtitle">外から来た情報を、TEEの安全な箱で確認して、最後にSuiへ記録する</text>
+
+  <rect x="40" y="120" width="360" height="800" rx="26" fill="#f3f8ff" stroke="#c8ddf6" stroke-width="2"/>
+  <text x="220" y="155" text-anchor="middle" class="laneTitle">地震</text>
+  <text x="220" y="180" text-anchor="middle" class="subtitle">USGSの地震データ</text>
+
+  <rect x="420" y="120" width="360" height="800" rx="26" fill="#f5fbf1" stroke="#cde8c6" stroke-width="2"/>
+  <text x="600" y="155" text-anchor="middle" class="laneTitle">メンバーシップ</text>
+  <text x="600" y="180" text-anchor="middle" class="subtitle">World IDなどの本人確認</text>
+
+  <rect x="800" y="120" width="360" height="800" rx="26" fill="#fff8eb" stroke="#f1d399" stroke-width="2"/>
+  <text x="980" y="155" text-anchor="middle" class="laneTitle">共通ランナー</text>
+  <text x="980" y="180" text-anchor="middle" class="subtitle">AWS / EC2 / Step Functions</text>
+
+  <rect x="1180" y="120" width="380" height="800" rx="26" fill="#f3efff" stroke="#d4c8f6" stroke-width="2"/>
+  <text x="1370" y="155" text-anchor="middle" class="laneTitle">TEE と Sui</text>
+  <text x="1370" y="180" text-anchor="middle" class="subtitle">安全な箱で検証 → ブロックチェーンへ</text>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="220" width="280" height="90" class="card earth"/>
+    <text x="220" y="252" text-anchor="middle" class="boxTitle">1. 地震を見つける</text>
+    <text x="220" y="278" text-anchor="middle" class="boxText">USGSから地震一覧を取得</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80" y="340" width="280" height="110" class="card earth"/>
+    <text x="220" y="372" text-anchor="middle" class="boxTitle">2. 候補をしぼる</text>
+    <text x="220" y="398" text-anchor="middle" class="boxText">小さい地震や重複を除く</text>
+    <text x="220" y="423" text-anchor="middle" class="small">必要なら手動IDでも開始</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80" y="480" width="280" height="90" class="card earth"/>
+    <text x="220" y="512" text-anchor="middle" class="boxTitle">3. DBに保存</text>
+    <text x="220" y="538" text-anchor="middle" class="boxText">new / processing など</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="460" y="220" width="280" height="90" class="card member"/>
+    <text x="600" y="252" text-anchor="middle" class="boxTitle">1. 申請を受け取る</text>
+    <text x="600" y="278" text-anchor="middle" class="boxText">ユーザーが登録申請</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="460" y="340" width="280" height="110" class="card member"/>
+    <text x="600" y="372" text-anchor="middle" class="boxTitle">2. 入力チェック</text>
+    <text x="600" y="398" text-anchor="middle" class="boxText">形式・重複・job作成</text>
+    <text x="600" y="423" text-anchor="middle" class="small">World ID証明などを確認対象にする</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="460" y="480" width="280" height="90" class="card member"/>
+    <text x="600" y="512" text-anchor="middle" class="boxTitle">3. DBに保存</text>
+    <text x="600" y="538" text-anchor="middle" class="boxText">申請jobとして保存</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="840" y="220" width="280" height="90" class="card common"/>
+    <text x="980" y="252" text-anchor="middle" class="boxTitle">4. Step Functions起動</text>
+    <text x="980" y="278" text-anchor="middle" class="boxText">処理の順番を管理</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="840" y="340" width="280" height="110" class="card common"/>
+    <text x="980" y="372" text-anchor="middle" class="boxTitle">5. Runnerを起動</text>
+    <text x="980" y="398" text-anchor="middle" class="boxText">EC2 / Nitro Enclaveを準備</text>
+    <text x="980" y="423" text-anchor="middle" class="small">SSMでコマンドを送る</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="840" y="480" width="280" height="110" class="card common"/>
+    <text x="980" y="512" text-anchor="middle" class="boxTitle">6. TEEを登録</text>
+    <text x="980" y="538" text-anchor="middle" class="boxText">安全な箱の公開鍵を</text>
+    <text x="980" y="563" text-anchor="middle" class="boxText">Suiに登録する</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1225" y="220" width="290" height="105" class="card tee"/>
+    <text x="1370" y="252" text-anchor="middle" class="boxTitle">7. TEEに投げる</text>
+    <text x="1370" y="278" text-anchor="middle" class="boxText">/process_data</text>
+    <text x="1370" y="303" text-anchor="middle" class="small">入力と登録情報をチェック</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1225" y="355" width="290" height="145" class="card tee"/>
+    <text x="1370" y="388" text-anchor="middle" class="boxTitle">8. TEEの中で確認</text>
+    <text x="1370" y="414" text-anchor="middle" class="boxText">地震: USGSを再取得</text>
+    <text x="1370" y="439" text-anchor="middle" class="boxText">会員: World IDを確認</text>
+    <text x="1370" y="464" text-anchor="middle" class="small">外の人が書き換えられない場所で検証</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1225" y="535" width="290" height="120" class="card tee"/>
+    <text x="1370" y="568" text-anchor="middle" class="boxTitle">9. 結果を作る</text>
+    <text x="1370" y="594" text-anchor="middle" class="boxText">OKならBCSデータ作成</text>
+    <text x="1370" y="619" text-anchor="middle" class="boxText">TEEの鍵で署名</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="840" y="650" width="280" height="100" class="card common"/>
+    <text x="980" y="683" text-anchor="middle" class="boxTitle">10. 結果を読む</text>
+    <text x="980" y="709" text-anchor="middle" class="boxText">S3から結果を読み</text>
+    <text x="980" y="734" text-anchor="middle" class="boxText">DBの状態を更新</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1225" y="690" width="290" height="90" class="card sui"/>
+    <text x="1370" y="722" text-anchor="middle" class="boxTitle">11. 保存する</text>
+    <text x="1370" y="748" text-anchor="middle" class="boxText">RelayerがSui Moveへ送る</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1225" y="815" width="290" height="80" class="card warn"/>
+    <text x="1370" y="848" text-anchor="middle" class="boxTitle">待つ / やり直す / 却下</text>
+    <text x="1370" y="874" text-anchor="middle" class="boxText">データ不足や失敗のとき</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="650" width="660" height="100" class="card" fill="#ffffff" stroke="#d8deea"/>
+    <text x="410" y="682" text-anchor="middle" class="boxTitle">地震だけの追加作業</text>
+    <text x="410" y="708" text-anchor="middle" class="boxText">finalized になったら、USGSの元データをもう一度確認して</text>
+    <text x="410" y="733" text-anchor="middle" class="boxText">S3 / Walrus に保存できたときだけ Relayerへ進む</text>
+  </g>
+
+  <path class="arrow" d="M220 310 L220 340"/>
+  <path class="arrow" d="M220 450 L220 480"/>
+  <path class="arrow" d="M360 525 C520 525, 660 265, 840 265"/>
+
+  <path class="arrow" d="M600 310 L600 340"/>
+  <path class="arrow" d="M600 450 L600 480"/>
+  <path class="arrow" d="M740 525 C800 525, 780 265, 840 265"/>
+
+  <path class="arrow" d="M980 310 L980 340"/>
+  <path class="arrow" d="M980 450 L980 480"/>
+  <path class="arrow" d="M1120 535 C1180 535, 1160 272, 1225 272"/>
+  <path class="arrow" d="M1370 325 L1370 355"/>
+  <path class="arrow" d="M1370 500 L1370 535"/>
+  <path class="arrow" d="M1225 600 C1160 600, 1160 700, 1120 700"/>
+  <path class="arrow" d="M1120 700 C1175 700, 1170 735, 1225 735"/>
+  <path class="dash" d="M1120 722 C1165 760, 1165 855, 1225 855"/>
+
+  <path class="arrow2" d="M220 570 L220 650"/>
+  <path class="arrow2" d="M740 700 C785 700, 795 700, 840 700"/>
+
+  <text x="500" y="235" class="label">どちらも同じランナーへ</text>
+  <text x="1160" y="240" class="label">TEEへ依頼</text>
+  <text x="1160" y="675" class="label">結果を戻す</text>
+
+  <rect x="80" y="930" width="1440" height="45" rx="18" fill="#ffffff" stroke="#d8deea"/>
+  <circle cx="120" cy="953" r="9" fill="#eaf4ff" stroke="#82b9f7"/>
+  <text x="140" y="958" class="small">地震処理</text>
+  <circle cx="250" cy="953" r="9" fill="#eef8ef" stroke="#87c58e"/>
+  <text x="270" y="958" class="small">メンバーシップ処理</text>
+  <circle cx="440" cy="953" r="9" fill="#fff6e5" stroke="#efbd62"/>
+  <text x="460" y="958" class="small">共通Runner</text>
+  <circle cx="590" cy="953" r="9" fill="#f2edff" stroke="#a58ae8"/>
+  <text x="610" y="958" class="small">TEE</text>
+  <circle cx="700" cy="953" r="9" fill="#edf7fb" stroke="#7fc7dd"/>
+  <text x="720" y="958" class="small">Sui保存</text>
+  <text x="950" y="958" class="note">覚え方: 見つける → 並べる → 安全な箱で確かめる → サインする → Suiに保存</text>
+</svg>

@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="1340" viewBox="0 0 820 1340" role="img" aria-labelledby="eqTitle eqDesc">
+  <title id="eqTitle">地震 verifier のしくみ</title>
+  <desc id="eqDesc">地震IDを受け取り、TEEの中で元データを取り直し、影響セルをMerkle rootにまとめ、署名済みのDisasterEvent payloadを作るまでの縦フロー。</desc>
+  <defs>
+    <style>
+      .bg { fill: #fbfbfd; }
+      .title { font: 700 30px sans-serif; fill: #172033; }
+      .subtitle { font: 500 17px sans-serif; fill: #546174; }
+      .cardTitle { font: 700 18px sans-serif; fill: #172033; }
+      .cardText { font: 500 14px sans-serif; fill: #293244; }
+      .small { font: 500 12px sans-serif; fill: #5d6878; }
+      .note { font: 600 15px sans-serif; fill: #172033; }
+      .contLabel { font: 700 15px sans-serif; fill: #5b4b9e; }
+      .num { font: 700 14px sans-serif; fill: #ffffff; }
+      .card { stroke-width: 2; }
+      .earth { fill: #eaf4ff; stroke: #82b9f7; }
+      .tee { fill: #ffffff; stroke: #a58ae8; }
+      .sui { fill: #edf7fb; stroke: #7fc7dd; }
+      .container { fill: #f7f4ff; stroke: #c9bdf0; stroke-width: 2; }
+      .arrow { stroke: #6b7485; stroke-width: 3; fill: none; marker-end: url(#eqArrow); }
+      .badge { fill: #7a6bb5; }
+    </style>
+    <marker id="eqArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#6b7485"/>
+    </marker>
+    <filter id="eqShadow" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="820" height="1340"/>
+  <text x="410" y="52" text-anchor="middle" class="title">地震 verifier のしくみ</text>
+  <text x="410" y="82" text-anchor="middle" class="subtitle">地震IDから、署名済みの災害データ(DisasterEvent)を作るまで</text>
+
+  <!-- TEE container -->
+  <rect class="container" x="85" y="250" width="650" height="875" rx="24"/>
+  <text x="110" y="284" class="contLabel">TEE（安全な箱）の中で計算する</text>
+
+  <!-- Step 1 (external input) -->
+  <g filter="url(#eqShadow)">
+    <rect class="card earth" x="175" y="128" width="470" height="74" rx="16"/>
+    <text x="410" y="160" text-anchor="middle" class="cardTitle">地震IDを受け取る</text>
+    <text x="410" y="184" text-anchor="middle" class="small">USGS の event id（地震の識別子）</text>
+    <circle class="badge" cx="175" cy="165" r="15"/><text x="175" y="170" text-anchor="middle" class="num">1</text>
+  </g>
+
+  <!-- Step 2 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="300" width="470" height="74" rx="16"/>
+    <text x="410" y="332" text-anchor="middle" class="cardTitle">元データをTEE内で取り直す</text>
+    <text x="410" y="356" text-anchor="middle" class="small">詳細GeoJSON ＋ ShakeMap グリッド</text>
+    <circle class="badge" cx="175" cy="337" r="15"/><text x="175" y="342" text-anchor="middle" class="num">2</text>
+  </g>
+
+  <!-- Step 3 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="403" width="470" height="74" rx="16"/>
+    <text x="410" y="435" text-anchor="middle" class="cardTitle">ゆれ(MMI)を地図のマスに集約</text>
+    <text x="410" y="459" text-anchor="middle" class="small">H3 resolution 7 のセル単位にまとめる</text>
+    <circle class="badge" cx="175" cy="440" r="15"/><text x="175" y="445" text-anchor="middle" class="num">3</text>
+  </g>
+
+  <!-- Step 4 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="506" width="470" height="74" rx="16"/>
+    <text x="410" y="538" text-anchor="middle" class="cardTitle">セルごとに代表値 P90 を計算</text>
+    <text x="410" y="562" text-anchor="middle" class="small">外れ値に振り回されにくい上位の値</text>
+    <circle class="badge" cx="175" cy="543" r="15"/><text x="175" y="548" text-anchor="middle" class="num">4</text>
+  </g>
+
+  <!-- Step 5 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="609" width="470" height="74" rx="16"/>
+    <text x="410" y="641" text-anchor="middle" class="cardTitle">影響度 cell_band を判定</text>
+    <text x="410" y="665" text-anchor="middle" class="small">1以上のセルだけ claim 対象にする</text>
+    <circle class="badge" cx="175" cy="646" r="15"/><text x="175" y="651" text-anchor="middle" class="num">5</text>
+  </g>
+
+  <!-- Step 6 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="712" width="470" height="74" rx="16"/>
+    <text x="410" y="744" text-anchor="middle" class="cardTitle">対象セルの葉(leaf)を作る</text>
+    <text x="410" y="768" text-anchor="middle" class="small">AffectedCellLeaf（1セル＝1枚の葉）</text>
+    <circle class="badge" cx="175" cy="749" r="15"/><text x="175" y="754" text-anchor="middle" class="num">6</text>
+  </g>
+
+  <!-- Step 7 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="815" width="470" height="74" rx="16"/>
+    <text x="410" y="847" text-anchor="middle" class="cardTitle">全部まとめて Merkle root に</text>
+    <text x="410" y="871" text-anchor="middle" class="small">affected_cells_root（1個の代表ハッシュ）</text>
+    <circle class="badge" cx="175" cy="852" r="15"/><text x="175" y="857" text-anchor="middle" class="num">7</text>
+  </g>
+
+  <!-- Step 8 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="918" width="470" height="74" rx="16"/>
+    <text x="410" y="950" text-anchor="middle" class="cardTitle">契約用の BCS payload を組み立て</text>
+    <text x="410" y="974" text-anchor="middle" class="small">決まった並び順のバイト列に整える</text>
+    <circle class="badge" cx="175" cy="955" r="15"/><text x="175" y="960" text-anchor="middle" class="num">8</text>
+  </g>
+
+  <!-- Step 9 -->
+  <g filter="url(#eqShadow)">
+    <rect class="card tee" x="175" y="1021" width="470" height="74" rx="16"/>
+    <text x="410" y="1053" text-anchor="middle" class="cardTitle">TEEの鍵で署名する</text>
+    <text x="410" y="1077" text-anchor="middle" class="small">中身を確定し、後から差し替え不可にする</text>
+    <circle class="badge" cx="175" cy="1058" r="15"/><text x="175" y="1063" text-anchor="middle" class="num">9</text>
+  </g>
+
+  <!-- Destination (Sui) -->
+  <g filter="url(#eqShadow)">
+    <rect class="card sui" x="175" y="1170" width="470" height="74" rx="16"/>
+    <text x="410" y="1202" text-anchor="middle" class="cardTitle">Suiに記録</text>
+    <text x="410" y="1226" text-anchor="middle" class="small">DisasterEvent ＋ affected_cells_root</text>
+  </g>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M410 202 L410 300"/>
+  <path class="arrow" d="M410 374 L410 403"/>
+  <path class="arrow" d="M410 477 L410 506"/>
+  <path class="arrow" d="M410 580 L410 609"/>
+  <path class="arrow" d="M410 683 L410 712"/>
+  <path class="arrow" d="M410 786 L410 815"/>
+  <path class="arrow" d="M410 889 L410 918"/>
+  <path class="arrow" d="M410 992 L410 1021"/>
+  <path class="arrow" d="M410 1095 L410 1170"/>
+
+  <!-- Bottom summary -->
+  <rect x="85" y="1278" width="650" height="46" rx="16" fill="#ffffff" stroke="#d8deea" stroke-width="2"/>
+  <text x="410" y="1307" text-anchor="middle" class="note">覚え方: 取り直す → マスに集める → 根(root)にまとめる → 署名する</text>
+</svg>

@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="1372" viewBox="0 0 820 1372" role="img" aria-labelledby="mbTitle mbDesc">
+  <title id="mbTitle">メンバーシップ / identity verifier のしくみ</title>
+  <desc id="mbDesc">本人確認の申請を受け取り、入力チェック、runner起動、TEEでの attestation・Sui登録・World ID確認・署名を経て、dry-run/submit のあと MembershipPass を更新するまでの縦フロー。</desc>
+  <defs>
+    <style>
+      .bg { fill: #fbfbfd; }
+      .title { font: 700 30px sans-serif; fill: #172033; }
+      .subtitle { font: 500 17px sans-serif; fill: #546174; }
+      .cardTitle { font: 700 18px sans-serif; fill: #172033; }
+      .cardText { font: 500 14px sans-serif; fill: #293244; }
+      .small { font: 500 12px sans-serif; fill: #5d6878; }
+      .note { font: 600 15px sans-serif; fill: #172033; }
+      .memo { font: 500 13px sans-serif; fill: #5d6878; }
+      .contLabel { font: 700 15px sans-serif; fill: #5b4b9e; }
+      .num { font: 700 13px sans-serif; fill: #ffffff; }
+      .card { stroke-width: 2; }
+      .member { fill: #eef8ef; stroke: #87c58e; }
+      .common { fill: #fff6e5; stroke: #efbd62; }
+      .tee { fill: #ffffff; stroke: #a58ae8; }
+      .sui { fill: #edf7fb; stroke: #7fc7dd; }
+      .container { fill: #f7f4ff; stroke: #c9bdf0; stroke-width: 2; }
+      .arrow { stroke: #6b7485; stroke-width: 3; fill: none; marker-end: url(#mbArrow); }
+      .badge { fill: #7a6bb5; }
+    </style>
+    <marker id="mbArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#6b7485"/>
+    </marker>
+    <filter id="mbShadow" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="820" height="1372"/>
+  <text x="410" y="52" text-anchor="middle" class="title">メンバーシップ / identity verifier のしくみ</text>
+  <text x="410" y="82" text-anchor="middle" class="subtitle">申請を受け取り、World ID を確認して、MembershipPass を更新するまで</text>
+
+  <!-- TEE container -->
+  <rect class="container" x="85" y="512" width="650" height="466" rx="24"/>
+  <text x="110" y="545" class="contLabel">TEE（安全な箱）の中で確認・署名する</text>
+
+  <!-- Step 1 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card member" x="175" y="120" width="470" height="74" rx="16"/>
+    <text x="410" y="152" text-anchor="middle" class="cardTitle">申請を受け取る</text>
+    <text x="410" y="176" text-anchor="middle" class="small">Frontend からの登録リクエスト</text>
+    <circle class="badge" cx="175" cy="157" r="16"/><text x="175" y="162" text-anchor="middle" class="num">1</text>
+  </g>
+
+  <!-- Step 2 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card common" x="175" y="223" width="470" height="74" rx="16"/>
+    <text x="410" y="255" text-anchor="middle" class="cardTitle">入力チェック</text>
+    <text x="410" y="279" text-anchor="middle" class="small">形式と registry_id を確認（不一致は拒否）</text>
+    <circle class="badge" cx="175" cy="260" r="16"/><text x="175" y="265" text-anchor="middle" class="num">2</text>
+  </g>
+
+  <!-- Step 3 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card common" x="175" y="326" width="470" height="74" rx="16"/>
+    <text x="410" y="358" text-anchor="middle" class="cardTitle">DBに保存</text>
+    <text x="410" y="382" text-anchor="middle" class="small">verification_jobs（処理待ちの申請）</text>
+    <circle class="badge" cx="175" cy="363" r="16"/><text x="175" y="368" text-anchor="middle" class="num">3</text>
+  </g>
+
+  <!-- Step 4 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card common" x="175" y="429" width="470" height="74" rx="16"/>
+    <text x="410" y="461" text-anchor="middle" class="cardTitle">runner を起動</text>
+    <text x="410" y="485" text-anchor="middle" class="small">EC2 / Nitro Enclave を準備する</text>
+    <circle class="badge" cx="175" cy="466" r="16"/><text x="175" y="471" text-anchor="middle" class="num">4</text>
+  </g>
+
+  <!-- Step 5 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card tee" x="175" y="560" width="470" height="74" rx="16"/>
+    <text x="410" y="592" text-anchor="middle" class="cardTitle">attestation を取得</text>
+    <text x="410" y="616" text-anchor="middle" class="small">この箱が本物だと示す証明書＋公開鍵</text>
+    <circle class="badge" cx="175" cy="597" r="16"/><text x="175" y="602" text-anchor="middle" class="num">5</text>
+  </g>
+
+  <!-- Step 6 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card tee" x="175" y="663" width="470" height="74" rx="16"/>
+    <text x="410" y="695" text-anchor="middle" class="cardTitle">TEEの鍵を Sui に登録</text>
+    <text x="410" y="719" text-anchor="middle" class="small">この公開鍵の署名だけ信用する設定にする</text>
+    <circle class="badge" cx="175" cy="700" r="16"/><text x="175" y="705" text-anchor="middle" class="num">6</text>
+  </g>
+
+  <!-- Step 7 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card tee" x="175" y="766" width="470" height="74" rx="16"/>
+    <text x="410" y="798" text-anchor="middle" class="cardTitle">World ID を確認</text>
+    <text x="410" y="822" text-anchor="middle" class="small">provider response を TEE 内で照会・検証</text>
+    <circle class="badge" cx="175" cy="771" r="16"/><text x="175" y="776" text-anchor="middle" class="num">7</text>
+  </g>
+
+  <!-- Step 8 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card tee" x="175" y="869" width="470" height="74" rx="16"/>
+    <text x="410" y="901" text-anchor="middle" class="cardTitle">verified のときだけ署名</text>
+    <text x="410" y="925" text-anchor="middle" class="small">rejected / pending には署名を付けない</text>
+    <circle class="badge" cx="175" cy="874" r="16"/><text x="175" y="879" text-anchor="middle" class="num">8</text>
+  </g>
+
+  <!-- Step 9 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card sui" x="175" y="1012" width="470" height="74" rx="16"/>
+    <text x="410" y="1044" text-anchor="middle" class="cardTitle">dry-run → submit</text>
+    <text x="410" y="1068" text-anchor="middle" class="small">dry_run は記録だけ・submit で本番送信</text>
+    <circle class="badge" cx="175" cy="1049" r="16"/><text x="175" y="1054" text-anchor="middle" class="num">9</text>
+  </g>
+
+  <!-- Step 10 -->
+  <g filter="url(#mbShadow)">
+    <rect class="card sui" x="175" y="1115" width="470" height="74" rx="16"/>
+    <text x="410" y="1147" text-anchor="middle" class="cardTitle">MembershipPass を更新</text>
+    <text x="410" y="1171" text-anchor="middle" class="small">更新後に読み戻して反映を確認</text>
+    <circle class="badge" cx="175" cy="1120" r="16"/><text x="175" y="1125" text-anchor="middle" class="num">10</text>
+  </g>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M410 194 L410 223"/>
+  <path class="arrow" d="M410 297 L410 326"/>
+  <path class="arrow" d="M410 400 L410 429"/>
+  <path class="arrow" d="M410 503 L410 560"/>
+  <path class="arrow" d="M410 634 L410 663"/>
+  <path class="arrow" d="M410 737 L410 766"/>
+  <path class="arrow" d="M410 840 L410 869"/>
+  <path class="arrow" d="M410 943 L410 1012"/>
+  <path class="arrow" d="M410 1086 L410 1115"/>
+
+  <!-- Note: directory name vs family name -->
+  <rect x="85" y="1228" width="650" height="58" rx="16" fill="#fff8eb" stroke="#f1d399" stroke-width="2"/>
+  <text x="410" y="1252" text-anchor="middle" class="memo">メモ: フォルダ名は membership/ ですが、family の正式名は identity です。</text>
+  <text x="410" y="1272" text-anchor="middle" class="memo">（Move verifier_family / TEE intent ともに identity）</text>
+
+  <!-- Bottom summary -->
+  <rect x="85" y="1305" width="650" height="46" rx="16" fill="#ffffff" stroke="#d8deea" stroke-width="2"/>
+  <text x="410" y="1334" text-anchor="middle" class="note">覚え方: 受け取る → 確認する → verified のときだけ署名 → Suiを更新</text>
+</svg>

@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="1140" viewBox="0 0 820 1140" role="img" aria-labelledby="pfTitle pfDesc">
+  <title id="pfTitle">affected cell proof 配布フロー（#141 予定）</title>
+  <desc id="pfDesc">canonical な affected cells artifact から proof を作って配布し、Frontend が取得して Sui tx に渡し、Move が root まで replay して一致しなければ fail-closed にする予定の縦フロー。</desc>
+  <defs>
+    <style>
+      .bg { fill: #fbfbfd; }
+      .title { font: 700 28px sans-serif; fill: #172033; }
+      .subtitle { font: 500 17px sans-serif; fill: #546174; }
+      .cardTitle { font: 700 18px sans-serif; fill: #172033; }
+      .cardText { font: 500 14px sans-serif; fill: #293244; }
+      .small { font: 500 12px sans-serif; fill: #5d6878; }
+      .note { font: 600 15px sans-serif; fill: #172033; }
+      .num { font: 700 13px sans-serif; fill: #ffffff; }
+      .card { stroke-width: 2; }
+      .tee { fill: #f2edff; stroke: #a58ae8; }
+      .planned { fill: #fffbeb; stroke: #ca8a04; }
+      .store { fill: #f1f5f9; stroke: #94a3b8; }
+      .front { fill: #fff3e8; stroke: #ea9a5a; }
+      .sui { fill: #edf7fb; stroke: #7fc7dd; }
+      .ok { fill: #eef8ef; stroke: #87c58e; }
+      .warn { fill: #fff0f0; stroke: #ef8f8f; }
+      .arrow { stroke: #6b7485; stroke-width: 3; fill: none; marker-end: url(#pfArrow); }
+      .badge { fill: #7a6bb5; }
+    </style>
+    <marker id="pfArrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#6b7485"/>
+    </marker>
+    <filter id="pfShadow" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" width="820" height="1140"/>
+  <text x="410" y="50" text-anchor="middle" class="title">affected cell proof の配布フロー（#141 予定）</text>
+  <text x="410" y="80" text-anchor="middle" class="subtitle">Walrus / R2 / Worker は配布の道具。正しさは Move が root で確かめる</text>
+
+  <!-- Step 1 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card tee" x="175" y="130" width="470" height="74" rx="16"/>
+    <text x="410" y="162" text-anchor="middle" class="cardTitle">canonical な affected_cells.json が確定</text>
+    <text x="410" y="186" text-anchor="middle" class="small">#142 の後に決まる正本（署名済み root の元）</text>
+    <circle class="badge" cx="175" cy="167" r="16"/><text x="175" y="172" text-anchor="middle" class="num">1</text>
+  </g>
+
+  <!-- Step 2 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card planned" x="175" y="233" width="470" height="74" rx="16"/>
+    <text x="410" y="265" text-anchor="middle" class="cardTitle">Publisher が proof を作る</text>
+    <text x="410" y="289" text-anchor="middle" class="small">proof manifest ＋ proof shards（分割した証明）</text>
+    <circle class="badge" cx="175" cy="270" r="16"/><text x="175" y="275" text-anchor="middle" class="num">2</text>
+  </g>
+
+  <!-- Step 3 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card store" x="175" y="336" width="470" height="74" rx="16"/>
+    <text x="410" y="368" text-anchor="middle" class="cardTitle">Walrus / R2 に保存</text>
+    <text x="410" y="392" text-anchor="middle" class="small">置き場所（信頼しない配布 surface）</text>
+    <circle class="badge" cx="175" cy="373" r="16"/><text x="175" y="378" text-anchor="middle" class="num">3</text>
+  </g>
+
+  <!-- Step 4 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card store" x="175" y="439" width="470" height="74" rx="16"/>
+    <text x="410" y="471" text-anchor="middle" class="cardTitle">Cloudflare Worker が配る</text>
+    <text x="410" y="495" text-anchor="middle" class="small">対象 proof だけ返す窓口（信頼しない）</text>
+    <circle class="badge" cx="175" cy="476" r="16"/><text x="175" y="481" text-anchor="middle" class="num">4</text>
+  </g>
+
+  <!-- Step 5 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card front" x="175" y="542" width="470" height="74" rx="16"/>
+    <text x="410" y="574" text-anchor="middle" class="cardTitle">Frontend が proof を取得</text>
+    <text x="410" y="598" text-anchor="middle" class="small">event ＋ 自分の home_cell で引く</text>
+    <circle class="badge" cx="175" cy="579" r="16"/><text x="175" y="584" text-anchor="middle" class="num">5</text>
+  </g>
+
+  <!-- Step 6 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card front" x="175" y="645" width="470" height="74" rx="16"/>
+    <text x="410" y="677" text-anchor="middle" class="cardTitle">Sui tx に leaf ＋ proof を渡す</text>
+    <text x="410" y="701" text-anchor="middle" class="small">AffectedCellLeaf と経路を contract へ</text>
+    <circle class="badge" cx="175" cy="650" r="16"/><text x="175" y="655" text-anchor="middle" class="num">6</text>
+  </g>
+
+  <!-- Step 7 -->
+  <g filter="url(#pfShadow)">
+    <rect class="card sui" x="175" y="748" width="470" height="74" rx="16"/>
+    <text x="410" y="780" text-anchor="middle" class="cardTitle">Move が root まで replay</text>
+    <text x="410" y="804" text-anchor="middle" class="small">渡された proof から affected_cells_root を再計算</text>
+    <circle class="badge" cx="175" cy="753" r="16"/><text x="175" y="758" text-anchor="middle" class="num">7</text>
+  </g>
+
+  <!-- Step 8: judge -->
+  <g filter="url(#pfShadow)">
+    <rect class="card sui" x="175" y="851" width="470" height="74" rx="16"/>
+    <text x="410" y="883" text-anchor="middle" class="cardTitle">署名済み root と一致するか確認</text>
+    <text x="410" y="907" text-anchor="middle" class="small">Worker / R2 が嘘を返しても、ここで弾ける</text>
+    <circle class="badge" cx="175" cy="856" r="16"/><text x="175" y="861" text-anchor="middle" class="num">8</text>
+  </g>
+
+  <!-- Outcomes -->
+  <g filter="url(#pfShadow)">
+    <rect class="card ok" x="175" y="960" width="225" height="72" rx="16"/>
+    <text x="287" y="992" text-anchor="middle" class="cardTitle">一致 → claim 続行</text>
+    <text x="287" y="1015" text-anchor="middle" class="small">正しい proof として受理</text>
+  </g>
+  <g filter="url(#pfShadow)">
+    <rect class="card warn" x="420" y="960" width="225" height="72" rx="16"/>
+    <text x="532" y="992" text-anchor="middle" class="cardTitle">不一致 → fail-closed</text>
+    <text x="532" y="1015" text-anchor="middle" class="small">却下して claim を止める</text>
+  </g>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M410 204 L410 233"/>
+  <path class="arrow" d="M410 307 L410 336"/>
+  <path class="arrow" d="M410 410 L410 439"/>
+  <path class="arrow" d="M410 513 L410 542"/>
+  <path class="arrow" d="M410 616 L410 645"/>
+  <path class="arrow" d="M410 719 L410 748"/>
+  <path class="arrow" d="M410 822 L410 851"/>
+  <path class="arrow" d="M410 925 C410 945 287 940 287 960"/>
+  <path class="arrow" d="M410 925 C410 945 532 940 532 960"/>
+
+  <!-- Bottom summary -->
+  <rect x="85" y="1066" width="650" height="46" rx="16" fill="#ffffff" stroke="#d8deea" stroke-width="2"/>
+  <text x="410" y="1095" text-anchor="middle" class="note">大事な点: 配り手を信じない。root が合わなければ claim は必ず fail-closed</text>
+</svg>
