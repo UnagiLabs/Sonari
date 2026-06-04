@@ -26,6 +26,6 @@ AWS dev stack の確認は、ad hoc AWS CLI ではなくこの directory の scr
 
 - `aws:verify:earthquake-wrapper` は ASG を `0 -> 1 -> 0` にします。`/opt/sonari/bin/run-earthquake-enclave` の `health_check`、`get_attestation`、`process_data` を SSM 経由で確認します。
 - `aws:verify:source-archiver` は runner ASG を起動しません。小さい source artifact を result bucket に置き、expected Walrus blob id を計算し、SourceArchiver Lambda を直接 invoke して `source_archiver.walrus_store.success` と secret 非露出を CloudWatch logs で確認します。最後に idle assertion を実行します。
-- `aws:smoke:earthquake-manual` は ManualWatcher Lambda URL に `source_event_id` を POST し、Step Functions execution と DynamoDB row の概要を確認します。出力の `source_archive_summary` で `source_archive_status`、`relayer_mode`、`relayer_digest`、`disaster_event_object_id` を確認します。relayer submit は既存 stack config に依存するため、起動時に明示表示します。
+- `aws:smoke:earthquake-manual` は ManualWatcher Lambda URL に `source_event_id` を POST し、Step Functions execution と DynamoDB row の概要を確認します。出力の `source_archive_summary` で `source_archive_status`、`evidence_manifest_uri`、`evidence_manifest_hash`、`evidence_manifest_artifact_s3_key`、`relayer_mode`、`relayer_digest`、`disaster_event_object_id` を確認します。relayer submit は既存 stack config に依存するため、起動時に明示表示します。
 - `aws:post-deploy-guardrails` は Git commit、artifact S3 keys、Lambda code metadata、ASG idle、schedule disabled を確認します。
 - old S3 artifact cleanup と CloudFormation deploy はここでは実行しません。deploy は既存 workflow と `scripts/aws_sonari_verifier_runner_deploy_plan.ts` を source of truth とします。

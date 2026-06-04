@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -74,14 +75,7 @@ describe("AWS script shared helpers", () => {
     });
 
     it("validates direct production wrapper JSON instead of runner service ok/result shape", () => {
-        const result = {
-            status: "finalized",
-            source_event_id: "us6000m0xl",
-            raw_data_manifest: { entries: [{ path: "grid.xml" }, { path: "detail.json" }] },
-            attestation: { public_key: "public-key-1" },
-            signature: { public_key: "public-key-1" },
-            unsigned_payload: {},
-        };
+        const result = finalizedWrapperResult();
 
         expect(assertDirectEarthquakeWrapperResult(result, "public-key-1")).toBe(result);
         expect(() =>
@@ -93,5 +87,90 @@ describe("AWS script shared helpers", () => {
                 "public-key-1",
             ),
         ).toThrow("raw_data_manifest.entries length");
+        expect(() =>
+            assertDirectEarthquakeWrapperResult(
+                {
+                    ...result,
+                    payload: { ...result.payload, evidence_manifest_uri: "ipfs://sonari/live" },
+                },
+                "public-key-1",
+            ),
+        ).toThrow("payload.evidence_manifest_uri");
     });
 });
+
+function finalizedWrapperResult(): {
+    status: "finalized";
+    source_event_id: string;
+    payload: Record<string, unknown>;
+    raw_data_manifest: { entries: Array<{ path: string }> };
+    affected_cells_ref: { uri: string; source_hash: string };
+    evidence_manifest_ref: { uri: string; source_hash: string };
+    evidence_manifest: Record<string, unknown>;
+    attestation: { public_key: string };
+    signature: { public_key: string };
+} {
+    const affectedCellsRef = {
+        uri: "walrus://blob/affected-cells",
+        source_hash: `0x${"66".repeat(32)}`,
+    };
+    const evidenceManifestRef = {
+        uri: "walrus://blob/evidence-manifest",
+        source_hash: `0x${"77".repeat(32)}`,
+    };
+    const evidenceManifest = {
+        schema_version: 1,
+        oracle_version: 1,
+        event_uid: `0x${"11".repeat(32)}`,
+        event_revision: 1,
+        hazard_type: "EARTHQUAKE",
+        source_event_id: "us6000m0xl",
+        sources: [],
+        earthquake: {
+            title: "M 7.1 - Fixture",
+            region: "Fixture Region",
+            occurred_at_ms: 1_700_000_000_000,
+            magnitude_x100: 710,
+            source_updated_at_ms: 1_700_000_050_000,
+        },
+        affected_cells: {
+            uri: affectedCellsRef.uri,
+            hash: affectedCellsRef.source_hash,
+            root: `0x${"44".repeat(32)}`,
+            count: 1,
+            geo_resolution: 7,
+        },
+    };
+    const evidenceManifestHash = `0x${createHash("sha256")
+        .update(JSON.stringify(evidenceManifest))
+        .digest("hex")}`;
+    return {
+        status: "finalized",
+        source_event_id: "us6000m0xl",
+        payload: {
+            intent: 1,
+            oracle_version: 1,
+            event_uid: `0x${"11".repeat(32)}`,
+            event_revision: 1,
+            source_event_id: "us6000m0xl",
+            title: "M 7.1 - Fixture",
+            region: "Fixture Region",
+            occurred_at_ms: 1_700_000_000_000,
+            hazard_type: 1,
+            status: 3,
+            severity_band: 3,
+            affected_cells_root: `0x${"44".repeat(32)}`,
+            affected_cell_count: 1,
+            evidence_manifest_uri: evidenceManifestRef.uri,
+            evidence_manifest_hash: evidenceManifestHash,
+            verified_at_ms: 1_700_000_100_000,
+            freshness_deadline_ms: 1_700_021_700_000,
+        },
+        raw_data_manifest: { entries: [{ path: "grid.xml" }, { path: "detail.json" }] },
+        affected_cells_ref: affectedCellsRef,
+        evidence_manifest_ref: evidenceManifestRef,
+        evidence_manifest: evidenceManifest,
+        attestation: { public_key: "public-key-1" },
+        signature: { public_key: "public-key-1" },
+    };
+}

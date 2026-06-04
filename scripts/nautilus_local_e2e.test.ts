@@ -44,7 +44,9 @@ describe("Nautilus local oracle E2E", () => {
                 status: "finalized",
                 payload: expect.objectContaining({
                     event_uid: expect.any(String),
-                    source_updated_at_ms: 1_704_151_200_000,
+                    evidence_manifest_uri:
+                        "ipfs://sonari/examples/us7000sonari/evidence_manifest.json",
+                    evidence_manifest_hash: expect.any(String),
                 }),
                 payload_bcs_hex: expect.any(String),
                 signature: expect.any(String),

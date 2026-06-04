@@ -28,40 +28,39 @@ shared/
 
 ## エクスポート一覧
 
-### `PAYLOAD_FIELD_ORDER` — Oracleペイロードの28フィールド
+### `PAYLOAD_FIELD_ORDER` — Oracleペイロードの17フィールド
 
-Oracleが生成するデータには決まった順番があります。BCS（バイト列変換）では順番が重要なため、この配列で厳密に管理します。
+Oracleが生成する署名対象データには決まった順番があります。BCS（バイト列変換）では順番が重要なため、この配列で厳密に管理します。生データ、生成済み affected cells、source metadata は署名対象 payload に直接入れず、`evidence_manifest_uri` と `evidence_manifest_hash` が指す evidence manifest に集約します。
 
 | # | フィールド名 | 意味 |
 |---|---|---|
 | 1 | `intent` | このデータの用途（地震Oracleであることを示す） |
 | 2 | `oracle_version` | Oracle仕様のバージョン番号 |
 | 3 | `event_uid` | 地震イベントの一意ID（hazard_type + source + id + 時刻から生成） |
-| 4 | `hazard_type` | 災害の種類（地震 = 1） |
-| 5 | `status` | 処理状態（完了 = 3） |
-| 6 | `event_revision` | イベントの改訂番号 |
-| 7 | `source_event_id` | USGSイベントID |
-| 8 | `title` | USGSイベントタイトル |
-| 9 | `region` | USGS地域名 |
-| 10 | `occurred_at_ms` | 地震発生時刻（ミリ秒） |
-| 11 | `magnitude_x100` | マグニチュードを100倍した整数 |
-| 12 | `verified_at_ms` | TEE検証時刻（ミリ秒） |
-| 13 | `source_updated_at_ms` | USGSデータの更新時刻（ミリ秒） |
-| 14 | `primary_source` | データ提供元（USGS = 1） |
-| 15 | `severity_band` | イベントの被害バンド（1-3） |
-| 16 | `source_set_hash` | ソースマニフェストのSHA-256ハッシュ |
-| 17 | `raw_data_hash` | 生データマニフェストのSHA-256ハッシュ |
-| 18 | `raw_data_uri` | 生データの保存場所（Walrus URI） |
-| 19 | `affected_cells_root` | 影響セル一覧のMerkleルートハッシュ |
-| 20 | `affected_cells_uri` | 影響セルデータの保存場所 |
-| 21 | `affected_cells_data_hash` | 影響セルデータのSHA-256ハッシュ |
-| 22 | `affected_cell_count` | 影響を受けたH3セルの総数 |
-| 23 | `geo_resolution` | H3セルの解像度（現在は7固定） |
-| 24 | `cells_generation_method` | セル生成方法（ShakeMap grid.xml + H3 + P90 = 1） |
-| 25 | `cell_metric` | セルの指標（USGS MMI = 1） |
-| 26 | `cell_aggregation` | 集計方法（グリッドポイントP90 = 1） |
-| 27 | `intensity_scale` | 強度スケール（MMI×100 = 1） |
-| 28 | `freshness_deadline_ms` | このOracleの有効期限（検証時刻 + 一定時間） |
+| 4 | `event_revision` | イベントの改訂番号 |
+| 5 | `source_event_id` | USGSイベントID |
+| 6 | `title` | USGSイベントタイトル |
+| 7 | `region` | USGS地域名 |
+| 8 | `occurred_at_ms` | 地震発生時刻（ミリ秒） |
+| 9 | `hazard_type` | 災害の種類（地震 = 1） |
+| 10 | `status` | 処理状態（完了 = 3） |
+| 11 | `severity_band` | イベントの被害バンド（1-3） |
+| 12 | `affected_cells_root` | affected cells artifact のMerkleルートハッシュ |
+| 13 | `affected_cell_count` | 影響を受けたH3セルの総数 |
+| 14 | `evidence_manifest_uri` | evidence manifest の保存場所（Walrus blob URI） |
+| 15 | `evidence_manifest_hash` | evidence manifest canonical JSON のSHA-256ハッシュ |
+| 16 | `verified_at_ms` | TEE検証時刻（ミリ秒） |
+| 17 | `freshness_deadline_ms` | このOracleの有効期限（検証時刻 + 一定時間） |
+
+### `EvidenceManifest` — payload外の検証証跡
+
+Evidence manifest は signed payload から外した証跡をまとめるオフチェーン artifact です。TEE が source raw artifacts、affected cells artifact、manifest 自体を archive し、payload は manifest の URI と hash だけを保持します。
+
+含まれる主な情報:
+
+- `sources[]`: USGS detail / ShakeMap grid の source URI、artifact URI、content hash、size、source updated time
+- `earthquake`: title、region、発生時刻、`magnitude_x100`、USGS updated time
+- `affected_cells`: affected cells artifact URI、hash、Merkle root、件数、H3解像度
 
 ### `AFFECTED_CELL_LEAF_FIELD_ORDER` — Merkleリーフの10フィールド
 
