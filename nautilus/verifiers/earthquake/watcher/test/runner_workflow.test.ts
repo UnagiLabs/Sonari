@@ -1060,6 +1060,58 @@ describe("AWS runner workflow helper", () => {
         expect(relayer).toMatchObject({ relayer: "skipped" });
     });
 
+    it("stores only a compact finalized result summary in DynamoDB state", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const baseResult = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        const result = {
+            ...baseResult,
+            affected_cells: {
+                ...baseResult.affected_cells,
+                affected_cells: Array.from({ length: 20_000 }, (_, index) => ({
+                    h3_index: String(6_088_190_135_139_041_27n + BigInt(index)),
+                    intensity_value: 831,
+                    cell_band: 2,
+                })),
+            },
+        };
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
+            repository,
+            now: () => 1_800_000_001_000,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "apply_result",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result_s3_key: "results/us7000sonari/cmd-123.json",
+        });
+
+        const row = await repository.get("us7000sonari");
+        expect(row?.tee_result_json).not.toContain("affected_cells");
+        expect(row?.tee_result_json?.length).toBeLessThan(2_000);
+        expect(JSON.parse(row?.tee_result_json ?? "{}")).toMatchObject({
+            status: "finalized",
+            payload: {
+                evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
+                evidence_manifest_hash: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+            },
+            payload_bcs_hex: expect.any(String),
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
+        });
+    });
+
     it("archives finalized source manifest entries before relayer work", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);

@@ -56,7 +56,8 @@ is_already_registered_error() {
   local text="$1"
   [[ "$text" == *"EVerifierConfigAlreadyRegistered"* ]] ||
     [[ "$text" == *"error code: 9"* ]] ||
-    [[ "$text" == *"Abort code: 9"* ]]
+    [[ "$text" == *"Abort code: 9"* ]] ||
+    [[ "$text" == *"with code 9"* ]]
 }
 
 run_sui_tx() {
