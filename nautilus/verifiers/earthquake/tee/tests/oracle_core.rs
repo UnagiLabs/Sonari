@@ -10,10 +10,10 @@ use tee::{
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
     LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
     PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive, SourceArchiveError,
-    StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, cell_band, grid_xml_from_artifact,
-    merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100, process_usgs,
-    process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
-    sha256_bytes,
+    StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, canonical_json_bytes, cell_band,
+    grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
+    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer,
+    process_usgs_with_source_archive, sha256_bytes,
 };
 
 const FIXTURE_DIR: &str = "../fixtures/usgs/finalized_minimal";
@@ -39,8 +39,6 @@ fn finalized_input() -> UsgsOracleInput {
             "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
                 .to_owned(),
         ),
-        raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
-        affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json".to_owned(),
     }
 }
 
@@ -55,8 +53,6 @@ fn input_with_detail_id_and_aliases(canonical_id: &str, aliases: &str) -> UsgsOr
     input.observed_at_ms = detail_updated_at_ms(&input.detail_json);
     input.raw_detail_uri =
         format!("https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{canonical_id}.geojson");
-    input.raw_data_uri = format!("ipfs://sonari/live/{canonical_id}/raw_data_manifest.json");
-    input.affected_cells_uri = format!("ipfs://sonari/live/{canonical_id}/affected_cells.json");
     input
 }
 
@@ -139,9 +135,15 @@ fn finalized_payload_maps_usgs_detail_fields_and_rounds_magnitude() {
         assert_eq!(payload.source_event_id, "us7000sonari");
         assert_eq!(payload.title, "M 7.24 - Test Event");
         assert_eq!(payload.region, "Test Region");
-        assert_eq!(payload.magnitude_x100, expected_x100);
         assert_eq!(payload.verified_at_ms, verified_at_ms);
         assert!(payload.freshness_deadline_ms > payload.verified_at_ms);
+        let manifest = output
+            .evidence_manifest
+            .as_ref()
+            .expect("evidence manifest should exist");
+        assert_eq!(manifest.earthquake.magnitude_x100, expected_x100);
+        assert_eq!(manifest.earthquake.title, "M 7.24 - Test Event");
+        assert_eq!(manifest.earthquake.region, "Test Region");
     }
 }
 
@@ -220,6 +222,10 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
         read_expected("affected_cells.json")
     );
     assert_eq!(
+        serde_json::to_value(output.evidence_manifest).unwrap(),
+        read_expected("evidence_manifest.json")
+    );
+    assert_eq!(
         serde_json::to_value(output.unsigned_payload).unwrap(),
         read_expected("unsigned_payload.json")
     );
@@ -227,6 +233,82 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
         serde_json::to_value(output.expected_hashes).unwrap(),
         read_expected("expected_hashes.json")
     );
+}
+
+#[test]
+fn finalized_payload_uses_current_17_field_contract_without_old_artifact_uris() {
+    let output = process_usgs(finalized_input()).expect("fixture should finalize");
+    let payload = serde_json::to_value(output.unsigned_payload.unwrap()).unwrap();
+    let payload = payload.as_object().unwrap();
+
+    assert_eq!(
+        payload.keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "intent",
+            "oracle_version",
+            "event_uid",
+            "event_revision",
+            "source_event_id",
+            "title",
+            "region",
+            "occurred_at_ms",
+            "hazard_type",
+            "status",
+            "severity_band",
+            "affected_cells_root",
+            "affected_cell_count",
+            "evidence_manifest_uri",
+            "evidence_manifest_hash",
+            "verified_at_ms",
+            "freshness_deadline_ms",
+        ]
+    );
+    for removed in [
+        "raw_data_uri",
+        "affected_cells_uri",
+        "raw_data_hash",
+        "affected_cells_data_hash",
+        "source_set_hash",
+        "magnitude_x100",
+        "source_updated_at_ms",
+        "primary_source",
+        "geo_resolution",
+        "cells_generation_method",
+        "cell_metric",
+        "cell_aggregation",
+        "intensity_scale",
+    ] {
+        assert!(
+            !payload.contains_key(removed),
+            "finalized payload must not contain removed field {removed}"
+        );
+    }
+}
+
+#[test]
+fn evidence_manifest_hash_is_sha256_of_canonical_manifest_bytes() {
+    let output = process_usgs(finalized_input()).expect("fixture should finalize");
+    let manifest = output
+        .evidence_manifest
+        .as_ref()
+        .expect("evidence manifest should exist");
+    let manifest_bytes = canonical_json_bytes(manifest).expect("manifest should serialize");
+    let payload = output.unsigned_payload.as_ref().unwrap();
+
+    assert_eq!(
+        payload.evidence_manifest_hash,
+        format!("0x{}", hex::encode(sha256_bytes(&manifest_bytes)))
+    );
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(manifest.oracle_version, ORACLE_VERSION);
+    assert_eq!(manifest.event_uid, payload.event_uid);
+    assert_eq!(manifest.event_revision, payload.event_revision);
+    assert_eq!(manifest.hazard_type, "EARTHQUAKE");
+    assert_eq!(manifest.source_event_id, payload.source_event_id);
+    assert_eq!(manifest.sources.len(), 2);
+    assert_eq!(manifest.affected_cells.root, payload.affected_cells_root);
+    assert_eq!(manifest.affected_cells.count, payload.affected_cell_count);
+    assert_eq!(manifest.affected_cells.geo_resolution, GEO_RESOLUTION);
 }
 
 #[test]
@@ -280,10 +362,6 @@ fn worker_request_accepts_usgs_alias_when_detail_ids_list_contains_exact_alias()
     assert_eq!(
         output.result.source_event_id,
         "official20110311054624120_30"
-    );
-    assert_eq!(
-        output.unsigned_payload.as_ref().unwrap().raw_data_uri,
-        "ipfs://sonari/live/official20110311054624120_30/raw_data_manifest.json"
     );
     for source in &output.source_manifest.as_ref().unwrap().sources {
         assert_eq!(source.event_id, "official20110311054624120_30");
@@ -377,7 +455,7 @@ fn finalized_usgs_references_raw_sources_before_signing_payload() {
         .raw_data_manifest
         .expect("finalized output should include raw manifest");
     assert_eq!(raw_manifest.entries.len(), 2);
-    assert_eq!(archive.stored.get(), 2);
+    assert_eq!(archive.stored.get(), 4);
     assert_eq!(archive.fetched.get(), 0);
 
     for entry in &raw_manifest.entries {
@@ -386,6 +464,46 @@ fn finalized_usgs_references_raw_sources_before_signing_payload() {
         assert!(!entry.source_uri.is_empty());
         assert_eq!(entry.content_hash, entry.source_hash);
     }
+}
+
+#[test]
+fn archived_finalized_output_exposes_expected_blob_ids_for_all_artifacts() {
+    let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
+    let archive = RecordingSourceArchive::default();
+    let output = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
+        .expect("fixture should finalize with archived artifacts");
+
+    let payload = output.unsigned_payload.as_ref().unwrap();
+    assert!(payload.evidence_manifest_uri.starts_with("walrus://blob/"));
+    assert!(!payload.evidence_manifest_uri.contains("ipfs://sonari/live"));
+    let manifest_ref = output
+        .evidence_manifest_ref
+        .as_ref()
+        .expect("manifest expected artifact ref should exist");
+    assert_eq!(payload.evidence_manifest_uri, manifest_ref.uri);
+    assert_eq!(manifest_ref.walrus_blob_id, "test-walrus-3");
+
+    let affected_ref = output
+        .affected_cells_ref
+        .as_ref()
+        .expect("affected cells expected artifact ref should exist");
+    assert_eq!(affected_ref.walrus_blob_id, "test-walrus-2");
+    assert_eq!(
+        output
+            .evidence_manifest
+            .as_ref()
+            .unwrap()
+            .affected_cells
+            .uri,
+        affected_ref.uri
+    );
+    assert_eq!(archive.stored.get(), 4);
+
+    let stored = archive.records.borrow();
+    assert_eq!(stored[0].artifact_kind, "raw_source");
+    assert_eq!(stored[1].artifact_kind, "raw_source");
+    assert_eq!(stored[2].artifact_kind, "affected_cells");
+    assert_eq!(stored[3].artifact_kind, "evidence_manifest");
 }
 
 #[test]
@@ -588,8 +706,6 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
             raw_grid_uri: Path::new(&grid_path).exists().then(|| {
                 format!("nautilus/verifiers/earthquake/fixtures/{case_id}/input/usgs_grid.xml")
             }),
-            raw_data_uri: String::new(),
-            affected_cells_uri: String::new(),
         })
         .expect("non-finalized cases should return status output");
 
@@ -1087,8 +1203,6 @@ fn selects_shakemap_products_deterministically_by_preferred_version_update_and_k
         observed_at_ms: detail_updated_at_ms(detail_json),
         raw_detail_uri: "detail.json".to_owned(),
         raw_grid_uri: Some("grid.xml".to_owned()),
-        raw_data_uri: "raw.json".to_owned(),
-        affected_cells_uri: "cells.json".to_owned(),
     };
 
     let output = process_usgs(input).expect("multi product fixture should finalize");
@@ -1128,6 +1242,7 @@ struct RecordingSourceArchive {
 }
 
 struct ArchivedSourceRecord {
+    artifact_kind: String,
     source_uri: String,
     source_hash: String,
     bytes: Vec<u8>,
@@ -1142,7 +1257,15 @@ impl SourceArchive for RecordingSourceArchive {
     ) -> Result<StoredSourceRef, SourceArchiveError> {
         let index = self.stored.get();
         self.stored.set(index + 1);
+        let artifact_kind = if source_uri.ends_with("/affected_cells.json") {
+            "affected_cells"
+        } else if source_uri.ends_with("/evidence_manifest.json") {
+            "evidence_manifest"
+        } else {
+            "raw_source"
+        };
         self.records.borrow_mut().push(ArchivedSourceRecord {
+            artifact_kind: artifact_kind.to_owned(),
             source_uri: source_uri.to_owned(),
             source_hash: source_hash.to_owned(),
             bytes: bytes.to_vec(),
@@ -1208,8 +1331,6 @@ fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
         raw_grid_uri: Path::new(&grid_path).exists().then(|| {
             format!("nautilus/verifiers/earthquake/fixtures/{case_id}/input/usgs_grid.xml")
         }),
-        raw_data_uri: String::new(),
-        affected_cells_uri: String::new(),
     }
 }
 

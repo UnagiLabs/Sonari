@@ -5,6 +5,7 @@ import argparse
 import json
 import struct
 import sys
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -47,15 +48,38 @@ AFFECTED_ORDER = [
 ]
 AFFECTED_CELL_ORDER = ["h3_index", "intensity_value", "cell_band"]
 EVIDENCE_ORDER = [
-    "source_manifest_uri",
-    "source_set_hash",
-    "raw_data_manifest_uri",
-    "raw_data_hash",
-    "affected_cells_uri",
-    "affected_cells_data_hash",
-    "affected_cells_root",
-    "affected_cell_count",
+    "schema_version",
     "oracle_version",
+    "event_uid",
+    "event_revision",
+    "hazard_type",
+    "source_event_id",
+    "sources",
+    "earthquake",
+    "affected_cells",
+]
+EVIDENCE_SOURCE_ORDER = [
+    "source",
+    "product",
+    "source_uri",
+    "artifact_uri",
+    "content_hash",
+    "size_bytes",
+    "source_updated_at_ms",
+]
+EVIDENCE_EARTHQUAKE_ORDER = [
+    "title",
+    "region",
+    "occurred_at_ms",
+    "magnitude_x100",
+    "source_updated_at_ms",
+]
+EVIDENCE_AFFECTED_ORDER = [
+    "uri",
+    "hash",
+    "root",
+    "count",
+    "geo_resolution",
 ]
 
 CELLS_GENERATION_METHOD = {"shakemap_gridxml_h3_grid_point_p90_v1": 1}
@@ -135,6 +159,22 @@ def canonical_json_bytes(value: Any, order: list[str], item_order: list[str] | N
     ).encode("utf-8")
 
 
+def canonical_evidence_manifest_bytes(value: dict[str, Any]) -> bytes:
+    ordered_value = ordered(value, EVIDENCE_ORDER)
+    ordered_value["sources"] = [
+        ordered(source, EVIDENCE_SOURCE_ORDER) for source in value["sources"]
+    ]
+    ordered_value["earthquake"] = ordered(value["earthquake"], EVIDENCE_EARTHQUAKE_ORDER)
+    ordered_value["affected_cells"] = ordered(
+        value["affected_cells"], EVIDENCE_AFFECTED_ORDER
+    )
+    return json.dumps(
+        ordered_value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 def uleb128(value: int) -> bytes:
     out = bytearray()
     while value >= 0x80:
@@ -178,6 +218,18 @@ def require_int_range(payload: dict[str, Any], field: str, minimum: int, maximum
     value = payload.get(field)
     if not isinstance(value, int) or isinstance(value, bool) or value < minimum or value > maximum:
         raise ValueError(f"payload {field} must be an integer in {minimum}..{maximum}")
+
+
+def magnitude_x100(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        raise ValueError("USGS properties.mag must be a decimal number")
+    try:
+        decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("USGS properties.mag must be a decimal number") from exc
+    if not decimal.is_finite():
+        raise ValueError("USGS properties.mag must be finite")
+    return int((decimal * Decimal(100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def validate_payload_contract(payload: dict[str, Any]) -> None:
@@ -309,6 +361,7 @@ def compute() -> dict[str, Any]:
     affected = load_json(affected_path)
     evidence = load_json(evidence_path)
     payload = load_json(EXAMPLES / "unsigned_payload.json")
+    detail = load_json(EXAMPLES / "raw_sources" / "usgs_detail.json")
     validate_payload_contract(payload)
 
     sorted_sources = sorted(
@@ -369,17 +422,49 @@ def compute() -> dict[str, Any]:
     ]
     root = merkle_root([item["leaf_hash"] for item in leaf_hashes])
     evidence_checks = {
-        "source_set_hash": source_set_hash,
-        "raw_data_hash": raw_data_hash,
-        "affected_cells_data_hash": affected_cells_data_hash,
-        "affected_cells_root": root,
-        "affected_cell_count": len(cells),
+        "schema_version": 1,
         "oracle_version": payload["oracle_version"],
+        "event_uid": payload["event_uid"],
+        "event_revision": payload["event_revision"],
+        "hazard_type": "EARTHQUAKE",
+        "source_event_id": payload["source_event_id"],
     }
     for key, value in evidence_checks.items():
         if evidence.get(key) != value:
             raise ValueError(f"evidence_manifest {key} mismatch: expected {value}, found {evidence.get(key)}")
-    evidence_bytes = canonical_json_bytes(evidence, EVIDENCE_ORDER)
+    expected_sources = [
+        {
+            "source": entry["name"],
+            "product": entry["product"],
+            "source_uri": entry["source_uri"],
+            "artifact_uri": entry["uri"],
+            "content_hash": entry["content_hash"],
+            "size_bytes": entry["size_bytes"],
+            "source_updated_at_ms": detail["properties"]["updated"],
+        }
+        for entry in raw["entries"]
+    ]
+    if evidence.get("sources") != expected_sources:
+        raise ValueError("evidence_manifest sources mismatch")
+    expected_earthquake = {
+        "title": payload["title"],
+        "region": payload["region"],
+        "occurred_at_ms": payload["occurred_at_ms"],
+        "magnitude_x100": magnitude_x100(detail["properties"]["mag"]),
+        "source_updated_at_ms": detail["properties"]["updated"],
+    }
+    if evidence.get("earthquake") != expected_earthquake:
+        raise ValueError("evidence_manifest earthquake mismatch")
+    expected_affected = {
+        "uri": "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+        "hash": affected_cells_data_hash,
+        "root": root,
+        "count": len(cells),
+        "geo_resolution": affected["geo_resolution"],
+    }
+    if evidence.get("affected_cells") != expected_affected:
+        raise ValueError("evidence_manifest affected_cells mismatch")
+    evidence_bytes = canonical_evidence_manifest_bytes(evidence)
     evidence_manifest_hash = sha256_hex(evidence_bytes)
     for path, expected_bytes in [
         (source_path, source_bytes),

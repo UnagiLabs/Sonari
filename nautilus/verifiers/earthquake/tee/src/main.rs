@@ -502,8 +502,6 @@ fn low_level_input(cli: Cli) -> Result<RunConfig, Box<dyn std::error::Error>> {
             observed_at_ms,
             raw_detail_uri: required(cli.raw_detail_uri, "--raw-detail-uri")?,
             raw_grid_uri: grid.raw_grid_uri,
-            raw_data_uri: required(cli.raw_data_uri, "--raw-data-uri")?,
-            affected_cells_uri: required(cli.affected_cells_uri, "--affected-cells-uri")?,
         },
         output_dir: cli.output_dir,
         signing_key_seed,
@@ -518,7 +516,6 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
     let detail_json = fs::read(&detail_path)?;
     let observed_at_ms = detail_updated_at_ms(&detail_json)?;
     let grid_path = input_dir.join("usgs_grid.xml");
-    let source_event_id = source_event_id(&detail_path)?;
     let output_dir = args.write_expected.then(|| case_dir.join("expected"));
     let signing_key_seed = signing_key_seed(args.sign_dev, args.signing_key_seed)?;
     let grid = if grid_path.exists() {
@@ -536,12 +533,6 @@ fn fixture_input(args: FixtureArgs) -> Result<RunConfig, Box<dyn std::error::Err
             observed_at_ms,
             raw_detail_uri: display_path(&detail_path),
             raw_grid_uri: grid.raw_grid_uri,
-            raw_data_uri: format!(
-                "ipfs://sonari/examples/{source_event_id}/raw_data_manifest.json"
-            ),
-            affected_cells_uri: format!(
-                "ipfs://sonari/examples/{source_event_id}/affected_cells.json"
-            ),
         },
         output_dir,
         signing_key_seed,
@@ -581,15 +572,6 @@ fn grid_input(
         raw_grid_bytes: Some(grid_bytes),
         raw_grid_uri: Some(raw_grid_uri),
     })
-}
-
-fn source_event_id(detail_path: &Path) -> Result<String, Box<dyn std::error::Error>> {
-    let detail: serde_json::Value = serde_json::from_slice(&fs::read(detail_path)?)?;
-    detail
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| format!("{} is missing string field `id`", detail_path.display()).into())
 }
 
 fn display_path(path: &Path) -> String {
@@ -675,6 +657,12 @@ fn write_output(
             canonical_json_bytes(raw_data_manifest)?,
         )?;
     }
+    if let Some(evidence_manifest) = &output.evidence_manifest {
+        fs::write(
+            output_dir.join("evidence_manifest.json"),
+            canonical_json_bytes(evidence_manifest)?,
+        )?;
+    }
     if let Some(affected_cells) = &output.affected_cells {
         fs::write(
             output_dir.join("affected_cells.json"),
@@ -718,31 +706,60 @@ mod tests {
             intent: 1,
             oracle_version: 1,
             event_uid: format!("0x{}", "11".repeat(32)),
-            hazard_type: 1,
-            status: 3,
             event_revision: 1,
             source_event_id: "us7000abcd".to_owned(),
             title: "M 7.1 - Sonari Fixture Earthquake".to_owned(),
             region: "Sonari Fixture Region".to_owned(),
             occurred_at_ms: 1_700_000_000_000,
-            magnitude_x100: 710,
-            verified_at_ms: 1_700_000_100_000,
-            source_updated_at_ms: 1_700_000_050_000,
-            primary_source: 1,
+            hazard_type: 1,
+            status: 3,
             severity_band: 3,
-            source_set_hash: format!("0x{}", "22".repeat(32)),
-            raw_data_hash: format!("0x{}", "33".repeat(32)),
-            raw_data_uri: "ipfs://sonari/live/us7000abcd/raw_data_manifest.json".to_owned(),
             affected_cells_root: format!("0x{}", "44".repeat(32)),
-            affected_cells_uri: "ipfs://sonari/live/us7000abcd/affected_cells.json".to_owned(),
-            affected_cells_data_hash: format!("0x{}", "55".repeat(32)),
             affected_cell_count: 1,
-            geo_resolution: 7,
-            cells_generation_method: 1,
-            cell_metric: 1,
-            cell_aggregation: 1,
-            intensity_scale: 1,
+            evidence_manifest_uri: "walrus://blob/manifest-blob".to_owned(),
+            evidence_manifest_hash: format!("0x{}", "55".repeat(32)),
+            verified_at_ms: 1_700_000_100_000,
             freshness_deadline_ms: 1_700_021_700_000,
+        }
+    }
+
+    fn sample_affected_cells() -> tee::AffectedCellsArtifact {
+        tee::AffectedCellsArtifact {
+            event_uid: format!("0x{}", "11".repeat(32)),
+            event_revision: 1,
+            oracle_version: 1,
+            geo_resolution: 7,
+            cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1".to_owned(),
+            cell_metric: "USGS_MMI".to_owned(),
+            cell_aggregation: "GRID_POINT_P90".to_owned(),
+            intensity_scale: "MMI_X100".to_owned(),
+            affected_cells: Vec::new(),
+        }
+    }
+
+    fn sample_evidence_manifest() -> tee::EvidenceManifest {
+        tee::EvidenceManifest {
+            schema_version: 1,
+            oracle_version: 1,
+            event_uid: format!("0x{}", "11".repeat(32)),
+            event_revision: 1,
+            hazard_type: "EARTHQUAKE".to_owned(),
+            source_event_id: "us7000abcd".to_owned(),
+            sources: Vec::new(),
+            earthquake: tee::EarthquakeEvidence {
+                title: "M 7.1 - Sonari Fixture Earthquake".to_owned(),
+                region: "Sonari Fixture Region".to_owned(),
+                occurred_at_ms: 1_700_000_000_000,
+                magnitude_x100: 710,
+                source_updated_at_ms: 1_700_000_050_000,
+            },
+            affected_cells: tee::EvidenceAffectedCells {
+                uri: "walrus://blob/affected-blob".to_owned(),
+                hash: format!("0x{}", "66".repeat(32)),
+                root: format!("0x{}", "44".repeat(32)),
+                count: 1,
+                geo_resolution: 7,
+            },
         }
     }
 
@@ -756,6 +773,10 @@ mod tests {
                 oracle_version: 1,
                 entries: Vec::new(),
             },
+            affected_cells: sample_affected_cells(),
+            evidence_manifest: sample_evidence_manifest(),
+            affected_cells_ref: None,
+            evidence_manifest_ref: None,
         };
         ProcessOutput::signable(vec![0x01], serde_json::to_value(&result).unwrap())
     }
@@ -771,6 +792,10 @@ mod tests {
                 oracle_version: 1,
                 entries: Vec::new(),
             },
+            affected_cells: sample_affected_cells(),
+            evidence_manifest: sample_evidence_manifest(),
+            affected_cells_ref: None,
+            evidence_manifest_ref: None,
         })
         .expect("TEE result should serialize");
         let payload = value
@@ -785,30 +810,19 @@ mod tests {
                 "intent",
                 "oracle_version",
                 "event_uid",
-                "hazard_type",
-                "status",
                 "event_revision",
                 "source_event_id",
                 "title",
                 "region",
                 "occurred_at_ms",
-                "magnitude_x100",
-                "verified_at_ms",
-                "source_updated_at_ms",
-                "primary_source",
+                "hazard_type",
+                "status",
                 "severity_band",
-                "source_set_hash",
-                "raw_data_hash",
-                "raw_data_uri",
                 "affected_cells_root",
-                "affected_cells_uri",
-                "affected_cells_data_hash",
                 "affected_cell_count",
-                "geo_resolution",
-                "cells_generation_method",
-                "cell_metric",
-                "cell_aggregation",
-                "intensity_scale",
+                "evidence_manifest_uri",
+                "evidence_manifest_hash",
+                "verified_at_ms",
                 "freshness_deadline_ms",
             ]
         );
@@ -839,6 +853,8 @@ mod tests {
                 "signature",
                 "public_key",
                 "raw_data_manifest",
+                "affected_cells",
+                "evidence_manifest",
                 "verifier_config_key",
                 "verifier_config_version",
                 "enclave_instance_public_key",
@@ -1050,9 +1066,6 @@ mod tests {
                 "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml"
                     .to_owned(),
             ),
-            raw_data_uri: "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json".to_owned(),
-            affected_cells_uri: "ipfs://sonari/examples/us7000sonari/affected_cells.json"
-                .to_owned(),
         }
     }
 

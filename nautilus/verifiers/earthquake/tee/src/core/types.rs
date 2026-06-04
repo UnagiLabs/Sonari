@@ -1,6 +1,6 @@
 use crate::core::artifacts::{
-    AffectedCellsArtifact, ExpectedHashes, RawDataManifest, SampleProof, SignatureArtifact,
-    SourceManifest, UnsignedPayload,
+    AffectedCellsArtifact, EvidenceManifest, ExpectedHashes, RawDataManifest, SampleProof,
+    SignatureArtifact, SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 use crate::crypto::HexError;
 use serde::Serialize;
@@ -45,8 +45,6 @@ pub struct UsgsOracleInput {
     pub observed_at_ms: u64,
     pub raw_detail_uri: String,
     pub raw_grid_uri: Option<String>,
-    pub raw_data_uri: String,
-    pub affected_cells_uri: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,7 +131,10 @@ pub struct OracleOutput {
     pub result: ResultSummary,
     pub source_manifest: Option<SourceManifest>,
     pub raw_data_manifest: Option<RawDataManifest>,
+    pub evidence_manifest: Option<EvidenceManifest>,
     pub affected_cells: Option<AffectedCellsArtifact>,
+    pub affected_cells_ref: Option<StoredSourceRef>,
+    pub evidence_manifest_ref: Option<StoredSourceRef>,
     pub expected_hashes: Option<ExpectedHashes>,
     pub sample_proof: Option<SampleProof>,
     pub unsigned_payload: Option<UnsignedPayload>,
