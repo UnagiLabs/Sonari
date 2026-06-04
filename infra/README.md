@@ -83,30 +83,10 @@ publish の terminal output から控えるもの:
 
 これらは後続の admin transaction、relayer、smoke test で使います。
 
-## GitHub / AWS 側で更新するもの
+## GitHub / AWS 側
 
-publish 後、dev deploy 用の GitHub Actions variables を新しい package に合わせます。
-
-地震 relayer:
-
-```text
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY=<DisasterRegistry object ID>
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY=<VerifierRegistry object ID>
-```
-
-membership identity の手元確認や smoke では、次の値も新しい object ID に合わせます。
-
-```text
-SONARI_IDENTITY_PACKAGE_ID=<PACKAGE_ID>
-SONARI_IDENTITY_PAUSE_STATE_ID=<PauseState object ID>
-SONARI_IDENTITY_REGISTRY_ID=<IdentityRegistry object ID>
-SONARI_MEMBERSHIP_REGISTRY_ID=<MembershipRegistry object ID>
-SONARI_VERIFIER_REGISTRY_ID=<VerifierRegistry object ID>
-```
-
-admin private key は更新先に含めません。
-SourceArchiver private key secret も、admin account 変更だけでは変更しません。
+- admin private key は GitHub / AWS / Lambda / EC2 / SSM に置かない
+- 具体的な環境変数は直下の順番セクションで一括で更新する
 
 ## GitHub Actions がやること
 
@@ -127,123 +107,86 @@ AWS dev stack の deploy は GitHub Actions で行います。
 - CloudFormation stack を更新する
 - deploy 後に ASG が止まっていること、schedule が disabled のままであることを確認する
 
-submit を有効にする場合、GitHub Actions variables は次の形にします。
+submit を有効にする場合は、上記 `Relayer` の値に加えて submit 専用変数を別途設定します（既存運用通り）。
+
+## publish → GitHub Variables 更新 → PCR登録 Transaction の順番（最小手順）
+
+この順番だけ実行すれば、AIでも迷いにくいです。
+
+1. Contract publish
+
+```bash
+sui client \
+  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
+  --client.env testnet \
+  publish contracts \
+  --gas-budget 1000000000
+```
+
+2. publish 出力と `contracts/Published.toml` から値を集めて変数化
+
+```bash
+PACKAGE_ID="<published package id>"
+ADMIN_CAP_ID="<published admin cap id>"
+DISASTER_REGISTRY_ID="<DisasterRegistry object id>"
+MEMBERSHIP_REGISTRY_ID="<MembershipRegistry object id>"
+VERIFIER_REGISTRY_ID="<VerifierRegistry object id>"
+PAUSE_STATE_ID="<PauseState object id>"
+IDENTITY_REGISTRY_ID="<IdentityRegistry object id>"
+```
+
+3. GitHub Actions の Variables を更新
+
+以下3つは必須。`testnet` 運用では下記を dev env / repo 変数へ入れます。
 
 ```text
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE=submit
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT=true
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK=testnet
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL=https://fullnode.testnet.sui.io:443
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS=<relayer signer address>
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN=<relayer signer secret ARN>
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY=<DisasterRegistry object ID>
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY=<VerifierRegistry object ID>
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET=${PACKAGE_ID}::accessor::create_disaster_event_from_signed_payload
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY=$DISASTER_REGISTRY_ID
+AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY=$VERIFIER_REGISTRY_ID
 ```
 
-## 管理者が必ず手でやること
+手元確認や smoke で使うもの:
 
-GitHub Actions の外で必要なのは、AdminCap が必要な Sui 操作だけです。
+```text
+SONARI_IDENTITY_PACKAGE_ID=$PACKAGE_ID
+SONARI_IDENTITY_PAUSE_STATE_ID=$PAUSE_STATE_ID
+SONARI_IDENTITY_REGISTRY_ID=$IDENTITY_REGISTRY_ID
+SONARI_MEMBERSHIP_REGISTRY_ID=$MEMBERSHIP_REGISTRY_ID
+SONARI_VERIFIER_REGISTRY_ID=$VERIFIER_REGISTRY_ID
+```
 
-1. contract publish
+4. PCR 登録トランザクションをまとめて実行
 
-GitHub Actions は contract を publish しません。
-publish は admin wallet で手動実行します。
-
-2. publish 後の object ID を GitHub Actions variables に入れる
-
-`PACKAGE_ID`、`DisasterRegistry`、`VerifierRegistry` などを新しい publish 結果に合わせます。
-
-3. earthquake PCR を VerifierRegistry に登録する
-
-GitHub Actions の run summary に出た PCR0 / PCR1 / PCR2 を使います。
-`VerifierRegistry` に config がまだない場合は `create_earthquake_verifier_config`、すでにある場合は `update_earthquake_verifier_config_pcrs` を使います。
+GA サマリの PCR をセットします。
 
 ```bash
-sui client \
-  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
-  --client.env testnet \
-  call \
-  --package "$PACKAGE_ID" \
-  --module admin \
-  --function create_earthquake_verifier_config \
-  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$PCR0" "0x$PCR1" "0x$PCR2" \
-  --gas-budget 100000000
+EARTHQUAKE_EIF_PCR0="..."
+EARTHQUAKE_EIF_PCR1="..."
+EARTHQUAKE_EIF_PCR2="..."
+MEMBERSHIP_IDENTITY_EIF_PCR0="..."
+MEMBERSHIP_IDENTITY_EIF_PCR1="..."
+MEMBERSHIP_IDENTITY_EIF_PCR2="..."
 ```
 
-更新する場合:
+まとめて実行:
 
 ```bash
-sui client \
-  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
-  --client.env testnet \
-  call \
-  --package "$PACKAGE_ID" \
-  --module admin \
-  --function update_earthquake_verifier_config_pcrs \
-  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$PCR0" "0x$PCR1" "0x$PCR2" \
-  --gas-budget 100000000
+./scripts/register-verifier-configs.sh \
+  --package-id "$PACKAGE_ID" \
+  --admin-cap-id "$ADMIN_CAP_ID" \
+  --verifier-registry-id "$VERIFIER_REGISTRY_ID" \
+  --earthquake-pcr0 "$EARTHQUAKE_EIF_PCR0" \
+  --earthquake-pcr1 "$EARTHQUAKE_EIF_PCR1" \
+  --earthquake-pcr2 "$EARTHQUAKE_EIF_PCR2" \
+  --identity-pcr0 "$MEMBERSHIP_IDENTITY_EIF_PCR0" \
+  --identity-pcr1 "$MEMBERSHIP_IDENTITY_EIF_PCR1" \
+  --identity-pcr2 "$MEMBERSHIP_IDENTITY_EIF_PCR2"
 ```
 
-4. identity PCR を VerifierRegistry に登録する
+補足:
 
-identity verifier は earthquake と同じ `VerifierRegistry` に、別の config として載ります。
-identity の config は config_key=2、family=IDENTITY です。
-earthquake の config（config_key=1、family=EARTHQUAKE_ORACLE）とは別枠なので、両方を登録できます。
-
-実際の identity PCR0 / PCR1 / PCR2 は AWS deploy フェーズで membership identity TEE の EIF から確定します。
-ここでは admin tx の API 手順だけを earthquake と並べて記録します。実 PCR 値が出たら同じ手順で登録します。
-`VerifierRegistry` に identity config がまだない場合は `create_identity_verifier_config`、すでにある場合は `update_identity_verifier_config_pcrs` を使います。
-
-identity の PCR は earthquake とは別の TEE（membership identity runner の EIF）由来です。
-直前の earthquake 手順で使った `$PCR0` / `$PCR1` / `$PCR2` をそのまま流用すると、
-identity config に earthquake の PCR を誤登録します。
-取り違えを防ぐため、identity 用は別名の `$IDENTITY_PCR0` / `$IDENTITY_PCR1` / `$IDENTITY_PCR2` に
-identity TEE の値を入れてから実行します。
-
-```bash
-sui client \
-  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
-  --client.env testnet \
-  call \
-  --package "$PACKAGE_ID" \
-  --module admin \
-  --function create_identity_verifier_config \
-  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$IDENTITY_PCR0" "0x$IDENTITY_PCR1" "0x$IDENTITY_PCR2" \
-  --gas-budget 100000000
-```
-
-更新する場合:
-
-```bash
-sui client \
-  --client.config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
-  --client.env testnet \
-  call \
-  --package "$PACKAGE_ID" \
-  --module admin \
-  --function update_identity_verifier_config_pcrs \
-  --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$IDENTITY_PCR0" "0x$IDENTITY_PCR1" "0x$IDENTITY_PCR2" \
-  --gas-budget 100000000
-```
-
-config の登録だけでは identity 更新はまだ通りません。
-`accessor::update_identity_verification` は VerifierKey ではなく enclave 署名ルート
-（`assert_enclave_signed_bytes`）で検証するため、identity config（config_key=2）に対応する
-`EnclaveInstance` が `VerifierRegistry` に登録されている必要があります。
-登録が無いと identity 更新は `EEnclaveInstanceNotRegistered` で fail-closed になります。
-
-この enclave instance 登録は、identity TEE が起動時に Nitro attestation を添えて
-`metadata_verifier::register_enclave_instance_for_config`（`config_key=2`）を自分で呼ぶことで行われます。
-earthquake 側が `register_enclave_instance`（config_key=1 相当）で自己登録するのと同じモデルで、
-AdminCap は不要です。authorization は admin が config に登録した PCR allowlist と
-attestation の PCR 一致で担保され、PCR が config と一致しない attestation は登録時点で reject されます。
-admin が手で行うのは上記 config（PCR）の登録までで、instance 登録は identity TEE 側の運用フローに含まれます。
-
-5. relayer signer に testnet SUI を入れる
-
-submit では `RELAYER_SIGNER_SECRET_ARN` の private key から復元される address が gas を払います。
-この address に testnet SUI がないと、Disaster event 作成 transaction は失敗します。
+- `--skip-identity` を付けると earthquake のみ先に登録できます。
+- identity config は `config_key=2`（family=IDENTITY）なので、earthquake 用 PCR を流用しないこと。
 
 ## Publish しない場所
 
