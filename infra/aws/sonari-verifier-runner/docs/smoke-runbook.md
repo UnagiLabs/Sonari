@@ -1,0 +1,142 @@
+# Smoke runbook
+
+この runbook は deploy 後の runtime smoke、一気通貫 smoke、失敗時の切り分け、証跡保存を扱います。AWS 関連 smoke では ad hoc AWS CLI command より `scripts/aws/README.md` の script を優先してください。
+
+## Stack output
+
+Stack output は一度だけ読み、地震と membership の両方の smoke check で再利用します。
+
+```bash
+stack_output() {
+  aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue | [0]" \
+    --output text
+}
+
+earthquake_sfn_arn="$(stack_output EarthquakeRunnerStateMachineArn)"
+membership_sfn_arn="$(stack_output MembershipRunnerStateMachineArn)"
+asg_name="$(stack_output RunnerAutoScalingGroupName)"
+watcher_schedule_name="$(stack_output WatcherScheduleName)"
+batch_schedule_name="$(stack_output BatchScheduleName)"
+manual_watcher_lambda_name="$(stack_output ManualWatcherLambdaName)"
+submit_verification_lambda_name="$(stack_output SubmitVerificationLambdaName)"
+runner_log_group_name="$(stack_output RunnerLogGroupName)"
+source_archiver_lambda_name="$(stack_output SourceArchiverLambdaName)"
+source_archiver_url="$(stack_output SourceArchiverFunctionUrlOutput)"
+```
+
+## Earthquake manual workflow
+
+手動で Lambda URL を叩く場合:
+
+```bash
+manual_watcher_url="$(aws lambda get-function-url-config \
+  --function-name "$manual_watcher_lambda_name" \
+  --query FunctionUrl \
+  --output text)"
+
+curl -fsS -X POST "$manual_watcher_url" \
+  -H 'content-type: application/json' \
+  --data '{"source_event_id":"<usgs-source-event-id>"}'
+
+aws stepfunctions list-executions \
+  --state-machine-arn "$earthquake_sfn_arn" \
+  --status-filter SUCCEEDED \
+  --max-results 1
+```
+
+dry-run 設定の smoke では、`pnpm aws:smoke:earthquake-manual` が DynamoDB row から `source_archive_summary` を出力します。`source_archive_status` が `success` であること、`relayer_mode` が `dry_run` であること、`relayer_digest` と `disaster_event_object_id` が `null` であることを確認します。
+
+archiver Lambda の CloudWatch logs では、source artifact ごとに Walrus store が成功していることを確認します。request/response summary には blob id だけを残し、token、wallet、config、private key は出しません。
+
+## Earthquake manual smoke の実行ノウハウ
+
+ManualWatcher の smoke は、`pnpm aws:smoke:earthquake-manual` の終了だけでは完了判定しません。この script は ManualWatcher Lambda URL に event を投入し、直近の Step Functions と DynamoDB row を読むだけなので、workflow が `RUNNING` の時点では `source_archive_summary` が `null` のまま出ることがあります。
+
+一気通貫で確認するときは、先に deploy commit と stack の `DeployedGitCommitSha` が一致することを確認し、`pnpm aws:post-deploy-guardrails` と `pnpm aws:check-idle` を通します。submit まで見る場合は、stack config の `RelayerMode=submit`、`RelayerAllowSubmit=true`、`RelayerTarget`、`RelayerVerifierRegistry`、relayer signer secret が正しいこと、GitHub Actions summary の earthquake EIF PCR0/1/2 と Sui `VerifierRegistry` の earthquake config が一致することも確認します。
+
+推奨順序:
+
+1. GitHub Actions deploy workflow を対象 commit で実行する。
+2. `pnpm aws:post-deploy-guardrails -- --stack sonari-verifier-runner-dev --region ap-northeast-1 --commit <commit>` を実行する。
+3. `pnpm aws:check-idle -- --stack sonari-verifier-runner-dev --region ap-northeast-1` を実行する。
+4. `pnpm aws:verify:source-archiver -- --stack sonari-verifier-runner-dev --region ap-northeast-1` を実行する。
+5. `pnpm aws:verify:earthquake-wrapper -- --stack sonari-verifier-runner-dev --region ap-northeast-1 --commit <commit> --source-event-id <source_event_id>` を実行する。
+6. `pnpm aws:smoke:earthquake-manual -- --stack sonari-verifier-runner-dev --region ap-northeast-1 --source-event-id <source_event_id>` を実行する。
+7. 対象 Step Functions execution と DynamoDB row を terminal status まで追跡する。
+8. SourceArchiver logs と secret 非露出を確認する。
+9. DynamoDB row と row に記録された S3 object、`source-artifacts/<source_event_id>/` prefix を cleanup する。
+10. 最後に `pnpm aws:check-idle` を再実行する。
+
+成功判定は、対象 execution が terminal status になった後の DynamoDB row で行います。
+
+- Step Functions execution が `SUCCEEDED`
+- DynamoDB row の `source_archive_status` が `success`
+- `relayer_mode` が `submit`
+- `relayer_status` が `succeeded`
+- `relayer_digest` が non-null
+- `disaster_event_object_id` または `relayer_object_id` が non-null
+- SourceArchiver logs に Walrus store success と `registered` / `uploaded` / `certified` がある
+- logs に token、private key、secret が出ていない
+- 最後に `pnpm aws:check-idle` が通る
+
+証跡は `.local/sonari-dev/aws-test-results/<run-id>/` に保存します。DynamoDB row before/after、Step Functions execution ARN/status/history、runner result S3 key、relayer digest/object id、Walrus blob ids、SourceArchiver log summary を残します。secret、token、private key は保存しません。
+
+## よくある詰まり
+
+`Execution Already Exists` が出る場合、対象 event の過去 Step Functions execution name と衝突しています。DynamoDB row を削除すると `retry_count` が `0` に戻り、`earthquake-<source_event_id>-1` から再利用しようとします。過去 execution の最大 suffix を確認し、再実行ではそれより大きい attempt になるように row の `retry_count` を調整するか、新しい `source_event_id` を使います。
+
+`AWS_RUNNER_PROCESS_FAILED` と `metadata_verifier::assert_attestation_pcr_matches` abort code 21 が出る場合、deployed EIF の PCR0/1/2 と Sui `VerifierRegistry` の earthquake config が一致していません。GitHub Actions deploy run の `Earthquake EIF PCRs` から PCR0/1/2 を取得し、AdminCap wallet で `admin::update_earthquake_verifier_config_pcrs` を実行します。更新後は config version と transaction digest を記録してから再実行します。
+
+`scripts/register-verifier-configs.sh` は、現行 Sui CLI の既存 config abort 表現が `with code 9` の場合、already registered 判定に引っかからない可能性があります。その場合は `admin::update_earthquake_verifier_config_pcrs` を直接実行するか、script の abort code 判定を別途改修します。
+
+SourceArchiver 単体は `pnpm aws:verify:source-archiver` で先に確認します。ここで Walrus blob id が expected と一致し、success log が出ていれば、ManualWatcher smoke の失敗原因を runner / PCR / relayer 側へ切り分けやすくなります。
+
+## Membership dummy proof smoke
+
+Membership dummy proof smoke は devnet または testnet 専用です。`pnpm identity:smoke` と同じ request shape の dummy proof payload を使い、submit Lambda を invoke して membership workflow が成功することを確認します。
+
+```bash
+test "${RELAYER_NETWORK:-testnet}" != mainnet
+
+aws lambda invoke \
+  --function-name "$submit_verification_lambda_name" \
+  --payload fileb://dist/aws/membership-dummy-proof-devnet.json \
+  /tmp/sonari-membership-dummy-proof-response.json
+
+aws stepfunctions list-executions \
+  --state-machine-arn "$membership_sfn_arn" \
+  --status-filter SUCCEEDED \
+  --max-results 1
+```
+
+## 必須の smoke result
+
+- earthquake manual workflow が Step Functions `SUCCEEDED` に到達する。
+- membership dummy proof smoke が devnet または testnet でのみ成功する。
+- mainnet dummy proof が deploy 前に拒否される。
+- RunnerControl、Lambda、Step Functions log に未解決の CloudWatch log error が残っていない。
+- `RunnerAutoScalingGroupName` の `DesiredCapacity=0`。
+- ASG の `InService` instance が `0`。
+- running EC2 instances が `0`。
+- `WatcherScheduleName` が `DISABLED`。
+- `BatchScheduleName` が `DISABLED`。
+
+```bash
+aws logs filter-log-events \
+  --log-group-name "$runner_log_group_name" \
+  --filter-pattern '?ERROR ?Error ?Exception ?Task timed out'
+
+aws autoscaling describe-auto-scaling-groups \
+  --auto-scaling-group-names "$asg_name" \
+  --query 'AutoScalingGroups[0].{DesiredCapacity:DesiredCapacity,InService:length(Instances[?LifecycleState==`InService`])}'
+
+aws ec2 describe-instances \
+  --filters "Name=tag:aws:autoscaling:groupName,Values=$asg_name" "Name=instance-state-name,Values=running" \
+  --query 'Reservations[].Instances[].InstanceId' \
+  --output text
+
+aws scheduler get-schedule --name "$watcher_schedule_name" --query State --output text
+aws scheduler get-schedule --name "$batch_schedule_name" --query State --output text
+```

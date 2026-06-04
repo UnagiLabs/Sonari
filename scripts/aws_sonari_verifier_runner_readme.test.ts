@@ -3,9 +3,22 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const readmePath = path.join(process.cwd(), "infra/aws/sonari-verifier-runner/README.md");
+const docsPaths = [
+    readmePath,
+    path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/deploy.md"),
+    path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/pcr-config.md"),
+    path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/smoke-runbook.md"),
+    path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/maintenance.md"),
+    path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/extending-verifier-kind.md"),
+] as const;
 
 async function readReadme(): Promise<string> {
     return readFile(readmePath, "utf8");
+}
+
+async function readRunnerDocs(): Promise<string> {
+    const docs = await Promise.all(docsPaths.map((docPath) => readFile(docPath, "utf8")));
+    return docs.join("\n");
 }
 
 function expectContainsAll(source: string, expected: readonly string[]): void {
@@ -26,8 +39,21 @@ function expectAdminCallIncludesSender(source: string, functionName: string): vo
 }
 
 describe("AWS Sonari verifier runner README", () => {
-    it("documents manual deploy with the validated deploy plan and commit-scoped artifacts", async () => {
+    it("keeps the top-level README as a short index into focused runbooks", async () => {
         const readme = await readReadme();
+
+        expect(readme.split("\n").length).toBeLessThanOrEqual(120);
+        expectContainsAll(readme, [
+            "docs/deploy.md",
+            "docs/pcr-config.md",
+            "docs/smoke-runbook.md",
+            "docs/maintenance.md",
+            "docs/extending-verifier-kind.md",
+        ]);
+    });
+
+    it("documents manual deploy with the validated deploy plan and commit-scoped artifacts", async () => {
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "aws sts get-caller-identity",
@@ -68,7 +94,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents runtime smoke gates for both verifier kinds and idle resources", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "earthquake manual workflow",
@@ -91,8 +117,37 @@ describe("AWS Sonari verifier runner README", () => {
         ]);
     });
 
+    it("documents earthquake manual smoke acceptance, evidence, and common failures", async () => {
+        const readme = await readRunnerDocs();
+
+        expectContainsAll(readme, [
+            "Earthquake manual smoke の実行ノウハウ",
+            "pnpm aws:post-deploy-guardrails",
+            "pnpm aws:verify:source-archiver",
+            "pnpm aws:verify:earthquake-wrapper",
+            "pnpm aws:smoke:earthquake-manual",
+            "source_archive_status",
+            "relayer_mode",
+            "relayer_status",
+            "relayer_digest",
+            "relayer_object_id",
+            "registered",
+            "uploaded",
+            "certified",
+            ".local/sonari-dev/aws-test-results/<run-id>/",
+            "Execution Already Exists",
+            "retry_count",
+            "AWS_RUNNER_PROCESS_FAILED",
+            "metadata_verifier::assert_attestation_pcr_matches",
+            "abort code 21",
+            "admin::update_earthquake_verifier_config_pcrs",
+            "with code 9",
+            "pnpm aws:check-idle",
+        ]);
+    });
+
     it("documents existing AdminCap-gated earthquake PCR config entrypoints", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "admin::create_earthquake_verifier_config",
@@ -106,7 +161,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents Earthquake EIF PCR extraction and Move byte-vector format", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "pnpm build:aws-earthquake-eif",
@@ -121,7 +176,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents AdminCap PCR transactions, key separation, and verification scope", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "PACKAGE_ID",
@@ -148,7 +203,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents existing AdminCap-gated membership identity PCR config entrypoints", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "admin::create_identity_verifier_config",
@@ -158,7 +213,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents membership identity EIF PCR extraction and Move byte-vector format", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "pnpm build:aws-membership-identity-eif",
@@ -168,7 +223,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents membership identity AdminCap PCR transactions and register/update semantics", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "--function create_identity_verifier_config",
@@ -182,7 +237,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("limits old AWS-side cleanup to files after successful new-stack smoke", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "新 stack の smoke が成功",
@@ -197,7 +252,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents cost/resource checks and rollback without relying on the old stack", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expectContainsAll(readme, [
             "Cost Explorer",
@@ -219,17 +274,19 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("does not document sensitive local material or static AWS keys", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         expect(readme).not.toMatch(/secret value/i);
-        expect(readme).not.toContain(".local");
+        expect(readme).not.toContain(".local/sonari-dev/sui_wallets");
+        expect(readme).not.toContain(".local/sonari-dev/aws-secrets");
+        expect(readme).toContain(".local/sonari-dev/aws-test-results/<run-id>/");
         expect(readme).not.toMatch(/private credential/i);
         expect(readme).not.toContain("AWS_ACCESS_KEY_ID");
         expect(readme).not.toContain("AWS_SECRET_ACCESS_KEY");
     });
 
     it("documents the replication units required to add a third verifier_kind", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         // The section must name the CloudFormation Parameters block to duplicate
         // (TeeArtifact bucket/key/sha256, Eif bucket/key/sha256,
@@ -267,7 +324,7 @@ describe("AWS Sonari verifier runner README", () => {
     });
 
     it("documents that earthquake RELAYER_* namespace must not be changed when adding a new verifier", async () => {
-        const readme = await readReadme();
+        const readme = await readRunnerDocs();
 
         // The README must make clear that earthquake RELAYER_* env vars are
         // earthquake-specific and must not be renamed or moved when a third

@@ -2,6 +2,8 @@
 
 AWS dev stack の確認は、ad hoc AWS CLI ではなくこの directory の script を優先します。対象は verification と smoke で、CloudFormation deploy や old artifact deletion は v1 の通常 script には含めません。
 
+一気通貫 smoke の運用順序、acceptance、失敗時の切り分けは `infra/aws/sonari-verifier-runner/docs/smoke-runbook.md` の `Earthquake manual smoke の実行ノウハウ` を参照してください。
+
 ## 何を実行するか
 
 - 状態確認だけ: `pnpm aws:inventory -- --stack sonari-verifier-runner-dev`

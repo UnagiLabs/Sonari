@@ -21,6 +21,8 @@ describe("AWS scripts documentation", () => {
             "relayer_digest",
             "disaster_event_object_id",
             "pnpm aws:post-deploy-guardrails",
+            "infra/aws/sonari-verifier-runner/docs/smoke-runbook.md",
+            "Earthquake manual smoke の実行ノウハウ",
             "cleanup",
             "ASG desired capacity を `0`",
             "SSM `--parameters commands=...` shorthand を使わない",
