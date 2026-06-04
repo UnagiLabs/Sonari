@@ -1,4 +1,5 @@
 use serde::Serialize;
+pub use sonari_tee_core::SignatureArtifact;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SourceManifest {
@@ -66,15 +67,19 @@ pub struct AffectedCellJson {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct UnsignedPayloadV1 {
+pub struct UnsignedPayload {
     pub intent: u8,
     pub oracle_version: u64,
     pub event_uid: String,
     pub hazard_type: u8,
     pub status: u8,
     pub event_revision: u32,
+    pub source_event_id: String,
+    pub title: String,
+    pub region: String,
     pub occurred_at_ms: u64,
-    pub observed_at_ms: u64,
+    pub magnitude_x100: u64,
+    pub verified_at_ms: u64,
     pub source_updated_at_ms: u64,
     pub primary_source: u8,
     pub severity_band: u8,
@@ -84,14 +89,12 @@ pub struct UnsignedPayloadV1 {
     pub affected_cells_root: String,
     pub affected_cells_uri: String,
     pub affected_cells_data_hash: String,
+    pub affected_cell_count: u64,
     pub geo_resolution: u8,
     pub cells_generation_method: u8,
     pub cell_metric: u8,
     pub cell_aggregation: u8,
     pub intensity_scale: u8,
-    pub max_cell_band: u8,
-    pub affected_cell_count: u64,
-    pub min_claim_band: u8,
     pub freshness_deadline_ms: u64,
 }
 
@@ -117,13 +120,6 @@ pub struct RawSourceContentHash {
 pub struct LeafHash {
     pub h3_index: String,
     pub leaf_hash: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SignatureArtifact {
-    pub algorithm: String,
-    pub public_key: String,
-    pub signature: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

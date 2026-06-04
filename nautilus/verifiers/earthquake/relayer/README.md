@@ -29,7 +29,7 @@ flowchart TD
   input[
     入力: SignedFinalizedPayload<br/>
     status: finalized<br/>
-    payload: EarthquakeOraclePayloadV1（26フィールド）<br/>
+    payload: EarthquakeOraclePayload（28フィールド）<br/>
     payload_bcs_hex / signature / public_key
   ]
 
@@ -117,7 +117,7 @@ const input = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
 
 // プレビューを確認
 const result = buildRelayerRequestPreview(input, {
-  target: "0xpackage::oracle_verifier::attest",
+  target: "0xpackage::accessor::create_disaster_event_from_signed_payload",
   registry: "0xregistry_object_id",
   verifierRegistry: "0xverifier_registry_id",
 });

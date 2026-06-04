@@ -40,10 +40,16 @@ export interface EarthquakeEventRow {
     relayer_status: RelayerStatus | null;
     relayer_request_json: string | null;
     relayer_digest: string | null;
+    relayer_object_id: string | null;
     relayer_error_code: RelayerErrorCode | null;
     relayer_error_message: string | null;
     relayer_updated_at_ms: number | null;
     relayer_submitted_at_ms: number | null;
+    source_archive_status: SourceArchiveStatus | null;
+    source_archive_error_code: SourceArchiveErrorCode | null;
+    source_archive_attempt: number | null;
+    source_artifact_s3_keys_json: string | null;
+    walrus_archive_updated_at_ms: number | null;
     runner_job_id: string | null;
     runner_queued_at_ms: number | null;
     runner_attempt: number | null;
@@ -71,12 +77,27 @@ export type RunnerPhase =
     | "queued"
     | "starting_instance"
     | "waiting_for_instance"
+    | "health_checking"
+    | "getting_attestation"
+    | "registering_enclave"
     | "dispatching_command"
     | "polling_command"
     | "reading_result"
     | "applying_result"
+    | "archiving_sources"
     | "stopping_instance"
     | "complete";
+
+export type SourceArchiveStatus =
+    | "skipped"
+    | "success"
+    | "configuration_failed"
+    | "retryable_failed"
+    | "integrity_failed";
+export type SourceArchiveErrorCode =
+    | "SOURCE_ARCHIVE_CONFIGURATION_FAILED"
+    | "SOURCE_ARCHIVE_RETRYABLE_FAILED"
+    | "SOURCE_ARCHIVE_INTEGRITY_FAILED";
 
 export interface RunnerQueueJob {
     runner_job_id: string;
@@ -177,6 +198,12 @@ export interface StateRepository {
         nowMs: number,
         expectedAttempt?: number,
     ): Promise<boolean>;
+    markSourceArchiveResult(
+        sourceEventId: string,
+        input: SourceArchiveStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean>;
 
     // Compatibility helpers used by local scripts while AWS Lambda is the production path.
     enqueueRunnerJob(
@@ -227,6 +254,14 @@ export interface StateRepository {
         nowMs: number,
         nextRetryAtMs: number,
     ): Promise<number>;
+}
+
+export interface SourceArchiveStateUpdate {
+    status: SourceArchiveStatus;
+    artifactS3Keys: string[];
+    errorCode?: SourceArchiveErrorCode;
+    retryableNextRetryAtMs?: number;
+    message?: string;
 }
 
 const DUE_STATUSES = new Set<OffchainStatus>(["new", "pending_source", "pending_mmi", "failed"]);
@@ -488,6 +523,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_status = "succeeded";
         row.relayer_request_json = JSON.stringify(success.request);
         row.relayer_digest = success.digest ?? null;
+        row.relayer_object_id = success.objectId ?? null;
         row.relayer_error_code = null;
         row.relayer_error_message = null;
         row.relayer_updated_at_ms = nowMs;
@@ -516,6 +552,23 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
+        return true;
+    }
+
+    async markSourceArchiveResult(
+        sourceEventId: string,
+        input: SourceArchiveStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = this.rows.get(sourceEventId);
+        if (row === undefined) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applySourceArchiveResultToRow(row, input, nowMs, expectedAttempt);
         return true;
     }
 
@@ -1078,6 +1131,7 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_status = "succeeded";
         row.relayer_request_json = JSON.stringify(success.request);
         row.relayer_digest = success.digest ?? null;
+        row.relayer_object_id = success.objectId ?? null;
         row.relayer_error_code = null;
         row.relayer_error_message = null;
         row.relayer_updated_at_ms = nowMs;
@@ -1106,6 +1160,23 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
+        return this.put(row, expectedAttempt, true);
+    }
+
+    async markSourceArchiveResult(
+        sourceEventId: string,
+        input: SourceArchiveStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = await this.get(sourceEventId);
+        if (row === null) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applySourceArchiveResultToRow(row, input, nowMs, expectedAttempt);
         return this.put(row, expectedAttempt, true);
     }
 
@@ -1492,10 +1563,16 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#relayer_status = :relayer_status",
                     "#relayer_request_json = :relayer_request_json",
                     "#relayer_digest = :relayer_digest",
+                    "#relayer_object_id = :relayer_object_id",
                     "#relayer_error_code = :relayer_error_code",
                     "#relayer_error_message = :relayer_error_message",
                     "#relayer_updated_at_ms = :relayer_updated_at_ms",
                     "#relayer_submitted_at_ms = :relayer_submitted_at_ms",
+                    "#source_archive_status = :source_archive_status",
+                    "#source_archive_error_code = :source_archive_error_code",
+                    "#source_archive_attempt = :source_archive_attempt",
+                    "#source_artifact_s3_keys_json = :source_artifact_s3_keys_json",
+                    "#walrus_archive_updated_at_ms = :walrus_archive_updated_at_ms",
                     "#runner_job_id = :runner_job_id",
                     "#runner_queued_at_ms = :runner_queued_at_ms",
                     "#runner_attempt = :runner_attempt",
@@ -1801,10 +1878,16 @@ function baseRow(
         relayer_status: null,
         relayer_request_json: null,
         relayer_digest: null,
+        relayer_object_id: null,
         relayer_error_code: null,
         relayer_error_message: null,
         relayer_updated_at_ms: null,
         relayer_submitted_at_ms: null,
+        source_archive_status: null,
+        source_archive_error_code: null,
+        source_archive_attempt: null,
+        source_artifact_s3_keys_json: null,
+        walrus_archive_updated_at_ms: null,
         runner_job_id: null,
         runner_queued_at_ms: null,
         runner_attempt: null,
@@ -1907,6 +1990,11 @@ async function applyResultToRow(
         row.signature = result.signature;
         row.public_key = result.public_key;
         row.finalized_at_ms = nowMs;
+        row.source_archive_status = null;
+        row.source_archive_error_code = null;
+        row.source_archive_attempt = null;
+        row.source_artifact_s3_keys_json = null;
+        row.walrus_archive_updated_at_ms = null;
         return;
     }
     row.tee_result_json = JSON.stringify(result);
@@ -1921,6 +2009,39 @@ async function applyResultToRow(
     row.status = result.status;
     row.retry_count += 1;
     row.next_retry_at_ms = pendingNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+}
+
+function applySourceArchiveResultToRow(
+    row: EarthquakeEventRow,
+    input: SourceArchiveStateUpdate,
+    nowMs: number,
+    expectedAttempt?: number,
+): void {
+    row.source_archive_status = input.status;
+    row.source_archive_error_code = input.errorCode ?? null;
+    row.source_archive_attempt = expectedAttempt ?? row.runner_attempt;
+    row.source_artifact_s3_keys_json = JSON.stringify(input.artifactS3Keys);
+    row.walrus_archive_updated_at_ms = nowMs;
+    row.updated_at_ms = nowMs;
+    if (input.status === "retryable_failed") {
+        row.status = "failed";
+        row.retry_count += 1;
+        row.error_code = "SOURCE_ARCHIVE_RETRYABLE_FAILED";
+        row.runner_error_message = input.message ?? null;
+        row.next_retry_at_ms = input.retryableNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+    }
+    if (input.status === "configuration_failed") {
+        row.status = "rejected";
+        row.error_code = "SOURCE_ARCHIVE_CONFIGURATION_FAILED";
+        row.runner_error_message = input.message ?? null;
+        row.next_retry_at_ms = null;
+    }
+    if (input.status === "integrity_failed") {
+        row.status = "rejected";
+        row.error_code = "SOURCE_ARCHIVE_INTEGRITY_FAILED";
+        row.runner_error_message = input.message ?? null;
+        row.next_retry_at_ms = null;
+    }
 }
 
 function applyRunnerWorkflowProgress(

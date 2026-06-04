@@ -1,6 +1,7 @@
 module contracts::donation;
 
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
+use std::string::{Self, String};
 use sui::coin::{Self, Coin};
 use sui::dynamic_field;
 use sui::dynamic_object_field;
@@ -50,6 +51,7 @@ public struct DonorPass has key {
     first_donated_at_ms: u64,
     last_donated_at_ms: u64,
     tier: u8,
+    tier_label: String,
 }
 
 public struct DonationRecord has key, store {
@@ -369,6 +371,7 @@ fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass
         first_donated_at_ms: ctx.epoch_timestamp_ms(),
         last_donated_at_ms: ctx.epoch_timestamp_ms(),
         tier: TIER_NONE,
+        tier_label: tier_label(TIER_NONE),
     };
     let donor_pass_id = object::id(&pass);
     dynamic_field::add(&mut registry.id, donor, donor_pass_id);
@@ -445,6 +448,7 @@ fun record_donation(
     let new_tier = tier_for_total(pass.total_donated_usdc);
     if (old_tier != new_tier) {
         pass.tier = new_tier;
+        pass.tier_label = tier_label(new_tier);
         event::emit(DonorTierUpdated {
             donor_pass_id: object::id(pass),
             old_tier,
@@ -464,6 +468,20 @@ fun tier_for_total(total_donated_usdc: u64): u8 {
         TIER_BRONZE
     } else {
         TIER_NONE
+    }
+}
+
+fun tier_label(tier: u8): String {
+    if (tier == TIER_NONE) {
+        string::utf8(b"None")
+    } else if (tier == TIER_BRONZE) {
+        string::utf8(b"Bronze")
+    } else if (tier == TIER_SILVER) {
+        string::utf8(b"Silver")
+    } else if (tier == TIER_GOLD) {
+        string::utf8(b"Gold")
+    } else {
+        string::utf8(b"Unknown")
     }
 }
 
@@ -498,6 +516,10 @@ public(package) fun donor_pass_donation_count(pass: &DonorPass): u64 {
 
 public(package) fun donor_pass_tier(pass: &DonorPass): u8 {
     pass.tier
+}
+
+public(package) fun donor_pass_tier_label(pass: &DonorPass): String {
+    pass.tier_label
 }
 
 public(package) fun donation_type_general(): u8 {
@@ -544,11 +566,11 @@ public(package) fun coin_type_usdc(): vector<u8> {
     COIN_TYPE_USDC
 }
 
-public fun registry_id(registry: &DonorRegistry): ID {
+public(package) fun registry_id(registry: &DonorRegistry): ID {
     object::id(registry)
 }
 
-public fun registry_kind_donor(): u8 {
+public(package) fun registry_kind_donor(): u8 {
     REGISTRY_KIND_DONOR
 }
 

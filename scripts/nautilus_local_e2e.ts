@@ -11,6 +11,7 @@ import {
     type RelayerResult,
 } from "../nautilus/verifiers/earthquake/relayer/src/index.js";
 import type {
+    EARTHQUAKE_VERIFIER_CONFIG_KEY,
     OracleErrorCode,
     SignedFinalizedPayload,
     TeeCoreResult,
@@ -33,7 +34,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_CASE_ID = "usgs/finalized_minimal";
 const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/earthquake/fixtures";
 const LEGACY_FIXTURES_URI_DIR = "nautilus/verifiers/earthquake/fixtures";
-const DEFAULT_TARGET = "0x123::earthquake_oracle::submit_payload_v1";
+const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_from_signed_payload";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
@@ -466,7 +467,7 @@ async function runRustOracleCore(options: {
 
 async function readFinalizedResult(outputDir: string): Promise<SignedFinalizedPayload> {
     const payload = await readJson<Record<string, unknown>>(
-        path.join(outputDir, "unsigned_payload_v1.json"),
+        path.join(outputDir, "unsigned_payload.json"),
     );
     const hashes = await readJson<Record<string, unknown>>(
         path.join(outputDir, "expected_hashes.json"),
@@ -489,6 +490,9 @@ async function readFinalizedResult(outputDir: string): Promise<SignedFinalizedPa
         payload_bcs_hex: hashes.unsigned_bcs_payload_hex,
         signature: signature.signature,
         public_key: signature.public_key,
+        verifier_config_key: 1 satisfies typeof EARTHQUAKE_VERIFIER_CONFIG_KEY,
+        verifier_config_version: 1,
+        enclave_instance_public_key: signature.public_key,
     };
 }
 

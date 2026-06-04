@@ -8,9 +8,15 @@ importers:
 
   .:
     devDependencies:
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.948.0
+        version: 3.1053.0
       '@biomejs/biome':
         specifier: ^2.4.15
         version: 2.4.15
+      '@sonari/verifier-contracts':
+        specifier: workspace:*
+        version: link:nautilus/verifiers/common/contracts
       '@types/node':
         specifier: ^24.10.2
         version: 24.12.4
@@ -51,6 +57,12 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
+
+  nautilus/verifiers/common/contracts:
+    dependencies:
+      '@mysten/sui':
+        specifier: ^2.16.3
+        version: 2.16.3(typescript@5.9.3)
 
   nautilus/verifiers/earthquake/relayer:
     dependencies:
@@ -102,14 +114,61 @@ importers:
       '@aws-sdk/lib-dynamodb':
         specifier: ^3.948.0
         version: 3.1053.0(@aws-sdk/client-dynamodb@3.1053.0)
+      '@mysten/sui':
+        specifier: ^2.16.3
+        version: 2.16.3(typescript@5.9.3)
+      '@mysten/walrus':
+        specifier: ^1.1.7
+        version: 1.1.7(@mysten/sui@2.16.3(typescript@5.9.3))
       '@sonari/earthquake-relayer':
         specifier: workspace:*
         version: link:../relayer
       '@sonari/earthquake-shared':
         specifier: workspace:*
         version: link:../shared
+      '@sonari/verifier-contracts':
+        specifier: workspace:*
+        version: link:../../common/contracts
+
+  nautilus/verifiers/membership/runner:
+    dependencies:
+      '@aws-sdk/client-auto-scaling':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-ec2':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-secrets-manager':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-sfn':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/client-ssm':
+        specifier: ^3.948.0
+        version: 3.1053.0
+      '@aws-sdk/lib-dynamodb':
+        specifier: ^3.948.0
+        version: 3.1053.0(@aws-sdk/client-dynamodb@3.1053.0)
+      '@mysten/sui':
+        specifier: ^2.16.3
+        version: 2.16.3(typescript@5.9.3)
+      '@sonari/membership-verifier-shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@sonari/verifier-contracts':
+        specifier: workspace:*
+        version: link:../../common/contracts
 
   nautilus/verifiers/membership/shared: {}
+
+  packages/residence-proof-worker: {}
 
 packages:
 
@@ -691,6 +750,14 @@ packages:
   '@mysten/utils@0.3.3':
     resolution: {integrity: sha512-gVHn5toh24eXXLEyBknwwM2F/tbDgqPX0yj77KtHjuoYUallcQ9vSwGfGsAy39IcTB259Yprt/ZOEwdup+zrpA==}
 
+  '@mysten/walrus-wasm@0.2.2':
+    resolution: {integrity: sha512-MbI1OAYvnlcdYo3hhSPgMra4Loiox32gI13aP+EpC1pjVxkIRnINzM2FcUgu1PIrl/L49O6f+latQm0vcCGXiQ==}
+
+  '@mysten/walrus@1.1.7':
+    resolution: {integrity: sha512-9hymg7JJmvAvUFFbsOAGcKD47Td/lfdyBgxmI6um65n0M8qnJIll44mvnNX/QKIyN3wRfFb2wE/odRLLy3HKMw==}
+    peerDependencies:
+      '@mysten/sui': ^2.16.2
+
   '@napi-rs/wasm-runtime@1.1.4':
     resolution: {integrity: sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow==}
     peerDependencies:
@@ -1000,6 +1067,9 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  dataloader@2.2.3:
+    resolution: {integrity: sha512-y2krtASINtPFS1rSDjacrFgn1dcUuoREVabwlOGOe4SdxenREqwjwjElAdwvbGM7kgZz9a3KVicWR7vcz8rnzA==}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
@@ -2051,6 +2121,16 @@ snapshots:
     dependencies:
       '@scure/base': 2.2.0
 
+  '@mysten/walrus-wasm@0.2.2': {}
+
+  '@mysten/walrus@1.1.7(@mysten/sui@2.16.3(typescript@5.9.3))':
+    dependencies:
+      '@mysten/bcs': 2.0.5
+      '@mysten/sui': 2.16.3(typescript@5.9.3)
+      '@mysten/utils': 0.3.3
+      '@mysten/walrus-wasm': 0.2.2
+      dataloader: 2.2.3
+
   '@napi-rs/wasm-runtime@1.1.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
     dependencies:
       '@emnapi/core': 1.10.0
@@ -2311,6 +2391,8 @@ snapshots:
   convert-source-map@2.0.0: {}
 
   csstype@3.2.3: {}
+
+  dataloader@2.2.3: {}
 
   detect-libc@2.1.2: {}
 

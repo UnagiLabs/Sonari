@@ -4,12 +4,11 @@ use contracts::program::{Self, Campaign, Program};
 use sui::event;
 
 const BPS_DENOMINATOR: u64 = 10_000;
-const THIRTY_DAYS_MS: u64 = 2_592_000_000;
-const NINETY_DAYS_MS: u64 = 7_776_000_000;
 
 const DEFAULT_BAND_1_USDC: u64 = 50_000_000;
 const DEFAULT_BAND_2_USDC: u64 = 150_000_000;
 const DEFAULT_BAND_3_USDC: u64 = 300_000_000;
+const DEFAULT_MIN_CLAIM_BAND: u8 = 1;
 
 const DEFAULT_POLICY_MAX_USDC: u64 = 300_000_000;
 const FUTURE_RESERVE_FLOOR_BPS: u64 = 5_000;
@@ -17,20 +16,16 @@ const LIQUID_RESERVE_TARGET_BPS: u64 = 7_000;
 const MAIN_BACKSTOP_OF_LIQUID_BPS: u64 = 2_000;
 const DESIGNATED_BUDGET_BPS: u64 = 8_000;
 
-const RISK_BUCKET_LOW: u8 = 1;
-const RISK_BUCKET_MEDIUM: u8 = 2;
-const RISK_BUCKET_HIGH: u8 = 3;
-
 const EInvalidEligibilityTier: u64 = 0;
 const EBudgetProgramMismatch: u64 = 1;
 const EBudgetCampaignMismatch: u64 = 2;
 const EBudgetExceeded: u64 = 3;
 const EDesignatedPoolMismatch: u64 = 4;
 const EMainOnlyBudgetCannotUseDesignatedPool: u64 = 5;
-const EInvalidRiskBucket: u64 = 6;
 
 public struct PayoutPolicy has key {
     id: UID,
+    min_claim_band: u8,
     tier1_amount_usdc: u64,
     tier2_amount_usdc: u64,
     tier3_amount_usdc: u64,
@@ -75,9 +70,10 @@ public struct CampaignBudgetOpened has copy, drop {
     actor: address,
 }
 
-public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
+public(package) fun create_default_disaster_policy(ctx: &mut TxContext): ID {
     let policy = PayoutPolicy {
         id: object::new(ctx),
+        min_claim_band: DEFAULT_MIN_CLAIM_BAND,
         tier1_amount_usdc: DEFAULT_BAND_1_USDC,
         tier2_amount_usdc: DEFAULT_BAND_2_USDC,
         tier3_amount_usdc: DEFAULT_BAND_3_USDC,
@@ -101,6 +97,7 @@ public(package) fun create_default_disaster_policy(ctx: &mut TxContext) {
     });
 
     transfer::share_object(policy);
+    policy_id
 }
 
 public(package) fun open_campaign_budget_from_main(
@@ -215,28 +212,21 @@ public(package) fun record_claim(
     budget.designated_claimed_usdc = budget.designated_claimed_usdc + designated_amount_usdc;
 }
 
-public fun quote_usdc(
+public(package) fun quote_usdc(
     policy: &PayoutPolicy,
     eligibility_tier: u8,
-    membership_issued_at_ms: u64,
-    confidence: u64,
-    risk_bucket: u8,
     user_max_amount_usdc: u64,
     budget_remaining_usdc: u64,
     pool_available_usdc: u64,
-    now_ms: u64,
 ): u64 {
     let mut amount = tier_amount_usdc(policy, eligibility_tier);
-    amount = apply_bps(amount, membership_age_multiplier_bps(membership_issued_at_ms, now_ms));
-    amount = apply_bps(amount, confidence_multiplier_bps(confidence));
-    amount = apply_bps(amount, risk_multiplier_bps(risk_bucket));
     amount = min_u64(amount, user_max_amount_usdc);
     amount = min_u64(amount, policy.policy_max_amount_usdc);
     amount = min_u64(amount, budget_remaining_usdc);
     min_u64(amount, pool_available_usdc)
 }
 
-public fun main_backstop_budget_usdc(
+public(package) fun main_backstop_budget_usdc(
     main_total_received_usdc: u64,
     main_balance_usdc: u64,
 ): u64 {
@@ -251,32 +241,36 @@ public fun main_backstop_budget_usdc(
     min_u64(liquid_budget, spendable)
 }
 
-public fun future_reserve_floor_usdc(main_total_received_usdc: u64): u64 {
+public(package) fun future_reserve_floor_usdc(main_total_received_usdc: u64): u64 {
     apply_bps(main_total_received_usdc, FUTURE_RESERVE_FLOOR_BPS)
 }
 
-public fun liquid_reserve_target_usdc(main_total_received_usdc: u64): u64 {
+public(package) fun liquid_reserve_target_usdc(main_total_received_usdc: u64): u64 {
     apply_bps(main_total_received_usdc, LIQUID_RESERVE_TARGET_BPS)
 }
 
-public fun campaign_budget_claimed_usdc(budget: &CampaignBudget): u64 {
+public(package) fun campaign_budget_claimed_usdc(budget: &CampaignBudget): u64 {
     budget.designated_claimed_usdc + budget.main_claimed_usdc
 }
 
-public fun campaign_budget_remaining_usdc(budget: &CampaignBudget): u64 {
+public(package) fun campaign_budget_remaining_usdc(budget: &CampaignBudget): u64 {
     designated_remaining_usdc(budget) + main_remaining_usdc(budget)
 }
 
-public fun main_remaining_usdc(budget: &CampaignBudget): u64 {
+public(package) fun main_remaining_usdc(budget: &CampaignBudget): u64 {
     budget.main_backstop_budget_usdc - budget.main_claimed_usdc
 }
 
-public fun designated_remaining_usdc(budget: &CampaignBudget): u64 {
+public(package) fun designated_remaining_usdc(budget: &CampaignBudget): u64 {
     budget.designated_budget_usdc - budget.designated_claimed_usdc
 }
 
-public fun policy_id(policy: &PayoutPolicy): ID {
+public(package) fun policy_id(policy: &PayoutPolicy): ID {
     object::id(policy)
+}
+
+public(package) fun min_claim_band(policy: &PayoutPolicy): u8 {
+    policy.min_claim_band
 }
 
 fun tier_amount_usdc(policy: &PayoutPolicy, eligibility_tier: u8): u64 {
@@ -288,33 +282,6 @@ fun tier_amount_usdc(policy: &PayoutPolicy, eligibility_tier: u8): u64 {
         policy.tier3_amount_usdc
     } else {
         abort EInvalidEligibilityTier
-    }
-}
-
-fun membership_age_multiplier_bps(issued_at_ms: u64, now_ms: u64): u64 {
-    let age = if (now_ms > issued_at_ms) { now_ms - issued_at_ms } else { 0 };
-    if (age < THIRTY_DAYS_MS) {
-        0
-    } else if (age < NINETY_DAYS_MS) {
-        5_000
-    } else {
-        BPS_DENOMINATOR
-    }
-}
-
-fun confidence_multiplier_bps(confidence: u64): u64 {
-    min_u64(confidence, BPS_DENOMINATOR)
-}
-
-fun risk_multiplier_bps(risk_bucket: u8): u64 {
-    if (risk_bucket == RISK_BUCKET_LOW) {
-        BPS_DENOMINATOR
-    } else if (risk_bucket == RISK_BUCKET_MEDIUM) {
-        5_000
-    } else if (risk_bucket == RISK_BUCKET_HIGH) {
-        0
-    } else {
-        abort EInvalidRiskBucket
     }
 }
 
@@ -349,4 +316,9 @@ public fun campaign_budget_opened_event_fields(
         main_backstop_budget_usdc,
         actor,
     )
+}
+
+#[test_only]
+public fun set_min_claim_band_for_testing(policy: &mut PayoutPolicy, min_claim_band: u8) {
+    policy.min_claim_band = min_claim_band;
 }

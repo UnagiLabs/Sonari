@@ -35,7 +35,7 @@ interface LiveE2eOptions {
     nowMs?: number;
 }
 
-const DEFAULT_TARGET = "0x123::earthquake_oracle::submit_payload_v1";
+const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_from_signed_payload";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
 
@@ -137,7 +137,12 @@ class LocalRelayerAdapter implements RelayerAdapter {
                     message: "dry_run requires RELAYER_GRPC_URL and RELAYER_SENDER_ADDRESS",
                 };
             }
-            const result = await dryRunRelayerSubmit(input, { ...config, grpcUrl, senderAddress });
+            const result = await dryRunRelayerSubmit(input, {
+                ...config,
+                network: "testnet",
+                grpcUrl,
+                senderAddress,
+            });
             return result.ok
                 ? { ok: true, value: { mode: this.mode, request: result.value.request } }
                 : result;

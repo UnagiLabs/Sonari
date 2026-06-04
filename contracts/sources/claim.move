@@ -2,11 +2,12 @@ module contracts::claim;
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::disaster_event::{DisasterCampaignBinding, DisasterEvent};
 use contracts::disaster_event;
+use contracts::identity_registry::{Self, IdentityRegistry};
 use contracts::membership::{Self, MembershipPass, MembershipRegistry};
 use contracts::payout_policy::{Self, CampaignBudget, PayoutPolicy};
 use contracts::pools::{Self, DesignatedPool, MainPool};
 use contracts::program::{Self, Campaign, Program};
-use sui::bcs;
+use std::string::{Self, String};
 use sui::clock::{Self, Clock};
 use sui::coin;
 use sui::dynamic_field;
@@ -18,9 +19,10 @@ const EInvalidAffectedCellProof: u64 = 7;
 const EDisasterEventMismatch: u64 = 8;
 const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
-const EResidenceMetadataExpired: u64 = 11;
+const EUnverifiedMembership: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
-const EResidenceMetadataAfterDisaster: u64 = 13;
+const EAccountCreatedAfterCutoff: u64 = 14;
+const EHomeCellRegisteredAfterCutoff: u64 = 15;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
 const U64_MAX_AS_U128: u128 = 18_446_744_073_709_551_615;
 
@@ -53,6 +55,7 @@ public struct ClaimReceipt has key {
     campaign_id: ID,
     pass_lineage_id: ID,
     eligibility_tier: u8,
+    tier_label: String,
     amount_usdc: u64,
     main_paid_usdc: u64,
     designated_paid_usdc: u64,
@@ -154,10 +157,13 @@ public(package) fun claim_disaster_usdc(
     budget: &mut CampaignBudget,
     binding: &DisasterCampaignBinding,
     disaster_event: &DisasterEvent,
+    identity_registry: &IdentityRegistry,
     pass: &MembershipPass,
     clock: &Clock,
     leaf: AffectedCellLeaf,
     proof: vector<ProofStep>,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
     designated_pool: &mut DesignatedPool,
     main_pool: &mut MainPool,
     user_max_amount_usdc: u64,
@@ -166,16 +172,22 @@ public(package) fun claim_disaster_usdc(
     let now_ms = clock::timestamp_ms(clock);
     program::assert_claim_precheck(program, campaign);
     program::assert_claim_window(campaign, now_ms);
+    program::assert_payout_policy_matches(program, payout_policy::policy_id(policy));
     payout_policy::assert_budget_matches(budget, program, campaign);
     payout_policy::assert_designated_pool_matches(budget, designated_pool);
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
-    assert_valid_disaster_eligibility(disaster_event, pass, &leaf, proof, now_ms);
+    assert_valid_disaster_eligibility(disaster_event, policy, pass, &leaf, proof);
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        identity_registry,
+        pass,
+        identity_provider,
+        duplicate_key_hash,
+    );
 
-    let duplicate_key = ClaimKey {
-        pass_lineage_id: membership::membership_pass_lineage_id(pass),
-        campaign_id: program::campaign_id(campaign),
-    };
+    let (pass_lineage_id, campaign_id) =
+        membership::duplicate_claim_key(pass, program::campaign_id(campaign));
+    let duplicate_key = ClaimKey { pass_lineage_id, campaign_id };
     assert!(
         !dynamic_field::exists_with_type<ClaimKey, bool>(&index.id, duplicate_key),
         EDuplicateClaim,
@@ -190,18 +202,12 @@ public(package) fun claim_disaster_usdc(
         payout_policy::main_remaining_usdc(budget),
     );
     let total_available = available_usdc(designated_available, main_available);
-    let (_, _, confidence, risk_bucket, _, _, _, _) =
-        membership::residence_metadata_summary(pass);
     let amount = payout_policy::quote_usdc(
         policy,
         affected_cell::cell_band(&leaf),
-        membership::membership_pass_issued_at_ms(pass),
-        confidence,
-        risk_bucket,
         user_max_amount_usdc,
         payout_policy::campaign_budget_remaining_usdc(budget),
         total_available,
-        now_ms,
     );
     assert!(amount > 0, ENoPayableAmount);
 
@@ -213,7 +219,7 @@ public(package) fun claim_disaster_usdc(
     index.claim_count = index.claim_count + 1;
     payout_policy::record_claim(budget, main_amount, designated_amount);
 
-    let recipient = membership::membership_pass_payout_address(pass);
+    let recipient = membership::membership_pass_owner(pass);
     let mut payout_coin = pools::withdraw_designated_usdc(designated_pool, designated_amount, ctx);
     let main_coin = pools::withdraw_main_usdc(main_pool, main_amount, ctx);
     coin::join(&mut payout_coin, main_coin);
@@ -235,10 +241,10 @@ public(package) fun claim_disaster_usdc(
 
 fun assert_valid_disaster_eligibility(
     disaster_event: &DisasterEvent,
+    policy: &PayoutPolicy,
     pass: &MembershipPass,
     leaf: &AffectedCellLeaf,
     proof: vector<ProofStep>,
-    now_ms: u64,
 ) {
     assert!(
         affected_cell::event_uid(leaf) == disaster_event::event_uid(disaster_event)
@@ -254,27 +260,30 @@ fun assert_valid_disaster_eligibility(
         EInvalidAffectedCellProof,
     );
     assert!(
-        affected_cell::cell_band(leaf) >= disaster_event::min_claim_band(disaster_event),
+        affected_cell::cell_band(leaf) >= payout_policy::min_claim_band(policy),
         EClaimBandTooLow,
     );
 
+    let cutoff_ms = disaster_event::occurred_at_ms(disaster_event);
     let (
-        _update_id,
-        residence_cell,
-        _confidence,
-        _risk_bucket,
-        _evidence_hash,
-        residence_issued_at_ms,
-        expires_at_ms,
-        _verifier_version,
-    ) = membership::residence_metadata_summary(pass);
+        account_created_at_ms,
+        home_cell,
+        home_cell_registered_at_ms,
+        identity_verified,
+        _identity_provider_mask,
+        _identity_verified_at_ms,
+        _identity_expires_at_ms,
+        _terms_version,
+        _signed_statement_hash,
+    ) = membership::membership_pass_mvp_summary(pass);
+    assert!(identity_verified, EUnverifiedMembership);
+    assert!(account_created_at_ms < cutoff_ms, EAccountCreatedAfterCutoff);
     assert!(
-        residence_issued_at_ms <= disaster_event::occurred_at_ms(disaster_event),
-        EResidenceMetadataAfterDisaster,
+        home_cell_registered_at_ms < cutoff_ms,
+        EHomeCellRegisteredAfterCutoff,
     );
-    assert!(expires_at_ms > now_ms, EResidenceMetadataExpired);
     assert!(
-        residence_cell == bcs::to_bytes(&affected_cell::h3_index(leaf)),
+        home_cell == affected_cell::h3_index(leaf),
         EResidenceCellMismatch,
     );
 }
@@ -297,6 +306,7 @@ fun create_receipt_and_emit(
         campaign_id: program::campaign_id(campaign),
         pass_lineage_id: membership::membership_pass_lineage_id(pass),
         eligibility_tier,
+        tier_label: claim_tier_label(eligibility_tier),
         amount_usdc: amount,
         main_paid_usdc: main_amount,
         designated_paid_usdc: designated_amount,
@@ -331,11 +341,11 @@ fun create_receipt_and_emit(
     transfer::transfer(receipt, ctx.sender());
 }
 
-public fun claim_index_claim_count(index: &ClaimIndex): u64 {
+public(package) fun claim_index_claim_count(index: &ClaimIndex): u64 {
     index.claim_count
 }
 
-public fun claim_receipt_summary(
+public(package) fun claim_receipt_summary(
     receipt: &ClaimReceipt,
 ): (ID, ID, ID, u64, u64, u64, address, address) {
     (
@@ -348,6 +358,22 @@ public fun claim_receipt_summary(
         receipt.claimant,
         receipt.recipient,
     )
+}
+
+public(package) fun claim_receipt_tier_label(receipt: &ClaimReceipt): String {
+    receipt.tier_label
+}
+
+fun claim_tier_label(tier: u8): String {
+    if (tier == 1) {
+        string::utf8(b"Tier 1")
+    } else if (tier == 2) {
+        string::utf8(b"Tier 2")
+    } else if (tier == 3) {
+        string::utf8(b"Tier 3")
+    } else {
+        string::utf8(b"Unknown")
+    }
 }
 
 fun min_u64(a: u64, b: u64): u64 {

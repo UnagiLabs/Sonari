@@ -1,0 +1,798 @@
+name: AWS Sonari Verifier Runner Dev Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/aws-sonari-verifier-runner-dev-deploy.yml
+      - infra/aws/sonari-verifier-runner/template.yaml
+      - scripts/build_aws_*.ts
+      - scripts/aws_sonari_verifier_runner_deploy_plan.ts
+      - scripts/tsconfig.json
+      - nautilus/verifiers/common/contracts/package.json
+      - nautilus/verifiers/common/contracts/tsconfig.json
+      - nautilus/verifiers/common/contracts/src/**
+      - nautilus/verifiers/earthquake/shared/package.json
+      - nautilus/verifiers/earthquake/shared/tsconfig.json
+      - nautilus/verifiers/earthquake/shared/src/**
+      - nautilus/verifiers/earthquake/watcher/package.json
+      - nautilus/verifiers/earthquake/watcher/tsconfig.json
+      - nautilus/verifiers/earthquake/watcher/src/**
+      - nautilus/verifiers/earthquake/relayer/package.json
+      - nautilus/verifiers/earthquake/relayer/tsconfig.json
+      - nautilus/verifiers/earthquake/relayer/src/**
+      - nautilus/verifiers/earthquake/tee/Cargo.toml
+      - nautilus/verifiers/earthquake/tee/src/**
+      - nautilus/verifiers/membership/shared/package.json
+      - nautilus/verifiers/membership/shared/tsconfig.json
+      - nautilus/verifiers/membership/shared/src/**
+      - nautilus/verifiers/membership/runner/package.json
+      - nautilus/verifiers/membership/runner/tsconfig.json
+      - nautilus/verifiers/membership/runner/src/**
+      - nautilus/verifiers/membership/tee/Cargo.toml
+      - nautilus/verifiers/membership/tee/src/**
+      - nautilus/verifiers/shared-tee/Cargo.toml
+      - nautilus/verifiers/shared-tee/src/**
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.json
+      - Cargo.toml
+      - Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-dev:
+    name: Deploy dev stack
+    runs-on: ubuntu-latest
+    environment: aws-sonari-verifier-runner-dev
+    timeout-minutes: 120
+    concurrency:
+      group: aws-sonari-verifier-runner-dev-deploy
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_ROLE_ARN }}
+      EXPECTED_AWS_ACCOUNT_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_ACCOUNT_ID }}
+      STACK_NAME: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_STACK_NAME }}
+      ARTIFACT_BUCKET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_ARTIFACT_BUCKET }}
+      WALRUS_CLI_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CLI_URL }}
+      WALRUS_CLI_SHA256: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WALRUS_CLI_SHA256 }}
+      VPC_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_VPC_ID }}
+      SUBNET_IDS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SUBNET_IDS }}
+      AMI_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_AMI_ID }}
+      RUNNER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RUNNER_TOKEN_SECRET_ARN }}
+      SOURCE_ARCHIVER_TOKEN_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN }}
+      SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN }}
+      SIGNING_SEED_CIPHERTEXT_S3_BUCKET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_BUCKET }}
+      SIGNING_SEED_CIPHERTEXT_S3_KEY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SIGNING_SEED_CIPHERTEXT_S3_KEY }}
+      NITRO_ENCLAVE_IMAGE_SHA384: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_IMAGE_SHA384 }}
+      NITRO_ENCLAVE_PCR3: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_PCR3 }}
+      WORLD_ID_APP_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_APP_ID }}
+      WORLD_ID_API_BASE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_API_BASE }}
+      WORLD_ID_PROOF_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_PROOF_MODE }}
+      NITRO_CLI_TAG: v1.4.4
+      S3_PREFIX: sonari-verifier-runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate dev deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_names=(
+            AWS_REGION
+            AWS_ROLE_ARN
+            EXPECTED_AWS_ACCOUNT_ID
+            STACK_NAME
+            ARTIFACT_BUCKET
+            WALRUS_CLI_URL
+            WALRUS_CLI_SHA256
+            VPC_ID
+            SUBNET_IDS
+            AMI_ID
+            RUNNER_TOKEN_SECRET_ARN
+            SOURCE_ARCHIVER_TOKEN_SECRET_ARN
+            SIGNING_SEED_CIPHERTEXT_S3_BUCKET
+            SIGNING_SEED_CIPHERTEXT_S3_KEY
+            NITRO_ENCLAVE_IMAGE_SHA384
+            NITRO_ENCLAVE_PCR3
+            WORLD_ID_APP_ID
+          )
+          for name in "${required_names[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "$name is required for the dev deploy workflow" >&2
+              exit 1
+            fi
+          done
+
+          if [[ "$AWS_ROLE_ARN" == *":role/"*dev* ]]; then
+            :
+          else
+            echo "AWS_ROLE_ARN must reference a dev-scoped IAM role" >&2
+            exit 1
+          fi
+
+          if ! { [[ "$STACK_NAME" =~ (^|[-_])dev($|[-_]) ]] || [[ "$STACK_NAME" == "sonari-aws-sonari-verifier-runner-dev" ]]; }; then
+            echo "STACK_NAME must be the explicit dev stack or contain a dev segment" >&2
+            exit 1
+          fi
+
+          if [[ ! "$EXPECTED_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo "EXPECTED_AWS_ACCOUNT_ID must be a 12-digit AWS account id" >&2
+            exit 1
+          fi
+
+          if [[ ! "$WALRUS_CLI_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "WALRUS_CLI_SHA256 must be a lowercase SHA-256 digest" >&2
+            exit 1
+          fi
+
+          if [[ ! "$NITRO_ENCLAVE_IMAGE_SHA384" =~ ^[0-9a-fA-F]{96}$ ]]; then
+            echo "NITRO_ENCLAVE_IMAGE_SHA384 must be a SHA-384 digest" >&2
+            exit 1
+          fi
+
+          if [[ ! "$NITRO_ENCLAVE_PCR3" =~ ^[0-9a-fA-F]{96}$ ]]; then
+            echo "NITRO_ENCLAVE_PCR3 must be a SHA-384 digest" >&2
+            exit 1
+          fi
+
+          expected_runner_role_arn="arn:aws:iam::${EXPECTED_AWS_ACCOUNT_ID}:role/sonari-verifier-runner-${STACK_NAME}-runner"
+          expected_pcr3="$(ROLE_ARN="$expected_runner_role_arn" python3 - <<'PY'
+          import hashlib
+          import os
+
+          digest = hashlib.sha384()
+          digest.update(b"\0" * 48)
+          digest.update(os.environ["ROLE_ARN"].encode("utf-8"))
+          print(digest.hexdigest())
+          PY
+          )"
+          if [[ "${NITRO_ENCLAVE_PCR3,,}" != "$expected_pcr3" ]]; then
+            echo "NITRO_ENCLAVE_PCR3 must match $expected_runner_role_arn" >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_REGION }}
+
+      - name: Validate dev AWS account
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_account_id="$(aws sts get-caller-identity --query Account --output text)"
+          if [[ "$actual_account_id" == "$EXPECTED_AWS_ACCOUNT_ID" ]]; then
+            exit 0
+          fi
+          echo "OIDC role resolved to an unexpected AWS account" >&2
+          exit 1
+
+      - name: Resolve SourceArchiver private key secret ARN
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_archiver_private_key_secret_arn="${SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN:-}"
+          if [[ -z "$source_archiver_private_key_secret_arn" ]]; then
+            source_archiver_private_key_secret_arn="$(aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Parameters[?ParameterKey=='SourceArchiverPrivateKeySecretArn'].ParameterValue | [0]" \
+              --output text)"
+            if [[ "$source_archiver_private_key_secret_arn" == "None" ]]; then
+              source_archiver_private_key_secret_arn=""
+            fi
+          fi
+
+          if [[ ! "$source_archiver_private_key_secret_arn" =~ ^arn:[A-Za-z0-9-]+:secretsmanager:[A-Za-z0-9-]+:[0-9]{12}:secret:.+ ]]; then
+            echo "SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN must be set or recoverable from the dev stack SourceArchiverPrivateKeySecretArn parameter" >&2
+            exit 1
+          fi
+
+          printf 'SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN=%s\n' "$source_archiver_private_key_secret_arn" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update
+          sudo apt-get install -y musl-tools unzip
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'nautilus/verifiers/**/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Cache Walrus CLI artifact
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/sonari/cli-artifacts/walrus/${{ env.WALRUS_CLI_SHA256 }}
+          key: walrus-cli-${{ runner.os }}-${{ env.WALRUS_CLI_SHA256 }}
+
+      - name: Install pinned Walrus CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install_dir="$RUNNER_TEMP/sonari-bin"
+          cache_dir="$HOME/.cache/sonari/cli-artifacts/walrus/$WALRUS_CLI_SHA256"
+          download_path="$cache_dir/download"
+          extract_dir="$RUNNER_TEMP/walrus-extract"
+          source_path=""
+
+          mkdir -p "$install_dir" "$cache_dir" "$extract_dir"
+          if [[ ! -f "$download_path" ]]; then
+            curl -fsSL "$WALRUS_CLI_URL" -o "$download_path"
+          fi
+          printf '%s  %s\n' "$WALRUS_CLI_SHA256" "$download_path" | sha256sum -c -
+
+          case "$WALRUS_CLI_URL" in
+            *.tar.gz|*.tgz)
+              tar -xzf "$download_path" -C "$extract_dir"
+              source_path="$(find "$extract_dir" -type f -name walrus | head -n 1)"
+              ;;
+            *.zip)
+              unzip -q "$download_path" -d "$extract_dir"
+              source_path="$(find "$extract_dir" -type f -name walrus | head -n 1)"
+              ;;
+            *)
+              source_path="$download_path"
+              ;;
+          esac
+
+          if [[ -z "$source_path" || ! -f "$source_path" ]]; then
+            echo "Unable to find walrus in downloaded Walrus CLI artifact" >&2
+            exit 1
+          fi
+
+          install -m 0755 "$source_path" "$install_dir/walrus"
+          "$install_dir/walrus" --version
+
+          echo "$RUNNER_TEMP/sonari-bin" >> "$GITHUB_PATH"
+          echo "SONARI_WALRUS_CLI=$RUNNER_TEMP/sonari-bin/walrus" >> "$GITHUB_ENV"
+
+      - name: Cache Nitro CLI build
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/sonari/cli-artifacts/nitro/${{ env.NITRO_CLI_TAG }}
+          key: nitro-cli-${{ runner.os }}-${{ env.NITRO_CLI_TAG }}
+
+      - name: Install pinned Nitro CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install_dir="$HOME/.cache/sonari/cli-artifacts/nitro/$NITRO_CLI_TAG/install"
+          nitro_cli="$install_dir/usr/bin/nitro-cli"
+          blobs_dir="$install_dir/usr/share/nitro_enclaves/blobs"
+
+          if [[ ! -x "$nitro_cli" || ! -d "$blobs_dir" ]]; then
+            rm -rf "$install_dir"
+            source_dir="$RUNNER_TEMP/aws-nitro-enclaves-cli"
+            rm -rf "$source_dir"
+            git clone --depth 1 --branch "$NITRO_CLI_TAG" \
+              https://github.com/aws/aws-nitro-enclaves-cli "$source_dir"
+            cargo build \
+              --release \
+              --manifest-path "$source_dir/Cargo.toml" \
+              --target-dir "$source_dir/build/nitro_cli"
+            install -D -m 0755 "$source_dir/build/nitro_cli/release/nitro-cli" "$nitro_cli"
+            mkdir -p "$blobs_dir"
+            cp -R "$source_dir/blobs/$(uname -m)/." "$blobs_dir/"
+          fi
+
+          "$nitro_cli" --version
+          sudo mkdir -p /var/log/nitro_enclaves
+          sudo chown "$(id -u):$(id -g)" /var/log/nitro_enclaves
+          echo "$install_dir/usr/bin" >> "$GITHUB_PATH"
+          echo "NITRO_CLI_BLOBS=$blobs_dir" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting, lint, and Rust
+        run: pnpm check
+
+      - name: Test verifier packages
+        run: |
+          pnpm test:oracle
+          pnpm test:identity
+
+      - name: Build Lambda artifact
+        run: pnpm build:aws-sonari-verifier-runner-lambda
+
+      - name: Build earthquake TEE artifact
+        run: pnpm build:aws-earthquake-tee-artifact
+
+      - name: Build earthquake EIF
+        run: pnpm build:aws-earthquake-eif
+
+      - name: Read earthquake EIF measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nitro-cli describe-eif \
+            --eif-path dist/aws/earthquake-tee.eif \
+            > dist/aws/earthquake-tee-measurements.json
+          cat dist/aws/earthquake-tee-measurements.json
+
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+
+          const raw = await readFile("dist/aws/earthquake-tee-measurements.json", "utf8");
+          const jsonStart = raw.indexOf("{");
+          if (jsonStart === -1) {
+            throw new Error("earthquake EIF measurements did not contain JSON");
+          }
+          const parsed = JSON.parse(raw.slice(jsonStart));
+          const measurements = parsed.Measurements;
+          if (typeof measurements !== "object" || measurements === null) {
+            throw new Error("earthquake EIF measurements are missing Measurements");
+          }
+
+          function readPcr(name) {
+            const value = measurements[name];
+            if (typeof value !== "string" || !/^[0-9a-fA-F]{96}$/.test(value)) {
+              throw new Error(`earthquake EIF ${name} must be a 48-byte SHA-384 hex string`);
+            }
+            return value.toLowerCase();
+          }
+
+          const pcr0 = readPcr("PCR0");
+          const pcr1 = readPcr("PCR1");
+          const pcr2 = readPcr("PCR2");
+          await appendFile(
+            process.env.GITHUB_ENV,
+            `EARTHQUAKE_EIF_PCR0=${pcr0}\nEARTHQUAKE_EIF_PCR1=${pcr1}\nEARTHQUAKE_EIF_PCR2=${pcr2}\n`,
+            "utf8",
+          );
+          await appendFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              "### Earthquake EIF PCRs",
+              "",
+              "| PCR | Value |",
+              "| --- | --- |",
+              `| PCR0 | \`${pcr0}\` |`,
+              `| PCR1 | \`${pcr1}\` |`,
+              `| PCR2 | \`${pcr2}\` |`,
+              "",
+              "Use these values for the Sui `VerifierRegistry` earthquake config.",
+              "",
+            ].join("\n"),
+            "utf8",
+          );
+          NODE
+
+      - name: Build membership identity TEE artifact
+        run: pnpm build:aws-membership-identity-tee-artifact
+
+      - name: Build membership identity EIF
+        run: pnpm build:aws-membership-identity-eif
+
+      - name: Read membership identity EIF measurements
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nitro-cli describe-eif \
+            --eif-path dist/aws/membership-identity-tee.eif \
+            > dist/aws/membership-identity-tee-measurements.json
+          cat dist/aws/membership-identity-tee-measurements.json
+
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+
+          const raw = await readFile("dist/aws/membership-identity-tee-measurements.json", "utf8");
+          const jsonStart = raw.indexOf("{");
+          if (jsonStart === -1) {
+            throw new Error("membership identity EIF measurements did not contain JSON");
+          }
+          const parsed = JSON.parse(raw.slice(jsonStart));
+          const measurements = parsed.Measurements;
+          if (typeof measurements !== "object" || measurements === null) {
+            throw new Error("membership identity EIF measurements are missing Measurements");
+          }
+
+          function readPcr(name) {
+            const value = measurements[name];
+            if (typeof value !== "string" || !/^[0-9a-fA-F]{96}$/.test(value)) {
+              throw new Error(`membership identity EIF ${name} must be a 48-byte SHA-384 hex string`);
+            }
+            return value.toLowerCase();
+          }
+
+          const pcr0 = readPcr("PCR0");
+          const pcr1 = readPcr("PCR1");
+          const pcr2 = readPcr("PCR2");
+          await appendFile(
+            process.env.GITHUB_ENV,
+            `MEMBERSHIP_IDENTITY_EIF_PCR0=${pcr0}\nMEMBERSHIP_IDENTITY_EIF_PCR1=${pcr1}\nMEMBERSHIP_IDENTITY_EIF_PCR2=${pcr2}\n`,
+            "utf8",
+          );
+          await appendFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              "### Membership Identity EIF PCRs",
+              "",
+              "| PCR | Value |",
+              "| --- | --- |",
+              `| PCR0 | \`${pcr0}\` |`,
+              `| PCR1 | \`${pcr1}\` |`,
+              `| PCR2 | \`${pcr2}\` |`,
+              "",
+              "Use these values for the Sui `VerifierRegistry` membership identity config.",
+              "",
+            ].join("\n"),
+            "utf8",
+          );
+          NODE
+
+      - name: Upload build artifacts to S3
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          validate_sha256() {
+            local label="$1"
+            local path="$2"
+            local checksum_path="${path}.sha256"
+            local digest=""
+
+            if [[ -f "$checksum_path" ]]; then
+              sha256sum -c "$checksum_path" >&2
+            fi
+
+            digest="$(sha256sum "$path" | awk '{print $1}')"
+            if [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+              printf '%s\n' "$digest"
+              return
+            fi
+
+            echo "$label SHA-256 is invalid" >&2
+            exit 1
+          }
+
+          lambda_key="${S3_PREFIX}/${GITHUB_SHA}/sonari-verifier-runner-lambda.zip"
+          earthquake_tee_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz"
+          earthquake_eif_key="${S3_PREFIX}/${GITHUB_SHA}/earthquake-tee.eif"
+          membership_tee_key="${S3_PREFIX}/${GITHUB_SHA}/membership-identity-tee-artifact.tar.gz"
+          membership_eif_key="${S3_PREFIX}/${GITHUB_SHA}/membership-identity-tee.eif"
+
+          earthquake_tee_artifact_sha256="$(validate_sha256 "earthquake TEE artifact" dist/aws/earthquake-tee-artifact.tar.gz)"
+          earthquake_eif_sha256="$(validate_sha256 "earthquake EIF" dist/aws/earthquake-tee.eif)"
+          membership_tee_artifact_sha256="$(validate_sha256 "membership TEE artifact" dist/aws/membership-identity-tee-artifact.tar.gz)"
+          membership_eif_sha256="$(validate_sha256 "membership EIF" dist/aws/membership-identity-tee.eif)"
+
+          for pcr_name in EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2; do
+            if [[ ! "${!pcr_name}" =~ ^[0-9a-f]{96}$ ]]; then
+              echo "$pcr_name is required before artifact upload" >&2
+              exit 1
+            fi
+          done
+
+          aws s3 cp dist/aws/sonari-verifier-runner-lambda.zip "s3://$ARTIFACT_BUCKET/$lambda_key"
+          aws s3 cp dist/aws/earthquake-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/$earthquake_tee_key"
+          aws s3 cp dist/aws/earthquake-tee.eif "s3://$ARTIFACT_BUCKET/$earthquake_eif_key"
+          aws s3 cp dist/aws/membership-identity-tee-artifact.tar.gz "s3://$ARTIFACT_BUCKET/$membership_tee_key"
+          aws s3 cp dist/aws/membership-identity-tee.eif "s3://$ARTIFACT_BUCKET/$membership_eif_key"
+
+          {
+            echo "LAMBDA_S3_KEY=$lambda_key"
+            echo "EARTHQUAKE_TEE_S3_KEY=$earthquake_tee_key"
+            echo "EARTHQUAKE_EIF_S3_KEY=$earthquake_eif_key"
+            echo "MEMBERSHIP_TEE_S3_KEY=$membership_tee_key"
+            echo "MEMBERSHIP_EIF_S3_KEY=$membership_eif_key"
+            echo "EARTHQUAKE_TEE_ARTIFACT_SHA256=$earthquake_tee_artifact_sha256"
+            echo "EARTHQUAKE_EIF_SHA256=$earthquake_eif_sha256"
+            echo "MEMBERSHIP_TEE_ARTIFACT_SHA256=$membership_tee_artifact_sha256"
+            echo "MEMBERSHIP_EIF_SHA256=$membership_eif_sha256"
+          } >> "$GITHUB_ENV"
+
+      - name: Create deploy plan
+        shell: bash
+        env:
+          RELAYER_NETWORK: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/aws
+
+          deploy_plan_args=(
+            scripts/aws_sonari_verifier_runner_deploy_plan.ts
+            --commit-sha "$GITHUB_SHA"
+            --lambda-bucket "$ARTIFACT_BUCKET"
+            --earthquake-tee-bucket "$ARTIFACT_BUCKET"
+            --earthquake-tee-sha256 "$EARTHQUAKE_TEE_ARTIFACT_SHA256"
+            --earthquake-eif-bucket "$ARTIFACT_BUCKET"
+            --earthquake-eif-sha256 "$EARTHQUAKE_EIF_SHA256"
+            --membership-tee-bucket "$ARTIFACT_BUCKET"
+            --membership-tee-sha256 "$MEMBERSHIP_TEE_ARTIFACT_SHA256"
+            --membership-eif-bucket "$ARTIFACT_BUCKET"
+            --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256"
+            --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN"
+            --source-archiver-private-key-secret-arn "$SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN"
+            --prefix "$S3_PREFIX"
+            --out dist/aws/sonari-verifier-runner-deploy-plan.json
+          )
+          if [[ -n "${RELAYER_NETWORK:-}" ]]; then
+            deploy_plan_args+=(--relayer-network "$RELAYER_NETWORK")
+          fi
+          if [[ -n "${WORLD_ID_PROOF_MODE:-}" ]]; then
+            deploy_plan_args+=(--world-id-proof-mode "$WORLD_ID_PROOF_MODE")
+          fi
+
+          pnpm tsx "${deploy_plan_args[@]}"
+
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const plan = JSON.parse(
+            await readFile("dist/aws/sonari-verifier-runner-deploy-plan.json", "utf8"),
+          );
+          const requiredParameterKeys = [
+            "LambdaCodeS3Bucket",
+            "LambdaCodeS3Key",
+            "TeeArtifactS3Bucket",
+            "TeeArtifactS3Key",
+            "TeeArtifactSha256",
+            "EarthquakeTeeEifS3Bucket",
+            "EarthquakeTeeEifS3Key",
+            "EarthquakeTeeEifSha256",
+            "MembershipTeeArtifactS3Bucket",
+            "MembershipTeeArtifactS3Key",
+            "MembershipTeeArtifactSha256",
+            "TeeEifS3Bucket",
+            "TeeEifS3Key",
+            "TeeEifSha256",
+            "GitCommitSha",
+            "ScheduleState",
+            "SourceArchiverTokenSecretArn",
+            "SourceArchiverPrivateKeySecretArn",
+            "SourceArchiverSuiNetwork",
+            "SourceArchiverSuiRpcUrl",
+            "SourceArchiverWalrusUploadRelayUrl",
+            "SourceArchiverWalrusUploadRelayTipMaxMist",
+            "SourceArchiverWalrusEpochs",
+            "SourceArchiverWalrusDeletable",
+          ];
+          for (const key of requiredParameterKeys) {
+            if (
+              !plan.parameterOverrideArgs.some((value) => value.startsWith(`${key}=`))
+            ) {
+              throw new Error(`deploy plan is missing ${key}`);
+            }
+          }
+          if (!plan.parameterOverrideArgs.includes("ScheduleState=DISABLED")) {
+            throw new Error("deploy plan must keep ScheduleState=DISABLED");
+          }
+          NODE
+
+      - name: Deploy CloudFormation stack
+        shell: bash
+        env:
+          RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}
+          RELAYER_NETWORK: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}
+          RELAYER_TARGET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}
+          RELAYER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}
+          RELAYER_VERIFIER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}
+          RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}
+          RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
+          RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
+          RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}
+          IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}
+          SONARI_IDENTITY_PACKAGE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}
+          SONARI_IDENTITY_PAUSE_STATE_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}
+          SONARI_IDENTITY_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}
+          SONARI_MEMBERSHIP_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}
+          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}
+        run: |
+          set -euo pipefail
+          mapfile -t deploy_plan_parameter_overrides < <(
+            node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const plan = JSON.parse(
+            await readFile("dist/aws/sonari-verifier-runner-deploy-plan.json", "utf8"),
+          );
+          for (const value of plan.parameterOverrideArgs) {
+            console.log(value);
+          }
+          NODE
+          )
+
+          extra_parameter_overrides=(
+            "VpcId=$VPC_ID"
+            "SubnetIds=$SUBNET_IDS"
+            "AmiId=$AMI_ID"
+            "RunnerTokenSecretArn=$RUNNER_TOKEN_SECRET_ARN"
+            "SigningSeedCiphertextS3Bucket=$SIGNING_SEED_CIPHERTEXT_S3_BUCKET"
+            "SigningSeedCiphertextS3Key=$SIGNING_SEED_CIPHERTEXT_S3_KEY"
+            "NitroEnclaveImageSha384=$NITRO_ENCLAVE_IMAGE_SHA384"
+            "NitroEnclavePcr3=$NITRO_ENCLAVE_PCR3"
+            "WorldIdAppId=$WORLD_ID_APP_ID"
+            "EarthquakeNitroEnclaveProcessCommand=/opt/sonari/bin/run-earthquake-enclave"
+          )
+
+          if [[ -n "${WORLD_ID_API_BASE:-}" ]]; then
+            extra_parameter_overrides+=("WorldIdApiBase=$WORLD_ID_API_BASE")
+          fi
+          if [[ -n "${RELAYER_MODE:-}" ]]; then
+            extra_parameter_overrides+=("RelayerMode=$RELAYER_MODE")
+          fi
+          if [[ -n "${RELAYER_NETWORK:-}" ]]; then
+            extra_parameter_overrides+=("RelayerNetwork=$RELAYER_NETWORK")
+          fi
+          if [[ -n "${RELAYER_TARGET:-}" ]]; then
+            extra_parameter_overrides+=("RelayerTarget=$RELAYER_TARGET")
+          fi
+          if [[ -n "${RELAYER_REGISTRY:-}" ]]; then
+            extra_parameter_overrides+=("RelayerRegistry=$RELAYER_REGISTRY")
+          fi
+          if [[ -n "${RELAYER_VERIFIER_REGISTRY:-}" ]]; then
+            extra_parameter_overrides+=("RelayerVerifierRegistry=$RELAYER_VERIFIER_REGISTRY")
+          fi
+          if [[ -n "${RELAYER_GRPC_URL:-}" ]]; then
+            extra_parameter_overrides+=("RelayerGrpcUrl=$RELAYER_GRPC_URL")
+          fi
+          if [[ -n "${RELAYER_SENDER_ADDRESS:-}" ]]; then
+            extra_parameter_overrides+=("RelayerSenderAddress=$RELAYER_SENDER_ADDRESS")
+          fi
+          if [[ -n "${RELAYER_SIGNER_SECRET_ARN:-}" ]]; then
+            extra_parameter_overrides+=("RelayerSignerSecretArn=$RELAYER_SIGNER_SECRET_ARN")
+          fi
+          if [[ -n "${RELAYER_ALLOW_SUBMIT:-}" ]]; then
+            extra_parameter_overrides+=("RelayerAllowSubmit=$RELAYER_ALLOW_SUBMIT")
+          fi
+          if [[ -n "${IDENTITY_RELAYER_MODE:-}" ]]; then
+            extra_parameter_overrides+=("IdentityRelayerMode=$IDENTITY_RELAYER_MODE")
+          fi
+          if [[ -n "${SONARI_IDENTITY_PACKAGE_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariIdentityPackageId=$SONARI_IDENTITY_PACKAGE_ID")
+          fi
+          if [[ -n "${SONARI_IDENTITY_PAUSE_STATE_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariIdentityPauseStateId=$SONARI_IDENTITY_PAUSE_STATE_ID")
+          fi
+          if [[ -n "${SONARI_IDENTITY_REGISTRY_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID")
+          fi
+          if [[ -n "${SONARI_MEMBERSHIP_REGISTRY_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID")
+          fi
+          if [[ -n "${SONARI_VERIFIER_REGISTRY_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID")
+          fi
+
+          aws cloudformation deploy \
+            --template-file infra/aws/sonari-verifier-runner/template.yaml \
+            --s3-bucket "$ARTIFACT_BUCKET" \
+            --s3-prefix "${S3_PREFIX}/${GITHUB_SHA}/cloudformation" \
+            --stack-name "$STACK_NAME" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides "${deploy_plan_parameter_overrides[@]}" "${extra_parameter_overrides[@]}" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify post-deploy guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          stack_output() {
+            aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue | [0]" \
+              --output text
+          }
+
+          lambda_code_sha() {
+            aws lambda get-function \
+              --function-name "$1" \
+              --query 'Configuration.CodeSha256' \
+              --output text
+          }
+
+          asg_name="$(stack_output RunnerAutoScalingGroupName)"
+          watcher_schedule_name="$(stack_output WatcherScheduleName)"
+          batch_schedule_name="$(stack_output BatchScheduleName)"
+          watcher_lambda_name="$(stack_output WatcherLambdaName)"
+          manual_watcher_lambda_name="$(stack_output ManualWatcherLambdaName)"
+          submit_verification_lambda_name="$(stack_output SubmitVerificationLambdaName)"
+          batch_verifier_lambda_name="$(stack_output BatchVerifierLambdaName)"
+          runner_control_lambda_name="$(stack_output RunnerControlLambdaName)"
+          source_archiver_lambda_name="$(stack_output SourceArchiverLambdaName)"
+          deployed_git_commit_sha="$(stack_output DeployedGitCommitSha)"
+          lambda_code_s3_key="$(stack_output LambdaCodeS3KeyOutput)"
+          tee_artifact_s3_key="$(stack_output TeeArtifactS3KeyOutput)"
+          deployed_tee_artifact_sha256="$(stack_output TeeArtifactSha256Output)"
+          earthquake_eif_s3_key="$(stack_output EarthquakeTeeEifS3KeyOutput)"
+          deployed_earthquake_eif_sha256="$(stack_output EarthquakeTeeEifSha256Output)"
+          membership_tee_artifact_s3_key="$(stack_output MembershipTeeArtifactS3KeyOutput)"
+          deployed_membership_tee_artifact_sha256="$(stack_output MembershipTeeArtifactSha256Output)"
+          tee_eif_s3_key="$(stack_output TeeEifS3KeyOutput)"
+          deployed_tee_eif_sha256="$(stack_output TeeEifSha256Output)"
+
+          desired_capacity="$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$asg_name" \
+            --query 'AutoScalingGroups[0].DesiredCapacity' \
+            --output text)"
+          [[ "$desired_capacity" == "0" ]]
+
+          watcher_schedule_state="$(aws scheduler get-schedule \
+            --name "$watcher_schedule_name" \
+            --query State \
+            --output text)"
+          batch_schedule_state="$(aws scheduler get-schedule \
+            --name "$batch_schedule_name" \
+            --query State \
+            --output text)"
+          [[ "$watcher_schedule_state" == "DISABLED" ]]
+          [[ "$batch_schedule_state" == "DISABLED" ]]
+
+          watcher_code_sha="$(lambda_code_sha "$watcher_lambda_name")"
+          manual_watcher_code_sha="$(lambda_code_sha "$manual_watcher_lambda_name")"
+          submit_verification_code_sha="$(lambda_code_sha "$submit_verification_lambda_name")"
+          batch_verifier_code_sha="$(lambda_code_sha "$batch_verifier_lambda_name")"
+          runner_control_code_sha="$(lambda_code_sha "$runner_control_lambda_name")"
+          source_archiver_code_sha="$(lambda_code_sha "$source_archiver_lambda_name")"
+          [[ "$watcher_code_sha" != "" ]]
+          [[ "$watcher_code_sha" != "None" ]]
+          [[ "$watcher_code_sha" == "$manual_watcher_code_sha" ]]
+          [[ "$watcher_code_sha" == "$submit_verification_code_sha" ]]
+          [[ "$watcher_code_sha" == "$batch_verifier_code_sha" ]]
+          [[ "$watcher_code_sha" == "$runner_control_code_sha" ]]
+          [[ "$watcher_code_sha" == "$source_archiver_code_sha" ]]
+
+          [[ "$deployed_git_commit_sha" == "$GITHUB_SHA" ]]
+          [[ "$lambda_code_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/sonari-verifier-runner-lambda.zip" ]]
+          [[ "$tee_artifact_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/earthquake-tee-artifact.tar.gz" ]]
+          [[ "$earthquake_eif_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/earthquake-tee.eif" ]]
+          [[ "$membership_tee_artifact_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/membership-identity-tee-artifact.tar.gz" ]]
+          [[ "$tee_eif_s3_key" == "sonari-verifier-runner/${GITHUB_SHA}/membership-identity-tee.eif" ]]
+          [[ "$deployed_tee_artifact_sha256" == "$EARTHQUAKE_TEE_ARTIFACT_SHA256" ]]
+          [[ "$deployed_earthquake_eif_sha256" == "$EARTHQUAKE_EIF_SHA256" ]]
+          [[ "$deployed_membership_tee_artifact_sha256" == "$MEMBERSHIP_TEE_ARTIFACT_SHA256" ]]
+          [[ "$deployed_tee_eif_sha256" == "$MEMBERSHIP_EIF_SHA256" ]]

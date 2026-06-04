@@ -12,7 +12,7 @@ import {
     UsgsSourceClient,
 } from "./nautilus_local_e2e.js";
 
-const target = "0x123::earthquake_oracle::submit_payload_v1";
+const target = "0x123::accessor::create_disaster_event_from_signed_payload";
 const registry = "0x456";
 const verifierRegistry = "0x654";
 // CI runs this test with a cold Cargo binary build before the Rust TEE tests.
@@ -49,7 +49,16 @@ describe("Nautilus local oracle E2E", () => {
                 payload_bcs_hex: expect.any(String),
                 signature: expect.any(String),
                 public_key: expect.any(String),
+                verifier_config_key: 1,
+                verifier_config_version: 1,
+                enclave_instance_public_key: expect.any(String),
             });
+            if (output.runner_result.status !== "finalized") {
+                throw new Error("expected finalized runner result");
+            }
+            expect(output.runner_result.enclave_instance_public_key).toBe(
+                output.runner_result.public_key,
+            );
             expect(output.runner_result).not.toHaveProperty("payloadBcsBytes");
             expect(output.runner_result).not.toHaveProperty("signatureBytes");
             expect(output.runner_result).not.toHaveProperty("publicKeyBytes");

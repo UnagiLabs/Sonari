@@ -1,0 +1,45 @@
+use membership_tee::{
+    INTENT, IdentityProvider, IdentityTeeResult, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY,
+    VERIFIER_VERSION, encoding::identity_bcs::payload_bcs_bytes,
+};
+
+#[test]
+fn pins_bcs_numeric_enums_to_typescript_contract() {
+    assert_eq!(INTENT, "SONARI_IDENTITY_VERIFICATION_V1");
+    assert_eq!(VERIFIER_FAMILY, "identity");
+    assert_eq!(VERIFIER_VERSION, 1);
+    assert_eq!(PROVIDER_KYC, 1);
+    assert_eq!(PROVIDER_WORLD_ID, 2);
+}
+
+#[test]
+fn bcs_golden_matches_typescript_reference() {
+    let result = IdentityTeeResult {
+        intent: INTENT.to_owned(),
+        verifier_family: VERIFIER_FAMILY.to_owned(),
+        verifier_version: VERIFIER_VERSION,
+        registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111"
+            .to_owned(),
+        membership_id: "0x2222222222222222222222222222222222222222222222222222222222222222"
+            .to_owned(),
+        owner: "0x3333333333333333333333333333333333333333333333333333333333333333".to_owned(),
+        provider: IdentityProvider::WorldId,
+        verified: true,
+        duplicate_key_hash: "0x4444444444444444444444444444444444444444444444444444444444444444"
+            .to_owned(),
+        evidence_hash: "0x5555555555555555555555555555555555555555555555555555555555555555"
+            .to_owned(),
+        issued_at_ms: 1_800_000_000_000,
+        expires_at_ms: 1_831_536_000_000,
+        terms_version: 1,
+        signed_statement_hash: "0x6666666666666666666666666666666666666666666666666666666666666666"
+            .to_owned(),
+    };
+
+    let encoded = payload_bcs_bytes(&result).expect("identity payload BCS should encode");
+
+    assert_eq!(
+        format!("0x{}", hex::encode(encoded)),
+        "0x1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000011111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222333333333333333333333333333333333333333333333333333333333333333302014444444444444444444444444444444444444444444444444444444444444444555555555555555555555555555555555555555555555555555555555555555500505c18a3010000007c0d70aa01000001000000000000006666666666666666666666666666666666666666666666666666666666666666"
+    );
+}

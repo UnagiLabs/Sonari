@@ -1,7 +1,6 @@
 use crate::core::artifacts::StoredSourceRef;
 use crate::core::types::OracleError;
 use crate::crypto::{sha256_bytes, to_hex};
-use serde_json::Value;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -19,8 +18,6 @@ pub const DEFAULT_WALRUS_CLI_TIMEOUT_MS: u64 = 120_000;
 pub enum SourceArchiveError {
     #[error("source archive store failed: {0}")]
     StoreFailed(String),
-    #[error("source archive fetch failed: {0}")]
-    FetchFailed(String),
     #[error(
         "source archive blob mismatch for {source_uri}: expected {expected_hash}, got {actual_hash}"
     )]
@@ -45,26 +42,18 @@ pub trait SourceArchive {
 #[derive(Debug, Clone)]
 pub struct WalrusCliSourceArchiveConfig {
     pub cli_path: PathBuf,
-    pub config_path: Option<PathBuf>,
-    pub context: Option<String>,
-    pub wallet: Option<String>,
-    pub upload_relay: Option<String>,
-    pub aggregator_url: String,
-    pub epochs: u32,
+    pub n_shards: u32,
     pub command_timeout_ms: u64,
+    pub egress_proxy_url: Option<String>,
 }
 
 impl Default for WalrusCliSourceArchiveConfig {
     fn default() -> Self {
         Self {
             cli_path: PathBuf::from("walrus"),
-            config_path: None,
-            context: None,
-            wallet: None,
-            upload_relay: None,
-            aggregator_url: String::new(),
-            epochs: 2,
+            n_shards: 1000,
             command_timeout_ms: DEFAULT_WALRUS_CLI_TIMEOUT_MS,
+            egress_proxy_url: None,
         }
     }
 }
@@ -74,19 +63,8 @@ impl WalrusCliSourceArchiveConfig {
         let cli_path = std::env::var_os("SONARI_WALRUS_CLI")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("walrus"));
-        let config_path = std::env::var_os("SONARI_WALRUS_CONFIG").map(PathBuf::from);
-        let context = non_empty_env("SONARI_WALRUS_CONTEXT");
-        let wallet = non_empty_env("SONARI_WALRUS_WALLET");
-        let upload_relay = non_empty_env("SONARI_WALRUS_UPLOAD_RELAY");
-        let aggregator_url = non_empty_env("SONARI_WALRUS_AGGREGATOR_URL").ok_or_else(|| {
-            SourceArchiveError::StoreFailed(
-                "SONARI_WALRUS_AGGREGATOR_URL is required for Walrus archive".to_owned(),
-            )
-        })?;
-        let epochs = match non_empty_env("SONARI_WALRUS_EPOCHS") {
-            Some(value) => parse_epochs(&value)?,
-            None => 2,
-        };
+        let egress_proxy_url = non_empty_env("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
+        let n_shards = required_n_shards_from_env()?;
         let command_timeout_ms = match std::env::var("SONARI_WALRUS_CLI_TIMEOUT_MS") {
             Ok(value) => parse_command_timeout_ms(&value)?,
             Err(std::env::VarError::NotPresent) => DEFAULT_WALRUS_CLI_TIMEOUT_MS,
@@ -99,50 +77,38 @@ impl WalrusCliSourceArchiveConfig {
 
         Ok(Self {
             cli_path,
-            config_path,
-            context,
-            wallet,
-            upload_relay,
-            aggregator_url,
-            epochs,
+            n_shards,
             command_timeout_ms,
+            egress_proxy_url,
         })
     }
 }
 
 #[derive(Debug)]
-pub struct WalrusCliSourceArchive<R = SystemWalrusCommandRunner, F = ReqwestBlobFetcher> {
+pub struct WalrusCliSourceArchive<R = SystemWalrusCommandRunner> {
     config: WalrusCliSourceArchiveConfig,
     command_runner: R,
-    blob_fetcher: F,
 }
 
-impl WalrusCliSourceArchive<SystemWalrusCommandRunner, ReqwestBlobFetcher> {
+impl WalrusCliSourceArchive<SystemWalrusCommandRunner> {
     pub fn new(config: WalrusCliSourceArchiveConfig) -> Result<Self, SourceArchiveError> {
         validate_walrus_config(&config)?;
         Ok(Self {
             config,
             command_runner: SystemWalrusCommandRunner,
-            blob_fetcher: ReqwestBlobFetcher,
         })
     }
 }
 
-impl<R, F> WalrusCliSourceArchive<R, F>
+impl<R> WalrusCliSourceArchive<R>
 where
     R: WalrusCommandRunner,
-    F: BlobFetcher,
 {
     #[cfg(test)]
-    fn with_clients(
-        config: WalrusCliSourceArchiveConfig,
-        command_runner: R,
-        blob_fetcher: F,
-    ) -> Self {
+    fn with_clients(config: WalrusCliSourceArchiveConfig, command_runner: R) -> Self {
         Self {
             config,
             command_runner,
-            blob_fetcher,
         }
     }
 
@@ -152,29 +118,13 @@ where
         let output = self.run_walrus(
             vec![
                 OsString::from("blob-id"),
+                OsString::from("--n-shards"),
+                OsString::from(self.config.n_shards.to_string()),
                 temp_file.path().as_os_str().to_owned(),
             ],
             SourceArchiveError::StoreFailed,
         )?;
         parse_blob_id_output(&output.stdout)
-    }
-
-    fn run_store(&self, bytes: &[u8]) -> Result<String, SourceArchiveError> {
-        let temp_file = TempSourceFile::write(bytes)
-            .map_err(|error| SourceArchiveError::StoreFailed(error.to_string()))?;
-        let mut args = vec![
-            OsString::from("store"),
-            OsString::from("--epochs"),
-            OsString::from(self.config.epochs.to_string()),
-            OsString::from("--json"),
-        ];
-        if let Some(upload_relay) = &self.config.upload_relay {
-            args.push(OsString::from("--upload-relay"));
-            args.push(OsString::from(upload_relay));
-        }
-        args.push(temp_file.path().as_os_str().to_owned());
-        let output = self.run_walrus(args, SourceArchiveError::StoreFailed)?;
-        parse_store_blob_id(&output.stdout)
     }
 
     fn run_walrus(
@@ -183,29 +133,22 @@ where
         map_error: impl FnOnce(String) -> SourceArchiveError,
     ) -> Result<CommandOutput, SourceArchiveError> {
         let mut args = Vec::new();
-        if let Some(config_path) = &self.config.config_path {
-            args.push(OsString::from("--config"));
-            args.push(config_path.as_os_str().to_owned());
-        }
-        if let Some(context) = &self.config.context {
-            args.push(OsString::from("--context"));
-            args.push(OsString::from(context));
-        }
-        if let Some(wallet) = &self.config.wallet {
-            args.push(OsString::from("--wallet"));
-            args.push(OsString::from(wallet));
-        }
         args.extend(command_args);
+        let env_overrides = proxy_env_overrides(self.config.egress_proxy_url.as_deref());
         self.command_runner
-            .run(&self.config.cli_path, &args, self.config.command_timeout_ms)
+            .run(
+                &self.config.cli_path,
+                &args,
+                self.config.command_timeout_ms,
+                &env_overrides,
+            )
             .map_err(map_error)
     }
 }
 
-impl<R, F> SourceArchive for WalrusCliSourceArchive<R, F>
+impl<R> SourceArchive for WalrusCliSourceArchive<R>
 where
     R: WalrusCommandRunner,
-    F: BlobFetcher,
 {
     fn store_and_verify(
         &self,
@@ -223,49 +166,11 @@ where
             });
         }
 
-        let expected_blob_id = self.blob_id_for_bytes(bytes)?;
-        let stored_blob_id = self.run_store(bytes)?;
-        if stored_blob_id != expected_blob_id {
-            return Err(SourceArchiveError::BlobMismatch {
-                source_uri: source_uri.to_owned(),
-                expected_hash: expected_blob_id,
-                actual_hash: stored_blob_id,
-            });
-        }
-
-        let blob_url = format!(
-            "{}/v1/blobs/{}",
-            self.config.aggregator_url.trim_end_matches('/'),
-            stored_blob_id
-        );
-        let fetched_bytes = self
-            .blob_fetcher
-            .fetch(
-                &blob_url,
-                bytes.len() as u64,
-                self.config.command_timeout_ms,
-            )
-            .map_err(SourceArchiveError::FetchFailed)?;
-        let fetched_hash = to_hex(&sha256_bytes(&fetched_bytes));
-        if fetched_hash != source_hash {
-            return Err(SourceArchiveError::BlobMismatch {
-                source_uri: source_uri.to_owned(),
-                expected_hash: source_hash.to_owned(),
-                actual_hash: fetched_hash,
-            });
-        }
-        let fetched_blob_id = self.blob_id_for_bytes(&fetched_bytes)?;
-        if fetched_blob_id != stored_blob_id {
-            return Err(SourceArchiveError::BlobMismatch {
-                source_uri: source_uri.to_owned(),
-                expected_hash: stored_blob_id,
-                actual_hash: fetched_blob_id,
-            });
-        }
+        let blob_id = self.blob_id_for_bytes(bytes)?;
 
         Ok(StoredSourceRef {
-            uri: format!("walrus://blob/{stored_blob_id}"),
-            walrus_blob_id: stored_blob_id,
+            uri: format!("walrus://blob/{blob_id}"),
+            walrus_blob_id: blob_id,
             source_hash: source_hash.to_owned(),
             size_bytes: bytes.len() as u64,
         })
@@ -278,6 +183,7 @@ pub trait WalrusCommandRunner {
         program: &Path,
         args: &[OsString],
         timeout_ms: u64,
+        env_overrides: &[(OsString, OsString)],
     ) -> Result<CommandOutput, String>;
 }
 
@@ -287,8 +193,9 @@ impl<T: WalrusCommandRunner + ?Sized> WalrusCommandRunner for &T {
         program: &Path,
         args: &[OsString],
         timeout_ms: u64,
+        env_overrides: &[(OsString, OsString)],
     ) -> Result<CommandOutput, String> {
-        (*self).run(program, args, timeout_ms)
+        (*self).run(program, args, timeout_ms, env_overrides)
     }
 }
 
@@ -307,6 +214,7 @@ impl WalrusCommandRunner for SystemWalrusCommandRunner {
         program: &Path,
         args: &[OsString],
         timeout_ms: u64,
+        env_overrides: &[(OsString, OsString)],
     ) -> Result<CommandOutput, String> {
         if timeout_ms == 0 {
             return Err("Walrus CLI timeout must be greater than zero".to_owned());
@@ -314,6 +222,7 @@ impl WalrusCommandRunner for SystemWalrusCommandRunner {
 
         let mut child = Command::new(program)
             .args(args)
+            .envs(env_overrides.iter().map(|(key, value)| (key, value)))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -373,79 +282,30 @@ impl WalrusCommandRunner for SystemWalrusCommandRunner {
     }
 }
 
-pub trait BlobFetcher {
-    fn fetch(
-        &self,
-        url: &str,
-        expected_size_bytes: u64,
-        timeout_ms: u64,
-    ) -> Result<Vec<u8>, String>;
-}
-
-impl<T: BlobFetcher + ?Sized> BlobFetcher for &T {
-    fn fetch(
-        &self,
-        url: &str,
-        expected_size_bytes: u64,
-        timeout_ms: u64,
-    ) -> Result<Vec<u8>, String> {
-        (*self).fetch(url, expected_size_bytes, timeout_ms)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ReqwestBlobFetcher;
-
-impl BlobFetcher for ReqwestBlobFetcher {
-    fn fetch(
-        &self,
-        url: &str,
-        expected_size_bytes: u64,
-        timeout_ms: u64,
-    ) -> Result<Vec<u8>, String> {
-        if timeout_ms == 0 {
-            return Err("aggregator fetch timeout must be greater than zero".to_owned());
-        }
-        let max_read_bytes = expected_size_bytes
-            .checked_add(1)
-            .ok_or_else(|| "expected source size is too large".to_owned())?;
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .build()
-            .map_err(|error| format!("GET {url} client build failed: {error}"))?;
-        let response = client
-            .get(url)
-            .send()
-            .map_err(|error| format!("GET {url} failed: {error}"))?
-            .error_for_status()
-            .map_err(|error| format!("GET {url} returned error status: {error}"))?;
-        let mut body = response.take(max_read_bytes);
-        let mut bytes = Vec::new();
-        body.read_to_end(&mut bytes)
-            .map_err(|error| format!("GET {url} body read failed: {error}"))?;
-        if bytes.len() as u64 > expected_size_bytes {
-            return Err(format!(
-                "GET {url} body exceeds expected size {expected_size_bytes} bytes"
-            ));
-        }
-        Ok(bytes)
-    }
+fn proxy_env_overrides(proxy_url: Option<&str>) -> Vec<(OsString, OsString)> {
+    let Some(proxy_url) = proxy_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    [
+        ("ALL_PROXY", proxy_url),
+        ("HTTPS_PROXY", proxy_url),
+        ("HTTP_PROXY", proxy_url),
+        ("NO_PROXY", "127.0.0.1,localhost"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (OsString::from(key), OsString::from(value)))
+    .collect()
 }
 
 fn validate_walrus_config(config: &WalrusCliSourceArchiveConfig) -> Result<(), SourceArchiveError> {
-    if config.aggregator_url.trim().is_empty() {
-        return Err(SourceArchiveError::StoreFailed(
-            "Walrus aggregator URL is required for live archive".to_owned(),
-        ));
-    }
-    if config.epochs == 0 {
-        return Err(SourceArchiveError::StoreFailed(
-            "Walrus epochs must be greater than zero".to_owned(),
-        ));
-    }
     if config.command_timeout_ms == 0 {
         return Err(SourceArchiveError::StoreFailed(
             "Walrus CLI timeout must be greater than zero".to_owned(),
+        ));
+    }
+    if config.n_shards < 2 {
+        return Err(SourceArchiveError::StoreFailed(
+            "SONARI_WALRUS_N_SHARDS must be an integer greater than or equal to 2".to_owned(),
         ));
     }
     Ok(())
@@ -467,67 +327,9 @@ fn parse_blob_id_output(stdout: &[u8]) -> Result<String, SourceArchiveError> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .filter(|line| !line.starts_with("Success:"))
-        .next_back()
+        .rfind(|line| !line.starts_with("Success:"))
         .map(str::to_owned)
         .ok_or_else(|| SourceArchiveError::StoreFailed("walrus blob-id output is empty".to_owned()))
-}
-
-fn parse_store_blob_id(stdout: &[u8]) -> Result<String, SourceArchiveError> {
-    let value = serde_json::from_slice::<Value>(stdout).map_err(|error| {
-        SourceArchiveError::StoreFailed(format!("walrus store JSON output is invalid: {error}"))
-    })?;
-    let blob_ids = store_success_blob_ids(&value);
-    let Some(blob_id) = single_unique_blob_id(&blob_ids)? else {
-        return Err(SourceArchiveError::StoreFailed(
-            "walrus store JSON missing blobId".to_owned(),
-        ));
-    };
-    if blob_id.is_empty() {
-        return Err(SourceArchiveError::StoreFailed(
-            "walrus store JSON blobId is empty".to_owned(),
-        ));
-    }
-    Ok(blob_id)
-}
-
-fn store_success_blob_ids(value: &Value) -> Vec<String> {
-    const SUCCESS_BLOB_ID_PATHS: &[&[&str]] = &[
-        &["newlyCreated", "blobObject", "blobId"],
-        &["alreadyCertified", "blobId"],
-        &["blobStoreResult", "newlyCreated", "blobObject", "blobId"],
-        &["blobStoreResult", "alreadyCertified", "blobId"],
-    ];
-
-    SUCCESS_BLOB_ID_PATHS
-        .iter()
-        .filter_map(|path| string_at_path(value, path))
-        .map(str::to_owned)
-        .collect()
-}
-
-fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
-    let mut current = value;
-    for segment in path {
-        current = current.as_object()?.get(*segment)?;
-    }
-    current.as_str()
-}
-
-fn single_unique_blob_id(blob_ids: &[String]) -> Result<Option<String>, SourceArchiveError> {
-    let mut unique: Vec<&str> = Vec::new();
-    for blob_id in blob_ids {
-        if !unique.iter().any(|existing| *existing == blob_id) {
-            unique.push(blob_id);
-        }
-    }
-    match unique.as_slice() {
-        [] => Ok(None),
-        [blob_id] => Ok(Some((*blob_id).to_owned())),
-        _ => Err(SourceArchiveError::StoreFailed(
-            "walrus store JSON contains multiple blobId values".to_owned(),
-        )),
-    }
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -547,6 +349,33 @@ pub fn parse_epochs(value: &str) -> Result<u32, SourceArchiveError> {
         ));
     }
     Ok(epochs)
+}
+
+pub fn parse_n_shards(value: &str) -> Result<u32, SourceArchiveError> {
+    let trimmed = value.trim();
+    let n_shards = trimmed.parse::<u32>().map_err(|error| {
+        SourceArchiveError::StoreFailed(format!(
+            "invalid SONARI_WALRUS_N_SHARDS `{value}`: {error}"
+        ))
+    })?;
+    if n_shards < 2 {
+        return Err(SourceArchiveError::StoreFailed(
+            "SONARI_WALRUS_N_SHARDS must be an integer greater than or equal to 2".to_owned(),
+        ));
+    }
+    Ok(n_shards)
+}
+
+fn required_n_shards_from_env() -> Result<u32, SourceArchiveError> {
+    match std::env::var("SONARI_WALRUS_N_SHARDS") {
+        Ok(value) => parse_n_shards(&value),
+        Err(std::env::VarError::NotPresent) => Err(SourceArchiveError::StoreFailed(
+            "SONARI_WALRUS_N_SHARDS is required".to_owned(),
+        )),
+        Err(error) => Err(SourceArchiveError::StoreFailed(format!(
+            "invalid SONARI_WALRUS_N_SHARDS: {error}"
+        ))),
+    }
 }
 
 pub fn parse_command_timeout_ms(value: &str) -> Result<u64, SourceArchiveError> {
@@ -658,61 +487,41 @@ mod tests {
     use std::collections::VecDeque;
     use std::ffi::OsString;
     use std::fs;
-    use std::net::TcpListener;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn source_hash(bytes: &[u8]) -> String {
         to_hex(&sha256_bytes(bytes))
     }
 
-    fn archive<'a>(
-        walrus: &'a FakeWalrusCommandRunner,
-        fetcher: &'a FakeBlobFetcher,
-    ) -> WalrusCliSourceArchive<&'a FakeWalrusCommandRunner, &'a FakeBlobFetcher> {
+    fn archive(
+        walrus: &FakeWalrusCommandRunner,
+    ) -> WalrusCliSourceArchive<&FakeWalrusCommandRunner> {
         WalrusCliSourceArchive::with_clients(
             WalrusCliSourceArchiveConfig {
                 cli_path: PathBuf::from("fake-walrus"),
-                aggregator_url: "https://aggregator.test".to_owned(),
-                epochs: 2,
                 ..WalrusCliSourceArchiveConfig::default()
             },
             walrus,
-            fetcher,
         )
     }
 
     #[test]
-    fn walrus_cli_archive_stores_fetches_and_verifies_new_blob() {
+    fn walrus_cli_archive_creates_content_addressed_reference_without_store_or_fetch() {
         let bytes = b"{\"id\":\"source\"}".to_vec();
         let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-123\n"),
-            Ok(r#"{"newlyCreated":{"blobObject":{"blobId":"blob-123"}}}"#),
-            Ok("blob-123\n"),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+        let walrus = FakeWalrusCommandRunner::new([Ok("blob-123\n")]);
 
-        let stored = archive(&walrus, &fetcher)
+        let stored = archive(&walrus)
             .store_and_verify("https://source.test/detail.geojson", &hash, &bytes)
-            .expect("Walrus archive should verify");
+            .expect("Walrus content-addressed reference should verify");
 
         assert_eq!(stored.uri, "walrus://blob/blob-123");
         assert_eq!(stored.walrus_blob_id, "blob-123");
         assert_eq!(stored.source_hash, hash);
         assert_eq!(stored.size_bytes, bytes.len() as u64);
-        assert_eq!(
-            fetcher.urls.borrow().as_slice(),
-            ["https://aggregator.test/v1/blobs/blob-123"]
-        );
-        assert_eq!(
-            fetcher.requests.borrow().as_slice(),
-            [FetchRequest {
-                url: "https://aggregator.test/v1/blobs/blob-123".to_owned(),
-                expected_size_bytes: bytes.len() as u64,
-                timeout_ms: 120_000,
-            }]
-        );
         assert_eq!(
             walrus
                 .args
@@ -720,30 +529,20 @@ mod tests {
                 .iter()
                 .map(|args| stringify_args(args))
                 .collect::<Vec<_>>(),
-            vec![
-                vec!["blob-id", "<temp>"],
-                vec!["store", "--epochs", "2", "--json", "<temp>"],
-                vec!["blob-id", "<temp>"],
-            ]
+            vec![vec!["blob-id", "--n-shards", "1000", "<temp>"]]
         );
-        assert_eq!(
-            walrus.temp_file_bytes.borrow().as_slice(),
-            [bytes.clone(), bytes.clone(), bytes]
-        );
+        assert_eq!(walrus.temp_file_bytes.borrow().as_slice(), [bytes]);
     }
 
     #[test]
     fn walrus_cli_archive_accepts_blob_id_success_prefix() {
         let bytes = b"source".to_vec();
         let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("Success: Blob from file '/tmp/source.bin' encoded successfully.\nblob-prefixed\n"),
-            Ok(r#"{"blobStoreResult":{"newlyCreated":{"blobObject":{"blobId":"blob-prefixed"}}}}"#),
-            Ok("blob-prefixed\n"),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+        let walrus = FakeWalrusCommandRunner::new([Ok(
+            "Success: Blob from file '/tmp/source.bin' encoded successfully.\nblob-prefixed\n",
+        )]);
 
-        let stored = archive(&walrus, &fetcher)
+        let stored = archive(&walrus)
             .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
             .expect("blob-id output with success prefix should verify");
 
@@ -754,16 +553,11 @@ mod tests {
     fn walrus_cli_archive_accepts_labeled_blob_id_output() {
         let bytes = b"source".to_vec();
         let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok(
-                "Success: Blob from file '/tmp/source.bin' encoded successfully.\nBlob ID: blob-labeled\nEncoding type: RedStuff/Reed-Solomon\n",
-            ),
-            Ok(r#"{"alreadyCertified":{"blobId":"blob-labeled"}}"#),
-            Ok("blob-labeled\n"),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
+        let walrus = FakeWalrusCommandRunner::new([Ok(
+            "Success: Blob from file '/tmp/source.bin' encoded successfully.\nBlob ID: blob-labeled\nEncoding type: RedStuff/Reed-Solomon\n",
+        )]);
 
-        let stored = archive(&walrus, &fetcher)
+        let stored = archive(&walrus)
             .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
             .expect("labeled blob-id output should verify");
 
@@ -787,30 +581,112 @@ mod tests {
     }
 
     #[test]
-    fn walrus_config_from_env_rejects_invalid_timeout() {
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn parses_walrus_n_shards_strictly() {
+        assert_eq!(parse_n_shards("1000").unwrap(), 1000);
+        assert!(parse_n_shards("0").is_err());
+        assert!(parse_n_shards("1").is_err());
+        assert!(parse_n_shards("not-a-number").is_err());
+    }
+
+    #[test]
+    fn walrus_config_from_env_rejects_missing_or_invalid_n_shards() {
         let _guard = ENV_LOCK.lock().unwrap();
-        let previous_aggregator = std::env::var_os("SONARI_WALRUS_AGGREGATOR_URL");
-        let previous_timeout = std::env::var_os("SONARI_WALRUS_CLI_TIMEOUT_MS");
-        unsafe {
-            std::env::set_var("SONARI_WALRUS_AGGREGATOR_URL", "https://aggregator.test");
-            std::env::set_var("SONARI_WALRUS_CLI_TIMEOUT_MS", "0");
+        with_env_var("SONARI_WALRUS_N_SHARDS", None, || {
+            let error = WalrusCliSourceArchiveConfig::from_env()
+                .expect_err("missing n_shards must be rejected");
+            assert!(format!("{error}").contains("SONARI_WALRUS_N_SHARDS"));
+        });
+        for value in ["0", "1", "not-a-number"] {
+            with_env_var("SONARI_WALRUS_N_SHARDS", Some(value), || {
+                let error = WalrusCliSourceArchiveConfig::from_env()
+                    .expect_err("invalid n_shards must be rejected");
+                assert!(format!("{error}").contains("SONARI_WALRUS_N_SHARDS"));
+            });
         }
+    }
 
-        let error =
-            WalrusCliSourceArchiveConfig::from_env().expect_err("zero timeout must be rejected");
+    #[test]
+    fn walrus_config_from_env_rejects_invalid_timeout() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        with_env_var("SONARI_WALRUS_N_SHARDS", Some("1000"), || {
+            with_env_var("SONARI_WALRUS_CLI_TIMEOUT_MS", Some("0"), || {
+                let error = WalrusCliSourceArchiveConfig::from_env()
+                    .expect_err("zero timeout must be rejected");
+                assert!(format!("{error}").contains("Walrus CLI timeout"));
+            });
+        });
+    }
 
+    fn with_env_var(name: &str, value: Option<&str>, test: impl FnOnce()) {
+        let previous = std::env::var_os(name);
         unsafe {
-            match previous_aggregator {
-                Some(value) => std::env::set_var("SONARI_WALRUS_AGGREGATOR_URL", value),
-                None => std::env::remove_var("SONARI_WALRUS_AGGREGATOR_URL"),
-            }
-            match previous_timeout {
-                Some(value) => std::env::set_var("SONARI_WALRUS_CLI_TIMEOUT_MS", value),
-                None => std::env::remove_var("SONARI_WALRUS_CLI_TIMEOUT_MS"),
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
             }
         }
-        assert!(format!("{error}").contains("Walrus CLI timeout"));
+        test();
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+
+    #[test]
+    fn walrus_config_from_env_reads_earthquake_egress_proxy_url() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        with_env_var("SONARI_WALRUS_N_SHARDS", Some("1000"), || {
+            with_env_var(
+                "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+                Some("http://127.0.0.1:18080"),
+                || {
+                    let config = WalrusCliSourceArchiveConfig::from_env().unwrap();
+                    assert_eq!(
+                        config.egress_proxy_url.as_deref(),
+                        Some("http://127.0.0.1:18080")
+                    );
+                    assert_eq!(config.n_shards, 1000);
+                },
+            );
+        });
+    }
+
+    #[test]
+    fn walrus_cli_commands_receive_proxy_environment_when_configured() {
+        let bytes = b"source".to_vec();
+        let hash = source_hash(&bytes);
+        let walrus = FakeWalrusCommandRunner::new([Ok("blob-123\n")]);
+        let archive = WalrusCliSourceArchive::with_clients(
+            WalrusCliSourceArchiveConfig {
+                cli_path: PathBuf::from("fake-walrus"),
+                egress_proxy_url: Some("http://127.0.0.1:18080".to_owned()),
+                ..WalrusCliSourceArchiveConfig::default()
+            },
+            &walrus,
+        );
+
+        archive
+            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
+            .expect("Walrus archive should verify");
+
+        let envs = walrus.envs.borrow();
+        assert_eq!(envs.len(), 1);
+        for command_env in envs.iter() {
+            assert_eq!(
+                stringify_env(command_env),
+                vec![
+                    ("ALL_PROXY".to_owned(), "http://127.0.0.1:18080".to_owned()),
+                    (
+                        "HTTPS_PROXY".to_owned(),
+                        "http://127.0.0.1:18080".to_owned(),
+                    ),
+                    ("HTTP_PROXY".to_owned(), "http://127.0.0.1:18080".to_owned(),),
+                    ("NO_PROXY".to_owned(), "127.0.0.1,localhost".to_owned()),
+                ]
+            );
+        }
     }
 
     #[test]
@@ -819,7 +695,7 @@ mod tests {
         let started_at = Instant::now();
 
         let error = runner
-            .run(Path::new("sleep"), &[OsString::from("5")], 50)
+            .run(Path::new("sleep"), &[OsString::from("5")], 50, &[])
             .expect_err("long-running command must time out");
 
         assert!(
@@ -833,129 +709,15 @@ mod tests {
     }
 
     #[test]
-    fn walrus_cli_archive_accepts_already_certified_store_response() {
-        let bytes = b"source".to_vec();
-        let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-certified\n"),
-            Ok(r#"{"alreadyCertified":{"blobId":"blob-certified"}}"#),
-            Ok("blob-certified\n"),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
-
-        let stored = archive(&walrus, &fetcher)
-            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect("already certified blob should verify");
-
-        assert_eq!(stored.uri, "walrus://blob/blob-certified");
-        assert_eq!(stored.walrus_blob_id, "blob-certified");
-    }
-
-    #[test]
-    fn walrus_cli_archive_accepts_nested_store_result_response() {
-        let bytes = b"source".to_vec();
-        let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-nested\n"),
-            Ok(r#"{"blobStoreResult":{"newlyCreated":{"blobObject":{"blobId":"blob-nested"}}}}"#),
-            Ok("blob-nested\n"),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
-
-        let stored = archive(&walrus, &fetcher)
-            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect("nested store result should verify");
-
-        assert_eq!(stored.uri, "walrus://blob/blob-nested");
-        assert_eq!(stored.walrus_blob_id, "blob-nested");
-    }
-
-    #[test]
-    fn walrus_cli_archive_accepts_nested_already_certified_store_response() {
-        let blob_id = parse_store_blob_id(
-            br#"{"blobStoreResult":{"alreadyCertified":{"blobId":"blob-nested-certified"}}}"#,
-        )
-        .expect("nested alreadyCertified store result should be accepted");
-
-        assert_eq!(blob_id, "blob-nested-certified");
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_error_store_blob_id() {
-        let error =
-            parse_store_blob_id(br#"{"blobStoreResult":{"error":{"blobId":"blob-error"}}}"#)
-                .expect_err("error variant blobId must not be accepted");
-
-        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_marked_invalid_store_blob_id() {
-        let error = parse_store_blob_id(br#"{"markedInvalid":{"blobId":"blob-invalid"}}"#)
-            .expect_err("markedInvalid variant blobId must not be accepted");
-
-        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_nested_marked_invalid_store_blob_id() {
-        let error = parse_store_blob_id(
-            br#"{"blobStoreResult":{"markedInvalid":{"blobId":"blob-invalid"}}}"#,
-        )
-        .expect_err("nested markedInvalid variant blobId must not be accepted");
-
-        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_multiple_success_store_blob_ids() {
-        let error = parse_store_blob_id(
-            br#"{"newlyCreated":{"blobObject":{"blobId":"blob-new"}},"alreadyCertified":{"blobId":"blob-certified"}}"#,
-        )
-        .expect_err("multiple different success blobIds must fail closed");
-
-        assert!(matches!(error, SourceArchiveError::StoreFailed(_)));
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_store_blob_id_mismatch() {
-        let bytes = b"source".to_vec();
-        let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-expected\n"),
-            Ok(r#"{"newlyCreated":{"blobObject":{"blobId":"blob-actual"}}}"#),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
-
-        let error = archive(&walrus, &fetcher)
-            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect_err("store blob id mismatch must fail closed");
-
-        assert!(matches!(
-            error,
-            SourceArchiveError::BlobMismatch {
-                expected_hash,
-                actual_hash,
-                ..
-            } if expected_hash == "blob-expected" && actual_hash == "blob-actual"
-        ));
-        assert!(fetcher.urls.borrow().is_empty());
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_aggregator_source_hash_mismatch() {
+    fn walrus_cli_archive_rejects_source_hash_mismatch_before_blob_id() {
         let bytes = b"source".to_vec();
         let wrong_bytes = b"tampered".to_vec();
-        let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-123\n"),
-            Ok(r#"{"alreadyCertified":{"blobId":"blob-123"}}"#),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(wrong_bytes.clone());
+        let wrong_hash = source_hash(&wrong_bytes);
+        let walrus = FakeWalrusCommandRunner::new([]);
 
-        let error = archive(&walrus, &fetcher)
-            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect_err("tampered aggregator bytes must fail closed");
+        let error = archive(&walrus)
+            .store_and_verify("https://source.test/grid.xml", &wrong_hash, &bytes)
+            .expect_err("source hash mismatch must fail closed");
 
         assert!(matches!(
             error,
@@ -963,96 +725,29 @@ mod tests {
                 expected_hash,
                 actual_hash,
                 ..
-            } if expected_hash == hash && actual_hash == source_hash(&wrong_bytes)
+            } if expected_hash == wrong_hash && actual_hash == source_hash(&bytes)
         ));
+        assert!(walrus.args.borrow().is_empty());
     }
 
     #[test]
-    fn walrus_cli_archive_returns_fetch_error_when_aggregator_fetch_fails() {
+    fn walrus_cli_archive_returns_blob_id_error_when_blob_id_command_fails() {
         let bytes = b"source".to_vec();
         let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-123\n"),
-            Ok(r#"{"alreadyCertified":{"blobId":"blob-123"}}"#),
-        ]);
-        let fetcher = FakeBlobFetcher::err("aggregator unavailable");
+        let walrus = FakeWalrusCommandRunner::new([Err("walrus blob-id failed".to_owned())]);
 
-        let error = archive(&walrus, &fetcher)
+        let error = archive(&walrus)
             .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect_err("aggregator fetch failure must fail closed");
+            .expect_err("blob-id failure must fail closed");
 
         assert!(
-            matches!(error, SourceArchiveError::FetchFailed(message) if message.contains("aggregator unavailable"))
+            matches!(error, SourceArchiveError::StoreFailed(message) if message.contains("walrus blob-id failed"))
         );
     }
 
     #[test]
-    fn reqwest_blob_fetcher_rejects_body_larger_than_expected_size() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("test server should bind");
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("test request should connect");
-            let mut buffer = [0_u8; 1024];
-            let _ = stream.read(&mut buffer);
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd")
-                .unwrap();
-        });
-
-        let error = ReqwestBlobFetcher
-            .fetch(&format!("http://{address}/v1/blobs/blob-123"), 3, 1_000)
-            .expect_err("oversized aggregator response must fail closed");
-
-        server.join().unwrap();
-        assert!(error.contains("exceeds expected size"));
-    }
-
-    #[test]
-    fn walrus_cli_archive_rejects_aggregator_blob_id_mismatch() {
-        let bytes = b"source".to_vec();
-        let hash = source_hash(&bytes);
-        let walrus = FakeWalrusCommandRunner::new([
-            Ok("blob-expected\n"),
-            Ok(r#"{"alreadyCertified":{"blobId":"blob-expected"}}"#),
-            Ok("blob-other\n"),
-        ]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
-
-        let error = archive(&walrus, &fetcher)
-            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect_err("blob-id mismatch after aggregator fetch must fail closed");
-
-        assert!(matches!(
-            error,
-            SourceArchiveError::BlobMismatch {
-                expected_hash,
-                actual_hash,
-                ..
-            } if expected_hash == "blob-expected" && actual_hash == "blob-other"
-        ));
-    }
-
-    #[test]
-    fn walrus_cli_archive_returns_store_error_when_store_command_fails() {
-        let bytes = b"source".to_vec();
-        let hash = source_hash(&bytes);
-        let walrus =
-            FakeWalrusCommandRunner::new([Ok("blob-123\n"), Err("walrus store failed".to_owned())]);
-        let fetcher = FakeBlobFetcher::ok(bytes.clone());
-
-        let error = archive(&walrus, &fetcher)
-            .store_and_verify("https://source.test/grid.xml", &hash, &bytes)
-            .expect_err("store failure must fail closed");
-
-        assert!(
-            matches!(error, SourceArchiveError::StoreFailed(message) if message.contains("walrus store failed"))
-        );
-        assert!(fetcher.urls.borrow().is_empty());
-    }
-
-    #[test]
-    #[ignore = "requires SONARI_WALRUS_LIVE=1, Walrus CLI config/wallet, and network funds"]
-    fn live_walrus_cli_archive_stores_fetches_and_verifies_fixture_source() {
+    #[ignore = "requires SONARI_WALRUS_LIVE=1 and Walrus CLI"]
+    fn live_walrus_cli_archive_creates_fixture_source_reference() {
         if std::env::var("SONARI_WALRUS_LIVE").ok().as_deref() != Some("1") {
             return;
         }
@@ -1075,6 +770,7 @@ mod tests {
     struct FakeWalrusCommandRunner {
         outputs: RefCell<VecDeque<Result<String, String>>>,
         args: RefCell<Vec<Vec<OsString>>>,
+        envs: RefCell<Vec<Vec<(OsString, OsString)>>>,
         temp_file_bytes: RefCell<Vec<Vec<u8>>>,
     }
 
@@ -1094,6 +790,7 @@ mod tests {
                         .collect(),
                 ),
                 args: RefCell::new(Vec::new()),
+                envs: RefCell::new(Vec::new()),
                 temp_file_bytes: RefCell::new(Vec::new()),
             }
         }
@@ -1105,8 +802,10 @@ mod tests {
             _program: &Path,
             args: &[OsString],
             _timeout_ms: u64,
+            env_overrides: &[(OsString, OsString)],
         ) -> Result<CommandOutput, String> {
             self.args.borrow_mut().push(args.to_vec());
+            self.envs.borrow_mut().push(env_overrides.to_vec());
             if let Some(path) = args.last().map(PathBuf::from).filter(|path| path.exists()) {
                 self.temp_file_bytes
                     .borrow_mut()
@@ -1124,60 +823,6 @@ mod tests {
         }
     }
 
-    struct FakeBlobFetcher {
-        bytes: Vec<u8>,
-        error: Option<String>,
-        urls: RefCell<Vec<String>>,
-        requests: RefCell<Vec<FetchRequest>>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct FetchRequest {
-        url: String,
-        expected_size_bytes: u64,
-        timeout_ms: u64,
-    }
-
-    impl FakeBlobFetcher {
-        fn ok(bytes: Vec<u8>) -> Self {
-            Self {
-                bytes,
-                error: None,
-                urls: RefCell::new(Vec::new()),
-                requests: RefCell::new(Vec::new()),
-            }
-        }
-
-        fn err(error: &str) -> Self {
-            Self {
-                bytes: Vec::new(),
-                error: Some(error.to_owned()),
-                urls: RefCell::new(Vec::new()),
-                requests: RefCell::new(Vec::new()),
-            }
-        }
-    }
-
-    impl BlobFetcher for FakeBlobFetcher {
-        fn fetch(
-            &self,
-            url: &str,
-            expected_size_bytes: u64,
-            timeout_ms: u64,
-        ) -> Result<Vec<u8>, String> {
-            self.urls.borrow_mut().push(url.to_owned());
-            self.requests.borrow_mut().push(FetchRequest {
-                url: url.to_owned(),
-                expected_size_bytes,
-                timeout_ms,
-            });
-            if let Some(error) = &self.error {
-                return Err(error.clone());
-            }
-            Ok(self.bytes.clone())
-        }
-    }
-
     fn stringify_args(args: &[OsString]) -> Vec<&'static str> {
         args.iter()
             .map(|arg| {
@@ -1187,6 +832,17 @@ mod tests {
                 } else {
                     Box::leak(value.into_owned().into_boxed_str())
                 }
+            })
+            .collect()
+    }
+
+    fn stringify_env(envs: &[(OsString, OsString)]) -> Vec<(String, String)> {
+        envs.iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
             })
             .collect()
     }

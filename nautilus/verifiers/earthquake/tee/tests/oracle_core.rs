@@ -8,7 +8,7 @@ use tee::{
     CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
     CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
-    LocalEd25519Signer, MIN_CLAIM_BAND, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
+    LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
     PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive, SourceArchiveError,
     StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, cell_band, grid_xml_from_artifact,
     merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100, process_usgs,
@@ -24,11 +24,14 @@ fn read_fixture(path: impl AsRef<Path>) -> Vec<u8> {
 }
 
 fn finalized_input() -> UsgsOracleInput {
+    let detail_json = read_fixture(format!("{FIXTURE_DIR}/input/usgs_detail.json"));
+    let observed_at_ms = detail_updated_at_ms(&detail_json);
     UsgsOracleInput {
         case_id: "usgs/finalized_minimal".to_owned(),
-        detail_json: read_fixture(format!("{FIXTURE_DIR}/input/usgs_detail.json")),
+        detail_json,
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        observed_at_ms,
         raw_detail_uri:
             "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json"
                 .to_owned(),
@@ -49,11 +52,37 @@ fn input_with_detail_id_and_aliases(canonical_id: &str, aliases: &str) -> UsgsOr
     detail["properties"]["ids"] = serde_json::Value::String(aliases.to_owned());
     input.case_id = format!("usgs-live/{canonical_id}");
     input.detail_json = serde_json::to_vec(&detail).expect("detail JSON should serialize");
+    input.observed_at_ms = detail_updated_at_ms(&input.detail_json);
     input.raw_detail_uri =
         format!("https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/{canonical_id}.geojson");
     input.raw_data_uri = format!("ipfs://sonari/live/{canonical_id}/raw_data_manifest.json");
     input.affected_cells_uri = format!("ipfs://sonari/live/{canonical_id}/affected_cells.json");
     input
+}
+
+fn input_with_usgs_payload_metadata(
+    title: &str,
+    region: &str,
+    magnitude: serde_json::Value,
+) -> UsgsOracleInput {
+    let mut input = finalized_input();
+    let mut detail: serde_json::Value =
+        serde_json::from_slice(&input.detail_json).expect("fixture detail should be valid JSON");
+    detail["properties"]["title"] = serde_json::Value::String(title.to_owned());
+    detail["properties"]["place"] = serde_json::Value::String(region.to_owned());
+    detail["properties"]["mag"] = magnitude;
+    input.detail_json = serde_json::to_vec(&detail).expect("detail JSON should serialize");
+    input.observed_at_ms = detail_updated_at_ms(&input.detail_json);
+    input
+}
+
+fn detail_updated_at_ms(detail_json: &[u8]) -> u64 {
+    serde_json::from_slice::<serde_json::Value>(detail_json)
+        .expect("fixture detail should be valid JSON")
+        .get("properties")
+        .and_then(|properties| properties.get("updated"))
+        .and_then(serde_json::Value::as_u64)
+        .expect("fixture detail should include properties.updated")
 }
 
 fn read_expected(name: &str) -> serde_json::Value {
@@ -80,7 +109,6 @@ fn pins_bcs_numeric_enums_to_typescript_contract() {
 fn pins_mvp_default_contract_values() {
     assert_eq!(ORACLE_VERSION, 1);
     assert_eq!(GEO_RESOLUTION, 7);
-    assert_eq!(MIN_CLAIM_BAND, 1);
 }
 
 #[test]
@@ -90,6 +118,59 @@ fn converts_mmi_decimal_strings_to_x100_deterministically() {
     assert_eq!(mmi_decimal_to_x100("7.234").unwrap(), 723);
     assert_eq!(mmi_decimal_to_x100("7.235").unwrap(), 724);
     assert_eq!(mmi_decimal_to_x100("0.005").unwrap(), 1);
+}
+
+#[test]
+fn finalized_payload_maps_usgs_detail_fields_and_rounds_magnitude() {
+    for (magnitude, expected_x100) in [
+        (serde_json::json!(7.234), 723),
+        (serde_json::json!(7.235), 724),
+        (serde_json::json!("7.995"), 800),
+    ] {
+        let input =
+            input_with_usgs_payload_metadata("M 7.24 - Test Event", "Test Region", magnitude);
+        let verified_at_ms = input.observed_at_ms;
+        let output = process_usgs(input).expect("fixture should finalize");
+        let payload = output
+            .unsigned_payload
+            .as_ref()
+            .expect("payload should exist");
+
+        assert_eq!(payload.source_event_id, "us7000sonari");
+        assert_eq!(payload.title, "M 7.24 - Test Event");
+        assert_eq!(payload.region, "Test Region");
+        assert_eq!(payload.magnitude_x100, expected_x100);
+        assert_eq!(payload.verified_at_ms, verified_at_ms);
+        assert!(payload.freshness_deadline_ms > payload.verified_at_ms);
+    }
+}
+
+#[test]
+fn finalized_payload_rejects_malformed_current_contract_fields() {
+    for (title, region, magnitude, expected) in [
+        ("", "Test Region", serde_json::json!(7.1), "title"),
+        ("M 7.1 - Test Event", "", serde_json::json!(7.1), "region"),
+        (
+            "M 7.1 - Test Event",
+            "Test Region",
+            serde_json::json!(0.0),
+            "magnitude",
+        ),
+        (
+            "M 7.1 - Test Event",
+            "Test Region",
+            serde_json::json!(20.01),
+            "magnitude",
+        ),
+    ] {
+        let error = process_usgs(input_with_usgs_payload_metadata(title, region, magnitude))
+            .expect_err("malformed current payload fields must fail closed");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected} error, got: {error}"
+        );
+    }
 }
 
 #[test]
@@ -140,11 +221,25 @@ fn finalized_fixture_core_matches_expected_hashes_without_signing() {
     );
     assert_eq!(
         serde_json::to_value(output.unsigned_payload).unwrap(),
-        read_expected("unsigned_payload_v1.json")
+        read_expected("unsigned_payload.json")
     );
     assert_eq!(
         serde_json::to_value(output.expected_hashes).unwrap(),
         read_expected("expected_hashes.json")
+    );
+}
+
+#[test]
+fn finalized_fixture_rejects_observed_at_ms_that_overflows_freshness_deadline() {
+    let mut input = finalized_input();
+    input.observed_at_ms = u64::MAX;
+
+    let error = process_usgs(input)
+        .expect_err("observed_at_ms at u64::MAX must overflow freshness_deadline_ms");
+
+    assert!(
+        error.to_string().contains("overflow"),
+        "expected an arithmetic overflow error, got: {error}"
     );
 }
 
@@ -270,7 +365,7 @@ fn finalized_entrypoint_signs_core_payload_with_injected_signer() {
 }
 
 #[test]
-fn finalized_usgs_archives_raw_sources_before_signing_payload() {
+fn finalized_usgs_references_raw_sources_before_signing_payload() {
     let signer = LocalEd25519Signer::new(SIGNING_KEY_SEED);
     let archive = RecordingSourceArchive::default();
     let output = process_usgs_with_source_archive(finalized_input(), &archive, &signer)
@@ -283,7 +378,7 @@ fn finalized_usgs_archives_raw_sources_before_signing_payload() {
         .expect("finalized output should include raw manifest");
     assert_eq!(raw_manifest.entries.len(), 2);
     assert_eq!(archive.stored.get(), 2);
-    assert_eq!(archive.fetched.get(), 2);
+    assert_eq!(archive.fetched.get(), 0);
 
     for entry in &raw_manifest.entries {
         assert!(entry.uri.starts_with("walrus://blob/"));
@@ -326,7 +421,7 @@ fn finalized_usgs_archives_raw_grid_zip_artifact_bytes_not_expanded_xml() {
     let grid_record = stored
         .iter()
         .find(|record| record.source_uri == "https://example.test/download/grid.xml.zip")
-        .expect("zip source should be archived");
+        .expect("zip source should be referenced");
     assert_eq!(grid_record.bytes, grid_zip);
     assert_eq!(grid_record.source_hash, grid_zip_hash);
 }
@@ -476,9 +571,11 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
     ] {
         let dir = format!("../fixtures/{case_id}");
         let grid_path = format!("{dir}/input/usgs_grid.xml");
+        let detail_json = read_fixture(format!("{dir}/input/usgs_detail.json"));
         let output = process_usgs(UsgsOracleInput {
             case_id: case_id.to_owned(),
-            detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
+            observed_at_ms: detail_updated_at_ms(&detail_json),
+            detail_json,
             grid_xml: Path::new(&grid_path)
                 .exists()
                 .then(|| read_fixture(&grid_path)),
@@ -668,8 +765,8 @@ fn low_level_cli_rejects_zero_walrus_timeout() {
     let output = Command::new(env!("CARGO_BIN_EXE_tee"))
         .args([
             "--walrus-archive",
-            "--walrus-aggregator-url",
-            "https://aggregator.test",
+            "--walrus-n-shards",
+            "1000",
             "--walrus-timeout-ms",
             "0",
         ])
@@ -682,6 +779,53 @@ fn low_level_cli_rejects_zero_walrus_timeout() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn low_level_cli_ignores_environment_signing_seed() {
+    let workspace = cli_test_workspace("low-level-ignores-env-seed");
+    let output_dir = workspace.join("output");
+    fs::create_dir_all(&workspace).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .args([
+            "--case-id",
+            "usgs/finalized_minimal",
+            "--detail",
+            &format!("{FIXTURE_DIR}/input/usgs_detail.json"),
+            "--grid",
+            &format!("{FIXTURE_DIR}/input/usgs_grid.xml"),
+            "--raw-detail-uri",
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+            "--raw-grid-uri",
+            "nautilus/verifiers/earthquake/fixtures/usgs/finalized_minimal/input/usgs_grid.xml",
+            "--raw-data-uri",
+            "ipfs://sonari/examples/us7000sonari/raw_data_manifest.json",
+            "--affected-cells-uri",
+            "ipfs://sonari/examples/us7000sonari/affected_cells.json",
+            "--output-dir",
+        ])
+        .arg(&output_dir)
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0101010101010101010101010101010101010101010101010101010101010101",
+        )
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let signature = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(output_dir.join("signature.json")).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(signature, read_expected("signature.json"));
+
+    fs::remove_dir_all(&workspace).unwrap();
 }
 
 #[test]
@@ -745,12 +889,168 @@ fn production_cli_reads_worker_request_from_stdin_when_input_is_omitted() {
 }
 
 #[test]
+fn production_cli_accepts_nautilus_health_check_action_without_seed() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env_remove("SONARI_TEE_SIGNING_KEY_SEED")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"health_check"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "healthy");
+    assert_eq!(result["external_sources_reachable"], true);
+}
+
+#[test]
+fn production_cli_returns_configured_attestation_action() {
+    let attestation_document_hex = format!("0x{}", "aa".repeat(96));
+    let public_key = format!("0x{}", "22".repeat(32));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .env(
+            "SONARI_TEE_ATTESTATION_DOCUMENT_HEX",
+            &attestation_document_hex,
+        )
+        .env("SONARI_TEE_ATTESTATION_PUBLIC_KEY", &public_key)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"get_attestation"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["attestation_document_hex"], attestation_document_hex);
+    assert_eq!(result["public_key"], public_key);
+}
+
+#[test]
+fn production_cli_get_attestation_output_is_byte_stable_for_fixed_seed_and_document() {
+    // Fixed seed, fixed document, and no explicit public key: the public key is
+    // derived from the seed so the route output is fully deterministic. Pinning
+    // the exact JSON bytes catches any wire drift in the get_attestation route.
+    let attestation_document_hex = format!("0x{}", "ab".repeat(96));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .env(
+            "SONARI_TEE_ATTESTATION_DOCUMENT_HEX",
+            &attestation_document_hex,
+        )
+        .env_remove("SONARI_TEE_ATTESTATION_PUBLIC_KEY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(br#"{"action":"get_attestation"}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    // The dev seed [7u8; 32] derives this Ed25519 public key; it is the same key
+    // pinned in the finalized fixture's signature.json, proving byte fidelity.
+    let expected = serde_json::json!({
+        "attestation_document_hex": attestation_document_hex,
+        "public_key": "0xea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
+    });
+    assert_eq!(result, expected);
+    let keys = result
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["attestation_document_hex", "public_key"]);
+}
+
+#[test]
+fn production_cli_requires_registration_metadata_for_process_data_action() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tee"))
+        .arg("production")
+        .env(
+            "SONARI_TEE_SIGNING_KEY_SEED",
+            "0x0707070707070707070707070707070707070707070707070707070707070707",
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"action":"process_data","payload":{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("registration_metadata"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn selects_shakemap_products_deterministically_by_preferred_version_update_and_key() {
     let detail_json = br#"{
         "id": "us7000multi",
         "properties": {
             "time": 1704067200000,
             "updated": 1704151200000,
+            "mag": 7.1,
+            "title": "M 7.1 - Multi Product Fixture",
+            "place": "Multi Product Fixture Region",
             "products": {
                 "shakemap": [
                     {
@@ -784,6 +1084,7 @@ fn selects_shakemap_products_deterministically_by_preferred_version_update_and_k
         detail_json: detail_json.to_vec(),
         grid_xml: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
         raw_grid_bytes: Some(read_fixture(format!("{FIXTURE_DIR}/input/usgs_grid.xml"))),
+        observed_at_ms: detail_updated_at_ms(detail_json),
         raw_detail_uri: "detail.json".to_owned(),
         raw_grid_uri: Some("grid.xml".to_owned()),
         raw_data_uri: "raw.json".to_owned(),
@@ -841,7 +1142,6 @@ impl SourceArchive for RecordingSourceArchive {
     ) -> Result<StoredSourceRef, SourceArchiveError> {
         let index = self.stored.get();
         self.stored.set(index + 1);
-        self.fetched.set(self.fetched.get() + 1);
         self.records.borrow_mut().push(ArchivedSourceRecord {
             source_uri: source_uri.to_owned(),
             source_hash: source_hash.to_owned(),
@@ -891,9 +1191,11 @@ impl SourceArchive for MismatchingSourceArchive {
 fn non_finalized_input(case_id: &str) -> UsgsOracleInput {
     let dir = format!("../fixtures/{case_id}");
     let grid_path = format!("{dir}/input/usgs_grid.xml");
+    let detail_json = read_fixture(format!("{dir}/input/usgs_detail.json"));
     UsgsOracleInput {
         case_id: case_id.to_owned(),
-        detail_json: read_fixture(format!("{dir}/input/usgs_detail.json")),
+        observed_at_ms: detail_updated_at_ms(&detail_json),
+        detail_json,
         grid_xml: Path::new(&grid_path)
             .exists()
             .then(|| read_fixture(&grid_path)),

@@ -27,7 +27,12 @@ export async function buildAwsEarthquakeTeeArtifact(
     const targetBinary = path.resolve(
         process.env.SONARI_TEE_BINARY ?? path.join(CARGO_TARGET_DIR, cargoTarget, "release/tee"),
     );
+    const targetBridgeBinary = path.resolve(
+        process.env.SONARI_VSOCK_TCP_BRIDGE_BINARY ??
+            path.join(CARGO_TARGET_DIR, cargoTarget, "release/vsock-tcp-bridge"),
+    );
     const artifactBinary = path.join(workDir, "bin/tee");
+    const artifactBridgeBinary = path.join(workDir, "bin/vsock-tcp-bridge");
     const artifactWalrusBinary = path.join(workDir, "bin/walrus");
     const walrusSourceBinary = await resolveExecutable(process.env.SONARI_WALRUS_CLI ?? "walrus");
 
@@ -49,6 +54,8 @@ export async function buildAwsEarthquakeTeeArtifact(
     }
     await copyFile(targetBinary, artifactBinary);
     await chmod(artifactBinary, 0o500);
+    await copyFile(targetBridgeBinary, artifactBridgeBinary);
+    await chmod(artifactBridgeBinary, 0o500);
     await copyFile(walrusSourceBinary, artifactWalrusBinary);
     await chmod(artifactWalrusBinary, 0o500);
     await run("tar", [
@@ -62,6 +69,7 @@ export async function buildAwsEarthquakeTeeArtifact(
         "-czf",
         outPath,
         "bin/tee",
+        "bin/vsock-tcp-bridge",
         "bin/walrus",
     ]);
 

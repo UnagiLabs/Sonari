@@ -71,9 +71,14 @@ contract-facing な要件として、H3 resolution 7 のセルだけを扱う。
 
 MVP の contract は、GPS、IP geolocation、VPN detection、住所証明、
 厳密な居住証明を Claim 条件として扱わない。
-海のみのセルなど、居住地として自然でないセルの制限は
-UI と verifier 側の入力検証で扱う。
-この文書変更だけでは、新しい Move 実装、source 追加、schema 変更を要求しない。
+ただし、登録できる `home_cell` は Move 側で許可居住セルの
+Merkle proof を検証する。
+許可居住セル root は admin が作成し、更新できる。
+root 更新後は、古い root 用の proof は使えない。
+
+居住セルはユーザーが後から変更できる。
+変更時も現在の許可居住セル root に対する proof を検証する。
+変更時刻は `Clock` から取得し、`home_cell_registered_at_ms` に保存する。
 
 ## 4. Identity verification
 
@@ -124,16 +129,13 @@ Disaster Claim は、次の条件をすべて検証する。
 | Recipient | 支払い先は Membership SBT owner の Sui address |
 | Duplicate Claim | 同じ campaign / event で未 Claim |
 
-`disaster_cutoff_time` は次の早い方である。
-
-- earthquake occurred time
-- Sonari candidate detected time
-
-災害発生時刻は cutoff の source の一例である。
-Claim timing の canonical term は `disaster_cutoff_time` である。
-finalized time は cutoff に使わない。
+地震 Claim の `disaster_cutoff_time` は、USGS が source として出す
+地震発生時刻を使う。オンチェーンでは `DisasterEvent.occurred_at_ms`
+として保存され、Membership の事前登録判定でもこの値を参照する。
+finalized time や Sonari candidate detected time は cutoff に使わない。
 発生後の駆け込み登録を防ぐためである。
 災害後の居住セル変更は、その災害の Claim eligibility に使えない。
+変更自体は許可するが、変更時刻が cutoff 以後なら Claim で reject する。
 将来、より厳しくする場合は grace period を置き、
 `last_changed_at_ms < disaster_cutoff_time - grace_period_ms` のように判定できる。
 MVP では grace period の具体値をまだ決めない。
@@ -203,11 +205,11 @@ DisasterEvent affected_cells_root
 - Earthquake Oracle payload は署名済みである。
 - `AffectedCellLeaf` は `affected_cells_root` に含まれる。
 - leaf の h3 index は `MembershipSBT.home_cell` と一致する。
-- leaf の band は event の minimum band 以上である。
+- leaf の band は Program に紐付く PayoutPolicy.min_claim_band 以上である。
 - Membership SBT の作成時刻と居住セル登録時刻は cutoff より前である。
 - Membership SBT は本人確認済みである。
 
-Earthquake Oracle v1 の BCS field order、schema、golden vector は変更しない。
+Earthquake Oracle payload の BCS field order、schema、golden vector は current contract として扱う。Move 側も schema と同じ freshness window（verified_at_ms + 21,600,000ms）を検証する。Claim に必要な minimum band は payload や DisasterEvent ではなく、Program に紐付く PayoutPolicy.min_claim_band で管理する。
 
 ## 9. External API surface
 
@@ -219,6 +221,8 @@ target API:
 | API | 処理概要 |
 | --- | --- |
 | donation functions | USDC donation を Pool へ入れる |
+| member registration | 許可居住セル proof を検証して Membership SBT を作る |
+| home cell update | current pass owner だけが proof 付きで居住セルを変更する |
 | identity update | Nautilus 署名済み本人確認 result を反映する |
 | disaster submit | Nautilus 署名済み災害 payload を保存する |
 | disaster claim | Membership SBT と affected cell を検証して支払う |

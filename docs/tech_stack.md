@@ -32,7 +32,7 @@ Verifier-specific details live with each verifier implementation.
 
 - Earthquake verifier: `nautilus/verifiers/earthquake/README.md`
 - Membership verifier: `nautilus/verifiers/membership/README.md`
-- Earthquake AWS runner: `infra/aws/earthquake-runner/README.md`
+- Sonari verifier AWS runner: `infra/aws/sonari-verifier-runner/README.md`
 
 ## ディレクトリ別役割
 
@@ -46,12 +46,13 @@ Verifier-specific details live with each verifier implementation.
 | `docs/` | プロジェクト全体の仕様、説明資料、提出用ドキュメント。 | Markdown、HTML |
 | `schemas/` | repository root の共通仕様。Payload、Merkle leaf、manifest、affected cells の言語横断契約を定義する。 | Markdown、JSON Schema |
 | `scripts/` | ローカル実行、デプロイ、登録、補助作業用スクリプト。 | shell、TypeScript |
-| `infra/` | AWS などの共有インフラテンプレート。Verifier 固有 template は verifier 名を含むディレクトリへ置く。 | CloudFormation |
+| `infra/` | AWS などの共有インフラテンプレート。Verifier runner は統合 runner 名のディレクトリへ置く。 | CloudFormation |
 
 ## 採用方針
 
 - 機能単位のルート構成を優先し、汎用的な中間ディレクトリは使わない。
 - TypeScript workspace は pnpm で管理し、root から `pnpm typecheck`、`pnpm test`、`pnpm test:oracle` を実行できる状態を保つ。
+- Rust の root 品質ゲートは `pnpm check:rust` で管理し、`cargo fmt --all --check` と `cargo clippy --workspace --all-targets -- -D warnings` を実行する。これにより通常コードだけでなく `#[cfg(test)]` を含む test target の Clippy warning も失敗扱いにする。
 - dApp は `dapp/` に置き、Dashboard、Donation、Membership Pass、Claim、Program / Campaign 表示、Wallet 接続を同じプロダクト面として扱う。
 - Earthquake verifier 専用コードは `nautilus/verifiers/earthquake/` に閉じる。
 - Membership verifier 専用コードは `nautilus/verifiers/membership/` に閉じる。

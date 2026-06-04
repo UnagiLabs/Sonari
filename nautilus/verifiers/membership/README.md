@@ -42,13 +42,26 @@ KYC と World ID は、どちらも満額 Claim ルートである。
 未認証の Membership SBT は Claim できない。
 
 World ID action は Sonari 専用にする。
+TEE は、設定された World ID app id と次の action だけを受け付ける。
+request で別の app id や action が来た場合は reject する。
+World ID API base URL は HTTPS のみ許可する。
 
 ```text
 sonari_membership_register_v1
 ```
 
-signal には Sui address、nonce、domain separator を含める。
+signal hash は TEE が再計算して、request の値と一致するか確認する。
+signal には Sui address、membership id、署名済み statement hash、
+domain separator を含める。
 これにより、proof の流用を防ぐ。
+
+```text
+sha256("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)
+```
+
+World ID API には `max_age = 604800` を明示して送る。
+これは World ID が許す最大 7 日の root age である。
+queued job の遅延で、既定の 2 時間に依存しないためである。
 
 ## Verifier output
 
@@ -76,6 +89,118 @@ IdentityVerificationResult {
 `provider` は `kyc` または `world_id` である。
 `verified` が `true` のときだけ、Membership SBT を verified にできる。
 
+## membership TEE CLI contract
+
+`membership-tee` は stdin で `IdentityVerifyRequest` JSON を受け取る。
+request は未知の field を拒否する。
+TEE は request の意味を変えず、検証結果だけを stdout に返す。
+TEE は 1 request = 1 JSON in / 1 JSON out の stateless な処理である。
+stateless とは、TEE が前の job 状態を持たないという意味である。
+
+```text
+membership-tee fixture [--world-id-status verified|rejected|pending-source]
+membership-tee production
+membership-tee --encode-only
+```
+
+fixture はローカル検証と golden vector 用である。
+World ID の verified fixture では `issued_at_ms` が必須である。
+`validity_ms` は fixture でだけ任意の有効期間として使える。
+`--world-app-id` は期待する World ID app id を固定する。
+request の `world_id.world_app_id` が一致しない場合は reject する。
+
+production は実運用の入口である。
+production は `SONARI_WORLD_ID_API_BASE` と `SONARI_WORLD_ID_APP_ID` を読む。
+World ID API base URL は HTTPS のみ許可する。
+署名鍵は `SONARI_TEE_SIGNING_KEY_SEED` または
+`SONARI_TEE_SIGNING_KEY_SEED_FILE` から読む。
+production では dev fallback を使わない。
+
+AWS 境界 interface として固定する env は次の 3 つである。
+これらは、外側の worker が TEE process に渡す値である。
+
+```text
+SONARI_TEE_SIGNING_KEY_SEED
+SONARI_TEE_SIGNING_KEY_SEED_FILE
+SONARI_WORLD_ID_API_BASE
+```
+
+`SONARI_WORLD_ID_APP_ID` は production の runtime config として必須である。
+ただし AWS 境界 interface の固定対象とは分けて扱う。
+#74 では deploy config から TEE process env に注入する。
+本番では KMS や Nitro attestation へ差し替える場合がある。
+その場合も stdin/stdout の JSON 契約は変えない。
+
+production では `issued_at_ms` と `validity_ms` を request から信頼しない。
+TEE が現在時刻を `issued_at_ms` に使う。
+有効期間も TEE 側の既定値を使う。
+これにより caller が署名済み result の寿命を延ばせない。
+
+成功時の stdout は `status: "verified"` と result fields を返す。
+この stdout は bare `IdentityTeeResult` ではない。
+`IdentityTeeResult` の fields に `payload_bcs_hex`、`signature`、`public_key` を足す。
+署名対象は `payload_bcs_hex` の bytes そのものである。
+Sui intent prefix は付けない。
+
+```json
+{
+  "status": "verified",
+  "intent": "SONARI_IDENTITY_VERIFICATION_V1",
+  "verifier_family": "identity",
+  "verifier_version": 1,
+  "registry_id": "0x...",
+  "membership_id": "0x...",
+  "owner": "0x...",
+  "provider": "world_id",
+  "verified": true,
+  "duplicate_key_hash": "0x...",
+  "evidence_hash": "0x...",
+  "issued_at_ms": 1800000000000,
+  "expires_at_ms": 1831536000000,
+  "terms_version": 1,
+  "signed_statement_hash": "0x...",
+  "payload_bcs_hex": "0x...",
+  "signature": "0x...",
+  "public_key": "0x..."
+}
+```
+
+非成功時の stdout は `status` と `error_code` だけを返す。
+`rejected`、`pending_source`、`unsupported` には署名を付けない。
+payload BCS も返さない。
+非 verified stdout は `status` と `error_code` だけを返す。
+`pending_source` は earthquake と同じ再試行用の語である。
+
+```json
+{ "status": "rejected", "error_code": "WORLD_ID_VERIFICATION_FAILED" }
+```
+
+`--encode-only` は完成済み `IdentityTeeResult` JSON を stdin で受け取る。
+stdout には `payload_bcs_hex` だけを返す。
+`verified == false` の result は拒否する。
+
+### Signed payload BCS layout
+
+Move に渡す signed payload は、次の順番で BCS bytes にする。
+この順番は contract-facing な契約として扱う。
+
+```text
+intent: vector<u8> UTF-8
+verifier_family: vector<u8> UTF-8, identity
+verifier_version: u64
+registry_id: 32-byte Sui object id
+membership_id: 32-byte Sui object id
+owner: 32-byte Sui address
+provider: u8, KYC = 1, World ID = 2
+verified: bool
+duplicate_key_hash: 32 bytes
+evidence_hash: 32 bytes
+issued_at_ms: u64
+expires_at_ms: u64
+terms_version: u64
+signed_statement_hash: 32 bytes
+```
+
 `duplicate_key_hash` は provider 内の重複登録を防ぐために使う。
 すでに別 SBT に紐づく duplicate key は reject する。
 
@@ -84,9 +209,33 @@ kyc_duplicate_key = hash(kyc_provider_id, provider_user_unique_id)
 world_duplicate_key = hash(world_app_id, action, nullifier)
 ```
 
+実装では SHA-256 を使う。
+input は UTF-8 文字列を NUL byte で区切る。
+大文字小文字は暗黙に変換しない。
+
+```text
+KYC: sonari:kyc:v1\0{provider_id}\0{provider_user_unique_id}
+World ID: sonari:world_id:v1\0{world_app_id}\0{action}\0{nullifier}
+```
+
+World ID の `nullifier` は、hash 前に正規化する。
+decimal と `0x` hex は同じ 10 進文字列へ変換する。
+先頭の `0` や hex の大文字小文字では別 key にしない。
+
 KYC と World ID をまたぐ完全な同一人物判定は MVP 外である。
 登録時と Claim 時に、複数 SBT と複数 Claim を禁じる表示を出す。
 その内容に対して Sui wallet 署名を求める。
+
+`evidence_hash` は、verifier が結果 payload を組み立てる時に計算する。
+caller から受け取った値は使わない。
+raw PII や proof body も入れない。
+
+```text
+sha256("sonari:identity_evidence:v1" \0 provider \0 duplicate_key_hash_hex \0 verification_level \0 issued_at_ms_decimal)
+```
+
+`duplicate_key_hash_hex` は `0x` 付き小文字 hex である。
+`issued_at_ms_decimal` には、TEE が result を発行した時刻を 10 進数で入れる。
 
 ## Privacy boundary
 
@@ -118,6 +267,7 @@ verifier は raw personal data を output に含めない。
 identity verification request は queued job として扱う。
 job があるときだけ batch workflow を起動する。
 job が 0 件なら EC2 / Nitro Enclave は起動しない。
+AWS on-demand interface の固定内容は `infra/aws/membership-identity-runner/README.md` に置く。
 
 ```mermaid
 flowchart TD

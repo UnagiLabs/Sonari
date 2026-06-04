@@ -1,0 +1,16 @@
+{
+    "intent": "SONARI_IDENTITY_VERIFICATION_V1",
+    "verifier_family": "identity",
+    "verifier_version": 1,
+    "registry_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "provider": "kyc",
+    "verified": false,
+    "duplicate_key_hash": "0x4957d2bb4adcf6295386f9bb1563b95ee9d34555c47604f6dc1e64614007ec66",
+    "evidence_hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "issued_at_ms": 1800000000000,
+    "expires_at_ms": 1831536000000,
+    "terms_version": 1,
+    "signed_statement_hash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

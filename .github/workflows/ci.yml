@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+env:
+  SUI_CLI_URL: https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/sui-testnet-v1.71.1-ubuntu-x86_64.tgz
+  SUI_CLI_SHA256: ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5
+
 jobs:
   check:
     name: pnpm and Cargo
@@ -16,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -27,16 +33,101 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.27.0 --activate
 
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
       - name: Set up Rust
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            nautilus/verifiers/earthquake/tee/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('nautilus/verifiers/earthquake/tee/Cargo.lock', 'nautilus/verifiers/earthquake/tee/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Detect Move changes
+        id: move-changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            base_ref="FETCH_HEAD"
+          else
+            base_ref="${{ github.event.before }}"
+            if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          git diff --name-only "$base_ref" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-files.txt"
+          # Move-related files include contracts/, Move.toml, and Move.lock.
+          if grep -Eq '^(contracts/|contracts/Move\.toml$|contracts/Move\.lock$|package\.json$|pnpm-lock\.yaml$|\.github/workflows/ci\.yml$)' "$RUNNER_TEMP/changed-files.txt"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache Sui CLI artifact
+        if: steps.move-changes.outputs.changed == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/sonari/cli-artifacts/sui/${{ env.SUI_CLI_SHA256 }}
+          key: sui-cli-${{ runner.os }}-${{ env.SUI_CLI_SHA256 }}
+
+      - name: Install pinned Sui CLI
+        if: steps.move-changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/sonari-bin"
+          cache_dir="$HOME/.cache/sonari/cli-artifacts/sui/$SUI_CLI_SHA256"
+          download_path="$cache_dir/download"
+          extract_dir="$RUNNER_TEMP/sui-extract"
+
+          mkdir -p "$install_dir" "$cache_dir" "$extract_dir"
+          if [[ ! -f "$download_path" ]]; then
+            curl -fsSL "$SUI_CLI_URL" -o "$download_path"
+          fi
+          printf '%s  %s\n' "$SUI_CLI_SHA256" "$download_path" | sha256sum -c -
+          tar -xzf "$download_path" -C "$extract_dir"
+          source_path="$(find "$extract_dir" -type f -name sui | head -n 1)"
+          if [[ -z "$source_path" || ! -f "$source_path" ]]; then
+            echo "Unable to find sui in downloaded Sui CLI artifact" >&2
+            exit 1
+          fi
+          install -m 0755 "$source_path" "$install_dir/sui"
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/sui" --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Check formatting and lint
         run: pnpm check
+
+      - name: Check Move contracts
+        if: steps.move-changes.outputs.changed == 'true'
+        run: pnpm check:move
 
       - name: Typecheck
         run: pnpm typecheck
@@ -45,4 +136,4 @@ jobs:
         run: pnpm test
 
       - name: Test Rust TEE
-        run: cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml
+        run: cargo test --workspace

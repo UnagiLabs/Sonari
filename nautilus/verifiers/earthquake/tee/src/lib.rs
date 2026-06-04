@@ -2,6 +2,7 @@ mod compute;
 mod core;
 mod crypto;
 mod encoding;
+pub mod server;
 mod source;
 
 pub use compute::intensity::{cell_band, mmi_decimal_to_x100, p90_x100};
@@ -9,15 +10,15 @@ pub use compute::merkle::merkle_root_from_leaf_hashes;
 pub use core::artifacts::{
     AffectedCellJson, AffectedCellsArtifact, ExpectedHashes, LeafHash, ProofStep, RawDataEntry,
     RawDataManifest, RawSourceContentHash, SampleProof, SignatureArtifact, SourceEntry,
-    SourceManifest, StoredSourceRef, UnsignedPayloadV1,
+    SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 pub use core::processing::{
-    process_usgs, process_usgs_from_worker_request, process_usgs_with_signer,
-    process_usgs_with_source_archive,
+    process_usgs, process_usgs_archived, process_usgs_from_worker_request,
+    process_usgs_with_signer, process_usgs_with_source_archive,
 };
 pub use core::source_archive::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, SourceArchive, SourceArchiveError, WalrusCliSourceArchive,
-    WalrusCliSourceArchiveConfig, parse_command_timeout_ms, parse_epochs,
+    WalrusCliSourceArchiveConfig, parse_command_timeout_ms, parse_epochs, parse_n_shards,
 };
 pub use core::types::{
     OracleError, OracleOutput, OracleStatus, ResultSummary, UsgsOracleInput, WorkerToTeeRequest,

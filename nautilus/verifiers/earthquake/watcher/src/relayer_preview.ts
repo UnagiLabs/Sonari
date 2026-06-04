@@ -2,6 +2,12 @@ import {
     buildRelayerRequestPreview,
     type RelayerRequestPreview as DirectRelayerRequestPreview,
     dryRunRelayerSubmit,
+    type RelayerResult,
+    type RelayerSigner,
+    type RelayerSubmitConfig,
+    type RelayerSubmitSuccess,
+    type SuiNetwork,
+    submitRelayerPayload,
 } from "@sonari/earthquake-relayer";
 import {
     type OracleErrorCode,
@@ -34,6 +40,7 @@ export interface RelayerSuccess {
     mode: RelayerMode;
     request: RelayerRequestPreview;
     digest?: string;
+    objectId?: string;
 }
 
 export type RelayerRunResult =
@@ -52,6 +59,7 @@ export interface HttpRelayerPreviewConfig {
     registry: string;
     verifierRegistry: string;
     mode?: RelayerMode;
+    network?: SuiNetwork;
     grpcUrl?: string;
     senderAddress?: string;
 }
@@ -61,8 +69,16 @@ export interface DirectRelayerConfig {
     target: string;
     registry: string;
     verifierRegistry: string;
+    network?: SuiNetwork;
     grpcUrl?: string;
     senderAddress?: string;
+    allowSubmit?: boolean;
+    configurationError?: string;
+    loadSigner?: () => Promise<RelayerSigner>;
+    submitPayload?: (
+        input: unknown,
+        config: RelayerSubmitConfig,
+    ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
 }
 
 type Fetcher = typeof fetch;
@@ -79,6 +95,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
         this.registry = config.registry;
         this.verifierRegistry = config.verifierRegistry;
         this.mode = config.mode ?? "preview";
+        this.network = config.network;
         this.grpcUrl = config.grpcUrl;
         this.senderAddress = config.senderAddress;
         this.bearerToken = config.bearerToken;
@@ -88,6 +105,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
     private readonly registry: string;
     private readonly verifierRegistry: string;
     readonly mode: RelayerMode;
+    private readonly network: SuiNetwork | undefined;
     private readonly grpcUrl: string | undefined;
     private readonly senderAddress: string | undefined;
     private readonly bearerToken: string | undefined;
@@ -115,6 +133,7 @@ export class HttpRelayerAdapter implements RelayerAdapter {
                     target: this.target,
                     registry: this.registry,
                     verifierRegistry: this.verifierRegistry,
+                    network: this.network,
                     grpcUrl: this.grpcUrl,
                     senderAddress: this.senderAddress,
                 }),
@@ -125,12 +144,16 @@ export class HttpRelayerAdapter implements RelayerAdapter {
                 if (body.ok) {
                     const request = readRelayerRequest(body.value);
                     const digest = readRelayerDigest(body.value);
+                    const objectId = readRelayerObjectId(body.value);
                     const value: RelayerSuccess = {
                         mode: this.mode,
                         request,
                     };
                     if (digest !== undefined) {
                         value.digest = digest;
+                    }
+                    if (objectId !== undefined) {
+                        value.objectId = objectId;
                     }
                     return {
                         ok: true,
@@ -164,6 +187,9 @@ export class DirectRelayerAdapter implements RelayerAdapter {
             registry: this.config.registry,
             verifierRegistry: this.config.verifierRegistry,
         };
+        if (this.config.configurationError !== undefined) {
+            return relayerSubmitFailed(this.config.configurationError);
+        }
         if (this.mode === "preview") {
             const result = buildRelayerRequestPreview(validation.value, requestConfig);
             return result.ok
@@ -177,11 +203,16 @@ export class DirectRelayerAdapter implements RelayerAdapter {
                 : result;
         }
         if (this.mode === "dry_run") {
-            if (this.config.grpcUrl === undefined || this.config.senderAddress === undefined) {
-                return relayerSubmitFailed("dry_run requires grpcUrl and senderAddress");
+            if (
+                this.config.network === undefined ||
+                this.config.grpcUrl === undefined ||
+                this.config.senderAddress === undefined
+            ) {
+                return relayerSubmitFailed("dry_run requires network, grpcUrl, and senderAddress");
             }
             const result = await dryRunRelayerSubmit(validation.value, {
                 ...requestConfig,
+                network: this.config.network,
                 grpcUrl: this.config.grpcUrl,
                 senderAddress: this.config.senderAddress,
             });
@@ -195,7 +226,40 @@ export class DirectRelayerAdapter implements RelayerAdapter {
                   }
                 : result;
         }
-        return relayerSubmitFailed("submit signer is not configured in the AWS Lambda runner");
+        if (this.config.allowSubmit !== true) {
+            return relayerSubmitFailed("submit requires RELAYER_ALLOW_SUBMIT=true");
+        }
+        if (this.config.network === undefined || this.config.grpcUrl === undefined) {
+            return relayerSubmitFailed("submit requires network and grpcUrl");
+        }
+        if (this.config.loadSigner === undefined) {
+            return relayerSubmitFailed("submit requires RELAYER_SIGNER_SECRET_ARN");
+        }
+        try {
+            const signer = await this.config.loadSigner();
+            const submit = this.config.submitPayload ?? submitRelayerPayload;
+            const result = await submit(validation.value, {
+                ...requestConfig,
+                network: this.config.network,
+                grpcUrl: this.config.grpcUrl,
+                signer,
+            });
+            return result.ok
+                ? {
+                      ok: true,
+                      value: {
+                          mode: this.mode,
+                          request: normalizeDirectRelayerRequest(result.value.request),
+                          ...(result.value.digest === undefined
+                              ? {}
+                              : { digest: result.value.digest }),
+                          objectId: result.value.objectId,
+                      },
+                  }
+                : result;
+        } catch (error) {
+            return relayerSubmitFailed(errorMessage(error));
+        }
     }
 }
 
@@ -218,7 +282,9 @@ export class StaticFailingRelayerAdapter implements RelayerAdapter {
 type RelayerSidecarResult =
     | {
           ok: true;
-          value: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string };
+          value:
+              | RelayerRequestPreview
+              | { request: RelayerRequestPreview; digest?: string; objectId?: string };
       }
     | { ok: false; error_code: RelayerErrorCode; message: string };
 
@@ -270,7 +336,7 @@ function readOptionalString(input: unknown): string | undefined {
 }
 
 function readRelayerRequest(
-    input: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string },
+    input: RelayerRequestPreview | { request: RelayerRequestPreview },
 ): RelayerRequestPreview {
     return "request" in input ? input.request : input;
 }
@@ -279,6 +345,12 @@ function readRelayerDigest(
     input: RelayerRequestPreview | { request: RelayerRequestPreview; digest?: string },
 ): string | undefined {
     return "request" in input ? readOptionalString(input.digest) : undefined;
+}
+
+function readRelayerObjectId(
+    input: RelayerRequestPreview | { request: RelayerRequestPreview; objectId?: string },
+): string | undefined {
+    return "request" in input ? readOptionalString(input.objectId) : undefined;
 }
 
 function normalizeDirectRelayerRequest(input: DirectRelayerRequestPreview): RelayerRequestPreview {

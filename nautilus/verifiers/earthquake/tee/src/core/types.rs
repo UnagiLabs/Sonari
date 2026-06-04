@@ -1,7 +1,8 @@
 use crate::core::artifacts::{
     AffectedCellsArtifact, ExpectedHashes, RawDataManifest, SampleProof, SignatureArtifact,
-    SourceManifest, UnsignedPayloadV1,
+    SourceManifest, UnsignedPayload,
 };
+use crate::crypto::HexError;
 use serde::Serialize;
 use thiserror::Error;
 
@@ -25,6 +26,14 @@ pub enum OracleError {
     Zip(String),
     #[error("invalid Worker to TEE request: {0}")]
     WorkerRequest(String),
+    #[error("arithmetic overflow: {0}")]
+    Overflow(String),
+}
+
+impl From<HexError> for OracleError {
+    fn from(error: HexError) -> Self {
+        Self::InvalidGridPoint(error.to_string())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +42,7 @@ pub struct UsgsOracleInput {
     pub detail_json: Vec<u8>,
     pub grid_xml: Option<Vec<u8>>,
     pub raw_grid_bytes: Option<Vec<u8>>,
+    pub observed_at_ms: u64,
     pub raw_detail_uri: String,
     pub raw_grid_uri: Option<String>,
     pub raw_data_uri: String,
@@ -126,7 +136,7 @@ pub struct OracleOutput {
     pub affected_cells: Option<AffectedCellsArtifact>,
     pub expected_hashes: Option<ExpectedHashes>,
     pub sample_proof: Option<SampleProof>,
-    pub unsigned_payload: Option<UnsignedPayloadV1>,
+    pub unsigned_payload: Option<UnsignedPayload>,
     pub unsigned_bcs_payload: Option<Vec<u8>>,
     pub signature: Option<SignatureArtifact>,
 }

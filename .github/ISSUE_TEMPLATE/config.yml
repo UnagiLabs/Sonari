@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Issue作成の前に
+    url: https://github.com/UnagiLabs/Sonari/issues/new/choose
+    about: 通常は「新規実装」または「修正」のフォームを使ってください。例外時のみ空issueを使ってください。

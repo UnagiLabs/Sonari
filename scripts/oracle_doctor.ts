@@ -19,8 +19,9 @@ export interface OracleDoctorResult {
     checks: DoctorCheck[];
 }
 
-const DEFAULT_TEMPLATE_PATH = "infra/aws/earthquake-runner/template.yaml";
-const RELAYER_MODES = new Set(["preview", "dry_run", "submit"]);
+const DEFAULT_TEMPLATE_PATH = "infra/aws/sonari-verifier-runner/template.yaml";
+const RELAYER_MODES = new Set(["", "preview", "dry_run", "submit"]);
+const RELAYER_NETWORKS = new Set(["mainnet", "testnet", "devnet"]);
 
 export async function runOracleDoctor(
     options: OracleDoctorOptions = {},
@@ -29,14 +30,27 @@ export async function runOracleDoctor(
     const checks: DoctorCheck[] = [];
 
     checks.push(checkRelayerMode(env.RELAYER_MODE));
+    checks.push(checkRelayerCoreField("RELAYER_TARGET", env.RELAYER_TARGET, env.RELAYER_MODE));
+    checks.push(checkRelayerCoreField("RELAYER_REGISTRY", env.RELAYER_REGISTRY, env.RELAYER_MODE));
+    checks.push(
+        checkRelayerCoreField(
+            "RELAYER_VERIFIER_REGISTRY",
+            env.RELAYER_VERIFIER_REGISTRY,
+            env.RELAYER_MODE,
+        ),
+    );
+    checks.push(checkRelayerNetwork(env.RELAYER_NETWORK, env.RELAYER_MODE));
     checks.push(checkBooleanFlag("RELAYER_ALLOW_SUBMIT", env.RELAYER_ALLOW_SUBMIT));
-    checks.push(checkRequiredForMode("RELAYER_GRPC_URL", env.RELAYER_GRPC_URL, env.RELAYER_MODE));
+    checks.push(checkRelayerGrpcUrl(env.RELAYER_GRPC_URL, env.RELAYER_NETWORK, env.RELAYER_MODE));
     checks.push(
         checkRequiredForMode(
             "RELAYER_SENDER_ADDRESS",
             env.RELAYER_SENDER_ADDRESS,
             env.RELAYER_MODE,
         ),
+    );
+    checks.push(
+        checkSubmitGuard(env.RELAYER_MODE, env.RELAYER_ALLOW_SUBMIT, env.RELAYER_SIGNER_SECRET_ARN),
     );
     checks.push(checkOptionalSecretPair("MANUAL_SUBMIT_TOKEN", env.MANUAL_SUBMIT_TOKEN));
     checks.push(checkOptionalSecretPair("RUNNER_TOKEN_SECRET_ARN", env.RUNNER_TOKEN_SECRET_ARN));
@@ -56,7 +70,7 @@ export async function runOracleDoctor(
 }
 
 function checkRelayerMode(value: string | undefined): DoctorCheck {
-    const mode = value ?? "preview";
+    const mode = value ?? "";
     if (!RELAYER_MODES.has(mode)) {
         return {
             name: "RELAYER_MODE",
@@ -67,7 +81,29 @@ function checkRelayerMode(value: string | undefined): DoctorCheck {
     return {
         name: "RELAYER_MODE",
         status: "ok",
-        message: mode,
+        message: mode.length === 0 ? "disabled" : mode,
+    };
+}
+
+function checkRelayerNetwork(
+    value: string | undefined,
+    modeValue: string | undefined,
+): DoctorCheck {
+    const mode = modeValue ?? "";
+    if (mode !== "dry_run" && mode !== "submit") {
+        return {
+            name: "RELAYER_NETWORK",
+            status: "warn",
+            message: "not required when relayer is disabled",
+        };
+    }
+    if (value !== undefined && RELAYER_NETWORKS.has(value)) {
+        return { name: "RELAYER_NETWORK", status: "ok", message: value };
+    }
+    return {
+        name: "RELAYER_NETWORK",
+        status: "fail",
+        message: "required for RELAYER_MODE=dry_run or submit",
     };
 }
 
@@ -79,6 +115,24 @@ function checkBooleanFlag(name: string, value: string | undefined): DoctorCheck 
         return { name, status: "warn", message: "not enabled" };
     }
     return { name, status: "fail", message: "must be true or false when set" };
+}
+
+function checkRelayerCoreField(
+    name: string,
+    value: string | undefined,
+    modeValue: string | undefined,
+): DoctorCheck {
+    const mode = modeValue ?? "";
+    if (mode.length === 0) {
+        return { name, status: "warn", message: "not required when relayer is disabled" };
+    }
+    if (!RELAYER_MODES.has(mode)) {
+        return { name, status: "warn", message: "RELAYER_MODE is invalid" };
+    }
+    if (value !== undefined && value.length > 0) {
+        return { name, status: "ok", message: "configured" };
+    }
+    return { name, status: "fail", message: `required for RELAYER_MODE=${mode}` };
 }
 
 function checkRequiredForMode(
@@ -94,6 +148,78 @@ function checkRequiredForMode(
         return { name, status: "ok", message: "configured" };
     }
     return { name, status: "fail", message: "required for RELAYER_MODE=dry_run" };
+}
+
+function checkRelayerGrpcUrl(
+    value: string | undefined,
+    network: string | undefined,
+    modeValue: string | undefined,
+): DoctorCheck {
+    const mode = modeValue ?? "";
+    if (mode !== "dry_run" && mode !== "submit") {
+        return {
+            name: "RELAYER_GRPC_URL",
+            status: "warn",
+            message: "not required when relayer is disabled",
+        };
+    }
+    if (value === undefined || value.length === 0) {
+        return {
+            name: "RELAYER_GRPC_URL",
+            status: "fail",
+            message: `required for RELAYER_MODE=${mode}`,
+        };
+    }
+    let url: URL;
+    try {
+        url = new URL(value);
+    } catch {
+        return { name: "RELAYER_GRPC_URL", status: "fail", message: "must be a valid URL" };
+    }
+    if (url.protocol !== "https:") {
+        return { name: "RELAYER_GRPC_URL", status: "fail", message: "must use https" };
+    }
+    if (network !== undefined && RELAYER_NETWORKS.has(network)) {
+        const expectedHost = `fullnode.${network}.sui.io`;
+        if (url.hostname !== expectedHost) {
+            return {
+                name: "RELAYER_GRPC_URL",
+                status: "fail",
+                message: `host ${url.hostname} does not match RELAYER_NETWORK=${network}`,
+            };
+        }
+    }
+    return { name: "RELAYER_GRPC_URL", status: "ok", message: "configured" };
+}
+
+function checkSubmitGuard(
+    modeValue: string | undefined,
+    allowSubmit: string | undefined,
+    signerSecretArn: string | undefined,
+): DoctorCheck {
+    const mode = modeValue ?? "";
+    if (mode !== "submit") {
+        return {
+            name: "RELAYER_SUBMIT_GUARD",
+            status: "warn",
+            message: "not required outside submit mode",
+        };
+    }
+    if (allowSubmit !== "true") {
+        return {
+            name: "RELAYER_SUBMIT_GUARD",
+            status: "fail",
+            message: "RELAYER_ALLOW_SUBMIT=true is required for submit",
+        };
+    }
+    if (signerSecretArn === undefined || signerSecretArn.length === 0) {
+        return {
+            name: "RELAYER_SUBMIT_GUARD",
+            status: "fail",
+            message: "RELAYER_SIGNER_SECRET_ARN is required for submit",
+        };
+    }
+    return { name: "RELAYER_SUBMIT_GUARD", status: "ok", message: "submit guard configured" };
 }
 
 function checkOptionalSecretPair(name: string, value: string | undefined): DoctorCheck {

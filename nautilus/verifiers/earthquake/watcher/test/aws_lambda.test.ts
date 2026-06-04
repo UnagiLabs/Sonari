@@ -20,6 +20,9 @@ import type { UsgsEarthquakeCandidate } from "../src/usgs.js";
 
 const baseNow = 1_800_000_000_000;
 const manualAuthToken = ["manual", "test", "token"].join("-");
+const finalizedPayloadBcsHex = "0x01";
+const finalizedSignature = `0x${"11".repeat(64)}`;
+const finalizedPublicKey = `0x${"22".repeat(32)}`;
 const passthroughSourceEventIdResolver = async ({ sourceEventId }: { sourceEventId: string }) => ({
     source_event_id: sourceEventId,
 });
@@ -314,6 +317,7 @@ describe("AWS Lambda watcher handlers", () => {
             name: "earthquake-us7000default-1",
         });
         expect(JSON.parse(String(readCommandInput(commands[0]).input))).toEqual({
+            verifier_kind: "earthquake",
             source_event_id: "us7000default",
             attempt: 1,
         });
@@ -610,7 +614,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "finalized",
             source_updated_at_ms: baseNow,
-            payload_bcs_hex: "0x01",
+            payload_bcs_hex: finalizedPayloadBcsHex,
         });
     });
 
@@ -753,9 +757,9 @@ describe("DynamoDB-compatible repository behavior", () => {
             ...staleProcessingRow,
             status: "finalized" as const,
             tee_result_json: JSON.stringify(finalizedResult()),
-            payload_bcs_hex: "0x01",
-            signature: "0xsig",
-            public_key: "0xpub",
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
             finalized_at_ms: baseNow + 1_000,
             updated_at_ms: baseNow + 1_000,
         };
@@ -771,9 +775,9 @@ describe("DynamoDB-compatible repository behavior", () => {
             status: "finalized",
             source_updated_at_ms: baseNow,
             last_seen_at_ms: baseNow + 2_000,
-            payload_bcs_hex: "0x01",
-            signature: "0xsig",
-            public_key: "0xpub",
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
             finalized_at_ms: baseNow + 1_000,
         });
     });
@@ -791,9 +795,9 @@ describe("DynamoDB-compatible repository behavior", () => {
             runner_phase: "complete" as const,
             runner_stopped_at_ms: null,
             tee_result_json: JSON.stringify(finalizedResult()),
-            payload_bcs_hex: "0x01",
-            signature: "0xsig",
-            public_key: "0xpub",
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
             finalized_at_ms: baseNow + 1_000,
             source_updated_at_ms: baseNow,
             updated_at_ms: baseNow + 1_000,
@@ -1420,7 +1424,7 @@ describe("DynamoDB-compatible repository behavior", () => {
 
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "finalized",
-            event_uid: "us7000sonari",
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             latest_revision: 1,
             source_updated_at_ms: baseNow,
         });
@@ -2048,12 +2052,16 @@ function finalizedResult(): TeeCoreResult {
         payload: {
             intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
             oracle_version: 1,
-            event_uid: "us7000sonari",
+            event_uid: `0x${"aa".repeat(32)}`,
             hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
             status: BCS_ENUMS.onchainStatus.FINALIZED,
             event_revision: 1,
+            source_event_id: "us7000sonari",
+            title: "M 7.1 - Sonari Fixture Earthquake",
+            region: "Sonari Fixture Region",
             occurred_at_ms: baseNow,
-            observed_at_ms: baseNow,
+            magnitude_x100: 710,
+            verified_at_ms: baseNow,
             source_updated_at_ms: baseNow,
             primary_source: BCS_ENUMS.primarySource.USGS,
             severity_band: 2,
@@ -2063,20 +2071,21 @@ function finalizedResult(): TeeCoreResult {
             affected_cells_root: `0x${"33".repeat(32)}`,
             affected_cells_uri: "walrus://cells",
             affected_cells_data_hash: `0x${"44".repeat(32)}`,
+            affected_cell_count: 1,
             geo_resolution: 7,
             cells_generation_method:
                 BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
             cell_metric: BCS_ENUMS.cellMetric.USGS_MMI,
             cell_aggregation: BCS_ENUMS.cellAggregation.GRID_POINT_P90,
             intensity_scale: BCS_ENUMS.intensityScale.MMI_X100,
-            max_cell_band: 2,
-            affected_cell_count: 1,
-            min_claim_band: 1,
-            freshness_deadline_ms: baseNow + 60_000,
+            freshness_deadline_ms: baseNow + 21_600_000,
         },
-        payload_bcs_hex: "0x01",
-        signature: "0xsig",
-        public_key: "0xpub",
+        payload_bcs_hex: finalizedPayloadBcsHex,
+        signature: finalizedSignature,
+        public_key: finalizedPublicKey,
+        verifier_config_key: 1,
+        verifier_config_version: 1,
+        enclave_instance_public_key: finalizedPublicKey,
     };
 }
 

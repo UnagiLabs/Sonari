@@ -1,10 +1,13 @@
 {
     "files": [],
     "references": [
+        { "path": "./nautilus/verifiers/common/contracts" },
         { "path": "./nautilus/verifiers/earthquake/shared" },
         { "path": "./nautilus/verifiers/earthquake/watcher" },
         { "path": "./nautilus/verifiers/earthquake/relayer" },
         { "path": "./nautilus/verifiers/earthquake/runner" },
-        { "path": "./nautilus/verifiers/membership/shared" }
+        { "path": "./nautilus/verifiers/membership/shared" },
+        { "path": "./nautilus/verifiers/membership/runner" },
+        { "path": "./packages/residence-proof-worker" }
     ]
 }

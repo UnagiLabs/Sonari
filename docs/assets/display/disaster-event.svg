@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Sonari Disaster Event</title>
+  <desc id="desc">Static display image for a verified Sonari disaster event.</desc>
+  <rect width="1200" height="630" fill="#111827"/>
+  <path d="M0 448c150-42 287-58 412-48 156 12 292 78 457 72 116-4 226-48 331-104v262H0z" fill="#1d4ed8"/>
+  <path d="M0 514c145-34 302-42 470-24 167 18 326 56 476 36 93-13 178-44 254-86v190H0z" fill="#38bdf8"/>
+  <circle cx="934" cy="158" r="82" fill="#fbbf24"/>
+  <path d="M210 442l156-258 106 174 66-108 130 214H210z" fill="#f8fafc"/>
+  <path d="M366 184l64 105-41-14-35 32-28-47-56 34z" fill="#ef4444"/>
+  <text x="92" y="132" fill="#f8fafc" font-family="Inter, Arial, sans-serif" font-size="58" font-weight="700">Verified Disaster Event</text>
+  <text x="94" y="210" fill="#cbd5e1" font-family="Inter, Arial, sans-serif" font-size="32">Readable title, region, and source data</text>
+</svg>
