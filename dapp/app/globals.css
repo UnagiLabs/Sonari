@@ -327,6 +327,17 @@ h4 {
   font-size: 15px;
 }
 
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.btn:disabled:hover {
+  box-shadow: none;
+  transform: none;
+}
+
 .card {
   padding: 24px;
   border: 1px solid var(--line);
@@ -2085,7 +2096,8 @@ h4 {
   font-weight: 600;
 }
 
-.text-field input {
+.text-field input,
+.text-field textarea {
   min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--line-strong);
@@ -2096,7 +2108,13 @@ h4 {
   font-size: 15px;
 }
 
-.text-field input:focus {
+.text-field textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.text-field input:focus,
+.text-field textarea:focus {
   border-color: var(--sage-500);
   box-shadow: 0 0 0 3px oklch(0.72 0.05 145 / 0.18);
 }
@@ -2262,6 +2280,53 @@ h4 {
 .terms-row span {
   color: var(--ink-muted);
   font-size: 13px;
+}
+
+.identity-fields,
+.identity-proof-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.identity-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 160px;
+}
+
+.identity-wide-field {
+  grid-column: 1 / -1;
+}
+
+.submit-status {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.submit-status strong {
+  color: var(--sage-900);
+  font-size: 14px;
+}
+
+.submit-status-submitting {
+  border-color: var(--sage-300);
+  background: var(--sage-50);
+  color: var(--sage-800);
+}
+
+.submit-status-success {
+  border-color: oklch(0.78 0.09 150);
+  background: oklch(0.96 0.025 150);
+}
+
+.submit-status-failed {
+  border-color: oklch(0.78 0.08 25);
+  background: oklch(0.97 0.025 25);
+  color: oklch(0.42 0.09 25);
 }
 
 .residence-fields .btn {
@@ -2840,6 +2905,8 @@ h4 {
   .residence-search-row,
   .selected-area-summary,
   .residence-fields,
+  .identity-fields,
+  .identity-proof-grid,
   .pass-preview-panel {
     grid-template-columns: 1fr;
   }

@@ -43,6 +43,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("AttributeName: lease_expires_at");
         expect(template).toContain("TimeToLiveSpecification:");
         expect(template).toContain("SubmitVerificationLambda:");
+        expect(template).toContain("SubmitVerificationFunctionUrl:");
+        expect(template).toContain("SubmitVerificationFunctionUrlPermission:");
+        expect(template).toContain("SubmitVerificationFunctionInvokeUrlPermission:");
+        expect(template).toContain("SubmitVerificationFunctionUrlOutput:");
         expect(template).toContain("BatchVerifierLambda:");
         expect(template).toContain("BatchSchedule:");
         expect(template).toContain("Handler: dist/src/lambda.submitVerificationHandler");
@@ -74,6 +78,29 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
         expect(template).toContain(
             "MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref MembershipNitroEnclaveProcessCommand",
+        );
+    });
+
+    it("exposes SubmitVerification through a public POST Function URL", async () => {
+        const template = await readTemplate();
+        const start = template.indexOf("SubmitVerificationFunctionUrl:");
+        const end = template.indexOf("BatchVerifierLambda:", start);
+        const submitUrlResources = template.slice(start, end);
+
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        expect(submitUrlResources).toContain("Type: AWS::Lambda::Url");
+        expect(submitUrlResources).toContain("AuthType: NONE");
+        expect(submitUrlResources).toContain("TargetFunctionArn: !Ref SubmitVerificationLambda");
+        expect(submitUrlResources).toContain("Cors:");
+        expect(submitUrlResources).toContain("- POST");
+        expect(submitUrlResources).toContain("- content-type");
+        expect(submitUrlResources).toContain('- "*"');
+        expect(submitUrlResources).toContain("Action: lambda:InvokeFunctionUrl");
+        expect(submitUrlResources).toContain("FunctionUrlAuthType: NONE");
+        expect(submitUrlResources).toContain("InvokedViaFunctionUrl: true");
+        expect(template).toContain(
+            "SubmitVerificationFunctionUrlOutput:\n    Value: !GetAtt SubmitVerificationFunctionUrl.FunctionUrl",
         );
     });
 
