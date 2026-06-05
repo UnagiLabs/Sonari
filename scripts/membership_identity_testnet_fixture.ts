@@ -138,6 +138,33 @@ export interface SuiClientOptions {
     readonly gasBudget?: string;
 }
 
+export type SuiCommandExecutor = (plan: SuiCommandPlan) => Promise<SuiCommandResult>;
+
+export interface MembershipIdentityFixtureBaseObjects {
+    readonly packageId: string;
+    readonly adminCapId: string;
+    readonly pauseStateId: string;
+    readonly identityRegistryId: string;
+    readonly membershipRegistryId: string;
+    readonly verifierRegistryId: string;
+}
+
+export interface MembershipIdentityFixtureBaseObjectCandidates {
+    readonly packageId?: string;
+    readonly adminCapId?: string;
+    readonly pauseStateId?: string;
+    readonly identityRegistryId?: string;
+    readonly membershipRegistryId?: string;
+    readonly verifierRegistryId?: string;
+}
+
+export interface ResolveBaseFixtureObjectsInput {
+    readonly candidates: MembershipIdentityFixtureBaseObjectCandidates;
+    readonly options: SuiClientOptions;
+    readonly executor: SuiCommandExecutor;
+    readonly publishIfMissing?: boolean;
+}
+
 export function assertFixtureNetwork(input: string): FixtureNetwork {
     if (input === "devnet" || input === "testnet") {
         return input;
@@ -440,6 +467,44 @@ export function buildSuiPtbCommand(
     };
 }
 
+export async function resolveBaseFixtureObjects(
+    input: ResolveBaseFixtureObjectsInput,
+): Promise<MembershipIdentityFixtureBaseObjects> {
+    assertFixtureNetwork(input.options.env);
+    const candidates = input.candidates;
+    const missing = missingBaseObjectFields(candidates);
+    if (missing.length > 0 && input.publishIfMissing !== true) {
+        throw new Error(
+            `missing fixture object ids: ${missing.join(", ")}; pass --publish-if-missing to publish contracts`,
+        );
+    }
+
+    const baseObjects =
+        missing.length > 0
+            ? await publishBaseFixtureObjects(input.options, input.executor)
+            : completeBaseObjectCandidates(candidates);
+
+    await verifyBaseObjectReadbacks(baseObjects, input.options, input.executor);
+    return baseObjects;
+}
+
+export function parsePublishedTomlPackageId(
+    input: string,
+    env: FixtureNetwork,
+): string | undefined {
+    const sectionPattern = new RegExp(`\\[published\\.${env}\\]([\\s\\S]*?)(?:\\n\\[|$)`);
+    const section = sectionPattern.exec(input)?.[1];
+    if (section === undefined) {
+        return undefined;
+    }
+    const publishedAt = /^\s*published-at\s*=\s*"([^"]+)"/m.exec(section)?.[1];
+    if (publishedAt === undefined) {
+        return undefined;
+    }
+    assertHexObjectId(publishedAt, `published.${env}.published-at`);
+    return publishedAt;
+}
+
 function assertHexObjectId(value: string, fieldName: string): void {
     if (!/^0x[0-9a-fA-F]+$/.test(value)) {
         throw new Error(`${fieldName} must be a 0x-prefixed hex object id`);
@@ -473,6 +538,99 @@ function parsePublishedPackageId(input: unknown): string {
         }
     }
     throw new Error("publish result did not include published package id");
+}
+
+async function publishBaseFixtureObjects(
+    options: SuiClientOptions,
+    executor: SuiCommandExecutor,
+): Promise<MembershipIdentityFixtureBaseObjects> {
+    const output = await executor(buildSuiPublishCommand(options));
+    const parsed = parseSuiJsonCommandResult(output, "sui publish");
+    return parsePublishFixtureObjects(parsed);
+}
+
+async function verifyBaseObjectReadbacks(
+    objects: MembershipIdentityFixtureBaseObjects,
+    options: SuiClientOptions,
+    executor: SuiCommandExecutor,
+): Promise<void> {
+    await verifyObjectType(objects.adminCapId, EXPECTED_OBJECT_TYPES.adminCap, "adminCapId");
+    await verifyObjectType(objects.pauseStateId, EXPECTED_OBJECT_TYPES.pauseState, "pauseStateId");
+    await verifyObjectType(
+        objects.identityRegistryId,
+        EXPECTED_OBJECT_TYPES.identityRegistry,
+        "identityRegistryId",
+    );
+    await verifyObjectType(
+        objects.membershipRegistryId,
+        EXPECTED_OBJECT_TYPES.membershipRegistry,
+        "membershipRegistryId",
+    );
+    await verifyObjectType(
+        objects.verifierRegistryId,
+        EXPECTED_OBJECT_TYPES.verifierRegistry,
+        "verifierRegistryId",
+    );
+
+    async function verifyObjectType(
+        objectId: string,
+        expectedType: string,
+        fieldName: string,
+    ): Promise<void> {
+        const output = await executor(buildSuiObjectCommand(objectId, options));
+        const parsed = parseSuiJsonCommandResult(output, `sui object ${fieldName}`);
+        const object = parseSuiObjectReadback(parsed);
+        assertSuiObjectType(object, expectedType, fieldName);
+    }
+}
+
+function completeBaseObjectCandidates(
+    candidates: MembershipIdentityFixtureBaseObjectCandidates,
+): MembershipIdentityFixtureBaseObjects {
+    return {
+        packageId: requiredCandidate(candidates.packageId, "packageId"),
+        adminCapId: requiredCandidate(candidates.adminCapId, "adminCapId"),
+        pauseStateId: requiredCandidate(candidates.pauseStateId, "pauseStateId"),
+        identityRegistryId: requiredCandidate(candidates.identityRegistryId, "identityRegistryId"),
+        membershipRegistryId: requiredCandidate(
+            candidates.membershipRegistryId,
+            "membershipRegistryId",
+        ),
+        verifierRegistryId: requiredCandidate(candidates.verifierRegistryId, "verifierRegistryId"),
+    };
+}
+
+function missingBaseObjectFields(
+    candidates: MembershipIdentityFixtureBaseObjectCandidates,
+): string[] {
+    const missing: string[] = [];
+    if (candidates.packageId === undefined) {
+        missing.push("packageId");
+    }
+    if (candidates.adminCapId === undefined) {
+        missing.push("adminCapId");
+    }
+    if (candidates.pauseStateId === undefined) {
+        missing.push("pauseStateId");
+    }
+    if (candidates.identityRegistryId === undefined) {
+        missing.push("identityRegistryId");
+    }
+    if (candidates.membershipRegistryId === undefined) {
+        missing.push("membershipRegistryId");
+    }
+    if (candidates.verifierRegistryId === undefined) {
+        missing.push("verifierRegistryId");
+    }
+    return missing;
+}
+
+function requiredCandidate(value: string | undefined, fieldName: string): string {
+    if (value === undefined) {
+        throw new Error(`missing required fixture candidate: ${fieldName}`);
+    }
+    assertHexObjectId(value, fieldName);
+    return value;
 }
 
 function parseCreatedObjectId(input: unknown, typeSuffix: string, name: string): string {

@@ -17,9 +17,14 @@ import {
     GENESIS_KIND_VERIFIER_REGISTRY,
     type MembershipIdentityFixtureManifestInput,
     parseMembershipPassIssuedId,
+    parsePublishedTomlPackageId,
     parsePublishFixtureObjects,
     parseSuiJsonCommandResult,
     parseSuiObjectReadback,
+    resolveBaseFixtureObjects,
+    type SuiCommandExecutor,
+    type SuiCommandPlan,
+    type SuiCommandResult,
     WORLD_ID_ACTION,
 } from "./membership_identity_testnet_fixture.js";
 
@@ -194,6 +199,106 @@ describe("membership identity Sui JSON parsing", () => {
     });
 });
 
+describe("membership identity base object resolution", () => {
+    it("reuses existing package and registry ids after object readback", async () => {
+        const executor = fakeExecutor({
+            [objectId("ab")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.adminCap}`,
+            [objectId("11")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.pauseState}`,
+            [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
+            [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
+            [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+        });
+
+        await expect(
+            resolveBaseFixtureObjects({
+                candidates: baseCandidates(),
+                options: suiOptions(),
+                executor,
+            }),
+        ).resolves.toEqual(baseCandidates());
+        expect(executor.plans.map((plan) => plan.args[5])).toEqual([
+            "object",
+            "object",
+            "object",
+            "object",
+            "object",
+        ]);
+    });
+
+    it("stops when AdminCap is missing and publish is not explicit", async () => {
+        const { adminCapId: _adminCapId, ...candidates } = baseCandidates();
+        await expect(
+            resolveBaseFixtureObjects({
+                candidates,
+                options: suiOptions(),
+                executor: fakeExecutor({}),
+            }),
+        ).rejects.toThrow(
+            "missing fixture object ids: adminCapId; pass --publish-if-missing to publish contracts",
+        );
+    });
+
+    it("stops when registry ids are missing and publish is not explicit", async () => {
+        const {
+            identityRegistryId: _identityRegistryId,
+            membershipRegistryId: _membershipRegistryId,
+            ...candidates
+        } = baseCandidates();
+        await expect(
+            resolveBaseFixtureObjects({
+                candidates,
+                options: suiOptions(),
+                executor: fakeExecutor({}),
+            }),
+        ).rejects.toThrow("missing fixture object ids: identityRegistryId, membershipRegistryId");
+    });
+
+    it("publishes only with an explicit flag and verifies created object ids", async () => {
+        const executor = fakeExecutor({
+            [objectId("ab")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.adminCap}`,
+            [objectId("11")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.pauseState}`,
+            [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
+            [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
+            [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+        });
+
+        await expect(
+            resolveBaseFixtureObjects({
+                candidates: { packageId: objectId("aa") },
+                options: suiOptions(),
+                executor,
+                publishIfMissing: true,
+            }),
+        ).resolves.toEqual(baseCandidates());
+        expect(executor.plans[0]?.args).toEqual([
+            "client",
+            "--client.config",
+            ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+            "--client.env",
+            "testnet",
+            "publish",
+            "contracts",
+            "--gas-budget",
+            "1000000000",
+            "--json",
+        ]);
+    });
+
+    it("reads testnet package id from Published.toml without registry ids", () => {
+        expect(
+            parsePublishedTomlPackageId(
+                [
+                    "[published.testnet]",
+                    'published-at = "0xabc"',
+                    'upgrade-capability = "0xdef"',
+                    "",
+                ].join("\n"),
+                "testnet",
+            ),
+        ).toBe("0xabc");
+    });
+});
+
 function fixtureInput(): MembershipIdentityFixtureManifestInput {
     return {
         network: "testnet",
@@ -252,6 +357,57 @@ function publishJson(): unknown {
             genesisEvent(GENESIS_KIND_VERIFIER_REGISTRY, objectId("44")),
         ],
     };
+}
+
+function baseCandidates() {
+    return {
+        packageId: objectId("aa"),
+        adminCapId: objectId("ab"),
+        pauseStateId: objectId("11"),
+        identityRegistryId: objectId("22"),
+        membershipRegistryId: objectId("33"),
+        verifierRegistryId: objectId("44"),
+    };
+}
+
+function suiOptions() {
+    return {
+        clientConfig: ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+        env: "testnet" as const,
+    };
+}
+
+function fakeExecutor(typeByObjectId: Record<string, string>): SuiCommandExecutor & {
+    plans: SuiCommandPlan[];
+} {
+    const plans: SuiCommandPlan[] = [];
+    const executor = (async (plan: SuiCommandPlan): Promise<SuiCommandResult> => {
+        plans.push(plan);
+        if (plan.args.includes("publish")) {
+            return { code: 0, stdout: JSON.stringify(publishJson()), stderr: "" };
+        }
+        const objectIdArg = plan.args[6];
+        if (typeof objectIdArg !== "string") {
+            return { code: 1, stdout: "", stderr: "missing object id" };
+        }
+        const type = typeByObjectId[objectIdArg];
+        if (type === undefined) {
+            return { code: 1, stdout: "", stderr: `missing object: ${objectIdArg}` };
+        }
+        return {
+            code: 0,
+            stdout: JSON.stringify({
+                data: {
+                    objectId: objectIdArg,
+                    type,
+                    content: { fields: {} },
+                },
+            }),
+            stderr: "",
+        };
+    }) as SuiCommandExecutor & { plans: SuiCommandPlan[] };
+    executor.plans = plans;
+    return executor;
 }
 
 function genesisEvent(objectKind: number, id: string): unknown {
