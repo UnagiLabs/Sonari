@@ -4,9 +4,19 @@ export const DEFAULT_FIXTURE_OUTPUT_DIR = ".local/sonari-dev/membership-identity
 export const FIXTURE_MANIFEST_FILE = "manifest.json";
 export const FIXTURE_ENV_FILE = "fixture.env";
 export const FIXTURE_DUMMY_WORLD_ID_REQUEST_FILE = "dummy-world-id-request.json";
-export const DEFAULT_TERMS_VERSION = 1;
+export const DEFAULT_HOME_CELL = "608819013597790207";
+export const DEFAULT_GEO_RESOLUTION = "7";
+export const DEFAULT_ALLOWLIST_VERSION = "1";
+export const DEFAULT_TERMS_VERSION = 2;
 export const DEFAULT_SIGNED_STATEMENT_HASH = `0x${"44".repeat(32)}`;
 export const DEFAULT_WORLD_ID_SIGNAL_HASH = `0x${"55".repeat(32)}`;
+export const DEFAULT_RESIDENCE_ROOT =
+    "0xa26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020";
+export const DEFAULT_RESIDENCE_SOURCE_HASH = `0x${"11".repeat(32)}`;
+export const DEFAULT_RESIDENCE_PROOF_LEFT =
+    "0x07985a56b782bd13b8ec079d4c243c8c2399605872223fc86066f59f4ae37569";
+export const DEFAULT_RESIDENCE_PROOF_RIGHT =
+    "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7";
 export const WORLD_ID_ACTION = "sonari_membership_register_v1";
 export const GENESIS_KIND_PAUSE_STATE = 2;
 export const GENESIS_KIND_MEMBERSHIP_REGISTRY = 6;
@@ -163,6 +173,34 @@ export interface ResolveBaseFixtureObjectsInput {
     readonly options: SuiClientOptions;
     readonly executor: SuiCommandExecutor;
     readonly publishIfMissing?: boolean;
+}
+
+export interface ResidenceFixtureInput {
+    readonly packageId: string;
+    readonly adminCapId: string;
+    readonly root: string;
+    readonly geoResolution: string;
+    readonly allowlistVersion: string;
+    readonly sourceHash: string;
+}
+
+export interface MembershipPassFixtureInput {
+    readonly packageId: string;
+    readonly pauseStateId: string;
+    readonly membershipRegistryId: string;
+    readonly allowedResidenceCellRegistryId: string;
+    readonly homeCell: string;
+    readonly proofLeft: string;
+    readonly proofRight: string;
+    readonly termsVersion: number;
+    readonly signedStatementHash: string;
+}
+
+export interface MembershipPassReadback {
+    readonly passId: string;
+    readonly owner: string;
+    readonly identityVerified: false;
+    readonly providerLabel: "Unverified";
 }
 
 export function assertFixtureNetwork(input: string): FixtureNetwork {
@@ -443,6 +481,29 @@ export function buildSuiCallCommand(input: {
     };
 }
 
+export function buildCreateAllowedResidenceCellRegistryCommand(
+    input: ResidenceFixtureInput,
+    options: SuiClientOptions,
+): SuiCommandPlan {
+    assertHexObjectId(input.packageId, "packageId");
+    assertHexObjectId(input.adminCapId, "adminCapId");
+    assertHex32(input.root, "residence.root");
+    assertHex32(input.sourceHash, "residence.sourceHash");
+    return buildSuiCallCommand({
+        options,
+        packageId: input.packageId,
+        module: "admin",
+        functionName: "create_allowed_residence_cell_registry",
+        args: [
+            input.adminCapId,
+            input.root,
+            input.geoResolution,
+            input.allowlistVersion,
+            input.sourceHash,
+        ],
+    });
+}
+
 export function buildSuiPtbCommand(
     options: SuiClientOptions,
     transactions: readonly string[],
@@ -467,6 +528,46 @@ export function buildSuiPtbCommand(
     };
 }
 
+export function buildRegisterMemberPtbCommand(
+    input: MembershipPassFixtureInput,
+    options: SuiClientOptions,
+): SuiCommandPlan {
+    assertHexObjectId(input.packageId, "packageId");
+    assertHexObjectId(input.pauseStateId, "pauseStateId");
+    assertHexObjectId(input.membershipRegistryId, "membershipRegistryId");
+    assertHexObjectId(input.allowedResidenceCellRegistryId, "allowedResidenceCellRegistryId");
+    assertHex32(input.proofLeft, "residence.proofLeft");
+    assertHex32(input.proofRight, "residence.proofRight");
+    assertHex32(input.signedStatementHash, "signedStatementHash");
+    const proofType = `<${input.packageId}::allowed_residence_cell::ProofStep>`;
+    return buildSuiPtbCommand(options, [
+        "--move-call",
+        `${input.packageId}::accessor::new_residence_proof_step_left`,
+        input.proofLeft,
+        "--assign",
+        "proof_left",
+        "--move-call",
+        `${input.packageId}::accessor::new_residence_proof_step_right`,
+        input.proofRight,
+        "--assign",
+        "proof_right",
+        "--make-move-vec",
+        proofType,
+        "[proof_left,proof_right]",
+        "--assign",
+        "residence_proof",
+        "--move-call",
+        `${input.packageId}::accessor::register_member`,
+        `@${input.pauseStateId}`,
+        `@${input.membershipRegistryId}`,
+        `@${input.allowedResidenceCellRegistryId}`,
+        input.homeCell,
+        "residence_proof",
+        input.termsVersion.toString(),
+        input.signedStatementHash,
+    ]);
+}
+
 export async function resolveBaseFixtureObjects(
     input: ResolveBaseFixtureObjectsInput,
 ): Promise<MembershipIdentityFixtureBaseObjects> {
@@ -486,6 +587,52 @@ export async function resolveBaseFixtureObjects(
 
     await verifyBaseObjectReadbacks(baseObjects, input.options, input.executor);
     return baseObjects;
+}
+
+export function parseAllowedResidenceCellRegistryId(input: unknown): string {
+    for (const event of readEvents(input)) {
+        if (
+            !eventTypeIncludes(event, "::allowed_residence_cell::AllowedResidenceCellRootUpdated")
+        ) {
+            continue;
+        }
+        const parsedJson = readParsedJson(event);
+        const registryId = parsedJson.registry_id ?? parsedJson.registryId;
+        if (typeof registryId !== "string") {
+            throw new Error("AllowedResidenceCellRootUpdated event is missing registry_id");
+        }
+        assertHexObjectId(registryId, "AllowedResidenceCellRootUpdated.registry_id");
+        return registryId;
+    }
+    throw new Error("transaction result did not include AllowedResidenceCellRootUpdated event");
+}
+
+export function parseUnverifiedMembershipPassReadback(
+    input: unknown,
+    expectedPassId: string,
+): MembershipPassReadback {
+    assertHexObjectId(expectedPassId, "expectedPassId");
+    const object = parseSuiObjectReadback(input);
+    if (object.objectId !== expectedPassId) {
+        throw new Error(`membership pass readback id mismatch: expected ${expectedPassId}`);
+    }
+    assertSuiObjectType(object, EXPECTED_OBJECT_TYPES.membershipPass, "membershipPassId");
+    const owner = readStringField(object.fields, "owner");
+    assertHexObjectId(owner, "membershipPass.owner");
+    const identityVerified = object.fields.identity_verified ?? object.fields.identityVerified;
+    if (identityVerified !== false) {
+        throw new Error("membership pass fixture must start with identity_verified=false");
+    }
+    const providerLabel = readStringField(object.fields, "provider_label");
+    if (providerLabel !== "Unverified") {
+        throw new Error("membership pass fixture must start with provider_label=Unverified");
+    }
+    return {
+        passId: object.objectId,
+        owner,
+        identityVerified: false,
+        providerLabel: "Unverified",
+    };
 }
 
 export function parsePublishedTomlPackageId(
@@ -701,6 +848,14 @@ function stringField(
         }
     }
     throw new Error(`sui object JSON did not include ${label}`);
+}
+
+function readStringField(record: Record<string, unknown>, name: string): string {
+    const value = record[name];
+    if (typeof value === "string") {
+        return value;
+    }
+    throw new Error(`sui object field ${name} must be a string`);
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

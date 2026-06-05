@@ -2,11 +2,20 @@ import { describe, expect, it } from "vitest";
 import {
     assertFixtureNetwork,
     assertSuiObjectType,
+    buildCreateAllowedResidenceCellRegistryCommand,
     buildDummyWorldIdRequest,
     buildMembershipIdentityFixtureFiles,
     buildMembershipIdentityFixtureManifest,
+    buildRegisterMemberPtbCommand,
     buildSuiObjectCommand,
     buildSuiPtbCommand,
+    DEFAULT_ALLOWLIST_VERSION,
+    DEFAULT_GEO_RESOLUTION,
+    DEFAULT_HOME_CELL,
+    DEFAULT_RESIDENCE_PROOF_LEFT,
+    DEFAULT_RESIDENCE_PROOF_RIGHT,
+    DEFAULT_RESIDENCE_ROOT,
+    DEFAULT_RESIDENCE_SOURCE_HASH,
     DEFAULT_SIGNED_STATEMENT_HASH,
     DEFAULT_TERMS_VERSION,
     DEFAULT_WORLD_ID_SIGNAL_HASH,
@@ -16,11 +25,13 @@ import {
     GENESIS_KIND_PAUSE_STATE,
     GENESIS_KIND_VERIFIER_REGISTRY,
     type MembershipIdentityFixtureManifestInput,
+    parseAllowedResidenceCellRegistryId,
     parseMembershipPassIssuedId,
     parsePublishedTomlPackageId,
     parsePublishFixtureObjects,
     parseSuiJsonCommandResult,
     parseSuiObjectReadback,
+    parseUnverifiedMembershipPassReadback,
     resolveBaseFixtureObjects,
     type SuiCommandExecutor,
     type SuiCommandPlan,
@@ -299,6 +310,111 @@ describe("membership identity base object resolution", () => {
     });
 });
 
+describe("membership identity pass fixture planning", () => {
+    it("plans allowed residence registry creation with the pinned fixture root", () => {
+        expect(
+            buildCreateAllowedResidenceCellRegistryCommand(
+                {
+                    packageId: objectId("aa"),
+                    adminCapId: objectId("ab"),
+                    root: DEFAULT_RESIDENCE_ROOT,
+                    geoResolution: DEFAULT_GEO_RESOLUTION,
+                    allowlistVersion: DEFAULT_ALLOWLIST_VERSION,
+                    sourceHash: DEFAULT_RESIDENCE_SOURCE_HASH,
+                },
+                suiOptions(),
+            ).args,
+        ).toEqual([
+            "client",
+            "--client.config",
+            ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+            "--client.env",
+            "testnet",
+            "call",
+            "--package",
+            objectId("aa"),
+            "--module",
+            "admin",
+            "--function",
+            "create_allowed_residence_cell_registry",
+            "--args",
+            objectId("ab"),
+            DEFAULT_RESIDENCE_ROOT,
+            DEFAULT_GEO_RESOLUTION,
+            DEFAULT_ALLOWLIST_VERSION,
+            DEFAULT_RESIDENCE_SOURCE_HASH,
+            "--gas-budget",
+            "100000000",
+            "--json",
+        ]);
+    });
+
+    it("plans register_member as a PTB that builds ProofStep values first", () => {
+        const args = buildRegisterMemberPtbCommand(
+            {
+                packageId: objectId("aa"),
+                pauseStateId: objectId("11"),
+                membershipRegistryId: objectId("33"),
+                allowedResidenceCellRegistryId: objectId("55"),
+                homeCell: DEFAULT_HOME_CELL,
+                proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
+                proofRight: DEFAULT_RESIDENCE_PROOF_RIGHT,
+                termsVersion: DEFAULT_TERMS_VERSION,
+                signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
+            },
+            suiOptions(),
+        ).args;
+
+        expect(args).toEqual(
+            expect.arrayContaining([
+                "ptb",
+                `${objectId("aa")}::accessor::new_residence_proof_step_left`,
+                DEFAULT_RESIDENCE_PROOF_LEFT,
+                "proof_left",
+                `${objectId("aa")}::accessor::new_residence_proof_step_right`,
+                DEFAULT_RESIDENCE_PROOF_RIGHT,
+                "proof_right",
+                `<${objectId("aa")}::allowed_residence_cell::ProofStep>`,
+                "[proof_left,proof_right]",
+                "residence_proof",
+                `${objectId("aa")}::accessor::register_member`,
+                `@${objectId("11")}`,
+                `@${objectId("33")}`,
+                `@${objectId("55")}`,
+                DEFAULT_HOME_CELL,
+                DEFAULT_TERMS_VERSION.toString(),
+                DEFAULT_SIGNED_STATEMENT_HASH,
+            ]),
+        );
+    });
+
+    it("reads allowed residence registry id from root update event", () => {
+        expect(
+            parseAllowedResidenceCellRegistryId({
+                events: [
+                    {
+                        type: `${objectId("aa")}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
+                        parsedJson: { registry_id: objectId("55") },
+                    },
+                ],
+            }),
+        ).toBe(objectId("55"));
+    });
+
+    it("accepts only unverified MembershipPass readback", () => {
+        expect(parseUnverifiedMembershipPassReadback(passReadback(false), objectId("66"))).toEqual({
+            passId: objectId("66"),
+            owner: objectId("77"),
+            identityVerified: false,
+            providerLabel: "Unverified",
+        });
+
+        expect(() =>
+            parseUnverifiedMembershipPassReadback(passReadback(true), objectId("66")),
+        ).toThrow("membership pass fixture must start with identity_verified=false");
+    });
+});
+
 function fixtureInput(): MembershipIdentityFixtureManifestInput {
     return {
         network: "testnet",
@@ -408,6 +524,22 @@ function fakeExecutor(typeByObjectId: Record<string, string>): SuiCommandExecuto
     }) as SuiCommandExecutor & { plans: SuiCommandPlan[] };
     executor.plans = plans;
     return executor;
+}
+
+function passReadback(identityVerified: boolean): unknown {
+    return {
+        data: {
+            objectId: objectId("66"),
+            type: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipPass}`,
+            content: {
+                fields: {
+                    owner: objectId("77"),
+                    identity_verified: identityVerified,
+                    provider_label: "Unverified",
+                },
+            },
+        },
+    };
 }
 
 function genesisEvent(objectKind: number, id: string): unknown {
