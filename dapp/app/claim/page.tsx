@@ -1,8 +1,24 @@
+"use client";
+
 import Image from "next/image";
+import { useState } from "react";
+import {
+    type AffectedCellsProof,
+    assertProofMatchesClaimContext,
+    buildClaimDisasterUsdcTransaction,
+    type ClaimDisasterUsdcObjectConfig,
+    ClaimProofError,
+    fetchAffectedCellsProof,
+} from "./affected-cells-proof";
 
 type ClaimableEvent = {
     id: string;
     source: "USGS";
+    eventUid: string;
+    eventRevision: number;
+    affectedCellsRoot: string;
+    txObjects: ClaimDisasterUsdcObjectConfig;
+    packageId: string;
     region: string;
     intensity: string;
     affectedCells: string;
@@ -20,14 +36,38 @@ type EligibilityCheck = {
 const membershipPass = {
     status: "Active",
     passId: "pass_0x7a9...21c",
-    residenceCell: "h3-8a30a10cfffffff",
+    passObjectId: "0x00000000000000000000000000000000000000000000000000000000000000b1",
+    homeCell: "608819013597790207",
     verification: "Signed residence metadata valid",
+};
+
+const affectedProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL ?? "";
+
+const claimTxObjects: ClaimDisasterUsdcObjectConfig = {
+    pauseState: "0x0000000000000000000000000000000000000000000000000000000000000011",
+    claimIndex: "0x0000000000000000000000000000000000000000000000000000000000000012",
+    membershipRegistry: "0x0000000000000000000000000000000000000000000000000000000000000013",
+    program: "0x0000000000000000000000000000000000000000000000000000000000000014",
+    campaign: "0x0000000000000000000000000000000000000000000000000000000000000015",
+    policy: "0x0000000000000000000000000000000000000000000000000000000000000016",
+    budget: "0x0000000000000000000000000000000000000000000000000000000000000017",
+    binding: "0x0000000000000000000000000000000000000000000000000000000000000018",
+    disasterEvent: "0x0000000000000000000000000000000000000000000000000000000000000019",
+    identityRegistry: "0x000000000000000000000000000000000000000000000000000000000000001a",
+    pass: membershipPass.passObjectId,
+    designatedPool: "0x000000000000000000000000000000000000000000000000000000000000001c",
+    mainPool: "0x000000000000000000000000000000000000000000000000000000000000001d",
 };
 
 const claimableEvents: ClaimableEvent[] = [
     {
         id: "usgs-2026-0521-184",
         source: "USGS",
+        eventUid: "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd",
+        eventRevision: 1,
+        affectedCellsRoot: "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f",
+        txObjects: claimTxObjects,
+        packageId: "0x00000000000000000000000000000000000000000000000000000000000000aa",
         region: "Offshore Iwate, Japan",
         intensity: "M6.8 / MMI VIII",
         affectedCells: "1,284 affected cells",
@@ -37,6 +77,11 @@ const claimableEvents: ClaimableEvent[] = [
     {
         id: "usgs-2026-0517-021",
         source: "USGS",
+        eventUid: "0xcd131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd",
+        eventRevision: 1,
+        affectedCellsRoot: "0x626e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f",
+        txObjects: claimTxObjects,
+        packageId: "0x00000000000000000000000000000000000000000000000000000000000000aa",
         region: "Northern California",
         intensity: "M5.9 / MMI VII",
         affectedCells: "482 affected cells",
@@ -79,7 +124,99 @@ const claimPreview = [
     { label: "Receipt", value: "Public, recipient reference anonymized" },
 ];
 
+type ProofState =
+    | { readonly status: "idle"; readonly message: string }
+    | { readonly status: "checking"; readonly message: string }
+    | { readonly status: "ready"; readonly message: string; readonly proof: AffectedCellsProof }
+    | { readonly status: "blocked"; readonly message: string };
+
+type TxState =
+    | { readonly status: "idle"; readonly message: string }
+    | { readonly status: "building"; readonly message: string }
+    | { readonly status: "ready"; readonly message: string; readonly commandCount: number }
+    | { readonly status: "failed"; readonly message: string };
+
 export default function ClaimPage() {
+    const defaultEvent = defaultClaimableEvent();
+    const [selectedEventId, setSelectedEventId] = useState(defaultEvent.id);
+    const [proofState, setProofState] = useState<ProofState>({
+        status: "idle",
+        message: "Eligibility has not been checked.",
+    });
+    const [txState, setTxState] = useState<TxState>({
+        status: "idle",
+        message: "Waiting for claim action.",
+    });
+    const selectedEvent =
+        claimableEvents.find((event) => event.id === selectedEventId) ?? defaultEvent;
+    const checks = buildEligibilityChecks(proofState);
+    const isClaimDisabled = proofState.status !== "ready" || txState.status === "building";
+
+    async function handleCheckEligibility() {
+        setProofState({ status: "checking", message: "Checking affected cells proof." });
+        setTxState({ status: "idle", message: "Waiting for claim action." });
+
+        try {
+            const proof = await fetchAffectedCellsProof({
+                workerUrl: affectedProofWorkerUrl,
+                eventUid: selectedEvent.eventUid,
+                eventRevision: selectedEvent.eventRevision,
+                homeCell: membershipPass.homeCell,
+            });
+            assertProofMatchesClaimContext(proof, {
+                eventUid: selectedEvent.eventUid,
+                eventRevision: selectedEvent.eventRevision,
+                homeCell: membershipPass.homeCell,
+                affectedCellsRoot: selectedEvent.affectedCellsRoot,
+            });
+            setProofState({
+                status: "ready",
+                message: "Affected cells proof verified.",
+                proof,
+            });
+        } catch (error) {
+            setProofState({
+                status: "blocked",
+                message: claimErrorMessage(error),
+            });
+        }
+    }
+
+    function handleBuildClaim() {
+        if (proofState.status !== "ready") {
+            return;
+        }
+
+        setTxState({ status: "building", message: "Building claim transaction." });
+        try {
+            const { transaction } = buildClaimDisasterUsdcTransaction({
+                packageId: selectedEvent.packageId,
+                proof: proofState.proof,
+                context: {
+                    eventUid: selectedEvent.eventUid,
+                    eventRevision: selectedEvent.eventRevision,
+                    homeCell: membershipPass.homeCell,
+                    affectedCellsRoot: selectedEvent.affectedCellsRoot,
+                },
+                objects: selectedEvent.txObjects,
+                identityProvider: 1,
+                duplicateKeyHash:
+                    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                userMaxAmountUsdc: "50000000",
+            });
+            setTxState({
+                status: "ready",
+                message: "Claim transaction is ready.",
+                commandCount: transaction.getData().commands.length,
+            });
+        } catch (error) {
+            setTxState({
+                status: "failed",
+                message: error instanceof Error ? error.message : "Claim transaction failed.",
+            });
+        }
+    }
+
     return (
         <>
             <div className="watercolor-bg" />
@@ -124,7 +261,7 @@ export default function ClaimPage() {
                                     </div>
                                     <div>
                                         <dt>Residence cell</dt>
-                                        <dd>{membershipPass.residenceCell}</dd>
+                                        <dd>{membershipPass.homeCell}</dd>
                                     </div>
                                     <div>
                                         <dt>Verification</dt>
@@ -153,8 +290,20 @@ export default function ClaimPage() {
                                         {claimableEvents.map((event) => (
                                             <label className="claim-event-option" key={event.id}>
                                                 <input
-                                                    defaultChecked={event.defaultChecked}
+                                                    checked={selectedEvent.id === event.id}
                                                     name="claimEvent"
+                                                    onChange={() => {
+                                                        setSelectedEventId(event.id);
+                                                        setProofState({
+                                                            status: "idle",
+                                                            message:
+                                                                "Eligibility has not been checked.",
+                                                        });
+                                                        setTxState({
+                                                            status: "idle",
+                                                            message: "Waiting for claim action.",
+                                                        });
+                                                    }}
                                                     type="radio"
                                                     value={event.id}
                                                 />
@@ -183,12 +332,17 @@ export default function ClaimPage() {
                                         <div className="eyebrow">Eligibility</div>
                                         <h2 id="eligibility-title">Verification checks</h2>
                                     </div>
-                                    <button className="btn btn-secondary" type="button">
+                                    <button
+                                        className="btn btn-secondary"
+                                        disabled={proofState.status === "checking"}
+                                        onClick={handleCheckEligibility}
+                                        type="button"
+                                    >
                                         Check eligibility
                                     </button>
                                 </div>
                                 <div className="check-list">
-                                    {eligibilityChecks.map((check) => (
+                                    {checks.map((check) => (
                                         <div className="check-row" key={check.label}>
                                             <span
                                                 className={`check-indicator ${
@@ -203,6 +357,7 @@ export default function ClaimPage() {
                                         </div>
                                     ))}
                                 </div>
+                                <p className="muted claim-sub">{proofState.message}</p>
                             </section>
                         </div>
 
@@ -222,8 +377,13 @@ export default function ClaimPage() {
                                         </div>
                                     ))}
                                 </div>
-                                <button className="btn btn-primary btn-lg" type="button">
-                                    Claim relief preview
+                                <button
+                                    className="btn btn-primary btn-lg"
+                                    disabled={isClaimDisabled}
+                                    onClick={handleBuildClaim}
+                                    type="button"
+                                >
+                                    Claim relief
                                 </button>
                             </section>
 
@@ -238,11 +398,8 @@ export default function ClaimPage() {
                             <section className="claim-result-panel">
                                 <div className="eyebrow">Transaction result</div>
                                 <div className="result-placeholder">
-                                    <strong>Waiting for claim action</strong>
-                                    <small>
-                                        The transaction digest, receipt link, and status can be
-                                        rendered here after backend integration.
-                                    </small>
+                                    <strong>{txState.message}</strong>
+                                    <small>{transactionStatusDetail(txState)}</small>
                                 </div>
                             </section>
                         </aside>
@@ -251,6 +408,62 @@ export default function ClaimPage() {
             </div>
         </>
     );
+}
+
+function defaultClaimableEvent(): ClaimableEvent {
+    const event =
+        claimableEvents.find((candidate) => candidate.defaultChecked) ?? claimableEvents[0];
+    if (event === undefined) {
+        throw new Error("claimableEvents must contain at least one event");
+    }
+    return event;
+}
+
+function buildEligibilityChecks(proofState: ProofState): EligibilityCheck[] {
+    return eligibilityChecks.map((check) => {
+        if (check.label !== "Residence cell included") {
+            return check;
+        }
+        if (proofState.status === "ready") {
+            return {
+                ...check,
+                detail: "Registered H3 cell appears in affected_cells.",
+                status: "ready",
+            };
+        }
+        return {
+            ...check,
+            detail: proofState.message,
+            status: "pending",
+        };
+    });
+}
+
+function claimErrorMessage(error: unknown): string {
+    if (error instanceof ClaimProofError) {
+        switch (error.code) {
+            case "worker_url_missing":
+                return "Affected proof worker is not configured.";
+            case "outside_affected_area":
+                return "Residence cell is outside this event.";
+            case "proof_fetch_failed":
+                return "Affected proof could not be fetched.";
+            case "invalid_proof_response":
+            case "proof_verification_failed":
+                return "Affected proof could not be verified.";
+        }
+    }
+    return error instanceof Error ? error.message : "Eligibility check failed.";
+}
+
+function transactionStatusDetail(txState: TxState): string {
+    if (txState.status === "ready") {
+        return `Built ${txState.commandCount} Move commands for wallet signing.`;
+    }
+    if (txState.status === "failed") {
+        return "The claim transaction was not created.";
+    }
+    return "The transaction digest, receipt link, and status can render here after signing.";
 }
 
 function ClaimTopbar() {
