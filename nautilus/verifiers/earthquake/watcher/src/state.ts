@@ -177,6 +177,11 @@ export interface StateRepository {
         nowMs: number,
         limit: number,
     ): Promise<EarthquakeEventRow[]>;
+    claimAffectedCellsProofRegistrationRetry(
+        sourceEventId: string,
+        expectedNextRetryAtMs: number,
+        nowMs: number,
+    ): Promise<{ attempt: number; resultS3Key: string } | null>;
     hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean>;
     tryStartRunnerWorkflowExclusively(
         sourceEventId: string,
@@ -400,6 +405,27 @@ export class InMemoryStateRepository implements StateRepository {
             )
             .slice(0, limit)
             .map((row) => structuredClone(row));
+    }
+
+    async claimAffectedCellsProofRegistrationRetry(
+        sourceEventId: string,
+        expectedNextRetryAtMs: number,
+        nowMs: number,
+    ): Promise<{ attempt: number; resultS3Key: string } | null> {
+        const row = this.rows.get(sourceEventId);
+        if (
+            row === undefined ||
+            !isDueAffectedCellsProofRegistration(row, nowMs) ||
+            row.affected_cells_proof_registration_next_retry_at_ms !== expectedNextRetryAtMs ||
+            row.runner_attempt === null ||
+            row.runner_result_s3_key === null
+        ) {
+            return null;
+        }
+        row.affected_cells_proof_registration_next_retry_at_ms = null;
+        row.affected_cells_proof_registration_updated_at_ms = nowMs;
+        row.updated_at_ms = nowMs;
+        return { attempt: row.runner_attempt, resultS3Key: row.runner_result_s3_key };
     }
 
     async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
@@ -947,6 +973,62 @@ export class DynamoDbStateRepository implements StateRepository {
                     (b.affected_cells_proof_registration_next_retry_at_ms ?? b.updated_at_ms),
             )
             .slice(0, limit);
+    }
+
+    async claimAffectedCellsProofRegistrationRetry(
+        sourceEventId: string,
+        expectedNextRetryAtMs: number,
+        nowMs: number,
+    ): Promise<{ attempt: number; resultS3Key: string } | null> {
+        const row = await this.get(sourceEventId);
+        if (
+            row === null ||
+            !isDueAffectedCellsProofRegistration(row, nowMs) ||
+            row.affected_cells_proof_registration_next_retry_at_ms !== expectedNextRetryAtMs ||
+            row.runner_attempt === null ||
+            row.runner_result_s3_key === null
+        ) {
+            return null;
+        }
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: sourceEventId },
+                    ConditionExpression:
+                        "#affected_cells_proof_registration_status = :retryable_failed_status AND #affected_cells_proof_registration_next_retry_at_ms = :expected_next_retry_at_ms AND #source_archive_status = :source_archive_success_status AND #runner_attempt = :runner_attempt AND #runner_result_s3_key = :runner_result_s3_key",
+                    UpdateExpression:
+                        "SET #affected_cells_proof_registration_next_retry_at_ms = :null_value, #affected_cells_proof_registration_updated_at_ms = :updated_at_ms, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#affected_cells_proof_registration_status":
+                            "affected_cells_proof_registration_status",
+                        "#affected_cells_proof_registration_next_retry_at_ms":
+                            "affected_cells_proof_registration_next_retry_at_ms",
+                        "#affected_cells_proof_registration_updated_at_ms":
+                            "affected_cells_proof_registration_updated_at_ms",
+                        "#source_archive_status": "source_archive_status",
+                        "#runner_attempt": "runner_attempt",
+                        "#runner_result_s3_key": "runner_result_s3_key",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":retryable_failed_status": "retryable_failed",
+                        ":expected_next_retry_at_ms": expectedNextRetryAtMs,
+                        ":source_archive_success_status": "success",
+                        ":runner_attempt": row.runner_attempt,
+                        ":runner_result_s3_key": row.runner_result_s3_key,
+                        ":updated_at_ms": nowMs,
+                        ":null_value": null,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return null;
+            }
+            throw error;
+        }
+        return { attempt: row.runner_attempt, resultS3Key: row.runner_result_s3_key };
     }
 
     async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {

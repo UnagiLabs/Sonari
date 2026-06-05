@@ -149,7 +149,12 @@ async function registrationErrorForResponse(
     if (errorKind === "integrity") {
         return new IntegrityAffectedCellsProofRegistrationError(message);
     }
-    if (response.status >= 500 || errorKind === "retryable") {
+    if (
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500 ||
+        errorKind === "retryable"
+    ) {
         return new RetryableAffectedCellsProofRegistrationError(message);
     }
     if (response.status === 409 || response.status === 422) {

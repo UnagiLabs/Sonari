@@ -101,10 +101,12 @@ describe("HttpAffectedCellsProofRegistrar", () => {
         );
     });
 
-    it("classifies timeout and 5xx responses as retryable", async () => {
-        await expect(registrarWithResponse(new Response("unavailable", { status: 503 })).register(
-            input,
-        )).rejects.toBeInstanceOf(RetryableAffectedCellsProofRegistrationError);
+    it("classifies timeout, 408, 429, and 5xx responses as retryable", async () => {
+        for (const status of [408, 429, 503]) {
+            await expect(registrarWithResponse(new Response("unavailable", { status })).register(
+                input,
+            )).rejects.toBeInstanceOf(RetryableAffectedCellsProofRegistrationError);
+        }
 
         const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
         const registrar = new HttpAffectedCellsProofRegistrar(

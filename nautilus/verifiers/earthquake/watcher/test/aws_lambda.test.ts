@@ -787,6 +787,12 @@ describe("DynamoDB-compatible repository behavior", () => {
             baseNow + 2_500,
             1,
         );
+        await repository.upsertManualEvent("us7000active", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000active",
+            "earthquake-us7000active-1",
+            baseNow + 2_750,
+        );
         const workflow = new RecordingWorkflowStarter();
 
         await expect(
@@ -802,7 +808,14 @@ describe("DynamoDB-compatible repository behavior", () => {
                 resultS3Key: "results/us7000proof/finalized.json",
             },
         ]);
+        await expect(
+            startDueAffectedCellsProofRegistrationRetries(repository, workflow, baseNow + 3_000),
+        ).resolves.toBe(0);
+        expect(workflow.starts).toHaveLength(1);
         await expect(repository.listDue(baseNow + 3_000, 10)).resolves.toEqual([]);
+        await expect(repository.get("us7000proof")).resolves.toMatchObject({
+            affected_cells_proof_registration_next_retry_at_ms: null,
+        });
     });
 
     it("records affected cells proof registration state without changing finalized source archive state", async () => {

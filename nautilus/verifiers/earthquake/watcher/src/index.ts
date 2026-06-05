@@ -136,15 +136,12 @@ export function createScheduledHandler(options: ScheduledHandlerOptions) {
             nowMs,
             options.dueLimit ?? DEFAULT_DUE_LIMIT,
         );
-        const proofRegistrationStarted =
-            started === 0
-                ? await startDueAffectedCellsProofRegistrationRetries(
-                      options.repository,
-                      options.workflow,
-                      nowMs,
-                      options.dueLimit ?? DEFAULT_DUE_LIMIT,
-                  )
-                : 0;
+        const proofRegistrationStarted = await startDueAffectedCellsProofRegistrationRetries(
+            options.repository,
+            options.workflow,
+            nowMs,
+            options.dueLimit ?? DEFAULT_DUE_LIMIT,
+        );
         return { scanned: candidates.length, workflow_started: started + proofRegistrationStarted };
     };
 }
@@ -368,28 +365,42 @@ export async function startDueAffectedCellsProofRegistrationRetries(
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
 ): Promise<number> {
-    const staleBeforeMs = nowMs - PROCESSING_STALE_AFTER_MS;
-    if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
-        return 0;
-    }
     const rows = await repository.listDueAffectedCellsProofRegistrations(nowMs, limit);
     let started = 0;
     for (const row of rows) {
-        const attempt = row.affected_cells_proof_registration_attempt ?? row.runner_attempt;
-        const resultS3Key = row.runner_result_s3_key;
-        if (attempt === null || resultS3Key === null) {
+        const nextRetryAtMs = row.affected_cells_proof_registration_next_retry_at_ms;
+        if (nextRetryAtMs === null) {
             continue;
         }
-        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-proof-registration-${attempt}-${nowMs}`;
+        const claimed = await repository.claimAffectedCellsProofRegistrationRetry(
+            row.source_event_id,
+            nextRetryAtMs,
+            nowMs,
+        );
+        if (claimed === null) {
+            continue;
+        }
+        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-proof-registration-${claimed.attempt}-${nowMs}`;
         try {
             await workflow.start({
                 sourceEventId: row.source_event_id,
                 executionName,
-                attempt,
+                attempt: claimed.attempt,
                 action: "register_affected_cells_proof",
-                resultS3Key,
+                resultS3Key: claimed.resultS3Key,
             });
-        } catch {
+        } catch (error) {
+            await repository.markAffectedCellsProofRegistrationResult(
+                row.source_event_id,
+                {
+                    status: "retryable_failed",
+                    errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+                    retryableNextRetryAtMs: nowMs + FAILED_RETRY_BACKOFF_MS,
+                    message: error instanceof Error ? error.message : String(error),
+                },
+                nowMs,
+                claimed.attempt,
+            );
             break;
         }
         started += 1;
