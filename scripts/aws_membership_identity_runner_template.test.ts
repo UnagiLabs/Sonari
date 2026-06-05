@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 const templatePath = path.join(process.cwd(), "infra/aws/membership-identity-runner/template.yaml");
 
 describe("AWS membership identity runner CloudFormation template", () => {
+    const legacyLocalWorldIdBase = "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:" + "8000";
+
     it("defines the verification job queue and Lambda workflow entrypoints", async () => {
         const template = await readFile(templatePath, "utf8");
 
@@ -55,17 +57,27 @@ describe("AWS membership identity runner CloudFormation template", () => {
             'sed -i "s/^memory_mib:.*/memory_mib: $' + '{NitroEnclaveMemoryMiB}/"',
         );
         expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
+        expect(template).toContain("dnf install -y awscli amazon-ssm-agent libstdc++ python3");
+        expect(template).toContain("yum install -y awscli amazon-ssm-agent libstdc++ python3");
+        expect(template).toContain(
+            "grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml",
+        );
+        expect(template).toContain(
+            "printf '%s\\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml",
+        );
         expect(template).toContain("Default: /opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
-        expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
-        expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
-        expect(template).toContain("Sonari dev fixture World ID proxy placeholder");
+        expect(template).not.toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).not.toContain("sonari-enclave-stdio");
+        expect(template).not.toContain("Sonari dev fixture World ID proxy placeholder");
         // VSOCK server mode: runner.env exposes the enclave CID and the wrapper
         // routes stdin actions to the enclave over VSOCK instead of an stdio bridge.
         expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
         expect(template).toContain("/get_attestation");
         expect(template).toContain("/process_data");
+        expect(template).toContain('--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"');
+        expect(template).toContain("egress_proxy_url: $egress_proxy_url");
         expect(template).toContain("VSOCK-CONNECT");
         expect(template).toContain(
             "GroupDescription: Sonari membership identity runner with SSM-only control plane",
@@ -73,18 +85,23 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain("SecurityGroupIngress:");
     });
 
-    it("treats World ID values as runtime config and never injects a plaintext signing seed", async () => {
+    it("treats World ID values as runtime config without requiring host signing material at runtime", async () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).toContain("WorldIdAppId:");
         expect(template).toContain("WorldIdApiBase:");
         expect(template).toContain("Default: https://developer.world.org");
         expect(template).toContain("SONARI_WORLD_ID_APP_ID");
-        expect(template).toContain("SONARI_WORLD_ID_API_BASE");
+        expect(template).toContain('echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"');
+        expect(template).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).not.toContain(legacyLocalWorldIdBase);
         expect(template).toContain("SigningSeedCiphertextS3Bucket:");
         expect(template).toContain("SigningSeedCiphertextS3Key:");
-        expect(template).toContain("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE");
-        expect(template).toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
+        expect(template).toContain("SigningMaterialKmsKey:");
+        expect(template).not.toContain(
+            'echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"',
+        );
+        expect(template).not.toContain('echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=');
         expect(template).not.toContain("TeeSigningKeySecretArn");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED_FILE");
@@ -160,9 +177,11 @@ describe("AWS membership identity runner CloudFormation template", () => {
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
 
-        // 案A: verified result は identity update を dry-run で提出する。
-        expect(template).toContain('"Next": "SuiSubmissionChoice"');
-        expect(template).toContain('"action": "dry_run_sui_submission"');
-        expect(template).toContain('"StringEquals": "verified", "Next": "DryRunSuiSubmission"');
+        // The dedicated runner owns the TEE server path only. Sui dry-run/submit
+        // requires separate relayer config and is intentionally not forced here.
+        expect(template).toContain('"action": "apply_result"');
+        expect(template).toContain('"Next": "StopInstance"');
+        expect(template).not.toContain('"Next": "SuiSubmissionChoice"');
+        expect(template).not.toContain('"action": "dry_run_sui_submission"');
     });
 });

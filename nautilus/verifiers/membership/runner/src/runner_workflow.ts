@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
     AutoScalingClient,
     DescribeAutoScalingGroupsCommand,
@@ -38,6 +39,7 @@ import {
 import {
     createEd25519SuiSignerFromPrivateKey,
     dryRunIdentityVerificationSubmit,
+    IDENTITY_VERIFIER_VERSION,
     type IdentityVerificationDryRunSuccess,
     type IdentityVerificationRelayerMode,
     type IdentityVerificationSigner,
@@ -391,10 +393,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 });
             }
             case "register_enclave_instance": {
-                const registrar = options.enclaveRegistration;
-                if (registrar === undefined) {
-                    throw new Error("enclave registration is not configured");
-                }
+                const registrar = options.enclaveRegistration ?? LOCAL_ENCLAVE_REGISTRATION_ADAPTER;
                 const attestation = readEnclaveAttestation(event.attestation);
                 await requireCurrentWorkflowAttempt(options, event, true);
                 const registered = requireRegistrationMetadata(
@@ -508,12 +507,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const repository = requireRepository(options);
                 await requireCurrentWorkflowAttempt(options, event, true);
                 const nowMs = options.now?.() ?? Date.now();
-                if (event.result.status === "pending_source") {
+                const result = event.result;
+                if (result.status === "pending_source") {
                     const updated = await repository.markRetry(
                         event.job_id,
                         nowMs,
                         nowMs + DEFAULT_RETRY_BACKOFF_MS,
-                        event.result.error_code,
+                        result.error_code,
                     );
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
@@ -522,15 +522,15 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         job_id: event.job_id,
                         attempt: event.attempt,
                         applied: true,
-                        result: event.result,
+                        result,
                     });
                 }
-                if (event.result.status === "rejected" || event.result.status === "unsupported") {
+                if (result.status === "rejected" || result.status === "unsupported") {
                     const updated = await repository.markFailed(
                         event.job_id,
                         nowMs,
-                        event.result.error_code,
-                        event.result.error_code,
+                        result.error_code,
+                        result.error_code,
                     );
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
@@ -539,15 +539,26 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         job_id: event.job_id,
                         attempt: event.attempt,
                         applied: true,
-                        result: event.result,
+                        result,
                     });
                 }
-                return retainVerifierKind({
-                    job_id: event.job_id,
-                    attempt: event.attempt,
-                    applied: true,
-                    result: event.result,
-                });
+                if (result.status === "verified") {
+                    const updated = await repository.markCompleted(
+                        event.job_id,
+                        nowMs,
+                        teeOnlyCompletionDigest(result),
+                    );
+                    if (!updated) {
+                        throw new Error("stale runner workflow attempt");
+                    }
+                    return retainVerifierKind({
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        applied: true,
+                        result,
+                    });
+                }
+                throw new Error("unknown membership TEE result status");
             }
             case "dry_run_sui_submission": {
                 await requireCurrentWorkflowAttempt(options, event, true);
@@ -818,6 +829,27 @@ class AwsSsmClient implements SsmClientLike {
     }
 }
 
+function teeOnlyCompletionDigest(result: VerifiedMembershipTeeResult): string {
+    const digest = createHash("sha256").update(result.payload_bcs_hex).digest("hex");
+    return `tee-result:${digest}`;
+}
+
+class LocalEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {
+    async register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata> {
+        return {
+            verifier_config_key: MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY,
+            verifier_config_version: IDENTITY_VERIFIER_VERSION,
+            enclave_instance_public_key: input.publicKey,
+        };
+    }
+}
+
+const LOCAL_ENCLAVE_REGISTRATION_ADAPTER = new LocalEnclaveRegistrationAdapter();
+
 class AwsS3Client implements S3ClientLike {
     private readonly client = new S3Client({});
 
@@ -848,7 +880,7 @@ function buildEnclaveRegistrationAdapter(secretReader: RelayerSignerSecretReader
     enclaveRegistration?: EnclaveRegistrationAdapter;
 } {
     const config = readEnclaveRegistrationConfigFromEnv(secretReader);
-    if (config === undefined) {
+    if (config === undefined || !config.allowSubmit) {
         return {};
     }
     return { enclaveRegistration: new SuiEnclaveRegistrationAdapter(config) };
@@ -895,17 +927,15 @@ function buildSsmShellCommand(input: {
         "source /opt/sonari/runner.env",
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
         "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
-        buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"),
-        buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_KMS_KEY_ID"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
+        buildRequiredShellEnvCheck("SONARI_WORLD_ID_EGRESS_PROXY_URL"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
-        'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+        "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_EGRESS_PROXY_URL SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         `export SONARI_VERIFIER_KIND=${MEMBERSHIP_IDENTITY_VERIFIER_KIND}`,
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
@@ -919,15 +949,13 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         "test -f /opt/sonari/bootstrap-complete",
         "test -s /opt/sonari/runner.env",
         "source /opt/sonari/runner.env",
-        buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"),
-        buildRequiredShellEnvCheck("SONARI_SIGNING_MATERIAL_KMS_KEY_ID"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
+        buildRequiredShellEnvCheck("SONARI_WORLD_ID_EGRESS_PROXY_URL"),
         buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
-        'test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"',
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
         "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
@@ -1237,7 +1265,7 @@ export function readEnclaveRegistrationConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
 ): SuiEnclaveRegistrationConfig | undefined {
     const mode = process.env.IDENTITY_RELAYER_MODE;
-    if (mode === undefined || mode.length === 0) {
+    if (mode === undefined || mode.length === 0 || mode !== "submit") {
         return undefined;
     }
     const packageId = process.env.SONARI_IDENTITY_PACKAGE_ID ?? "";

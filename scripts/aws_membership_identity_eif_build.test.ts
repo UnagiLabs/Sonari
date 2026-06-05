@@ -6,7 +6,7 @@ import { createAwsMembershipIdentityEifBuildPlan } from "./build_aws_membership_
 const packageJsonPath = path.join(process.cwd(), "package.json");
 
 describe("AWS membership identity EIF build script", () => {
-    it("generates deterministic Nitro build and run-enclave commands", () => {
+    it("generates deterministic Nitro build and run-enclave commands with the server EIF entrypoint", () => {
         const plan = createAwsMembershipIdentityEifBuildPlan({
             artifactPath: "dist/aws/membership-identity-tee-artifact.tar.gz",
             eifPath: "dist/aws/membership-identity-tee.eif",
@@ -19,10 +19,7 @@ describe("AWS membership identity EIF build script", () => {
         expect(plan.eifPath).toBe(path.resolve("dist/aws/membership-identity-tee.eif"));
         expect(plan.dockerContextDir).toBe(path.resolve(".build/aws-membership-identity-eif"));
         expect(plan.dockerUri).toBe("sonari/membership-identity-tee:local");
-        expect(plan.teeCommand).toEqual([
-            "/opt/sonari/tee-artifact/bin/membership-tee",
-            "production",
-        ]);
+        expect(plan.teeCommand).toEqual(["/opt/sonari/tee-artifact/bin/membership-tee", "server"]);
         expect(plan.buildEnclaveCommand).toEqual([
             "nitro-cli",
             "build-enclave",
@@ -47,34 +44,27 @@ describe("AWS membership identity EIF build script", () => {
         ]);
     });
 
-    it("can build a non-mainnet dummy World ID EIF with the fixture verifier", () => {
-        const plan = createAwsMembershipIdentityEifBuildPlan({
-            artifactPath: "dist/aws/membership-identity-tee-artifact.tar.gz",
-            eifPath: "dist/aws/membership-identity-tee-dummy.eif",
-            workDir: ".build/aws-membership-identity-eif-dummy",
-            teeMode: "fixture",
-            worldIdStatus: "verified",
-            worldAppId: "app_staging_dummy",
-        });
+    it("rejects legacy stdin/stdout modes for the AWS server EIF builder", async () => {
+        const script = await readFile(
+            path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
+            "utf8",
+        );
 
-        expect(plan.teeCommand).toEqual([
-            "/opt/sonari/tee-artifact/bin/membership-tee",
-            "fixture",
-            "--world-id-status",
-            "verified",
-            "--world-app-id",
-            "app_staging_dummy",
-        ]);
+        expect(script).not.toContain("--tee-mode");
+        expect(script).not.toContain("--world-id-status");
+        expect(script).not.toContain("--world-app-id");
+        expect(script).not.toContain('"production"');
+        expect(script).not.toContain('"fixture"');
     });
 
-    it("documents that the EIF container runs membership-tee production without Walrus", async () => {
+    it("documents that the EIF container runs membership-tee server without Walrus", async () => {
         const script = await readFile(
             path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
             "utf8",
         );
 
         expect(script).toContain('"/opt/sonari/tee-artifact/bin/membership-tee"');
-        expect(script).toContain('"production"');
+        expect(script).toContain('"server"');
         expect(script).toContain("nitro-cli");
         expect(script).toContain("build-enclave");
         expect(script).toContain("run-enclave");

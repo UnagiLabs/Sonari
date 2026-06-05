@@ -107,16 +107,44 @@ describe("membership identity AWS interface docs", () => {
             "x86_64-unknown-linux-musl",
             "dist/aws/membership-identity-tee-artifact.tar.gz",
             ".sha256",
-            "bin/membership-tee production",
+            "bin/membership-tee server",
         ]) {
             expect(awsReadme).toContain(phrase);
         }
 
+        expect(awsReadme).not.toContain("bin/membership-tee production");
         expect(awsReadme).toContain("Walrus CLI を含めません");
         expect(awsReadme).toContain("membership TEE は Walrus を呼びません");
         expect(awsReadme).toContain("membership-identity-tee.eif");
         expect(awsReadme).toContain("KMS / Nitro attestation measurement");
         expect(awsReadme).toContain("stdin/stdout 契約は変えません");
+    });
+
+    it("documents server as the AWS/Nautilus production path and production as legacy local stdio", async () => {
+        const { awsReadme, membershipReadme, teeReadme } = await readDocs();
+        const combined = `${awsReadme}\n${membershipReadme}\n${teeReadme}`;
+
+        for (const phrase of [
+            "AWS / Nautilus production entrypoint",
+            "`membership-tee server`",
+            "`membership-tee production` は legacy/local",
+            "legacy/local stdin/stdout",
+            "enclave-local ephemeral key",
+            "/get_attestation",
+            "/process_data",
+            "registration metadata",
+            "egress_proxy_url",
+            "SONARI_WORLD_ID_EGRESS_PROXY_URL",
+            "https://developer.world.org",
+        ]) {
+            expect(combined).toContain(phrase);
+        }
+
+        expect(combined).toContain(
+            "World ID API base は canonical value を使い、egress は `egress_proxy_url` / `SONARI_WORLD_ID_EGRESS_PROXY_URL` で渡す",
+        );
+        expect(awsReadme).not.toContain("dummy proof mode");
+        expect(awsReadme).not.toContain("dummy World ID verifier");
     });
 
     it("keeps unsupported KYC error code documentation aligned with the TEE", async () => {

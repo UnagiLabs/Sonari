@@ -155,7 +155,7 @@ Parameters:
   WorldIdApiBase:
     Type: String
     Default: https://developer.world.org
-    Description: World ID API base URL passed as runtime configuration to the membership identity enclave process.
+    Description: Legacy parameter kept for deploy input compatibility. The membership server path pins the canonical https://developer.world.org base.
   RelayerMode:
     Type: String
     Default: ""
@@ -481,7 +481,7 @@ Resources:
             : "${!SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"
             SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=180
 
-            marker=/tmp/sonari-earthquake-enclave-bootstrapped
+            marker=/tmp/se
             input_file="$(mktemp)"
             response_file="$(mktemp)"
             trap 'rm -f "$input_file" "$response_file"' EXIT
@@ -493,12 +493,9 @@ Resources:
                 return
               fi
 
-              nitro-cli run-enclave $SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS >/tmp/sonari-earthquake-run-enclave.json 2>/tmp/sonari-earthquake-run-enclave.err || {
-                if ! nitro-cli describe-enclaves | grep -q '"EnclaveCID": '"$SONARI_EARTHQUAKE_ENCLAVE_CID"; then
-                  cat /tmp/sonari-earthquake-run-enclave.err >&2
-                  exit 1
-                fi
-              }
+              nitro-cli terminate-enclave --all &>/dev/null || true
+              nitro-cli run-enclave $SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS >/tmp/sonari-earthquake-run-enclave.json 2>/tmp/sonari-earthquake-run-enclave.err || { cat /tmp/sonari-earthquake-run-enclave.err >&2; exit 1; }
+              rm -f /tmp/sm
               sleep 2
 
               jq -n \
@@ -563,11 +560,35 @@ Resources:
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            : "${!SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"
-            : "${!SONARI_NITRO_RUN_ENCLAVE_ARGS:?SONARI_NITRO_RUN_ENCLAVE_ARGS is required}"
-            : "${!SONARI_ENCLAVE_STDIO_BRIDGE:?SONARI_ENCLAVE_STDIO_BRIDGE is required}"
-            test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
-            exec "$SONARI_ENCLAVE_STDIO_BRIDGE" $SONARI_NITRO_RUN_ENCLAVE_ARGS
+            . /opt/sonari/runner.env
+            : "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID"
+            eif="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
+            args="$SONARI_NITRO_RUN_ENCLAVE_ARGS"
+            cid="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"
+            m=/tmp/sm
+            i="$(mktemp)"
+            o="$(mktemp)"
+            trap 'rm -f "$i" "$o"' EXIT
+            cat >"$i"
+            ensure_membership_enclave() {
+              test -s "$eif"
+              [ -f "$m" ] && return
+              nitro-cli terminate-enclave --all &>/dev/null || true
+              rm -f /tmp/se
+              nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || { cat /tmp/m.err >&2; exit 1; }
+              sleep 2
+              jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
+              touch "$m"
+            }
+            ensure_membership_enclave
+            action="$(jq -r .action "$i")"
+            case "$action" in
+              get_attestation) printf 'GET /get_attestation HTTP/1.0\r\n\r\n' ;;
+              process_data) printf 'POST /process_data HTTP/1.0\r\nContent-Length:%s\r\n\r\n' "$(wc -c <"$i")"; cat "$i" ;;
+              *) exit 1 ;;
+            esac | socat -t 180 - "VSOCK-CONNECT:$cid:3000" >"$o"
+            head -n 1 "$o" | tr -d '\r' | grep -Eq '^HTTP/1\.[01] 200 ' || { cat "$o" >&2; exit 1; }
+            sed '1,/^\r\{0,1\}$/d' "$o"
             SONARI_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-membership-identity-enclave
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
@@ -604,23 +625,11 @@ Resources:
             ${WorldIdAppId}
             SONARI_WORLD_ID_APP_ID
             )
-            world_id_api_base=$(cat <<'SONARI_WORLD_ID_API_BASE'
-            ${WorldIdApiBase}
-            SONARI_WORLD_ID_API_BASE
-            )
+            world_id_api_base="https://developer.world.org"
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
-            fi
-            if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
-              cat >/usr/local/bin/sonari-enclave-stdio <<'SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE'
-            #!/bin/bash
-            set -euo pipefail
-            : "${!SONARI_WORLD_ID_APP_ID:?SONARI_WORLD_ID_APP_ID is required}"
-            exec /opt/sonari/membership-tee-artifact/bin/membership-tee fixture --world-id-status verified --world-app-id "$SONARI_WORLD_ID_APP_ID"
-            SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE
-              chmod 0500 /usr/local/bin/sonari-enclave-stdio
             fi
             vsock_proxy_path="$(command -v vsock-proxy || true)"
             if [ -z "$vsock_proxy_path" ]; then
@@ -753,10 +762,9 @@ Resources:
               printf 'SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $earthquake_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
               echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
-              echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
-              printf 'SONARI_WORLD_ID_API_BASE=%q\n' "$world_id_api_base"
+              echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
@@ -1469,14 +1477,58 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt" },
-              "Next": "DispatchTeeCommand",
+              "Next": "DispatchGetAttestationCommand",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
-            "DispatchTeeCommand": {
+            "DispatchGetAttestationCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_tee_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_get_attestation_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Next": "WaitForAttestationCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "WaitForAttestationCommand": { "Type": "Wait", "Seconds": 30, "Next": "PollAttestationCommand" },
+            "PollAttestationCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "poll_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count.$": "$.command_poll_count" },
+              "Next": "AttestationCommandComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "AttestationCommandComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.command_status", "StringEquals": "SUCCEEDED", "Next": "ReadAttestationResult" },
+                { "Variable": "$.command_status", "StringEquals": "FAILED", "Next": "MarkFailed" },
+                { "Variable": "$.command_poll_count", "NumericGreaterThanEquals": 60, "Next": "MarkCommandPollingTimedOut" }
+              ],
+              "Default": "WaitForAttestationCommand"
+            },
+            "ReadAttestationResult": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_attestation_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "ResultPath": "$.attestation_result",
+              "Next": "RegisterEnclaveInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "RegisterEnclaveInstance": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_enclave_instance", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "attestation.$": "$.attestation_result.attestation" },
+              "ResultPath": "$.registration_result",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Next": "DispatchProcessDataCommand",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DispatchProcessDataCommand": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_process_data_command", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "registration_metadata.$": "$.registration_result.registration_metadata" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
               "Next": "WaitForCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },

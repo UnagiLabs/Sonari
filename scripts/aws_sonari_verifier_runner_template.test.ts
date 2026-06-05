@@ -14,6 +14,18 @@ function countType(template: string, resourceType: string): number {
     );
 }
 
+function extractHeredoc(template: string, startMarker: string, endMarker: string): string {
+    const start = template.indexOf(startMarker);
+    const bodyStart = template.indexOf("\n", start);
+    const end = template.indexOf(endMarker, bodyStart);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(bodyStart).toBeGreaterThan(start);
+    expect(end).toBeGreaterThan(bodyStart);
+
+    return template.slice(bodyStart, end);
+}
+
 describe("AWS Sonari verifier runner CloudFormation template", () => {
     it("shares exactly one EC2 AutoScalingGroup and LaunchTemplate across verifier kinds", async () => {
         const template = await readTemplate();
@@ -195,6 +207,43 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
     });
 
+    it("runs membership verifier through attestation registration and process_data", async () => {
+        const template = await readTemplate();
+        const start = template.indexOf("MembershipRunnerStateMachine:");
+        const end = template.indexOf("WatcherSchedule:", start);
+        const membership = template.slice(start, end);
+        const expectedActions = [
+            '"action": "dispatch_get_attestation_command"',
+            '"action": "read_attestation_result"',
+            '"action": "register_enclave_instance"',
+            '"action": "dispatch_process_data_command"',
+            '"action": "read_result"',
+            '"action": "apply_result"',
+        ];
+
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        expect(membership).toContain('"Next": "DispatchGetAttestationCommand"');
+        expect(membership).not.toContain('"action": "dispatch_tee_command"');
+        for (const action of expectedActions) {
+            expect(membership).toContain(action);
+        }
+        for (let index = 1; index < expectedActions.length; index += 1) {
+            const previousAction = expectedActions[index - 1];
+            const currentAction = expectedActions[index];
+            if (previousAction === undefined || currentAction === undefined) {
+                throw new Error("expected action sequence was malformed");
+            }
+            expect(membership.indexOf(previousAction)).toBeLessThan(
+                membership.indexOf(currentAction),
+            );
+        }
+        expect(membership).toContain('"attestation.$": "$.attestation_result.attestation"');
+        expect(membership).toContain(
+            '"registration_metadata.$": "$.registration_result.registration_metadata"',
+        );
+    });
+
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {
         const template = await readTemplate();
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
@@ -344,9 +393,12 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // earthquake egress model -- never a host-controlled http://127.0.0.1 base.
         expect(template).not.toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
         expect(template).not.toContain("http://127.0.0.1:8000");
-        expect(template).toContain(
-            "printf 'SONARI_WORLD_ID_API_BASE=%q\\n' \"$world_id_api_base\"",
+        expect(template).toContain('world_id_api_base="https://developer.world.org"');
+        expect(template).toContain('echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"');
+        expect(template).not.toContain(
+            "$" + "{WorldIdApiBase}\n            SONARI_WORLD_ID_API_BASE",
         );
+        expect(template).not.toContain("printf 'SONARI_WORLD_ID_API_BASE=%q\\n'");
         // The canonical https base must keep its https scheme on the wire.
         expect(template).toContain("Default: https://developer.world.org");
         // World ID HTTPS traffic is forwarded through the same explicit egress proxy
@@ -389,13 +441,61 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
         expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
-        expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
-        expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
+        expect(template).not.toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
         // World ID readiness gate is a single unconditional oneshot unit bound to the
         // shared egress vsock proxy (dev fixture and prod share one definition).
         expect(template).toContain("Description=Sonari World ID egress readiness gate");
         expect(template).toContain("BindsTo=sonari-earthquake-egress-vsock-proxy.service");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
+    });
+
+    it("routes membership verifier through server bootstrap and VSOCK HTTP requests", async () => {
+        const template = await readTemplate();
+        const membershipWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-membership-identity-enclave",
+            "SONARI_ENCLAVE_WRAPPER",
+        );
+
+        expect(membershipWrapper).toContain("/opt/sonari/runner.env");
+        expect(membershipWrapper).toContain(
+            ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID"',
+        );
+        expect(membershipWrapper).toContain("m=/tmp/sm");
+        expect(membershipWrapper).toContain("nitro-cli terminate-enclave --all");
+        expect(membershipWrapper).toContain("rm -f /tmp/se");
+        expect(membershipWrapper).toContain("nitro-cli run-enclave $args");
+        expect(membershipWrapper).toContain(
+            '--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"',
+        );
+        expect(membershipWrapper).toContain("$egress_proxy_url");
+        expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:7777");
+        expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:3000");
+        expect(membershipWrapper).toContain("GET /get_attestation HTTP/1.0");
+        expect(membershipWrapper).toContain("POST /process_data HTTP/1.0");
+        expect(membershipWrapper).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
+        expect(membershipWrapper).not.toContain('exec "$SONARI_ENCLAVE_STDIO_BRIDGE"');
+    });
+
+    it("invalidates stale shared-runner enclave markers when switching verifier kinds", async () => {
+        const template = await readTemplate();
+        const earthquakeWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-earthquake-enclave",
+            "SONARI_EARTHQUAKE_ENCLAVE_WRAPPER",
+        );
+        const membershipWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-membership-identity-enclave",
+            "SONARI_ENCLAVE_WRAPPER",
+        );
+
+        expect(earthquakeWrapper).toContain("marker=/tmp/se");
+        expect(earthquakeWrapper).toContain("nitro-cli terminate-enclave --all");
+        expect(earthquakeWrapper).toContain("rm -f /tmp/sm");
+        expect(membershipWrapper).toContain("m=/tmp/sm");
+        expect(membershipWrapper).toContain("rm -f /tmp/se");
     });
 
     it("exports the membership enclave CID to runner.env from the shared NitroEnclaveCid", async () => {
@@ -560,7 +660,6 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             TeeEifS3Bucket: 58,
             TeeEifS3Key: 91,
             TeeEifSha256: 64,
-            WorldIdApiBase: 27,
             WorldIdAppId: 17,
         };
 
