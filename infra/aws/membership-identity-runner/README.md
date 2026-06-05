@@ -343,9 +343,9 @@ Real World ID request を submit し、enclave が vsock-proxy 経由でのみ W
 ### 7. Sui dry-run / submit
 
 この dedicated stack は `membership-tee server` の attestation、World ID verification、`/process_data` envelope を確認する runner です。
-Sui dry-run / submit は、relayer 設定を持つ shared stack または後続 issue で確認します。
 default / dry-run smoke では、runner は envelope 用の local registration metadata を使います。
-submit-capable relayer 設定がある場合だけ、Sui 上の enclave registration を使います。
+submit-capable relayer 設定（`RELAYER_MODE=submit`、`RELAYER_ALLOW_SUBMIT=true`、`RELAYER_SIGNER_SECRET_ARN`）がある場合だけ、Sui 上の enclave registration を使い、Sui submit と digest 取得まで進みます。
+testnet 一気通貫の成功条件は、後述の「dummy World ID + Sui testnet 一気通貫 smoke」にまとめます。
 
 ### 8. Post-tx membership pass state readback
 
@@ -361,6 +361,38 @@ Tx digest が finalized された後、同じ Sui network から `SONARI_MEMBERS
 - signed statement hash
 
 Issue #74 は、この readback が tx digest evidence と一致した後にだけ close できます。
+
+## dummy World ID + Sui testnet 一気通貫 smoke
+
+この節は MVP のゴールを 1 か所にまとめます。MVP では、本物の World ID API 検証は行いません。代わりに、テスト用の本人確認データを使い、testnet で本人確認を最後まで通すことを目標にします。real World ID proof の live gate と KYC は MVP の対象外です。
+
+### dummy World ID proof の network 制限
+
+dummy World ID proof は testnet / devnet 指定時のみ使えます。mainnet では deploy 前に拒否します。ここでいう dummy World ID proof とは、本物の World ID API を確認する代わりに、検証済みと同じ形をしたテスト用の proof（本人確認データ）を流す運用のことです。
+
+この制限は `pnpm identity:live-gate`（`scripts/membership_identity_live_gate.ts`）が強制します。`RELAYER_NETWORK=mainnet` で dummy を選ぶと、live gate が fail-closed（安全側に倒して停止）で止めます。dummy proof smoke の具体手順は、共有 runbook `infra/aws/sonari-verifier-runner/docs/smoke-runbook.md` の「Membership dummy proof smoke」を参照します。
+
+### Sui testnet object の用意
+
+testnet 一気通貫には Sui object ID が必要です。「Sui object ID」節の env を、次のどちらかで埋めます。
+
+- 必要な Sui testnet object を新規に作る。
+- 既存 object を検出して、その object ID を割り当てる。
+
+どちらの場合も、`SONARI_IDENTITY_REGISTRY_ID` は stack の `SonariIdentityRegistryId` と一致させます。一致しない object を使うと、request は fail-closed で弾かれます。
+
+### smoke の成功条件
+
+testnet 一気通貫の smoke は、次をすべて満たしたときに成功とします。
+
+- Step Functions 実行が `SUCCEEDED` に到達する。
+- Sui submit digest が残る。submit は submit-capable relayer 設定がある場合に実行します。digest とは Sui に提出した取引の控え番号です。
+- MembershipPass readback が、submit した verified payload を反映する。同じ testnet から `SONARI_MEMBERSHIP_PASS_ID` を読み、本人確認結果が一致することを確認します。
+- AWS idle cleanup が効く。run 後に capacity が zero に戻ります。`DesiredCapacity=0`、ASG の `InService=0`、running EC2 instances が `0`、schedule が `DISABLED` になることを確認します。
+
+### KYC の扱い
+
+KYC は MVP 外です。`provider=kyc` の request は現在 `unsupported` を返し、error code は `KYC_UNSUPPORTED` です。MVP では World ID provider だけを通します。
 
 ## Evidence gate
 
