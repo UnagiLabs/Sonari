@@ -35,8 +35,11 @@ export type ExecutionSummary = {
 
 export type LatestExecutionSummary = {
     executionArn: string;
+    status: string;
     verifierKind: string | null;
     jobId: string | null;
+    registrationMetadata: RegistrationMetadataSummary | null;
+    teeResult: TeeResultSummary | null;
 };
 
 export type JobSummary = {
@@ -44,7 +47,28 @@ export type JobSummary = {
     status: string;
     workflowExecutionName: string | null;
     retryCount: number | null;
+    errorCode: string | null;
+    errorMessage: string | null;
+    txDigest: string | null;
 };
+
+export type RegistrationMetadataSummary = {
+    verifierConfigKey: number;
+    verifierConfigVersion: number | null;
+    enclaveInstancePublicKey: string;
+};
+
+export type TeeResultSummary =
+    | {
+          status: "verified";
+          payloadBcsHex: string;
+          signature: string;
+          publicKey: string;
+      }
+    | {
+          status: string;
+          errorCode: string | null;
+      };
 
 export type SmokeMembershipManualResult = {
     batchVerifierLambdaName: string;
@@ -172,11 +196,58 @@ async function describeLatestExecution(
     const inputText =
         isRecord(response) && typeof response.input === "string" ? response.input : null;
     const parsedInput = inputText === null ? null : safeJsonParse(inputText);
+    const evidence = await readLatestExecutionEvidence(aws, executionArn);
     return {
         executionArn,
+        status: isRecord(response) ? requireString(response.status, "execution.status") : "unknown",
         verifierKind: readRecordString(parsedInput, "verifier_kind"),
         jobId: readRecordString(parsedInput, "job_id"),
+        registrationMetadata: evidence.registrationMetadata,
+        teeResult: evidence.teeResult,
     };
+}
+
+async function readLatestExecutionEvidence(
+    aws: AwsCli,
+    executionArn: string,
+): Promise<{
+    registrationMetadata: RegistrationMetadataSummary | null;
+    teeResult: TeeResultSummary | null;
+}> {
+    let nextToken: string | undefined;
+    let registrationMetadata: RegistrationMetadataSummary | null = null;
+    let teeResult: TeeResultSummary | null = null;
+    for (let page = 0; page < 25; page += 1) {
+        const args = [
+            "stepfunctions",
+            "get-execution-history",
+            "--execution-arn",
+            executionArn,
+            "--max-results",
+            "100",
+        ];
+        if (nextToken !== undefined) {
+            args.push("--next-token", nextToken);
+        }
+        const response = await aws.json(args);
+        const events = isRecord(response) && Array.isArray(response.events) ? response.events : [];
+        registrationMetadata ??= readRegistrationMetadata(
+            readStateOutput(events, "RegisterEnclaveInstance"),
+        );
+        teeResult ??= readTeeResult(readStateOutput(events, "ReadResult"));
+        if (registrationMetadata !== null && teeResult !== null) {
+            return { registrationMetadata, teeResult };
+        }
+        const responseNextToken = readRecordString(response, "nextToken");
+        if (responseNextToken === null) {
+            return { registrationMetadata, teeResult };
+        }
+        if (responseNextToken === nextToken) {
+            throw new Error("Step Functions execution history pagination did not advance");
+        }
+        nextToken = responseNextToken;
+    }
+    throw new Error("Step Functions execution history pagination exceeded 25 pages");
 }
 
 async function readJob(aws: AwsCli, tableName: string, jobId: string): Promise<JobSummary | null> {
@@ -197,6 +268,9 @@ async function readJob(aws: AwsCli, tableName: string, jobId: string): Promise<J
         status: readDynamoString(item, "status") ?? "unknown",
         workflowExecutionName: readDynamoString(item, "workflow_execution_name"),
         retryCount: readDynamoNumber(item, "retry_count"),
+        errorCode: readDynamoString(item, "error_code"),
+        errorMessage: readDynamoString(item, "error_message"),
+        txDigest: readDynamoString(item, "tx_digest"),
     };
 }
 
@@ -231,6 +305,81 @@ function readRecordString(value: unknown, key: string): string | null {
     }
     const nested = value[key];
     return typeof nested === "string" && nested.length > 0 ? nested : null;
+}
+
+function readRecordNumber(value: unknown, key: string): number | null {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const nested = value[key];
+    return typeof nested === "number" && Number.isSafeInteger(nested) ? nested : null;
+}
+
+function readStateOutput(events: unknown[], stateName: string): unknown {
+    for (const event of events) {
+        if (!isRecord(event) || event.type !== "TaskStateExited") {
+            continue;
+        }
+        const details = event.stateExitedEventDetails;
+        if (
+            !isRecord(details) ||
+            details.name !== stateName ||
+            typeof details.output !== "string"
+        ) {
+            continue;
+        }
+        return safeJsonParse(details.output);
+    }
+    return null;
+}
+
+function readRegistrationMetadata(output: unknown): RegistrationMetadataSummary | null {
+    if (!isRecord(output) || !isRecord(output.registration_result)) {
+        return null;
+    }
+    const metadata = output.registration_result.registration_metadata;
+    if (!isRecord(metadata)) {
+        return null;
+    }
+    const verifierConfigKey = readRecordNumber(metadata, "verifier_config_key");
+    const enclaveInstancePublicKey = readRecordString(metadata, "enclave_instance_public_key");
+    if (verifierConfigKey === null || enclaveInstancePublicKey === null) {
+        return null;
+    }
+    return {
+        verifierConfigKey,
+        verifierConfigVersion: readRecordNumber(metadata, "verifier_config_version"),
+        enclaveInstancePublicKey,
+    };
+}
+
+function readTeeResult(output: unknown): TeeResultSummary | null {
+    if (!isRecord(output) || !isRecord(output.result)) {
+        return null;
+    }
+    const result = output.result;
+    const status = readRecordString(result, "status");
+    if (status === null) {
+        return null;
+    }
+    if (status === "verified") {
+        const payloadBcsHex = readRecordString(result, "payload_bcs_hex");
+        const signature = readRecordString(result, "signature");
+        const publicKey = readRecordString(result, "public_key");
+        if (payloadBcsHex === null || signature === null || publicKey === null) {
+            throw new Error(
+                "verified membership TEE result requires payload_bcs_hex, signature, and public_key",
+            );
+        }
+        return { status, payloadBcsHex, signature, publicKey };
+    }
+    if ("signature" in result || "public_key" in result) {
+        throw new Error("non-verified membership TEE result must not include signature fields");
+    }
+    return {
+        status,
+        errorCode: readRecordString(result, "error_code"),
+    };
 }
 
 function readDynamoString(item: Record<string, unknown>, key: string): string | null {

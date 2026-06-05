@@ -25,8 +25,20 @@ describe("AWS membership manual batch smoke script", () => {
             workflowStarted: 2,
             latestExecution: {
                 executionArn: LATEST_EXECUTION_ARN,
+                status: "RUNNING",
                 verifierKind: "membership_identity",
                 jobId: "job-abc",
+                registrationMetadata: {
+                    verifierConfigKey: 2,
+                    verifierConfigVersion: 1,
+                    enclaveInstancePublicKey: `0x${"cc".repeat(32)}`,
+                },
+                teeResult: {
+                    status: "verified",
+                    payloadBcsHex: "0x010203",
+                    signature: `0x${"11".repeat(64)}`,
+                    publicKey: `0x${"22".repeat(32)}`,
+                },
             },
             job: null,
         });
@@ -43,8 +55,53 @@ describe("AWS membership manual batch smoke script", () => {
             "lambda:invoke",
             "stepfunctions:list-executions",
             "stepfunctions:describe-execution",
+            "stepfunctions:get-execution-history",
         ]);
         expect(operations).not.toContain("dynamodb:get-item");
+    });
+
+    it("summarizes non-verified TEE results without signature fields", async () => {
+        const result = await runSmokeMembershipManual({
+            aws: new RecordingAwsCli({ teeStatus: "pending_source" }),
+            stack: STACK,
+            expectedAccount: EXPECTED_ACCOUNT,
+        });
+
+        expect(result.latestExecution?.teeResult).toEqual({
+            status: "pending_source",
+            errorCode: "WORLD_ID_API_UNAVAILABLE",
+        });
+        expect(JSON.stringify(result.latestExecution?.teeResult)).not.toContain("signature");
+        expect(JSON.stringify(result.latestExecution?.teeResult)).not.toContain("publicKey");
+    });
+
+    it("paginates execution history until registration metadata and TEE result are found", async () => {
+        const cli = new RecordingAwsCli({ paginatedHistory: true });
+
+        const result = await runSmokeMembershipManual({
+            aws: cli,
+            stack: STACK,
+            expectedAccount: EXPECTED_ACCOUNT,
+        });
+
+        expect(result.latestExecution?.registrationMetadata).toMatchObject({
+            verifierConfigKey: 2,
+        });
+        expect(result.latestExecution?.teeResult).toMatchObject({
+            status: "verified",
+            payloadBcsHex: "0x010203",
+        });
+        expect(cli.historyNextTokens).toEqual([null, "page-2"]);
+    });
+
+    it("fails closed when execution history pagination does not advance", async () => {
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ stuckHistoryToken: true }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+            }),
+        ).rejects.toThrow("Step Functions execution history pagination did not advance");
     });
 
     it("invokes the batch lambda with the membership_identity verifier_kind payload", async () => {
@@ -75,6 +132,9 @@ describe("AWS membership manual batch smoke script", () => {
             status: "processing",
             workflowExecutionName: "membership-exec-1",
             retryCount: 0,
+            errorCode: "WORLD_ID_API_UNAVAILABLE",
+            errorMessage: "waiting for World ID",
+            txDigest: "tee-result:abc123",
         });
         expect(cli.getItemKeys).toEqual([{ job_id: { S: "job-abc" } }]);
         expect(cli.operations.map((operation) => operation.label)).toContain("dynamodb:get-item");
@@ -144,6 +204,9 @@ type RecordingAwsCliOptions = {
     functionError?: boolean;
     executionsEmpty?: boolean;
     workflowStarted?: number;
+    teeStatus?: "verified" | "pending_source";
+    paginatedHistory?: boolean;
+    stuckHistoryToken?: boolean;
 };
 
 class RecordingAwsCli implements AwsCli {
@@ -151,6 +214,7 @@ class RecordingAwsCli implements AwsCli {
     readonly lambdaPayloads: unknown[] = [];
     readonly invokeFunctionNames: string[] = [];
     readonly getItemKeys: unknown[] = [];
+    readonly historyNextTokens: Array<string | null> = [];
 
     constructor(private readonly options: RecordingAwsCliOptions = {}) {}
 
@@ -205,6 +269,8 @@ class RecordingAwsCli implements AwsCli {
                         attempt: 1,
                     }),
                 };
+            case "stepfunctions:get-execution-history":
+                return this.executionHistory(args);
             case "dynamodb:get-item": {
                 const key = args[args.indexOf("--key") + 1];
                 this.getItemKeys.push(JSON.parse(key ?? "{}") as unknown);
@@ -214,12 +280,30 @@ class RecordingAwsCli implements AwsCli {
                         status: { S: "processing" },
                         workflow_execution_name: { S: "membership-exec-1" },
                         retry_count: { N: "0" },
+                        error_code: { S: "WORLD_ID_API_UNAVAILABLE" },
+                        error_message: { S: "waiting for World ID" },
+                        tx_digest: { S: "tee-result:abc123" },
                     },
                 };
             }
             default:
                 throw new Error(`unexpected AWS call: ${label}`);
         }
+    }
+
+    private executionHistory(args: readonly string[]): unknown {
+        const nextToken = readArg(args, "--next-token");
+        this.historyNextTokens.push(nextToken);
+        if (this.options.stuckHistoryToken === true) {
+            return { events: [], nextToken: "same-token" };
+        }
+        if (this.options.paginatedHistory !== true) {
+            return executionHistory(this.options.teeStatus ?? "verified");
+        }
+        if (nextToken === null) {
+            return { events: fillerHistoryEvents(), nextToken: "page-2" };
+        }
+        return executionHistory(this.options.teeStatus ?? "verified");
     }
 
     private label(args: readonly string[]): string {
@@ -243,11 +327,71 @@ class RecordingAwsCli implements AwsCli {
         if (service === "stepfunctions" && operation === "describe-execution") {
             return "stepfunctions:describe-execution";
         }
+        if (service === "stepfunctions" && operation === "get-execution-history") {
+            return "stepfunctions:get-execution-history";
+        }
         if (service === "dynamodb" && operation === "get-item") {
             return "dynamodb:get-item";
         }
         return `${service}:${operation}`;
     }
+}
+
+function readArg(args: readonly string[], name: string): string | null {
+    const index = args.indexOf(name);
+    return index === -1 ? null : (args[index + 1] ?? null);
+}
+
+function fillerHistoryEvents(): unknown[] {
+    return Array.from({ length: 100 }, (_, index) => ({
+        type: "TaskStateExited",
+        stateExitedEventDetails: {
+            name: `Filler${index}`,
+            output: "{}",
+        },
+    }));
+}
+
+function executionHistory(teeStatus: "verified" | "pending_source"): unknown {
+    const registrationOutput = {
+        registration_result: {
+            registration_metadata: {
+                verifier_config_key: 2,
+                verifier_config_version: 1,
+                enclave_instance_public_key: `0x${"cc".repeat(32)}`,
+            },
+        },
+    };
+    const result =
+        teeStatus === "verified"
+            ? {
+                  status: "verified",
+                  payload_bcs_hex: "0x010203",
+                  signature: `0x${"11".repeat(64)}`,
+                  public_key: `0x${"22".repeat(32)}`,
+              }
+            : {
+                  status: "pending_source",
+                  error_code: "WORLD_ID_API_UNAVAILABLE",
+              };
+    return {
+        events: [
+            {
+                type: "TaskStateExited",
+                stateExitedEventDetails: {
+                    name: "RegisterEnclaveInstance",
+                    output: JSON.stringify(registrationOutput),
+                },
+            },
+            {
+                type: "TaskStateExited",
+                stateExitedEventDetails: {
+                    name: "ReadResult",
+                    output: JSON.stringify({ result }),
+                },
+            },
+        ],
+    };
 }
 
 function stackResponse(omitOutput?: string): unknown {

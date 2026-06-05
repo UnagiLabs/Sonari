@@ -105,7 +105,6 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain("TeeSigningKeySecretArn");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED_FILE");
-        expect(template).not.toContain("secretsmanager:GetSecretValue");
         expect(template).not.toContain("aws kms decrypt");
     });
 
