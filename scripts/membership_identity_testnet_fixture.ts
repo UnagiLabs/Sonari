@@ -8,6 +8,20 @@ export const DEFAULT_TERMS_VERSION = 1;
 export const DEFAULT_SIGNED_STATEMENT_HASH = `0x${"44".repeat(32)}`;
 export const DEFAULT_WORLD_ID_SIGNAL_HASH = `0x${"55".repeat(32)}`;
 export const WORLD_ID_ACTION = "sonari_membership_register_v1";
+export const GENESIS_KIND_PAUSE_STATE = 2;
+export const GENESIS_KIND_MEMBERSHIP_REGISTRY = 6;
+export const GENESIS_KIND_VERIFIER_REGISTRY = 7;
+export const GENESIS_KIND_IDENTITY_REGISTRY = 9;
+
+export const EXPECTED_OBJECT_TYPES = {
+    adminCap: "::admin::AdminCap",
+    pauseState: "::admin::PauseState",
+    identityRegistry: "::identity_registry::IdentityRegistry",
+    membershipRegistry: "::membership::MembershipRegistry",
+    verifierRegistry: "::metadata_verifier::VerifierRegistry",
+    allowedResidenceCellRegistry: "::allowed_residence_cell::AllowedResidenceCellRegistry",
+    membershipPass: "::membership::MembershipPass",
+} as const;
 
 export type FixtureNetwork = "devnet" | "testnet";
 
@@ -90,6 +104,38 @@ export interface MembershipIdentityFixtureFiles {
     readonly manifestJson: string;
     readonly envFile: string;
     readonly dummyWorldIdRequestJson: string;
+}
+
+export interface SuiCommandResult {
+    readonly code: number;
+    readonly stdout: string;
+    readonly stderr: string;
+}
+
+export interface SuiObjectReadback {
+    readonly objectId: string;
+    readonly type: string;
+    readonly fields: Record<string, unknown>;
+}
+
+export interface SuiPublishFixtureObjects {
+    readonly packageId: string;
+    readonly adminCapId: string;
+    readonly pauseStateId: string;
+    readonly identityRegistryId: string;
+    readonly membershipRegistryId: string;
+    readonly verifierRegistryId: string;
+}
+
+export interface SuiCommandPlan {
+    readonly command: "sui";
+    readonly args: readonly string[];
+}
+
+export interface SuiClientOptions {
+    readonly clientConfig: string;
+    readonly env: FixtureNetwork;
+    readonly gasBudget?: string;
 }
 
 export function assertFixtureNetwork(input: string): FixtureNetwork {
@@ -209,6 +255,191 @@ export function validateSmokeInput(input: MembershipIdentityFixtureSmokeInput): 
     }
 }
 
+export function parseSuiJsonCommandResult(result: SuiCommandResult, context: string): unknown {
+    if (result.code !== 0) {
+        const detail = result.stderr.length > 0 ? result.stderr : result.stdout;
+        throw new Error(`${context} failed: ${detail.trim()}`);
+    }
+    try {
+        return JSON.parse(result.stdout) as unknown;
+    } catch (error) {
+        throw new Error(`${context} returned invalid JSON: ${errorMessage(error)}`);
+    }
+}
+
+export function parseSuiActiveEnv(input: unknown): string {
+    if (typeof input === "string") {
+        return input;
+    }
+    if (isRecord(input)) {
+        const activeEnv = input.active_env ?? input.activeEnv ?? input.alias;
+        if (typeof activeEnv === "string") {
+            return activeEnv;
+        }
+    }
+    throw new Error("sui active-env JSON did not include an active env");
+}
+
+export function parseSuiObjectReadback(input: unknown): SuiObjectReadback {
+    const data = isRecord(input) && isRecord(input.data) ? input.data : input;
+    if (!isRecord(data)) {
+        throw new Error("sui object JSON must be an object");
+    }
+    const objectId = stringField(data, ["objectId", "object_id"], "object id");
+    const type = stringField(data, ["type", "objectType", "object_type"], "object type");
+    const content = isRecord(data.content) ? data.content : undefined;
+    const fields = content !== undefined && isRecord(content.fields) ? content.fields : {};
+    return { objectId, type, fields };
+}
+
+export function assertSuiObjectType(
+    object: SuiObjectReadback,
+    expectedSuffix: string,
+    fieldName: string,
+): void {
+    if (!object.type.endsWith(expectedSuffix)) {
+        throw new Error(`${fieldName} must be ${expectedSuffix}, got ${object.type}`);
+    }
+}
+
+export function parsePublishFixtureObjects(input: unknown): SuiPublishFixtureObjects {
+    const packageId = parsePublishedPackageId(input);
+    const adminCapId = parseCreatedObjectId(input, EXPECTED_OBJECT_TYPES.adminCap, "AdminCap");
+    const genesis = parseGenesisObjectIds(input);
+    const pauseStateId = genesis.get(GENESIS_KIND_PAUSE_STATE);
+    const membershipRegistryId = genesis.get(GENESIS_KIND_MEMBERSHIP_REGISTRY);
+    const verifierRegistryId = genesis.get(GENESIS_KIND_VERIFIER_REGISTRY);
+    const identityRegistryId = genesis.get(GENESIS_KIND_IDENTITY_REGISTRY);
+
+    if (pauseStateId === undefined) {
+        throw new Error("publish result did not include PauseState genesis object");
+    }
+    if (membershipRegistryId === undefined) {
+        throw new Error("publish result did not include MembershipRegistry genesis object");
+    }
+    if (verifierRegistryId === undefined) {
+        throw new Error("publish result did not include VerifierRegistry genesis object");
+    }
+    if (identityRegistryId === undefined) {
+        throw new Error("publish result did not include IdentityRegistry genesis object");
+    }
+
+    return {
+        packageId,
+        adminCapId,
+        pauseStateId,
+        identityRegistryId,
+        membershipRegistryId,
+        verifierRegistryId,
+    };
+}
+
+export function parseMembershipPassIssuedId(input: unknown): string {
+    for (const event of readEvents(input)) {
+        const parsedJson = readParsedJson(event);
+        const passId = parsedJson.pass_id ?? parsedJson.passId;
+        if (
+            typeof passId === "string" &&
+            eventTypeIncludes(event, "::membership::MembershipPassIssued")
+        ) {
+            assertHexObjectId(passId, "MembershipPassIssued.pass_id");
+            return passId;
+        }
+    }
+    throw new Error("transaction result did not include MembershipPassIssued event");
+}
+
+export function buildSuiObjectCommand(objectId: string, options: SuiClientOptions): SuiCommandPlan {
+    assertHexObjectId(objectId, "objectId");
+    return {
+        command: "sui",
+        args: [
+            "client",
+            "--client.config",
+            options.clientConfig,
+            "--client.env",
+            options.env,
+            "object",
+            objectId,
+            "--json",
+        ],
+    };
+}
+
+export function buildSuiPublishCommand(options: SuiClientOptions): SuiCommandPlan {
+    return {
+        command: "sui",
+        args: [
+            "client",
+            "--client.config",
+            options.clientConfig,
+            "--client.env",
+            options.env,
+            "publish",
+            "contracts",
+            "--gas-budget",
+            options.gasBudget ?? "1000000000",
+            "--json",
+        ],
+    };
+}
+
+export function buildSuiCallCommand(input: {
+    readonly options: SuiClientOptions;
+    readonly packageId: string;
+    readonly module: string;
+    readonly functionName: string;
+    readonly args: readonly string[];
+}): SuiCommandPlan {
+    assertHexObjectId(input.packageId, "packageId");
+    return {
+        command: "sui",
+        args: [
+            "client",
+            "--client.config",
+            input.options.clientConfig,
+            "--client.env",
+            input.options.env,
+            "call",
+            "--package",
+            input.packageId,
+            "--module",
+            input.module,
+            "--function",
+            input.functionName,
+            "--args",
+            ...input.args,
+            "--gas-budget",
+            input.options.gasBudget ?? "100000000",
+            "--json",
+        ],
+    };
+}
+
+export function buildSuiPtbCommand(
+    options: SuiClientOptions,
+    transactions: readonly string[],
+): SuiCommandPlan {
+    if (transactions.length === 0) {
+        throw new Error("PTB requires at least one transaction argument");
+    }
+    return {
+        command: "sui",
+        args: [
+            "client",
+            "--client.config",
+            options.clientConfig,
+            "--client.env",
+            options.env,
+            "ptb",
+            ...transactions,
+            "--gas-budget",
+            options.gasBudget ?? "100000000",
+            "--json",
+        ],
+    };
+}
+
 function assertHexObjectId(value: string, fieldName: string): void {
     if (!/^0x[0-9a-fA-F]+$/.test(value)) {
         throw new Error(`${fieldName} must be a 0x-prefixed hex object id`);
@@ -225,6 +456,101 @@ function assertNonEmpty(value: string, fieldName: string): void {
     if (value.length === 0) {
         throw new Error(`${fieldName} must be non-empty`);
     }
+}
+
+function parsePublishedPackageId(input: unknown): string {
+    for (const change of readObjectChanges(input)) {
+        if (!isRecord(change)) {
+            continue;
+        }
+        if (change.type === "published" && typeof change.packageId === "string") {
+            assertHexObjectId(change.packageId, "published.packageId");
+            return change.packageId;
+        }
+        if (change.type === "published" && typeof change.package_id === "string") {
+            assertHexObjectId(change.package_id, "published.package_id");
+            return change.package_id;
+        }
+    }
+    throw new Error("publish result did not include published package id");
+}
+
+function parseCreatedObjectId(input: unknown, typeSuffix: string, name: string): string {
+    for (const change of readObjectChanges(input)) {
+        if (!isRecord(change)) {
+            continue;
+        }
+        const objectType = change.objectType ?? change.object_type;
+        const objectId = change.objectId ?? change.object_id;
+        if (typeof objectType === "string" && objectType.endsWith(typeSuffix)) {
+            if (typeof objectId !== "string") {
+                throw new Error(`${name} object change did not include object id`);
+            }
+            assertHexObjectId(objectId, name);
+            return objectId;
+        }
+    }
+    throw new Error(`publish result did not include ${name}`);
+}
+
+function parseGenesisObjectIds(input: unknown): Map<number, string> {
+    const ids = new Map<number, string>();
+    for (const event of readEvents(input)) {
+        if (!eventTypeIncludes(event, "::admin::GenesisObjectCreated")) {
+            continue;
+        }
+        const parsedJson = readParsedJson(event);
+        const objectKind = parsedJson.object_kind ?? parsedJson.objectKind;
+        const objectId = parsedJson.object_id ?? parsedJson.objectId;
+        if (typeof objectKind !== "number" || typeof objectId !== "string") {
+            throw new Error("GenesisObjectCreated event is missing object_kind or object_id");
+        }
+        assertHexObjectId(objectId, "GenesisObjectCreated.object_id");
+        ids.set(objectKind, objectId);
+    }
+    return ids;
+}
+
+function readEvents(input: unknown): readonly Record<string, unknown>[] {
+    const events = isRecord(input) && Array.isArray(input.events) ? input.events : [];
+    return events.filter(isRecord);
+}
+
+function readObjectChanges(input: unknown): readonly unknown[] {
+    return isRecord(input) && Array.isArray(input.objectChanges) ? input.objectChanges : [];
+}
+
+function readParsedJson(event: Record<string, unknown>): Record<string, unknown> {
+    if (isRecord(event.parsedJson)) {
+        return event.parsedJson;
+    }
+    throw new Error("Sui event did not include parsedJson");
+}
+
+function eventTypeIncludes(event: Record<string, unknown>, suffix: string): boolean {
+    return typeof event.type === "string" && event.type.endsWith(suffix);
+}
+
+function stringField(
+    record: Record<string, unknown>,
+    names: readonly string[],
+    label: string,
+): string {
+    for (const name of names) {
+        const value = record[name];
+        if (typeof value === "string") {
+            return value;
+        }
+    }
+    throw new Error(`sui object JSON did not include ${label}`);
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 async function main(): Promise<void> {

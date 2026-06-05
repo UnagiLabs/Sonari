@@ -1,13 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
     assertFixtureNetwork,
+    assertSuiObjectType,
     buildDummyWorldIdRequest,
     buildMembershipIdentityFixtureFiles,
     buildMembershipIdentityFixtureManifest,
+    buildSuiObjectCommand,
+    buildSuiPtbCommand,
     DEFAULT_SIGNED_STATEMENT_HASH,
     DEFAULT_TERMS_VERSION,
     DEFAULT_WORLD_ID_SIGNAL_HASH,
+    EXPECTED_OBJECT_TYPES,
+    GENESIS_KIND_IDENTITY_REGISTRY,
+    GENESIS_KIND_MEMBERSHIP_REGISTRY,
+    GENESIS_KIND_PAUSE_STATE,
+    GENESIS_KIND_VERIFIER_REGISTRY,
     type MembershipIdentityFixtureManifestInput,
+    parseMembershipPassIssuedId,
+    parsePublishFixtureObjects,
+    parseSuiJsonCommandResult,
+    parseSuiObjectReadback,
     WORLD_ID_ACTION,
 } from "./membership_identity_testnet_fixture.js";
 
@@ -92,6 +104,96 @@ describe("membership identity testnet fixture files", () => {
     });
 });
 
+describe("membership identity Sui JSON parsing", () => {
+    it("reads package and registry ids from publish JSON", () => {
+        expect(parsePublishFixtureObjects(publishJson())).toEqual({
+            packageId: objectId("aa"),
+            adminCapId: objectId("ab"),
+            pauseStateId: objectId("11"),
+            identityRegistryId: objectId("22"),
+            membershipRegistryId: objectId("33"),
+            verifierRegistryId: objectId("44"),
+        });
+    });
+
+    it("reads pass id from MembershipPassIssued transaction events", () => {
+        expect(
+            parseMembershipPassIssuedId({
+                events: [
+                    {
+                        type: `${objectId("aa")}::membership::MembershipPassIssued`,
+                        parsedJson: {
+                            pass_id: objectId("66"),
+                        },
+                    },
+                ],
+            }),
+        ).toBe(objectId("66"));
+    });
+
+    it("rejects object type mismatches on readback", () => {
+        const object = parseSuiObjectReadback({
+            data: {
+                objectId: objectId("22"),
+                type: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
+                content: { fields: { issued_count: "0" } },
+            },
+        });
+
+        expect(object.fields).toEqual({ issued_count: "0" });
+        expect(() =>
+            assertSuiObjectType(
+                object,
+                EXPECTED_OBJECT_TYPES.identityRegistry,
+                "identityRegistryId",
+            ),
+        ).toThrow("identityRegistryId must be ::identity_registry::IdentityRegistry");
+    });
+
+    it("converts Sui CLI failures and invalid JSON into clear errors", () => {
+        expect(() =>
+            parseSuiJsonCommandResult(
+                { code: 1, stdout: "", stderr: "Object not found" },
+                "sui object",
+            ),
+        ).toThrow("sui object failed: Object not found");
+
+        expect(() =>
+            parseSuiJsonCommandResult({ code: 0, stdout: "{", stderr: "" }, "sui call"),
+        ).toThrow("sui call returned invalid JSON");
+    });
+
+    it("plans object and PTB commands with explicit client config and env", () => {
+        expect(
+            buildSuiObjectCommand(objectId("22"), {
+                clientConfig: ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+                env: "testnet",
+            }),
+        ).toEqual({
+            command: "sui",
+            args: [
+                "client",
+                "--client.config",
+                ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+                "--client.env",
+                "testnet",
+                "object",
+                objectId("22"),
+                "--json",
+            ],
+        });
+        expect(
+            buildSuiPtbCommand(
+                {
+                    clientConfig: ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+                    env: "testnet",
+                },
+                ["--move-call", `${objectId("aa")}::accessor::new_residence_proof_step_left`],
+            ).args,
+        ).toContain("ptb");
+    });
+});
+
 function fixtureInput(): MembershipIdentityFixtureManifestInput {
     return {
         network: "testnet",
@@ -128,4 +230,36 @@ function fixtureInput(): MembershipIdentityFixtureManifestInput {
 
 function objectId(byte: string): string {
     return `0x${byte.repeat(32)}`;
+}
+
+function publishJson(): unknown {
+    return {
+        objectChanges: [
+            {
+                type: "published",
+                packageId: objectId("aa"),
+            },
+            {
+                type: "created",
+                objectType: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.adminCap}`,
+                objectId: objectId("ab"),
+            },
+        ],
+        events: [
+            genesisEvent(GENESIS_KIND_PAUSE_STATE, objectId("11")),
+            genesisEvent(GENESIS_KIND_IDENTITY_REGISTRY, objectId("22")),
+            genesisEvent(GENESIS_KIND_MEMBERSHIP_REGISTRY, objectId("33")),
+            genesisEvent(GENESIS_KIND_VERIFIER_REGISTRY, objectId("44")),
+        ],
+    };
+}
+
+function genesisEvent(objectKind: number, id: string): unknown {
+    return {
+        type: `${objectId("aa")}::admin::GenesisObjectCreated`,
+        parsedJson: {
+            object_kind: objectKind,
+            object_id: id,
+        },
+    };
 }
