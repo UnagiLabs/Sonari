@@ -1261,7 +1261,10 @@ Resources:
             "StartRouter": {
               "Type": "Choice",
               "Choices": [
-                { "Variable": "$.action", "StringEquals": "register_affected_cells_proof", "Next": "RegisterAffectedCellsProofRetry" }
+                { "And": [
+                  { "Variable": "$.action", "IsPresent": true },
+                  { "Variable": "$.action", "StringEquals": "register_affected_cells_proof" }
+                ], "Next": "RegisterAffectedCellsProofRetry" }
               ],
               "Default": "StartInstance"
             },

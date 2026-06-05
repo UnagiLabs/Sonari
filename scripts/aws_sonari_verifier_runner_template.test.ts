@@ -143,6 +143,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         const template = await readTemplate();
 
         expect(template).toContain('"StartAt": "StartRouter"');
+        expect(template).toContain(
+            '{ "And": [\n                  { "Variable": "$.action", "IsPresent": true },\n                  { "Variable": "$.action", "StringEquals": "register_affected_cells_proof" }\n                ], "Next": "RegisterAffectedCellsProofRetry" }',
+        );
         expect(template).toContain('"StringEquals": "register_affected_cells_proof"');
         expect(template).toContain('"Next": "RegisterAffectedCellsProofRetry"');
         expect(template).toContain('"ArchiveSources"');
