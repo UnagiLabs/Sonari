@@ -3,6 +3,11 @@ import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import {
+    IDENTITY_PROVIDER_BCS,
+    type IdentityProvider,
+    type IdentityVerificationResult,
+} from "@sonari/membership-verifier-shared";
+import {
     createSuiEnclaveRegistrationTransaction,
     type EnclaveRegistrationEvent,
     type EnclaveRegistrationExecutionResponse,
@@ -76,6 +81,16 @@ export interface IdentityVerificationSubmitSuccess {
     readonly request: IdentityVerificationSuiRequest;
     readonly digest: string;
     readonly effects: Record<string, unknown>;
+}
+
+export interface MembershipPassReadback {
+    readonly objectId: string;
+    readonly identityVerified: true;
+    readonly identityProviderMask: number;
+    readonly identityVerifiedAtMs: number;
+    readonly identityExpiresAtMs: number;
+    readonly termsVersion: number;
+    readonly signedStatementHash: string;
 }
 
 export interface IdentityVerificationSubmitTransaction {
@@ -318,6 +333,102 @@ export function createIdentityVerificationTransaction(
     return tx;
 }
 
+export function parseMembershipPassReadback(
+    input: unknown,
+    expected: IdentityVerificationResult,
+    expectedPackageId: string,
+): IdentityVerificationSuiResult<MembershipPassReadback> {
+    const object = parseSuiObjectReadback(input);
+    if (!object.ok) {
+        return object;
+    }
+    if (object.value.objectId !== expected.membership_id) {
+        return relayerSubmitFailed(
+            `MembershipPass readback id mismatch: expected ${expected.membership_id}`,
+        );
+    }
+    const expectedType = `${expectedPackageId}::membership::MembershipPass`;
+    if (object.value.type !== expectedType) {
+        return relayerSubmitFailed(
+            `MembershipPass readback type mismatch: expected ${expectedType}`,
+        );
+    }
+
+    const fields = object.value.fields;
+    const identityVerified = readBooleanField(fields.identity_verified, "identity_verified");
+    if (!identityVerified.ok) {
+        return identityVerified;
+    }
+    if (!identityVerified.value) {
+        return relayerSubmitFailed("MembershipPass readback identity_verified was not true");
+    }
+
+    const providerMask = readU8Field(fields.identity_provider_mask, "identity_provider_mask");
+    if (!providerMask.ok) {
+        return providerMask;
+    }
+    const providerBit = providerBitFor(expected.provider);
+    if ((providerMask.value & providerBit) !== providerBit) {
+        return relayerSubmitFailed(
+            "MembershipPass readback provider mask does not include payload provider",
+        );
+    }
+
+    const verifiedAtMs = readU64Field(fields.identity_verified_at_ms, "identity_verified_at_ms");
+    if (!verifiedAtMs.ok) {
+        return verifiedAtMs;
+    }
+    if (verifiedAtMs.value !== expected.issued_at_ms) {
+        return relayerSubmitFailed(
+            "MembershipPass readback verified timestamp does not match payload",
+        );
+    }
+
+    const expiresAtMs = readU64Field(fields.identity_expires_at_ms, "identity_expires_at_ms");
+    if (!expiresAtMs.ok) {
+        return expiresAtMs;
+    }
+    if (expiresAtMs.value !== expected.expires_at_ms) {
+        return relayerSubmitFailed(
+            "MembershipPass readback expiry timestamp does not match payload",
+        );
+    }
+
+    const termsVersion = readU64Field(fields.terms_version, "terms_version");
+    if (!termsVersion.ok) {
+        return termsVersion;
+    }
+    if (termsVersion.value !== expected.terms_version) {
+        return relayerSubmitFailed("MembershipPass readback terms_version does not match payload");
+    }
+
+    const signedStatementHash = readHex32Field(
+        fields.signed_statement_hash,
+        "signed_statement_hash",
+    );
+    if (!signedStatementHash.ok) {
+        return signedStatementHash;
+    }
+    if (signedStatementHash.value !== expected.signed_statement_hash.toLowerCase()) {
+        return relayerSubmitFailed(
+            "MembershipPass readback signed_statement_hash does not match payload",
+        );
+    }
+
+    return {
+        ok: true,
+        value: {
+            objectId: object.value.objectId,
+            identityVerified: true,
+            identityProviderMask: providerMask.value,
+            identityVerifiedAtMs: verifiedAtMs.value,
+            identityExpiresAtMs: expiresAtMs.value,
+            termsVersion: termsVersion.value,
+            signedStatementHash: signedStatementHash.value,
+        },
+    };
+}
+
 function parseSignedIdentityPayload(
     input: unknown,
 ): IdentityVerificationSuiResult<ParsedSignedIdentityPayload> {
@@ -519,6 +630,112 @@ function relayerSubmitFailed<T = never>(message: string): IdentityVerificationSu
 
 function moveRejected<T = never>(message: string): IdentityVerificationSuiResult<T> {
     return { ok: false, error_code: MOVE_REJECTED, message };
+}
+
+interface SuiObjectReadback {
+    readonly objectId: string;
+    readonly type: string;
+    readonly fields: Record<string, unknown>;
+}
+
+function parseSuiObjectReadback(input: unknown): IdentityVerificationSuiResult<SuiObjectReadback> {
+    if (!isRecord(input)) {
+        return relayerSubmitFailed("MembershipPass readback response was not an object");
+    }
+    const data = isRecord(input.data) ? input.data : input;
+    const objectId = readStringAlias(data, ["objectId", "object_id"], "object id");
+    if (!objectId.ok) {
+        return objectId;
+    }
+    const type = readStringAlias(data, ["type"], "object type");
+    if (!type.ok) {
+        return type;
+    }
+    const content = data.content;
+    if (!isRecord(content) || !isRecord(content.fields)) {
+        return relayerSubmitFailed(
+            "MembershipPass readback response did not include object fields",
+        );
+    }
+    return {
+        ok: true,
+        value: {
+            objectId: objectId.value,
+            type: type.value,
+            fields: content.fields,
+        },
+    };
+}
+
+function readStringAlias(
+    input: Record<string, unknown>,
+    aliases: readonly string[],
+    fieldName: string,
+): IdentityVerificationSuiResult<string> {
+    for (const alias of aliases) {
+        const value = input[alias];
+        if (typeof value === "string" && value.length > 0) {
+            return { ok: true, value };
+        }
+    }
+    return relayerSubmitFailed(`MembershipPass readback missing ${fieldName}`);
+}
+
+function readBooleanField(
+    input: unknown,
+    fieldName: string,
+): IdentityVerificationSuiResult<boolean> {
+    if (typeof input === "boolean") {
+        return { ok: true, value: input };
+    }
+    return relayerSubmitFailed(`MembershipPass readback ${fieldName} must be boolean`);
+}
+
+function readU8Field(input: unknown, fieldName: string): IdentityVerificationSuiResult<number> {
+    const value = readU64Field(input, fieldName);
+    if (!value.ok) {
+        return value;
+    }
+    if (value.value > 0xff) {
+        return relayerSubmitFailed(`MembershipPass readback ${fieldName} must fit in u8`);
+    }
+    return value;
+}
+
+function readU64Field(input: unknown, fieldName: string): IdentityVerificationSuiResult<number> {
+    if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
+        return { ok: true, value: input };
+    }
+    if (typeof input === "string" && /^(?:0|[1-9][0-9]*)$/.test(input)) {
+        const value = Number(input);
+        if (Number.isSafeInteger(value)) {
+            return { ok: true, value };
+        }
+    }
+    return relayerSubmitFailed(`MembershipPass readback ${fieldName} must be a safe u64`);
+}
+
+function readHex32Field(input: unknown, fieldName: string): IdentityVerificationSuiResult<string> {
+    if (typeof input === "string" && /^0x[0-9a-fA-F]{64}$/.test(input)) {
+        return { ok: true, value: input.toLowerCase() };
+    }
+    if (
+        Array.isArray(input) &&
+        input.length === 32 &&
+        input.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 0xff)
+    ) {
+        return {
+            ok: true,
+            value: `0x${input
+                .map((byte) => (byte as number).toString(16).padStart(2, "0"))
+                .join("")}`,
+        };
+    }
+    return relayerSubmitFailed(`MembershipPass readback ${fieldName} must be 32-byte hex`);
+}
+
+function providerBitFor(provider: IdentityProvider): number {
+    return IDENTITY_PROVIDER_BCS[provider];
 }
 
 function errorMessage(error: unknown): string {
