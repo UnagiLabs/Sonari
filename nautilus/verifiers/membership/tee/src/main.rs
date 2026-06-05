@@ -204,10 +204,9 @@ struct EnclaveState {
     ctx: TeeContext,
     world_id_base_url: String,
     world_id_app_id: String,
-    /// Resolved at startup from the bootstrap env. Not yet read by the handler
-    /// (STEP 4 will use it for verifier selection); kept here so the startup
-    /// gate result survives across the server lifetime.
-    #[allow(dead_code)]
+    /// Resolved once at startup by the fail-closed gate. Passed to the handler so
+    /// it can select the dummy or cloud World ID verifier per request without
+    /// re-reading the host-supplied bootstrap env.
     world_id_verifier_mode: ResolvedWorldIdVerifierMode,
 }
 
@@ -303,8 +302,11 @@ fn route_request(
         }
         ("POST", "/process_data") => {
             let envelope = parse_process_data_envelope(&request.body)?;
-            let handler =
-                IdentityProcessHandler::new(&state.world_id_base_url, &state.world_id_app_id);
+            let handler = IdentityProcessHandler::new(
+                &state.world_id_base_url,
+                &state.world_id_app_id,
+                state.world_id_verifier_mode,
+            );
             let output = handler
                 .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;

@@ -308,7 +308,7 @@ Resources:
                 fi
               }
               sleep 2
-              jq -n                 --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE"                 --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID"                 --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"                 '{world_id_api_base: $world_id_api_base, world_id_app_id: $world_id_app_id, egress_proxy_url: $egress_proxy_url}'                 | socat -t "$SONARI_MEMBERSHIP_VSOCK_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:7777" >/dev/null
+              jq -n                 --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE"                 --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID"                 --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"                 --arg network "${RELAYER_NETWORK:-}"                 --arg proof_mode "${SONARI_WORLD_ID_PROOF_MODE:-}"                 '{world_id_api_base: $world_id_api_base, world_id_app_id: $world_id_app_id, egress_proxy_url: $egress_proxy_url, network: $network, proof_mode: $proof_mode}'                 | socat -t "$SONARI_MEMBERSHIP_VSOCK_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:7777" >/dev/null
               touch "$marker"
             }
 
