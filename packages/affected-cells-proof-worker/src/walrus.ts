@@ -1,10 +1,12 @@
 import { AffectedCellsProofError } from "./errors.js";
+import type { AuthEnv } from "./auth.js";
 
 /**
  * Cloudflare Worker の環境変数バインディング型。
  * 後続 STEP（register/http/index）でフィールドを追加していく共通 Env 型。
+ * AuthEnv を intersection で取り込み、token 認証フィールドを含む。
  */
-export interface Env {
+export interface Env extends AuthEnv {
     WALRUS_AGGREGATOR_URL?: string;
 }
 
