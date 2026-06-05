@@ -266,6 +266,52 @@ describe("handleProofRequest", () => {
     });
 
     // -------------------------------------------------------------------------
+    // 回帰: 登録直後の正常な配信ではキャッシュが効き再生成が走らない（issue #174）
+    // -------------------------------------------------------------------------
+
+    it("回帰: 登録後の正常な GET で R2 への put が増えない（キャッシュが効く）", async () => {
+        const bucket = new FakeR2Bucket();
+        const env = buildEnv({ bucket });
+        await registerGolden(env);
+
+        // 登録直後の put 回数を記録する（manifest 1 + shard 1 = 2 回）
+        const putCountAfterRegister = bucket.getTotalPutCount();
+
+        const req = buildGetRequest(GOLDEN_H3_INDEX_0);
+        const res = await handleProofRequest(req, env, env.fetchImpl);
+        expect(res.status).toBe(200);
+
+        // shard を消していない正常系では再生成も再保存も走らないため put は増えない
+        expect(bucket.getTotalPutCount()).toBe(putCountAfterRegister);
+    });
+
+    it("回帰: 保存された shard 本体の sha256 が manifest の shard hash と一致する", async () => {
+        const bucket = new FakeR2Bucket();
+        const env = buildEnv({ bucket });
+        await registerGolden(env);
+
+        const manifestKey =
+            `affected-proofs/events/${GOLDEN_EVENT_UID}/revisions/${GOLDEN_EVENT_REVISION}/manifest.json`;
+        const manifestObj = await bucket.get(manifestKey);
+        expect(manifestObj).not.toBeNull();
+        const manifest = JSON.parse(
+            new TextDecoder().decode(await manifestObj!.arrayBuffer()),
+        ) as { shards: Array<{ r2_key: string; hash: string }> };
+        expect(manifest.shards.length).toBeGreaterThan(0);
+
+        const { sha256Hex } = await import("@sonari/proof-core");
+        for (const shard of manifest.shards) {
+            const shardObj = await bucket.get(shard.r2_key);
+            expect(shardObj).not.toBeNull();
+            // loadProofShard と同じ decode→encode 経路で sha256 を計算し検証層と等価にする
+            const text = new TextDecoder().decode(await shardObj!.arrayBuffer());
+            const bytes = new TextEncoder().encode(text);
+            const digest = await sha256Hex(bytes);
+            expect(digest).toBe(shard.hash);
+        }
+    });
+
+    // -------------------------------------------------------------------------
     // 404: affected cells に含まれない h3_index
     // -------------------------------------------------------------------------
 
