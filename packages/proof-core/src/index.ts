@@ -19,3 +19,19 @@ export {
     validateH3CellLayout,
 } from "./h3.js";
 export { hashLeafBytes } from "./leaf-hash.js";
+export { type ProofStep, replayProof } from "./merkle.js";
+export {
+    assertMatches,
+    assertNonNegativeSafeInteger,
+    expectArray,
+    expectBoolean,
+    expectKeys,
+    expectLiteral,
+    expectNonNegativeSafeInteger,
+    expectPositiveSafeInteger,
+    expectPrefixedHex32,
+    expectRecord,
+    expectString,
+    type JsonRecord,
+} from "./schema.js";
+export { proofShardId } from "./shard.js";
