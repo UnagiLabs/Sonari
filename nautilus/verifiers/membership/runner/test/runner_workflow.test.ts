@@ -592,12 +592,18 @@ describe("membership runner workflow", () => {
         const row = await repository.get(job.row.job_id);
         const dryRunRecord = JSON.parse(row?.sui_dry_run_result_json ?? "{}") as {
             transaction_bytes?: number[];
+            submit_context?: unknown;
         };
         expect(row).toMatchObject({
             status: "processing",
             sui_dry_run_completed_at_ms: baseNowMs + 2,
         });
         expect(dryRunRecord.transaction_bytes).toEqual([4, 5, 6]);
+        expect(dryRunRecord.submit_context).toEqual({
+            network: "testnet",
+            grpc_url: "https://fullnode.testnet.sui.io:443",
+            sender_address: "0xsender",
+        });
         expect(signAndExecuteCalls).toBe(0);
     });
 
@@ -738,6 +744,92 @@ describe("membership runner workflow", () => {
             tx_digest: null,
         });
         expect(submitter.submits).toEqual([]);
+    });
+
+    it("rejects stored dry-run handoff with stale Sui submit context before submit", async () => {
+        for (const [name, submitContext, expectedMessage] of [
+            [
+                "network",
+                {
+                    ...fakeSuiSubmitContext(),
+                    network: "devnet",
+                    grpc_url: "https://fullnode.devnet.sui.io:443",
+                },
+                "Stored Sui dry-run submit_context network does not match submit config",
+            ],
+            [
+                "grpcUrl",
+                {
+                    ...fakeSuiSubmitContext(),
+                    grpc_url: "https://fullnode.mainnet.sui.io:443",
+                },
+                "Stored Sui dry-run submit_context grpcUrl does not match submit config",
+            ],
+            [
+                "senderAddress",
+                {
+                    ...fakeSuiSubmitContext(),
+                    sender_address: "0xother-sender",
+                },
+                "Stored Sui dry-run submit_context senderAddress does not match submit config",
+            ],
+        ] as const) {
+            const repository = new InMemoryVerificationJobRepository();
+            const job = await repository.upsertRequest(
+                {
+                    ...validRequest(),
+                    signed_statement_hash:
+                        name === "network"
+                            ? `0x${"8b".repeat(32)}`
+                            : name === "grpcUrl"
+                              ? `0x${"8c".repeat(32)}`
+                              : `0x${"8d".repeat(32)}`,
+                },
+                baseNowMs,
+            );
+            await repository.claimNextDue(baseNowMs + 1);
+            await repository.markSuiDryRunSucceeded(
+                job.row.job_id,
+                baseNowMs + 2,
+                JSON.stringify(dryRunHandoffRecord({ submit_context: submitContext })),
+            );
+            const submitter = new RecordingSuiSubmissionAdapter();
+            const handler = createRunnerControlHandler({
+                autoscaling: new RecordingAutoScalingClient(),
+                ec2: new RecordingEc2Client(),
+                ssm: new RecordingSsmClient(),
+                s3: new RecordingS3Client(),
+                repository,
+                suiSubmission: submitter,
+                now: () => baseNowMs + 3,
+                config: {
+                    ...baseConfig(),
+                    suiSubmission: fakeRunnerSuiSubmissionConfig(),
+                },
+            });
+
+            await expect(
+                handler({
+                    action: "submit_sui_submission",
+                    job_id: job.row.job_id,
+                    attempt: 1,
+                    result: {
+                        ...verifiedTeeResult(),
+                        signed_statement_hash: JSON.parse(job.row.request_json)
+                            .signed_statement_hash,
+                    },
+                }),
+                name,
+            ).resolves.toMatchObject({ sui_submission: "failed" });
+
+            await expect(repository.get(job.row.job_id), name).resolves.toMatchObject({
+                status: "failed",
+                error_code: "RELAYER_SUBMIT_FAILED",
+                error_message: expectedMessage,
+                tx_digest: null,
+            });
+            expect(submitter.submits, name).toEqual([]);
+        }
     });
 
     it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
@@ -1390,6 +1482,17 @@ function fakeRunnerSuiSubmissionConfig() {
         membershipRegistryId: "0x333",
         verifierRegistryId: "0x444",
         clockId: "0x6",
+        network: "testnet" as const,
+        grpcUrl: "https://fullnode.testnet.sui.io:443",
+        senderAddress: "0xsender",
+    };
+}
+
+function fakeSuiSubmitContext() {
+    return {
+        network: "testnet",
+        grpc_url: "https://fullnode.testnet.sui.io:443",
+        sender_address: "0xsender",
     };
 }
 
@@ -1409,6 +1512,7 @@ function dryRunHandoffRecord(
         request: ReturnType<typeof fakeSuiRequest>;
         transaction_bytes: number[];
         effects: Record<string, unknown>;
+        submit_context: ReturnType<typeof fakeSuiSubmitContext>;
     }> = {},
 ) {
     return {

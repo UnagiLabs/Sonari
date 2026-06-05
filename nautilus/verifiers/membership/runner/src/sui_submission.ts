@@ -290,6 +290,9 @@ export async function submitIdentityVerificationPayload(
         if (!isNonEmptyString(senderAddress)) {
             return relayerSubmitFailed("Signer did not provide a sender address");
         }
+        if (config.senderAddress !== undefined && config.senderAddress !== senderAddress) {
+            return relayerSubmitFailed("Signer address does not match RELAYER_SENDER_ADDRESS");
+        }
         const client = config.client ?? createSuiGrpcClient(config.grpcUrl, config.network);
         const transaction =
             config.transaction ??

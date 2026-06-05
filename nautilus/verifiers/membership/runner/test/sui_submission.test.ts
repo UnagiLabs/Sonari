@@ -232,6 +232,37 @@ describe("membership identity Sui submission", () => {
         });
     });
 
+    it("fails closed when configured sender address does not match the submit signer", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+        let signAndExecuteCalls = 0;
+        const client = fakeClient({
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalls += 1;
+                return successfulTransaction("submit-digest");
+            },
+        });
+
+        await expect(
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                senderAddress: "0xsender",
+                allowSubmit: true,
+                signer,
+                client,
+                transaction: {},
+            }),
+        ).resolves.toEqual({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Signer address does not match RELAYER_SENDER_ADDRESS",
+        });
+        expect(signAndExecuteCalls).toBe(0);
+    });
+
     it("fails closed when submit readback is missing or stale", async () => {
         const signer = createEd25519SuiSignerFromPrivateKey(
             "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",

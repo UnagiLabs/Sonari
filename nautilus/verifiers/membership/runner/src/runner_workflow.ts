@@ -135,6 +135,13 @@ export interface SuiDryRunHandoffRecord {
     readonly request: IdentityVerificationDryRunSuccess["request"];
     readonly transaction_bytes: number[];
     readonly effects: Record<string, unknown>;
+    readonly submit_context?: SuiDryRunSubmitContext | undefined;
+}
+
+export interface SuiDryRunSubmitContext {
+    readonly network: SuiNetwork;
+    readonly grpc_url: string;
+    readonly sender_address: string;
 }
 
 export const MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY = 2;
@@ -606,7 +613,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     const updated = await repository.markSuiDryRunSucceeded(
                         event.job_id,
                         nowMs,
-                        JSON.stringify(suiDryRunHandoffRecord(signedPayload, result.value)),
+                        JSON.stringify(
+                            suiDryRunHandoffRecord(
+                                signedPayload,
+                                result.value,
+                                options.config.suiSubmission,
+                            ),
+                        ),
                     );
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
@@ -1230,12 +1243,15 @@ function signedPayloadForRelayer(
 function suiDryRunHandoffRecord(
     signedPayload: SignedIdentityPayloadForRelayer,
     dryRun: IdentityVerificationDryRunSuccess,
+    config: RunnerSuiSubmissionConfig | undefined,
 ): SuiDryRunHandoffRecord {
+    const submitContext = buildSuiDryRunSubmitContext(config);
     return {
         signed_payload: signedPayload,
         request: dryRun.request,
         transaction_bytes: dryRun.transactionBytes,
         effects: dryRun.effects,
+        ...(submitContext === undefined ? {} : { submit_context: submitContext }),
     };
 }
 
@@ -1272,6 +1288,10 @@ function readSuiDryRunHandoff(
     if (!requestMatch.ok) {
         return requestMatch;
     }
+    const submitContext = validateStoredSuiSubmitContext(parsed.submit_context, config);
+    if (!submitContext.ok) {
+        return submitContext;
+    }
     const transactionBytes = readNumberArray(parsed.transaction_bytes, "transaction_bytes");
     if (!transactionBytes.ok) {
         return transactionBytes;
@@ -1286,6 +1306,7 @@ function readSuiDryRunHandoff(
             request: request.value,
             transaction_bytes: transactionBytes.value,
             effects: parsed.effects,
+            ...(submitContext.value === undefined ? {} : { submit_context: submitContext.value }),
         },
     };
 }
@@ -1428,6 +1449,83 @@ function validateStoredSuiRequestConfig(
         }
     }
     return { ok: true, value: true };
+}
+
+function buildSuiDryRunSubmitContext(
+    config: RunnerSuiSubmissionConfig | undefined,
+): SuiDryRunSubmitContext | undefined {
+    if (
+        config === undefined ||
+        config.network === undefined ||
+        config.grpcUrl === undefined ||
+        config.senderAddress === undefined
+    ) {
+        return undefined;
+    }
+    return {
+        network: config.network,
+        grpc_url: config.grpcUrl,
+        sender_address: config.senderAddress,
+    };
+}
+
+function validateStoredSuiSubmitContext(
+    input: unknown,
+    config: RunnerSuiSubmissionConfig | undefined,
+): IdentityVerificationSuiResult<SuiDryRunSubmitContext | undefined> {
+    if (config === undefined) {
+        return { ok: true, value: undefined };
+    }
+    const expected = buildSuiDryRunSubmitContext(config);
+    if (expected === undefined) {
+        return relayerSubmitFailed(
+            "Sui submission config missing network, grpcUrl, or senderAddress for dry-run handoff validation",
+        );
+    }
+    const stored = readStoredSuiSubmitContext(input);
+    if (!stored.ok) {
+        return stored;
+    }
+    const checks: ReadonlyArray<readonly [string, string, string]> = [
+        ["network", stored.value.network, expected.network],
+        ["grpcUrl", stored.value.grpc_url, expected.grpc_url],
+        ["senderAddress", stored.value.sender_address, expected.sender_address],
+    ];
+    for (const [field, actual, expectedValue] of checks) {
+        if (actual !== expectedValue) {
+            return relayerSubmitFailed(
+                `Stored Sui dry-run submit_context ${field} does not match submit config`,
+            );
+        }
+    }
+    return { ok: true, value: stored.value };
+}
+
+function readStoredSuiSubmitContext(
+    input: unknown,
+): IdentityVerificationSuiResult<SuiDryRunSubmitContext> {
+    if (!isRecord(input)) {
+        return relayerSubmitFailed(
+            "Stored Sui dry-run handoff submit_context is required before submit",
+        );
+    }
+    try {
+        const network = parseString(input.network, "submit_context.network");
+        const parsedNetwork = readSuiNetwork(network);
+        if (parsedNetwork === undefined) {
+            throw new Error("submit_context.network must be mainnet, testnet, or devnet");
+        }
+        return {
+            ok: true,
+            value: {
+                network: parsedNetwork,
+                grpc_url: parseString(input.grpc_url, "submit_context.grpc_url"),
+                sender_address: parseString(input.sender_address, "submit_context.sender_address"),
+            },
+        };
+    } catch (error) {
+        return relayerSubmitFailed(errorMessage(error));
+    }
 }
 
 function sameSignedPayload(
