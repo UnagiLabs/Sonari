@@ -298,6 +298,13 @@ describe("claim transaction arguments", () => {
             "claim_disaster_usdc",
         ]);
 
+        const proofVector = data.commands[2];
+        expect(proofVector?.$kind).toBe("MakeMoveVec");
+        if (proofVector?.$kind !== "MakeMoveVec") {
+            throw new Error("third command must be MakeMoveVec");
+        }
+        expect(proofVector.MakeMoveVec.type).toBe(`${PACKAGE_ID}::affected_cell::ProofStep`);
+
         const claim = data.commands.at(-1);
         expect(claim?.$kind).toBe("MoveCall");
         if (claim?.$kind !== "MoveCall") {

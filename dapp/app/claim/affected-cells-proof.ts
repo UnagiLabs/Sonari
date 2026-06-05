@@ -273,7 +273,10 @@ export function buildClaimDisasterUsdcTransaction(
             arguments: [tx.pure.vector("u8", step.siblingHashBytes)],
         }),
     );
-    const proof = tx.makeMoveVec({ elements: proofSteps });
+    const proof = tx.makeMoveVec({
+        type: `${input.packageId}::affected_cell::ProofStep`,
+        elements: proofSteps,
+    });
 
     tx.moveCall({
         target: `${input.packageId}::accessor::claim_disaster_usdc`,
