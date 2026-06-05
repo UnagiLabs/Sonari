@@ -1,0 +1,25 @@
+name = "sonari-affected-cells-proof-worker"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+[[r2_buckets]]
+binding = "AFFECTED_PROOF_SHARDS"
+bucket_name = "sonari-affected-proofs-v1"
+
+[vars]
+GEO_RESOLUTION = "7"
+# WALRUS_AGGREGATOR_URL は公開 aggregator の場合は vars に記載できる。
+# 例: WALRUS_AGGREGATOR_URL = "https://aggregator.walrus-testnet.walrus.space"
+# プライベート aggregator の場合は vars に書かず `wrangler secret put WALRUS_AGGREGATOR_URL` で設定すること。
+WALRUS_AGGREGATOR_URL = "https://aggregator.walrus-testnet.walrus.space"
+
+# ---------------------------------------------------------------------------
+# Secrets（repo にハードコードしない・deploy 時に wrangler secret put で設定する）
+# ---------------------------------------------------------------------------
+#
+# 以下の secret は `wrangler secret put` コマンドで Cloudflare に登録してください。
+# repo にはこれらの値を絶対にコミットしないこと。
+#
+#   wrangler secret put AFFECTED_PROOF_REGISTER_TOKEN
+#     - AWS Lambda などから登録 POST に使うトークン
+#     - 推奨: 32 バイト以上のランダム文字列

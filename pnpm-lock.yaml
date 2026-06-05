@@ -168,6 +168,12 @@ importers:
 
   nautilus/verifiers/membership/shared: {}
 
+  packages/affected-cells-proof-worker:
+    dependencies:
+      '@sonari/proof-core':
+        specifier: workspace:*
+        version: link:../proof-core
+
   packages/proof-core: {}
 
   packages/residence-proof-worker:
