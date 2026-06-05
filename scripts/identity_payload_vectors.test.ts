@@ -3,7 +3,20 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 interface IdentityResultVectors {
+    readonly schema: "sonari.identity_verification_result.bcs";
+    readonly version: 1;
+    readonly signing_policy: IdentityResultSigningPolicy;
     readonly vectors: readonly IdentityResultVector[];
+}
+
+interface IdentityResultSigningPolicy {
+    readonly verified_true_is_signable: true;
+    readonly verified_false_is_signable: false;
+    readonly unsigned_statuses_must_not_include: readonly [
+        "payload_bcs_hex",
+        "signature",
+        "public_key",
+    ];
 }
 
 interface IdentityResultVector {
@@ -16,6 +29,18 @@ interface IdentityResultVector {
 const repoRoot = process.cwd();
 
 describe("identity payload golden vectors", () => {
+    it("pins the vector metadata and signing policy", () => {
+        const vectors = readIdentityResultVectors();
+
+        expect(vectors.schema).toBe("sonari.identity_verification_result.bcs");
+        expect(vectors.version).toBe(1);
+        expect(vectors.signing_policy).toEqual({
+            verified_true_is_signable: true,
+            verified_false_is_signable: false,
+            unsigned_statuses_must_not_include: ["payload_bcs_hex", "signature", "public_key"],
+        });
+    });
+
     it("keeps the Move decode fixture aligned with the canonical vector", () => {
         const moveSource = readText("contracts/tests/identity_result_tests.move");
         const vector = readVector("world_id_success_v1");
@@ -42,14 +67,18 @@ describe("identity payload golden vectors", () => {
 });
 
 function readVector(caseId: string): IdentityResultVector {
-    const vectors = JSON.parse(
-        readText("schemas/examples/identity_result_vectors.json"),
-    ) as IdentityResultVectors;
+    const vectors = readIdentityResultVectors();
     const vector = vectors.vectors.find((candidate) => candidate.case_id === caseId);
     if (vector === undefined) {
         throw new Error(`Missing identity result vector: ${caseId}`);
     }
     return vector;
+}
+
+function readIdentityResultVectors(): IdentityResultVectors {
+    return JSON.parse(
+        readText("schemas/examples/identity_result_vectors.json"),
+    ) as IdentityResultVectors;
 }
 
 function extractMoveHexLiteral(source: string, functionName: string): string {

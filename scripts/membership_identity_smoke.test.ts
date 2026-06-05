@@ -8,8 +8,21 @@ import {
 } from "./membership_identity_smoke.js";
 
 interface IdentityResultVectors {
+    readonly schema: "sonari.identity_verification_result.bcs";
+    readonly version: 1;
+    readonly signing_policy: IdentityResultSigningPolicy;
     readonly vectors: readonly IdentityResultVector[];
     readonly not_signable_cases: readonly IdentityResultNotSignableCase[];
+}
+
+interface IdentityResultSigningPolicy {
+    readonly verified_true_is_signable: true;
+    readonly verified_false_is_signable: false;
+    readonly unsigned_statuses_must_not_include: readonly [
+        "payload_bcs_hex",
+        "signature",
+        "public_key",
+    ];
 }
 
 interface IdentityResultVector {
@@ -140,7 +153,16 @@ describe("membership identity smoke", () => {
     });
 
     it("tracks reject fixtures as non-signable vector cases", () => {
-        const nonSignableCases = readIdentityResultVectors().not_signable_cases;
+        const vectors = readIdentityResultVectors();
+        const nonSignableCases = vectors.not_signable_cases;
+
+        expect(vectors.schema).toBe("sonari.identity_verification_result.bcs");
+        expect(vectors.version).toBe(1);
+        expect(vectors.signing_policy).toEqual({
+            verified_true_is_signable: true,
+            verified_false_is_signable: false,
+            unsigned_statuses_must_not_include: ["payload_bcs_hex", "signature", "public_key"],
+        });
 
         expect(nonSignableCases).toEqual(
             expect.arrayContaining([

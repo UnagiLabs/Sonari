@@ -12,9 +12,22 @@ import {
 } from "./index.js";
 
 interface IdentityResultVectors {
+    readonly schema: "sonari.identity_verification_result.bcs";
+    readonly version: 1;
     readonly field_order: readonly string[];
     readonly provider_enum: typeof IDENTITY_PROVIDER_BCS;
+    readonly signing_policy: IdentityResultSigningPolicy;
     readonly vectors: readonly IdentityResultVector[];
+}
+
+interface IdentityResultSigningPolicy {
+    readonly verified_true_is_signable: true;
+    readonly verified_false_is_signable: false;
+    readonly unsigned_statuses_must_not_include: readonly [
+        "payload_bcs_hex",
+        "signature",
+        "public_key",
+    ];
 }
 
 interface IdentityResultVector {
@@ -62,6 +75,18 @@ describe("IdentityVerificationResult", () => {
         expect(worldIdSuccessVector.source_fixture).toBe(
             "nautilus/verifiers/membership/fixtures/identity/world_id_success.json",
         );
+    });
+
+    it("pins the golden vector metadata and signing policy", () => {
+        const vectors = readIdentityResultVectors();
+
+        expect(vectors.schema).toBe("sonari.identity_verification_result.bcs");
+        expect(vectors.version).toBe(1);
+        expect(vectors.signing_policy).toEqual({
+            verified_true_is_signable: true,
+            verified_false_is_signable: false,
+            unsigned_statuses_must_not_include: ["payload_bcs_hex", "signature", "public_key"],
+        });
     });
 
     it("pins the contract-facing field order", () => {

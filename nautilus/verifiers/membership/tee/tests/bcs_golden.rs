@@ -6,9 +6,19 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct IdentityResultVectors {
+    schema: String,
+    version: u64,
     field_order: Vec<String>,
     provider_enum: ProviderEnum,
+    signing_policy: SigningPolicy,
     vectors: Vec<IdentityResultVector>,
+}
+
+#[derive(Deserialize)]
+struct SigningPolicy {
+    verified_true_is_signable: bool,
+    verified_false_is_signable: bool,
+    unsigned_statuses_must_not_include: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -37,6 +47,14 @@ fn pins_bcs_numeric_enums_to_typescript_contract() {
 #[test]
 fn bcs_golden_matches_typescript_reference() {
     let vectors = identity_result_vectors();
+    assert_eq!(vectors.schema, "sonari.identity_verification_result.bcs");
+    assert_eq!(vectors.version, 1);
+    assert!(vectors.signing_policy.verified_true_is_signable);
+    assert!(!vectors.signing_policy.verified_false_is_signable);
+    assert_eq!(
+        vectors.signing_policy.unsigned_statuses_must_not_include,
+        ["payload_bcs_hex", "signature", "public_key"]
+    );
     assert_eq!(
         vectors.field_order,
         [
