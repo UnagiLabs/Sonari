@@ -125,7 +125,7 @@ pnpm check:ts
 
 ## デプロイ手順
 
-実際の deploy には Cloudflare アカウントと認証が必要です。**実 deploy は手動・スコープ外**です。
+実際の deploy には Cloudflare アカウントと認証が必要です。
 
 ### 1. R2 bucket を作成する
 
