@@ -606,7 +606,7 @@ fun verify_member_with_provider(
         let mut pass = scenario.take_from_sender<membership::MembershipPass>();
         identity_registry::bind_duplicate_key(
             &mut identity_registry,
-            &pass,
+            membership::membership_pass_lineage_id(&pass),
             provider,
             duplicate_key_hash,
         );
@@ -653,7 +653,7 @@ fun bind_duplicate_key_to_other_pass(
         let other_pass = membership::create_pass_for_testing(@0xC0FFEE, scenario.ctx());
         identity_registry::bind_duplicate_key(
             &mut identity_registry,
-            &other_pass,
+            membership::membership_pass_lineage_id(&other_pass),
             provider,
             duplicate_key_hash,
         );

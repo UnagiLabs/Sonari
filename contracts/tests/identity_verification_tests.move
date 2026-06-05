@@ -132,7 +132,7 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
         assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
         identity_registry::assert_duplicate_key_bound_to_pass(
             &identity_registry,
-            &pass,
+            membership::membership_pass_lineage_id(&pass),
             identity_registry::provider_world_id(),
             rust_fixture_world_id_duplicate_key_hash(),
         );

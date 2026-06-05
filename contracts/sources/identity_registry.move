@@ -64,12 +64,11 @@ public(package) fun create_identity_registry(ctx: &mut TxContext): ID {
 
 public(package) fun bind_duplicate_key(
     registry: &mut IdentityRegistry,
-    pass: &MembershipPass,
+    pass_lineage_id: ID,
     provider: u8,
     duplicate_key_hash: vector<u8>,
 ) {
     assert_known_provider(provider);
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
     let key = IdentityKey {
         provider,
         duplicate_key_hash,
@@ -86,12 +85,11 @@ public(package) fun bind_duplicate_key(
 
 public(package) fun assert_duplicate_key_bound_to_pass(
     registry: &IdentityRegistry,
-    pass: &MembershipPass,
+    pass_lineage_id: ID,
     provider: u8,
     duplicate_key_hash: vector<u8>,
 ) {
     assert_known_provider(provider);
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
     let key = IdentityKey {
         provider,
         duplicate_key_hash,
@@ -130,7 +128,7 @@ public(package) fun apply_identity_verification_result(
     membership::assert_current_pass_precheck(membership_registry, pass, pass_owner);
     bind_duplicate_key(
         registry,
-        pass,
+        membership::membership_pass_lineage_id(pass),
         identity_result_v1::provider(result),
         identity_result_v1::duplicate_key_hash(result),
     );

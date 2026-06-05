@@ -294,7 +294,7 @@ fun decoded_result_rejects_duplicate_key_bound_to_another_sbt() {
     let (other_membership_registry, other_pass) = setup_other_step3_pass();
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
@@ -357,13 +357,13 @@ fun kyc_duplicate_key_rejects_different_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -377,13 +377,13 @@ fun world_id_duplicate_key_rejects_different_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
@@ -397,13 +397,13 @@ fun same_hash_across_providers_is_allowed() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
@@ -443,13 +443,13 @@ fun same_key_same_pass_is_idempotent() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -477,13 +477,13 @@ fun duplicate_key_binding_check_accepts_same_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -502,7 +502,7 @@ fun duplicate_key_binding_check_rejects_missing_key() {
 
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -516,13 +516,13 @@ fun duplicate_key_binding_check_rejects_different_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -536,13 +536,13 @@ fun duplicate_key_binding_check_rejects_wrong_provider() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );

@@ -180,7 +180,7 @@ public(package) fun claim_disaster_usdc(
     assert_valid_disaster_eligibility(disaster_event, policy, pass, &leaf, proof);
     identity_registry::assert_duplicate_key_bound_to_pass(
         identity_registry,
-        pass,
+        membership::membership_pass_lineage_id(pass),
         identity_provider,
         duplicate_key_hash,
     );
