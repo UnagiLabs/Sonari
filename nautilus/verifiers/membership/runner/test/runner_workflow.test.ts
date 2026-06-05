@@ -472,7 +472,7 @@ describe("membership runner workflow", () => {
         await expect(repository.get(submitJob.row.job_id)).resolves.toMatchObject({
             status: "failed",
             error_code: "RELAYER_SUBMIT_FAILED",
-            error_message: "Sui submission config is required",
+            error_message: "Sui dry-run handoff is required before submit",
         });
     });
 
@@ -601,13 +601,11 @@ describe("membership runner workflow", () => {
         expect(signAndExecuteCalls).toBe(0);
     });
 
-    it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
+    it("fails closed without a valid stored dry-run handoff before submit", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
         await repository.claimNextDue(baseNowMs + 1);
-        const submitter = new RecordingSuiSubmissionAdapter({
-            submitDigest: "tx-original",
-        });
+        const submitter = new RecordingSuiSubmissionAdapter();
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -626,6 +624,103 @@ describe("membership runner workflow", () => {
                 attempt: 1,
                 result: verifiedTeeResult(),
             }),
+        ).resolves.toMatchObject({ sui_submission: "failed" });
+
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "failed",
+            error_code: "RELAYER_SUBMIT_FAILED",
+            error_message: "Sui dry-run handoff is required before submit",
+            tx_digest: null,
+        });
+        expect(submitter.submits).toEqual([]);
+    });
+
+    it("rejects malformed or mismatched stored dry-run handoff before submit", async () => {
+        for (const [name, handoff] of [
+            ["malformed", "{"],
+            [
+                "mismatched",
+                JSON.stringify(
+                    dryRunHandoffRecord({
+                        signed_payload: {
+                            ...signedPayloadForTest(),
+                            membership_id: `0x${"99".repeat(32)}`,
+                        },
+                    }),
+                ),
+            ],
+        ] as const) {
+            const repository = new InMemoryVerificationJobRepository();
+            const job = await repository.upsertRequest(
+                {
+                    ...validRequest(),
+                    signed_statement_hash:
+                        name === "malformed" ? `0x${"89".repeat(32)}` : `0x${"8a".repeat(32)}`,
+                },
+                baseNowMs,
+            );
+            await repository.claimNextDue(baseNowMs + 1);
+            await repository.markSuiDryRunSucceeded(job.row.job_id, baseNowMs + 2, handoff);
+            const submitter = new RecordingSuiSubmissionAdapter();
+            const handler = createRunnerControlHandler({
+                autoscaling: new RecordingAutoScalingClient(),
+                ec2: new RecordingEc2Client(),
+                ssm: new RecordingSsmClient(),
+                s3: new RecordingS3Client(),
+                repository,
+                suiSubmission: submitter,
+                now: () => baseNowMs + 3,
+                config: baseConfig(),
+            });
+
+            await expect(
+                handler({
+                    action: "submit_sui_submission",
+                    job_id: job.row.job_id,
+                    attempt: 1,
+                    result: {
+                        ...verifiedTeeResult(),
+                        signed_statement_hash: JSON.parse(job.row.request_json)
+                            .signed_statement_hash,
+                    },
+                }),
+                name,
+            ).resolves.toMatchObject({ sui_submission: "failed" });
+            expect(submitter.submits, name).toEqual([]);
+        }
+    });
+
+    it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            submitDigest: "tx-original",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "dry_run_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
         ).resolves.toMatchObject({
             sui_submission: "succeeded",
             tx_digest: "tx-original",
@@ -637,15 +732,50 @@ describe("membership runner workflow", () => {
             tx_digest: "tx-original",
             completed_at_ms: baseNowMs + 2,
         });
-        expect(submitter.submits).toEqual([
-            {
-                status: "verified",
-                payload_bcs_hex: "0x010203",
-                signature: `0x${"11".repeat(64)}`,
-                public_key: `0x${"22".repeat(32)}`,
-                membership_id: validRequest().membership_id, // dynamic: from verifiedTeeResult
-            },
-        ]);
+        expect(submitter.submits).toEqual([verifiedTeeResult()]);
+    });
+
+    it("records submit tx digest before failing a post-submit readback failure", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            submitDigest: "tx-readback-failed",
+            submitFailureMessage:
+                "MembershipPass readback verified timestamp does not match payload",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "dry_run_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "failed" });
+
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "failed",
+            tx_digest: "tx-readback-failed",
+            error_code: "RELAYER_SUBMIT_FAILED",
+            error_message: "MembershipPass readback verified timestamp does not match payload",
+        });
     });
 
     it("records explicit timeout failures", async () => {
@@ -1126,6 +1256,7 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
         private readonly options: {
             dryRunDigest?: string;
             submitDigest?: string;
+            submitFailureMessage?: string;
         } = {},
     ) {}
 
@@ -1146,6 +1277,14 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
 
     async submit(result: unknown) {
         this.submits.push(result);
+        if (this.options.submitFailureMessage !== undefined) {
+            return {
+                ok: false as const,
+                error_code: "RELAYER_SUBMIT_FAILED" as const,
+                message: this.options.submitFailureMessage,
+                digest: this.options.submitDigest,
+            };
+        }
         return {
             ok: true as const,
             value: {
@@ -1168,6 +1307,7 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
 }
 
 function fakeSuiRequest() {
+    const membershipPassId = validRequest().membership_id;
     return {
         target: "0xabc::accessor::update_identity_verification",
         packageId: "0xabc",
@@ -1175,19 +1315,46 @@ function fakeSuiRequest() {
         identityRegistryId: "0x222",
         membershipRegistryId: "0x333",
         verifierRegistryId: "0x444",
-        membershipPassId: "0x555",
+        membershipPassId,
         clockId: "0x6",
         arguments: [
             "0x111",
             "0x222",
             "0x333",
             "0x444",
-            "0x555",
+            membershipPassId,
             "0x6",
             [1, 2, 3],
             Array.from({ length: 64 }, () => 0x11),
             Array.from({ length: 32 }, () => 0x22),
         ] as [string, string, string, string, string, string, number[], number[], number[]],
+    };
+}
+
+function signedPayloadForTest() {
+    return {
+        status: "verified" as const,
+        payload_bcs_hex: "0x010203",
+        signature: `0x${"11".repeat(64)}`,
+        public_key: `0x${"22".repeat(32)}`,
+        membership_id: validRequest().membership_id,
+    };
+}
+
+function dryRunHandoffRecord(
+    overrides: Partial<{
+        signed_payload: ReturnType<typeof signedPayloadForTest>;
+        request: ReturnType<typeof fakeSuiRequest>;
+        transaction_bytes: number[];
+        effects: Record<string, unknown>;
+    }> = {},
+) {
+    return {
+        signed_payload: signedPayloadForTest(),
+        request: fakeSuiRequest(),
+        transaction_bytes: [1, 2, 3],
+        effects: { digest: "dry-run-digest" },
+        ...overrides,
     };
 }
 

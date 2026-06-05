@@ -26,7 +26,12 @@ export type IdentityVerificationSuiErrorCode = typeof RELAYER_SUBMIT_FAILED | ty
 
 export type IdentityVerificationSuiResult<T> =
     | { ok: true; value: T }
-    | { ok: false; error_code: IdentityVerificationSuiErrorCode; message: string };
+    | {
+          ok: false;
+          error_code: IdentityVerificationSuiErrorCode;
+          message: string;
+          digest?: string | undefined;
+      };
 
 export type SuiNetwork = "mainnet" | "testnet" | "devnet";
 export type IdentityVerificationRelayerMode = "dry_run" | "submit";
@@ -314,7 +319,7 @@ export async function submitIdentityVerificationPayload(
             config.packageId,
         );
         if (!readback.ok) {
-            return readback;
+            return { ...readback, digest: result.value.digest };
         }
 
         return {
