@@ -109,6 +109,28 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain("aws kms decrypt");
     });
 
+    it("delivers the World ID proof mode and Sui network to the enclave bootstrap for the fail-closed dummy gate", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // CFN parameters carry the operator's proof mode / network choice with safe
+        // defaults so the committed template deploys as real World ID verification.
+        expect(template).toContain("WorldIdProofMode:");
+        expect(template).toContain("RelayerNetwork:");
+        // proof mode only allows real|dummy at deploy time and defaults to real.
+        expect(template).toContain("      - real\n      - dummy");
+        // runner.env exposes both values to the enclave wrapper, which sources it
+        // before running the bootstrap jq. The `$' + '{` split keeps biome from
+        // treating these CloudFormation substitutions as JS template literals.
+        expect(template).toContain('echo "SONARI_WORLD_ID_PROOF_MODE=$' + '{WorldIdProofMode}"');
+        expect(template).toContain('echo "RELAYER_NETWORK=$' + '{RelayerNetwork}"');
+        // The bootstrap jq forwards both into the enclave config so the TEE-side
+        // fail-closed gate can allow dummy only on testnet/devnet.
+        expect(template).toContain('--arg proof_mode "$' + '{SONARI_WORLD_ID_PROOF_MODE:-}"');
+        expect(template).toContain('--arg network "$' + '{RELAYER_NETWORK:-}"');
+        expect(template).toContain("proof_mode: $proof_mode");
+        expect(template).toContain("network: $network");
+    });
+
     it("gates KMS decrypt of signing material on Nitro attestation measurements", async () => {
         const template = await readFile(templatePath, "utf8");
 

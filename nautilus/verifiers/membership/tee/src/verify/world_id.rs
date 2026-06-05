@@ -299,16 +299,112 @@ fn pending_source() -> WorldIdVerificationStatus {
     }
 }
 
+/// A dummy World ID verifier that skips the HTTP call to the World ID API and
+/// returns [`WorldIdVerificationStatus::Verified`] directly when `app_id` and
+/// `action` match. All other validation (app_id normalisation, action check)
+/// follows the same path as [`CloudWorldIdVerifier`] so that request shape,
+/// payload, and signature-target bytes are identical to the real verifier.
+///
+/// **Only for testnet / devnet.** The fail-closed gate in STEP 2 / STEP 4
+/// ensures this verifier cannot be selected on mainnet.
+#[derive(Debug, Clone)]
+pub struct DummyWorldIdVerifier {
+    app_id: String,
+}
+
+impl DummyWorldIdVerifier {
+    pub fn new(app_id: impl Into<String>) -> Result<Self, IdentityError> {
+        let app_id = normalize_app_id(app_id.into())?;
+        Ok(Self { app_id })
+    }
+}
+
+impl WorldIdVerifier for DummyWorldIdVerifier {
+    fn expected_app_id(&self) -> &str {
+        &self.app_id
+    }
+
+    fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
+        if proof.world_app_id != self.app_id || proof.action != WORLD_ID_ACTION {
+            return rejected();
+        }
+        WorldIdVerificationStatus::Verified
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CloudWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE,
-        WORLD_ID_APP_ID_ENV, WORLD_ID_MAX_AGE_SECONDS, WORLD_ID_USER_AGENT,
-        WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest, WorldIdVerificationStatus,
-        WorldIdVerifier, classify_bad_request, classify_http_status, classify_success_response,
+        CloudWorldIdVerifier, DummyWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_ENV,
+        WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV, WORLD_ID_MAX_AGE_SECONDS,
+        WORLD_ID_USER_AGENT, WORLD_ID_VERIFICATION_FAILED, WorldIdApiRequest,
+        WorldIdVerificationStatus, WorldIdVerifier, classify_bad_request, classify_http_status,
+        classify_success_response,
     };
     use crate::WorldIdProofRequest;
     use reqwest::StatusCode;
+
+    // ---- DummyWorldIdVerifier tests ----
+
+    #[test]
+    fn dummy_world_id_verifier_returns_verified_when_app_id_and_action_match() {
+        let verifier = DummyWorldIdVerifier::new("app_staging_123").unwrap();
+        let proof = world_id_proof();
+
+        assert_eq!(
+            verifier.verify_world_id(&proof),
+            WorldIdVerificationStatus::Verified
+        );
+    }
+
+    #[test]
+    fn dummy_world_id_verifier_rejects_mismatched_app_id() {
+        let verifier = DummyWorldIdVerifier::new("app_staging_123").unwrap();
+        let mut proof = world_id_proof();
+        proof.world_app_id = "app_attacker".to_owned();
+
+        assert_eq!(
+            verifier.verify_world_id(&proof),
+            WorldIdVerificationStatus::Rejected {
+                error_code: WORLD_ID_VERIFICATION_FAILED.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn dummy_world_id_verifier_rejects_mismatched_action() {
+        let verifier = DummyWorldIdVerifier::new("app_staging_123").unwrap();
+        let mut proof = world_id_proof();
+        proof.action = "attacker_action".to_owned();
+
+        assert_eq!(
+            verifier.verify_world_id(&proof),
+            WorldIdVerificationStatus::Rejected {
+                error_code: WORLD_ID_VERIFICATION_FAILED.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn dummy_and_cloud_rejected_error_codes_are_identical() {
+        // request shape 同一の証拠: dummy の Rejected は Cloud の Rejected と同一の error_code を返す
+        let dummy = DummyWorldIdVerifier::new("app_staging_123").unwrap();
+        let cloud =
+            CloudWorldIdVerifier::new("https://developer.world.org", "app_staging_123").unwrap();
+        let mut proof = world_id_proof();
+        proof.world_app_id = "app_attacker".to_owned();
+
+        let dummy_result = dummy.verify_world_id(&proof);
+        let cloud_result = cloud.verify_world_id(&proof);
+
+        assert_eq!(dummy_result, cloud_result);
+    }
+
+    #[test]
+    fn dummy_world_id_verifier_rejects_empty_app_id() {
+        let error = DummyWorldIdVerifier::new("").unwrap_err();
+        assert!(error.to_string().contains("URL-safe app id"));
+    }
 
     #[test]
     fn world_id_request_serializes_exact_api_body_fields() {

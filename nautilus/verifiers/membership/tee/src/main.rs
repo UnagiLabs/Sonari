@@ -6,10 +6,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use membership_tee::server::{EGRESS_PROXY_URL_KEY, IdentityProcessHandler};
 use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityProvider,
-    IdentityTeeResult, IdentityVerifyRequest, WORLD_ID_API_BASE_CANONICAL,
-    WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
-    WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
-    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
+    IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV,
+    WORLD_ID_API_BASE_CANONICAL, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
+    WORLD_ID_PROOF_MODE_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
+    WorldIdVerificationStatus, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
+    process_identity_with_verifier, resolve_world_id_verifier_mode,
 };
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::enclave::{
@@ -203,6 +204,10 @@ struct EnclaveState {
     ctx: TeeContext,
     world_id_base_url: String,
     world_id_app_id: String,
+    /// Resolved once at startup by the fail-closed gate. Passed to the handler so
+    /// it can select the dummy or cloud World ID verifier per request without
+    /// re-reading the host-supplied bootstrap env.
+    world_id_verifier_mode: ResolvedWorldIdVerifierMode,
 }
 
 /// Runs the production Nautilus server: ephemeral key signing, NSM attestation,
@@ -247,11 +252,19 @@ fn enclave_state_from_env(
 ) -> Result<EnclaveState, Box<dyn std::error::Error>> {
     let world_id_app_id = non_empty_env(WORLD_ID_APP_ID_ENV)
         .ok_or(format!("{WORLD_ID_APP_ID_ENV} is required for server mode"))?;
+    let proof_mode = non_empty_env(WORLD_ID_PROOF_MODE_ENV);
+    let network = non_empty_env(SUI_NETWORK_ENV);
+    // Fail-closed gate: evaluate once at startup. If the proof_mode/network
+    // combination is disallowed (e.g. dummy on mainnet or with unknown/unset
+    // network), the server refuses to start rather than silently degrading.
+    let world_id_verifier_mode =
+        resolve_world_id_verifier_mode(proof_mode.as_deref(), network.as_deref())?;
     Ok(EnclaveState {
         ephemeral_signing_key_seed,
         ctx: tee_context_from_env(),
         world_id_base_url: server_world_id_base_url(),
         world_id_app_id,
+        world_id_verifier_mode,
     })
 }
 
@@ -289,8 +302,11 @@ fn route_request(
         }
         ("POST", "/process_data") => {
             let envelope = parse_process_data_envelope(&request.body)?;
-            let handler =
-                IdentityProcessHandler::new(&state.world_id_base_url, &state.world_id_app_id);
+            let handler = IdentityProcessHandler::new(
+                &state.world_id_base_url,
+                &state.world_id_app_id,
+                state.world_id_verifier_mode,
+            );
             let output = handler
                 .process(&serde_json::to_vec(&envelope.payload)?, &state.ctx)
                 .map_err(|error| -> Box<dyn std::error::Error> { error.to_string().into() })?;
@@ -429,7 +445,31 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     // origin. The field is still accepted on the wire for backward compatibility.
     set_env_before_server(WORLD_ID_APP_ID_ENV, &config.world_id_app_id);
     apply_egress_proxy_env(config.egress_proxy_url.as_deref());
+    apply_network_env(config.network.as_deref());
+    apply_proof_mode_env(config.proof_mode.as_deref());
     Ok(())
+}
+
+/// Installs or clears the Sui network env from the bootstrap config.
+///
+/// `Some(network)` installs the host-supplied value; `None` explicitly clears
+/// the env so a stale value from a prior run can never influence the gate.
+fn apply_network_env(network: Option<&str>) {
+    match network {
+        Some(n) => set_env_before_server(SUI_NETWORK_ENV, n),
+        None => unset_env_before_server(SUI_NETWORK_ENV),
+    }
+}
+
+/// Installs or clears the World ID proof mode env from the bootstrap config.
+///
+/// `Some(mode)` installs the host-supplied value; `None` explicitly clears the
+/// env so a stale proof_mode from a prior run can never enable dummy mode.
+fn apply_proof_mode_env(proof_mode: Option<&str>) {
+    match proof_mode {
+        Some(m) => set_env_before_server(WORLD_ID_PROOF_MODE_ENV, m),
+        None => unset_env_before_server(WORLD_ID_PROOF_MODE_ENV),
+    }
 }
 
 /// Installs or clears the egress proxy env from the bootstrap config.
@@ -452,6 +492,13 @@ struct BootstrapConfig {
     world_id_api_base: String,
     world_id_app_id: String,
     egress_proxy_url: Option<String>,
+    /// Sui network name supplied by the host (e.g. `"testnet"`, `"mainnet"`).
+    /// Optional for backward compatibility; absence is treated as unset (will
+    /// cause dummy mode to be rejected by the fail-closed gate).
+    network: Option<String>,
+    /// World ID proof mode supplied by the host (`"real"` or `"dummy"`).
+    /// Optional for backward compatibility; absence defaults to real mode.
+    proof_mode: Option<String>,
 }
 
 fn set_env_before_server(name: &str, value: &str) {
@@ -744,8 +791,9 @@ mod tests {
             EGRESS_PROXY_URL_KEY, UNSIGNED_PLACEHOLDER, process_with_verifier,
         };
         use membership_tee::{
-            VERIFIER_FAMILY, WORLD_ID_ACTION, WORLD_ID_API_UNAVAILABLE, WorldIdProofRequest,
-            WorldIdVerificationStatus, WorldIdVerifier,
+            ResolvedWorldIdVerifierMode, VERIFIER_FAMILY, WORLD_ID_ACTION,
+            WORLD_ID_API_UNAVAILABLE, WorldIdProofRequest, WorldIdVerificationStatus,
+            WorldIdVerifier,
         };
         use sonari_tee_core::enclave::{EnclaveRegistrationMetadata, ProcessOutput, TeeContext};
         use sonari_tee_core::{LocalEd25519Signer, PayloadSigner};
@@ -1023,6 +1071,7 @@ mod tests {
                 ctx: TeeContext::new(),
                 world_id_base_url: "https://developer.world.org".to_owned(),
                 world_id_app_id: "app_staging_123".to_owned(),
+                world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
             };
             // The base URL is unreachable in tests so the real World ID call maps
             // to pending_source: this still proves the route wires the handler,
@@ -1048,6 +1097,7 @@ mod tests {
                 ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:18080")]),
                 world_id_base_url: "https://developer.world.org".to_owned(),
                 world_id_app_id: "app_staging_123".to_owned(),
+                world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
             };
             let request = sonari_tee_core::enclave::HttpRequest {
                 method: "GET".to_owned(),
@@ -1116,12 +1166,94 @@ mod tests {
             set_env_before_server, tee_context_from_env, unset_env_before_server,
         };
         use membership_tee::server::EGRESS_PROXY_URL_KEY;
-        use membership_tee::{WORLD_ID_API_BASE_CANONICAL, WORLD_ID_APP_ID_ENV};
+        use membership_tee::{
+            ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_API_BASE_CANONICAL,
+            WORLD_ID_APP_ID_ENV, WORLD_ID_PROOF_MODE_ENV,
+        };
         use std::sync::Mutex;
 
         static ENV_LOCK: Mutex<()> = Mutex::new(());
 
         const TEST_SEED: [u8; 32] = [7u8; 32];
+
+        /// dummy + mainnet → `enclave_state_from_env` must return Err (fail-closed).
+        /// This guards the mainnet boundary at startup so an adversarial bootstrap
+        /// config can never enable dummy mode on mainnet.
+        #[test]
+        fn enclave_state_rejects_dummy_mode_on_mainnet() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
+            set_env_before_server(SUI_NETWORK_ENV, "mainnet");
+
+            let result = enclave_state_from_env(TEST_SEED);
+            assert!(
+                result.is_err(),
+                "dummy mode on mainnet must be rejected at startup (fail-closed)"
+            );
+
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+        }
+
+        /// dummy + testnet → Ok, and the resolved mode must be Dummy.
+        #[test]
+        fn enclave_state_allows_dummy_mode_on_testnet() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
+            set_env_before_server(SUI_NETWORK_ENV, "testnet");
+
+            let state = enclave_state_from_env(TEST_SEED).expect("dummy+testnet must succeed");
+            assert_eq!(
+                state.world_id_verifier_mode,
+                ResolvedWorldIdVerifierMode::Dummy,
+                "world_id_verifier_mode must be Dummy on testnet"
+            );
+
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+        }
+
+        /// dummy + network not set → Err (fail-closed: unknown/missing network must
+        /// not permit dummy mode).
+        #[test]
+        fn enclave_state_rejects_dummy_mode_when_network_unset() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
+            unset_env_before_server(SUI_NETWORK_ENV);
+
+            let result = enclave_state_from_env(TEST_SEED);
+            assert!(
+                result.is_err(),
+                "dummy mode with no network must be rejected at startup (fail-closed)"
+            );
+
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+        }
+
+        /// proof_mode not set → Ok, and the resolved mode must be Real (safe default).
+        #[test]
+        fn enclave_state_defaults_to_real_mode_when_proof_mode_unset() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+
+            let state = enclave_state_from_env(TEST_SEED)
+                .expect("unset proof_mode must default to Real and succeed");
+            assert_eq!(
+                state.world_id_verifier_mode,
+                ResolvedWorldIdVerifierMode::Real,
+                "unset proof_mode must resolve to Real"
+            );
+
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+        }
 
         #[test]
         fn server_world_id_base_is_canonical_and_ignores_env() {

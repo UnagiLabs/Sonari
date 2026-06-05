@@ -21,8 +21,9 @@
 //! structurally separate from this handler.
 
 use crate::{
-    CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityTeeResult,
-    IdentityVerifyRequest, WorldIdVerifier, process_identity_with_verifier,
+    CloudWorldIdVerifier, DummyWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus,
+    IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, WorldIdVerifier,
+    process_identity_with_verifier,
 };
 use serde::Serialize;
 use sonari_tee_core::{
@@ -86,14 +87,25 @@ pub enum TeeJsonResult {
 pub struct IdentityProcessHandler {
     world_id_base_url: String,
     world_id_app_id: String,
+    world_id_verifier_mode: ResolvedWorldIdVerifierMode,
 }
 
 impl IdentityProcessHandler {
     /// Builds a handler with the orchestration-resolved World ID configuration.
-    pub fn new(world_id_base_url: impl Into<String>, world_id_app_id: impl Into<String>) -> Self {
+    ///
+    /// `world_id_verifier_mode` is resolved once at startup by the fail-closed gate
+    /// (`resolve_world_id_verifier_mode`): the server refuses to start when dummy is
+    /// requested outside testnet/devnet, so a `Dummy` value reaching this handler is
+    /// already proven safe.
+    pub fn new(
+        world_id_base_url: impl Into<String>,
+        world_id_app_id: impl Into<String>,
+        world_id_verifier_mode: ResolvedWorldIdVerifierMode,
+    ) -> Self {
         Self {
             world_id_base_url: world_id_base_url.into(),
             world_id_app_id: world_id_app_id.into(),
+            world_id_verifier_mode,
         }
     }
 }
@@ -108,15 +120,30 @@ impl ProcessDataHandler for IdentityProcessHandler {
         request.issued_at_ms = None;
         request.validity_ms = None;
 
-        let verifier = CloudWorldIdVerifier::with_proxy(
-            self.world_id_base_url.clone(),
-            self.world_id_app_id.clone(),
-            ctx.get(EGRESS_PROXY_URL_KEY),
-        )
-        .map_err(|error| process_failed(error.to_string()))?;
-
         let issued_at_ms = current_unix_ms().map_err(|error| process_failed(error.to_string()))?;
-        process_with_verifier(request, &verifier, issued_at_ms)
+
+        // Verifier selection by the startup-resolved mode. `Dummy` skips only the
+        // World ID HTTP call (testnet/devnet smoke; already gated fail-closed at
+        // startup); `Real` keeps the canonical cloud verifier routed through the
+        // egress proxy. The downstream pipeline (`process_with_verifier`) is
+        // verifier-agnostic, so request shape, BCS payload, and signature-target
+        // bytes stay identical between the two modes.
+        match self.world_id_verifier_mode {
+            ResolvedWorldIdVerifierMode::Dummy => {
+                let verifier = DummyWorldIdVerifier::new(self.world_id_app_id.clone())
+                    .map_err(|error| process_failed(error.to_string()))?;
+                process_with_verifier(request, &verifier, issued_at_ms)
+            }
+            ResolvedWorldIdVerifierMode::Real => {
+                let verifier = CloudWorldIdVerifier::with_proxy(
+                    self.world_id_base_url.clone(),
+                    self.world_id_app_id.clone(),
+                    ctx.get(EGRESS_PROXY_URL_KEY),
+                )
+                .map_err(|error| process_failed(error.to_string()))?;
+                process_with_verifier(request, &verifier, issued_at_ms)
+            }
+        }
     }
 }
 
@@ -227,9 +254,10 @@ mod tests {
         process_output_from_identity, process_with_verifier,
     };
     use crate::{
-        INTENT, IdentityProvider, IdentityVerifyRequest, VERIFIER_FAMILY, VERIFIER_VERSION,
-        WORLD_ID_ACTION, WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED,
-        WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
+        DummyWorldIdVerifier, INTENT, IdentityProvider, IdentityVerifyRequest,
+        ResolvedWorldIdVerifierMode, VERIFIER_FAMILY, VERIFIER_VERSION, WORLD_ID_ACTION,
+        WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
+        WorldIdVerificationStatus, WorldIdVerifier,
     };
     use sonari_tee_core::{PayloadSigner, ProcessDataHandler, ProcessOutput, TeeContext};
 
@@ -434,7 +462,11 @@ mod tests {
 
     #[test]
     fn handler_rejects_malformed_request_input() {
-        let handler = IdentityProcessHandler::new("https://developer.world.org", "app_staging_123");
+        let handler = IdentityProcessHandler::new(
+            "https://developer.world.org",
+            "app_staging_123",
+            ResolvedWorldIdVerifierMode::Real,
+        );
         let error = handler
             .process(b"not json", &TeeContext::new())
             .expect_err("malformed input must produce a handler error");
@@ -443,7 +475,11 @@ mod tests {
 
     #[test]
     fn handler_rejects_request_with_unknown_field() {
-        let handler = IdentityProcessHandler::new("https://developer.world.org", "app_staging_123");
+        let handler = IdentityProcessHandler::new(
+            "https://developer.world.org",
+            "app_staging_123",
+            ResolvedWorldIdVerifierMode::Real,
+        );
         let mut body = request_json();
         body["raw_personal_data"] = serde_json::json!("do-not-accept");
         let error = handler
@@ -463,7 +499,11 @@ mod tests {
         // request cannot reach the API, so a verified-mock-independent live call
         // resolves to pending_source. This proves the proxy is wired through the
         // context (a direct client would instead reach DNS/the real host).
-        let handler = IdentityProcessHandler::new("https://developer.world.org", "app_staging_123");
+        let handler = IdentityProcessHandler::new(
+            "https://developer.world.org",
+            "app_staging_123",
+            ResolvedWorldIdVerifierMode::Real,
+        );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
 
         let output = handler
@@ -497,5 +537,90 @@ mod tests {
         assert!(keys.contains(&"public_key"));
         assert!(keys.contains(&"verifier_family"));
         assert!(keys.contains(&"intent"));
+    }
+
+    /// Verifies that DummyWorldIdVerifier produces the same ProcessOutput::Signable
+    /// bytes as MockWorldIdVerifier (verified path) when using process_with_verifier.
+    /// This proves the dummy verifier is a drop-in for the real one in the pipeline.
+    #[test]
+    fn dummy_verifier_produces_signable_output_identical_to_mock_verified() {
+        let dummy =
+            DummyWorldIdVerifier::new("app_staging_123").expect("dummy verifier should construct");
+        let output_dummy = process_with_verifier(world_id_request(), &dummy, 1_900_000_000_000)
+            .expect("dummy verifier should produce a signable result");
+
+        let output_mock = process_with_verifier(
+            world_id_request(),
+            &MockWorldIdVerifier {
+                status: WorldIdVerificationStatus::Verified,
+            },
+            1_900_000_000_000,
+        )
+        .expect("mock verified should produce a signable result");
+
+        let (
+            ProcessOutput::Signable {
+                payload_bcs: bcs_dummy,
+                result_json: json_dummy,
+            },
+            ProcessOutput::Signable {
+                payload_bcs: bcs_mock,
+                result_json: json_mock,
+            },
+        ) = (output_dummy, output_mock)
+        else {
+            panic!("both dummy and mock verified outputs must be Signable");
+        };
+        assert_eq!(
+            bcs_dummy, bcs_mock,
+            "dummy verifier BCS payload must be byte-identical to mock verified"
+        );
+        assert_eq!(
+            json_dummy, json_mock,
+            "dummy verifier result JSON must be byte-identical to mock verified"
+        );
+    }
+
+    /// Verifies that a handler constructed with Dummy mode returns Signable (verified)
+    /// even when the World ID API base URL is unreachable, proving no HTTP is made.
+    #[test]
+    fn handler_dummy_mode_returns_verified_without_http() {
+        let handler = IdentityProcessHandler::new(
+            "https://unreachable.invalid",
+            "app_staging_123",
+            ResolvedWorldIdVerifierMode::Dummy,
+        );
+        let output = handler
+            .process(
+                &serde_json::to_vec(&request_json()).unwrap(),
+                &TeeContext::new(),
+            )
+            .expect("dummy mode handler must succeed without HTTP");
+
+        assert!(
+            matches!(output, ProcessOutput::Signable { .. }),
+            "dummy mode must produce Signable (verified) output without HTTP"
+        );
+        assert_eq!(output.result_json()["status"], "verified");
+    }
+
+    /// Verifies that a handler constructed with Real mode (unreachable URL) still
+    /// falls back to pending_source, preserving the pre-existing behaviour.
+    #[test]
+    fn handler_real_mode_returns_pending_source_with_unreachable_url() {
+        let handler = IdentityProcessHandler::new(
+            "https://developer.world.org",
+            "app_staging_123",
+            ResolvedWorldIdVerifierMode::Real,
+        );
+        let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
+
+        let output = handler
+            .process(&serde_json::to_vec(&request_json()).unwrap(), &ctx)
+            .expect("real mode with unreachable proxy must map to pending_source");
+
+        assert!(matches!(output, ProcessOutput::Unsigned { .. }));
+        assert_eq!(output.result_json()["status"], "pending_source");
+        assert_eq!(output.result_json()["error_code"], WORLD_ID_API_UNAVAILABLE);
     }
 }
