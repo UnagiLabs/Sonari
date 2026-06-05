@@ -15,7 +15,11 @@ import {
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
-import { FAILED_RETRY_BACKOFF_MS, FINALIZATION_WINDOW_MS } from "./constants.js";
+import {
+    FAILED_RETRY_BACKOFF_MS,
+    FINALIZATION_WINDOW_MS,
+    PROCESSING_STALE_AFTER_MS,
+} from "./constants.js";
 import type {
     RelayerErrorCode,
     RelayerMode,
@@ -422,7 +426,7 @@ export class InMemoryStateRepository implements StateRepository {
         ) {
             return null;
         }
-        row.affected_cells_proof_registration_next_retry_at_ms = null;
+        row.affected_cells_proof_registration_next_retry_at_ms = nowMs + PROCESSING_STALE_AFTER_MS;
         row.affected_cells_proof_registration_updated_at_ms = nowMs;
         row.updated_at_ms = nowMs;
         return { attempt: row.runner_attempt, resultS3Key: row.runner_result_s3_key };
