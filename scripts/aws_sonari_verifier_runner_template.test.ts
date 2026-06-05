@@ -419,12 +419,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
 
         expect(membershipWrapper).toContain("/opt/sonari/runner.env");
-        expect(membershipWrapper).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?");
-        expect(membershipWrapper).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS:?");
-        expect(membershipWrapper).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:?");
-        expect(membershipWrapper).toContain("SONARI_WORLD_ID_API_BASE:?");
-        expect(membershipWrapper).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL:?");
-        expect(membershipWrapper).toContain("SONARI_WORLD_ID_APP_ID:?");
+        expect(membershipWrapper).toContain(
+            ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID"',
+        );
+        expect(membershipWrapper).toContain("nitro-cli terminate-enclave --all");
         expect(membershipWrapper).toContain("nitro-cli run-enclave $args");
         expect(membershipWrapper).toContain(
             '--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"',

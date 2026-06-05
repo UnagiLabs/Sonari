@@ -564,12 +564,7 @@ Resources:
             #!/bin/bash
             set -euo pipefail
             . /opt/sonari/runner.env
-            : "${!SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?}"
-            : "${!SONARI_NITRO_RUN_ENCLAVE_ARGS:?}"
-            : "${!SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:?}"
-            : "${!SONARI_WORLD_ID_API_BASE:?}"
-            : "${!SONARI_WORLD_ID_EGRESS_PROXY_URL:?}"
-            : "${!SONARI_WORLD_ID_APP_ID:?}"
+            : "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID"
             eif="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
             args="$SONARI_NITRO_RUN_ENCLAVE_ARGS"
             cid="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"
@@ -581,7 +576,8 @@ Resources:
             ensure_membership_enclave() {
               test -s "$eif"
               [ -f "$m" ] && return
-              nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || nitro-cli describe-enclaves | grep -q '"EnclaveCID": '"$cid"
+              nitro-cli terminate-enclave --all &>/dev/null || true
+              nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || { cat /tmp/m.err >&2; exit 1; }
               sleep 2
               jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
               touch "$m"
