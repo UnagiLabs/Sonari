@@ -13,29 +13,16 @@
  * 7. affectedCellsRoot で root 再計算 → affected_cells_root と照合
  * 8. 一致時のみ proof を生成し R2 に put
  * 9. 冪等: 同 event/revision・同 root なら 200 no-op、root 不一致は fail-closed
+ *
+ * 注: 生成・保存のコアロジックは proof_builder.ts の buildAndSaveProofArtifacts に委譲。
  */
 
-import {
-    type AffectedCellsInput,
-    affectedCellLeavesFromInput,
-    affectedCellLeafHash,
-    affectedCellsRoot,
-    buildProofEntries,
-    buildProofShardGroups,
-    parseAffectedCellsFile,
-    proofShardId,
-    sha256Hex,
-} from "@sonari/proof-core";
 import { verifyRegisterToken } from "./auth.js";
 import { AffectedCellsProofError } from "./errors.js";
-import type { AffectedCellsProofManifest, AffectedCellsProofShardEntry } from "./proof_artifacts.js";
+import type { AffectedCellsProofManifest } from "./proof_artifacts.js";
+import { buildAndSaveProofArtifacts } from "./proof_builder.js";
 import type { AffectedProofR2Bucket } from "./r2.js";
-import {
-    loadProofManifest,
-    manifestR2Key,
-    saveProofArtifacts,
-    shardR2Key,
-} from "./r2.js";
+import { loadProofManifest } from "./r2.js";
 import type { Env } from "./walrus.js";
 import { fetchWalrusBlob } from "./walrus.js";
 
@@ -163,134 +150,25 @@ async function handleRegisterRequestUnchecked(
     const rawBytes = await fetchWalrusBlob(body.affected_cells_uri, env, fetchImpl);
     const bytes = new Uint8Array(rawBytes);
 
-    // 5. SHA-256 再計算 → hash 照合
-    const computedHash = await sha256Hex(bytes);
-    if (computedHash !== body.affected_cells_hash) {
-        throw new AffectedCellsProofError(
-            "affected_cells_hash_mismatch",
-            `SHA-256 mismatch: computed=${computedHash}, expected=${body.affected_cells_hash}`,
-            400,
-        );
-    }
-
-    // 6. parseAffectedCellsFile で schema 検証
-    let parsedInput: AffectedCellsInput;
-    try {
-        const text = new TextDecoder().decode(bytes);
-        parsedInput = parseAffectedCellsFile(JSON.parse(text) as unknown);
-    } catch (cause) {
-        const message = cause instanceof Error ? cause.message : "affected_cells is invalid";
-        throw new AffectedCellsProofError(
-            "affected_cells_invalid",
-            `affected_cells file is invalid: ${message}`,
-            400,
-        );
-    }
-
-    // 3b. 三者一致検証（file 内の event_uid/event_revision と path を照合）
-    if (parsedInput.event_uid !== body.event_uid) {
-        throw new AffectedCellsProofError(
-            "affected_cells_invalid",
-            `event_uid mismatch in file: file=${parsedInput.event_uid}, body=${body.event_uid}`,
-            400,
-        );
-    }
-    if (parsedInput.event_revision !== body.event_revision) {
-        throw new AffectedCellsProofError(
-            "affected_cells_invalid",
-            `event_revision mismatch in file: file=${parsedInput.event_revision}, body=${body.event_revision}`,
-            400,
-        );
-    }
-
-    // 7. root 再計算 → root 照合
-    const computedRoot = await affectedCellsRoot(parsedInput);
-    if (computedRoot !== body.affected_cells_root) {
-        throw new AffectedCellsProofError(
-            "affected_cells_root_mismatch",
-            `Merkle root mismatch: computed=${computedRoot}, expected=${body.affected_cells_root}`,
-            400,
-        );
-    }
-
-    // 8. 一致時のみ proof を生成し R2 に put
-    const SHARD_COUNT = 1; // MVP 固定
-    const shardGroups = await buildProofShardGroups(parsedInput, SHARD_COUNT);
-    const proofEntries = await buildProofEntries(parsedInput);
-
-    // shard entry に leaf 全フィールドを含める
-    const leaves = affectedCellLeavesFromInput(parsedInput);
-    const shardEntriesMap = new Map<string, AffectedCellsProofShardEntry[]>();
-
-    // shard group ごとに entry を整理
-    for (const group of shardGroups) {
-        const shardKey = group.shard_id.toString();
-        const entries: AffectedCellsProofShardEntry[] = [];
-
-        for (const proofEntry of proofEntries) {
-            // この entry がこの shard に属するか確認
-            const entryShardId = await proofShardId(BigInt(proofEntry.h3_index), SHARD_COUNT);
-            if (entryShardId !== group.shard_id) {
-                continue;
-            }
-
-            // 対応する leaf を見つける
-            const leaf = leaves.find((l) => l.h3_index.toString() === proofEntry.h3_index);
-            if (leaf === undefined) {
-                throw new AffectedCellsProofError(
-                    "internal",
-                    `Leaf not found for h3_index: ${proofEntry.h3_index}`,
-                    500,
-                );
-            }
-
-            const leafHash = await affectedCellLeafHash(leaf);
-
-            entries.push({
-                event_uid: leaf.event_uid,
-                event_revision: leaf.event_revision,
-                geo_resolution: leaf.geo_resolution,
-                h3_index: leaf.h3_index,
-                cell_band: leaf.cell_band,
-                intensity_value: leaf.intensity_value,
-                cell_metric: leaf.cell_metric,
-                intensity_scale: leaf.intensity_scale,
-                cells_generation_method: leaf.cells_generation_method,
-                oracle_version: leaf.oracle_version,
-                leaf_hash: leafHash,
-                proof: proofEntry.proof,
-            });
-        }
-
-        shardEntriesMap.set(shardKey, entries);
-    }
-
-    // manifest を構築
-    const manifest: AffectedCellsProofManifest = {
-        schema_version: 1,
-        event_uid: body.event_uid as `0x${string}`,
-        event_revision: body.event_revision,
-        affected_cells_uri: body.affected_cells_uri,
-        affected_cells_hash: body.affected_cells_hash as `0x${string}`,
-        affected_cells_root: body.affected_cells_root as `0x${string}`,
-        affected_cell_count: body.affected_cell_count,
-        geo_resolution: body.geo_resolution,
-        shards: shardGroups.map((g) => ({
-            shard_key: g.shard_id.toString(),
-            r2_key: shardR2Key(body.event_uid, body.event_revision, g.shard_id.toString()),
-            hash: g.sha256,
-            cell_count: g.proof_count,
-        })),
-    };
-
-    // R2 に保存
-    await saveProofArtifacts({ bucket, manifest, shardEntriesMap });
+    // 5〜8. hash/schema/root 検証 → proof 生成 → R2 保存（proof_builder に委譲）
+    // 三者一致検証（path × file）は buildAndSaveProofArtifacts 内で行われる
+    const { manifest } = await buildAndSaveProofArtifacts({
+        bytes,
+        eventUid: body.event_uid,
+        eventRevision: body.event_revision,
+        affectedCellsUri: body.affected_cells_uri,
+        affectedCellsHash: body.affected_cells_hash,
+        affectedCellsRoot: body.affected_cells_root,
+        affectedCellCount: body.affected_cell_count,
+        geoResolution: body.geo_resolution,
+        bucket,
+    });
 
     return jsonResponse({
         event_uid: body.event_uid,
         event_revision: body.event_revision,
         affected_cells_root: body.affected_cells_root,
-        shard_count: shardGroups.length,
+        shard_count: manifest.shards.length,
         stored: true,
     });
 }
