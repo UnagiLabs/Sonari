@@ -67,6 +67,17 @@ Parameters:
     Type: String
     Default: https://developer.world.org
     Description: Retained for deploy compatibility; membership server path pins the canonical World ID API base.
+  WorldIdProofMode:
+    Type: String
+    Default: real
+    AllowedValues:
+      - real
+      - dummy
+    Description: World ID proof verification mode delivered to the enclave bootstrap. dummy is only honored by the enclave on testnet/devnet (fail-closed elsewhere); real keeps live World ID API verification.
+  RelayerNetwork:
+    Type: String
+    Default: ""
+    Description: Sui network name delivered to the enclave bootstrap so the fail-closed dummy gate can allow dummy only on testnet or devnet. Empty, mainnet, or unknown keeps the enclave on real World ID verification.
   ScheduleExpression:
     Type: String
     Default: rate(1 minute)
@@ -473,6 +484,8 @@ Resources:
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
+              echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
+              echo "RELAYER_NETWORK=${RelayerNetwork}"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
             } >/opt/sonari/runner.env
             chown ec2-user:ec2-user /opt/sonari/runner.env
