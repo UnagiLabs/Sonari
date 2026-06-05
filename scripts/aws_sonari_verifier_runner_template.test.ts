@@ -14,6 +14,18 @@ function countType(template: string, resourceType: string): number {
     );
 }
 
+function extractHeredoc(template: string, startMarker: string, endMarker: string): string {
+    const start = template.indexOf(startMarker);
+    const bodyStart = template.indexOf("\n", start);
+    const end = template.indexOf(endMarker, bodyStart);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(bodyStart).toBeGreaterThan(start);
+    expect(end).toBeGreaterThan(bodyStart);
+
+    return template.slice(bodyStart, end);
+}
+
 describe("AWS Sonari verifier runner CloudFormation template", () => {
     it("shares exactly one EC2 AutoScalingGroup and LaunchTemplate across verifier kinds", async () => {
         const template = await readTemplate();
@@ -389,13 +401,39 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
         expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
-        expect(template).toContain('[[ "$world_id_app_id" == app_staging_* ]]');
-        expect(template).toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
+        expect(template).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
+        expect(template).not.toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
         // World ID readiness gate is a single unconditional oneshot unit bound to the
         // shared egress vsock proxy (dev fixture and prod share one definition).
         expect(template).toContain("Description=Sonari World ID egress readiness gate");
         expect(template).toContain("BindsTo=sonari-earthquake-egress-vsock-proxy.service");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
+    });
+
+    it("routes membership verifier through server bootstrap and VSOCK HTTP requests", async () => {
+        const template = await readTemplate();
+        const membershipWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-membership-identity-enclave",
+            "SONARI_ENCLAVE_WRAPPER",
+        );
+
+        expect(membershipWrapper).toContain("/opt/sonari/runner.env");
+        expect(membershipWrapper).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?");
+        expect(membershipWrapper).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS:?");
+        expect(membershipWrapper).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:?");
+        expect(membershipWrapper).toContain("SONARI_WORLD_ID_API_BASE:?");
+        expect(membershipWrapper).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL:?");
+        expect(membershipWrapper).toContain("SONARI_WORLD_ID_APP_ID:?");
+        expect(membershipWrapper).toContain("nitro-cli run-enclave $args");
+        expect(membershipWrapper).toContain('--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"');
+        expect(membershipWrapper).toContain("$egress_proxy_url");
+        expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:7777");
+        expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:3000");
+        expect(membershipWrapper).toContain("GET /get_attestation HTTP/1.0");
+        expect(membershipWrapper).toContain("POST /process_data HTTP/1.0");
+        expect(membershipWrapper).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
+        expect(membershipWrapper).not.toContain('exec "$SONARI_ENCLAVE_STDIO_BRIDGE"');
     });
 
     it("exports the membership enclave CID to runner.env from the shared NitroEnclaveCid", async () => {

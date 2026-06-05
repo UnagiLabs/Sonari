@@ -563,11 +563,38 @@ Resources:
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            : "${!SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"
-            : "${!SONARI_NITRO_RUN_ENCLAVE_ARGS:?SONARI_NITRO_RUN_ENCLAVE_ARGS is required}"
-            : "${!SONARI_ENCLAVE_STDIO_BRIDGE:?SONARI_ENCLAVE_STDIO_BRIDGE is required}"
-            test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
-            exec "$SONARI_ENCLAVE_STDIO_BRIDGE" $SONARI_NITRO_RUN_ENCLAVE_ARGS
+            . /opt/sonari/runner.env
+            : "${!SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?}"
+            : "${!SONARI_NITRO_RUN_ENCLAVE_ARGS:?}"
+            : "${!SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:?}"
+            : "${!SONARI_WORLD_ID_API_BASE:?}"
+            : "${!SONARI_WORLD_ID_EGRESS_PROXY_URL:?}"
+            : "${!SONARI_WORLD_ID_APP_ID:?}"
+            eif="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
+            args="$SONARI_NITRO_RUN_ENCLAVE_ARGS"
+            cid="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"
+            m=/tmp/m
+            i="$(mktemp)"
+            o="$(mktemp)"
+            trap 'rm -f "$i" "$o"' EXIT
+            cat >"$i"
+            ensure_membership_enclave() {
+              test -s "$eif"
+              [ -f "$m" ] && return
+              nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || nitro-cli describe-enclaves | grep -q '"EnclaveCID": '"$cid"
+              sleep 2
+              jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
+              touch "$m"
+            }
+            ensure_membership_enclave
+            action="$(jq -r .action "$i")"
+            case "$action" in
+              get_attestation) printf 'GET /get_attestation HTTP/1.0\r\n\r\n' ;;
+              process_data) printf 'POST /process_data HTTP/1.0\r\nContent-Length:%s\r\n\r\n' "$(wc -c <"$i")"; cat "$i" ;;
+              *) exit 1 ;;
+            esac | socat -t 180 - "VSOCK-CONNECT:$cid:3000" >"$o"
+            head -n 1 "$o" | tr -d '\r' | grep -Eq '^HTTP/1\.[01] 200 ' || { cat "$o" >&2; exit 1; }
+            sed '1,/^\r\{0,1\}$/d' "$o"
             SONARI_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-membership-identity-enclave
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
@@ -612,15 +639,6 @@ Resources:
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
-            fi
-            if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
-              cat >/usr/local/bin/sonari-enclave-stdio <<'SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE'
-            #!/bin/bash
-            set -euo pipefail
-            : "${!SONARI_WORLD_ID_APP_ID:?SONARI_WORLD_ID_APP_ID is required}"
-            exec /opt/sonari/membership-tee-artifact/bin/membership-tee fixture --world-id-status verified --world-app-id "$SONARI_WORLD_ID_APP_ID"
-            SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE
-              chmod 0500 /usr/local/bin/sonari-enclave-stdio
             fi
             vsock_proxy_path="$(command -v vsock-proxy || true)"
             if [ -z "$vsock_proxy_path" ]; then
@@ -753,7 +771,6 @@ Resources:
               printf 'SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $earthquake_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
               echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
-              echo "SONARI_ENCLAVE_STDIO_BRIDGE=/usr/local/bin/sonari-enclave-stdio"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_API_BASE=%q\n' "$world_id_api_base"
