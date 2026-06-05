@@ -161,6 +161,17 @@ describe("parseAffectedCellsFile", () => {
         const bad = { ...(affectedJson as object), affected_cells: badCells };
         expect(() => parseAffectedCellsFile(bad)).toThrow();
     });
+
+    it("throws for intensity_value above u16 range", () => {
+        const input = affectedJson as AffectedCellsInput;
+        const firstCell = input.affected_cells[0];
+        const secondCell = input.affected_cells[1];
+        if (firstCell === undefined || secondCell === undefined)
+            throw new Error("Not enough cells in fixture");
+        const badCells = [{ ...firstCell, intensity_value: 65536 }, secondCell];
+        const bad = { ...(affectedJson as object), affected_cells: badCells };
+        expect(() => parseAffectedCellsFile(bad)).toThrow();
+    });
 });
 
 // ---------------------------------------------------------------------------

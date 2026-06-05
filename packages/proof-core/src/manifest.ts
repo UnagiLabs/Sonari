@@ -156,14 +156,6 @@ export async function buildProofManifest(
 
     const total_proof_count = groups.reduce((sum, g) => sum + g.proof_count, 0);
 
-    // Verify invariant: total_proof_count === Σ proof_count
-    const shardSum = groups.reduce((sum, g) => sum + g.proof_count, 0);
-    if (shardSum !== total_proof_count) {
-        throw new Error(
-            `Invariant violation: total_proof_count ${total_proof_count} !== Σ proof_count ${shardSum}`,
-        );
-    }
-
     const shards = groups.map(({ shard_id, proof_count, sha256, byte_size }) => ({
         shard_id,
         proof_count,

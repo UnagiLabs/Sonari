@@ -165,6 +165,12 @@ export function parseAffectedCellsFile(value: unknown): AffectedCellsInput {
             `affected_cells[${idx}].intensity_value`,
             cellRec.intensity_value,
         );
+        // intensity_value is encoded as BCS u16 in the leaf; reject out-of-range at the boundary.
+        if (intensity_value > 0xffff) {
+            throw new Error(
+                `affected_cells[${idx}].intensity_value must be a u16 (0..65535), got ${intensity_value}`,
+            );
+        }
 
         const cell_band = expectNonNegativeSafeInteger(
             `affected_cells[${idx}].cell_band`,
