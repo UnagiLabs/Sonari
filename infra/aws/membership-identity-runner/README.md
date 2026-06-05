@@ -225,23 +225,34 @@ AWS deployment には、少なくとも次の stack parameter が必要です。
 
 Launch template の user data は、AWS Nitro Enclaves allocator の `/etc/nitro_enclaves/allocator.yaml` を `NitroEnclaveCpuCount` / `NitroEnclaveMemoryMiB` に合わせて更新し、`nitro-enclaves-allocator.service` を restart します。`nitro-cli run-enclave --memory` より小さい hugepage 予約で instance を起動してはいけません。
 
-### Sui registration config
+### Sui dry-run / registration config
 
-VerifierRegistry への enclave registration には次が必要です。
+MembershipPass の identity payload dry-run には次が必要です。
+dry-run は Sui に transaction を submit しません。
+ただし Move VM で reject された場合は fail-closed で止まります。
+
+- `IDENTITY_RELAYER_MODE=dry_run`
+- `SONARI_IDENTITY_PACKAGE_ID`
+- `SONARI_IDENTITY_PAUSE_STATE_ID`
+- `SONARI_IDENTITY_REGISTRY_ID`
+- `SONARI_MEMBERSHIP_REGISTRY_ID`
+- `SONARI_VERIFIER_REGISTRY_ID`
+- `SONARI_SUI_CLOCK_ID`
+- `RELAYER_NETWORK`: 例 `testnet`
+- `RELAYER_GRPC_URL`
+- `RELAYER_SENDER_ADDRESS`
+
+VerifierRegistry への enclave registration には追加で次が必要です。
 registration は real submit です。
 dry-run だけでは登録済み enclave metadata を作れません。
 
 - `IDENTITY_RELAYER_MODE=submit`
-- `SONARI_IDENTITY_PACKAGE_ID`
-- `SONARI_VERIFIER_REGISTRY_ID`
-- `RELAYER_NETWORK`: 例 `testnet`
-- `RELAYER_GRPC_URL`
 - `RELAYER_ALLOW_SUBMIT=true`
 - `RELAYER_SIGNER_SECRET_ARN`
 
-identity payload の Sui dry-run / submit は #154 の範囲外です。
-そのため、この dedicated stack では `SONARI_IDENTITY_PAUSE_STATE_ID`、
-`SONARI_MEMBERSHIP_REGISTRY_ID`、`SONARI_MEMBERSHIP_PASS_ID` を要求しません。
+本番 submit と MembershipPass readback は #155 の範囲外です。
+dry-run 成功時は signed payload、Sui request、transaction bytes、effects を
+verification job row に保存します。
 
 ## 運用 runbook
 
@@ -340,7 +351,7 @@ Real World ID request を submit し、enclave が vsock-proxy 経由でのみ W
 - verified output の public key
 - sanitized CloudWatch log location
 
-### 7. VerifierRegistry registration と TEE result
+### 7. VerifierRegistry registration、TEE result、Sui dry-run
 
 この dedicated stack は `membership-tee server` の attestation、World ID verification、`/process_data` envelope を確認する runner です。
 default / dry-run smoke では、runner は envelope 用の local registration metadata を使います。
@@ -348,6 +359,9 @@ submit-capable registration 設定（`IDENTITY_RELAYER_MODE=submit`、`RELAYER_A
 この registration は real submit です。
 `tx_digest` は VerifierRegistry 登録 proof ではありません。
 TEE-only completion では `tee-result:<sha256>` の digest が job に残ります。
+verified result では、runner は `accessor::update_identity_verification` の dry-run を実行します。
+dry-run が失敗した場合、job は failed になり、`apply_result` には進みません。
+dry-run が成功した場合、job row に `sui_dry_run_result_json` と `sui_dry_run_completed_at_ms` が残ります。
 testnet 一気通貫の成功条件は、後述の「dummy World ID + Sui testnet 一気通貫 smoke」にまとめます。
 
 記録するもの:
@@ -359,8 +373,11 @@ testnet 一気通貫の成功条件は、後述の「dummy World ID + Sui testne
 - verified result の `public_key`
 - non-verified result に `signature` が無いこと
 - non-verified result に `public_key` が無いこと
+- dry-run result の `sui_dry_run_completed_at_ms`
+- dry-run result の signed payload / request / transaction bytes
+- dry-run failure が job failed になったこと
 
-### 8. Post-tx membership pass state readback（#154 範囲外）
+### 8. Post-tx membership pass state readback（#155 範囲外）
 
 Tx digest が finalized された後、同じ Sui network から `SONARI_MEMBERSHIP_PASS_ID` を読みます。Membership pass の identity verification field が submit した verified payload を反映していることを確認します。
 
@@ -373,7 +390,7 @@ Tx digest が finalized された後、同じ Sui network から `SONARI_MEMBERS
 - terms version
 - signed statement hash
 
-この readback は #154 の範囲外です。
+この readback は #155 の範囲外です。
 
 ## dummy World ID + Sui testnet 一気通貫 smoke
 
@@ -387,7 +404,8 @@ dummy World ID proof は testnet / devnet 指定時のみ使えます。mainnet 
 
 ### Sui testnet object の用意
 
-testnet 一気通貫には Sui registration config が必要です。「Sui registration config」節の env を、次のどちらかで埋めます。
+testnet 一気通貫には Sui dry-run / registration config が必要です。
+「Sui dry-run / registration config」節の env を、次のどちらかで埋めます。
 
 - 必要な Sui testnet object を新規に作る。
 - 既存 object を検出して、その object ID を割り当てる。

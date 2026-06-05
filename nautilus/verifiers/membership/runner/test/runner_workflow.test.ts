@@ -476,6 +476,129 @@ describe("membership runner workflow", () => {
         });
     });
 
+    it("records dry-run handoff data for verified TEE output before completion", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            dryRunDigest: "dry-run-digest",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dry_run_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "succeeded" });
+
+        const row = await repository.get(job.row.job_id);
+        expect(row).toMatchObject({
+            status: "processing",
+            sui_dry_run_completed_at_ms: baseNowMs + 2,
+        });
+        expect(row?.sui_dry_run_result_json).not.toBeNull();
+        const dryRunRecord = JSON.parse(row?.sui_dry_run_result_json ?? "{}") as {
+            signed_payload?: unknown;
+            request?: { target?: string };
+            transaction_bytes?: number[];
+            effects?: { digest?: string };
+        };
+        expect(dryRunRecord).toEqual({
+            signed_payload: {
+                status: "verified",
+                payload_bcs_hex: "0x010203",
+                signature: `0x${"11".repeat(64)}`,
+                public_key: `0x${"22".repeat(32)}`,
+                membership_id: validRequest().membership_id,
+            },
+            request: fakeSuiRequest(),
+            transaction_bytes: [1, 2, 3],
+            effects: { digest: "dry-run-digest" },
+        });
+        expect(submitter.dryRuns).toEqual([dryRunRecord.signed_payload]);
+        expect(submitter.submits).toEqual([]);
+    });
+
+    it("allows submit-capable registration mode to run dry-run preflight without submit", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        let signAndExecuteCalls = 0;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: {
+                ...baseConfig(),
+                suiSubmission: {
+                    mode: "submit",
+                    packageId: "0xabc",
+                    pauseStateId: "0x111",
+                    identityRegistryId: "0x222",
+                    membershipRegistryId: "0x333",
+                    verifierRegistryId: "0x444",
+                    clockId: "0x6",
+                    network: "testnet",
+                    grpcUrl: "https://fullnode.testnet.sui.io:443",
+                    senderAddress: "0xsender",
+                    allowSubmit: true,
+                    transaction: {
+                        build: async () => new Uint8Array([4, 5, 6]),
+                    },
+                    client: {
+                        simulateTransaction: async () => ({
+                            $kind: "Transaction",
+                            Transaction: {
+                                digest: "dry-run-digest",
+                                status: { success: true, error: null },
+                                effects: { status: { success: true } },
+                            },
+                        }),
+                        signAndExecuteTransaction: async () => {
+                            signAndExecuteCalls += 1;
+                            throw new Error("submit must not run during dry-run preflight");
+                        },
+                    },
+                },
+            },
+        });
+
+        await expect(
+            handler({
+                action: "dry_run_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "succeeded" });
+
+        const row = await repository.get(job.row.job_id);
+        const dryRunRecord = JSON.parse(row?.sui_dry_run_result_json ?? "{}") as {
+            transaction_bytes?: number[];
+        };
+        expect(row).toMatchObject({
+            status: "processing",
+            sui_dry_run_completed_at_ms: baseNowMs + 2,
+        });
+        expect(dryRunRecord.transaction_bytes).toEqual([4, 5, 6]);
+        expect(signAndExecuteCalls).toBe(0);
+    });
+
     it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
@@ -880,7 +1003,7 @@ describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => 
         }
     });
 
-    it("passes Sui registration env and signer secret access to RunnerControlLambda", async () => {
+    it("passes Sui dry-run, registration env, and signer secret access to RunnerControlLambda", async () => {
         const template = await readFile(
             new URL(
                 "../../../../../infra/aws/membership-identity-runner/template.yaml",
@@ -891,21 +1014,33 @@ describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => 
 
         expect(template).toContain("IdentityRelayerMode:");
         expect(template).toContain("SonariIdentityPackageId:");
+        expect(template).toContain("SonariIdentityPauseStateId:");
+        expect(template).toContain("SonariIdentityRegistryId:");
+        expect(template).toContain("SonariMembershipRegistryId:");
         expect(template).toContain("SonariVerifierRegistryId:");
+        expect(template).toContain("SonariSuiClockId:");
         expect(template).toContain("RelayerGrpcUrl:");
+        expect(template).toContain("RelayerSenderAddress:");
         expect(template).toContain("RelayerAllowSubmit:");
         expect(template).toContain("RelayerSignerSecretArn:");
         expect(template).toContain("IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode");
         expect(template).toContain("SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId");
+        expect(template).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId",
+        );
+        expect(template).toContain("SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId");
+        expect(template).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId",
+        );
         expect(template).toContain("SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId");
+        expect(template).toContain("SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId");
         expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
         expect(template).toContain("RELAYER_GRPC_URL: !Ref RelayerGrpcUrl");
+        expect(template).toContain("RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress");
         expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
         expect(template).toContain("RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn");
         expect(template).toContain("secretsmanager:GetSecretValue");
         expect(template).toContain("Resource: !Ref RelayerSignerSecretArn");
-        expect(template).not.toContain("SONARI_IDENTITY_PAUSE_STATE_ID:");
-        expect(template).not.toContain("SONARI_MEMBERSHIP_REGISTRY_ID:");
     });
 });
 

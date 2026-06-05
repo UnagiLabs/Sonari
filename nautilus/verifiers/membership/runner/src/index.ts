@@ -51,6 +51,8 @@ export interface VerificationJobRow {
     readonly workflow_execution_name: string | null;
     readonly workflow_started_at_ms: number | null;
     readonly tx_digest: string | null;
+    readonly sui_dry_run_result_json: string | null;
+    readonly sui_dry_run_completed_at_ms: number | null;
     readonly created_at_ms: number;
     readonly updated_at_ms: number;
     readonly completed_at_ms: number | null;
@@ -82,6 +84,7 @@ export interface VerificationJobRepository {
         message: string,
     ): Promise<boolean>;
     markFailed(jobId: string, nowMs: number, errorCode: string, message?: string): Promise<boolean>;
+    markSuiDryRunSucceeded(jobId: string, nowMs: number, resultJson: string): Promise<boolean>;
     markCompleted(jobId: string, nowMs: number, txDigest: string): Promise<boolean>;
 }
 
@@ -248,6 +251,8 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
             workflow_execution_name: null,
             workflow_started_at_ms: null,
             tx_digest: null,
+            sui_dry_run_result_json: null,
+            sui_dry_run_completed_at_ms: null,
             created_at_ms: nowMs,
             updated_at_ms: nowMs,
             completed_at_ms: null,
@@ -334,6 +339,24 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
         return true;
     }
 
+    async markSuiDryRunSucceeded(
+        jobId: string,
+        nowMs: number,
+        resultJson: string,
+    ): Promise<boolean> {
+        const row = this.rowsByJobId.get(jobId);
+        if (row === undefined || row.status !== "processing") {
+            return false;
+        }
+        this.rowsByJobId.set(jobId, {
+            ...row,
+            sui_dry_run_result_json: resultJson,
+            sui_dry_run_completed_at_ms: nowMs,
+            updated_at_ms: nowMs,
+        });
+        return true;
+    }
+
     async markCompleted(jobId: string, nowMs: number, txDigest: string): Promise<boolean> {
         const row = this.rowsByJobId.get(jobId);
         if (row === undefined) {
@@ -391,6 +414,8 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
             workflow_execution_name: null,
             workflow_started_at_ms: null,
             tx_digest: null,
+            sui_dry_run_result_json: null,
+            sui_dry_run_completed_at_ms: null,
             created_at_ms: nowMs,
             updated_at_ms: nowMs,
             completed_at_ms: null,
@@ -537,6 +562,36 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
                         ":null_value": null,
                         ":error_code": errorCode,
                         ":message": message ?? null,
+                        ":now_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return false;
+            }
+            throw error;
+        }
+        return true;
+    }
+
+    async markSuiDryRunSucceeded(
+        jobId: string,
+        nowMs: number,
+        resultJson: string,
+    ): Promise<boolean> {
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { job_id: jobId },
+                    ConditionExpression: "attribute_exists(job_id) AND #status = :processing",
+                    UpdateExpression:
+                        "SET sui_dry_run_result_json = :result_json, sui_dry_run_completed_at_ms = :now_ms, updated_at_ms = :now_ms",
+                    ExpressionAttributeNames: { "#status": "status" },
+                    ExpressionAttributeValues: {
+                        ":processing": "processing",
+                        ":result_json": resultJson,
                         ":now_ms": nowMs,
                     },
                 }),
@@ -870,6 +925,8 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
         workflow_execution_name: nullableString(input.workflow_execution_name),
         workflow_started_at_ms: nullableNumber(input.workflow_started_at_ms),
         tx_digest: nullableString(input.tx_digest),
+        sui_dry_run_result_json: nullableString(input.sui_dry_run_result_json),
+        sui_dry_run_completed_at_ms: nullableNumber(input.sui_dry_run_completed_at_ms),
         created_at_ms: input.created_at_ms,
         updated_at_ms: input.updated_at_ms,
         completed_at_ms: nullableNumber(input.completed_at_ms),

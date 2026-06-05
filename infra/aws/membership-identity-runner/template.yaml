@@ -85,19 +85,39 @@ Parameters:
       - ""
       - dry_run
       - submit
-    Description: Leave empty to skip Sui registration. Use submit to register the membership identity enclave in VerifierRegistry.
+    Description: Leave empty to fail closed on verified dry-run. Use dry_run for MembershipPass dry-run, or submit to register the membership identity enclave in VerifierRegistry.
   SonariIdentityPackageId:
     Type: String
     Default: ""
     Description: Sui package ID for the membership identity Move module.
+  SonariIdentityPauseStateId:
+    Type: String
+    Default: ""
+    Description: PauseState object ID for the membership identity accessor dry-run call.
+  SonariIdentityRegistryId:
+    Type: String
+    Default: ""
+    Description: IdentityRegistry object ID for the membership identity accessor dry-run call.
+  SonariMembershipRegistryId:
+    Type: String
+    Default: ""
+    Description: MembershipRegistry object ID for the membership identity accessor dry-run call.
   SonariVerifierRegistryId:
     Type: String
     Default: ""
-    Description: VerifierRegistry object ID used for membership identity enclave registration.
+    Description: VerifierRegistry object ID used for membership identity dry-run and enclave registration.
+  SonariSuiClockId:
+    Type: String
+    Default: "0x6"
+    Description: Sui clock object ID for the membership identity accessor dry-run call. Defaults to 0x6.
   RelayerGrpcUrl:
     Type: String
     Default: ""
-    Description: Sui gRPC URL for membership identity enclave registration.
+    Description: Sui gRPC URL for membership identity dry-run or enclave registration.
+  RelayerSenderAddress:
+    Type: String
+    Default: ""
+    Description: Sender address used for membership identity dry-run transaction building.
   RelayerSignerSecretArn:
     Type: String
     Default: ""
@@ -731,7 +751,12 @@ Resources:
           RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
           IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
           SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
+          SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId
+          SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId
+          SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId
           SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId
+          SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId
+          RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
 
   RunnerStateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -833,8 +858,22 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
-              "Next": "ApplyResult",
+              "Next": "DryRunSuiSubmission",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DryRunSuiSubmission": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dry_run_sui_submission", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "DryRunSuiSubmissionComplete",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DryRunSuiSubmissionComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.sui_submission", "StringEquals": "failed", "Next": "StopInstance" }
+              ],
+              "Default": "ApplyResult"
             },
             "ApplyResult": {
               "Type": "Task",

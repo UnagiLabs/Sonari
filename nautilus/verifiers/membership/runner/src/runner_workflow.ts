@@ -43,8 +43,10 @@ import {
     type IdentityVerificationDryRunSuccess,
     type IdentityVerificationRelayerMode,
     type IdentityVerificationSigner,
+    type IdentityVerificationSubmitClient,
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitSuccess,
+    type IdentityVerificationSubmitTransaction,
     type IdentityVerificationSuiResult,
     SuiEnclaveRegistrationAdapter,
     type SuiEnclaveRegistrationConfig,
@@ -73,6 +75,8 @@ export interface RunnerSuiSubmissionConfig {
     readonly allowSubmit?: boolean | undefined;
     readonly configurationError?: string | undefined;
     readonly loadSigner?: (() => Promise<IdentityVerificationSigner>) | undefined;
+    readonly client?: IdentityVerificationSubmitClient | undefined;
+    readonly transaction?: IdentityVerificationSubmitTransaction | undefined;
 }
 
 export interface AutoScalingClientLike {
@@ -124,6 +128,13 @@ export interface SuiSubmissionAdapter {
     submit(
         result: SignedIdentityPayloadForRelayer,
     ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>>;
+}
+
+export interface SuiDryRunHandoffRecord {
+    readonly signed_payload: SignedIdentityPayloadForRelayer;
+    readonly request: IdentityVerificationDryRunSuccess["request"];
+    readonly transaction_bytes: number[];
+    readonly effects: Record<string, unknown>;
 }
 
 export const MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY = 2;
@@ -588,8 +599,17 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         result: event.result,
                     });
                 }
-                const result = await submitter.dryRun(signedPayloadForRelayer(event.result));
+                const signedPayload = signedPayloadForRelayer(event.result);
+                const result = await submitter.dryRun(signedPayload);
                 if (result.ok) {
+                    const updated = await repository.markSuiDryRunSucceeded(
+                        event.job_id,
+                        nowMs,
+                        JSON.stringify(suiDryRunHandoffRecord(signedPayload, result.value)),
+                    );
+                    if (!updated) {
+                        throw new Error("stale runner workflow attempt");
+                    }
                     return retainVerifierKind({
                         job_id: event.job_id,
                         attempt: event.attempt,
@@ -1116,8 +1136,8 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
         if (this.config.configurationError !== undefined) {
             return relayerSubmitFailed(this.config.configurationError);
         }
-        if (this.config.mode !== "dry_run") {
-            return relayerSubmitFailed("dry_run requires RELAYER_MODE=dry_run");
+        if (this.config.mode !== "dry_run" && this.config.mode !== "submit") {
+            return relayerSubmitFailed("dry_run requires IDENTITY_RELAYER_MODE=dry_run or submit");
         }
         return dryRunIdentityVerificationSubmit(result, this.submitConfig());
     }
@@ -1154,6 +1174,10 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
             ...(this.config.allowSubmit === undefined
                 ? {}
                 : { allowSubmit: this.config.allowSubmit }),
+            ...(this.config.client === undefined ? {} : { client: this.config.client }),
+            ...(this.config.transaction === undefined
+                ? {}
+                : { transaction: this.config.transaction }),
         };
     }
 }
@@ -1167,6 +1191,18 @@ function signedPayloadForRelayer(
         signature: result.signature,
         public_key: result.public_key,
         membership_id: result.membership_id,
+    };
+}
+
+function suiDryRunHandoffRecord(
+    signedPayload: SignedIdentityPayloadForRelayer,
+    dryRun: IdentityVerificationDryRunSuccess,
+): SuiDryRunHandoffRecord {
+    return {
+        signed_payload: signedPayload,
+        request: dryRun.request,
+        transaction_bytes: dryRun.transactionBytes,
+        effects: dryRun.effects,
     };
 }
 
