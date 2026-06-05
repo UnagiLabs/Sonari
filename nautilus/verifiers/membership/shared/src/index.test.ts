@@ -5,37 +5,63 @@ import {
     computeKycDuplicateKeyHash,
     computeWorldIdDuplicateKeyHash,
     encodeIdentityVerificationResultBcsHex,
+    IDENTITY_PROVIDER_BCS,
     IDENTITY_RESULT_FIELD_ORDER,
     IDENTITY_RESULT_INTENT,
     type IdentityVerificationResult,
 } from "./index.js";
 
-const identityResultFixture = {
-    intent: IDENTITY_RESULT_INTENT,
-    verifier_family: "identity",
-    verifier_version: 1,
-    registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111",
-    membership_id: "0x2222222222222222222222222222222222222222222222222222222222222222",
-    owner: "0x3333333333333333333333333333333333333333333333333333333333333333",
-    provider: "world_id",
-    verified: true,
-    duplicate_key_hash: "0x4444444444444444444444444444444444444444444444444444444444444444",
-    evidence_hash: "0x5555555555555555555555555555555555555555555555555555555555555555",
-    issued_at_ms: 1_800_000_000_000,
-    expires_at_ms: 1_831_536_000_000,
-    terms_version: 1,
-    signed_statement_hash: "0x6666666666666666666666666666666666666666666666666666666666666666",
-} satisfies IdentityVerificationResult;
+interface IdentityResultVectors {
+    readonly field_order: readonly string[];
+    readonly provider_enum: typeof IDENTITY_PROVIDER_BCS;
+    readonly vectors: readonly IdentityResultVector[];
+}
+
+interface IdentityResultVector {
+    readonly case_id: string;
+    readonly source_fixture: string;
+    readonly result: IdentityVerificationResult;
+    readonly payload_bcs_hex: string;
+}
 
 function readIdentityFixture(name: string): IdentityVerificationResult {
     const fixtureUrl = new URL(`../../fixtures/identity/${name}.json`, import.meta.url);
     return JSON.parse(readFileSync(fixtureUrl, "utf8")) as IdentityVerificationResult;
 }
 
+function readIdentityFixtureRecord(name: string): Record<string, unknown> {
+    const fixtureUrl = new URL(`../../fixtures/identity/${name}.json`, import.meta.url);
+    return JSON.parse(readFileSync(fixtureUrl, "utf8")) as Record<string, unknown>;
+}
+
+function readIdentityResultVectors(): IdentityResultVectors {
+    const vectorsUrl = new URL(
+        "../../../../../schemas/examples/identity_result_vectors.json",
+        import.meta.url,
+    );
+    return JSON.parse(readFileSync(vectorsUrl, "utf8")) as IdentityResultVectors;
+}
+
+function readIdentityResultVector(caseId: string): IdentityResultVector {
+    const vector = readIdentityResultVectors().vectors.find(
+        (candidate) => candidate.case_id === caseId,
+    );
+    if (vector === undefined) {
+        throw new Error(`Missing identity result vector: ${caseId}`);
+    }
+    return vector;
+}
+
 describe("IdentityVerificationResult", () => {
+    const worldIdSuccessVector = readIdentityResultVector("world_id_success_v1");
+    const identityResultFixture = worldIdSuccessVector.result;
+
     it("matches the target signed identity result shape", () => {
         expect(identityResultFixture.verified).toBe(true);
         expect(identityResultFixture.verifier_family).toBe("identity");
+        expect(worldIdSuccessVector.source_fixture).toBe(
+            "nautilus/verifiers/membership/fixtures/identity/world_id_success.json",
+        );
     });
 
     it("pins the contract-facing field order", () => {
@@ -55,11 +81,16 @@ describe("IdentityVerificationResult", () => {
             "terms_version",
             "signed_statement_hash",
         ]);
+        expect(IDENTITY_RESULT_FIELD_ORDER).toEqual(readIdentityResultVectors().field_order);
+    });
+
+    it("pins provider enum values to the golden vector", () => {
+        expect(IDENTITY_PROVIDER_BCS).toEqual(readIdentityResultVectors().provider_enum);
     });
 
     it("encodes the signed payload to fixed BCS hex", () => {
         expect(encodeIdentityVerificationResultBcsHex(identityResultFixture)).toBe(
-            "0x1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000011111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222333333333333333333333333333333333333333333333333333333333333333302014444444444444444444444444444444444444444444444444444444444444444555555555555555555555555555555555555555555555555555555555555555500505c18a3010000007c0d70aa01000001000000000000006666666666666666666666666666666666666666666666666666666666666666",
+            worldIdSuccessVector.payload_bcs_hex,
         );
     });
 
@@ -154,6 +185,7 @@ describe("IdentityVerificationResult", () => {
 
         expect(worldId.provider).toBe("world_id");
         expect(worldId.verified).toBe(true);
+        expect(worldId).toEqual(worldIdSuccessVector.result);
         expect(worldId.duplicate_key_hash).toBe(
             computeWorldIdDuplicateKeyHash({
                 world_app_id: "app_staging_123",
@@ -161,21 +193,31 @@ describe("IdentityVerificationResult", () => {
                 nullifier: "12345678901234567890",
             }),
         );
-        expect(encodeIdentityVerificationResultBcsHex(worldId)).toMatch(/^0x[0-9a-f]+$/);
+        expect(encodeIdentityVerificationResultBcsHex(worldId)).toBe(
+            worldIdSuccessVector.payload_bcs_hex,
+        );
     });
 
     it("loads KYC and World ID reject fixtures", () => {
         const kyc = readIdentityFixture("kyc_reject");
         const worldId = readIdentityFixture("world_id_reject");
+        const kycRecord = readIdentityFixtureRecord("kyc_reject");
+        const worldIdRecord = readIdentityFixtureRecord("world_id_reject");
 
         expect(kyc.provider).toBe("kyc");
         expect(kyc.verified).toBe(false);
+        expect(kycRecord).not.toHaveProperty("payload_bcs_hex");
+        expect(kycRecord).not.toHaveProperty("signature");
+        expect(kycRecord).not.toHaveProperty("public_key");
         expect(kyc.terms_version).toBe(1);
         expect(kyc.evidence_hash).toMatch(/^0x[0-9a-f]{64}$/);
         expect(kyc.signed_statement_hash).toMatch(/^0x[0-9a-f]{64}$/);
 
         expect(worldId.provider).toBe("world_id");
         expect(worldId.verified).toBe(false);
+        expect(worldIdRecord).not.toHaveProperty("payload_bcs_hex");
+        expect(worldIdRecord).not.toHaveProperty("signature");
+        expect(worldIdRecord).not.toHaveProperty("public_key");
         expect(worldId.terms_version).toBe(1);
         expect(worldId.evidence_hash).toMatch(/^0x[0-9a-f]{64}$/);
         expect(worldId.signed_statement_hash).toMatch(/^0x[0-9a-f]{64}$/);
