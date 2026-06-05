@@ -207,6 +207,43 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
     });
 
+    it("runs membership verifier through attestation registration and process_data", async () => {
+        const template = await readTemplate();
+        const start = template.indexOf("MembershipRunnerStateMachine:");
+        const end = template.indexOf("WatcherSchedule:", start);
+        const membership = template.slice(start, end);
+        const expectedActions = [
+            '"action": "dispatch_get_attestation_command"',
+            '"action": "read_attestation_result"',
+            '"action": "register_enclave_instance"',
+            '"action": "dispatch_process_data_command"',
+            '"action": "read_result"',
+            '"action": "apply_result"',
+        ];
+
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        expect(membership).toContain('"Next": "DispatchGetAttestationCommand"');
+        expect(membership).not.toContain('"action": "dispatch_tee_command"');
+        for (const action of expectedActions) {
+            expect(membership).toContain(action);
+        }
+        for (let index = 1; index < expectedActions.length; index += 1) {
+            const previousAction = expectedActions[index - 1];
+            const currentAction = expectedActions[index];
+            if (previousAction === undefined || currentAction === undefined) {
+                throw new Error("expected action sequence was malformed");
+            }
+            expect(membership.indexOf(previousAction)).toBeLessThan(
+                membership.indexOf(currentAction),
+            );
+        }
+        expect(membership).toContain('"attestation.$": "$.attestation_result.attestation"');
+        expect(membership).toContain(
+            '"registration_metadata.$": "$.registration_result.registration_metadata"',
+        );
+    });
+
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {
         const template = await readTemplate();
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
