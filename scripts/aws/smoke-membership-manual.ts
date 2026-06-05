@@ -2,7 +2,6 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { MEMBERSHIP_IDENTITY_VERIFIER_KIND } from "@sonari/verifier-contracts";
 import {
     type AwsCli,
     assertExpectedAccount,
@@ -17,14 +16,27 @@ import {
     parseStackOutputs,
     readStringOption,
     requireOutput,
+    waitFor,
 } from "./shared.js";
+
+const DEFAULT_REQUEST_FILE = ".local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json";
+const MAX_EXECUTIONS = 20;
+const POLL = {
+    intervalMs: 1_000,
+    timeoutMs: 120_000,
+};
 
 export type SmokeMembershipManualOptions = {
     aws?: AwsCli;
     stack?: string;
     expectedAccount?: string;
     region?: string;
-    jobId?: string | undefined;
+    requestFile?: string;
+    now?: () => number;
+    poll?: {
+        intervalMs: number;
+        timeoutMs: number;
+    };
 };
 
 export type ExecutionSummary = {
@@ -87,25 +99,29 @@ export type TeeResultSummary =
           errorCode: string | null;
       };
 
-export type SmokeMembershipManualResult = {
-    batchVerifierLambdaName: string;
-    stateMachineArn: string;
-    workflowStarted: number;
-    executions: ExecutionSummary[];
-    latestExecution: LatestExecutionSummary | null;
-    job: JobSummary | null;
+export type SubmitVerificationSummary = {
+    statusCode: number;
+    jobId: string;
+    status: string;
+    duplicate: boolean;
+    txDigest: string | null;
 };
 
-const MAX_EXECUTIONS = 5;
+export type SmokeMembershipManualResult = {
+    submitVerificationLambdaName: string;
+    batchVerifierLambdaName: string;
+    stateMachineArn: string;
+    requestFile: string;
+    submitResponse: SubmitVerificationSummary;
+    workflowStarted: number;
+    executions: ExecutionSummary[];
+    matchedExecution: LatestExecutionSummary;
+    job: JobSummary;
+};
 
 /**
- * Manually trigger the membership identity batch verifier and observe its effects.
- *
- * This mirrors the production batch path: the batch lambda claims queued/retry jobs
- * and starts a Step Functions execution per job. The `verifier_kind` lives inside the
- * execution input (set by the runner workflow starter), not in the lambda payload, so
- * this script invokes the lambda and then reads the latest execution input to confirm
- * `verifier_kind=membership_identity`.
+ * Submit a dummy World ID request through the public membership entrypoint,
+ * then trigger the manual batch and follow the exact job/execution it created.
  */
 export async function runSmokeMembershipManual(
     options: SmokeMembershipManualOptions = {},
@@ -113,72 +129,135 @@ export async function runSmokeMembershipManual(
     const aws = options.aws ?? new ExecFileAwsCli(options.region ?? DEFAULT_REGION);
     const stack = options.stack ?? DEFAULT_STACK;
     const expectedAccount = options.expectedAccount ?? DEFAULT_EXPECTED_ACCOUNT;
+    const requestFile = resolveRequestFile(options.requestFile ?? DEFAULT_REQUEST_FILE);
+    const now = options.now ?? Date.now;
+    const poll = options.poll ?? POLL;
 
     await assertExpectedAccount(aws, expectedAccount);
     const outputs = parseStackOutputs(await describeStack(aws, stack));
     await assertSchedulesDisabled(aws, outputs);
 
+    const submitVerificationLambdaName = requireOutput(outputs, "SubmitVerificationLambdaName");
     const batchVerifierLambdaName = requireOutput(outputs, "BatchVerifierLambdaName");
     const stateMachineArn = requireOutput(outputs, "MembershipRunnerStateMachineArn");
+    const tableName = requireOutput(outputs, "VerificationJobsTableName");
+
+    const rawRequest = JSON.parse(await readFile(requestFile, "utf8")) as unknown;
+    const request = uniqueizeDummyWorldIdRequest(rawRequest, now());
+    const submitResponse = await invokeSubmitVerification(
+        aws,
+        submitVerificationLambdaName,
+        request,
+    );
+    if (submitResponse.duplicate) {
+        throw new Error("SubmitVerification Lambda returned duplicate=true for a uniqueized smoke request");
+    }
 
     const workflowStarted = await invokeBatchVerifier(aws, batchVerifierLambdaName);
-    const executions = await listExecutions(aws, stateMachineArn);
-    const latest = executions[0];
-    const latestExecution =
-        latest === undefined ? null : await describeLatestExecution(aws, latest.executionArn);
-    const job =
-        options.jobId === undefined
-            ? null
-            : await readJob(
-                  aws,
-                  requireOutput(outputs, "VerificationJobsTableName"),
-                  options.jobId,
-              );
+    const job = await waitFor(`verification job ${submitResponse.jobId}`, poll, async () => {
+        const current = await readJob(aws, tableName, submitResponse.jobId);
+        if (current === null || current.workflowExecutionName === null) {
+            return null;
+        }
+        return current;
+    });
+
+    const match = await waitFor(
+        `Step Functions execution ${job.workflowExecutionName}`,
+        poll,
+        async () => {
+            const executions = await listExecutions(aws, stateMachineArn);
+            const execution = executions.find(
+                (candidate) => candidate.name === job.workflowExecutionName,
+            );
+            if (execution === undefined) {
+                return null;
+            }
+            return { execution, executions };
+        },
+    );
+    const matchedExecution = await describeExecution(aws, match.execution.executionArn);
 
     return {
+        submitVerificationLambdaName,
         batchVerifierLambdaName,
         stateMachineArn,
+        requestFile,
+        submitResponse,
         workflowStarted,
-        executions,
-        latestExecution,
+        executions: match.executions,
+        matchedExecution,
         job,
     };
 }
 
+async function invokeSubmitVerification(
+    aws: AwsCli,
+    functionName: string,
+    request: unknown,
+): Promise<SubmitVerificationSummary> {
+    const response = await invokeLambdaJson(aws, functionName, {
+        body: JSON.stringify(request),
+    });
+    if (!isRecord(response) || typeof response.statusCode !== "number" || typeof response.body !== "string") {
+        throw new Error("SubmitVerification Lambda response did not include statusCode/body");
+    }
+    const body = safeJsonParse(response.body);
+    if (response.statusCode >= 400) {
+        const message =
+            isRecord(body) && typeof body.message === "string" ? body.message : response.body;
+        throw new Error(`SubmitVerification Lambda rejected request: ${message}`);
+    }
+    if (
+        !isRecord(body) ||
+        typeof body.job_id !== "string" ||
+        typeof body.status !== "string" ||
+        typeof body.duplicate !== "boolean"
+    ) {
+        throw new Error("SubmitVerification Lambda response body did not include job_id/status/duplicate");
+    }
+    return {
+        statusCode: response.statusCode,
+        jobId: body.job_id,
+        status: body.status,
+        duplicate: body.duplicate,
+        txDigest: typeof body.tx_digest === "string" ? body.tx_digest : null,
+    };
+}
+
 async function invokeBatchVerifier(aws: AwsCli, functionName: string): Promise<number> {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-batch-"));
+    const response = await invokeLambdaJson(aws, functionName, { verifier_kind: "membership_identity" });
+    if (isRecord(response) && typeof response.errorMessage === "string") {
+        throw new Error(`BatchVerifier Lambda invocation failed: ${response.errorMessage}`);
+    }
+    if (!isRecord(response) || typeof response.workflow_started !== "number") {
+        throw new Error("BatchVerifier Lambda response did not include workflow_started");
+    }
+    return response.workflow_started;
+}
+
+async function invokeLambdaJson(aws: AwsCli, functionName: string, payload: unknown): Promise<unknown> {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-lambda-"));
     try {
-        const responsePath = path.join(tempDir, "batch-response.json");
+        const responsePath = path.join(tempDir, "response.json");
         const invokeResult = await aws.json([
             "lambda",
             "invoke",
             "--function-name",
             functionName,
             "--payload",
-            JSON.stringify({ verifier_kind: MEMBERSHIP_IDENTITY_VERIFIER_KIND }),
+            JSON.stringify(payload),
             "--cli-binary-format",
             "raw-in-base64-out",
             responsePath,
         ]);
         if (isRecord(invokeResult) && typeof invokeResult.FunctionError === "string") {
-            throw new Error(
-                `BatchVerifier Lambda invocation failed: ${invokeResult.FunctionError}`,
-            );
+            throw new Error(`${functionName} invocation failed: ${invokeResult.FunctionError}`);
         }
-        return readWorkflowStarted(JSON.parse(await readFile(responsePath, "utf8")) as unknown);
+        return JSON.parse(await readFile(responsePath, "utf8")) as unknown;
     } finally {
         await rm(tempDir, { recursive: true, force: true });
     }
-}
-
-function readWorkflowStarted(value: unknown): number {
-    if (isRecord(value) && typeof value.errorMessage === "string") {
-        throw new Error(`BatchVerifier Lambda invocation failed: ${value.errorMessage}`);
-    }
-    if (!isRecord(value) || typeof value.workflow_started !== "number") {
-        throw new Error("BatchVerifier Lambda response did not include workflow_started");
-    }
-    return value.workflow_started;
 }
 
 async function listExecutions(aws: AwsCli, stateMachineArn: string): Promise<ExecutionSummary[]> {
@@ -200,7 +279,7 @@ async function listExecutions(aws: AwsCli, stateMachineArn: string): Promise<Exe
     }));
 }
 
-async function describeLatestExecution(
+async function describeExecution(
     aws: AwsCli,
     executionArn: string,
 ): Promise<LatestExecutionSummary> {
@@ -213,7 +292,7 @@ async function describeLatestExecution(
     const inputText =
         isRecord(response) && typeof response.input === "string" ? response.input : null;
     const parsedInput = inputText === null ? null : safeJsonParse(inputText);
-    const evidence = await readLatestExecutionEvidence(aws, executionArn);
+    const evidence = await readExecutionEvidence(aws, executionArn);
     return {
         executionArn,
         status: isRecord(response) ? requireString(response.status, "execution.status") : "unknown",
@@ -225,7 +304,7 @@ async function describeLatestExecution(
     };
 }
 
-async function readLatestExecutionEvidence(
+async function readExecutionEvidence(
     aws: AwsCli,
     executionArn: string,
 ): Promise<{
@@ -299,7 +378,7 @@ async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
     if (args.help === true) {
         process.stdout.write(
-            "Usage: pnpm aws:smoke:membership-manual -- [--stack <name>] [--expected-account <id>] [--region <region>] [--job-id <id>]\n",
+            "Usage: pnpm aws:smoke:membership-manual -- [--stack <name>] [--expected-account <id>] [--region <region>] [--request-file <path>]\n",
         );
         return;
     }
@@ -307,17 +386,26 @@ async function main(): Promise<void> {
         stack: readStringOption(args, "stack", DEFAULT_STACK),
         expectedAccount: readStringOption(args, "expected-account", DEFAULT_EXPECTED_ACCOUNT),
         region: readStringOption(args, "region", DEFAULT_REGION),
-        jobId: readOptionalStringOption(args, "job-id"),
+        requestFile: readStringOption(args, "request-file", DEFAULT_REQUEST_FILE),
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-function readOptionalStringOption(
-    options: Record<string, string | boolean>,
-    key: string,
-): string | undefined {
-    const value = options[key];
-    return typeof value === "string" && value.length > 0 ? value : undefined;
+function resolveRequestFile(inputPath: string): string {
+    return path.isAbsolute(inputPath) ? inputPath : path.resolve(process.cwd(), inputPath);
+}
+
+function uniqueizeDummyWorldIdRequest(input: unknown, nowMs: number): unknown {
+    if (!isRecord(input) || !isRecord(input.world_id) || typeof input.world_id.nullifier_hash !== "string") {
+        throw new Error("dummy World ID request must include world_id.nullifier_hash");
+    }
+    return {
+        ...input,
+        world_id: {
+            ...input.world_id,
+            nullifier_hash: `${input.world_id.nullifier_hash}:${nowMs}`,
+        },
+    };
 }
 
 function readRecordString(value: unknown, key: string): string | null {
