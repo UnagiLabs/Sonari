@@ -16,6 +16,8 @@ import {
     type PrefixedHex32,
     type ProofStep,
 } from "@sonari/proof-core";
+import { Transaction } from "@mysten/sui/transactions";
+import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 
 export type ClaimProofErrorCode =
     | "worker_url_missing"
@@ -49,6 +51,67 @@ export interface FetchAffectedCellsProofInput {
     readonly eventRevision: number;
     readonly homeCell: string;
     readonly fetchImpl?: typeof fetch;
+}
+
+export interface ClaimProofContext {
+    readonly eventUid: string;
+    readonly eventRevision: number;
+    readonly homeCell: string;
+    readonly affectedCellsRoot: string;
+}
+
+export interface AffectedCellLeafMoveArgs {
+    readonly eventUidBytes: number[];
+    readonly eventRevision: number;
+    readonly h3Index: string;
+    readonly geoResolution: number;
+    readonly cellMetric: number;
+    readonly intensityValue: number;
+    readonly intensityScale: number;
+    readonly cellBand: number;
+    readonly cellsGenerationMethod: number;
+    readonly oracleVersion: string;
+}
+
+export interface AffectedCellProofMoveArg {
+    readonly constructor:
+        | "new_affected_cell_proof_step_left"
+        | "new_affected_cell_proof_step_right";
+    readonly siblingHashBytes: number[];
+}
+
+export interface ClaimDisasterUsdcObjectConfig {
+    readonly pauseState: string;
+    readonly claimIndex: string;
+    readonly membershipRegistry: string;
+    readonly program: string;
+    readonly campaign: string;
+    readonly policy: string;
+    readonly budget: string;
+    readonly binding: string;
+    readonly disasterEvent: string;
+    readonly identityRegistry: string;
+    readonly pass: string;
+    readonly designatedPool: string;
+    readonly mainPool: string;
+    readonly clock?: string | undefined;
+}
+
+export interface BuildClaimDisasterUsdcTransactionInput {
+    readonly senderAddress?: string | undefined;
+    readonly packageId: string;
+    readonly proof: AffectedCellsProof;
+    readonly context: ClaimProofContext;
+    readonly objects: ClaimDisasterUsdcObjectConfig;
+    readonly identityProvider: number;
+    readonly duplicateKeyHash: string;
+    readonly userMaxAmountUsdc: string | bigint | number;
+}
+
+export interface ClaimDisasterUsdcTransactionResult {
+    readonly transaction: Transaction;
+    readonly leafArgs: AffectedCellLeafMoveArgs;
+    readonly proofArgs: AffectedCellProofMoveArg[];
 }
 
 export async function fetchAffectedCellsProof(
@@ -105,6 +168,139 @@ export async function fetchAffectedCellsProof(
     }
 
     return parseAffectedCellsProofResponse(body);
+}
+
+export function assertProofMatchesClaimContext(
+    proof: AffectedCellsProof,
+    context: ClaimProofContext,
+): void {
+    if (proof.event_uid !== context.eventUid) {
+        throw new ClaimProofError("invalid_proof_response", "event_uid does not match.");
+    }
+    if (proof.leaf.event_uid !== context.eventUid) {
+        throw new ClaimProofError("invalid_proof_response", "leaf event_uid does not match.");
+    }
+    if (proof.event_revision !== context.eventRevision) {
+        throw new ClaimProofError(
+            "invalid_proof_response",
+            "event_revision does not match.",
+        );
+    }
+    if (proof.leaf.event_revision !== context.eventRevision) {
+        throw new ClaimProofError(
+            "invalid_proof_response",
+            "leaf event_revision does not match.",
+        );
+    }
+    if (proof.h3_index !== context.homeCell) {
+        throw new ClaimProofError("invalid_proof_response", "home_cell does not match h3_index.");
+    }
+    if (proof.leaf.h3_index.toString() !== context.homeCell) {
+        throw new ClaimProofError(
+            "invalid_proof_response",
+            "home_cell does not match leaf h3_index.",
+        );
+    }
+    if (proof.affected_cells_root !== context.affectedCellsRoot) {
+        throw new ClaimProofError(
+            "invalid_proof_response",
+            "affected_cells_root does not match.",
+        );
+    }
+}
+
+export function buildAffectedCellLeafMoveArgs(
+    leaf: AffectedCellLeaf,
+): AffectedCellLeafMoveArgs {
+    return {
+        eventUidBytes: hexToByteArray(leaf.event_uid),
+        eventRevision: leaf.event_revision,
+        h3Index: leaf.h3_index.toString(),
+        geoResolution: leaf.geo_resolution,
+        cellMetric: cellMetricToMoveValue(leaf.cell_metric),
+        intensityValue: leaf.intensity_value,
+        intensityScale: intensityScaleToMoveValue(leaf.intensity_scale),
+        cellBand: leaf.cell_band,
+        cellsGenerationMethod: cellsGenerationMethodToMoveValue(
+            leaf.cells_generation_method,
+        ),
+        oracleVersion: leaf.oracle_version.toString(),
+    };
+}
+
+export function buildAffectedCellProofMoveArgs(
+    proof: readonly ProofStep[],
+): AffectedCellProofMoveArg[] {
+    return proof.map((step) => ({
+        constructor: step.sibling_on_left
+            ? "new_affected_cell_proof_step_left"
+            : "new_affected_cell_proof_step_right",
+        siblingHashBytes: hexToByteArray(step.sibling_hash),
+    }));
+}
+
+export function buildClaimDisasterUsdcTransaction(
+    input: BuildClaimDisasterUsdcTransactionInput,
+): ClaimDisasterUsdcTransactionResult {
+    assertProofMatchesClaimContext(input.proof, input.context);
+
+    const tx = new Transaction();
+    if (input.senderAddress !== undefined) {
+        tx.setSender(input.senderAddress);
+    }
+
+    const leafArgs = buildAffectedCellLeafMoveArgs(input.proof.leaf);
+    const leaf = tx.moveCall({
+        target: `${input.packageId}::accessor::new_affected_cell_leaf`,
+        arguments: [
+            tx.pure.vector("u8", leafArgs.eventUidBytes),
+            tx.pure.u32(leafArgs.eventRevision),
+            tx.pure.u64(leafArgs.h3Index),
+            tx.pure.u8(leafArgs.geoResolution),
+            tx.pure.u8(leafArgs.cellMetric),
+            tx.pure.u16(leafArgs.intensityValue),
+            tx.pure.u8(leafArgs.intensityScale),
+            tx.pure.u8(leafArgs.cellBand),
+            tx.pure.u8(leafArgs.cellsGenerationMethod),
+            tx.pure.u64(leafArgs.oracleVersion),
+        ],
+    });
+
+    const proofArgs = buildAffectedCellProofMoveArgs(input.proof.proof);
+    const proofSteps = proofArgs.map((step) =>
+        tx.moveCall({
+            target: `${input.packageId}::accessor::${step.constructor}`,
+            arguments: [tx.pure.vector("u8", step.siblingHashBytes)],
+        }),
+    );
+    const proof = tx.makeMoveVec({ elements: proofSteps });
+
+    tx.moveCall({
+        target: `${input.packageId}::accessor::claim_disaster_usdc`,
+        arguments: [
+            tx.object(input.objects.pauseState),
+            tx.object(input.objects.claimIndex),
+            tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.program),
+            tx.object(input.objects.campaign),
+            tx.object(input.objects.policy),
+            tx.object(input.objects.budget),
+            tx.object(input.objects.binding),
+            tx.object(input.objects.disasterEvent),
+            tx.object(input.objects.identityRegistry),
+            tx.object(input.objects.pass),
+            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
+            leaf,
+            proof,
+            tx.pure.u8(input.identityProvider),
+            tx.pure.vector("u8", hexToByteArray(expectPrefixedHex32("duplicate_key_hash", input.duplicateKeyHash))),
+            tx.object(input.objects.designatedPool),
+            tx.object(input.objects.mainPool),
+            tx.pure.u64(input.userMaxAmountUsdc),
+        ],
+    });
+
+    return { transaction: tx, leafArgs, proofArgs };
 }
 
 export async function parseAffectedCellsProofResponse(
@@ -279,4 +475,38 @@ function expectDecimalU64String(name: string, value: unknown): string {
         throw new Error(`${name} must fit in u64`);
     }
     return text;
+}
+
+function hexToByteArray(value: PrefixedHex32): number[] {
+    const bytes: number[] = [];
+    for (let index = 2; index < value.length; index += 2) {
+        bytes.push(Number.parseInt(value.slice(index, index + 2), 16));
+    }
+    return bytes;
+}
+
+function cellMetricToMoveValue(value: AffectedCellLeaf["cell_metric"]): number {
+    if (value === CellMetric.USGS_MMI) {
+        return 1;
+    }
+    throw new ClaimProofError("invalid_proof_response", `Unknown cell_metric: ${value}`);
+}
+
+function intensityScaleToMoveValue(value: AffectedCellLeaf["intensity_scale"]): number {
+    if (value === IntensityScale.MMI_X100) {
+        return 1;
+    }
+    throw new ClaimProofError("invalid_proof_response", `Unknown intensity_scale: ${value}`);
+}
+
+function cellsGenerationMethodToMoveValue(
+    value: AffectedCellLeaf["cells_generation_method"],
+): number {
+    if (value === CellsGenerationMethod.shakemap_gridxml_h3_grid_point_p90_v1) {
+        return 1;
+    }
+    throw new ClaimProofError(
+        "invalid_proof_response",
+        `Unknown cells_generation_method: ${value}`,
+    );
 }
