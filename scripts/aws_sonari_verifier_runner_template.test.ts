@@ -426,7 +426,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(membershipWrapper).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL:?");
         expect(membershipWrapper).toContain("SONARI_WORLD_ID_APP_ID:?");
         expect(membershipWrapper).toContain("nitro-cli run-enclave $args");
-        expect(membershipWrapper).toContain('--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"');
+        expect(membershipWrapper).toContain(
+            '--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"',
+        );
         expect(membershipWrapper).toContain("$egress_proxy_url");
         expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:7777");
         expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:3000");

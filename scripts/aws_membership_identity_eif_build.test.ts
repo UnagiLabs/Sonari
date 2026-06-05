@@ -19,10 +19,7 @@ describe("AWS membership identity EIF build script", () => {
         expect(plan.eifPath).toBe(path.resolve("dist/aws/membership-identity-tee.eif"));
         expect(plan.dockerContextDir).toBe(path.resolve(".build/aws-membership-identity-eif"));
         expect(plan.dockerUri).toBe("sonari/membership-identity-tee:local");
-        expect(plan.teeCommand).toEqual([
-            "/opt/sonari/tee-artifact/bin/membership-tee",
-            "server",
-        ]);
+        expect(plan.teeCommand).toEqual(["/opt/sonari/tee-artifact/bin/membership-tee", "server"]);
         expect(plan.buildEnclaveCommand).toEqual([
             "nitro-cli",
             "build-enclave",
