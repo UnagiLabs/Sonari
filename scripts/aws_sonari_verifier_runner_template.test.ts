@@ -74,6 +74,12 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain(
             'SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]',
         );
+        expect(template).toContain(
+            'AFFECTED_PROOF_REGISTRAR_URL: !If [HasAffectedProofRegistrarConfig, !Ref AffectedProofRegistrarUrl, ""]',
+        );
+        expect(template).toContain(
+            'AFFECTED_PROOF_REGISTRAR_TOKEN_SECRET_ARN: !If [HasAffectedProofRegistrarConfig, !Ref AffectedProofRegistrarTokenSecretArn, ""]',
+        );
         expect(template).toContain("!GetAtt RunnerLeaseTable.Arn");
         const runnerControlRoleStart = template.indexOf("RunnerControlLambdaRole:");
         const runnerStateMachineRoleStart = template.indexOf("RunnerStateMachineRole:");
@@ -85,6 +91,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(runnerControlRole).toContain(
             "Resource: !Sub $" + "{RunnerResultBucket.Arn}/source-artifacts/*",
         );
+        expect(runnerControlRole).toContain("HasAffectedProofRegistrarConfig");
+        expect(runnerControlRole).toContain("Resource: !Ref AffectedProofRegistrarTokenSecretArn");
         expect(template).toContain(
             "EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref EarthquakeNitroEnclaveProcessCommand",
         );
@@ -129,6 +137,25 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(verifierKindParameterCount).toBe(runnerTaskCount);
         expect(template).toContain('"verifier_kind": "earthquake"');
         expect(template).toContain('"verifier_kind": "membership_identity"');
+    });
+
+    it("routes affected proof registration after archive and supports registration-only retry starts", async () => {
+        const template = await readTemplate();
+
+        expect(template).toContain('"StartAt": "StartRouter"');
+        expect(template).toContain('"StringEquals": "register_affected_cells_proof"');
+        expect(template).toContain('"Next": "RegisterAffectedCellsProofRetry"');
+        expect(template).toContain('"ArchiveSources"');
+        expect(template).toContain('"Next": "RegisterAffectedCellsProof"');
+        expect(template).toContain('"RegisterAffectedCellsProof"');
+        expect(template).toContain('"Next": "RelayerPreviewOrDryRun"');
+        expect(template).toContain('"RegisterAffectedCellsProofRetry"');
+        expect(template).toContain('"End": true');
+        expect(template).toContain('"Next": "RestoreAffectedCellsProofRegistrationRetry"');
+        expect(template).toContain('"RestoreAffectedCellsProofRegistrationRetry"');
+        expect(template).toContain('"action": "restore_affected_cells_proof_registration_retry"');
+        expect(template).toContain('"ProofRegistrationRetryComplete"');
+        expect(template).toContain('"action": "register_affected_cells_proof"');
     });
 
     it("dispatches the shared run-sonari-verifier entry by verifier kind", async () => {
@@ -307,6 +334,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
 
         expect(template).toContain("SourceArchiverTokenSecretArn:");
         expect(template).toContain("SourceArchiverPrivateKeySecretArn:");
+        expect(template).toContain("AffectedProofRegistrarUrl:");
+        expect(template).toContain("AffectedProofRegistrarTokenSecretArn:");
+        expect(template).toContain("HasAffectedProofRegistrarConfig:");
         expect(template).toContain("SourceArchiverSuiNetwork:");
         expect(template).toContain("SourceArchiverSuiRpcUrl:");
         expect(template).toContain("SourceArchiverWalrusUploadRelayUrl:");

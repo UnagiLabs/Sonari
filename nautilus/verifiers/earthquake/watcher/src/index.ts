@@ -64,8 +64,16 @@ export {
 
 const INLINE_TEST_RUNNER_TIMEOUT_MS = 90_000;
 
+export interface WorkflowStartRequest {
+    sourceEventId: string;
+    executionName: string;
+    attempt?: number;
+    action?: "register_affected_cells_proof";
+    resultS3Key?: string;
+}
+
 export interface WorkflowStarter {
-    start(input: { sourceEventId: string; executionName: string; attempt?: number }): Promise<void>;
+    start(input: WorkflowStartRequest): Promise<void>;
 }
 
 export interface StepFunctionsClientLike {
@@ -82,19 +90,19 @@ export class StepFunctionsWorkflowStarter implements WorkflowStarter {
         this.client = client ?? new SFNClient({});
     }
 
-    async start(input: {
-        sourceEventId: string;
-        executionName: string;
-        attempt?: number;
-    }): Promise<void> {
+    async start(input: WorkflowStartRequest): Promise<void> {
         await this.client.send(
             new StartExecutionCommand({
                 stateMachineArn: this.stateMachineArn,
                 name: input.executionName,
                 input: JSON.stringify({
                     verifier_kind: EARTHQUAKE_VERIFIER_KIND,
+                    ...(input.action === undefined ? {} : { action: input.action }),
                     source_event_id: input.sourceEventId,
                     attempt: input.attempt ?? 1,
+                    ...(input.resultS3Key === undefined
+                        ? {}
+                        : { result_s3_key: input.resultS3Key }),
                 }),
             }),
         );
@@ -128,7 +136,13 @@ export function createScheduledHandler(options: ScheduledHandlerOptions) {
             nowMs,
             options.dueLimit ?? DEFAULT_DUE_LIMIT,
         );
-        return { scanned: candidates.length, workflow_started: started };
+        const proofRegistrationStarted = await startDueAffectedCellsProofRegistrationRetries(
+            options.repository,
+            options.workflow,
+            nowMs,
+            options.dueLimit ?? DEFAULT_DUE_LIMIT,
+        );
+        return { scanned: candidates.length, workflow_started: started + proofRegistrationStarted };
     };
 }
 
@@ -337,6 +351,56 @@ export async function startDueWorkflows(
                 start.attempt,
             );
             await repository.markWorkflowStopped(row.source_event_id, start.attempt, nowMs);
+            break;
+        }
+        started += 1;
+        break;
+    }
+    return started;
+}
+
+export async function startDueAffectedCellsProofRegistrationRetries(
+    repository: StateRepository,
+    workflow: WorkflowStarter,
+    nowMs: number,
+    limit = DEFAULT_DUE_LIMIT,
+): Promise<number> {
+    const rows = await repository.listDueAffectedCellsProofRegistrations(nowMs, limit);
+    let started = 0;
+    for (const row of rows) {
+        const nextRetryAtMs = row.affected_cells_proof_registration_next_retry_at_ms;
+        if (nextRetryAtMs === null) {
+            continue;
+        }
+        const claimed = await repository.claimAffectedCellsProofRegistrationRetry(
+            row.source_event_id,
+            nextRetryAtMs,
+            nowMs,
+        );
+        if (claimed === null) {
+            continue;
+        }
+        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-proof-registration-${claimed.attempt}-${nowMs}`;
+        try {
+            await workflow.start({
+                sourceEventId: row.source_event_id,
+                executionName,
+                attempt: claimed.attempt,
+                action: "register_affected_cells_proof",
+                resultS3Key: claimed.resultS3Key,
+            });
+        } catch (error) {
+            await repository.markAffectedCellsProofRegistrationResult(
+                row.source_event_id,
+                {
+                    status: "retryable_failed",
+                    errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+                    retryableNextRetryAtMs: nowMs + FAILED_RETRY_BACKOFF_MS,
+                    message: error instanceof Error ? error.message : String(error),
+                },
+                nowMs,
+                claimed.attempt,
+            );
             break;
         }
         started += 1;

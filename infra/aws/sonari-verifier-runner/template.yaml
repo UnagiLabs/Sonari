@@ -48,6 +48,14 @@ Parameters:
     Type: String
     Default: ""
     Description: Secrets Manager ARN containing only the raw SourceArchiver ED25519 suiprivkey value. The secret is read only by the source archiver Lambda.
+  AffectedProofRegistrarUrl:
+    Type: String
+    Default: ""
+    Description: affected-cells-proof-worker URL used by RunnerControl to register Walrus affected_cells artifacts.
+  AffectedProofRegistrarTokenSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager ARN containing the runner-only token accepted by the affected proof register API.
   SourceArchiverSuiNetwork:
     Type: String
     Default: testnet
@@ -242,6 +250,9 @@ Conditions:
   HasSourceArchiverConfig: !And
     - !Not [!Equals [!Ref SourceArchiverTokenSecretArn, ""]]
     - !Not [!Equals [!Ref SourceArchiverPrivateKeySecretArn, ""]]
+  HasAffectedProofRegistrarConfig: !And
+    - !Not [!Equals [!Ref AffectedProofRegistrarUrl, ""]]
+    - !Not [!Equals [!Ref AffectedProofRegistrarTokenSecretArn, ""]]
 
 Resources:
   EventsTable:
@@ -937,6 +948,12 @@ Resources:
                   Action: secretsmanager:GetSecretValue
                   Resource: !Ref SourceArchiverTokenSecretArn
                 - !Ref AWS::NoValue
+              - !If
+                - HasAffectedProofRegistrarConfig
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref AffectedProofRegistrarTokenSecretArn
+                - !Ref AWS::NoValue
 
   SourceArchiverLambdaRole:
     Type: AWS::IAM::Role
@@ -1179,6 +1196,8 @@ Resources:
           SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId
           SOURCE_ARCHIVER_URL: !If [HasSourceArchiverConfig, !GetAtt SourceArchiverFunctionUrl.FunctionUrl, ""]
           SOURCE_ARCHIVER_TOKEN_SECRET_ARN: !If [HasSourceArchiverConfig, !Ref SourceArchiverTokenSecretArn, ""]
+          AFFECTED_PROOF_REGISTRAR_URL: !If [HasAffectedProofRegistrarConfig, !Ref AffectedProofRegistrarUrl, ""]
+          AFFECTED_PROOF_REGISTRAR_TOKEN_SECRET_ARN: !If [HasAffectedProofRegistrarConfig, !Ref AffectedProofRegistrarTokenSecretArn, ""]
 
   SourceArchiverLambda:
     Type: AWS::Lambda::Function
@@ -1237,8 +1256,15 @@ Resources:
       DefinitionString: !Sub |
         {
           "Comment": "Run Sonari earthquake verifier on shared EC2 Nitro Enclave capacity.",
-          "StartAt": "StartInstance",
+          "StartAt": "StartRouter",
           "States": {
+            "StartRouter": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.action", "StringEquals": "register_affected_cells_proof", "Next": "RegisterAffectedCellsProofRetry" }
+              ],
+              "Default": "StartInstance"
+            },
             "StartInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
@@ -1388,8 +1414,35 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
-              "Next": "RelayerPreviewOrDryRun",
+              "Next": "RegisterAffectedCellsProof",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "RegisterAffectedCellsProof": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Next": "RelayerPreviewOrDryRun",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "RelayerPreviewOrDryRun" }]
+            },
+            "RegisterAffectedCellsProofRetry": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "End": true,
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "RestoreAffectedCellsProofRegistrationRetry" }]
+            },
+            "RestoreAffectedCellsProofRegistrationRetry": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "restore_affected_cells_proof_registration_retry", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "message.$": "$.error.Cause" },
+              "Next": "ProofRegistrationRetryComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.restore_error", "Next": "ProofRegistrationRetryComplete" }]
+            },
+            "ProofRegistrationRetryComplete": {
+              "Type": "Succeed"
             },
             "RelayerPreviewOrDryRun": {
               "Type": "Task",

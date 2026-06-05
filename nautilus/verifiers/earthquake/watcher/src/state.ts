@@ -51,6 +51,12 @@ export interface EarthquakeEventRow {
     source_archive_attempt: number | null;
     source_artifact_s3_keys_json: string | null;
     walrus_archive_updated_at_ms: number | null;
+    affected_cells_proof_registration_status: AffectedCellsProofRegistrationStatus | null;
+    affected_cells_proof_registration_error_code: AffectedCellsProofRegistrationErrorCode | null;
+    affected_cells_proof_registration_attempt: number | null;
+    affected_cells_proof_registration_next_retry_at_ms: number | null;
+    affected_cells_proof_registration_error_message: string | null;
+    affected_cells_proof_registration_updated_at_ms: number | null;
     runner_job_id: string | null;
     runner_queued_at_ms: number | null;
     runner_attempt: number | null;
@@ -86,6 +92,7 @@ export type RunnerPhase =
     | "reading_result"
     | "applying_result"
     | "archiving_sources"
+    | "registering_affected_cells_proof"
     | "stopping_instance"
     | "complete";
 
@@ -99,6 +106,17 @@ export type SourceArchiveErrorCode =
     | "SOURCE_ARCHIVE_CONFIGURATION_FAILED"
     | "SOURCE_ARCHIVE_RETRYABLE_FAILED"
     | "SOURCE_ARCHIVE_INTEGRITY_FAILED";
+
+export type AffectedCellsProofRegistrationStatus =
+    | "skipped"
+    | "success"
+    | "configuration_failed"
+    | "retryable_failed"
+    | "integrity_failed";
+export type AffectedCellsProofRegistrationErrorCode =
+    | "AFFECTED_CELLS_PROOF_REGISTRATION_CONFIGURATION_FAILED"
+    | "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED"
+    | "AFFECTED_CELLS_PROOF_REGISTRATION_INTEGRITY_FAILED";
 
 export interface RunnerQueueJob {
     runner_job_id: string;
@@ -155,6 +173,15 @@ export interface StateRepository {
     ): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
+    listDueAffectedCellsProofRegistrations(
+        nowMs: number,
+        limit: number,
+    ): Promise<EarthquakeEventRow[]>;
+    claimAffectedCellsProofRegistrationRetry(
+        sourceEventId: string,
+        expectedNextRetryAtMs: number,
+        nowMs: number,
+    ): Promise<{ attempt: number; resultS3Key: string } | null>;
     hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean>;
     tryStartRunnerWorkflowExclusively(
         sourceEventId: string,
@@ -202,6 +229,12 @@ export interface StateRepository {
     markSourceArchiveResult(
         sourceEventId: string,
         input: SourceArchiveStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean>;
+    markAffectedCellsProofRegistrationResult(
+        sourceEventId: string,
+        input: AffectedCellsProofRegistrationStateUpdate,
         nowMs: number,
         expectedAttempt?: number,
     ): Promise<boolean>;
@@ -261,6 +294,13 @@ export interface SourceArchiveStateUpdate {
     status: SourceArchiveStatus;
     artifactS3Keys: string[];
     errorCode?: SourceArchiveErrorCode;
+    retryableNextRetryAtMs?: number;
+    message?: string;
+}
+
+export interface AffectedCellsProofRegistrationStateUpdate {
+    status: AffectedCellsProofRegistrationStatus;
+    errorCode?: AffectedCellsProofRegistrationErrorCode;
     retryableNextRetryAtMs?: number;
     message?: string;
 }
@@ -350,6 +390,42 @@ export class InMemoryStateRepository implements StateRepository {
             .sort((a, b) => a.updated_at_ms - b.updated_at_ms)
             .slice(0, limit)
             .map((row) => structuredClone(row));
+    }
+
+    async listDueAffectedCellsProofRegistrations(
+        nowMs: number,
+        limit: number,
+    ): Promise<EarthquakeEventRow[]> {
+        return [...this.rows.values()]
+            .filter((row) => isDueAffectedCellsProofRegistration(row, nowMs))
+            .sort(
+                (a, b) =>
+                    (a.affected_cells_proof_registration_next_retry_at_ms ?? a.updated_at_ms) -
+                    (b.affected_cells_proof_registration_next_retry_at_ms ?? b.updated_at_ms),
+            )
+            .slice(0, limit)
+            .map((row) => structuredClone(row));
+    }
+
+    async claimAffectedCellsProofRegistrationRetry(
+        sourceEventId: string,
+        expectedNextRetryAtMs: number,
+        nowMs: number,
+    ): Promise<{ attempt: number; resultS3Key: string } | null> {
+        const row = this.rows.get(sourceEventId);
+        if (
+            row === undefined ||
+            !isDueAffectedCellsProofRegistration(row, nowMs) ||
+            row.affected_cells_proof_registration_next_retry_at_ms !== expectedNextRetryAtMs ||
+            row.runner_attempt === null ||
+            row.runner_result_s3_key === null
+        ) {
+            return null;
+        }
+        row.affected_cells_proof_registration_next_retry_at_ms = null;
+        row.affected_cells_proof_registration_updated_at_ms = nowMs;
+        row.updated_at_ms = nowMs;
+        return { attempt: row.runner_attempt, resultS3Key: row.runner_result_s3_key };
     }
 
     async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
@@ -570,6 +646,23 @@ export class InMemoryStateRepository implements StateRepository {
             return false;
         }
         applySourceArchiveResultToRow(row, input, nowMs, expectedAttempt);
+        return true;
+    }
+
+    async markAffectedCellsProofRegistrationResult(
+        sourceEventId: string,
+        input: AffectedCellsProofRegistrationStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = this.rows.get(sourceEventId);
+        if (row === undefined) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applyAffectedCellsProofRegistrationResultToRow(row, input, nowMs, expectedAttempt);
         return true;
     }
 
@@ -866,6 +959,76 @@ export class DynamoDbStateRepository implements StateRepository {
             .filter((row) => DUE_STATUSES.has(row.status) && isReadyForRetryOrDeadline(row, nowMs))
             .sort((a, b) => a.updated_at_ms - b.updated_at_ms)
             .slice(0, limit);
+    }
+
+    async listDueAffectedCellsProofRegistrations(
+        nowMs: number,
+        limit: number,
+    ): Promise<EarthquakeEventRow[]> {
+        return (await this.scanRows())
+            .filter((row) => isDueAffectedCellsProofRegistration(row, nowMs))
+            .sort(
+                (a, b) =>
+                    (a.affected_cells_proof_registration_next_retry_at_ms ?? a.updated_at_ms) -
+                    (b.affected_cells_proof_registration_next_retry_at_ms ?? b.updated_at_ms),
+            )
+            .slice(0, limit);
+    }
+
+    async claimAffectedCellsProofRegistrationRetry(
+        sourceEventId: string,
+        expectedNextRetryAtMs: number,
+        nowMs: number,
+    ): Promise<{ attempt: number; resultS3Key: string } | null> {
+        const row = await this.get(sourceEventId);
+        if (
+            row === null ||
+            !isDueAffectedCellsProofRegistration(row, nowMs) ||
+            row.affected_cells_proof_registration_next_retry_at_ms !== expectedNextRetryAtMs ||
+            row.runner_attempt === null ||
+            row.runner_result_s3_key === null
+        ) {
+            return null;
+        }
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { source_event_id: sourceEventId },
+                    ConditionExpression:
+                        "#affected_cells_proof_registration_status = :retryable_failed_status AND #affected_cells_proof_registration_next_retry_at_ms = :expected_next_retry_at_ms AND #source_archive_status = :source_archive_success_status AND #runner_attempt = :runner_attempt AND #runner_result_s3_key = :runner_result_s3_key",
+                    UpdateExpression:
+                        "SET #affected_cells_proof_registration_next_retry_at_ms = :null_value, #affected_cells_proof_registration_updated_at_ms = :updated_at_ms, #updated_at_ms = :updated_at_ms",
+                    ExpressionAttributeNames: {
+                        "#affected_cells_proof_registration_status":
+                            "affected_cells_proof_registration_status",
+                        "#affected_cells_proof_registration_next_retry_at_ms":
+                            "affected_cells_proof_registration_next_retry_at_ms",
+                        "#affected_cells_proof_registration_updated_at_ms":
+                            "affected_cells_proof_registration_updated_at_ms",
+                        "#source_archive_status": "source_archive_status",
+                        "#runner_attempt": "runner_attempt",
+                        "#runner_result_s3_key": "runner_result_s3_key",
+                        "#updated_at_ms": "updated_at_ms",
+                    },
+                    ExpressionAttributeValues: {
+                        ":retryable_failed_status": "retryable_failed",
+                        ":expected_next_retry_at_ms": expectedNextRetryAtMs,
+                        ":source_archive_success_status": "success",
+                        ":runner_attempt": row.runner_attempt,
+                        ":runner_result_s3_key": row.runner_result_s3_key,
+                        ":updated_at_ms": nowMs,
+                        ":null_value": null,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return null;
+            }
+            throw error;
+        }
+        return { attempt: row.runner_attempt, resultS3Key: row.runner_result_s3_key };
     }
 
     async hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean> {
@@ -1178,6 +1341,23 @@ export class DynamoDbStateRepository implements StateRepository {
             return false;
         }
         applySourceArchiveResultToRow(row, input, nowMs, expectedAttempt);
+        return this.put(row, expectedAttempt, true);
+    }
+
+    async markAffectedCellsProofRegistrationResult(
+        sourceEventId: string,
+        input: AffectedCellsProofRegistrationStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = await this.get(sourceEventId);
+        if (row === null) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applyAffectedCellsProofRegistrationResultToRow(row, input, nowMs, expectedAttempt);
         return this.put(row, expectedAttempt, true);
     }
 
@@ -1574,6 +1754,12 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#source_archive_attempt = :source_archive_attempt",
                     "#source_artifact_s3_keys_json = :source_artifact_s3_keys_json",
                     "#walrus_archive_updated_at_ms = :walrus_archive_updated_at_ms",
+                    "#affected_cells_proof_registration_status = :affected_cells_proof_registration_status",
+                    "#affected_cells_proof_registration_error_code = :affected_cells_proof_registration_error_code",
+                    "#affected_cells_proof_registration_attempt = :affected_cells_proof_registration_attempt",
+                    "#affected_cells_proof_registration_next_retry_at_ms = :affected_cells_proof_registration_next_retry_at_ms",
+                    "#affected_cells_proof_registration_error_message = :affected_cells_proof_registration_error_message",
+                    "#affected_cells_proof_registration_updated_at_ms = :affected_cells_proof_registration_updated_at_ms",
                     "#runner_job_id = :runner_job_id",
                     "#runner_queued_at_ms = :runner_queued_at_ms",
                     "#runner_attempt = :runner_attempt",
@@ -1889,6 +2075,12 @@ function baseRow(
         source_archive_attempt: null,
         source_artifact_s3_keys_json: null,
         walrus_archive_updated_at_ms: null,
+        affected_cells_proof_registration_status: null,
+        affected_cells_proof_registration_error_code: null,
+        affected_cells_proof_registration_attempt: null,
+        affected_cells_proof_registration_next_retry_at_ms: null,
+        affected_cells_proof_registration_error_message: null,
+        affected_cells_proof_registration_updated_at_ms: null,
         runner_job_id: null,
         runner_queued_at_ms: null,
         runner_attempt: null,
@@ -1955,6 +2147,17 @@ function isReadyForRetryOrDeadline(row: EarthquakeEventRow, nowMs: number): bool
     return row.next_retry_at_ms === null || row.next_retry_at_ms <= nowMs;
 }
 
+function isDueAffectedCellsProofRegistration(row: EarthquakeEventRow, nowMs: number): boolean {
+    return (
+        row.affected_cells_proof_registration_status === "retryable_failed" &&
+        row.affected_cells_proof_registration_next_retry_at_ms !== null &&
+        row.affected_cells_proof_registration_next_retry_at_ms <= nowMs &&
+        row.source_archive_status === "success" &&
+        row.runner_result_s3_key !== null &&
+        row.runner_attempt !== null
+    );
+}
+
 function isActiveRunnerWorkflow(row: EarthquakeEventRow, staleBeforeMs?: number): boolean {
     if (staleBeforeMs !== undefined && row.updated_at_ms <= staleBeforeMs) {
         return false;
@@ -1996,6 +2199,12 @@ async function applyResultToRow(
         row.source_archive_attempt = null;
         row.source_artifact_s3_keys_json = null;
         row.walrus_archive_updated_at_ms = null;
+        row.affected_cells_proof_registration_status = null;
+        row.affected_cells_proof_registration_error_code = null;
+        row.affected_cells_proof_registration_attempt = null;
+        row.affected_cells_proof_registration_next_retry_at_ms = null;
+        row.affected_cells_proof_registration_error_message = null;
+        row.affected_cells_proof_registration_updated_at_ms = null;
         return;
     }
     row.tee_result_json = JSON.stringify(compactTeeResultForState(result));
@@ -2071,6 +2280,27 @@ function applySourceArchiveResultToRow(
         row.runner_error_message = input.message ?? null;
         row.next_retry_at_ms = null;
     }
+}
+
+function applyAffectedCellsProofRegistrationResultToRow(
+    row: EarthquakeEventRow,
+    input: AffectedCellsProofRegistrationStateUpdate,
+    nowMs: number,
+    expectedAttempt?: number,
+): void {
+    row.affected_cells_proof_registration_status = input.status;
+    row.affected_cells_proof_registration_error_code = input.errorCode ?? null;
+    row.affected_cells_proof_registration_attempt = expectedAttempt ?? row.runner_attempt;
+    row.affected_cells_proof_registration_updated_at_ms = nowMs;
+    row.updated_at_ms = nowMs;
+    if (input.status === "retryable_failed") {
+        row.affected_cells_proof_registration_next_retry_at_ms =
+            input.retryableNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+        row.affected_cells_proof_registration_error_message = input.message ?? null;
+        return;
+    }
+    row.affected_cells_proof_registration_next_retry_at_ms = null;
+    row.affected_cells_proof_registration_error_message = input.message ?? null;
 }
 
 function applyRunnerWorkflowProgress(
