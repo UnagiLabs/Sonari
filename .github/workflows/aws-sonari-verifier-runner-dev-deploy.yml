@@ -591,6 +591,7 @@ jobs:
             "TeeEifSha256",
             "GitCommitSha",
             "ScheduleState",
+            "WorldIdProofMode",
             "SourceArchiverTokenSecretArn",
             "SourceArchiverPrivateKeySecretArn",
             "SourceArchiverSuiNetwork",

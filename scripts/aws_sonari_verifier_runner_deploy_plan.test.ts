@@ -133,6 +133,7 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `TeeEifSha256=${validMembershipEifSha256}`,
                 `GitCommitSha=${validCommitSha}`,
                 "ScheduleState=DISABLED",
+                "WorldIdProofMode=dummy",
                 `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
                 `SourceArchiverPrivateKeySecretArn=${validInput.sourceArchiverPrivateKeySecretArn}`,
                 "SourceArchiverSuiNetwork=testnet",

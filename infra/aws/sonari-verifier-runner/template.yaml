@@ -164,6 +164,13 @@ Parameters:
     Type: String
     Default: https://developer.world.org
     Description: Legacy parameter kept for deploy input compatibility. The membership server path pins the canonical https://developer.world.org base.
+  WorldIdProofMode:
+    Type: String
+    Default: real
+    AllowedValues:
+      - real
+      - dummy
+    Description: World ID proof verification mode delivered to the membership enclave bootstrap. dummy is only honored on testnet or devnet and must fail closed elsewhere.
   RelayerMode:
     Type: String
     Default: ""
@@ -751,22 +758,6 @@ Resources:
             systemctl daemon-reload
             systemctl enable --now sonari-earthquake-egress-connect-proxy.service
             systemctl enable --now sonari-earthquake-egress-vsock-proxy.service
-            cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<'SONARI_VSOCK_PROXY'
-            [Unit]
-            Description=Sonari World ID egress readiness gate
-            After=sonari-earthquake-egress-vsock-proxy.service
-            BindsTo=sonari-earthquake-egress-vsock-proxy.service
-
-            [Service]
-            Type=oneshot
-            RemainAfterExit=yes
-            ExecStart=/bin/true
-
-            [Install]
-            WantedBy=multi-user.target
-            SONARI_VSOCK_PROXY
-            systemctl daemon-reload
-            systemctl enable --now sonari-world-id-vsock-proxy.service
             {
               echo "RUNNER_TOKEN_FILE=/opt/sonari/runner-token"
               echo "SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus"
@@ -786,6 +777,8 @@ Resources:
               echo "RELAYER_NETWORK=${RelayerNetwork}"
               echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
+              echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
+              echo "RELAYER_NETWORK=${RelayerNetwork}"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
               printf 'SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$membership_command"
@@ -1632,9 +1625,17 @@ Resources:
             "DryRunSuiSubmissionComplete": {
               "Type": "Choice",
               "Choices": [
-                { "Variable": "$.sui_submission", "StringEquals": "failed", "Next": "StopInstance" }
+                { "Variable": "$.sui_submission", "StringEquals": "failed", "Next": "StopInstance" },
+                { "Variable": "$.sui_submission", "StringEquals": "succeeded", "Next": "SubmitSuiSubmission" }
               ],
               "Default": "ApplyResult"
+            },
+            "SubmitSuiSubmission": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "submit_sui_submission", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ApplyResult": {
               "Type": "Task",

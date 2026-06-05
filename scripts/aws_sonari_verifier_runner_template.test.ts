@@ -249,6 +249,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             '"action": "dispatch_process_data_command"',
             '"action": "read_result"',
             '"action": "dry_run_sui_submission"',
+            '"action": "submit_sui_submission"',
             '"action": "apply_result"',
         ];
 
@@ -274,8 +275,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
         expect(membership).toContain('"Next": "DryRunSuiSubmission"');
+        expect(membership).toContain('"StringEquals": "succeeded", "Next": "SubmitSuiSubmission"');
+        expect(membership).toContain('"SubmitSuiSubmission"');
         expect(membership).toContain('"Default": "ApplyResult"');
-        expect(membership).not.toContain('"action": "submit_sui_submission"');
+        expect(membership).toContain('"action": "submit_sui_submission"');
     });
 
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {
@@ -480,10 +483,6 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
         expect(template).not.toContain("SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE");
-        // World ID readiness gate is a single unconditional oneshot unit bound to the
-        // shared egress vsock proxy (dev fixture and prod share one definition).
-        expect(template).toContain("Description=Sonari World ID egress readiness gate");
-        expect(template).toContain("BindsTo=sonari-earthquake-egress-vsock-proxy.service");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 
