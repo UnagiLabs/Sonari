@@ -78,6 +78,37 @@ Parameters:
     Type: String
     Default: ""
     Description: Sui network name delivered to the enclave bootstrap so the fail-closed dummy gate can allow dummy only on testnet or devnet. Empty, mainnet, or unknown keeps the enclave on real World ID verification.
+  IdentityRelayerMode:
+    Type: String
+    Default: ""
+    AllowedValues:
+      - ""
+      - dry_run
+      - submit
+    Description: Leave empty to skip Sui registration. Use submit to register the membership identity enclave in VerifierRegistry.
+  SonariIdentityPackageId:
+    Type: String
+    Default: ""
+    Description: Sui package ID for the membership identity Move module.
+  SonariVerifierRegistryId:
+    Type: String
+    Default: ""
+    Description: VerifierRegistry object ID used for membership identity enclave registration.
+  RelayerGrpcUrl:
+    Type: String
+    Default: ""
+    Description: Sui gRPC URL for membership identity enclave registration.
+  RelayerSignerSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager ARN containing the Sui private key for membership identity enclave registration.
+  RelayerAllowSubmit:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "false"
+      - "true"
+    Description: Must be true before IDENTITY_RELAYER_MODE=submit can register an enclave on Sui.
   ScheduleExpression:
     Type: String
     Default: rate(1 minute)
@@ -98,6 +129,9 @@ Parameters:
     Type: String
     Default: unknown
     Description: Git commit SHA deployed by this stack update.
+
+Conditions:
+  HasRelayerSignerSecretArn: !Not [!Equals [!Ref RelayerSignerSecretArn, ""]]
 
 Resources:
   VerificationJobsTable:
@@ -598,6 +632,12 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                 Resource: !GetAtt VerificationJobsTable.Arn
+              - !If
+                - HasRelayerSignerSecretArn
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref RelayerSignerSecretArn
+                - !Ref AWS::NoValue
 
   RunnerStateMachineRole:
     Type: AWS::IAM::Role
@@ -685,6 +725,13 @@ Resources:
           RUNNER_ASG_NAME: !Ref RunnerAutoScalingGroup
           RESULT_BUCKET: !Ref RunnerResultBucket
           NITRO_ENCLAVE_PROCESS_COMMAND: !Ref NitroEnclaveProcessCommand
+          RELAYER_NETWORK: !Ref RelayerNetwork
+          RELAYER_GRPC_URL: !Ref RelayerGrpcUrl
+          RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
+          RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
+          IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
+          SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
+          SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId
 
   RunnerStateMachine:
     Type: AWS::StepFunctions::StateMachine

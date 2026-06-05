@@ -18,8 +18,8 @@ Run completed at:
 
 AWS credentials present:
 World ID app/proof inputs present:
-Sui object IDs present:
-Sui submit signer configured:
+Sui registration config present:
+Sui registration signer configured:
 
 If any item is missing, stop and record the blocker here. credential absence
 means issue cannot be closed.
@@ -73,18 +73,15 @@ WorldIdAppId:
 WorldIdApiBase:
 ScheduleState:
 
-## Sui object IDs
+## Sui registration config
 
+IDENTITY_RELAYER_MODE:
 SONARI_IDENTITY_PACKAGE_ID:
-SONARI_IDENTITY_PAUSE_STATE_ID:
-SONARI_IDENTITY_REGISTRY_ID:
-SONARI_MEMBERSHIP_REGISTRY_ID:
 SONARI_VERIFIER_REGISTRY_ID:
-SONARI_MEMBERSHIP_PASS_ID:
-SONARI_SUI_CLOCK_ID:
 RELAYER_NETWORK:
 RELAYER_GRPC_URL:
-RELAYER_SENDER_ADDRESS:
+RELAYER_ALLOW_SUBMIT:
+RELAYER_SIGNER_SECRET_ARN:
 
 ## Verification log
 
@@ -92,22 +89,25 @@ Local unit tests:
 AWS deployment smoke:
 Nitro Enclave start:
 vsock-proxy World ID real API smoke:
-Sui dry-run:
-Sui submit:
+VerifierRegistry registration:
+TEE process_data:
 AWS idle cleanup (DesiredCapacity / InService / running EC2 / schedule):
 
-## Sui result
+## VerifierRegistry registration metadata
 
-Tx digest:
-Submit effects summary:
-Post-tx readback:
-Membership pass object id:
-Identity verified:
-Provider:
-Verified at:
-Expires at:
-Terms version:
-Signed statement hash:
+verifier_config_key:
+verifier_config_version:
+enclave_instance_public_key:
+
+## TEE result
+
+status:
+payload_bcs_hex (verified only):
+signature present (verified only):
+public_key present (verified only):
+signature absent (non-verified only):
+public_key absent (non-verified only):
+job tx_digest (TEE-only digest, not registration proof):
 
 ## Close-out
 

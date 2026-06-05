@@ -86,9 +86,8 @@ describe("membership identity AWS interface docs", () => {
             "SubmitVerification Lambda -> verification_jobs DynamoDB -> BatchVerifier Lambda -> Step Functions -> EC2 + Nitro",
         );
         expect(awsReadme).toContain("信頼境界");
-        expect(awsReadme).toContain("#74");
         expect(awsReadme).toContain("運用 runbook");
-        expect(awsReadme).toContain("Credential がない場合、この issue は close できません");
+        expect(awsReadme).toContain("real registration は確認できません");
         expect(awsReadme).toContain("worker は request 作成と状態管理");
         expect(awsReadme).toContain("TEE は検証、正規化、署名");
         expect(awsReadme).toContain("relayer は結果を配送するだけ");
@@ -167,8 +166,9 @@ describe("membership identity AWS interface docs", () => {
             "Sui testnet object",
             "既存 object を検出",
             "SUCCEEDED",
-            "Sui submit digest",
-            "MembershipPass readback",
+            "registration metadata に `verifier_config_key=2`",
+            "verified result に `payload_bcs_hex`",
+            "non-verified result に `signature`",
             "AWS idle cleanup",
             "DesiredCapacity=0",
             "KYC は MVP 外",
@@ -199,21 +199,22 @@ describe("membership identity AWS interface docs", () => {
             "encrypted signing material",
             "World ID app / proof input",
             "Stack parameter",
-            "Sui object ID",
+            "Sui registration config",
             "Local unit test",
             "AWS deployment smoke",
             "Nitro Enclave start",
             "vsock-proxy World ID real API smoke",
-            "Sui dry-run",
-            "Sui submit",
-            "Post-tx membership pass state readback",
-            "Credential がない場合、この issue は close できません",
+            "VerifierRegistry registration",
+            "TEE process_data",
+            "VerifierRegistry registration metadata",
+            "TEE result",
+            "real registration は確認できません",
             "Stack name:",
             "Artifact checksum:",
             "EIF identity:",
             "Public key:",
-            "Tx digest:",
-            "Post-tx readback:",
+            "payload_bcs_hex (verified only):",
+            "job tx_digest (TEE-only digest, not registration proof):",
         ]) {
             expect(combined).toContain(phrase);
         }
