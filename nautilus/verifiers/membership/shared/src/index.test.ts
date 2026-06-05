@@ -94,6 +94,14 @@ describe("IdentityVerificationResult", () => {
         );
     });
 
+    it("encodes every golden vector result to its payload hex", () => {
+        for (const vector of readIdentityResultVectors().vectors) {
+            expect(encodeIdentityVerificationResultBcsHex(vector.result), vector.case_id).toBe(
+                vector.payload_bcs_hex,
+            );
+        }
+    });
+
     it("rejects malformed contract-facing bytes", () => {
         expect(() =>
             encodeIdentityVerificationResultBcsHex({

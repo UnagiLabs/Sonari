@@ -59,7 +59,7 @@ fn bcs_golden_matches_typescript_reference() {
     assert_eq!(vectors.provider_enum.kyc, PROVIDER_KYC);
     assert_eq!(vectors.provider_enum.world_id, PROVIDER_WORLD_ID);
 
-    let vector = vectors
+    let world_id_success = vectors
         .vectors
         .iter()
         .find(|vector| vector.case_id == "world_id_success_v1")
@@ -70,17 +70,22 @@ fn bcs_golden_matches_typescript_reference() {
     .expect("world_id_success fixture should parse");
 
     assert_eq!(
-        vector.source_fixture,
+        world_id_success.source_fixture,
         "nautilus/verifiers/membership/fixtures/identity/world_id_success.json"
     );
-    assert_eq!(vector.result, fixture);
+    assert_eq!(world_id_success.result, fixture);
 
-    let encoded = payload_bcs_bytes(&vector.result).expect("identity payload BCS should encode");
+    for vector in vectors.vectors {
+        let encoded =
+            payload_bcs_bytes(&vector.result).expect("identity payload BCS should encode");
 
-    assert_eq!(
-        format!("0x{}", hex::encode(encoded)),
-        vector.payload_bcs_hex
-    );
+        assert_eq!(
+            format!("0x{}", hex::encode(encoded)),
+            vector.payload_bcs_hex,
+            "{} vector payload hex drifted from result fields",
+            vector.case_id
+        );
+    }
 }
 
 fn identity_result_vectors() -> IdentityResultVectors {
