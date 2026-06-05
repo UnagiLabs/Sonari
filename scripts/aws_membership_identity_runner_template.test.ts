@@ -182,6 +182,15 @@ describe("AWS membership identity runner CloudFormation template", () => {
 
     it("wires the attestation -> register -> process_data -> dry-run submission flow in the state machine", async () => {
         const template = await readFile(templatePath, "utf8");
+        const expectedActions = [
+            '"action": "dispatch_get_attestation_command"',
+            '"action": "read_attestation_result"',
+            '"action": "register_enclave_instance"',
+            '"action": "dispatch_process_data_command"',
+            '"action": "read_result"',
+            '"action": "dry_run_sui_submission"',
+            '"action": "apply_result"',
+        ];
 
         // FindReadyInstance now hands off to the attestation/register chain, not the legacy
         // single-shot dispatch_tee_command path.
@@ -189,20 +198,44 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain('"action": "dispatch_tee_command"');
 
         // attestation -> register(config_key=2) -> process_data(registration_metadata) wiring.
-        expect(template).toContain('"action": "dispatch_get_attestation_command"');
-        expect(template).toContain('"action": "read_attestation_result"');
-        expect(template).toContain('"action": "register_enclave_instance"');
+        for (const action of expectedActions) {
+            expect(template).toContain(action);
+        }
+        for (let index = 1; index < expectedActions.length; index += 1) {
+            const previousAction = expectedActions[index - 1];
+            const currentAction = expectedActions[index];
+            if (previousAction === undefined || currentAction === undefined) {
+                throw new Error("expected action sequence was malformed");
+            }
+            expect(template.indexOf(previousAction)).toBeLessThan(template.indexOf(currentAction));
+        }
         expect(template).toContain('"attestation.$": "$.attestation_result.attestation"');
-        expect(template).toContain('"action": "dispatch_process_data_command"');
         expect(template).toContain(
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
+        expect(template).toContain('"Next": "DryRunSuiSubmission"');
+        expect(template).toContain('"Default": "ApplyResult"');
+        expect(template).not.toContain('"action": "submit_sui_submission"');
+    });
 
-        // The dedicated runner owns the TEE server path only. Sui dry-run/submit
-        // requires separate relayer config and is intentionally not forced here.
-        expect(template).toContain('"action": "apply_result"');
-        expect(template).toContain('"Next": "StopInstance"');
-        expect(template).not.toContain('"Next": "SuiSubmissionChoice"');
-        expect(template).not.toContain('"action": "dry_run_sui_submission"');
+    it("passes membership identity dry-run object IDs to RunnerControlLambda", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("SonariIdentityPauseStateId:");
+        expect(template).toContain("SonariIdentityRegistryId:");
+        expect(template).toContain("SonariMembershipRegistryId:");
+        expect(template).toContain("SonariSuiClockId:");
+        expect(template).toContain("RelayerSenderAddress:");
+        expect(template).toContain("SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId");
+        expect(template).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId",
+        );
+        expect(template).toContain("SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId");
+        expect(template).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId",
+        );
+        expect(template).toContain("SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId");
+        expect(template).toContain("SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId");
+        expect(template).toContain("RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress");
     });
 });

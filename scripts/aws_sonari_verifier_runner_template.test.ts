@@ -245,6 +245,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             '"action": "register_enclave_instance"',
             '"action": "dispatch_process_data_command"',
             '"action": "read_result"',
+            '"action": "dry_run_sui_submission"',
             '"action": "apply_result"',
         ];
 
@@ -269,6 +270,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(membership).toContain(
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
+        expect(membership).toContain('"Next": "DryRunSuiSubmission"');
+        expect(membership).toContain('"Default": "ApplyResult"');
+        expect(membership).not.toContain('"action": "submit_sui_submission"');
     });
 
     it("keeps schedules disabled by default and uses that state for both schedules", async () => {

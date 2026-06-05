@@ -73,13 +73,18 @@ WorldIdAppId:
 WorldIdApiBase:
 ScheduleState:
 
-## Sui registration config
+## Sui dry-run / registration config
 
 IDENTITY_RELAYER_MODE:
 SONARI_IDENTITY_PACKAGE_ID:
+SONARI_IDENTITY_PAUSE_STATE_ID:
+SONARI_IDENTITY_REGISTRY_ID:
+SONARI_MEMBERSHIP_REGISTRY_ID:
 SONARI_VERIFIER_REGISTRY_ID:
+SONARI_SUI_CLOCK_ID:
 RELAYER_NETWORK:
 RELAYER_GRPC_URL:
+RELAYER_SENDER_ADDRESS:
 RELAYER_ALLOW_SUBMIT:
 RELAYER_SIGNER_SECRET_ARN:
 
@@ -91,6 +96,7 @@ Nitro Enclave start:
 vsock-proxy World ID real API smoke:
 VerifierRegistry registration:
 TEE process_data:
+Sui dry-run:
 AWS idle cleanup (DesiredCapacity / InService / running EC2 / schedule):
 
 ## VerifierRegistry registration metadata
@@ -107,6 +113,8 @@ signature present (verified only):
 public_key present (verified only):
 signature absent (non-verified only):
 public_key absent (non-verified only):
+sui_dry_run_completed_at_ms:
+sui_dry_run_result_json contains signed_payload / request / transaction_bytes / effects:
 job tx_digest (TEE-only digest, not registration proof):
 
 ## Close-out

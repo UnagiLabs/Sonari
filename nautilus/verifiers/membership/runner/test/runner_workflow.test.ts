@@ -935,7 +935,7 @@ describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => 
         }
     });
 
-    it("passes Sui registration env and signer secret access to RunnerControlLambda", async () => {
+    it("passes Sui dry-run, registration env, and signer secret access to RunnerControlLambda", async () => {
         const template = await readFile(
             new URL(
                 "../../../../../infra/aws/membership-identity-runner/template.yaml",
@@ -946,21 +946,33 @@ describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => 
 
         expect(template).toContain("IdentityRelayerMode:");
         expect(template).toContain("SonariIdentityPackageId:");
+        expect(template).toContain("SonariIdentityPauseStateId:");
+        expect(template).toContain("SonariIdentityRegistryId:");
+        expect(template).toContain("SonariMembershipRegistryId:");
         expect(template).toContain("SonariVerifierRegistryId:");
+        expect(template).toContain("SonariSuiClockId:");
         expect(template).toContain("RelayerGrpcUrl:");
+        expect(template).toContain("RelayerSenderAddress:");
         expect(template).toContain("RelayerAllowSubmit:");
         expect(template).toContain("RelayerSignerSecretArn:");
         expect(template).toContain("IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode");
         expect(template).toContain("SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId");
+        expect(template).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId",
+        );
+        expect(template).toContain("SONARI_IDENTITY_REGISTRY_ID: !Ref SonariIdentityRegistryId");
+        expect(template).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: !Ref SonariMembershipRegistryId",
+        );
         expect(template).toContain("SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId");
+        expect(template).toContain("SONARI_SUI_CLOCK_ID: !Ref SonariSuiClockId");
         expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
         expect(template).toContain("RELAYER_GRPC_URL: !Ref RelayerGrpcUrl");
+        expect(template).toContain("RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress");
         expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
         expect(template).toContain("RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn");
         expect(template).toContain("secretsmanager:GetSecretValue");
         expect(template).toContain("Resource: !Ref RelayerSignerSecretArn");
-        expect(template).not.toContain("SONARI_IDENTITY_PAUSE_STATE_ID:");
-        expect(template).not.toContain("SONARI_MEMBERSHIP_REGISTRY_ID:");
     });
 });
 

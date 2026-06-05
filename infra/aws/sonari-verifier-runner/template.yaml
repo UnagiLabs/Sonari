@@ -1607,8 +1607,22 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
-              "Next": "ApplyResult",
+              "Next": "DryRunSuiSubmission",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DryRunSuiSubmission": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dry_run_sui_submission", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "DryRunSuiSubmissionComplete",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
+            },
+            "DryRunSuiSubmissionComplete": {
+              "Type": "Choice",
+              "Choices": [
+                { "Variable": "$.sui_submission", "StringEquals": "failed", "Next": "StopInstance" }
+              ],
+              "Default": "ApplyResult"
             },
             "ApplyResult": {
               "Type": "Task",
