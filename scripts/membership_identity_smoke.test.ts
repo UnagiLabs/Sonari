@@ -1,10 +1,29 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
     type MembershipIdentitySmokeOutput,
     runMembershipIdentitySmoke,
 } from "./membership_identity_smoke.js";
+
+interface IdentityResultVectors {
+    readonly vectors: readonly IdentityResultVector[];
+    readonly not_signable_cases: readonly IdentityResultNotSignableCase[];
+}
+
+interface IdentityResultVector {
+    readonly case_id: string;
+    readonly source_fixture: string;
+    readonly payload_bcs_hex: string;
+}
+
+interface IdentityResultNotSignableCase {
+    readonly case_id: string;
+    readonly source_fixture: string;
+    readonly verified: false;
+    readonly must_not_include: readonly string[];
+}
 
 describe("membership identity smoke", () => {
     let output: MembershipIdentitySmokeOutput;
@@ -104,7 +123,54 @@ describe("membership identity smoke", () => {
             });
         }
     }, 60_000);
+
+    it("anchors the World ID smoke payload to the golden vector", () => {
+        const vector = readIdentityResultVector("world_id_success_v1");
+        const smokeCase = output.cases.find((candidate) => candidate.name === "world_id_success");
+        if (smokeCase?.verified !== true) {
+            throw new Error("world_id_success smoke case is not verified");
+        }
+
+        expect(vector.source_fixture).toBe(
+            "nautilus/verifiers/membership/fixtures/identity/world_id_success.json",
+        );
+        expect(smokeCase.payload_bcs_hex).toBe(vector.payload_bcs_hex);
+        expect(smokeCase.ts_payload_bcs_hex).toBe(vector.payload_bcs_hex);
+        expect(smokeCase.rust_payload_bcs_hex).toBe(vector.payload_bcs_hex);
+    });
+
+    it("tracks reject fixtures as non-signable vector cases", () => {
+        const nonSignableCases = readIdentityResultVectors().not_signable_cases;
+
+        expect(nonSignableCases).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    case_id: "world_id_reject_v1",
+                    source_fixture:
+                        "nautilus/verifiers/membership/fixtures/identity/world_id_reject.json",
+                    verified: false,
+                    must_not_include: ["payload_bcs_hex", "signature", "public_key"],
+                }),
+            ]),
+        );
+    });
 });
+
+function readIdentityResultVector(caseId: string): IdentityResultVector {
+    const vector = readIdentityResultVectors().vectors.find(
+        (candidate) => candidate.case_id === caseId,
+    );
+    if (vector === undefined) {
+        throw new Error(`Missing identity result vector: ${caseId}`);
+    }
+    return vector;
+}
+
+function readIdentityResultVectors(): IdentityResultVectors {
+    return JSON.parse(
+        readFileSync("schemas/examples/identity_result_vectors.json", "utf8"),
+    ) as IdentityResultVectors;
+}
 
 async function runMembershipTeeEncodeOnly(input: string): Promise<{
     readonly code: number | null;
