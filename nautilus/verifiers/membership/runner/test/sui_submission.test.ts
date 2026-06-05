@@ -6,6 +6,7 @@ import {
     type IdentityVerificationSubmitClient,
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitTransaction,
+    parseMembershipPassReadback,
     SuiEnclaveRegistrationAdapter,
     type SuiEnclaveRegistrationClient,
     type SuiEnclaveRegistrationConfig,
@@ -183,7 +184,7 @@ describe("membership identity Sui submission", () => {
         );
 
         await expect(
-            submitIdentityVerificationPayload(verifiedResult(), {
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -197,7 +198,7 @@ describe("membership identity Sui submission", () => {
         });
 
         await expect(
-            submitIdentityVerificationPayload(verifiedResult(), {
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -210,7 +211,7 @@ describe("membership identity Sui submission", () => {
         });
 
         await expect(
-            submitIdentityVerificationPayload(verifiedResult(), {
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -223,8 +224,166 @@ describe("membership identity Sui submission", () => {
             ok: true,
             value: {
                 digest: "submit-digest",
+                readback: {
+                    identityVerified: true,
+                    objectId: `0x${"55".repeat(32)}`,
+                },
             },
         });
+    });
+
+    it("fails closed when configured sender address does not match the submit signer", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+        let signAndExecuteCalls = 0;
+        const client = fakeClient({
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalls += 1;
+                return successfulTransaction("submit-digest");
+            },
+        });
+
+        await expect(
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                senderAddress: "0xsender",
+                allowSubmit: true,
+                signer,
+                client,
+                transaction: {},
+            }),
+        ).resolves.toEqual({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Signer address does not match RELAYER_SENDER_ADDRESS",
+        });
+        expect(signAndExecuteCalls).toBe(0);
+    });
+
+    it("fails closed when submit readback is missing or stale", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+        let signAndExecuteCalls = 0;
+        const client = fakeClient({
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalls += 1;
+                return successfulTransaction("submit-digest");
+            },
+            getObject: async () =>
+                membershipPassReadback(verifiedIdentityResult(), {
+                    identity_verified_at_ms: 1,
+                }),
+        });
+
+        await expect(
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                allowSubmit: true,
+                signer,
+                client,
+                transaction: {},
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "MembershipPass readback verified timestamp does not match payload",
+        });
+        expect(signAndExecuteCalls).toBe(1);
+    });
+
+    it("keeps the submit digest when post-submit readback RPC throws", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+        const client = fakeClient({
+            signAndExecuteTransaction: async () => successfulTransaction("submit-digest"),
+            getObject: async () => {
+                throw new Error("Sui object read failed");
+            },
+        });
+
+        await expect(
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                allowSubmit: true,
+                signer,
+                client,
+                transaction: {},
+            }),
+        ).resolves.toEqual({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Sui object read failed",
+            digest: "submit-digest",
+        });
+    });
+
+    it("parses MembershipPass readback only when it reflects the submitted identity payload", () => {
+        const expected = verifiedIdentityResult();
+        const readback = membershipPassReadback(expected);
+
+        expect(parseMembershipPassReadback(readback, expected, packageId)).toEqual({
+            ok: true,
+            value: {
+                objectId: expected.membership_id,
+                identityVerified: true,
+                identityProviderMask: 2,
+                identityVerifiedAtMs: expected.issued_at_ms,
+                identityExpiresAtMs: expected.expires_at_ms,
+                termsVersion: expected.terms_version,
+                signedStatementHash: expected.signed_statement_hash,
+            },
+        });
+    });
+
+    it("rejects MembershipPass readback that is wrong, stale, or not updated by the payload", () => {
+        const expected = verifiedIdentityResult();
+        const valid = membershipPassReadback(expected);
+
+        const cases: ReadonlyArray<readonly [string, unknown]> = [
+            ["object id", { ...valid, data: { ...valid.data, objectId: `0x${"99".repeat(32)}` } }],
+            [
+                "type",
+                { ...valid, data: { ...valid.data, type: `${packageId}::membership::Other` } },
+            ],
+            ["verified flag", membershipPassReadback(expected, { identity_verified: false })],
+            ["provider mask", membershipPassReadback(expected, { identity_provider_mask: 1 })],
+            [
+                "verified timestamp",
+                membershipPassReadback(expected, {
+                    identity_verified_at_ms: expected.issued_at_ms - 1,
+                }),
+            ],
+            [
+                "expiry timestamp",
+                membershipPassReadback(expected, {
+                    identity_expires_at_ms: expected.expires_at_ms + 1,
+                }),
+            ],
+            [
+                "terms version",
+                membershipPassReadback(expected, { terms_version: expected.terms_version + 1 }),
+            ],
+            [
+                "signed statement hash",
+                membershipPassReadback(expected, { signed_statement_hash: `0x${"98".repeat(32)}` }),
+            ],
+        ];
+
+        for (const [name, readback] of cases) {
+            expect(parseMembershipPassReadback(readback, expected, packageId), name).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_SUBMIT_FAILED",
+            });
+        }
     });
 });
 
@@ -559,6 +718,53 @@ function verifiedResult(): Record<string, unknown> {
     };
 }
 
+function verifiedIdentityResult() {
+    return {
+        status: "verified" as const,
+        payload_bcs_hex: "0x010203",
+        signature: `0x${"11".repeat(64)}`,
+        public_key: `0x${"22".repeat(32)}`,
+        intent: "SONARI_IDENTITY_VERIFICATION_V1",
+        verifier_family: "identity" as const,
+        verifier_version: 1,
+        registry_id: `0x${"44".repeat(32)}`,
+        membership_id: `0x${"55".repeat(32)}`,
+        owner: `0x${"66".repeat(32)}`,
+        provider: "world_id" as const,
+        verified: true,
+        duplicate_key_hash: `0x${"77".repeat(32)}`,
+        evidence_hash: `0x${"88".repeat(32)}`,
+        issued_at_ms: 1_900_000_000_000,
+        expires_at_ms: 1_931_536_000_000,
+        terms_version: 1,
+        signed_statement_hash: `0x${"99".repeat(32)}`,
+    };
+}
+
+function membershipPassReadback(
+    expected: ReturnType<typeof verifiedIdentityResult>,
+    overrides: Record<string, unknown> = {},
+) {
+    const fields = {
+        identity_verified: true,
+        identity_provider_mask: 2,
+        identity_verified_at_ms: String(expected.issued_at_ms),
+        identity_expires_at_ms: String(expected.expires_at_ms),
+        terms_version: String(expected.terms_version),
+        signed_statement_hash: Array.from(
+            Buffer.from(expected.signed_statement_hash.slice(2), "hex"),
+        ),
+        ...overrides,
+    };
+    return {
+        data: {
+            objectId: expected.membership_id,
+            type: `${packageId}::membership::MembershipPass`,
+            content: { fields },
+        },
+    };
+}
+
 function fakeTransaction(bytes: Uint8Array): IdentityVerificationSubmitTransaction {
     return {
         build: async () => bytes,
@@ -573,6 +779,17 @@ function fakeClient(
             methods.simulateTransaction ?? (async () => successfulTransaction("dry")),
         signAndExecuteTransaction:
             methods.signAndExecuteTransaction ?? (async () => successfulTransaction("submit")),
+        waitForTransaction:
+            methods.waitForTransaction ?? (async () => successfulTransaction("wait")),
+        getObject:
+            methods.getObject ??
+            (async () => ({
+                object: {
+                    objectId: `0x${"55".repeat(32)}`,
+                    type: `${packageId}::membership::MembershipPass`,
+                    json: membershipPassReadback(verifiedIdentityResult()).data.content.fields,
+                },
+            })),
     };
 }
 

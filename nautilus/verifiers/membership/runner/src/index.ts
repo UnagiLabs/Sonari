@@ -85,6 +85,7 @@ export interface VerificationJobRepository {
     ): Promise<boolean>;
     markFailed(jobId: string, nowMs: number, errorCode: string, message?: string): Promise<boolean>;
     markSuiDryRunSucceeded(jobId: string, nowMs: number, resultJson: string): Promise<boolean>;
+    recordSuiSubmitDigest(jobId: string, nowMs: number, txDigest: string): Promise<boolean>;
     markCompleted(jobId: string, nowMs: number, txDigest: string): Promise<boolean>;
 }
 
@@ -357,6 +358,19 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
         return true;
     }
 
+    async recordSuiSubmitDigest(jobId: string, nowMs: number, txDigest: string): Promise<boolean> {
+        const row = this.rowsByJobId.get(jobId);
+        if (row === undefined || row.status === "completed") {
+            return false;
+        }
+        this.rowsByJobId.set(jobId, {
+            ...row,
+            tx_digest: row.tx_digest ?? txDigest,
+            updated_at_ms: nowMs,
+        });
+        return true;
+    }
+
     async markCompleted(jobId: string, nowMs: number, txDigest: string): Promise<boolean> {
         const row = this.rowsByJobId.get(jobId);
         if (row === undefined) {
@@ -592,6 +606,32 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
                     ExpressionAttributeValues: {
                         ":processing": "processing",
                         ":result_json": resultJson,
+                        ":now_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return false;
+            }
+            throw error;
+        }
+        return true;
+    }
+
+    async recordSuiSubmitDigest(jobId: string, nowMs: number, txDigest: string): Promise<boolean> {
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { job_id: jobId },
+                    ConditionExpression: "attribute_exists(job_id) AND #status <> :completed",
+                    UpdateExpression:
+                        "SET tx_digest = if_not_exists(tx_digest, :tx_digest), updated_at_ms = :now_ms",
+                    ExpressionAttributeNames: { "#status": "status" },
+                    ExpressionAttributeValues: {
+                        ":completed": "completed",
+                        ":tx_digest": txDigest,
                         ":now_ms": nowMs,
                     },
                 }),

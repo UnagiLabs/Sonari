@@ -126,7 +126,7 @@ export interface SuiSubmissionAdapter {
         result: SignedIdentityPayloadForRelayer,
     ): Promise<IdentityVerificationSuiResult<IdentityVerificationDryRunSuccess>>;
     submit(
-        result: SignedIdentityPayloadForRelayer,
+        result: VerifiedMembershipTeeResult,
     ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>>;
 }
 
@@ -135,6 +135,13 @@ export interface SuiDryRunHandoffRecord {
     readonly request: IdentityVerificationDryRunSuccess["request"];
     readonly transaction_bytes: number[];
     readonly effects: Record<string, unknown>;
+    readonly submit_context?: SuiDryRunSubmitContext | undefined;
+}
+
+export interface SuiDryRunSubmitContext {
+    readonly network: SuiNetwork;
+    readonly grpc_url: string;
+    readonly sender_address: string;
 }
 
 export const MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY = 2;
@@ -304,6 +311,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               sui_submission: "skipped" | "succeeded" | "failed";
               result: MembershipTeeResult;
               tx_digest?: string | undefined;
+              readback?: IdentityVerificationSubmitSuccess["readback"] | undefined;
           }
         | { job_id: string; attempt?: number | undefined; failed: true }
     );
@@ -605,7 +613,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     const updated = await repository.markSuiDryRunSucceeded(
                         event.job_id,
                         nowMs,
-                        JSON.stringify(suiDryRunHandoffRecord(signedPayload, result.value)),
+                        JSON.stringify(
+                            suiDryRunHandoffRecord(
+                                signedPayload,
+                                result.value,
+                                options.config.suiSubmission,
+                            ),
+                        ),
                     );
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
@@ -632,7 +646,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 });
             }
             case "submit_sui_submission": {
-                await requireCurrentWorkflowAttempt(options, event, true);
+                const row = await requireCurrentWorkflowAttempt(options, event, true);
                 if (event.result.status !== "verified") {
                     return retainVerifierKind({
                         job_id: event.job_id,
@@ -644,6 +658,26 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
                 const submitter = options.suiSubmission ?? buildSuiSubmissionFromConfig(options);
+                const handoff = readSuiDryRunHandoff(
+                    row,
+                    event.result,
+                    options.config.suiSubmission,
+                );
+                if (!handoff.ok) {
+                    await markSuiSubmissionFailed(
+                        repository,
+                        event,
+                        nowMs,
+                        handoff.error_code,
+                        handoff.message,
+                    );
+                    return retainVerifierKind({
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        sui_submission: "failed",
+                        result: event.result,
+                    });
+                }
                 if (submitter === undefined) {
                     await markSuiSubmissionFailed(
                         repository,
@@ -659,8 +693,18 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         result: event.result,
                     });
                 }
-                const result = await submitter.submit(signedPayloadForRelayer(event.result));
+                const result = await submitter.submit(event.result);
                 if (!result.ok) {
+                    if (result.digest !== undefined) {
+                        const digestUpdated = await repository.recordSuiSubmitDigest(
+                            event.job_id,
+                            nowMs,
+                            result.digest,
+                        );
+                        if (!digestUpdated) {
+                            throw new Error("stale runner workflow attempt");
+                        }
+                    }
                     await markSuiSubmissionFailed(
                         repository,
                         event,
@@ -673,6 +717,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         attempt: event.attempt,
                         sui_submission: "failed",
                         result: event.result,
+                        ...(result.digest === undefined ? {} : { tx_digest: result.digest }),
                     });
                 }
                 const updated = await repository.markCompleted(
@@ -683,13 +728,14 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!updated) {
                     throw new Error("stale runner workflow attempt");
                 }
-                const row = await repository.get(event.job_id);
+                const completedRow = await repository.get(event.job_id);
                 return retainVerifierKind({
                     job_id: event.job_id,
                     attempt: event.attempt,
                     sui_submission: "succeeded",
                     result: event.result,
-                    tx_digest: row?.tx_digest ?? result.value.digest,
+                    tx_digest: completedRow?.tx_digest ?? result.value.digest,
+                    readback: result.value.readback,
                 });
             }
             case "mark_failed": {
@@ -1143,7 +1189,7 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
     }
 
     async submit(
-        result: SignedIdentityPayloadForRelayer,
+        result: VerifiedMembershipTeeResult,
     ): Promise<IdentityVerificationSuiResult<IdentityVerificationSubmitSuccess>> {
         if (this.config.configurationError !== undefined) {
             return relayerSubmitFailed(this.config.configurationError);
@@ -1197,13 +1243,328 @@ function signedPayloadForRelayer(
 function suiDryRunHandoffRecord(
     signedPayload: SignedIdentityPayloadForRelayer,
     dryRun: IdentityVerificationDryRunSuccess,
+    config: RunnerSuiSubmissionConfig | undefined,
 ): SuiDryRunHandoffRecord {
+    const submitContext = buildSuiDryRunSubmitContext(config);
     return {
         signed_payload: signedPayload,
         request: dryRun.request,
         transaction_bytes: dryRun.transactionBytes,
         effects: dryRun.effects,
+        ...(submitContext === undefined ? {} : { submit_context: submitContext }),
     };
+}
+
+function readSuiDryRunHandoff(
+    row: VerificationJobRow,
+    result: VerifiedMembershipTeeResult,
+    config: RunnerSuiSubmissionConfig | undefined,
+): IdentityVerificationSuiResult<SuiDryRunHandoffRecord> {
+    if (row.sui_dry_run_result_json === null) {
+        return relayerSubmitFailed("Sui dry-run handoff is required before submit");
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(row.sui_dry_run_result_json);
+    } catch {
+        return relayerSubmitFailed("Stored Sui dry-run handoff is malformed");
+    }
+    if (!isRecord(parsed)) {
+        return relayerSubmitFailed("Stored Sui dry-run handoff must be an object");
+    }
+    const signedPayload = readStoredSignedPayload(parsed.signed_payload);
+    if (!signedPayload.ok) {
+        return signedPayload;
+    }
+    const expectedSignedPayload = signedPayloadForRelayer(result);
+    if (!sameSignedPayload(signedPayload.value, expectedSignedPayload)) {
+        return relayerSubmitFailed("Stored Sui dry-run handoff does not match verified payload");
+    }
+    const request = readStoredSuiRequest(parsed.request);
+    if (!request.ok) {
+        return request;
+    }
+    const requestMatch = validateStoredSuiRequest(request.value, expectedSignedPayload, config);
+    if (!requestMatch.ok) {
+        return requestMatch;
+    }
+    const submitContext = validateStoredSuiSubmitContext(parsed.submit_context, config);
+    if (!submitContext.ok) {
+        return submitContext;
+    }
+    const transactionBytes = readNumberArray(parsed.transaction_bytes, "transaction_bytes");
+    if (!transactionBytes.ok) {
+        return transactionBytes;
+    }
+    if (!isRecord(parsed.effects)) {
+        return relayerSubmitFailed("Stored Sui dry-run handoff effects must be an object");
+    }
+    return {
+        ok: true,
+        value: {
+            signed_payload: signedPayload.value,
+            request: request.value,
+            transaction_bytes: transactionBytes.value,
+            effects: parsed.effects,
+            ...(submitContext.value === undefined ? {} : { submit_context: submitContext.value }),
+        },
+    };
+}
+
+function readStoredSignedPayload(
+    input: unknown,
+): IdentityVerificationSuiResult<SignedIdentityPayloadForRelayer> {
+    if (!isRecord(input)) {
+        return relayerSubmitFailed("Stored Sui dry-run handoff signed_payload must be an object");
+    }
+    try {
+        return {
+            ok: true,
+            value: {
+                status: "verified",
+                payload_bcs_hex: parseHex(input.payload_bcs_hex, "signed_payload.payload_bcs_hex"),
+                signature: parseFixedHex(input.signature, "signed_payload.signature", 64),
+                public_key: parseFixedHex(input.public_key, "signed_payload.public_key", 32),
+                membership_id: parseHex32(input.membership_id, "signed_payload.membership_id"),
+            },
+        };
+    } catch (error) {
+        return relayerSubmitFailed(errorMessage(error));
+    }
+}
+
+function readStoredSuiRequest(
+    input: unknown,
+): IdentityVerificationSuiResult<IdentityVerificationDryRunSuccess["request"]> {
+    if (!isRecord(input)) {
+        return relayerSubmitFailed("Stored Sui dry-run handoff request must be an object");
+    }
+    try {
+        return {
+            ok: true,
+            value: {
+                target: parseString(input.target, "request.target"),
+                packageId: parseString(input.packageId, "request.packageId"),
+                pauseStateId: parseString(input.pauseStateId, "request.pauseStateId"),
+                identityRegistryId: parseString(
+                    input.identityRegistryId,
+                    "request.identityRegistryId",
+                ),
+                membershipRegistryId: parseString(
+                    input.membershipRegistryId,
+                    "request.membershipRegistryId",
+                ),
+                verifierRegistryId: parseString(
+                    input.verifierRegistryId,
+                    "request.verifierRegistryId",
+                ),
+                membershipPassId: parseHex32(input.membershipPassId, "request.membershipPassId"),
+                clockId: parseString(input.clockId, "request.clockId"),
+                arguments: readStoredSuiRequestArguments(input.arguments),
+            },
+        };
+    } catch (error) {
+        return relayerSubmitFailed(errorMessage(error));
+    }
+}
+
+function readStoredSuiRequestArguments(
+    input: unknown,
+): IdentityVerificationDryRunSuccess["request"]["arguments"] {
+    if (!Array.isArray(input) || input.length !== 9) {
+        throw new Error("request.arguments must contain 9 items");
+    }
+    return [
+        parseString(input[0], "request.arguments[0]"),
+        parseString(input[1], "request.arguments[1]"),
+        parseString(input[2], "request.arguments[2]"),
+        parseString(input[3], "request.arguments[3]"),
+        parseHex32(input[4], "request.arguments[4]"),
+        parseString(input[5], "request.arguments[5]"),
+        readNumberArrayOrThrow(input[6], "request.arguments[6]"),
+        readNumberArrayOrThrow(input[7], "request.arguments[7]"),
+        readNumberArrayOrThrow(input[8], "request.arguments[8]"),
+    ];
+}
+
+function validateStoredSuiRequest(
+    request: IdentityVerificationDryRunSuccess["request"],
+    signedPayload: SignedIdentityPayloadForRelayer,
+    config: RunnerSuiSubmissionConfig | undefined,
+): IdentityVerificationSuiResult<true> {
+    if (config !== undefined) {
+        const configMatch = validateStoredSuiRequestConfig(request, config);
+        if (!configMatch.ok) {
+            return configMatch;
+        }
+    }
+    if (
+        request.membershipPassId !== signedPayload.membership_id ||
+        request.arguments[4] !== signedPayload.membership_id
+    ) {
+        return relayerSubmitFailed(
+            "Stored Sui dry-run request membership id does not match payload",
+        );
+    }
+    if (!sameNumberArray(request.arguments[6], hexToBytes(signedPayload.payload_bcs_hex))) {
+        return relayerSubmitFailed("Stored Sui dry-run request payload bytes do not match payload");
+    }
+    if (!sameNumberArray(request.arguments[7], hexToBytes(signedPayload.signature))) {
+        return relayerSubmitFailed(
+            "Stored Sui dry-run request signature bytes do not match payload",
+        );
+    }
+    if (!sameNumberArray(request.arguments[8], hexToBytes(signedPayload.public_key))) {
+        return relayerSubmitFailed(
+            "Stored Sui dry-run request public key bytes do not match payload",
+        );
+    }
+    return { ok: true, value: true };
+}
+
+function validateStoredSuiRequestConfig(
+    request: IdentityVerificationDryRunSuccess["request"],
+    config: RunnerSuiSubmissionConfig,
+): IdentityVerificationSuiResult<true> {
+    const expectedTarget = `${config.packageId}::accessor::update_identity_verification`;
+    const checks: ReadonlyArray<readonly [string, string, string]> = [
+        ["target", request.target, expectedTarget],
+        ["packageId", request.packageId, config.packageId],
+        ["pauseStateId", request.pauseStateId, config.pauseStateId],
+        ["identityRegistryId", request.identityRegistryId, config.identityRegistryId],
+        ["membershipRegistryId", request.membershipRegistryId, config.membershipRegistryId],
+        ["verifierRegistryId", request.verifierRegistryId, config.verifierRegistryId],
+        ["clockId", request.clockId, config.clockId],
+        ["arguments[0]", request.arguments[0], config.pauseStateId],
+        ["arguments[1]", request.arguments[1], config.identityRegistryId],
+        ["arguments[2]", request.arguments[2], config.membershipRegistryId],
+        ["arguments[3]", request.arguments[3], config.verifierRegistryId],
+        ["arguments[5]", request.arguments[5], config.clockId],
+    ];
+    for (const [field, actual, expected] of checks) {
+        if (actual !== expected) {
+            return relayerSubmitFailed(
+                `Stored Sui dry-run request ${field} does not match submit config`,
+            );
+        }
+    }
+    return { ok: true, value: true };
+}
+
+function buildSuiDryRunSubmitContext(
+    config: RunnerSuiSubmissionConfig | undefined,
+): SuiDryRunSubmitContext | undefined {
+    if (
+        config === undefined ||
+        config.network === undefined ||
+        config.grpcUrl === undefined ||
+        config.senderAddress === undefined
+    ) {
+        return undefined;
+    }
+    return {
+        network: config.network,
+        grpc_url: config.grpcUrl,
+        sender_address: config.senderAddress,
+    };
+}
+
+function validateStoredSuiSubmitContext(
+    input: unknown,
+    config: RunnerSuiSubmissionConfig | undefined,
+): IdentityVerificationSuiResult<SuiDryRunSubmitContext | undefined> {
+    if (config === undefined) {
+        return { ok: true, value: undefined };
+    }
+    const expected = buildSuiDryRunSubmitContext(config);
+    if (expected === undefined) {
+        return relayerSubmitFailed(
+            "Sui submission config missing network, grpcUrl, or senderAddress for dry-run handoff validation",
+        );
+    }
+    const stored = readStoredSuiSubmitContext(input);
+    if (!stored.ok) {
+        return stored;
+    }
+    const checks: ReadonlyArray<readonly [string, string, string]> = [
+        ["network", stored.value.network, expected.network],
+        ["grpcUrl", stored.value.grpc_url, expected.grpc_url],
+        ["senderAddress", stored.value.sender_address, expected.sender_address],
+    ];
+    for (const [field, actual, expectedValue] of checks) {
+        if (actual !== expectedValue) {
+            return relayerSubmitFailed(
+                `Stored Sui dry-run submit_context ${field} does not match submit config`,
+            );
+        }
+    }
+    return { ok: true, value: stored.value };
+}
+
+function readStoredSuiSubmitContext(
+    input: unknown,
+): IdentityVerificationSuiResult<SuiDryRunSubmitContext> {
+    if (!isRecord(input)) {
+        return relayerSubmitFailed(
+            "Stored Sui dry-run handoff submit_context is required before submit",
+        );
+    }
+    try {
+        const network = parseString(input.network, "submit_context.network");
+        const parsedNetwork = readSuiNetwork(network);
+        if (parsedNetwork === undefined) {
+            throw new Error("submit_context.network must be mainnet, testnet, or devnet");
+        }
+        return {
+            ok: true,
+            value: {
+                network: parsedNetwork,
+                grpc_url: parseString(input.grpc_url, "submit_context.grpc_url"),
+                sender_address: parseString(input.sender_address, "submit_context.sender_address"),
+            },
+        };
+    } catch (error) {
+        return relayerSubmitFailed(errorMessage(error));
+    }
+}
+
+function sameSignedPayload(
+    left: SignedIdentityPayloadForRelayer,
+    right: SignedIdentityPayloadForRelayer,
+): boolean {
+    return (
+        left.status === right.status &&
+        left.payload_bcs_hex === right.payload_bcs_hex &&
+        left.signature === right.signature &&
+        left.public_key === right.public_key &&
+        left.membership_id === right.membership_id
+    );
+}
+
+function readNumberArray(input: unknown, field: string): IdentityVerificationSuiResult<number[]> {
+    try {
+        return { ok: true, value: readNumberArrayOrThrow(input, field) };
+    } catch (error) {
+        return relayerSubmitFailed(errorMessage(error));
+    }
+}
+
+function readNumberArrayOrThrow(input: unknown, field: string): number[] {
+    if (
+        !Array.isArray(input) ||
+        !input.every((value) => Number.isInteger(value) && value >= 0 && value <= 0xff)
+    ) {
+        throw new Error(`${field} must be a byte array`);
+    }
+    return [...input] as number[];
+}
+
+function sameNumberArray(left: readonly number[], right: readonly number[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function hexToBytes(value: string): number[] {
+    return Array.from(Buffer.from(value.slice(2), "hex"));
 }
 
 function buildSuiSubmissionFromConfig(
@@ -1365,6 +1726,10 @@ async function markSuiSubmissionFailed(
 
 function relayerSubmitFailed<T = never>(message: string): IdentityVerificationSuiResult<T> {
     return { ok: false, error_code: "RELAYER_SUBMIT_FAILED", message };
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
 }
 
 function appendConfigurationError(existing: string | undefined, next: string): string {

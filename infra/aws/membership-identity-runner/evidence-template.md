@@ -1,6 +1,6 @@
 # Membership identity AWS runner evidence
 
-Use this template for issue #74 live verification. Leave secrets, raw proof
+Use this template for issue #156 live verification. Leave secrets, raw proof
 body, signing seed plaintext, and private keys out of this file.
 
 ## Run identity
@@ -97,6 +97,7 @@ vsock-proxy World ID real API smoke:
 VerifierRegistry registration:
 TEE process_data:
 Sui dry-run:
+Sui submit / MembershipPass readback:
 AWS idle cleanup (DesiredCapacity / InService / running EC2 / schedule):
 
 ## VerifierRegistry registration metadata
@@ -117,7 +118,20 @@ sui_dry_run_completed_at_ms:
 sui_dry_run_result_json contains signed_payload / request / transaction_bytes / effects:
 job tx_digest (TEE-only digest, not registration proof):
 
+## Sui submit / MembershipPass readback
+
+tx_digest:
+readback_status:
+membership_pass_object_id:
+identity_verified:
+identity_provider_mask:
+identity_verified_at_ms:
+identity_expires_at_ms:
+terms_version:
+signed_statement_hash:
+readback_failure_tx_digest:
+
 ## Close-out
 
-Issue #74 DoD met:
+Issue #156 DoD met:
 Remaining blockers:

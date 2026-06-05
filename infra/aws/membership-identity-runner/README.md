@@ -225,7 +225,7 @@ AWS deployment には、少なくとも次の stack parameter が必要です。
 
 Launch template の user data は、AWS Nitro Enclaves allocator の `/etc/nitro_enclaves/allocator.yaml` を `NitroEnclaveCpuCount` / `NitroEnclaveMemoryMiB` に合わせて更新し、`nitro-enclaves-allocator.service` を restart します。`nitro-cli run-enclave --memory` より小さい hugepage 予約で instance を起動してはいけません。
 
-### Sui dry-run / registration config
+### Sui dry-run / submit / registration config
 
 MembershipPass の identity payload dry-run には次が必要です。
 dry-run は Sui に transaction を submit しません。
@@ -242,17 +242,24 @@ dry-run は Sui に transaction を submit しません。
 - `RELAYER_GRPC_URL`
 - `RELAYER_SENDER_ADDRESS`
 
-VerifierRegistry への enclave registration には追加で次が必要です。
-registration は real submit です。
-dry-run だけでは登録済み enclave metadata を作れません。
+MembershipPass への本 submit と readback には追加で次が必要です。
+submit は real transaction です。
+dry-run 成功後だけ submit へ進みます。
 
 - `IDENTITY_RELAYER_MODE=submit`
 - `RELAYER_ALLOW_SUBMIT=true`
 - `RELAYER_SIGNER_SECRET_ARN`
 
-本番 submit と MembershipPass readback は #155 の範囲外です。
+VerifierRegistry への enclave registration も同じ submit 設定を使います。
+registration は real submit です。
+dry-run だけでは登録済み enclave metadata を作れません。
+
 dry-run 成功時は signed payload、Sui request、transaction bytes、effects を
 verification job row に保存します。
+submit 成功時は tx digest を job row に保存します。
+その後、同じ Sui network から MembershipPass を読み戻します。
+readback が submitted payload と一致した場合だけ completed にします。
+readback が失敗した場合も tx digest は保存し、job は failed にします。
 
 ## 運用 runbook
 
@@ -351,7 +358,7 @@ Real World ID request を submit し、enclave が vsock-proxy 経由でのみ W
 - verified output の public key
 - sanitized CloudWatch log location
 
-### 7. VerifierRegistry registration、TEE result、Sui dry-run
+### 7. VerifierRegistry registration、TEE result、Sui submit
 
 この dedicated stack は `membership-tee server` の attestation、World ID verification、`/process_data` envelope を確認する runner です。
 default / dry-run smoke では、runner は envelope 用の local registration metadata を使います。
@@ -362,6 +369,8 @@ TEE-only completion では `tee-result:<sha256>` の digest が job に残りま
 verified result では、runner は `accessor::update_identity_verification` の dry-run を実行します。
 dry-run が失敗した場合、job は failed になり、`apply_result` には進みません。
 dry-run が成功した場合、job row に `sui_dry_run_result_json` と `sui_dry_run_completed_at_ms` が残ります。
+`IDENTITY_RELAYER_MODE=submit` では、runner は保存済み dry-run handoff と verified result を照合してから submit します。
+submit 後は MembershipPass を readback し、submitted payload の反映を確認します。
 testnet 一気通貫の成功条件は、後述の「dummy World ID + Sui testnet 一気通貫 smoke」にまとめます。
 
 記録するもの:
@@ -376,21 +385,14 @@ testnet 一気通貫の成功条件は、後述の「dummy World ID + Sui testne
 - dry-run result の `sui_dry_run_completed_at_ms`
 - dry-run result の signed payload / request / transaction bytes
 - dry-run failure が job failed になったこと
-
-### 8. Post-tx membership pass state readback（#155 範囲外）
-
-Tx digest が finalized された後、同じ Sui network から `SONARI_MEMBERSHIP_PASS_ID` を読みます。Membership pass の identity verification field が submit した verified payload を反映していることを確認します。
-
-記録するもの:
-
-- membership pass object id
-- identity verified flag
-- provider mask または provider field
-- verified / expires timestamp
-- terms version
-- signed statement hash
-
-この readback は #155 の範囲外です。
+- submit result の `tx_digest`
+- readback の membership pass object id
+- readback の identity verified flag
+- readback の provider mask
+- readback の verified / expires timestamp
+- readback の terms version
+- readback の signed statement hash
+- readback failure でも tx digest が job row に残ること
 
 ## dummy World ID + Sui testnet 一気通貫 smoke
 

@@ -189,6 +189,7 @@ describe("AWS membership identity runner CloudFormation template", () => {
             '"action": "dispatch_process_data_command"',
             '"action": "read_result"',
             '"action": "dry_run_sui_submission"',
+            '"action": "submit_sui_submission"',
             '"action": "apply_result"',
         ];
 
@@ -214,8 +215,9 @@ describe("AWS membership identity runner CloudFormation template", () => {
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
         expect(template).toContain('"Next": "DryRunSuiSubmission"');
+        expect(template).toContain('"Next": "SubmitSuiSubmission"');
         expect(template).toContain('"Default": "ApplyResult"');
-        expect(template).not.toContain('"action": "submit_sui_submission"');
+        expect(template).toContain('"Next": "StopInstance"');
     });
 
     it("passes membership identity dry-run object IDs to RunnerControlLambda", async () => {
