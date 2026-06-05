@@ -17,6 +17,11 @@ const EIdentityRegistryMismatch: u64 = 2;
 const EMembershipIdMismatch: u64 = 3;
 const EOwnerMismatch: u64 = 4;
 const EIdentityKeyNotBound: u64 = 5;
+const EIdentityProviderReplay: u64 = 6;
+const EIdentityRecordNotFound: u64 = 7;
+const EIdentityRecordOwnerMismatch: u64 = 8;
+const EIdentityVerificationExpired: u64 = 9;
+const EIdentityProviderNotVerified: u64 = 10;
 
 public struct IdentityRegistry has key {
     id: UID,
@@ -26,6 +31,15 @@ public struct IdentityRegistry has key {
 public struct IdentityKey has copy, drop, store {
     provider: u8,
     duplicate_key_hash: vector<u8>,
+}
+
+public struct IdentityVerificationRecord has copy, drop, store {
+    owner: address,
+    provider_mask: u8,
+    verified_at_ms: u64,
+    expires_at_ms: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
 }
 
 public struct RegistryCreated has copy, drop {
@@ -130,6 +144,62 @@ public(package) fun apply_identity_verification_result(
     );
 }
 
+public(package) fun record_identity_verification(
+    registry: &mut IdentityRegistry,
+    pass_lineage_id: ID,
+    owner: address,
+    provider: u8,
+    verified_at_ms: u64,
+    expires_at_ms: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
+) {
+    assert_known_provider(provider);
+    if (dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id)) {
+        let record = dynamic_field::borrow_mut<ID, IdentityVerificationRecord>(
+            &mut registry.id,
+            pass_lineage_id,
+        );
+        assert!(record.owner == owner, EIdentityRecordOwnerMismatch);
+        assert!(record.provider_mask & provider == 0, EIdentityProviderReplay);
+        record.provider_mask = record.provider_mask + provider;
+        record.verified_at_ms = verified_at_ms;
+        record.expires_at_ms = expires_at_ms;
+        record.terms_version = terms_version;
+        record.signed_statement_hash = signed_statement_hash;
+    } else {
+        dynamic_field::add(
+            &mut registry.id,
+            pass_lineage_id,
+            IdentityVerificationRecord {
+                owner,
+                provider_mask: provider,
+                verified_at_ms,
+                expires_at_ms,
+                terms_version,
+                signed_statement_hash,
+            },
+        );
+    };
+}
+
+public(package) fun assert_identity_verified(
+    registry: &IdentityRegistry,
+    pass_lineage_id: ID,
+    owner: address,
+    provider: u8,
+    now_ms: u64,
+) {
+    assert!(
+        dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id),
+        EIdentityRecordNotFound,
+    );
+    let record = dynamic_field::borrow<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id);
+    assert!(record.owner == owner, EIdentityRecordOwnerMismatch);
+    assert!(record.provider_mask & provider != 0, EIdentityProviderNotVerified);
+    assert!(now_ms < record.expires_at_ms, EIdentityVerificationExpired);
+}
+
 public(package) fun registry_id(registry: &IdentityRegistry): ID {
     object::id(registry)
 }
@@ -214,6 +284,38 @@ public fun remove_binding_for_testing(
     );
     let _ = dynamic_field::remove<IdentityKey, ID>(&mut registry.id, key);
     registry.binding_count = registry.binding_count - 1;
+}
+
+#[test_only]
+public fun identity_verification_record_for_testing(
+    registry: &IdentityRegistry,
+    pass_lineage_id: ID,
+): (address, u8, u64, u64, u64, vector<u8>) {
+    assert!(
+        dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id),
+        EIdentityRecordNotFound,
+    );
+    let record = dynamic_field::borrow<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id);
+    (
+        record.owner,
+        record.provider_mask,
+        record.verified_at_ms,
+        record.expires_at_ms,
+        record.terms_version,
+        record.signed_statement_hash,
+    )
+}
+
+#[test_only]
+public fun remove_identity_record_for_testing(
+    registry: &mut IdentityRegistry,
+    pass_lineage_id: ID,
+) {
+    assert!(
+        dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id),
+        EIdentityRecordNotFound,
+    );
+    let _ = dynamic_field::remove<ID, IdentityVerificationRecord>(&mut registry.id, pass_lineage_id);
 }
 
 #[test_only]
