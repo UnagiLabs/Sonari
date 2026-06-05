@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import {
     type AwsCli,
+    assertAsgIdle,
     assertExpectedAccount,
     assertSchedulesDisabled,
     DEFAULT_EXPECTED_ACCOUNT,
@@ -14,12 +15,14 @@ import {
     isRecord,
     parseArgs,
     parseStackOutputs,
+    parseStackParameters,
     readStringOption,
     requireOutput,
     waitFor,
 } from "./shared.js";
 
-const DEFAULT_REQUEST_FILE = ".local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json";
+const DEFAULT_REQUEST_FILE =
+    ".local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json";
 const MAX_EXECUTIONS = 20;
 const POLL = {
     intervalMs: 1_000,
@@ -111,12 +114,14 @@ export type SmokeMembershipManualResult = {
     submitVerificationLambdaName: string;
     batchVerifierLambdaName: string;
     stateMachineArn: string;
+    runnerAutoScalingGroupName: string;
     requestFile: string;
     submitResponse: SubmitVerificationSummary;
     workflowStarted: number;
     executions: ExecutionSummary[];
     matchedExecution: LatestExecutionSummary;
     job: JobSummary;
+    idleVerified: true;
 };
 
 /**
@@ -134,13 +139,17 @@ export async function runSmokeMembershipManual(
     const poll = options.poll ?? POLL;
 
     await assertExpectedAccount(aws, expectedAccount);
-    const outputs = parseStackOutputs(await describeStack(aws, stack));
+    const stackDescription = await describeStack(aws, stack);
+    const outputs = parseStackOutputs(stackDescription);
+    const parameters = parseStackParameters(stackDescription);
+    assertHappyPathPreflight(parameters);
     await assertSchedulesDisabled(aws, outputs);
 
     const submitVerificationLambdaName = requireOutput(outputs, "SubmitVerificationLambdaName");
     const batchVerifierLambdaName = requireOutput(outputs, "BatchVerifierLambdaName");
     const stateMachineArn = requireOutput(outputs, "MembershipRunnerStateMachineArn");
     const tableName = requireOutput(outputs, "VerificationJobsTableName");
+    const runnerAutoScalingGroupName = requireOutput(outputs, "RunnerAutoScalingGroupName");
 
     const rawRequest = JSON.parse(await readFile(requestFile, "utf8")) as unknown;
     const request = uniqueizeDummyWorldIdRequest(rawRequest, now());
@@ -150,11 +159,13 @@ export async function runSmokeMembershipManual(
         request,
     );
     if (submitResponse.duplicate) {
-        throw new Error("SubmitVerification Lambda returned duplicate=true for a uniqueized smoke request");
+        throw new Error(
+            "SubmitVerification Lambda returned duplicate=true for a uniqueized smoke request",
+        );
     }
 
     const workflowStarted = await invokeBatchVerifier(aws, batchVerifierLambdaName);
-    const job = await waitFor(`verification job ${submitResponse.jobId}`, poll, async () => {
+    const _job = await waitFor(`verification job ${submitResponse.jobId}`, poll, async () => {
         const current = await readJob(aws, tableName, submitResponse.jobId);
         if (current === null || current.workflowExecutionName === null) {
             return null;
@@ -162,33 +173,85 @@ export async function runSmokeMembershipManual(
         return current;
     });
 
-    const match = await waitFor(
-        `Step Functions execution ${job.workflowExecutionName}`,
+    const terminal = await waitFor(
+        `membership smoke happy path ${submitResponse.jobId}`,
         poll,
         async () => {
+            const currentJob = await readJob(aws, tableName, submitResponse.jobId);
+            if (currentJob === null) {
+                return null;
+            }
+            if (currentJob.status === "failed" || currentJob.status === "retry") {
+                throw new Error(
+                    `verification job ${submitResponse.jobId} did not complete: ${currentJob.status}`,
+                );
+            }
+            if (currentJob.workflowExecutionName === null) {
+                return null;
+            }
             const executions = await listExecutions(aws, stateMachineArn);
             const execution = executions.find(
-                (candidate) => candidate.name === job.workflowExecutionName,
+                (candidate) => candidate.name === currentJob.workflowExecutionName,
             );
             if (execution === undefined) {
                 return null;
             }
-            return { execution, executions };
+            const matchedExecution = await describeExecution(aws, execution.executionArn);
+            if (matchedExecution.status === "FAILED" || matchedExecution.status === "TIMED_OUT") {
+                throw new Error(
+                    `Step Functions execution ${execution.name} did not succeed: ${matchedExecution.status}`,
+                );
+            }
+            if (matchedExecution.status !== "SUCCEEDED") {
+                return null;
+            }
+            if (
+                currentJob.status !== "completed" ||
+                currentJob.txDigest === null ||
+                matchedExecution.suiSubmission?.status !== "succeeded" ||
+                matchedExecution.suiSubmission.txDigest === null ||
+                matchedExecution.suiSubmission.readback?.identityVerified !== true
+            ) {
+                return null;
+            }
+            return { currentJob, executions, matchedExecution };
         },
     );
-    const matchedExecution = await describeExecution(aws, match.execution.executionArn);
+    await assertAsgIdle(aws, runnerAutoScalingGroupName);
 
     return {
         submitVerificationLambdaName,
         batchVerifierLambdaName,
         stateMachineArn,
+        runnerAutoScalingGroupName,
         requestFile,
         submitResponse,
         workflowStarted,
-        executions: match.executions,
-        matchedExecution,
-        job,
+        executions: terminal.executions,
+        matchedExecution: terminal.matchedExecution,
+        job: terminal.currentJob,
+        idleVerified: true,
     };
+}
+
+function assertHappyPathPreflight(parameters: Record<string, string>): void {
+    const relayerNetwork = parameters.RelayerNetwork ?? "";
+    const worldIdProofMode = parameters.WorldIdProofMode ?? "real";
+    const identityRelayerMode = parameters.IdentityRelayerMode ?? "";
+    const relayerAllowSubmit = parameters.RelayerAllowSubmit ?? "false";
+
+    if (worldIdProofMode !== "dummy") {
+        throw new Error("membership smoke requires WorldIdProofMode=dummy");
+    }
+    if (relayerNetwork !== "testnet" && relayerNetwork !== "devnet") {
+        throw new Error("membership smoke requires RelayerNetwork to be testnet or devnet");
+    }
+    if (identityRelayerMode !== "submit") {
+        throw new Error("membership smoke requires IdentityRelayerMode=submit");
+    }
+    if (relayerAllowSubmit !== "true") {
+        throw new Error("membership smoke requires RelayerAllowSubmit=true");
+    }
 }
 
 async function invokeSubmitVerification(
@@ -199,7 +262,11 @@ async function invokeSubmitVerification(
     const response = await invokeLambdaJson(aws, functionName, {
         body: JSON.stringify(request),
     });
-    if (!isRecord(response) || typeof response.statusCode !== "number" || typeof response.body !== "string") {
+    if (
+        !isRecord(response) ||
+        typeof response.statusCode !== "number" ||
+        typeof response.body !== "string"
+    ) {
         throw new Error("SubmitVerification Lambda response did not include statusCode/body");
     }
     const body = safeJsonParse(response.body);
@@ -214,7 +281,9 @@ async function invokeSubmitVerification(
         typeof body.status !== "string" ||
         typeof body.duplicate !== "boolean"
     ) {
-        throw new Error("SubmitVerification Lambda response body did not include job_id/status/duplicate");
+        throw new Error(
+            "SubmitVerification Lambda response body did not include job_id/status/duplicate",
+        );
     }
     return {
         statusCode: response.statusCode,
@@ -226,7 +295,9 @@ async function invokeSubmitVerification(
 }
 
 async function invokeBatchVerifier(aws: AwsCli, functionName: string): Promise<number> {
-    const response = await invokeLambdaJson(aws, functionName, { verifier_kind: "membership_identity" });
+    const response = await invokeLambdaJson(aws, functionName, {
+        verifier_kind: "membership_identity",
+    });
     if (isRecord(response) && typeof response.errorMessage === "string") {
         throw new Error(`BatchVerifier Lambda invocation failed: ${response.errorMessage}`);
     }
@@ -236,7 +307,11 @@ async function invokeBatchVerifier(aws: AwsCli, functionName: string): Promise<n
     return response.workflow_started;
 }
 
-async function invokeLambdaJson(aws: AwsCli, functionName: string, payload: unknown): Promise<unknown> {
+async function invokeLambdaJson(
+    aws: AwsCli,
+    functionName: string,
+    payload: unknown,
+): Promise<unknown> {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-lambda-"));
     try {
         const responsePath = path.join(tempDir, "response.json");
@@ -396,7 +471,11 @@ function resolveRequestFile(inputPath: string): string {
 }
 
 function uniqueizeDummyWorldIdRequest(input: unknown, nowMs: number): unknown {
-    if (!isRecord(input) || !isRecord(input.world_id) || typeof input.world_id.nullifier_hash !== "string") {
+    if (
+        !isRecord(input) ||
+        !isRecord(input.world_id) ||
+        typeof input.world_id.nullifier_hash !== "string"
+    ) {
         throw new Error("dummy World ID request must include world_id.nullifier_hash");
     }
     return {
