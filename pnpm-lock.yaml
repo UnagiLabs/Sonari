@@ -170,7 +170,11 @@ importers:
 
   packages/proof-core: {}
 
-  packages/residence-proof-worker: {}
+  packages/residence-proof-worker:
+    dependencies:
+      '@sonari/proof-core':
+        specifier: workspace:*
+        version: link:../proof-core
 
 packages:
 

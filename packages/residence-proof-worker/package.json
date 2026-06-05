@@ -11,5 +11,8 @@
     "scripts": {
         "test": "vitest run src",
         "typecheck": "tsc -b --noEmit"
+    },
+    "dependencies": {
+        "@sonari/proof-core": "workspace:*"
     }
 }

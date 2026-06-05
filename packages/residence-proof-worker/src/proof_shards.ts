@@ -1,18 +1,65 @@
+// Re-export generic utilities from proof-core (single source of truth)
+export {
+    assertMatches,
+    assertNonNegativeSafeInteger,
+    bytesToBigEndianU64,
+    bytesToPrefixedHex,
+    expectArray,
+    expectBoolean,
+    expectKeys,
+    expectLiteral,
+    expectNonNegativeSafeInteger,
+    expectPositiveSafeInteger,
+    expectPrefixedHex32,
+    expectRecord,
+    expectString,
+    hashLeafBytes,
+    hexToBytes,
+    type JsonRecord,
+    type ParsedH3Index,
+    type PrefixedHex32,
+    type ProofStep,
+    parseH3Index,
+    proofShardId,
+    replayProof,
+    sha256Bytes,
+    sha256Hex,
+    U64_MAX,
+    u64BigEndianBytes,
+    u64LittleEndianBytes,
+    validateH3CellLayout,
+} from "@sonari/proof-core";
+
+import {
+    assertMatches,
+    assertNonNegativeSafeInteger,
+    expectArray,
+    expectBoolean,
+    expectKeys,
+    expectLiteral,
+    expectNonNegativeSafeInteger,
+    expectPositiveSafeInteger,
+    expectPrefixedHex32,
+    expectRecord,
+    expectString,
+    hashLeafBytes,
+    type ParsedH3Index,
+    type PrefixedHex32,
+    type ProofStep,
+    parseH3Index,
+    proofShardId,
+    replayProof,
+    u64LittleEndianBytes,
+} from "@sonari/proof-core";
+
+// Residence-specific schema constants
 const PROOF_MANIFEST_SCHEMA = "sonari.residence.proof_manifest.v1";
 const PROOF_SHARD_SCHEMA = "sonari.residence.proof_shard.v1";
 const PROOF_SCHEMA_VERSION = 1;
 const PROOF_SHARD_OBJECT_KEY_RULE =
     "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz";
-const U64_MAX = 18_446_744_073_709_551_615n;
-const H3_MAX_RESOLUTION = 15;
-const H3_MODE_CELL = 1n;
-const H3_PENTAGON_BASE_CELLS = new Set([4, 14, 24, 38, 49, 58, 63, 72, 83, 97, 107, 117]);
 
-export interface ParsedH3Index {
-    decimal: string;
-    value: bigint;
-}
-
+// Residence-specific types
 export interface ProofShardManifest {
     schema: typeof PROOF_MANIFEST_SCHEMA;
     schema_version: typeof PROOF_SCHEMA_VERSION;
@@ -50,11 +97,6 @@ export interface ProofShardEntry {
     proof: ProofStep[];
 }
 
-export interface ProofStep {
-    sibling_on_left: boolean;
-    sibling_hash: PrefixedHex32;
-}
-
 export interface ValidatedProofEntry {
     h3Index: ParsedH3Index;
     leafHash: PrefixedHex32;
@@ -70,37 +112,20 @@ export interface ResidenceProofResponse {
     proof: ProofStep[];
 }
 
-type PrefixedHex32 = `0x${string}`;
-type JsonRecord = Record<string, unknown>;
-
-export function parseH3Index(value: string, expectedResolution: number): ParsedH3Index {
-    if (
-        !Number.isInteger(expectedResolution) ||
-        expectedResolution < 0 ||
-        expectedResolution > 15
-    ) {
-        throw new Error(`expected resolution must be between 0 and 15: ${expectedResolution}`);
-    }
-    if (!/^(0|[1-9][0-9]*)$/.test(value)) {
-        throw new Error(`h3_index must be a canonical decimal u64 string: ${value}`);
-    }
-
-    const parsed = BigInt(value);
-    if (parsed > U64_MAX) {
-        throw new Error(`h3_index is outside the u64 range: ${value}`);
-    }
-
-    validateH3CellLayout(parsed, expectedResolution, value);
-    return { decimal: value, value: parsed };
-}
-
-export async function proofShardId(h3Index: bigint, shardCount: number): Promise<number> {
-    if (!Number.isInteger(shardCount) || shardCount <= 0) {
-        throw new Error("shard_count must be greater than zero");
-    }
-    const digest = await sha256Bytes(u64BigEndianBytes(h3Index));
-    const prefix = bytesToBigEndianU64(digest.subarray(0, 8));
-    return Number(prefix % BigInt(shardCount));
+// Residence-specific leaf hash: SHA-256(0x00 || h3LE8 || geo || allowlistLE8)
+// Uses proof-core's hashLeafBytes which prepends 0x00 to the given payload.
+// payload = h3LE8(8) + geo(1) + allowlistLE8(8) = 17 bytes
+// hashLeafBytes prepends 0x00 -> SHA-256(0x00 || payload) = 18 bytes total, matching original.
+export async function leafHash(leaf: {
+    h3Index: bigint;
+    geoResolution: number;
+    allowlistVersion: number;
+}): Promise<PrefixedHex32> {
+    const payload = new Uint8Array(17); // h3LE8(8) + geo(1) + allowlistLE8(8)
+    payload.set(u64LittleEndianBytes(leaf.h3Index), 0);
+    payload[8] = leaf.geoResolution;
+    payload.set(u64LittleEndianBytes(BigInt(leaf.allowlistVersion)), 9);
+    return hashLeafBytes(payload);
 }
 
 export function expectedProofShardObjectKey(
@@ -343,89 +368,6 @@ export function shapeProofResponse(
     };
 }
 
-export async function leafHash(leaf: {
-    h3Index: bigint;
-    geoResolution: number;
-    allowlistVersion: number;
-}): Promise<PrefixedHex32> {
-    const bytes = new Uint8Array(18);
-    bytes[0] = 0;
-    bytes.set(u64LittleEndianBytes(leaf.h3Index), 1);
-    bytes[9] = leaf.geoResolution;
-    bytes.set(u64LittleEndianBytes(BigInt(leaf.allowlistVersion)), 10);
-    return sha256Hex(bytes);
-}
-
-export async function replayProof(
-    leafHashValue: string,
-    proof: readonly ProofStep[],
-): Promise<PrefixedHex32> {
-    let current = hexToBytes(expectPrefixedHex32("leaf_hash", leafHashValue));
-    for (const step of proof) {
-        const sibling = hexToBytes(expectPrefixedHex32("sibling_hash", step.sibling_hash));
-        const input = new Uint8Array(65);
-        input[0] = 1;
-        if (step.sibling_on_left) {
-            input.set(sibling, 1);
-            input.set(current, 33);
-        } else {
-            input.set(current, 1);
-            input.set(sibling, 33);
-        }
-        current = await sha256Bytes(input);
-    }
-    return bytesToPrefixedHex(current);
-}
-
-export async function sha256Hex(bytes: Uint8Array): Promise<PrefixedHex32> {
-    return bytesToPrefixedHex(await sha256Bytes(bytes));
-}
-
-async function sha256Bytes(bytes: Uint8Array): Promise<Uint8Array> {
-    const buffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(buffer).set(bytes);
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
-    return new Uint8Array(digest);
-}
-
-function validateH3CellLayout(h3Index: bigint, expectedResolution: number, rawValue: string): void {
-    if (((h3Index >> 63n) & 1n) !== 0n) {
-        throw new Error(`h3_index reserved bit must be zero: ${rawValue}`);
-    }
-    const mode = (h3Index >> 59n) & 0xfn;
-    if (mode !== H3_MODE_CELL) {
-        throw new Error(`h3_index mode must be an H3 cell: ${rawValue}`);
-    }
-    if (((h3Index >> 56n) & 0x7n) !== 0n) {
-        throw new Error(`h3_index reserved bits must be zero: ${rawValue}`);
-    }
-    const resolution = Number((h3Index >> 52n) & 0xfn);
-    if (resolution !== expectedResolution) {
-        throw new Error(`h3_index resolution must be ${expectedResolution}: ${rawValue}`);
-    }
-    const baseCell = Number((h3Index >> 45n) & 0x7fn);
-    if (baseCell > 121) {
-        throw new Error(`h3_index base cell is outside the H3 range: ${rawValue}`);
-    }
-
-    let leadingNonZeroDigit = 0;
-    for (let digit = 1; digit <= H3_MAX_RESOLUTION; digit += 1) {
-        const value = Number((h3Index >> BigInt((H3_MAX_RESOLUTION - digit) * 3)) & 0x7n);
-        if (digit <= expectedResolution && value === 7) {
-            throw new Error(`h3_index active digit must be 0..6: ${rawValue}`);
-        }
-        if (digit <= expectedResolution && leadingNonZeroDigit === 0 && value !== 0) {
-            leadingNonZeroDigit = value;
-        }
-        if (digit > expectedResolution && value !== 7) {
-            throw new Error(`h3_index unused digit must be 7: ${rawValue}`);
-        }
-    }
-    if (H3_PENTAGON_BASE_CELLS.has(baseCell) && leadingNonZeroDigit === 1) {
-        throw new Error(`h3_index uses the deleted pentagon subsequence: ${rawValue}`);
-    }
-}
-
 function parseInventoryEntry(value: unknown): ProofShardInventoryEntry {
     const record = expectRecord("proof shard inventory entry", value);
     expectKeys("proof shard inventory entry", record, [
@@ -461,132 +403,4 @@ function parseProofStep(value: unknown): ProofStep {
         sibling_on_left: expectBoolean("sibling_on_left", record.sibling_on_left),
         sibling_hash: expectPrefixedHex32("sibling_hash", record.sibling_hash),
     };
-}
-
-function expectRecord(name: string, value: unknown): JsonRecord {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw new Error(`${name} must be an object`);
-    }
-    return value as JsonRecord;
-}
-
-function expectKeys(name: string, record: JsonRecord, keys: readonly string[]): void {
-    const expected = new Set(keys);
-    for (const key of Object.keys(record)) {
-        if (!expected.has(key)) {
-            throw new Error(`${name} contains unexpected field: ${key}`);
-        }
-    }
-    for (const key of keys) {
-        if (!(key in record)) {
-            throw new Error(`${name} is missing field: ${key}`);
-        }
-    }
-}
-
-function expectString(name: string, value: unknown): string {
-    if (typeof value !== "string") {
-        throw new Error(`${name} must be a string`);
-    }
-    return value;
-}
-
-function expectBoolean(name: string, value: unknown): boolean {
-    if (typeof value !== "boolean") {
-        throw new Error(`${name} must be a boolean`);
-    }
-    return value;
-}
-
-function expectArray(name: string, value: unknown): unknown[] {
-    if (!Array.isArray(value)) {
-        throw new Error(`${name} must be an array`);
-    }
-    return value;
-}
-
-function expectLiteral<T extends string | number>(name: string, value: unknown, expected: T): T {
-    if (value !== expected) {
-        throw new Error(`${name} must be ${expected}`);
-    }
-    return expected;
-}
-
-function expectNonNegativeSafeInteger(name: string, value: unknown): number {
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-        throw new Error(`${name} must be a non-negative safe integer`);
-    }
-    return value;
-}
-
-function expectPositiveSafeInteger(name: string, value: unknown): number {
-    const parsed = expectNonNegativeSafeInteger(name, value);
-    if (parsed === 0) {
-        throw new Error(`${name} must be greater than zero`);
-    }
-    return parsed;
-}
-
-function assertNonNegativeSafeInteger(name: string, value: number): void {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new Error(`${name} must be a non-negative safe integer`);
-    }
-}
-
-function expectPrefixedHex32(name: string, value: unknown): PrefixedHex32 {
-    if (typeof value !== "string" || !/^0x[0-9a-f]{64}$/.test(value)) {
-        throw new Error(`${name} must be a lowercase 0x-prefixed 32-byte hex string`);
-    }
-    return value as PrefixedHex32;
-}
-
-function assertMatches<T>(name: string, actual: T, expected: T): void {
-    if (actual !== expected) {
-        throw new Error(`${name} ${actual} does not match ${expected}`);
-    }
-}
-
-function u64BigEndianBytes(value: bigint): Uint8Array {
-    if (value < 0n || value > U64_MAX) {
-        throw new Error(`u64 value is outside range: ${value}`);
-    }
-    const bytes = new Uint8Array(8);
-    for (let index = 7; index >= 0; index -= 1) {
-        bytes[index] = Number((value >> BigInt((7 - index) * 8)) & 0xffn);
-    }
-    return bytes;
-}
-
-function u64LittleEndianBytes(value: bigint): Uint8Array {
-    if (value < 0n || value > U64_MAX) {
-        throw new Error(`u64 value is outside range: ${value}`);
-    }
-    const bytes = new Uint8Array(8);
-    for (let index = 0; index < 8; index += 1) {
-        bytes[index] = Number((value >> BigInt(index * 8)) & 0xffn);
-    }
-    return bytes;
-}
-
-function bytesToBigEndianU64(bytes: Uint8Array): bigint {
-    if (bytes.length !== 8) {
-        throw new Error("u64 byte prefix must be 8 bytes");
-    }
-    let value = 0n;
-    for (const byte of bytes) {
-        value = (value << 8n) | BigInt(byte);
-    }
-    return value;
-}
-
-function hexToBytes(value: PrefixedHex32): Uint8Array {
-    const bytes = new Uint8Array(32);
-    for (let index = 0; index < bytes.length; index += 1) {
-        bytes[index] = Number.parseInt(value.slice(2 + index * 2, 4 + index * 2), 16);
-    }
-    return bytes;
-}
-
-function bytesToPrefixedHex(bytes: Uint8Array): PrefixedHex32 {
-    return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
