@@ -19,7 +19,6 @@ const EInvalidAffectedCellProof: u64 = 7;
 const EDisasterEventMismatch: u64 = 8;
 const EClaimBandTooLow: u64 = 9;
 const EResidenceCellMismatch: u64 = 10;
-const EUnverifiedMembership: u64 = 11;
 const EGenericClaimDisabled: u64 = 12;
 const EAccountCreatedAfterCutoff: u64 = 14;
 const EHomeCellRegisteredAfterCutoff: u64 = 15;
@@ -178,6 +177,13 @@ public(package) fun claim_disaster_usdc(
     disaster_event::assert_campaign_binding(binding, campaign, disaster_event);
     membership::assert_current_pass_precheck(registry, pass, ctx.sender());
     assert_valid_disaster_eligibility(disaster_event, policy, pass, &leaf, proof);
+    identity_registry::assert_identity_verified(
+        identity_registry,
+        membership::membership_pass_lineage_id(pass),
+        membership::membership_pass_owner(pass),
+        identity_provider,
+        now_ms,
+    );
     identity_registry::assert_duplicate_key_bound_to_pass(
         identity_registry,
         membership::membership_pass_lineage_id(pass),
@@ -269,14 +275,13 @@ fun assert_valid_disaster_eligibility(
         account_created_at_ms,
         home_cell,
         home_cell_registered_at_ms,
-        identity_verified,
+        _identity_verified,
         _identity_provider_mask,
         _identity_verified_at_ms,
         _identity_expires_at_ms,
         _terms_version,
         _signed_statement_hash,
     ) = membership::membership_pass_mvp_summary(pass);
-    assert!(identity_verified, EUnverifiedMembership);
     assert!(account_created_at_ms < cutoff_ms, EAccountCreatedAfterCutoff);
     assert!(
         home_cell_registered_at_ms < cutoff_ms,
