@@ -43,8 +43,10 @@ import {
     type IdentityVerificationDryRunSuccess,
     type IdentityVerificationRelayerMode,
     type IdentityVerificationSigner,
+    type IdentityVerificationSubmitClient,
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitSuccess,
+    type IdentityVerificationSubmitTransaction,
     type IdentityVerificationSuiResult,
     SuiEnclaveRegistrationAdapter,
     type SuiEnclaveRegistrationConfig,
@@ -73,6 +75,8 @@ export interface RunnerSuiSubmissionConfig {
     readonly allowSubmit?: boolean | undefined;
     readonly configurationError?: string | undefined;
     readonly loadSigner?: (() => Promise<IdentityVerificationSigner>) | undefined;
+    readonly client?: IdentityVerificationSubmitClient | undefined;
+    readonly transaction?: IdentityVerificationSubmitTransaction | undefined;
 }
 
 export interface AutoScalingClientLike {
@@ -1132,8 +1136,8 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
         if (this.config.configurationError !== undefined) {
             return relayerSubmitFailed(this.config.configurationError);
         }
-        if (this.config.mode !== "dry_run") {
-            return relayerSubmitFailed("dry_run requires RELAYER_MODE=dry_run");
+        if (this.config.mode !== "dry_run" && this.config.mode !== "submit") {
+            return relayerSubmitFailed("dry_run requires IDENTITY_RELAYER_MODE=dry_run or submit");
         }
         return dryRunIdentityVerificationSubmit(result, this.submitConfig());
     }
@@ -1170,6 +1174,10 @@ class DirectSuiSubmissionAdapter implements SuiSubmissionAdapter {
             ...(this.config.allowSubmit === undefined
                 ? {}
                 : { allowSubmit: this.config.allowSubmit }),
+            ...(this.config.client === undefined ? {} : { client: this.config.client }),
+            ...(this.config.transaction === undefined
+                ? {}
+                : { transaction: this.config.transaction }),
         };
     }
 }

@@ -531,6 +531,74 @@ describe("membership runner workflow", () => {
         expect(submitter.submits).toEqual([]);
     });
 
+    it("allows submit-capable registration mode to run dry-run preflight without submit", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        let signAndExecuteCalls = 0;
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: {
+                ...baseConfig(),
+                suiSubmission: {
+                    mode: "submit",
+                    packageId: "0xabc",
+                    pauseStateId: "0x111",
+                    identityRegistryId: "0x222",
+                    membershipRegistryId: "0x333",
+                    verifierRegistryId: "0x444",
+                    clockId: "0x6",
+                    network: "testnet",
+                    grpcUrl: "https://fullnode.testnet.sui.io:443",
+                    senderAddress: "0xsender",
+                    allowSubmit: true,
+                    transaction: {
+                        build: async () => new Uint8Array([4, 5, 6]),
+                    },
+                    client: {
+                        simulateTransaction: async () => ({
+                            $kind: "Transaction",
+                            Transaction: {
+                                digest: "dry-run-digest",
+                                status: { success: true, error: null },
+                                effects: { status: { success: true } },
+                            },
+                        }),
+                        signAndExecuteTransaction: async () => {
+                            signAndExecuteCalls += 1;
+                            throw new Error("submit must not run during dry-run preflight");
+                        },
+                    },
+                },
+            },
+        });
+
+        await expect(
+            handler({
+                action: "dry_run_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "succeeded" });
+
+        const row = await repository.get(job.row.job_id);
+        const dryRunRecord = JSON.parse(row?.sui_dry_run_result_json ?? "{}") as {
+            transaction_bytes?: number[];
+        };
+        expect(row).toMatchObject({
+            status: "processing",
+            sui_dry_run_completed_at_ms: baseNowMs + 2,
+        });
+        expect(dryRunRecord.transaction_bytes).toEqual([4, 5, 6]);
+        expect(signAndExecuteCalls).toBe(0);
+    });
+
     it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
