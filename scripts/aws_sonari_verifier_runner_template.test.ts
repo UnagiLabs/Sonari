@@ -422,7 +422,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(membershipWrapper).toContain(
             ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID"',
         );
+        expect(membershipWrapper).toContain("m=/tmp/sm");
         expect(membershipWrapper).toContain("nitro-cli terminate-enclave --all");
+        expect(membershipWrapper).toContain("rm -f /tmp/se");
         expect(membershipWrapper).toContain("nitro-cli run-enclave $args");
         expect(membershipWrapper).toContain(
             '--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"',
@@ -434,6 +436,25 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(membershipWrapper).toContain("POST /process_data HTTP/1.0");
         expect(membershipWrapper).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
         expect(membershipWrapper).not.toContain('exec "$SONARI_ENCLAVE_STDIO_BRIDGE"');
+    });
+
+    it("invalidates stale shared-runner enclave markers when switching verifier kinds", async () => {
+        const template = await readTemplate();
+        const earthquakeWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-earthquake-enclave",
+            "SONARI_EARTHQUAKE_ENCLAVE_WRAPPER",
+        );
+        const membershipWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-membership-identity-enclave",
+            "SONARI_ENCLAVE_WRAPPER",
+        );
+
+        expect(earthquakeWrapper).toContain("marker=/tmp/se");
+        expect(earthquakeWrapper).toContain("rm -f /tmp/sm");
+        expect(membershipWrapper).toContain("m=/tmp/sm");
+        expect(membershipWrapper).toContain("rm -f /tmp/se");
     });
 
     it("exports the membership enclave CID to runner.env from the shared NitroEnclaveCid", async () => {

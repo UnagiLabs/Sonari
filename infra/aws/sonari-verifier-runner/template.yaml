@@ -481,7 +481,7 @@ Resources:
             : "${!SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"
             SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=180
 
-            marker=/tmp/sonari-earthquake-enclave-bootstrapped
+            marker=/tmp/se
             input_file="$(mktemp)"
             response_file="$(mktemp)"
             trap 'rm -f "$input_file" "$response_file"' EXIT
@@ -499,6 +499,7 @@ Resources:
                   exit 1
                 fi
               }
+              rm -f /tmp/sm
               sleep 2
 
               jq -n \
@@ -568,7 +569,7 @@ Resources:
             eif="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
             args="$SONARI_NITRO_RUN_ENCLAVE_ARGS"
             cid="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"
-            m=/tmp/m
+            m=/tmp/sm
             i="$(mktemp)"
             o="$(mktemp)"
             trap 'rm -f "$i" "$o"' EXIT
@@ -577,6 +578,7 @@ Resources:
               test -s "$eif"
               [ -f "$m" ] && return
               nitro-cli terminate-enclave --all &>/dev/null || true
+              rm -f /tmp/se
               nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || { cat /tmp/m.err >&2; exit 1; }
               sleep 2
               jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
