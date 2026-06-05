@@ -17,6 +17,10 @@ pub use core::types::{
 };
 pub use error::IdentityError;
 pub use verify::kyc::{KYC_UNSUPPORTED, KycVerificationStatus, verify_kyc_unsupported};
+pub use verify::proof_mode::{
+    ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_PROOF_MODE_ENV,
+    resolve_world_id_verifier_mode,
+};
 pub use verify::world_id::{
     CloudWorldIdVerifier, DummyWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_CANONICAL,
     WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
