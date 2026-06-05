@@ -573,6 +573,8 @@ describe("membership runner workflow", () => {
                             signAndExecuteCalls += 1;
                             throw new Error("submit must not run during dry-run preflight");
                         },
+                        waitForTransaction: async () => ({}),
+                        getObject: async () => ({}),
                     },
                 },
             },
@@ -1151,6 +1153,15 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
                 request: fakeSuiRequest(),
                 digest: this.options.submitDigest ?? "tx-default",
                 effects: {},
+                readback: {
+                    objectId: fakeSuiRequest().membershipPassId,
+                    identityVerified: true as const,
+                    identityProviderMask: 2,
+                    identityVerifiedAtMs: baseNowMs,
+                    identityExpiresAtMs: baseNowMs + 1,
+                    termsVersion: validRequest().terms_version,
+                    signedStatementHash: validRequest().signed_statement_hash,
+                },
             },
         };
     }

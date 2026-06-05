@@ -4,6 +4,7 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import {
     IDENTITY_PROVIDER_BCS,
+    IDENTITY_RESULT_INTENT,
     type IdentityProvider,
     type IdentityVerificationResult,
 } from "@sonari/membership-verifier-shared";
@@ -81,6 +82,7 @@ export interface IdentityVerificationSubmitSuccess {
     readonly request: IdentityVerificationSuiRequest;
     readonly digest: string;
     readonly effects: Record<string, unknown>;
+    readonly readback: MembershipPassReadback;
 }
 
 export interface MembershipPassReadback {
@@ -107,6 +109,8 @@ export interface IdentityVerificationSubmitClient {
         signer: IdentityVerificationSigner;
         include: { effects: true; events: true; objectTypes: true };
     }): Promise<IdentityVerificationExecutionResponse>;
+    waitForTransaction(input: { digest: string }): Promise<unknown>;
+    getObject(input: { objectId: string; include: { json: true } }): Promise<unknown>;
 }
 
 export type IdentityVerificationExecutionResponse =
@@ -271,6 +275,10 @@ export async function submitIdentityVerificationPayload(
     if (config.signer === undefined) {
         return relayerSubmitFailed("submit requires signer material");
     }
+    const expectedReadback = parseExpectedIdentityVerificationResult(input);
+    if (!expectedReadback.ok) {
+        return expectedReadback;
+    }
 
     try {
         const senderAddress = config.signer.toSuiAddress();
@@ -295,6 +303,19 @@ export async function submitIdentityVerificationPayload(
         if (!isNonEmptyString(result.value.digest)) {
             return relayerSubmitFailed("Sui response did not include transaction digest");
         }
+        await client.waitForTransaction({ digest: result.value.digest });
+        const object = await client.getObject({
+            objectId: request.value.membershipPassId,
+            include: { json: true },
+        });
+        const readback = parseMembershipPassReadback(
+            object,
+            expectedReadback.value,
+            config.packageId,
+        );
+        if (!readback.ok) {
+            return readback;
+        }
 
         return {
             ok: true,
@@ -303,6 +324,7 @@ export async function submitIdentityVerificationPayload(
                 request: request.value,
                 digest: result.value.digest,
                 effects: result.value.effects,
+                readback: readback.value,
             },
         };
     } catch (error) {
@@ -482,6 +504,98 @@ function parseSignedIdentityPayload(
     };
 }
 
+function parseExpectedIdentityVerificationResult(
+    input: unknown,
+): IdentityVerificationSuiResult<IdentityVerificationResult> {
+    if (!isRecord(input) || input.status !== "verified") {
+        return relayerSubmitFailed("Expected verified membership TEE result");
+    }
+    const intent = readExpectedString(input.intent, "intent");
+    if (!intent.ok) {
+        return intent;
+    }
+    if (intent.value !== IDENTITY_RESULT_INTENT) {
+        return relayerSubmitFailed(`intent must be ${IDENTITY_RESULT_INTENT}`);
+    }
+    const verifierFamily = readExpectedString(input.verifier_family, "verifier_family");
+    if (!verifierFamily.ok) {
+        return verifierFamily;
+    }
+    if (verifierFamily.value !== "identity") {
+        return relayerSubmitFailed("verifier_family must be identity");
+    }
+    const verifierVersion = readExpectedU64(input.verifier_version, "verifier_version");
+    if (!verifierVersion.ok) {
+        return verifierVersion;
+    }
+    const registryId = readExpectedHex32(input.registry_id, "registry_id");
+    if (!registryId.ok) {
+        return registryId;
+    }
+    const membershipId = readExpectedHex32(input.membership_id, "membership_id");
+    if (!membershipId.ok) {
+        return membershipId;
+    }
+    const owner = readExpectedHex32(input.owner, "owner");
+    if (!owner.ok) {
+        return owner;
+    }
+    const provider = readExpectedProvider(input.provider);
+    if (!provider.ok) {
+        return provider;
+    }
+    if (input.verified !== true) {
+        return relayerSubmitFailed("verified must be true");
+    }
+    const duplicateKeyHash = readExpectedHex32(input.duplicate_key_hash, "duplicate_key_hash");
+    if (!duplicateKeyHash.ok) {
+        return duplicateKeyHash;
+    }
+    const evidenceHash = readExpectedHex32(input.evidence_hash, "evidence_hash");
+    if (!evidenceHash.ok) {
+        return evidenceHash;
+    }
+    const issuedAtMs = readExpectedU64(input.issued_at_ms, "issued_at_ms");
+    if (!issuedAtMs.ok) {
+        return issuedAtMs;
+    }
+    const expiresAtMs = readExpectedU64(input.expires_at_ms, "expires_at_ms");
+    if (!expiresAtMs.ok) {
+        return expiresAtMs;
+    }
+    const termsVersion = readExpectedU64(input.terms_version, "terms_version");
+    if (!termsVersion.ok) {
+        return termsVersion;
+    }
+    const signedStatementHash = readExpectedHex32(
+        input.signed_statement_hash,
+        "signed_statement_hash",
+    );
+    if (!signedStatementHash.ok) {
+        return signedStatementHash;
+    }
+
+    return {
+        ok: true,
+        value: {
+            intent: intent.value,
+            verifier_family: "identity",
+            verifier_version: verifierVersion.value,
+            registry_id: registryId.value,
+            membership_id: membershipId.value,
+            owner: owner.value,
+            provider: provider.value,
+            verified: true,
+            duplicate_key_hash: duplicateKeyHash.value,
+            evidence_hash: evidenceHash.value,
+            issued_at_ms: issuedAtMs.value,
+            expires_at_ms: expiresAtMs.value,
+            terms_version: termsVersion.value,
+            signed_statement_hash: signedStatementHash.value,
+        },
+    };
+}
+
 function validateRequestConfig(
     config: IdentityVerificationSubmitConfig,
 ): IdentityVerificationSuiResult<IdentityVerificationSubmitConfig> {
@@ -514,6 +628,40 @@ function parseHexBytes(
         return relayerSubmitFailed(`${fieldName} must be ${expectedLength} bytes`);
     }
     return { ok: true, value: bytes };
+}
+
+function readExpectedString(
+    input: unknown,
+    fieldName: string,
+): IdentityVerificationSuiResult<string> {
+    if (typeof input === "string" && input.length > 0) {
+        return { ok: true, value: input };
+    }
+    return relayerSubmitFailed(`Verified membership TEE result requires ${fieldName}`);
+}
+
+function readExpectedProvider(input: unknown): IdentityVerificationSuiResult<IdentityProvider> {
+    if (input === "kyc" || input === "world_id") {
+        return { ok: true, value: input };
+    }
+    return relayerSubmitFailed("provider must be kyc or world_id");
+}
+
+function readExpectedU64(input: unknown, fieldName: string): IdentityVerificationSuiResult<number> {
+    if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
+        return { ok: true, value: input };
+    }
+    return relayerSubmitFailed(`${fieldName} must be a safe unsigned integer`);
+}
+
+function readExpectedHex32(
+    input: unknown,
+    fieldName: string,
+): IdentityVerificationSuiResult<string> {
+    if (typeof input === "string" && /^0x[0-9a-fA-F]{64}$/.test(input)) {
+        return { ok: true, value: input.toLowerCase() };
+    }
+    return relayerSubmitFailed(`${fieldName} must be a 32-byte 0x-prefixed hex string`);
 }
 
 function createSuiGrpcClient(
@@ -642,7 +790,7 @@ function parseSuiObjectReadback(input: unknown): IdentityVerificationSuiResult<S
     if (!isRecord(input)) {
         return relayerSubmitFailed("MembershipPass readback response was not an object");
     }
-    const data = isRecord(input.data) ? input.data : input;
+    const data = isRecord(input.data) ? input.data : isRecord(input.object) ? input.object : input;
     const objectId = readStringAlias(data, ["objectId", "object_id"], "object id");
     if (!objectId.ok) {
         return objectId;
@@ -652,7 +800,8 @@ function parseSuiObjectReadback(input: unknown): IdentityVerificationSuiResult<S
         return type;
     }
     const content = data.content;
-    if (!isRecord(content) || !isRecord(content.fields)) {
+    const fields = isRecord(content) && isRecord(content.fields) ? content.fields : data.json;
+    if (!isRecord(fields)) {
         return relayerSubmitFailed(
             "MembershipPass readback response did not include object fields",
         );
@@ -662,7 +811,7 @@ function parseSuiObjectReadback(input: unknown): IdentityVerificationSuiResult<S
         value: {
             objectId: objectId.value,
             type: type.value,
-            fields: content.fields,
+            fields,
         },
     };
 }

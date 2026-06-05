@@ -184,7 +184,7 @@ describe("membership identity Sui submission", () => {
         );
 
         await expect(
-            submitIdentityVerificationPayload(verifiedResult(), {
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -198,7 +198,7 @@ describe("membership identity Sui submission", () => {
         });
 
         await expect(
-            submitIdentityVerificationPayload(verifiedResult(), {
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -211,7 +211,7 @@ describe("membership identity Sui submission", () => {
         });
 
         await expect(
-            submitIdentityVerificationPayload(verifiedResult(), {
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -224,8 +224,46 @@ describe("membership identity Sui submission", () => {
             ok: true,
             value: {
                 digest: "submit-digest",
+                readback: {
+                    identityVerified: true,
+                    objectId: `0x${"55".repeat(32)}`,
+                },
             },
         });
+    });
+
+    it("fails closed when submit readback is missing or stale", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+        let signAndExecuteCalls = 0;
+        const client = fakeClient({
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalls += 1;
+                return successfulTransaction("submit-digest");
+            },
+            getObject: async () =>
+                membershipPassReadback(verifiedIdentityResult(), {
+                    identity_verified_at_ms: 1,
+                }),
+        });
+
+        await expect(
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                allowSubmit: true,
+                signer,
+                client,
+                transaction: {},
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "MembershipPass readback verified timestamp does not match payload",
+        });
+        expect(signAndExecuteCalls).toBe(1);
     });
 
     it("parses MembershipPass readback only when it reflects the submitted identity payload", () => {
@@ -281,13 +319,10 @@ describe("membership identity Sui submission", () => {
         ];
 
         for (const [name, readback] of cases) {
-            expect(parseMembershipPassReadback(readback, expected, packageId)).toMatchObject(
-                {
-                    ok: false,
-                    error_code: "RELAYER_SUBMIT_FAILED",
-                },
-                name,
-            );
+            expect(parseMembershipPassReadback(readback, expected, packageId), name).toMatchObject({
+                ok: false,
+                error_code: "RELAYER_SUBMIT_FAILED",
+            });
         }
     });
 });
@@ -684,6 +719,17 @@ function fakeClient(
             methods.simulateTransaction ?? (async () => successfulTransaction("dry")),
         signAndExecuteTransaction:
             methods.signAndExecuteTransaction ?? (async () => successfulTransaction("submit")),
+        waitForTransaction:
+            methods.waitForTransaction ?? (async () => successfulTransaction("wait")),
+        getObject:
+            methods.getObject ??
+            (async () => ({
+                object: {
+                    objectId: `0x${"55".repeat(32)}`,
+                    type: `${packageId}::membership::MembershipPass`,
+                    json: membershipPassReadback(verifiedIdentityResult()).data.content.fields,
+                },
+            })),
     };
 }
 
