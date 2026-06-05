@@ -1,4 +1,15 @@
 export {
+    type AffectedCellLeaf,
+    affectedCellLeafHash,
+    CellMetric,
+    type CellMetric as CellMetricValue,
+    CellsGenerationMethod,
+    type CellsGenerationMethod as CellsGenerationMethodValue,
+    IntensityScale,
+    type IntensityScale as IntensityScaleValue,
+    serializeAffectedCellLeaf,
+} from "./affected-cell-leaf.js";
+export {
     bytesToBigEndianU64,
     bytesToPrefixedHex,
     hexToBytes,
@@ -6,6 +17,9 @@ export {
     sha256Bytes,
     sha256Hex,
     U64_MAX,
+    u8Byte,
+    u16LittleEndianBytes,
+    u32LittleEndianBytes,
     u64BigEndianBytes,
     u64LittleEndianBytes,
 } from "./bytes.js";

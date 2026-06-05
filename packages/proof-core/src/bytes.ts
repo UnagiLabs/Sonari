@@ -1,6 +1,41 @@
 export const U64_MAX = 18_446_744_073_709_551_615n;
+export const U32_MAX = 4_294_967_295;
+export const U16_MAX = 65_535;
+export const U8_MAX = 255;
 
 export type PrefixedHex32 = `0x${string}`;
+
+export function u8Byte(value: number | bigint): Uint8Array {
+    const n = typeof value === "bigint" ? Number(value) : value;
+    if (!Number.isInteger(n) || n < 0 || n > U8_MAX) {
+        throw new Error(`u8 value is outside range: ${value}`);
+    }
+    return Uint8Array.of(n);
+}
+
+export function u16LittleEndianBytes(value: number | bigint): Uint8Array {
+    const n = typeof value === "bigint" ? Number(value) : value;
+    if (!Number.isInteger(n) || n < 0 || n > U16_MAX) {
+        throw new Error(`u16 value is outside range: ${value}`);
+    }
+    const bytes = new Uint8Array(2);
+    bytes[0] = n & 0xff;
+    bytes[1] = (n >> 8) & 0xff;
+    return bytes;
+}
+
+export function u32LittleEndianBytes(value: number | bigint): Uint8Array {
+    const n = typeof value === "bigint" ? Number(value) : value;
+    if (!Number.isInteger(n) || n < 0 || n > U32_MAX) {
+        throw new Error(`u32 value is outside range: ${value}`);
+    }
+    const bytes = new Uint8Array(4);
+    bytes[0] = n & 0xff;
+    bytes[1] = (n >> 8) & 0xff;
+    bytes[2] = (n >> 16) & 0xff;
+    bytes[3] = (n >> 24) & 0xff;
+    return bytes;
+}
 
 export function u64LittleEndianBytes(value: bigint): Uint8Array {
     if (value < 0n || value > U64_MAX) {
