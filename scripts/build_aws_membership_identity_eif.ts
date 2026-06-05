@@ -10,13 +10,8 @@ const DEFAULT_DOCKER_URI = "sonari/membership-identity-tee:local";
 const DEFAULT_CPU_COUNT = 2;
 const DEFAULT_MEMORY_MIB = 1024;
 const DEFAULT_ENCLAVE_CID = 16;
-const DEFAULT_TEE_MODE = "server";
-const DEFAULT_WORLD_ID_STATUS = "verified";
-const DEFAULT_WORLD_APP_ID = "app_staging_123";
 const MEMBERSHIP_TEE_BIN = "/opt/sonari/tee-artifact/bin/membership-tee";
-
-export type AwsMembershipIdentityTeeMode = "server" | "production" | "fixture";
-export type AwsMembershipIdentityFixtureWorldIdStatus = "verified" | "rejected" | "pending-source";
+const MEMBERSHIP_TEE_COMMAND = [MEMBERSHIP_TEE_BIN, "server"] as const;
 
 export interface BuildAwsMembershipIdentityEifOptions {
     artifactPath?: string;
@@ -26,9 +21,6 @@ export interface BuildAwsMembershipIdentityEifOptions {
     memoryMiB?: number;
     enclaveCid?: number;
     keepWorkDir?: boolean;
-    teeMode?: AwsMembershipIdentityTeeMode;
-    worldIdStatus?: AwsMembershipIdentityFixtureWorldIdStatus;
-    worldAppId?: string;
 }
 
 export interface AwsMembershipIdentityEifBuildPlan {
@@ -52,16 +44,13 @@ export function createAwsMembershipIdentityEifBuildPlan(
     const cpuCount = options.cpuCount ?? DEFAULT_CPU_COUNT;
     const memoryMiB = options.memoryMiB ?? DEFAULT_MEMORY_MIB;
     const enclaveCid = options.enclaveCid ?? DEFAULT_ENCLAVE_CID;
-    const teeMode = options.teeMode ?? DEFAULT_TEE_MODE;
-    const worldIdStatus = options.worldIdStatus ?? DEFAULT_WORLD_ID_STATUS;
-    const worldAppId = options.worldAppId ?? DEFAULT_WORLD_APP_ID;
 
     return {
         artifactPath,
         eifPath,
         dockerContextDir,
         dockerUri: DEFAULT_DOCKER_URI,
-        teeCommand: teeCommandFor({ teeMode, worldIdStatus, worldAppId }),
+        teeCommand: MEMBERSHIP_TEE_COMMAND,
         buildEnclaveCommand: [
             "nitro-cli",
             "build-enclave",
@@ -111,27 +100,6 @@ export async function buildAwsMembershipIdentityEif(
     return plan;
 }
 
-function teeCommandFor(options: {
-    readonly teeMode: AwsMembershipIdentityTeeMode;
-    readonly worldIdStatus: AwsMembershipIdentityFixtureWorldIdStatus;
-    readonly worldAppId: string;
-}): readonly string[] {
-    if (options.teeMode === "server") {
-        return [MEMBERSHIP_TEE_BIN, "server"];
-    }
-    if (options.teeMode === "production") {
-        return [MEMBERSHIP_TEE_BIN, "production"];
-    }
-    return [
-        MEMBERSHIP_TEE_BIN,
-        "fixture",
-        "--world-id-status",
-        options.worldIdStatus,
-        "--world-app-id",
-        options.worldAppId,
-    ];
-}
-
 function dockerfileFor(teeCommand: readonly string[]): string {
     return [
         "FROM public.ecr.aws/amazonlinux/amazonlinux:2023",
@@ -150,9 +118,6 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
         memoryMiB: DEFAULT_MEMORY_MIB,
         enclaveCid: DEFAULT_ENCLAVE_CID,
         keepWorkDir: false,
-        teeMode: DEFAULT_TEE_MODE,
-        worldIdStatus: DEFAULT_WORLD_ID_STATUS,
-        worldAppId: DEFAULT_WORLD_APP_ID,
     };
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -203,23 +168,6 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
             index += 1;
             continue;
         }
-        if (arg === "--tee-mode") {
-            options.teeMode = parseTeeMode(parseValue(argv, index, "--tee-mode"));
-            index += 1;
-            continue;
-        }
-        if (arg === "--world-id-status") {
-            options.worldIdStatus = parseWorldIdStatus(
-                parseValue(argv, index, "--world-id-status"),
-            );
-            index += 1;
-            continue;
-        }
-        if (arg === "--world-app-id") {
-            options.worldAppId = parseValue(argv, index, "--world-app-id");
-            index += 1;
-            continue;
-        }
         if (arg?.startsWith("--artifact=") === true) {
             options.artifactPath = parseInlineValue(arg, "--artifact");
             continue;
@@ -250,18 +198,6 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
             );
             continue;
         }
-        if (arg?.startsWith("--tee-mode=") === true) {
-            options.teeMode = parseTeeMode(parseInlineValue(arg, "--tee-mode"));
-            continue;
-        }
-        if (arg?.startsWith("--world-id-status=") === true) {
-            options.worldIdStatus = parseWorldIdStatus(parseInlineValue(arg, "--world-id-status"));
-            continue;
-        }
-        if (arg?.startsWith("--world-app-id=") === true) {
-            options.worldAppId = parseInlineValue(arg, "--world-app-id");
-            continue;
-        }
         throw new Error(`Unknown argument: ${arg ?? ""}`);
     }
 
@@ -290,20 +226,6 @@ function parsePositiveInteger(value: string, flag: string): number {
         throw new Error(`${flag} requires a positive integer`);
     }
     return parsed;
-}
-
-function parseTeeMode(value: string): AwsMembershipIdentityTeeMode {
-    if (value === "server" || value === "production" || value === "fixture") {
-        return value;
-    }
-    throw new Error("--tee-mode requires server, production, or fixture");
-}
-
-function parseWorldIdStatus(value: string): AwsMembershipIdentityFixtureWorldIdStatus {
-    if (value === "verified" || value === "rejected" || value === "pending-source") {
-        return value;
-    }
-    throw new Error("--world-id-status requires verified, rejected, or pending-source");
 }
 
 async function run(command: string, args: readonly string[]): Promise<void> {

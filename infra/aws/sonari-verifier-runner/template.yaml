@@ -493,12 +493,8 @@ Resources:
                 return
               fi
 
-              nitro-cli run-enclave $SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS >/tmp/sonari-earthquake-run-enclave.json 2>/tmp/sonari-earthquake-run-enclave.err || {
-                if ! nitro-cli describe-enclaves | grep -q '"EnclaveCID": '"$SONARI_EARTHQUAKE_ENCLAVE_CID"; then
-                  cat /tmp/sonari-earthquake-run-enclave.err >&2
-                  exit 1
-                fi
-              }
+              nitro-cli terminate-enclave --all &>/dev/null || true
+              nitro-cli run-enclave $SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS >/tmp/sonari-earthquake-run-enclave.json 2>/tmp/sonari-earthquake-run-enclave.err || { cat /tmp/sonari-earthquake-run-enclave.err >&2; exit 1; }
               rm -f /tmp/sm
               sleep 2
 

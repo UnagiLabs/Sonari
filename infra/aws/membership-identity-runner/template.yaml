@@ -368,33 +368,8 @@ Resources:
               echo "WorldIdApiBase must be an http(s) URL" >&2
               exit 1
             fi
-            sonari_dev_membership_stdio_bridge=0
-            if ! command -v sonari-enclave-stdio >/dev/null 2>&1 && [[ "$world_id_app_id" == app_staging_* ]]; then
-              cat >/usr/local/bin/sonari-enclave-stdio <<'SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE'
-            #!/bin/bash
-            set -euo pipefail
-            : "${!SONARI_WORLD_ID_APP_ID:?SONARI_WORLD_ID_APP_ID is required}"
-            exec /opt/sonari/tee-artifact/bin/membership-tee fixture --world-id-status verified --world-app-id "$SONARI_WORLD_ID_APP_ID"
-            SONARI_DEV_MEMBERSHIP_STDIO_BRIDGE
-              chmod 0500 /usr/local/bin/sonari-enclave-stdio
-              sonari_dev_membership_stdio_bridge=1
-            fi
             vsock_proxy_path="$(command -v vsock-proxy)"
-            if [ "$sonari_dev_membership_stdio_bridge" = "1" ]; then
-              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_DEV_VSOCK_PROXY
-            [Unit]
-            Description=Sonari dev fixture World ID proxy placeholder
-
-            [Service]
-            Type=oneshot
-            RemainAfterExit=yes
-            ExecStart=/bin/true
-
-            [Install]
-            WantedBy=multi-user.target
-            SONARI_DEV_VSOCK_PROXY
-            else
-              cat >/opt/sonari/bin/sonari-world-id-egress-connect-proxy <<'SONARI_WORLD_ID_CONNECT_PROXY'
+            cat >/opt/sonari/bin/sonari-world-id-egress-connect-proxy <<'SONARI_WORLD_ID_CONNECT_PROXY'
             #!/usr/bin/env python3
             import argparse
             import select
@@ -452,9 +427,9 @@ Resources:
                 server.allowlist = allowlist
                 server.serve_forever()
             SONARI_WORLD_ID_CONNECT_PROXY
-              chmod 0500 /opt/sonari/bin/sonari-world-id-egress-connect-proxy
-              printf '%s\n' "$world_id_api_host:443" >/opt/sonari/world-id-egress-allowlist
-              cat >/etc/systemd/system/sonari-world-id-egress-connect-proxy.service <<'SONARI_WORLD_ID_CONNECT_PROXY_SERVICE'
+            chmod 0500 /opt/sonari/bin/sonari-world-id-egress-connect-proxy
+            printf '%s\n' "$world_id_api_host:443" >/opt/sonari/world-id-egress-allowlist
+            cat >/etc/systemd/system/sonari-world-id-egress-connect-proxy.service <<'SONARI_WORLD_ID_CONNECT_PROXY_SERVICE'
             [Unit]
             Description=Sonari World ID HTTPS CONNECT egress proxy
             After=network-online.target
@@ -469,7 +444,7 @@ Resources:
             [Install]
             WantedBy=multi-user.target
             SONARI_WORLD_ID_CONNECT_PROXY_SERVICE
-              cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
+            cat >/etc/systemd/system/sonari-world-id-vsock-proxy.service <<SONARI_VSOCK_PROXY
             [Unit]
             Description=Sonari World ID egress vsock proxy for membership identity enclave
             After=sonari-world-id-egress-connect-proxy.service nitro-enclaves-allocator.service
@@ -485,11 +460,8 @@ Resources:
             [Install]
             WantedBy=multi-user.target
             SONARI_VSOCK_PROXY
-            fi
             systemctl daemon-reload
-            if [ "$sonari_dev_membership_stdio_bridge" != "1" ]; then
-              systemctl enable --now sonari-world-id-egress-connect-proxy.service
-            fi
+            systemctl enable --now sonari-world-id-egress-connect-proxy.service
             systemctl enable --now sonari-world-id-vsock-proxy.service
             {
               printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"

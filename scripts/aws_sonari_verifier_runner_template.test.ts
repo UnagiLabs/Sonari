@@ -452,6 +452,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
 
         expect(earthquakeWrapper).toContain("marker=/tmp/se");
+        expect(earthquakeWrapper).toContain("nitro-cli terminate-enclave --all");
         expect(earthquakeWrapper).toContain("rm -f /tmp/sm");
         expect(membershipWrapper).toContain("m=/tmp/sm");
         expect(membershipWrapper).toContain("rm -f /tmp/se");

@@ -44,38 +44,20 @@ describe("AWS membership identity EIF build script", () => {
         ]);
     });
 
-    it("can build a non-mainnet dummy World ID EIF with the fixture verifier", () => {
-        const plan = createAwsMembershipIdentityEifBuildPlan({
-            artifactPath: "dist/aws/membership-identity-tee-artifact.tar.gz",
-            eifPath: "dist/aws/membership-identity-tee-dummy.eif",
-            workDir: ".build/aws-membership-identity-eif-dummy",
-            teeMode: "fixture",
-            worldIdStatus: "verified",
-            worldAppId: "app_staging_dummy",
-        });
+    it("rejects legacy stdin/stdout modes for the AWS server EIF builder", async () => {
+        const script = await readFile(
+            path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
+            "utf8",
+        );
 
-        expect(plan.teeCommand).toEqual([
-            "/opt/sonari/tee-artifact/bin/membership-tee",
-            "fixture",
-            "--world-id-status",
-            "verified",
-            "--world-app-id",
-            "app_staging_dummy",
-        ]);
+        expect(script).not.toContain("--tee-mode");
+        expect(script).not.toContain("--world-id-status");
+        expect(script).not.toContain("--world-app-id");
+        expect(script).not.toContain('"production"');
+        expect(script).not.toContain('"fixture"');
     });
 
-    it("can still build an explicit legacy local production EIF", () => {
-        const plan = createAwsMembershipIdentityEifBuildPlan({
-            teeMode: "production",
-        });
-
-        expect(plan.teeCommand).toEqual([
-            "/opt/sonari/tee-artifact/bin/membership-tee",
-            "production",
-        ]);
-    });
-
-    it("documents that the EIF container runs membership-tee entrypoints without Walrus", async () => {
+    it("documents that the EIF container runs membership-tee server without Walrus", async () => {
         const script = await readFile(
             path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
             "utf8",
@@ -83,7 +65,6 @@ describe("AWS membership identity EIF build script", () => {
 
         expect(script).toContain('"/opt/sonari/tee-artifact/bin/membership-tee"');
         expect(script).toContain('"server"');
-        expect(script).toContain('"production"');
         expect(script).toContain("nitro-cli");
         expect(script).toContain("build-enclave");
         expect(script).toContain("run-enclave");
