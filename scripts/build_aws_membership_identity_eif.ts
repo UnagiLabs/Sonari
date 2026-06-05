@@ -10,12 +10,12 @@ const DEFAULT_DOCKER_URI = "sonari/membership-identity-tee:local";
 const DEFAULT_CPU_COUNT = 2;
 const DEFAULT_MEMORY_MIB = 1024;
 const DEFAULT_ENCLAVE_CID = 16;
-const DEFAULT_TEE_MODE = "production";
+const DEFAULT_TEE_MODE = "server";
 const DEFAULT_WORLD_ID_STATUS = "verified";
 const DEFAULT_WORLD_APP_ID = "app_staging_123";
 const MEMBERSHIP_TEE_BIN = "/opt/sonari/tee-artifact/bin/membership-tee";
 
-export type AwsMembershipIdentityTeeMode = "production" | "fixture";
+export type AwsMembershipIdentityTeeMode = "server" | "production" | "fixture";
 export type AwsMembershipIdentityFixtureWorldIdStatus = "verified" | "rejected" | "pending-source";
 
 export interface BuildAwsMembershipIdentityEifOptions {
@@ -116,6 +116,9 @@ function teeCommandFor(options: {
     readonly worldIdStatus: AwsMembershipIdentityFixtureWorldIdStatus;
     readonly worldAppId: string;
 }): readonly string[] {
+    if (options.teeMode === "server") {
+        return [MEMBERSHIP_TEE_BIN, "server"];
+    }
     if (options.teeMode === "production") {
         return [MEMBERSHIP_TEE_BIN, "production"];
     }
@@ -290,10 +293,10 @@ function parsePositiveInteger(value: string, flag: string): number {
 }
 
 function parseTeeMode(value: string): AwsMembershipIdentityTeeMode {
-    if (value === "production" || value === "fixture") {
+    if (value === "server" || value === "production" || value === "fixture") {
         return value;
     }
-    throw new Error("--tee-mode requires production or fixture");
+    throw new Error("--tee-mode requires server, production, or fixture");
 }
 
 function parseWorldIdStatus(value: string): AwsMembershipIdentityFixtureWorldIdStatus {

@@ -6,7 +6,7 @@ import { createAwsMembershipIdentityEifBuildPlan } from "./build_aws_membership_
 const packageJsonPath = path.join(process.cwd(), "package.json");
 
 describe("AWS membership identity EIF build script", () => {
-    it("generates deterministic Nitro build and run-enclave commands", () => {
+    it("generates deterministic Nitro build and run-enclave commands with the server EIF entrypoint", () => {
         const plan = createAwsMembershipIdentityEifBuildPlan({
             artifactPath: "dist/aws/membership-identity-tee-artifact.tar.gz",
             eifPath: "dist/aws/membership-identity-tee.eif",
@@ -21,7 +21,7 @@ describe("AWS membership identity EIF build script", () => {
         expect(plan.dockerUri).toBe("sonari/membership-identity-tee:local");
         expect(plan.teeCommand).toEqual([
             "/opt/sonari/tee-artifact/bin/membership-tee",
-            "production",
+            "server",
         ]);
         expect(plan.buildEnclaveCommand).toEqual([
             "nitro-cli",
@@ -67,13 +67,25 @@ describe("AWS membership identity EIF build script", () => {
         ]);
     });
 
-    it("documents that the EIF container runs membership-tee production without Walrus", async () => {
+    it("can still build an explicit legacy local production EIF", () => {
+        const plan = createAwsMembershipIdentityEifBuildPlan({
+            teeMode: "production",
+        });
+
+        expect(plan.teeCommand).toEqual([
+            "/opt/sonari/tee-artifact/bin/membership-tee",
+            "production",
+        ]);
+    });
+
+    it("documents that the EIF container runs membership-tee entrypoints without Walrus", async () => {
         const script = await readFile(
             path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
             "utf8",
         );
 
         expect(script).toContain('"/opt/sonari/tee-artifact/bin/membership-tee"');
+        expect(script).toContain('"server"');
         expect(script).toContain('"production"');
         expect(script).toContain("nitro-cli");
         expect(script).toContain("build-enclave");
