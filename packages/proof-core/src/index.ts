@@ -10,6 +10,19 @@ export {
     serializeAffectedCellLeaf,
 } from "./affected-cell-leaf.js";
 export {
+    type AffectedCellEntry,
+    type AffectedCellsInput,
+    affectedCellLeavesFromInput,
+    affectedCellProofSteps,
+    affectedCellsLeafHashes,
+    affectedCellsRoot,
+    type DirectionalProofStep,
+    directionalToProofStep,
+    type ProofDirection,
+    parseAffectedCellsFile,
+    proofStepToDirectional,
+} from "./affected-cells.js";
+export {
     bytesToBigEndianU64,
     bytesToPrefixedHex,
     hexToBytes,
@@ -33,6 +46,14 @@ export {
     validateH3CellLayout,
 } from "./h3.js";
 export { hashLeafBytes } from "./leaf-hash.js";
+export {
+    buildProofEntries,
+    buildProofManifest,
+    buildProofShardGroups,
+    type ProofEntry,
+    type ProofManifest,
+    type ProofShardGroup,
+} from "./manifest.js";
 export {
     merkleLevelsFromLeafHashes,
     merkleRootFromLeafHashes,
