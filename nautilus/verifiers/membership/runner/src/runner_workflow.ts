@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
     AutoScalingClient,
     DescribeAutoScalingGroupsCommand,
@@ -38,6 +39,7 @@ import {
 import {
     createEd25519SuiSignerFromPrivateKey,
     dryRunIdentityVerificationSubmit,
+    IDENTITY_VERIFIER_VERSION,
     type IdentityVerificationDryRunSuccess,
     type IdentityVerificationRelayerMode,
     type IdentityVerificationSigner,
@@ -391,10 +393,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 });
             }
             case "register_enclave_instance": {
-                const registrar = options.enclaveRegistration;
-                if (registrar === undefined) {
-                    throw new Error("enclave registration is not configured");
-                }
+                const registrar = options.enclaveRegistration ?? LOCAL_ENCLAVE_REGISTRATION_ADAPTER;
                 const attestation = readEnclaveAttestation(event.attestation);
                 await requireCurrentWorkflowAttempt(options, event, true);
                 const registered = requireRegistrationMetadata(
@@ -508,12 +507,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const repository = requireRepository(options);
                 await requireCurrentWorkflowAttempt(options, event, true);
                 const nowMs = options.now?.() ?? Date.now();
-                if (event.result.status === "pending_source") {
+                const result = event.result;
+                if (result.status === "pending_source") {
                     const updated = await repository.markRetry(
                         event.job_id,
                         nowMs,
                         nowMs + DEFAULT_RETRY_BACKOFF_MS,
-                        event.result.error_code,
+                        result.error_code,
                     );
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
@@ -522,15 +522,15 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         job_id: event.job_id,
                         attempt: event.attempt,
                         applied: true,
-                        result: event.result,
+                        result,
                     });
                 }
-                if (event.result.status === "rejected" || event.result.status === "unsupported") {
+                if (result.status === "rejected" || result.status === "unsupported") {
                     const updated = await repository.markFailed(
                         event.job_id,
                         nowMs,
-                        event.result.error_code,
-                        event.result.error_code,
+                        result.error_code,
+                        result.error_code,
                     );
                     if (!updated) {
                         throw new Error("stale runner workflow attempt");
@@ -539,15 +539,26 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         job_id: event.job_id,
                         attempt: event.attempt,
                         applied: true,
-                        result: event.result,
+                        result,
                     });
                 }
-                return retainVerifierKind({
-                    job_id: event.job_id,
-                    attempt: event.attempt,
-                    applied: true,
-                    result: event.result,
-                });
+                if (result.status === "verified") {
+                    const updated = await repository.markCompleted(
+                        event.job_id,
+                        nowMs,
+                        teeOnlyCompletionDigest(result),
+                    );
+                    if (!updated) {
+                        throw new Error("stale runner workflow attempt");
+                    }
+                    return retainVerifierKind({
+                        job_id: event.job_id,
+                        attempt: event.attempt,
+                        applied: true,
+                        result,
+                    });
+                }
+                throw new Error("unknown membership TEE result status");
             }
             case "dry_run_sui_submission": {
                 await requireCurrentWorkflowAttempt(options, event, true);
@@ -818,6 +829,27 @@ class AwsSsmClient implements SsmClientLike {
     }
 }
 
+function teeOnlyCompletionDigest(result: VerifiedMembershipTeeResult): string {
+    const digest = createHash("sha256").update(result.payload_bcs_hex).digest("hex");
+    return `tee-result:${digest}`;
+}
+
+class LocalEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {
+    async register(input: {
+        jobId: string;
+        attestationDocumentHex: string;
+        publicKey: string;
+    }): Promise<EnclaveVerificationMetadata> {
+        return {
+            verifier_config_key: MEMBERSHIP_IDENTITY_VERIFIER_CONFIG_KEY,
+            verifier_config_version: IDENTITY_VERIFIER_VERSION,
+            enclave_instance_public_key: input.publicKey,
+        };
+    }
+}
+
+const LOCAL_ENCLAVE_REGISTRATION_ADAPTER = new LocalEnclaveRegistrationAdapter();
+
 class AwsS3Client implements S3ClientLike {
     private readonly client = new S3Client({});
 
@@ -848,7 +880,7 @@ function buildEnclaveRegistrationAdapter(secretReader: RelayerSignerSecretReader
     enclaveRegistration?: EnclaveRegistrationAdapter;
 } {
     const config = readEnclaveRegistrationConfigFromEnv(secretReader);
-    if (config === undefined) {
+    if (config === undefined || !config.allowSubmit) {
         return {};
     }
     return { enclaveRegistration: new SuiEnclaveRegistrationAdapter(config) };
@@ -1233,7 +1265,7 @@ export function readEnclaveRegistrationConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
 ): SuiEnclaveRegistrationConfig | undefined {
     const mode = process.env.IDENTITY_RELAYER_MODE;
-    if (mode === undefined || mode.length === 0) {
+    if (mode === undefined || mode.length === 0 || mode !== "submit") {
         return undefined;
     }
     const packageId = process.env.SONARI_IDENTITY_PACKAGE_ID ?? "";

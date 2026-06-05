@@ -31,6 +31,7 @@ Relayer や worker は、この crate が返した結果の意味を変えては
 AWS / Nautilus production path は `membership-tee server` です。
 `server` は起動時に enclave-local ephemeral key を作り、`/get_attestation` でその public key を Nitro attestation に含めます。
 worker はその attestation を登録し、registration metadata を受け取ります。
+submit-capable relayer 設定がない default / dry-run smoke では、worker は `/process_data` envelope 用の local registration metadata を作ります。
 その後、worker は `/process_data` に `IdentityVerifyRequest` と registration metadata を送ります。
 `server` は verified result の BCS payload を ephemeral key で署名し、registration metadata を result に注入します。
 

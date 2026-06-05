@@ -369,6 +369,9 @@ Resources:
               exit 1
             fi
             vsock_proxy_path="$(command -v vsock-proxy)"
+            if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
+              printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
+            fi
             cat >/opt/sonari/bin/sonari-world-id-egress-connect-proxy <<'SONARI_WORLD_ID_CONNECT_PROXY'
             #!/usr/bin/env python3
             import argparse
@@ -777,22 +780,8 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
-              "Next": "SuiSubmissionChoice",
-              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
-            },
-            "SuiSubmissionChoice": {
-              "Type": "Choice",
-              "Choices": [
-                { "Variable": "$.result.status", "StringEquals": "verified", "Next": "DryRunSuiSubmission" }
-              ],
-              "Default": "StopInstance"
-            },
-            "DryRunSuiSubmission": {
-              "Type": "Task",
-              "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dry_run_sui_submission", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
               "Next": "StopInstance",
-              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "MarkFailed": {
               "Type": "Task",

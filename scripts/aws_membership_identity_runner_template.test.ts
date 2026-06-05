@@ -59,6 +59,12 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
         expect(template).toContain("dnf install -y awscli amazon-ssm-agent libstdc++ python3");
         expect(template).toContain("yum install -y awscli amazon-ssm-agent libstdc++ python3");
+        expect(template).toContain(
+            "grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml",
+        );
+        expect(template).toContain(
+            "printf '%s\\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml",
+        );
         expect(template).toContain("Default: /opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
@@ -171,9 +177,11 @@ describe("AWS membership identity runner CloudFormation template", () => {
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
 
-        // 案A: verified result は identity update を dry-run で提出する。
-        expect(template).toContain('"Next": "SuiSubmissionChoice"');
-        expect(template).toContain('"action": "dry_run_sui_submission"');
-        expect(template).toContain('"StringEquals": "verified", "Next": "DryRunSuiSubmission"');
+        // The dedicated runner owns the TEE server path only. Sui dry-run/submit
+        // requires separate relayer config and is intentionally not forced here.
+        expect(template).toContain('"action": "apply_result"');
+        expect(template).toContain('"Next": "StopInstance"');
+        expect(template).not.toContain('"Next": "SuiSubmissionChoice"');
+        expect(template).not.toContain('"action": "dry_run_sui_submission"');
     });
 });

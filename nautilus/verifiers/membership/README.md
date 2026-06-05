@@ -115,6 +115,7 @@ server path は enclave-local ephemeral key を起動時に作る。
 この key は `/get_attestation` の attestation public key と、
 `/process_data` の verified payload 署名に使う。
 worker は `/get_attestation` を登録し、registration metadata を受け取る。
+submit-capable relayer 設定がない default / dry-run smoke では、worker は `/process_data` envelope 用の local registration metadata を作る。
 その metadata を `/process_data` の request envelope に入れる。
 server は verified result に registration metadata を注入して返す。
 

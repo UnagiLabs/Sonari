@@ -358,6 +358,36 @@ describe("membership runner workflow", () => {
         });
     });
 
+    it("applies verified TEE output as completed for TEE-only server path", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "apply_result",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ applied: true, result: { status: "verified" } });
+
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "completed",
+            tx_digest: expect.stringMatching(/^tee-result:[0-9a-f]{64}$/),
+            completed_at_ms: baseNowMs + 2,
+        });
+    });
+
     it("skips Sui submission for status-only TEE output", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
@@ -832,6 +862,23 @@ describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => 
             Object.assign(process.env, originalEnv);
         }
     });
+
+    it("readEnclaveRegistrationConfigFromEnv returns undefined for dry_run mode", () => {
+        const originalEnv = { ...process.env };
+        try {
+            process.env.IDENTITY_RELAYER_MODE = "dry_run";
+            process.env.SONARI_IDENTITY_PACKAGE_ID = "0xpkg";
+            process.env.SONARI_VERIFIER_REGISTRY_ID = "0xreg";
+
+            const config = readEnclaveRegistrationConfigFromEnv(noopSecretReader);
+            expect(config).toBeUndefined();
+        } finally {
+            for (const key of Object.keys(process.env)) {
+                if (!(key in originalEnv)) delete process.env[key];
+            }
+            Object.assign(process.env, originalEnv);
+        }
+    });
 });
 
 const noopSecretReader = {
@@ -1072,7 +1119,7 @@ describe("membership runner attestation/register/process_data flow", () => {
         });
     });
 
-    it("register_enclave_instance throws when enclaveRegistration adapter is not configured", async () => {
+    it("register_enclave_instance uses local metadata when enclaveRegistration adapter is not configured", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
         await repository.claimNextDue(baseNowMs + 1);
@@ -1086,17 +1133,24 @@ describe("membership runner attestation/register/process_data flow", () => {
             config: baseConfig(),
         });
 
-        await expect(
-            handler({
-                action: "register_enclave_instance",
-                job_id: job.row.job_id,
-                attempt: 1,
-                attestation: {
-                    attestation_document_hex: fakeAttestationHex,
-                    public_key: fakePublicKey,
-                },
-            } as never),
-        ).rejects.toThrow(/enclave registration is not configured/);
+        const result = await handler({
+            action: "register_enclave_instance",
+            job_id: job.row.job_id,
+            attempt: 1,
+            attestation: {
+                attestation_document_hex: fakeAttestationHex,
+                public_key: fakePublicKey,
+            },
+        } as never);
+
+        expect(result).toMatchObject({
+            job_id: job.row.job_id,
+            registration_metadata: {
+                verifier_config_key: 2,
+                verifier_config_version: 1,
+                enclave_instance_public_key: fakePublicKey,
+            },
+        });
     });
 
     it("dispatch_process_data_command injects registration_metadata with verifier_config_key=2 into TEE input", async () => {

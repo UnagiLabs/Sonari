@@ -59,8 +59,9 @@ membership-tee server
 
 `membership-tee server` は VSOCK HTTP server として待ち受けます。
 server path は起動時に enclave-local ephemeral key を作ります。
-AWS runner は `/get_attestation` を呼び、attestation public key を登録します。
-登録後、runner は registration metadata を受け取ります。
+AWS runner は `/get_attestation` を呼び、attestation public key を取得します。
+submit-capable relayer 設定がある場合、runner は Sui 上の enclave registration を使います。
+default / dry-run smoke では、runner は `/process_data` envelope 用の local registration metadata を作ります。
 runner は `/process_data` に `IdentityVerifyRequest` と registration metadata を送ります。
 server は verified result に signature、public_key、registration metadata を入れて返します。
 
@@ -339,31 +340,14 @@ Real World ID request を submit し、enclave が vsock-proxy 経由でのみ W
 - verified output の public key
 - sanitized CloudWatch log location
 
-### 7. Sui dry-run
+### 7. Sui dry-run / submit
 
-最初に relayer mode を dry-run にします。
+この dedicated stack は `membership-tee server` の attestation、World ID verification、`/process_data` envelope を確認する runner です。
+Sui dry-run / submit は、relayer 設定を持つ shared stack または後続 issue で確認します。
+default / dry-run smoke では、runner は envelope 用の local registration metadata を使います。
+submit-capable relayer 設定がある場合だけ、Sui 上の enclave registration を使います。
 
-```bash
-RELAYER_MODE=dry_run
-```
-
-Workflow を `dry_run_sui_submission` まで実行します。dry-run は、署名済み `payload_bcs_hex`、`signature`、`public_key` の意味を変えずに使う必要があります。
-
-Dry-run result と effects を記録します。
-
-### 8. Sui submit
-
-Dry-run が成功し、signer secret が設定された後にだけ submit します。
-
-```bash
-RELAYER_MODE=submit
-RELAYER_ALLOW_SUBMIT=true
-RELAYER_SIGNER_SECRET_ARN="$RELAYER_SIGNER_SECRET_ARN"
-```
-
-Submit path は `accessor::update_identity_verification` を呼び、tx digest を保存します。tx digest を記録し、duplicate completion で上書きしてはいけません。
-
-### 9. Post-tx membership pass state readback
+### 8. Post-tx membership pass state readback
 
 Tx digest が finalized された後、同じ Sui network から `SONARI_MEMBERSHIP_PASS_ID` を読みます。Membership pass の identity verification field が submit した verified payload を反映していることを確認します。
 
