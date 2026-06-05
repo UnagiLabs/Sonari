@@ -168,7 +168,13 @@ importers:
 
   nautilus/verifiers/membership/shared: {}
 
-  packages/residence-proof-worker: {}
+  packages/proof-core: {}
+
+  packages/residence-proof-worker:
+    dependencies:
+      '@sonari/proof-core':
+        specifier: workspace:*
+        version: link:../proof-core
 
 packages:
 
