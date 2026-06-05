@@ -879,6 +879,34 @@ describe("STEP 7: env namespace, stop_instance, register adapter wiring", () => 
             Object.assign(process.env, originalEnv);
         }
     });
+
+    it("passes Sui registration env and signer secret access to RunnerControlLambda", async () => {
+        const template = await readFile(
+            new URL(
+                "../../../../../infra/aws/membership-identity-runner/template.yaml",
+                import.meta.url,
+            ),
+            "utf8",
+        );
+
+        expect(template).toContain("IdentityRelayerMode:");
+        expect(template).toContain("SonariIdentityPackageId:");
+        expect(template).toContain("SonariVerifierRegistryId:");
+        expect(template).toContain("RelayerGrpcUrl:");
+        expect(template).toContain("RelayerAllowSubmit:");
+        expect(template).toContain("RelayerSignerSecretArn:");
+        expect(template).toContain("IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode");
+        expect(template).toContain("SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId");
+        expect(template).toContain("SONARI_VERIFIER_REGISTRY_ID: !Ref SonariVerifierRegistryId");
+        expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
+        expect(template).toContain("RELAYER_GRPC_URL: !Ref RelayerGrpcUrl");
+        expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
+        expect(template).toContain("RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn");
+        expect(template).toContain("secretsmanager:GetSecretValue");
+        expect(template).toContain("Resource: !Ref RelayerSignerSecretArn");
+        expect(template).not.toContain("SONARI_IDENTITY_PAUSE_STATE_ID:");
+        expect(template).not.toContain("SONARI_MEMBERSHIP_REGISTRY_ID:");
+    });
 });
 
 const noopSecretReader = {
