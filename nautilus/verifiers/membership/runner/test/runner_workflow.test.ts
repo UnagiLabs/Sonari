@@ -476,6 +476,61 @@ describe("membership runner workflow", () => {
         });
     });
 
+    it("records dry-run handoff data for verified TEE output before completion", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            dryRunDigest: "dry-run-digest",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "dry_run_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "succeeded" });
+
+        const row = await repository.get(job.row.job_id);
+        expect(row).toMatchObject({
+            status: "processing",
+            sui_dry_run_completed_at_ms: baseNowMs + 2,
+        });
+        expect(row?.sui_dry_run_result_json).not.toBeNull();
+        const dryRunRecord = JSON.parse(row?.sui_dry_run_result_json ?? "{}") as {
+            signed_payload?: unknown;
+            request?: { target?: string };
+            transaction_bytes?: number[];
+            effects?: { digest?: string };
+        };
+        expect(dryRunRecord).toEqual({
+            signed_payload: {
+                status: "verified",
+                payload_bcs_hex: "0x010203",
+                signature: `0x${"11".repeat(64)}`,
+                public_key: `0x${"22".repeat(32)}`,
+                membership_id: validRequest().membership_id,
+            },
+            request: fakeSuiRequest(),
+            transaction_bytes: [1, 2, 3],
+            effects: { digest: "dry-run-digest" },
+        });
+        expect(submitter.dryRuns).toEqual([dryRunRecord.signed_payload]);
+        expect(submitter.submits).toEqual([]);
+    });
+
     it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
