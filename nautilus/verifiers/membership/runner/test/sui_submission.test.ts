@@ -73,8 +73,13 @@ describe("membership identity Sui submission", () => {
 
     it("dry-runs without signer material and fails closed when dry-run config is missing", async () => {
         const transaction = fakeTransaction(new Uint8Array([9, 8, 7]));
+        let signAndExecuteCalls = 0;
         const client = fakeClient({
             simulateTransaction: async () => successfulTransaction("dry-run-digest"),
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalls += 1;
+                return successfulTransaction("unexpected-submit");
+            },
         });
 
         await expect(
@@ -95,6 +100,7 @@ describe("membership identity Sui submission", () => {
                 },
             },
         });
+        expect(signAndExecuteCalls).toBe(0);
 
         await expect(
             dryRunIdentityVerificationSubmit(verifiedResult(), {
@@ -106,6 +112,65 @@ describe("membership identity Sui submission", () => {
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
             message: "dry_run requires network, grpcUrl, and senderAddress",
+        });
+    });
+
+    it("maps dry-run Move failures to MOVE_REJECTED without submit fallback", async () => {
+        let signAndExecuteCalls = 0;
+        const failedTransactionClient = fakeClient({
+            simulateTransaction: async () => ({
+                $kind: "FailedTransaction",
+                FailedTransaction: {
+                    status: { success: false, error: "Move abort: invalid signature" },
+                    effects: {},
+                },
+            }),
+            signAndExecuteTransaction: async () => {
+                signAndExecuteCalls += 1;
+                return successfulTransaction("unexpected-submit");
+            },
+        });
+
+        await expect(
+            dryRunIdentityVerificationSubmit(verifiedResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                senderAddress,
+                transaction: fakeTransaction(new Uint8Array([1])),
+                client: failedTransactionClient,
+            }),
+        ).resolves.toEqual({
+            ok: false,
+            error_code: "MOVE_REJECTED",
+            message: "Move abort: invalid signature",
+        });
+        expect(signAndExecuteCalls).toBe(0);
+
+        await expect(
+            dryRunIdentityVerificationSubmit(verifiedResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                senderAddress,
+                transaction: fakeTransaction(new Uint8Array([2])),
+                client: fakeClient({
+                    simulateTransaction: async () => ({
+                        $kind: "Transaction",
+                        Transaction: {
+                            status: {
+                                success: false,
+                                error: { message: "Move transaction reported failure" },
+                            },
+                            effects: {},
+                        },
+                    }),
+                }),
+            }),
+        ).resolves.toEqual({
+            ok: false,
+            error_code: "MOVE_REJECTED",
+            message: "Move transaction reported failure",
         });
     });
 
