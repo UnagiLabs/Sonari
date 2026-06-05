@@ -1,0 +1,1 @@
+export { INTERNAL_NODE_DOMAIN_SEPARATOR, LEAF_HASH_DOMAIN_SEPARATOR } from "./constants.js";

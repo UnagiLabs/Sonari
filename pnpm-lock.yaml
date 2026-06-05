@@ -168,6 +168,8 @@ importers:
 
   nautilus/verifiers/membership/shared: {}
 
+  packages/proof-core: {}
+
   packages/residence-proof-worker: {}
 
 packages:

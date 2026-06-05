@@ -8,6 +8,7 @@
         { "path": "./nautilus/verifiers/earthquake/runner" },
         { "path": "./nautilus/verifiers/membership/shared" },
         { "path": "./nautilus/verifiers/membership/runner" },
+        { "path": "./packages/proof-core" },
         { "path": "./packages/residence-proof-worker" }
     ]
 }
