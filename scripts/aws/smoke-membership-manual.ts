@@ -165,7 +165,7 @@ export async function runSmokeMembershipManual(
     }
 
     const workflowStarted = await invokeBatchVerifier(aws, batchVerifierLambdaName);
-    const _job = await waitFor(`verification job ${submitResponse.jobId}`, poll, async () => {
+    await waitFor(`verification job ${submitResponse.jobId}`, poll, async () => {
         const current = await readJob(aws, tableName, submitResponse.jobId);
         if (current === null || current.workflowExecutionName === null) {
             return null;
