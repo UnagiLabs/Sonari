@@ -21,7 +21,7 @@ import {
 import { AffectedCellsProofError } from "./errors.js";
 import type { AffectedCellsProofManifest, AffectedCellsProofShardEntry } from "./proof_artifacts.js";
 import type { AffectedProofR2Bucket } from "./r2.js";
-import { saveProofArtifacts, shardR2Key } from "./r2.js";
+import { saveProofArtifacts, serializeShardEntries, shardR2Key } from "./r2.js";
 
 export interface BuildAndSaveParams {
     /** Walrus から取得した生 bytes */
@@ -175,12 +175,23 @@ export async function buildAndSaveProofArtifacts(
         affected_cells_root: expectedRoot as `0x${string}`,
         affected_cell_count: affectedCellCount,
         geo_resolution: geoResolution,
-        shards: shardGroups.map((g) => ({
-            shard_key: g.shard_id.toString(),
-            r2_key: shardR2Key(eventUid, eventRevision, g.shard_id.toString()),
-            hash: g.sha256,
-            cell_count: g.proof_count,
-        })),
+        shards: await Promise.all(
+            shardGroups.map(async (g) => {
+                const shardKey = g.shard_id.toString();
+                const entries = shardEntriesMap.get(shardKey) ?? [];
+                // R2 へ保存するバイト列と同じ正規バイト列から sha256 を計算し、
+                // 保存形と検証形（loadProofShard）のハッシュを一致させる。
+                const hash = await sha256Hex(
+                    new TextEncoder().encode(serializeShardEntries(entries)),
+                );
+                return {
+                    shard_key: shardKey,
+                    r2_key: shardR2Key(eventUid, eventRevision, shardKey),
+                    hash,
+                    cell_count: g.proof_count,
+                };
+            }),
+        ),
     };
 
     await saveProofArtifacts({ bucket, manifest, shardEntriesMap });
