@@ -92,6 +92,7 @@ export type RunnerPhase =
     | "reading_result"
     | "applying_result"
     | "archiving_sources"
+    | "registering_affected_cells_proof"
     | "stopping_instance"
     | "complete";
 

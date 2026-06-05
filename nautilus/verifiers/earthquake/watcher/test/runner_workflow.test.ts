@@ -16,6 +16,7 @@ import {
     computeAffectedCellsRootHex,
     encodeEarthquakeOraclePayloadBcsHex,
 } from "@sonari/earthquake-shared";
+import { FAILED_RETRY_BACKOFF_MS } from "../src/constants.js";
 import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
@@ -34,6 +35,7 @@ import {
     type RelayerSignerSecretReader,
     RetryableSourceArchiveError,
     type S3ClientLike,
+    type AffectedCellsProofRegistrarAdapter,
     type SourceArchiveAdapter,
     type SsmClientLike,
 } from "../src/runner_workflow.js";
@@ -1796,6 +1798,122 @@ describe("AWS runner workflow helper", () => {
         }
     });
 
+    it("registers affected cells proof metadata after source archive success", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/affected_cells.json"] },
+            1_800_000_001_500,
+            1,
+        );
+        const registrar = new RecordingAffectedCellsProofRegistrar();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            affectedCellsProofRegistrar: registrar,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "register_affected_cells_proof",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ affected_cells_proof_registration: "success" });
+
+        expect(registrar.inputs).toEqual([
+            {
+                event_uid: (result.payload as EarthquakeOraclePayload).event_uid,
+                event_revision: (result.payload as EarthquakeOraclePayload).event_revision,
+                affected_cells_uri: "walrus://blob/cellsBlob_123456",
+                affected_cells_hash: result.affected_cells_ref?.source_hash,
+                affected_cells_root: (result.payload as EarthquakeOraclePayload).affected_cells_root,
+                affected_cell_count: (result.payload as EarthquakeOraclePayload).affected_cell_count,
+                geo_resolution: 7,
+            },
+        ]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            source_archive_status: "success",
+            affected_cells_proof_registration_status: "success",
+            affected_cells_proof_registration_error_code: null,
+            affected_cells_proof_registration_next_retry_at_ms: null,
+        });
+    });
+
+    it("keeps relayer work independent from retryable affected proof registration failures", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/affected_cells.json"] },
+            1_800_000_001_500,
+            1,
+        );
+        const relayer = new RecordingRelayerAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            affectedCellsProofRegistrar: new FailingAffectedCellsProofRegistrar(),
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "register_affected_cells_proof",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ affected_cells_proof_registration: "retryable_failed" });
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ relayer: "succeeded" });
+
+        expect(relayer.inputs).toEqual([result]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            source_archive_status: "success",
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_error_code:
+                "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+            affected_cells_proof_registration_next_retry_at_ms:
+                1_800_000_002_000 + FAILED_RETRY_BACKOFF_MS,
+            relayer_status: null,
+        });
+    });
+
     it("marks dry-run relayer as failed when RELAYER_NETWORK is missing", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
@@ -2564,6 +2682,23 @@ class QueueingSecretReader implements RelayerSignerSecretReader {
             throw new Error("secret queue is empty");
         }
         return secret;
+    }
+}
+
+class RecordingAffectedCellsProofRegistrar implements AffectedCellsProofRegistrarAdapter {
+    readonly inputs: Parameters<AffectedCellsProofRegistrarAdapter["register"]>[0][] = [];
+
+    async register(
+        input: Parameters<AffectedCellsProofRegistrarAdapter["register"]>[0],
+    ): Promise<{ stored: boolean; shardCount: number }> {
+        this.inputs.push(input);
+        return { stored: true, shardCount: 1 };
+    }
+}
+
+class FailingAffectedCellsProofRegistrar implements AffectedCellsProofRegistrarAdapter {
+    async register(): Promise<{ stored: boolean; shardCount: number }> {
+        throw new Error("affected proof worker unavailable");
     }
 }
 

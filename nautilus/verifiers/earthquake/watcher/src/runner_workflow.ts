@@ -55,6 +55,14 @@ import {
     setRunnerDesiredCapacity,
     withVerifierKind,
 } from "@sonari/verifier-contracts";
+import {
+    type AffectedCellsProofRegistrationInput,
+    type AffectedCellsProofRegistrationResult,
+    ConfigurationAffectedCellsProofRegistrationError,
+    HttpAffectedCellsProofRegistrar,
+    IntegrityAffectedCellsProofRegistrationError,
+    RetryableAffectedCellsProofRegistrationError,
+} from "./affected_cells_proof_registrar.js";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
 import {
@@ -65,6 +73,7 @@ import {
 } from "./relayer_preview.js";
 import { assertValidUsgsSourceEventId } from "./source_event_id.js";
 import {
+    type AffectedCellsProofRegistrationStateUpdate,
     DynamoDbStateRepository,
     type SourceArchiveStateUpdate,
     type StateRepository,
@@ -166,6 +175,12 @@ export interface EnclaveRegistrationAdapter {
         attestationDocumentHex: string;
         publicKey: string;
     }): Promise<EnclaveVerificationMetadata>;
+}
+
+export interface AffectedCellsProofRegistrarAdapter {
+    register(
+        input: AffectedCellsProofRegistrationInput,
+    ): Promise<AffectedCellsProofRegistrationResult>;
 }
 
 export interface EnclaveRegistrationConfig {
@@ -310,6 +325,12 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               result_s3_key: string;
           }
         | {
+              action: "register_affected_cells_proof";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+          }
+        | {
               action: "relayer_preview_or_dry_run";
               source_event_id: string;
               attempt?: number | undefined;
@@ -404,6 +425,18 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              affected_cells_proof_registration:
+                  | "skipped"
+                  | "success"
+                  | "configuration_failed"
+                  | "retryable_failed"
+                  | "integrity_failed";
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
               relayer: "succeeded";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
@@ -428,6 +461,7 @@ export interface RunnerControlHandlerOptions {
     relayer?: RelayerAdapter;
     enclaveRegistration?: EnclaveRegistrationAdapter;
     sourceArchive?: SourceArchiveAdapter;
+    affectedCellsProofRegistrar?: AffectedCellsProofRegistrarAdapter;
     now?: () => number;
     config: RunnerWorkflowConfig;
 }
@@ -836,6 +870,41 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     attempt: event.attempt,
                     source_archive: archived.status,
                     source_artifact_s3_keys: archived.artifactS3Keys,
+                    result_s3_key: event.result_s3_key,
+                    result_status: result.status,
+                });
+            }
+            case "register_affected_cells_proof": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "registering_affected_cells_proof",
+                    allowNonProcessing: true,
+                    resultS3Key: event.result_s3_key,
+                    nowMs,
+                });
+                const result = await readTeeResultFromS3(options, event);
+                const row = await repository.get(event.source_event_id);
+                const registration = await registerAffectedCellsProofAction({
+                    sourceEventId: event.source_event_id,
+                    attempt: event.attempt,
+                    result,
+                    registrar: options.affectedCellsProofRegistrar,
+                    sourceArchiveSucceeded: row?.source_archive_status === "success",
+                });
+                const marked = await repository.markAffectedCellsProofRegistrationResult(
+                    event.source_event_id,
+                    affectedCellsProofRegistrationStateUpdate(registration, nowMs),
+                    nowMs,
+                    event.attempt,
+                );
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    affected_cells_proof_registration: registration.status,
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
                 });
@@ -1578,6 +1647,25 @@ function buildSourceArchiveFromConfig(options: RunnerControlHandlerOptions): Sou
     };
 }
 
+function buildAffectedCellsProofRegistrarFromConfig():
+    | AffectedCellsProofRegistrarAdapter
+    | undefined {
+    const registrarUrl = process.env.AFFECTED_PROOF_REGISTRAR_URL;
+    const tokenSecretArn = process.env.AFFECTED_PROOF_REGISTRAR_TOKEN_SECRET_ARN;
+    if (registrarUrl === undefined || registrarUrl.length === 0) {
+        return undefined;
+    }
+    if (tokenSecretArn === undefined || tokenSecretArn.length === 0) {
+        throw new ConfigurationAffectedCellsProofRegistrationError(
+            "AFFECTED_PROOF_REGISTRAR_TOKEN_SECRET_ARN is required with AFFECTED_PROOF_REGISTRAR_URL",
+        );
+    }
+    return new HttpAffectedCellsProofRegistrar(registrarUrl, {
+        secretArn: tokenSecretArn,
+        secretReader: new AwsRelayerSignerSecretReader(),
+    });
+}
+
 type SourceArchiveAttemptResult =
     | { status: "success"; artifactS3Keys: string[] }
     | {
@@ -1612,6 +1700,134 @@ function sourceArchiveFailureStateUpdate(
         artifactS3Keys: archived.artifactS3Keys,
         errorCode: "SOURCE_ARCHIVE_INTEGRITY_FAILED",
         message: archived.message,
+    };
+}
+
+type AffectedCellsProofRegistrationAttemptResult =
+    | { status: "skipped" | "success" }
+    | {
+          status: "configuration_failed" | "retryable_failed" | "integrity_failed";
+          message: string;
+      };
+
+async function registerAffectedCellsProof(input: {
+    sourceEventId: string;
+    attempt: number | undefined;
+    result: TeeCoreResult;
+    registrar: AffectedCellsProofRegistrarAdapter | undefined;
+    sourceArchiveSucceeded: boolean;
+}): Promise<AffectedCellsProofRegistrationAttemptResult> {
+    if (input.result.status !== "finalized" || !input.sourceArchiveSucceeded) {
+        return { status: "skipped" };
+    }
+    if (input.registrar === undefined) {
+        return { status: "skipped" };
+    }
+    const registrationInput = affectedCellsProofRegistrationInput(input.result);
+    try {
+        await input.registrar.register(registrationInput);
+        return { status: "success" };
+    } catch (error) {
+        if (error instanceof ConfigurationAffectedCellsProofRegistrationError) {
+            return { status: "configuration_failed", message: error.message };
+        }
+        if (error instanceof IntegrityAffectedCellsProofRegistrationError) {
+            return { status: "integrity_failed", message: error.message };
+        }
+        return {
+            status: "retryable_failed",
+            message: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+
+async function registerAffectedCellsProofAction(input: {
+    sourceEventId: string;
+    attempt: number | undefined;
+    result: TeeCoreResult;
+    registrar: AffectedCellsProofRegistrarAdapter | undefined;
+    sourceArchiveSucceeded: boolean;
+}): Promise<AffectedCellsProofRegistrationAttemptResult> {
+    try {
+        return await registerAffectedCellsProof({
+            ...input,
+            registrar: input.registrar ?? buildAffectedCellsProofRegistrarFromConfig(),
+        });
+    } catch (error) {
+        return affectedCellsProofRegistrationFailure(error);
+    }
+}
+
+function affectedCellsProofRegistrationFailure(
+    error: unknown,
+): Extract<AffectedCellsProofRegistrationAttemptResult, { message: string }> {
+    if (error instanceof ConfigurationAffectedCellsProofRegistrationError) {
+        return { status: "configuration_failed", message: error.message };
+    }
+    if (error instanceof IntegrityAffectedCellsProofRegistrationError) {
+        return { status: "integrity_failed", message: error.message };
+    }
+    if (error instanceof RetryableAffectedCellsProofRegistrationError) {
+        return { status: "retryable_failed", message: error.message };
+    }
+    return {
+        status: "retryable_failed",
+        message: error instanceof Error ? error.message : String(error),
+    };
+}
+
+function affectedCellsProofRegistrationStateUpdate(
+    registration: AffectedCellsProofRegistrationAttemptResult,
+    nowMs: number,
+): AffectedCellsProofRegistrationStateUpdate {
+    if (registration.status === "retryable_failed") {
+        return {
+            status: "retryable_failed",
+            errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+            retryableNextRetryAtMs: nowMs + SOURCE_ARCHIVE_RETRY_BACKOFF_MS,
+            message: registration.message,
+        };
+    }
+    if (registration.status === "configuration_failed") {
+        return {
+            status: "configuration_failed",
+            errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_CONFIGURATION_FAILED",
+            message: registration.message,
+        };
+    }
+    if (registration.status === "integrity_failed") {
+        return {
+            status: "integrity_failed",
+            errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_INTEGRITY_FAILED",
+            message: registration.message,
+        };
+    }
+    return { status: registration.status };
+}
+
+function affectedCellsProofRegistrationInput(
+    result: Extract<TeeCoreResult, { status: "finalized" }>,
+): AffectedCellsProofRegistrationInput {
+    const validation = validateRelayerSubmitInput(result);
+    if (!validation.ok) {
+        throw new IntegrityAffectedCellsProofRegistrationError(validation.message);
+    }
+    const payload = validation.value.payload as EarthquakeOraclePayload;
+    const affectedCellsRef = validation.value.affected_cells_ref;
+    const evidenceManifest = validation.value.evidence_manifest;
+    if (affectedCellsRef === undefined || evidenceManifest === undefined) {
+        throw new IntegrityAffectedCellsProofRegistrationError(
+            "finalized result is missing affected cells registration metadata",
+        );
+    }
+    return {
+        event_uid: payload.event_uid,
+        event_revision: payload.event_revision,
+        affected_cells_uri: affectedCellsRef.uri,
+        affected_cells_hash: affectedCellsRef.source_hash,
+        affected_cells_root: payload.affected_cells_root,
+        affected_cell_count: payload.affected_cell_count,
+        geo_resolution: evidenceManifest.affected_cells.geo_resolution,
     };
 }
 
