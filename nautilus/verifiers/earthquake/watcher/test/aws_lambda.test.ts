@@ -884,6 +884,51 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toHaveLength(2);
     });
 
+    it("claim sets lease deadline so expired lease is re-picked as due (DynamoDB)", async () => {
+        const retryableRow = await eventRow("us7000dblease", {
+            status: "finalized",
+            runner_attempt: 1,
+            runner_result_s3_key: "results/us7000dblease/finalized.json",
+            source_archive_status: "success",
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_next_retry_at_ms: baseNow + 3_000,
+            affected_cells_proof_registration_attempt: 1,
+            updated_at_ms: baseNow,
+        });
+        const client = new GenericDynamoClient([retryableRow]);
+        const repository = new DynamoDbStateRepository("events", client);
+        const workflow = new RecordingWorkflowStarter();
+        const claimNowMs = baseNow + 3_000;
+        const expectedLeaseMs = claimNowMs + PROCESSING_STALE_AFTER_MS;
+
+        // claim・start が 1 件行われる
+        await expect(
+            startDueAffectedCellsProofRegistrationRetries(repository, workflow, claimNowMs),
+        ).resolves.toBe(1);
+
+        // claim 直後: next_retry_at_ms がリース期限に設定されており status は retryable_failed のまま
+        const claimedRow = client.rows.get("us7000dblease");
+        expect(claimedRow).toMatchObject({
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_next_retry_at_ms: expectedLeaseMs,
+        });
+
+        // リース期限内の時刻では due にならず 0 を返す（二重起動しない）
+        await expect(
+            startDueAffectedCellsProofRegistrationRetries(repository, workflow, claimNowMs),
+        ).resolves.toBe(0);
+        await expect(
+            startDueAffectedCellsProofRegistrationRetries(repository, workflow, expectedLeaseMs - 1),
+        ).resolves.toBe(0);
+        expect(workflow.starts).toHaveLength(1);
+
+        // リース期限後の時刻では再び due になり workflow.start が再度呼ばれる（孤立からの回復）
+        await expect(
+            startDueAffectedCellsProofRegistrationRetries(repository, workflow, expectedLeaseMs),
+        ).resolves.toBe(1);
+        expect(workflow.starts).toHaveLength(2);
+    });
+
     it("records affected cells proof registration state without changing finalized source archive state", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000proof", baseNow);
@@ -2305,4 +2350,108 @@ function pendingSourceResult(sourceEventId: string): TeeCoreResult {
         source_event_id: sourceEventId,
         error_code: "SHAKEMAP_PRODUCT_MISSING",
     };
+}
+
+/**
+ * 汎用フェイク DynamoDB クライアント。
+ * - ScanCommand: rows をすべて返す
+ * - GetCommand (Key のみ): source_event_id で 1 行を返す
+ * - UpdateCommand: "field = :value" の SET 式を評価・適用。ConditionExpression は
+ *   "#field = :value" の AND 連結のみをサポート（claim に利用される形式）。
+ */
+class GenericDynamoClient {
+    readonly rows: Map<string, EarthquakeEventRow>;
+
+    constructor(initialRows: EarthquakeEventRow[]) {
+        this.rows = new Map(initialRows.map((row) => [row.source_event_id, row]));
+    }
+
+    async send(command: unknown): Promise<unknown> {
+        const input = readCommandInput(command);
+
+        // ScanCommand
+        if (!("Key" in input) && !("UpdateExpression" in input) && !("Item" in input)) {
+            return { Items: [...this.rows.values()].map((row) => structuredClone(row)) };
+        }
+
+        // GetCommand
+        if ("Key" in input && !("UpdateExpression" in input)) {
+            const key = input.Key as { source_event_id: string };
+            const row = this.rows.get(key.source_event_id);
+            return { Item: row !== undefined ? structuredClone(row) : undefined };
+        }
+
+        // UpdateCommand
+        if ("UpdateExpression" in input) {
+            const key = input.Key as { source_event_id: string };
+            const current = this.rows.get(key.source_event_id);
+            if (current === undefined) {
+                throw Object.assign(new Error("conditional request failed"), {
+                    name: "ConditionalCheckFailedException",
+                });
+            }
+            const names = input.ExpressionAttributeNames as Record<string, string> | undefined;
+            const values = input.ExpressionAttributeValues as Record<string, unknown> | undefined;
+            if (names === undefined || values === undefined) {
+                throw new Error("test update command must use expression names and values");
+            }
+            const condition = input.ConditionExpression;
+            if (typeof condition === "string" && !this.matchesEqualityCondition(current, condition, names, values)) {
+                throw Object.assign(new Error("conditional request failed"), {
+                    name: "ConditionalCheckFailedException",
+                });
+            }
+            const updateExpression = input.UpdateExpression;
+            if (typeof updateExpression !== "string" || !updateExpression.startsWith("SET ")) {
+                throw new Error("test client only supports SET update expressions");
+            }
+            let updated: EarthquakeEventRow = structuredClone(current);
+            for (const assignment of updateExpression.slice("SET ".length).split(", ")) {
+                const [nameToken, valueToken] = assignment.split(" = ");
+                if (nameToken === undefined || valueToken === undefined) {
+                    throw new Error(`unexpected update assignment ${assignment}`);
+                }
+                const field = names[nameToken];
+                if (field === undefined || !(valueToken in values)) {
+                    throw new Error(`unexpected update assignment ${assignment}`);
+                }
+                updated = { ...updated, [field]: values[valueToken] };
+            }
+            this.rows.set(key.source_event_id, updated);
+            return {};
+        }
+
+        throw new Error("unexpected GenericDynamoClient command");
+    }
+
+    /**
+     * "#field = :value AND ..." 形式の ConditionExpression を評価する。
+     * AND 連結された "=" 等値比較のみをサポートする。
+     */
+    private matchesEqualityCondition(
+        row: EarthquakeEventRow,
+        condition: string,
+        names: Record<string, string>,
+        values: Record<string, unknown>,
+    ): boolean {
+        for (const clause of condition.split(" AND ")) {
+            const parts = clause.trim().split(" = ");
+            if (parts.length !== 2) {
+                throw new Error(`unsupported condition clause: ${clause}`);
+            }
+            const [nameToken, valueToken] = parts as [string, string];
+            const field = names[nameToken.trim()];
+            const expected = values[valueToken.trim()];
+            if (field === undefined) {
+                throw new Error(`unknown expression attribute name ${nameToken}`);
+            }
+            if (!(valueToken.trim() in values)) {
+                throw new Error(`unknown expression attribute value ${valueToken}`);
+            }
+            if (row[field as keyof EarthquakeEventRow] !== expected) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

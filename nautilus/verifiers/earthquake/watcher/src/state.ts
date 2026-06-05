@@ -1002,7 +1002,7 @@ export class DynamoDbStateRepository implements StateRepository {
                     ConditionExpression:
                         "#affected_cells_proof_registration_status = :retryable_failed_status AND #affected_cells_proof_registration_next_retry_at_ms = :expected_next_retry_at_ms AND #source_archive_status = :source_archive_success_status AND #runner_attempt = :runner_attempt AND #runner_result_s3_key = :runner_result_s3_key",
                     UpdateExpression:
-                        "SET #affected_cells_proof_registration_next_retry_at_ms = :null_value, #affected_cells_proof_registration_updated_at_ms = :updated_at_ms, #updated_at_ms = :updated_at_ms",
+                        "SET #affected_cells_proof_registration_next_retry_at_ms = :lease_until_ms, #affected_cells_proof_registration_updated_at_ms = :updated_at_ms, #updated_at_ms = :updated_at_ms",
                     ExpressionAttributeNames: {
                         "#affected_cells_proof_registration_status":
                             "affected_cells_proof_registration_status",
@@ -1022,7 +1022,7 @@ export class DynamoDbStateRepository implements StateRepository {
                         ":runner_attempt": row.runner_attempt,
                         ":runner_result_s3_key": row.runner_result_s3_key,
                         ":updated_at_ms": nowMs,
-                        ":null_value": null,
+                        ":lease_until_ms": nowMs + PROCESSING_STALE_AFTER_MS,
                     },
                 }),
             );
