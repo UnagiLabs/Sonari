@@ -574,7 +574,6 @@ describe("membership runner workflow", () => {
                             throw new Error("submit must not run during dry-run preflight");
                         },
                         waitForTransaction: async () => ({}),
-                        getObject: async () => ({}),
                     },
                 },
             },
@@ -645,12 +644,14 @@ describe("membership runner workflow", () => {
         for (const [name, handoff] of [
             ["malformed", "{"],
             [
+                // STEP 5: membership_id は tx args から除外済みのため、
+                // payload_bcs_hex の改ざんで照合ミスを検出する
                 "mismatched",
                 JSON.stringify(
                     dryRunHandoffRecord({
                         signed_payload: {
                             ...signedPayloadForTest(),
-                            membership_id: `0x${"99".repeat(32)}`,
+                            payload_bcs_hex: `0x${"99".repeat(3)}`,
                         },
                     }),
                 ),
@@ -877,14 +878,14 @@ describe("membership runner workflow", () => {
         expect(submitter.submits).toEqual([verifiedTeeResult()]);
     });
 
-    it("records submit tx digest before failing a post-submit readback failure", async () => {
+    it("records submit tx digest when post-submit waitForTransaction fails (digest-based result)", async () => {
+        // STEP 5: readback 廃止のため waitForTransaction 失敗のケースをテスト
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
         await repository.claimNextDue(baseNowMs + 1);
         const submitter = new RecordingSuiSubmissionAdapter({
-            submitDigest: "tx-readback-failed",
-            submitFailureMessage:
-                "MembershipPass readback verified timestamp does not match payload",
+            submitDigest: "tx-wait-failed",
+            submitFailureMessage: "waitForTransaction timed out",
         });
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
@@ -914,9 +915,9 @@ describe("membership runner workflow", () => {
 
         await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
             status: "failed",
-            tx_digest: "tx-readback-failed",
+            tx_digest: "tx-wait-failed",
             error_code: "RELAYER_SUBMIT_FAILED",
-            error_message: "MembershipPass readback verified timestamp does not match payload",
+            error_message: "waitForTransaction timed out",
         });
     });
 
@@ -1427,6 +1428,7 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
                 digest: this.options.submitDigest,
             };
         }
+        // STEP 5: digest ベース判定。readback フィールドなし
         return {
             ok: true as const,
             value: {
@@ -1434,22 +1436,13 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
                 request: fakeSuiRequest(),
                 digest: this.options.submitDigest ?? "tx-default",
                 effects: {},
-                readback: {
-                    objectId: fakeSuiRequest().membershipPassId,
-                    identityVerified: true as const,
-                    identityProviderMask: 2,
-                    identityVerifiedAtMs: baseNowMs,
-                    identityExpiresAtMs: baseNowMs + 1,
-                    termsVersion: validRequest().terms_version,
-                    signedStatementHash: validRequest().signed_statement_hash,
-                },
             },
         };
     }
 }
 
 function fakeSuiRequest() {
-    const membershipPassId = validRequest().membership_id;
+    // STEP 5: membershipPassId フィールド削除、arguments は 8 要素
     return {
         target: "0xabc::accessor::update_identity_verification",
         packageId: "0xabc",
@@ -1457,19 +1450,17 @@ function fakeSuiRequest() {
         identityRegistryId: "0x222",
         membershipRegistryId: "0x333",
         verifierRegistryId: "0x444",
-        membershipPassId,
         clockId: "0x6",
         arguments: [
             "0x111",
             "0x222",
             "0x333",
             "0x444",
-            membershipPassId,
             "0x6",
             [1, 2, 3],
             Array.from({ length: 64 }, () => 0x11),
             Array.from({ length: 32 }, () => 0x22),
-        ] as [string, string, string, string, string, string, number[], number[], number[]],
+        ] as [string, string, string, string, string, number[], number[], number[]],
     };
 }
 

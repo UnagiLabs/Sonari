@@ -6,7 +6,6 @@ import {
     type IdentityVerificationSubmitClient,
     type IdentityVerificationSubmitConfig,
     type IdentityVerificationSubmitTransaction,
-    parseMembershipPassReadback,
     SuiEnclaveRegistrationAdapter,
     type SuiEnclaveRegistrationClient,
     type SuiEnclaveRegistrationConfig,
@@ -19,17 +18,17 @@ const pauseStateId = "0x111";
 const identityRegistryId = "0x222";
 const membershipRegistryId = "0x333";
 const verifierRegistryId = "0x444";
-// membershipPassId removed: now derived dynamically from verified result.membership_id
+// membershipPassId removed from tx builder: Move accessor no longer takes MembershipPass arg
 const clockId = "0x6";
 const network = "testnet";
 const grpcUrl = "https://fullnode.testnet.sui.io:443";
 const senderAddress = "0xsender";
 
 describe("membership identity Sui submission", () => {
-    it("builds update_identity_verification arguments from signed TEE bytes only", () => {
+    it("builds update_identity_verification arguments (8 args, no membershipPassId) from signed TEE bytes", () => {
         const result = buildIdentityVerificationSuiRequest(verifiedResult(), baseConfig());
 
-        const expectedMembershipPassId = `0x${"55".repeat(32)}`; // from verifiedResult().membership_id
+        // STEP 5: membershipPassId フィールドが削除され、arguments は 8 要素
         expect(result).toEqual({
             ok: true,
             value: {
@@ -39,14 +38,13 @@ describe("membership identity Sui submission", () => {
                 identityRegistryId,
                 membershipRegistryId,
                 verifierRegistryId,
-                membershipPassId: expectedMembershipPassId,
                 clockId,
+                // membershipPassId フィールドなし
                 arguments: [
                     pauseStateId,
                     identityRegistryId,
                     membershipRegistryId,
                     verifierRegistryId,
-                    expectedMembershipPassId,
                     clockId,
                     [1, 2, 3],
                     Array.from({ length: 64 }, () => 0x11),
@@ -54,6 +52,30 @@ describe("membership identity Sui submission", () => {
                 ],
             },
         });
+    });
+
+    it("request does not contain membershipPassId field", () => {
+        const result = buildIdentityVerificationSuiRequest(verifiedResult(), baseConfig());
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        // membershipPassId フィールドが存在しないこと
+        expect(Object.hasOwn(result.value, "membershipPassId")).toBe(false);
+    });
+
+    it("arguments array is exactly 8 elements (no membership pass object)", () => {
+        const result = buildIdentityVerificationSuiRequest(verifiedResult(), baseConfig());
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.arguments).toHaveLength(8);
+        // 新順序: [pauseState, identityRegistry, membershipRegistry, verifierRegistry, clock, payload, signature, publicKey]
+        expect(result.value.arguments[0]).toBe(pauseStateId);
+        expect(result.value.arguments[1]).toBe(identityRegistryId);
+        expect(result.value.arguments[2]).toBe(membershipRegistryId);
+        expect(result.value.arguments[3]).toBe(verifierRegistryId);
+        expect(result.value.arguments[4]).toBe(clockId);
+        expect(result.value.arguments[5]).toEqual([1, 2, 3]); // payload
+        expect(result.value.arguments[6]).toEqual(Array.from({ length: 64 }, () => 0x11)); // signature
+        expect(result.value.arguments[7]).toEqual(Array.from({ length: 32 }, () => 0x22)); // publicKey
     });
 
     it("rejects status-only, malformed hex, and malformed signature material", () => {
@@ -184,7 +206,7 @@ describe("membership identity Sui submission", () => {
         );
 
         await expect(
-            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+            submitIdentityVerificationPayload(verifiedResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -198,7 +220,7 @@ describe("membership identity Sui submission", () => {
         });
 
         await expect(
-            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+            submitIdentityVerificationPayload(verifiedResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -210,8 +232,9 @@ describe("membership identity Sui submission", () => {
             message: "submit requires signer material",
         });
 
+        // STEP 5: submit 成功はdigest ベース判定。readback フィールドなし
         await expect(
-            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+            submitIdentityVerificationPayload(verifiedResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -223,13 +246,24 @@ describe("membership identity Sui submission", () => {
         ).resolves.toMatchObject({
             ok: true,
             value: {
+                mode: "submit",
                 digest: "submit-digest",
-                readback: {
-                    identityVerified: true,
-                    objectId: `0x${"55".repeat(32)}`,
-                },
             },
         });
+
+        // readback フィールドが存在しないこと
+        const result = await submitIdentityVerificationPayload(verifiedResult(), {
+            ...baseConfig(),
+            network,
+            grpcUrl,
+            allowSubmit: true,
+            signer,
+            client,
+            transaction: {},
+        });
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(Object.hasOwn(result.value, "readback")).toBe(false);
     });
 
     it("fails closed when configured sender address does not match the submit signer", async () => {
@@ -245,7 +279,7 @@ describe("membership identity Sui submission", () => {
         });
 
         await expect(
-            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+            submitIdentityVerificationPayload(verifiedResult(), {
                 ...baseConfig(),
                 network,
                 grpcUrl,
@@ -263,151 +297,88 @@ describe("membership identity Sui submission", () => {
         expect(signAndExecuteCalls).toBe(0);
     });
 
-    it("fails closed when submit readback is missing or stale", async () => {
+    it("submit succeeds with digest-based result (waitForTransaction only, no object read)", async () => {
+        // STEP 5: getObject は不要。waitForTransaction + digest で成功を返す
         const signer = createEd25519SuiSignerFromPrivateKey(
             "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
         );
-        let signAndExecuteCalls = 0;
+        let waitForTransactionCalled = false;
         const client = fakeClient({
-            signAndExecuteTransaction: async () => {
-                signAndExecuteCalls += 1;
-                return successfulTransaction("submit-digest");
+            signAndExecuteTransaction: async () => successfulTransaction("submit-digest"),
+            waitForTransaction: async () => {
+                waitForTransactionCalled = true;
+                return undefined;
             },
-            getObject: async () =>
-                membershipPassReadback(verifiedIdentityResult(), {
-                    identity_verified_at_ms: 1,
-                }),
         });
 
-        await expect(
-            submitIdentityVerificationPayload(verifiedIdentityResult(), {
-                ...baseConfig(),
-                network,
-                grpcUrl,
-                allowSubmit: true,
-                signer,
-                client,
-                transaction: {},
-            }),
-        ).resolves.toMatchObject({
-            ok: false,
-            error_code: "RELAYER_SUBMIT_FAILED",
-            message: "MembershipPass readback verified timestamp does not match payload",
+        const result = await submitIdentityVerificationPayload(verifiedResult(), {
+            ...baseConfig(),
+            network,
+            grpcUrl,
+            allowSubmit: true,
+            signer,
+            client,
+            transaction: {},
         });
-        expect(signAndExecuteCalls).toBe(1);
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.digest).toBe("submit-digest");
+        // waitForTransaction は呼ばれる（finality 待ち）
+        expect(waitForTransactionCalled).toBe(true);
     });
 
-    it("keeps the submit digest when post-submit readback RPC throws", async () => {
+    it("waitForTransaction failure surfaces as RELAYER_SUBMIT_FAILED with digest", async () => {
         const signer = createEd25519SuiSignerFromPrivateKey(
             "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
         );
         const client = fakeClient({
             signAndExecuteTransaction: async () => successfulTransaction("submit-digest"),
-            getObject: async () => {
-                throw new Error("Sui object read failed");
+            waitForTransaction: async () => {
+                throw new Error("waitForTransaction timed out");
             },
         });
 
-        await expect(
-            submitIdentityVerificationPayload(verifiedIdentityResult(), {
-                ...baseConfig(),
-                network,
-                grpcUrl,
-                allowSubmit: true,
-                signer,
-                client,
-                transaction: {},
-            }),
-        ).resolves.toEqual({
+        const result = await submitIdentityVerificationPayload(verifiedResult(), {
+            ...baseConfig(),
+            network,
+            grpcUrl,
+            allowSubmit: true,
+            signer,
+            client,
+            transaction: {},
+        });
+
+        expect(result).toEqual({
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
-            message: "Sui object read failed",
+            message: "waitForTransaction timed out",
             digest: "submit-digest",
         });
-    });
-
-    it("parses MembershipPass readback only when it reflects the submitted identity payload", () => {
-        const expected = verifiedIdentityResult();
-        const readback = membershipPassReadback(expected);
-
-        expect(parseMembershipPassReadback(readback, expected, packageId)).toEqual({
-            ok: true,
-            value: {
-                objectId: expected.membership_id,
-                identityVerified: true,
-                identityProviderMask: 2,
-                identityVerifiedAtMs: expected.issued_at_ms,
-                identityExpiresAtMs: expected.expires_at_ms,
-                termsVersion: expected.terms_version,
-                signedStatementHash: expected.signed_statement_hash,
-            },
-        });
-    });
-
-    it("rejects MembershipPass readback that is wrong, stale, or not updated by the payload", () => {
-        const expected = verifiedIdentityResult();
-        const valid = membershipPassReadback(expected);
-
-        const cases: ReadonlyArray<readonly [string, unknown]> = [
-            ["object id", { ...valid, data: { ...valid.data, objectId: `0x${"99".repeat(32)}` } }],
-            [
-                "type",
-                { ...valid, data: { ...valid.data, type: `${packageId}::membership::Other` } },
-            ],
-            ["verified flag", membershipPassReadback(expected, { identity_verified: false })],
-            ["provider mask", membershipPassReadback(expected, { identity_provider_mask: 1 })],
-            [
-                "verified timestamp",
-                membershipPassReadback(expected, {
-                    identity_verified_at_ms: expected.issued_at_ms - 1,
-                }),
-            ],
-            [
-                "expiry timestamp",
-                membershipPassReadback(expected, {
-                    identity_expires_at_ms: expected.expires_at_ms + 1,
-                }),
-            ],
-            [
-                "terms version",
-                membershipPassReadback(expected, { terms_version: expected.terms_version + 1 }),
-            ],
-            [
-                "signed statement hash",
-                membershipPassReadback(expected, { signed_statement_hash: `0x${"98".repeat(32)}` }),
-            ],
-        ];
-
-        for (const [name, readback] of cases) {
-            expect(parseMembershipPassReadback(readback, expected, packageId), name).toMatchObject({
-                ok: false,
-                error_code: "RELAYER_SUBMIT_FAILED",
-            });
-        }
     });
 });
 
 describe("STEP 7: dynamic membershipPassId from verified result.membership_id", () => {
     const dynamicMembershipId = `0x${"aa".repeat(32)}`; // 32 bytes = Sui object id
 
-    it("buildIdentityVerificationSuiRequest uses membership_id from input, not config", () => {
+    it("buildIdentityVerificationSuiRequest uses membership_id from input for context (not tx args)", () => {
         const input = {
             ...verifiedResult(),
             membership_id: dynamicMembershipId,
         };
-        // Config has no membershipPassId (or a different value - should be ignored)
+        // STEP 5: membership_id は tx args に含まれない（Move側はpayload_bcsで照合）
         const config = configWithoutMembershipPass();
         const result = buildIdentityVerificationSuiRequest(input, config);
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
-        // args[4] must be the dynamic membership_id from input
-        expect(result.value.arguments[4]).toBe(dynamicMembershipId);
-        // membershipPassId in the result must equal input's membership_id
-        expect(result.value.membershipPassId).toBe(dynamicMembershipId);
+        // arguments は 8 要素、membership_id オブジェクトは含まれない
+        expect(result.value.arguments).toHaveLength(8);
+        // membershipPassId フィールド自体が存在しない
+        expect(Object.hasOwn(result.value, "membershipPassId")).toBe(false);
     });
 
-    it("different membership_id values produce different tx.object targets", () => {
+    it("different membership_id values do not affect tx arguments (payload bytes differ)", () => {
         const id1 = `0x${"11".repeat(32)}`;
         const id2 = `0x${"22".repeat(32)}`;
         const config = configWithoutMembershipPass();
@@ -423,34 +394,12 @@ describe("STEP 7: dynamic membershipPassId from verified result.membership_id", 
 
         expect(result1.ok && result2.ok).toBe(true);
         if (!result1.ok || !result2.ok) return;
-        expect(result1.value.arguments[4]).toBe(id1);
-        expect(result2.value.arguments[4]).toBe(id2);
-        expect(result1.value.arguments[4]).not.toBe(result2.value.arguments[4]);
-    });
-
-    it("membership_id must be valid 32-byte hex; invalid format is rejected", () => {
-        const config = configWithoutMembershipPass();
-
-        // invalid: not hex
-        const bad1 = buildIdentityVerificationSuiRequest(
-            { ...verifiedResult(), membership_id: "not-hex" },
-            config,
-        );
-        expect(bad1.ok).toBe(false);
-
-        // invalid: wrong byte count (31 bytes)
-        const bad2 = buildIdentityVerificationSuiRequest(
-            { ...verifiedResult(), membership_id: `0x${"aa".repeat(31)}` },
-            config,
-        );
-        expect(bad2.ok).toBe(false);
-
-        // valid: 32 bytes
-        const good = buildIdentityVerificationSuiRequest(
-            { ...verifiedResult(), membership_id: `0x${"aa".repeat(32)}` },
-            config,
-        );
-        expect(good.ok).toBe(true);
+        // STEP 5: tx args に membership_id は含まれないので引数長は同じ 8
+        expect(result1.value.arguments).toHaveLength(8);
+        expect(result2.value.arguments).toHaveLength(8);
+        // clock が arguments[4] であることを確認
+        expect(result1.value.arguments[4]).toBe(clockId);
+        expect(result2.value.arguments[4]).toBe(clockId);
     });
 
     it("SONARI_MEMBERSHIP_PASS_ID env is not required when membership_id is in input", () => {
@@ -714,54 +663,7 @@ function verifiedResult(): Record<string, unknown> {
         signature: `0x${"11".repeat(64)}`,
         public_key: `0x${"22".repeat(32)}`,
         intent: "ignored by relayer",
-        membership_id: `0x${"55".repeat(32)}`, // valid 32-byte Sui object id used as membershipPassId
-    };
-}
-
-function verifiedIdentityResult() {
-    return {
-        status: "verified" as const,
-        payload_bcs_hex: "0x010203",
-        signature: `0x${"11".repeat(64)}`,
-        public_key: `0x${"22".repeat(32)}`,
-        intent: "SONARI_IDENTITY_VERIFICATION_V1",
-        verifier_family: "identity" as const,
-        verifier_version: 1,
-        registry_id: `0x${"44".repeat(32)}`,
-        membership_id: `0x${"55".repeat(32)}`,
-        owner: `0x${"66".repeat(32)}`,
-        provider: "world_id" as const,
-        verified: true,
-        duplicate_key_hash: `0x${"77".repeat(32)}`,
-        evidence_hash: `0x${"88".repeat(32)}`,
-        issued_at_ms: 1_900_000_000_000,
-        expires_at_ms: 1_931_536_000_000,
-        terms_version: 1,
-        signed_statement_hash: `0x${"99".repeat(32)}`,
-    };
-}
-
-function membershipPassReadback(
-    expected: ReturnType<typeof verifiedIdentityResult>,
-    overrides: Record<string, unknown> = {},
-) {
-    const fields = {
-        identity_verified: true,
-        identity_provider_mask: 2,
-        identity_verified_at_ms: String(expected.issued_at_ms),
-        identity_expires_at_ms: String(expected.expires_at_ms),
-        terms_version: String(expected.terms_version),
-        signed_statement_hash: Array.from(
-            Buffer.from(expected.signed_statement_hash.slice(2), "hex"),
-        ),
-        ...overrides,
-    };
-    return {
-        data: {
-            objectId: expected.membership_id,
-            type: `${packageId}::membership::MembershipPass`,
-            content: { fields },
-        },
+        membership_id: `0x${"55".repeat(32)}`, // still present in payload (Move side checks it)
     };
 }
 
@@ -779,17 +681,7 @@ function fakeClient(
             methods.simulateTransaction ?? (async () => successfulTransaction("dry")),
         signAndExecuteTransaction:
             methods.signAndExecuteTransaction ?? (async () => successfulTransaction("submit")),
-        waitForTransaction:
-            methods.waitForTransaction ?? (async () => successfulTransaction("wait")),
-        getObject:
-            methods.getObject ??
-            (async () => ({
-                object: {
-                    objectId: `0x${"55".repeat(32)}`,
-                    type: `${packageId}::membership::MembershipPass`,
-                    json: membershipPassReadback(verifiedIdentityResult()).data.content.fields,
-                },
-            })),
+        waitForTransaction: methods.waitForTransaction ?? (async () => undefined),
     };
 }
 
