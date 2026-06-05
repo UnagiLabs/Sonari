@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 const templatePath = path.join(process.cwd(), "infra/aws/membership-identity-runner/template.yaml");
 
 describe("AWS membership identity runner CloudFormation template", () => {
+    const legacyLocalWorldIdBase = "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:" + "8000";
+
     it("defines the verification job queue and Lambda workflow entrypoints", async () => {
         const template = await readFile(templatePath, "utf8");
 
@@ -66,6 +68,8 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID");
         expect(template).toContain("/get_attestation");
         expect(template).toContain("/process_data");
+        expect(template).toContain('--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"');
+        expect(template).toContain("egress_proxy_url: $egress_proxy_url");
         expect(template).toContain("VSOCK-CONNECT");
         expect(template).toContain(
             "GroupDescription: Sonari membership identity runner with SSM-only control plane",
@@ -73,18 +77,23 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain("SecurityGroupIngress:");
     });
 
-    it("treats World ID values as runtime config and never injects a plaintext signing seed", async () => {
+    it("treats World ID values as runtime config without requiring host signing material at runtime", async () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).toContain("WorldIdAppId:");
         expect(template).toContain("WorldIdApiBase:");
         expect(template).toContain("Default: https://developer.world.org");
         expect(template).toContain("SONARI_WORLD_ID_APP_ID");
-        expect(template).toContain("SONARI_WORLD_ID_API_BASE");
+        expect(template).toContain('echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"');
+        expect(template).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).not.toContain(legacyLocalWorldIdBase);
         expect(template).toContain("SigningSeedCiphertextS3Bucket:");
         expect(template).toContain("SigningSeedCiphertextS3Key:");
-        expect(template).toContain("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE");
-        expect(template).toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
+        expect(template).toContain("SigningMaterialKmsKey:");
+        expect(template).not.toContain(
+            'echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"',
+        );
+        expect(template).not.toContain('echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=');
         expect(template).not.toContain("TeeSigningKeySecretArn");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED_FILE");

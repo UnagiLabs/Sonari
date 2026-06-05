@@ -18,6 +18,8 @@ import { validRequest } from "./fixtures.js";
 const baseNowMs = 1_800_000_000_000;
 
 describe("membership runner workflow", () => {
+    const legacyLocalWorldIdBase = "SONARI_WORLD_ID_API_BASE=http://127.0.0.1:" + "8000";
+
     it("retains membership verifier kind across common runner workflow actions", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
@@ -170,11 +172,15 @@ describe("membership runner workflow", () => {
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
         );
         expect(readiness).toContain("SONARI_WORLD_ID_API_BASE is required");
+        expect(readiness).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL is required");
         expect(readiness).toContain("SONARI_WORLD_ID_APP_ID is required");
         expect(readiness).toContain("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required");
         expect(readiness).toContain("SONARI_NITRO_RUN_ENCLAVE_ARGS is required");
         expect(readiness).toContain("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID is required");
         expect(readiness).toContain('test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"');
+        expect(readiness).not.toContain("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE");
+        expect(readiness).not.toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
+        expect(readiness).not.toContain('test -s "$SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE"');
         expect(readiness).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
     });
 
@@ -217,7 +223,7 @@ describe("membership runner workflow", () => {
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
         );
         expect(command).toContain(
-            "export SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE SONARI_SIGNING_MATERIAL_KMS_KEY_ID SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+            "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_EGRESS_PROXY_URL SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
         );
         // The shared run-sonari-verifier dispatcher selects the membership enclave
         // only when SONARI_VERIFIER_KIND is set; the SSM dispatch must export it.
@@ -229,6 +235,8 @@ describe("membership runner workflow", () => {
             `aws s3 cp '/tmp/sonari-membership-tee-result-${job.row.job_id}-${baseNowMs + 2}.json' 's3://runner-results/results/${job.row.job_id}/${baseNowMs + 2}.json'`,
         );
         expect(command).not.toContain("SONARI_TEE_SIGNING_KEY_SEED");
+        expect(command).not.toContain("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE");
+        expect(command).not.toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
         expect(command).not.toContain(
             " | '/opt/sonari/tee-artifact/bin/membership-tee' 'production'",
         );
@@ -545,7 +553,7 @@ describe("membership runner workflow", () => {
         });
     });
 
-    it("bootstraps a fail-closed World ID vsock proxy in the membership AWS template", async () => {
+    it("bootstraps fail-closed World ID egress and server bootstrap in the membership AWS template", async () => {
         const template = await readFile(
             new URL(
                 "../../../../../infra/aws/membership-identity-runner/template.yaml",
@@ -556,7 +564,13 @@ describe("membership runner workflow", () => {
 
         expect(template).toContain('vsock_proxy_path="$(command -v vsock-proxy)"');
         expect(template).toContain("sonari-world-id-vsock-proxy.service");
-        expect(template).toContain("ExecStart=$vsock_proxy_path 8000 $world_id_api_host 443");
+        expect(template).toContain(
+            "ExecStart=/opt/sonari/bin/sonari-world-id-egress-connect-proxy --listen-port 18081 --allowlist-file /opt/sonari/world-id-egress-allowlist",
+        );
+        expect(template).toContain("ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081");
+        expect(template).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080");
+        expect(template).toContain('--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"');
+        expect(template).toContain("egress_proxy_url: $egress_proxy_url");
         expect(template).toContain("TeeEifS3Bucket:");
         expect(template).toContain("TeeEifS3Key:");
         expect(template).toContain("TeeEifSha256:");
@@ -574,8 +588,13 @@ describe("membership runner workflow", () => {
         expect(template).toContain(
             "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
         );
-        expect(template).toContain("SONARI_WORLD_ID_UPSTREAM_API_BASE");
-        expect(template).toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
+        expect(template).toContain('echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"');
+        expect(template).not.toContain("SONARI_WORLD_ID_UPSTREAM_API_BASE");
+        expect(template).not.toContain(legacyLocalWorldIdBase);
+        expect(template).not.toContain(
+            'echo "SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE=/opt/sonari/signing-seed.ciphertext"',
+        );
+        expect(template).not.toContain('echo "SONARI_SIGNING_MATERIAL_KMS_KEY_ID=');
         expect(template).toContain("touch /opt/sonari/bootstrap-complete");
     });
     // STEP 4: VSOCK server request dispatch
