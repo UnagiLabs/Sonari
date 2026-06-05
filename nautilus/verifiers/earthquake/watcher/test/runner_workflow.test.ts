@@ -1914,6 +1914,72 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("restores affected proof registration retry state after retry-only task failures", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            {
+                status: "success",
+                artifactS3Keys: ["source-artifacts/us7000sonari/1/affected_cells.json"],
+            },
+            1_800_000_001_500,
+            1,
+        );
+        await repository.markAffectedCellsProofRegistrationResult(
+            "us7000sonari",
+            {
+                status: "retryable_failed",
+                errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+                retryableNextRetryAtMs: 1_800_000_001_600,
+                message: "worker unavailable",
+            },
+            1_800_000_001_500,
+            1,
+        );
+        await repository.claimAffectedCellsProofRegistrationRetry(
+            "us7000sonari",
+            1_800_000_001_600,
+            1_800_000_002_000,
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            now: () => 1_800_000_003_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "restore_affected_cells_proof_registration_retry",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                message: "States task failed",
+            } as never),
+        ).resolves.toMatchObject({
+            affected_cells_proof_registration: "retry_restored",
+        });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_error_code:
+                "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+            affected_cells_proof_registration_next_retry_at_ms:
+                1_800_000_003_000 + FAILED_RETRY_BACKOFF_MS,
+            affected_cells_proof_registration_error_message: "States task failed",
+        });
+    });
+
     it("marks dry-run relayer as failed when RELAYER_NETWORK is missing", async () => {
         const repository = new InMemoryStateRepository();
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);

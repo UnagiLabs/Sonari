@@ -151,6 +151,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"Next": "RelayerPreviewOrDryRun"');
         expect(template).toContain('"RegisterAffectedCellsProofRetry"');
         expect(template).toContain('"End": true');
+        expect(template).toContain('"Next": "RestoreAffectedCellsProofRegistrationRetry"');
+        expect(template).toContain('"RestoreAffectedCellsProofRegistrationRetry"');
+        expect(template).toContain('"action": "restore_affected_cells_proof_registration_retry"');
         expect(template).toContain('"ProofRegistrationRetryComplete"');
         expect(template).toContain('"action": "register_affected_cells_proof"');
     });

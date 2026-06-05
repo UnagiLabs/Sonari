@@ -1431,7 +1431,15 @@ Resources:
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
               "End": true,
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
-              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "ProofRegistrationRetryComplete" }]
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "RestoreAffectedCellsProofRegistrationRetry" }]
+            },
+            "RestoreAffectedCellsProofRegistrationRetry": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "restore_affected_cells_proof_registration_retry", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "message.$": "$.error.Cause" },
+              "Next": "ProofRegistrationRetryComplete",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.restore_error", "Next": "ProofRegistrationRetryComplete" }]
             },
             "ProofRegistrationRetryComplete": {
               "Type": "Succeed"

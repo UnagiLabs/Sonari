@@ -331,6 +331,12 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               result_s3_key: string;
           }
         | {
+              action: "restore_affected_cells_proof_registration_retry";
+              source_event_id: string;
+              attempt?: number | undefined;
+              message?: string | undefined;
+          }
+        | {
               action: "relayer_preview_or_dry_run";
               source_event_id: string;
               attempt?: number | undefined;
@@ -433,6 +439,11 @@ export type RunnerControlResult = RunnerControlVerifierKind &
                   | "integrity_failed";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
+          }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              affected_cells_proof_registration: "retry_restored";
           }
         | {
               source_event_id: string;
@@ -907,6 +918,29 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     affected_cells_proof_registration: registration.status,
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
+                });
+            }
+            case "restore_affected_cells_proof_registration_retry": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                const marked = await repository.markAffectedCellsProofRegistrationResult(
+                    event.source_event_id,
+                    {
+                        status: "retryable_failed",
+                        errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+                        retryableNextRetryAtMs: nowMs + SOURCE_ARCHIVE_RETRY_BACKOFF_MS,
+                        message: event.message ?? "affected cells proof registration retry failed",
+                    },
+                    nowMs,
+                    event.attempt,
+                );
+                if (!marked) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                return retainVerifierKind({
+                    source_event_id: event.source_event_id,
+                    attempt: event.attempt,
+                    affected_cells_proof_registration: "retry_restored",
                 });
             }
             case "relayer_preview_or_dry_run": {
