@@ -43,6 +43,9 @@ KMS/Nitro attestation measurements checked:
 
 ## World ID app/proof inputs
 
+dummy World ID proof は testnet / devnet のみ記録します。mainnet では live gate が
+deploy 前に拒否するため、dummy を記録してはいけません。
+
 World ID proof mode (real/dummy):
 World ID app id:
 World ID API base:
@@ -91,6 +94,7 @@ Nitro Enclave start:
 vsock-proxy World ID real API smoke:
 Sui dry-run:
 Sui submit:
+AWS idle cleanup (DesiredCapacity / InService / running EC2 / schedule):
 
 ## Sui result
 
