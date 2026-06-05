@@ -751,6 +751,85 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(client.scanInputs[1]).toMatchObject({ ExclusiveStartKey: { source_event_id: "page-1" } });
     });
 
+    it("records affected cells proof registration state without changing finalized source archive state", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000proof", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000proof",
+            "earthquake-us7000proof-1",
+            baseNow + 500,
+        );
+        await repository.applyRunnerResult("us7000proof", finalizedResult(), baseNow + 1_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000proof",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000proof/1/affected_cells.json"] },
+            baseNow + 2_000,
+            1,
+        );
+
+        await expect(
+            repository.markAffectedCellsProofRegistrationResult(
+                "us7000proof",
+                {
+                    status: "retryable_failed",
+                    errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+                    retryableNextRetryAtMs: baseNow + HOUR_MS,
+                    message: "worker unavailable",
+                },
+                baseNow + 3_000,
+                1,
+            ),
+        ).resolves.toBe(true);
+
+        await expect(repository.get("us7000proof")).resolves.toMatchObject({
+            status: "finalized",
+            source_archive_status: "success",
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_error_code:
+                "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED",
+            affected_cells_proof_registration_attempt: 1,
+            affected_cells_proof_registration_next_retry_at_ms: baseNow + HOUR_MS,
+            affected_cells_proof_registration_error_message: "worker unavailable",
+            affected_cells_proof_registration_updated_at_ms: baseNow + 3_000,
+        });
+    });
+
+    it("records affected cells proof registration state through DynamoDB rows", async () => {
+        const row = await eventRow("us7000proof", {
+            status: "submitted",
+            runner_attempt: 1,
+            source_archive_status: "success",
+            source_archive_attempt: 1,
+        });
+        const client = new StaleReadRaceClient(row, row);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await expect(
+            repository.markAffectedCellsProofRegistrationResult(
+                "us7000proof",
+                {
+                    status: "configuration_failed",
+                    errorCode: "AFFECTED_CELLS_PROOF_REGISTRATION_CONFIGURATION_FAILED",
+                    message: "token secret missing",
+                },
+                baseNow + 4_000,
+                1,
+            ),
+        ).resolves.toBe(true);
+
+        expect(client.currentRow).toMatchObject({
+            status: "submitted",
+            source_archive_status: "success",
+            affected_cells_proof_registration_status: "configuration_failed",
+            affected_cells_proof_registration_error_code:
+                "AFFECTED_CELLS_PROOF_REGISTRATION_CONFIGURATION_FAILED",
+            affected_cells_proof_registration_attempt: 1,
+            affected_cells_proof_registration_next_retry_at_ms: null,
+            affected_cells_proof_registration_error_message: "token secret missing",
+            affected_cells_proof_registration_updated_at_ms: baseNow + 4_000,
+        });
+    });
+
     it("preserves finalized DynamoDB result fields when watcher upsert races a stale read", async () => {
         const staleProcessingRow = await eventRow("us7000race", {
             status: "processing",

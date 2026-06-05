@@ -51,6 +51,12 @@ export interface EarthquakeEventRow {
     source_archive_attempt: number | null;
     source_artifact_s3_keys_json: string | null;
     walrus_archive_updated_at_ms: number | null;
+    affected_cells_proof_registration_status: AffectedCellsProofRegistrationStatus | null;
+    affected_cells_proof_registration_error_code: AffectedCellsProofRegistrationErrorCode | null;
+    affected_cells_proof_registration_attempt: number | null;
+    affected_cells_proof_registration_next_retry_at_ms: number | null;
+    affected_cells_proof_registration_error_message: string | null;
+    affected_cells_proof_registration_updated_at_ms: number | null;
     runner_job_id: string | null;
     runner_queued_at_ms: number | null;
     runner_attempt: number | null;
@@ -99,6 +105,17 @@ export type SourceArchiveErrorCode =
     | "SOURCE_ARCHIVE_CONFIGURATION_FAILED"
     | "SOURCE_ARCHIVE_RETRYABLE_FAILED"
     | "SOURCE_ARCHIVE_INTEGRITY_FAILED";
+
+export type AffectedCellsProofRegistrationStatus =
+    | "skipped"
+    | "success"
+    | "configuration_failed"
+    | "retryable_failed"
+    | "integrity_failed";
+export type AffectedCellsProofRegistrationErrorCode =
+    | "AFFECTED_CELLS_PROOF_REGISTRATION_CONFIGURATION_FAILED"
+    | "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED"
+    | "AFFECTED_CELLS_PROOF_REGISTRATION_INTEGRITY_FAILED";
 
 export interface RunnerQueueJob {
     runner_job_id: string;
@@ -205,6 +222,12 @@ export interface StateRepository {
         nowMs: number,
         expectedAttempt?: number,
     ): Promise<boolean>;
+    markAffectedCellsProofRegistrationResult(
+        sourceEventId: string,
+        input: AffectedCellsProofRegistrationStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean>;
 
     // Compatibility helpers used by local scripts while AWS Lambda is the production path.
     enqueueRunnerJob(
@@ -261,6 +284,13 @@ export interface SourceArchiveStateUpdate {
     status: SourceArchiveStatus;
     artifactS3Keys: string[];
     errorCode?: SourceArchiveErrorCode;
+    retryableNextRetryAtMs?: number;
+    message?: string;
+}
+
+export interface AffectedCellsProofRegistrationStateUpdate {
+    status: AffectedCellsProofRegistrationStatus;
+    errorCode?: AffectedCellsProofRegistrationErrorCode;
     retryableNextRetryAtMs?: number;
     message?: string;
 }
@@ -570,6 +600,23 @@ export class InMemoryStateRepository implements StateRepository {
             return false;
         }
         applySourceArchiveResultToRow(row, input, nowMs, expectedAttempt);
+        return true;
+    }
+
+    async markAffectedCellsProofRegistrationResult(
+        sourceEventId: string,
+        input: AffectedCellsProofRegistrationStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = this.rows.get(sourceEventId);
+        if (row === undefined) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applyAffectedCellsProofRegistrationResultToRow(row, input, nowMs, expectedAttempt);
         return true;
     }
 
@@ -1181,6 +1228,23 @@ export class DynamoDbStateRepository implements StateRepository {
         return this.put(row, expectedAttempt, true);
     }
 
+    async markAffectedCellsProofRegistrationResult(
+        sourceEventId: string,
+        input: AffectedCellsProofRegistrationStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = await this.get(sourceEventId);
+        if (row === null) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applyAffectedCellsProofRegistrationResultToRow(row, input, nowMs, expectedAttempt);
+        return this.put(row, expectedAttempt, true);
+    }
+
     async enqueueRunnerJob(
         sourceEventId: string,
         attempt: number,
@@ -1574,6 +1638,12 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#source_archive_attempt = :source_archive_attempt",
                     "#source_artifact_s3_keys_json = :source_artifact_s3_keys_json",
                     "#walrus_archive_updated_at_ms = :walrus_archive_updated_at_ms",
+                    "#affected_cells_proof_registration_status = :affected_cells_proof_registration_status",
+                    "#affected_cells_proof_registration_error_code = :affected_cells_proof_registration_error_code",
+                    "#affected_cells_proof_registration_attempt = :affected_cells_proof_registration_attempt",
+                    "#affected_cells_proof_registration_next_retry_at_ms = :affected_cells_proof_registration_next_retry_at_ms",
+                    "#affected_cells_proof_registration_error_message = :affected_cells_proof_registration_error_message",
+                    "#affected_cells_proof_registration_updated_at_ms = :affected_cells_proof_registration_updated_at_ms",
                     "#runner_job_id = :runner_job_id",
                     "#runner_queued_at_ms = :runner_queued_at_ms",
                     "#runner_attempt = :runner_attempt",
@@ -1889,6 +1959,12 @@ function baseRow(
         source_archive_attempt: null,
         source_artifact_s3_keys_json: null,
         walrus_archive_updated_at_ms: null,
+        affected_cells_proof_registration_status: null,
+        affected_cells_proof_registration_error_code: null,
+        affected_cells_proof_registration_attempt: null,
+        affected_cells_proof_registration_next_retry_at_ms: null,
+        affected_cells_proof_registration_error_message: null,
+        affected_cells_proof_registration_updated_at_ms: null,
         runner_job_id: null,
         runner_queued_at_ms: null,
         runner_attempt: null,
@@ -1996,6 +2072,12 @@ async function applyResultToRow(
         row.source_archive_attempt = null;
         row.source_artifact_s3_keys_json = null;
         row.walrus_archive_updated_at_ms = null;
+        row.affected_cells_proof_registration_status = null;
+        row.affected_cells_proof_registration_error_code = null;
+        row.affected_cells_proof_registration_attempt = null;
+        row.affected_cells_proof_registration_next_retry_at_ms = null;
+        row.affected_cells_proof_registration_error_message = null;
+        row.affected_cells_proof_registration_updated_at_ms = null;
         return;
     }
     row.tee_result_json = JSON.stringify(compactTeeResultForState(result));
@@ -2071,6 +2153,27 @@ function applySourceArchiveResultToRow(
         row.runner_error_message = input.message ?? null;
         row.next_retry_at_ms = null;
     }
+}
+
+function applyAffectedCellsProofRegistrationResultToRow(
+    row: EarthquakeEventRow,
+    input: AffectedCellsProofRegistrationStateUpdate,
+    nowMs: number,
+    expectedAttempt?: number,
+): void {
+    row.affected_cells_proof_registration_status = input.status;
+    row.affected_cells_proof_registration_error_code = input.errorCode ?? null;
+    row.affected_cells_proof_registration_attempt = expectedAttempt ?? row.runner_attempt;
+    row.affected_cells_proof_registration_updated_at_ms = nowMs;
+    row.updated_at_ms = nowMs;
+    if (input.status === "retryable_failed") {
+        row.affected_cells_proof_registration_next_retry_at_ms =
+            input.retryableNextRetryAtMs ?? nowMs + FAILED_RETRY_BACKOFF_MS;
+        row.affected_cells_proof_registration_error_message = input.message ?? null;
+        return;
+    }
+    row.affected_cells_proof_registration_next_retry_at_ms = null;
+    row.affected_cells_proof_registration_error_message = input.message ?? null;
 }
 
 function applyRunnerWorkflowProgress(
