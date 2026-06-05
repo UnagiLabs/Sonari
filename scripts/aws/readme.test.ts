@@ -16,6 +16,7 @@ describe("AWS scripts documentation", () => {
             "pnpm aws:verify:earthquake-wrapper",
             "pnpm aws:verify:source-archiver",
             "pnpm aws:smoke:earthquake-manual",
+            "pnpm aws:smoke:membership-manual",
             "source_archive_summary",
             "source_archive_status",
             "evidence_manifest_uri",
