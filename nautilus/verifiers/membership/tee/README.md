@@ -23,10 +23,25 @@ Relayer や worker は、この crate が返した結果の意味を変えては
 | 入口 | 用途 | 署名 seed |
 | --- | --- | --- |
 | `fixture` | test や fixture 用の deterministic 実行 | dev fallback を許す |
-| `production` | 実運用で World ID API を確認する | env または file が必須 |
+| `server` | AWS / Nautilus production entrypoint | enclave-local ephemeral key |
+| `production` | legacy/local stdin/stdout 互換 | env または file が必須 |
 | `--encode-only` | TS/Rust の BCS bytes 一致を確認する | 署名しない |
 
-`fixture` と `production` は、stdin から `IdentityVerifyRequest` JSON を 1 つ読みます。stdout には status 付き JSON を 1 つだけ返します。
+`server` は VSOCK HTTP server として動きます。
+AWS / Nautilus production path は `membership-tee server` です。
+`server` は起動時に enclave-local ephemeral key を作り、`/get_attestation` でその public key を Nitro attestation に含めます。
+worker はその attestation を登録し、registration metadata を受け取ります。
+その後、worker は `/process_data` に `IdentityVerifyRequest` と registration metadata を送ります。
+`server` は verified result の BCS payload を ephemeral key で署名し、registration metadata を result に注入します。
+
+World ID API base は canonical value を使い、egress は `egress_proxy_url` / `SONARI_WORLD_ID_EGRESS_PROXY_URL` で渡す。
+`server` は canonical base として `https://developer.world.org` を使います。
+bootstrap JSON の `world_id_api_base` は互換のため受け取りますが、server path はこの値を production source of truth として使いません。
+host が渡せる World ID network 設定は `egress_proxy_url` だけです。
+
+`membership-tee production` は legacy/local stdin/stdout route です。
+AWS / Nautilus production の source of truth ではありません。
+`fixture` と legacy/local `production` は、stdin から `IdentityVerifyRequest` JSON を 1 つ読みます。stdout には status 付き JSON を 1 つだけ返します。
 AWS interface では 1 request = 1 JSON in / 1 JSON out として固定します。
 TEE は stateless です。前の job 状態は持ちません。
 
@@ -86,8 +101,12 @@ verified stdout は bare `IdentityTeeResult` ではありません。
 
 Sui intent prefix は付けません。payload の field order や enum 値は、Move / Rust / TypeScript をまたぐ契約です。変更する場合は、schema、golden vector、Rust test、TypeScript test を一緒に更新してください。
 
-## production の安全境界
+## server と legacy/local production の安全境界
 
+`server` は signing seed を command line argument、env、file から受け取りません。
+AWS / Nautilus production path は enclave-local ephemeral key だけを使います。
+
+`production` は legacy/local 互換 route です。
 `production` は signing seed を command line argument から受け取りません。
 
 次のどちらかを使います。
@@ -97,7 +116,7 @@ SONARI_TEE_SIGNING_KEY_SEED
 SONARI_TEE_SIGNING_KEY_SEED_FILE
 ```
 
-AWS 境界 interface として固定する env は次の 3 つです。
+legacy/local stdin/stdout 互換の AWS 境界 interface として残る env は次の 3 つです。
 
 ```text
 SONARI_TEE_SIGNING_KEY_SEED
@@ -111,7 +130,7 @@ SONARI_WORLD_ID_API_BASE
 本番では KMS や Nitro attestation へ差し替える場合があります。
 その場合も stdin/stdout の JSON 契約は変えないでください。
 
-request 由来の `issued_at_ms` と `validity_ms` は production では信頼しません。TEE 側の現在時刻と既定 TTL を使います。これは、caller が長すぎる有効期限を持つ署名済み payload を作らせないためです。
+request 由来の `issued_at_ms` と `validity_ms` は server path と legacy/local production では信頼しません。TEE 側の現在時刻と既定 TTL を使います。これは、caller が長すぎる有効期限を持つ署名済み payload を作らせないためです。
 
 ## fixture の使い方
 
