@@ -1,0 +1,83 @@
+{
+    "schema": "sonari.identity_verification_result.bcs",
+    "version": 1,
+    "field_order": [
+        "intent",
+        "verifier_family",
+        "verifier_version",
+        "registry_id",
+        "membership_id",
+        "owner",
+        "provider",
+        "verified",
+        "duplicate_key_hash",
+        "evidence_hash",
+        "issued_at_ms",
+        "expires_at_ms",
+        "terms_version",
+        "signed_statement_hash"
+    ],
+    "provider_enum": {
+        "kyc": 1,
+        "world_id": 2
+    },
+    "signing_policy": {
+        "verified_true_is_signable": true,
+        "verified_false_is_signable": false,
+        "unsigned_statuses_must_not_include": ["payload_bcs_hex", "signature", "public_key"]
+    },
+    "vectors": [
+        {
+            "case_id": "world_id_success_v1",
+            "source_fixture": "nautilus/verifiers/membership/fixtures/identity/world_id_success.json",
+            "result": {
+                "intent": "SONARI_IDENTITY_VERIFICATION_V1",
+                "verifier_family": "identity",
+                "verifier_version": 1,
+                "registry_id": "0x1111111111111111111111111111111111111111111111111111111111111111",
+                "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+                "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+                "provider": "world_id",
+                "verified": true,
+                "duplicate_key_hash": "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
+                "evidence_hash": "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f",
+                "issued_at_ms": 1800000000000,
+                "expires_at_ms": 1831536000000,
+                "terms_version": 1,
+                "signed_statement_hash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            "payload_bcs_hex": "0x1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e7469747901000000000000001111111111111111111111111111111111111111111111111111111111111111222222222222222222222222222222222222222222222222222222222222222233333333333333333333333333333333333333333333333333333333333333330201b9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a7468893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f00505c18a3010000007c0d70aa0100000100000000000000dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+            "case_id": "move_signed_world_id_fixture_v1",
+            "source_fixture": "contracts/tests/identity_verification_tests.move::rust_fixture_payload_bcs",
+            "result": {
+                "intent": "SONARI_IDENTITY_VERIFICATION_V1",
+                "verifier_family": "identity",
+                "verifier_version": 1,
+                "registry_id": "0x75b6758a05e5945c492eb147dcfe2e58df886a71ff36c25b2ad07bec42cd407a",
+                "membership_id": "0xdba72804cc9504a82bbaa13ed4a83a0e2c6219d7e45125cf57fd10cbab957a97",
+                "owner": "0x000000000000000000000000000000000000000000000000000000000000051a",
+                "provider": "world_id",
+                "verified": true,
+                "duplicate_key_hash": "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
+                "evidence_hash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+                "issued_at_ms": 1800000000000,
+                "expires_at_ms": 1831536000000,
+                "terms_version": 7,
+                "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "payload_bcs_hex": "0x1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000075b6758a05e5945c492eb147dcfe2e58df886a71ff36c25b2ad07bec42cd407adba72804cc9504a82bbaa13ed4a83a0e2c6219d7e45125cf57fd10cbab957a97000000000000000000000000000000000000000000000000000000000000051a0201b9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74555555555555555555555555555555555555555555555555555555555555555500505c18a3010000007c0d70aa01000007000000000000006666666666666666666666666666666666666666666666666666666666666666",
+            "signature_hex": "0x5e74818871cee57fc7da5131aa042f4ce2e221694dd3d1a4b56ef2201c81dd7113600b689d0d0b88e0ba50dbcd5144ea8dab22d3a1f1e9af576ef69f2424170f",
+            "public_key_hex": "0xea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c"
+        }
+    ],
+    "not_signable_cases": [
+        {
+            "case_id": "world_id_reject_v1",
+            "source_fixture": "nautilus/verifiers/membership/fixtures/identity/world_id_reject.json",
+            "verified": false,
+            "must_not_include": ["payload_bcs_hex", "signature", "public_key"]
+        }
+    ]
+}
