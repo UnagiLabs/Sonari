@@ -154,6 +154,33 @@ describe("membership identity AWS interface docs", () => {
         expect(teeReadme).not.toContain("KYC_NOT_IMPLEMENTED");
     });
 
+    it("documents the dummy World ID testnet smoke goal, network gate, Sui object policy, and KYC scope", async () => {
+        const { awsReadme } = await readDocs();
+
+        for (const phrase of [
+            "dummy World ID + Sui testnet 一気通貫 smoke",
+            "dummy World ID proof は testnet / devnet",
+            "mainnet では deploy 前に拒否",
+            "identity:live-gate",
+            "scripts/membership_identity_live_gate.ts",
+            "infra/aws/sonari-verifier-runner/docs/smoke-runbook.md",
+            "Sui testnet object",
+            "既存 object を検出",
+            "SUCCEEDED",
+            "Sui submit digest",
+            "MembershipPass readback",
+            "AWS idle cleanup",
+            "DesiredCapacity=0",
+            "KYC は MVP 外",
+            "KYC_UNSUPPORTED",
+        ]) {
+            expect(awsReadme).toContain(phrase);
+        }
+
+        expect(awsReadme).not.toContain("dummy proof mode");
+        expect(awsReadme).not.toContain("dummy World ID verifier");
+    });
+
     it("documents the operator runbook and evidence capture terms for issue 74 step 6", async () => {
         const [{ awsReadme }, awsEvidenceTemplate] = await Promise.all([
             readDocs(),
