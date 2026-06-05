@@ -644,7 +644,12 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 }
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
-                const handoff = readSuiDryRunHandoff(row, event.result);
+                const submitter = options.suiSubmission ?? buildSuiSubmissionFromConfig(options);
+                const handoff = readSuiDryRunHandoff(
+                    row,
+                    event.result,
+                    options.config.suiSubmission,
+                );
                 if (!handoff.ok) {
                     await markSuiSubmissionFailed(
                         repository,
@@ -660,7 +665,6 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         result: event.result,
                     });
                 }
-                const submitter = options.suiSubmission ?? buildSuiSubmissionFromConfig(options);
                 if (submitter === undefined) {
                     await markSuiSubmissionFailed(
                         repository,
@@ -1238,6 +1242,7 @@ function suiDryRunHandoffRecord(
 function readSuiDryRunHandoff(
     row: VerificationJobRow,
     result: VerifiedMembershipTeeResult,
+    config: RunnerSuiSubmissionConfig | undefined,
 ): IdentityVerificationSuiResult<SuiDryRunHandoffRecord> {
     if (row.sui_dry_run_result_json === null) {
         return relayerSubmitFailed("Sui dry-run handoff is required before submit");
@@ -1263,7 +1268,7 @@ function readSuiDryRunHandoff(
     if (!request.ok) {
         return request;
     }
-    const requestMatch = validateStoredSuiRequest(request.value, expectedSignedPayload);
+    const requestMatch = validateStoredSuiRequest(request.value, expectedSignedPayload, config);
     if (!requestMatch.ok) {
         return requestMatch;
     }
@@ -1364,7 +1369,14 @@ function readStoredSuiRequestArguments(
 function validateStoredSuiRequest(
     request: IdentityVerificationDryRunSuccess["request"],
     signedPayload: SignedIdentityPayloadForRelayer,
+    config: RunnerSuiSubmissionConfig | undefined,
 ): IdentityVerificationSuiResult<true> {
+    if (config !== undefined) {
+        const configMatch = validateStoredSuiRequestConfig(request, config);
+        if (!configMatch.ok) {
+            return configMatch;
+        }
+    }
     if (
         request.membershipPassId !== signedPayload.membership_id ||
         request.arguments[4] !== signedPayload.membership_id
@@ -1385,6 +1397,35 @@ function validateStoredSuiRequest(
         return relayerSubmitFailed(
             "Stored Sui dry-run request public key bytes do not match payload",
         );
+    }
+    return { ok: true, value: true };
+}
+
+function validateStoredSuiRequestConfig(
+    request: IdentityVerificationDryRunSuccess["request"],
+    config: RunnerSuiSubmissionConfig,
+): IdentityVerificationSuiResult<true> {
+    const expectedTarget = `${config.packageId}::accessor::update_identity_verification`;
+    const checks: ReadonlyArray<readonly [string, string, string]> = [
+        ["target", request.target, expectedTarget],
+        ["packageId", request.packageId, config.packageId],
+        ["pauseStateId", request.pauseStateId, config.pauseStateId],
+        ["identityRegistryId", request.identityRegistryId, config.identityRegistryId],
+        ["membershipRegistryId", request.membershipRegistryId, config.membershipRegistryId],
+        ["verifierRegistryId", request.verifierRegistryId, config.verifierRegistryId],
+        ["clockId", request.clockId, config.clockId],
+        ["arguments[0]", request.arguments[0], config.pauseStateId],
+        ["arguments[1]", request.arguments[1], config.identityRegistryId],
+        ["arguments[2]", request.arguments[2], config.membershipRegistryId],
+        ["arguments[3]", request.arguments[3], config.verifierRegistryId],
+        ["arguments[5]", request.arguments[5], config.clockId],
+    ];
+    for (const [field, actual, expected] of checks) {
+        if (actual !== expected) {
+            return relayerSubmitFailed(
+                `Stored Sui dry-run request ${field} does not match submit config`,
+            );
+        }
     }
     return { ok: true, value: true };
 }

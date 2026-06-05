@@ -690,6 +690,56 @@ describe("membership runner workflow", () => {
         }
     });
 
+    it("rejects stored dry-run handoff with stale Sui request config before submit", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        await repository.markSuiDryRunSucceeded(
+            job.row.job_id,
+            baseNowMs + 2,
+            JSON.stringify(
+                dryRunHandoffRecord({
+                    request: {
+                        ...fakeSuiRequest(),
+                        packageId: "0xstale",
+                        target: "0xstale::accessor::update_identity_verification",
+                    },
+                }),
+            ),
+        );
+        const submitter = new RecordingSuiSubmissionAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 3,
+            config: {
+                ...baseConfig(),
+                suiSubmission: fakeRunnerSuiSubmissionConfig(),
+            },
+        });
+
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({ sui_submission: "failed" });
+
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "failed",
+            error_code: "RELAYER_SUBMIT_FAILED",
+            error_message: "Stored Sui dry-run request target does not match submit config",
+            tx_digest: null,
+        });
+        expect(submitter.submits).toEqual([]);
+    });
+
     it("records submit tx digest and keeps the original digest on duplicate completion", async () => {
         const repository = new InMemoryVerificationJobRepository();
         const job = await repository.upsertRequest(validRequest(), baseNowMs);
@@ -1328,6 +1378,18 @@ function fakeSuiRequest() {
             Array.from({ length: 64 }, () => 0x11),
             Array.from({ length: 32 }, () => 0x22),
         ] as [string, string, string, string, string, string, number[], number[], number[]],
+    };
+}
+
+function fakeRunnerSuiSubmissionConfig() {
+    return {
+        mode: "submit" as const,
+        packageId: "0xabc",
+        pauseStateId: "0x111",
+        identityRegistryId: "0x222",
+        membershipRegistryId: "0x333",
+        verifierRegistryId: "0x444",
+        clockId: "0x6",
     };
 }
 

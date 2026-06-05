@@ -266,6 +266,35 @@ describe("membership identity Sui submission", () => {
         expect(signAndExecuteCalls).toBe(1);
     });
 
+    it("keeps the submit digest when post-submit readback RPC throws", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(
+            "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+        );
+        const client = fakeClient({
+            signAndExecuteTransaction: async () => successfulTransaction("submit-digest"),
+            getObject: async () => {
+                throw new Error("Sui object read failed");
+            },
+        });
+
+        await expect(
+            submitIdentityVerificationPayload(verifiedIdentityResult(), {
+                ...baseConfig(),
+                network,
+                grpcUrl,
+                allowSubmit: true,
+                signer,
+                client,
+                transaction: {},
+            }),
+        ).resolves.toEqual({
+            ok: false,
+            error_code: "RELAYER_SUBMIT_FAILED",
+            message: "Sui object read failed",
+            digest: "submit-digest",
+        });
+    });
+
     it("parses MembershipPass readback only when it reflects the submitted identity payload", () => {
         const expected = verifiedIdentityResult();
         const readback = membershipPassReadback(expected);

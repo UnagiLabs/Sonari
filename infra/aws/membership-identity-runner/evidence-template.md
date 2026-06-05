@@ -1,6 +1,6 @@
 # Membership identity AWS runner evidence
 
-Use this template for issue #74 live verification. Leave secrets, raw proof
+Use this template for issue #156 live verification. Leave secrets, raw proof
 body, signing seed plaintext, and private keys out of this file.
 
 ## Run identity
@@ -133,5 +133,5 @@ readback_failure_tx_digest:
 
 ## Close-out
 
-Issue #74 DoD met:
+Issue #156 DoD met:
 Remaining blockers:

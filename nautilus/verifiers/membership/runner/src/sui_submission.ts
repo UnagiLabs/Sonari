@@ -308,16 +308,21 @@ export async function submitIdentityVerificationPayload(
         if (!isNonEmptyString(result.value.digest)) {
             return relayerSubmitFailed("Sui response did not include transaction digest");
         }
-        await client.waitForTransaction({ digest: result.value.digest });
-        const object = await client.getObject({
-            objectId: request.value.membershipPassId,
-            include: { json: true },
-        });
-        const readback = parseMembershipPassReadback(
-            object,
-            expectedReadback.value,
-            config.packageId,
-        );
+        let readback: IdentityVerificationSuiResult<MembershipPassReadback>;
+        try {
+            await client.waitForTransaction({ digest: result.value.digest });
+            const object = await client.getObject({
+                objectId: request.value.membershipPassId,
+                include: { json: true },
+            });
+            readback = parseMembershipPassReadback(
+                object,
+                expectedReadback.value,
+                config.packageId,
+            );
+        } catch (error) {
+            return relayerSubmitFailedWithDigest(errorMessage(error), result.value.digest);
+        }
         if (!readback.ok) {
             return { ...readback, digest: result.value.digest };
         }
@@ -779,6 +784,13 @@ function readExecutionErrorMessage(value: unknown): string | undefined {
 
 function relayerSubmitFailed<T = never>(message: string): IdentityVerificationSuiResult<T> {
     return { ok: false, error_code: RELAYER_SUBMIT_FAILED, message };
+}
+
+function relayerSubmitFailedWithDigest<T = never>(
+    message: string,
+    digest: string,
+): IdentityVerificationSuiResult<T> {
+    return { ok: false, error_code: RELAYER_SUBMIT_FAILED, message, digest };
 }
 
 function moveRejected<T = never>(message: string): IdentityVerificationSuiResult<T> {
