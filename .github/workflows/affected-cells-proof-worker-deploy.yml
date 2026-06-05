@@ -1,0 +1,88 @@
+name: Affected Cells Proof Worker Deploy
+
+# packages/affected-cells-proof-worker か依存先 packages/proof-core が main に入ると
+# 自動で Cloudflare へ wrangler deploy する。手動デプロイ漏れを防ぐのが目的。
+# パターンは .github/workflows/aws-sonari-verifier-runner-dev-deploy.yml に倣う。
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - packages/affected-cells-proof-worker/**
+      - packages/proof-core/**
+      - pnpm-lock.yaml
+      - .github/workflows/affected-cells-proof-worker-deploy.yml
+  workflow_dispatch:
+
+# Cloudflare は API トークン認証で OIDC 不要。AWS 版の id-token: write は持たせない。
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy worker to Cloudflare
+    runs-on: ubuntu-latest
+    # environment 配下の secret として CLOUDFLARE_API_TOKEN（必要なら CLOUDFLARE_ACCOUNT_ID）
+    # を参照する。secret は GitHub の Settings で別途登録する（本リポジトリには平文を置かない）。
+    environment: cloudflare-affected-cells-proof-worker
+    timeout-minutes: 30
+    # 同一 worker への同時デプロイを直列化する。実行中の deploy は途中で殺さない。
+    concurrency:
+      group: affected-cells-proof-worker-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      # deploy 前に workspace を解決しておく。worker の src/index.ts は
+      # @sonari/proof-core（workspace:*）を import しており、wrangler の esbuild バンドルは
+      # node_modules の workspace シンボリックリンク経由で依存を解決する（dry-run で実証済み）。
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      # cloudflare/wrangler-action は wrangler を自前で導入する。リポジトリ依存に wrangler は
+      # 無いため、再現性のため wranglerVersion を固定する（dry-run で 4.85.0 を検証済み）。
+      #
+      # packageManager: pnpm を明示するのは必須。これを省くと action は npm を既定にし、
+      # worker の package.json にある "@sonari/proof-core": "workspace:*" を npm が解釈できず
+      # 失敗する。pnpm なら workspace プロトコルを正しく扱い、workspace シンボリックリンクも保つ。
+      #
+      # アプリ secret（AFFECTED_PROOF_REGISTER_TOKEN 等）はこの workflow では一切扱わない。
+      # それらは `wrangler secret put` で Cloudflare 側に別管理する。CI に渡すのは
+      # Cloudflare API token（と必要なら account id）のみ。
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.85.0"
+          packageManager: pnpm
+          workingDirectory: packages/affected-cells-proof-worker
+          command: deploy
