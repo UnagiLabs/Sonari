@@ -164,10 +164,12 @@ describe("membership identity Sui JSON parsing", () => {
         expect(() =>
             assertSuiObjectType(
                 object,
-                EXPECTED_OBJECT_TYPES.identityRegistry,
+                `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
                 "identityRegistryId",
             ),
-        ).toThrow("identityRegistryId must be ::identity_registry::IdentityRegistry");
+        ).toThrow(
+            `identityRegistryId must be ${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
+        );
     });
 
     it("converts Sui CLI failures and invalid JSON into clear errors", () => {
@@ -266,6 +268,26 @@ describe("membership identity base object resolution", () => {
                 executor: fakeExecutor({}),
             }),
         ).rejects.toThrow("missing fixture object ids: identityRegistryId, membershipRegistryId");
+    });
+
+    it("rejects registry readback from a stale package publish", async () => {
+        const executor = fakeExecutor({
+            [objectId("ab")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.adminCap}`,
+            [objectId("11")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.pauseState}`,
+            [objectId("22")]: `${objectId("bb")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
+            [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
+            [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+        });
+
+        await expect(
+            resolveBaseFixtureObjects({
+                candidates: baseCandidates(),
+                options: suiOptions(),
+                executor,
+            }),
+        ).rejects.toThrow(
+            `identityRegistryId must be ${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
+        );
     });
 
     it("publishes only with an explicit flag and verifies created object ids", async () => {
@@ -406,7 +428,13 @@ describe("membership identity pass fixture planning", () => {
     });
 
     it("accepts only unverified MembershipPass readback", () => {
-        expect(parseUnverifiedMembershipPassReadback(passReadback(false), objectId("66"))).toEqual({
+        expect(
+            parseUnverifiedMembershipPassReadback(
+                passReadback(false),
+                objectId("66"),
+                objectId("aa"),
+            ),
+        ).toEqual({
             passId: objectId("66"),
             owner: objectId("77"),
             identityVerified: false,
@@ -414,7 +442,11 @@ describe("membership identity pass fixture planning", () => {
         });
 
         expect(() =>
-            parseUnverifiedMembershipPassReadback(passReadback(true), objectId("66")),
+            parseUnverifiedMembershipPassReadback(
+                passReadback(true),
+                objectId("66"),
+                objectId("aa"),
+            ),
         ).toThrow("membership pass fixture must start with identity_verified=false");
     });
 });

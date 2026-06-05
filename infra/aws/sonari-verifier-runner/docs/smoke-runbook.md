@@ -126,9 +126,13 @@ SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID
 ```bash
 test "${RELAYER_NETWORK:-testnet}" != mainnet
 
+jq -c '{body: (. | tostring)}' \
+  .local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json \
+  > /tmp/sonari-membership-dummy-proof-event.json
+
 aws lambda invoke \
   --function-name "$submit_verification_lambda_name" \
-  --payload fileb://.local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json \
+  --payload fileb:///tmp/sonari-membership-dummy-proof-event.json \
   /tmp/sonari-membership-dummy-proof-response.json
 
 aws stepfunctions list-executions \

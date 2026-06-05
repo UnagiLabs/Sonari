@@ -380,17 +380,21 @@ export function parseSuiObjectReadback(input: unknown): SuiObjectReadback {
 
 export function assertSuiObjectType(
     object: SuiObjectReadback,
-    expectedSuffix: string,
+    expectedType: string,
     fieldName: string,
 ): void {
-    if (!object.type.endsWith(expectedSuffix)) {
-        throw new Error(`${fieldName} must be ${expectedSuffix}, got ${object.type}`);
+    if (object.type !== expectedType) {
+        throw new Error(`${fieldName} must be ${expectedType}, got ${object.type}`);
     }
 }
 
 export function parsePublishFixtureObjects(input: unknown): SuiPublishFixtureObjects {
     const packageId = parsePublishedPackageId(input);
-    const adminCapId = parseCreatedObjectId(input, EXPECTED_OBJECT_TYPES.adminCap, "AdminCap");
+    const adminCapId = parseCreatedObjectId(
+        input,
+        expectedPackageType(packageId, EXPECTED_OBJECT_TYPES.adminCap),
+        "AdminCap",
+    );
     const genesis = parseGenesisObjectIds(input);
     const pauseStateId = genesis.get(GENESIS_KIND_PAUSE_STATE);
     const membershipRegistryId = genesis.get(GENESIS_KIND_MEMBERSHIP_REGISTRY);
@@ -631,13 +635,19 @@ export function parseAllowedResidenceCellRegistryId(input: unknown): string {
 export function parseUnverifiedMembershipPassReadback(
     input: unknown,
     expectedPassId: string,
+    expectedPackageId: string,
 ): MembershipPassReadback {
     assertHexObjectId(expectedPassId, "expectedPassId");
+    assertHexObjectId(expectedPackageId, "expectedPackageId");
     const object = parseSuiObjectReadback(input);
     if (object.objectId !== expectedPassId) {
         throw new Error(`membership pass readback id mismatch: expected ${expectedPassId}`);
     }
-    assertSuiObjectType(object, EXPECTED_OBJECT_TYPES.membershipPass, "membershipPassId");
+    assertSuiObjectType(
+        object,
+        expectedPackageType(expectedPackageId, EXPECTED_OBJECT_TYPES.membershipPass),
+        "membershipPassId",
+    );
     const owner = readStringField(object.fields, "owner");
     assertHexObjectId(owner, "membershipPass.owner");
     const identityVerified = object.fields.identity_verified ?? object.fields.identityVerified;
@@ -811,7 +821,10 @@ async function resolveAllowedResidenceCellRegistryId(input: {
         );
         assertSuiObjectType(
             parseSuiObjectReadback(parsed),
-            EXPECTED_OBJECT_TYPES.allowedResidenceCellRegistry,
+            expectedPackageType(
+                input.baseObjects.packageId,
+                EXPECTED_OBJECT_TYPES.allowedResidenceCellRegistry,
+            ),
             "allowedResidenceCellRegistryId",
         );
         return input.candidate;
@@ -842,7 +855,12 @@ async function resolveMembershipPassReadback(input: {
     readonly candidate?: string;
 }): Promise<MembershipPassReadback> {
     if (input.candidate !== undefined) {
-        return readMembershipPass(input.candidate, input.options, input.executor);
+        return readMembershipPass(
+            input.candidate,
+            input.baseObjects.packageId,
+            input.options,
+            input.executor,
+        );
     }
 
     const created = await input.executor(
@@ -863,17 +881,18 @@ async function resolveMembershipPassReadback(input: {
     );
     const parsed = parseSuiJsonCommandResult(created, "register membership pass");
     const passId = parseMembershipPassIssuedId(parsed);
-    return readMembershipPass(passId, input.options, input.executor);
+    return readMembershipPass(passId, input.baseObjects.packageId, input.options, input.executor);
 }
 
 async function readMembershipPass(
     passId: string,
+    packageId: string,
     options: SuiClientOptions,
     executor: SuiCommandExecutor,
 ): Promise<MembershipPassReadback> {
     const output = await executor(buildSuiObjectCommand(passId, options));
     const parsed = parseSuiJsonCommandResult(output, "sui object membershipPassId");
-    return parseUnverifiedMembershipPassReadback(parsed, passId);
+    return parseUnverifiedMembershipPassReadback(parsed, passId, packageId);
 }
 
 function buildBaseObjectCandidates(
@@ -1028,7 +1047,11 @@ async function verifyBaseObjectReadbacks(
         const output = await executor(buildSuiObjectCommand(objectId, options));
         const parsed = parseSuiJsonCommandResult(output, `sui object ${fieldName}`);
         const object = parseSuiObjectReadback(parsed);
-        assertSuiObjectType(object, expectedType, fieldName);
+        assertSuiObjectType(
+            object,
+            expectedPackageType(objects.packageId, expectedType),
+            fieldName,
+        );
     }
 }
 
@@ -1081,14 +1104,19 @@ function requiredCandidate(value: string | undefined, fieldName: string): string
     return value;
 }
 
-function parseCreatedObjectId(input: unknown, typeSuffix: string, name: string): string {
+function expectedPackageType(packageId: string, typeSuffix: string): string {
+    assertHexObjectId(packageId, "packageId");
+    return `${packageId}${typeSuffix}`;
+}
+
+function parseCreatedObjectId(input: unknown, expectedType: string, name: string): string {
     for (const change of readObjectChanges(input)) {
         if (!isRecord(change)) {
             continue;
         }
         const objectType = change.objectType ?? change.object_type;
         const objectId = change.objectId ?? change.object_id;
-        if (typeof objectType === "string" && objectType.endsWith(typeSuffix)) {
+        if (objectType === expectedType) {
             if (typeof objectId !== "string") {
                 throw new Error(`${name} object change did not include object id`);
             }

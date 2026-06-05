@@ -113,6 +113,8 @@ describe("AWS Sonari verifier runner README", () => {
             ].join(""),
             ".local/sonari-dev/membership-identity-fixture/fixture.env",
             ".local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json",
+            "jq -c '{body: (. | tostring)}'",
+            "fileb:///tmp/sonari-membership-dummy-proof-event.json",
             "SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID",
             "SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID",
             "devnet または testnet 専用",
