@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
     assertFixtureNetwork,
@@ -33,6 +36,7 @@ import {
     parseSuiObjectReadback,
     parseUnverifiedMembershipPassReadback,
     resolveBaseFixtureObjects,
+    runMembershipIdentityTestnetFixture,
     type SuiCommandExecutor,
     type SuiCommandPlan,
     type SuiCommandResult,
@@ -415,6 +419,50 @@ describe("membership identity pass fixture planning", () => {
     });
 });
 
+describe("membership identity fixture runner", () => {
+    it("writes manifest, env, and request files from fake Sui execution", async () => {
+        const outputDir = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-fixture-"));
+        try {
+            const executor = fakeExecutor({
+                [objectId("ab")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.adminCap}`,
+                [objectId("11")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.pauseState}`,
+                [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
+                [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
+                [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+                [objectId("55")]:
+                    `${objectId("aa")}${EXPECTED_OBJECT_TYPES.allowedResidenceCellRegistry}`,
+                [objectId("66")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipPass}`,
+            });
+
+            const result = await runMembershipIdentityTestnetFixture({
+                env: "testnet",
+                clientConfig: ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+                outputDir,
+                publishIfMissing: true,
+                executor,
+                processEnv: {},
+                now: () => new Date("2026-06-05T00:00:00.000Z"),
+            });
+
+            await expect(readFile(result.envPath, "utf8")).resolves.toContain(
+                `SONARI_MEMBERSHIP_PASS_ID=${objectId("66")}`,
+            );
+            await expect(readFile(result.dummyWorldIdRequestPath, "utf8")).resolves.toContain(
+                `"membership_id": "${objectId("66")}"`,
+            );
+            const manifest = JSON.parse(await readFile(result.manifestPath, "utf8")) as {
+                readonly smoke: { readonly owner: string; readonly terms_version: number };
+            };
+            expect(manifest.smoke).toMatchObject({
+                owner: objectId("77"),
+                terms_version: DEFAULT_TERMS_VERSION,
+            });
+        } finally {
+            await rm(outputDir, { recursive: true, force: true });
+        }
+    });
+});
+
 function fixtureInput(): MembershipIdentityFixtureManifestInput {
     return {
         network: "testnet",
@@ -502,6 +550,34 @@ function fakeExecutor(typeByObjectId: Record<string, string>): SuiCommandExecuto
         if (plan.args.includes("publish")) {
             return { code: 0, stdout: JSON.stringify(publishJson()), stderr: "" };
         }
+        if (plan.args.includes("create_allowed_residence_cell_registry")) {
+            return {
+                code: 0,
+                stdout: JSON.stringify({
+                    events: [
+                        {
+                            type: `${objectId("aa")}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
+                            parsedJson: { registry_id: objectId("55") },
+                        },
+                    ],
+                }),
+                stderr: "",
+            };
+        }
+        if (plan.args.includes("ptb")) {
+            return {
+                code: 0,
+                stdout: JSON.stringify({
+                    events: [
+                        {
+                            type: `${objectId("aa")}::membership::MembershipPassIssued`,
+                            parsedJson: { pass_id: objectId("66") },
+                        },
+                    ],
+                }),
+                stderr: "",
+            };
+        }
         const objectIdArg = plan.args[6];
         if (typeof objectIdArg !== "string") {
             return { code: 1, stdout: "", stderr: "missing object id" };
@@ -516,7 +592,16 @@ function fakeExecutor(typeByObjectId: Record<string, string>): SuiCommandExecuto
                 data: {
                     objectId: objectIdArg,
                     type,
-                    content: { fields: {} },
+                    content: {
+                        fields:
+                            objectIdArg === objectId("66")
+                                ? {
+                                      owner: objectId("77"),
+                                      identity_verified: false,
+                                      provider_label: "Unverified",
+                                  }
+                                : {},
+                    },
                 },
             }),
             stderr: "",

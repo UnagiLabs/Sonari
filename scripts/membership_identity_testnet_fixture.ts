@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const DEFAULT_FIXTURE_OUTPUT_DIR = ".local/sonari-dev/membership-identity-fixture";
@@ -116,6 +119,14 @@ export interface MembershipIdentityFixtureFiles {
     readonly dummyWorldIdRequestJson: string;
 }
 
+export interface MembershipIdentityFixtureRunResult {
+    readonly outputDir: string;
+    readonly manifestPath: string;
+    readonly envPath: string;
+    readonly dummyWorldIdRequestPath: string;
+    readonly manifest: MembershipIdentityFixtureManifest;
+}
+
 export interface SuiCommandResult {
     readonly code: number;
     readonly stdout: string;
@@ -173,6 +184,16 @@ export interface ResolveBaseFixtureObjectsInput {
     readonly options: SuiClientOptions;
     readonly executor: SuiCommandExecutor;
     readonly publishIfMissing?: boolean;
+}
+
+export interface RunMembershipIdentityTestnetFixtureOptions {
+    readonly env: FixtureNetwork;
+    readonly clientConfig: string;
+    readonly outputDir: string;
+    readonly publishIfMissing?: boolean;
+    readonly executor?: SuiCommandExecutor;
+    readonly processEnv?: Record<string, string | undefined>;
+    readonly now?: () => Date;
 }
 
 export interface ResidenceFixtureInput {
@@ -652,6 +673,87 @@ export function parsePublishedTomlPackageId(
     return publishedAt;
 }
 
+export async function runMembershipIdentityTestnetFixture(
+    options: RunMembershipIdentityTestnetFixtureOptions,
+): Promise<MembershipIdentityFixtureRunResult> {
+    const fixtureEnv = assertFixtureNetwork(options.env);
+    const executor = options.executor ?? executeSuiCommand;
+    const runtimeEnv = options.processEnv ?? process.env;
+    const existingManifest = await readExistingManifest(options.outputDir);
+    const publishedTomlPackageId = await readPublishedTomlPackageId(fixtureEnv);
+    const allowedResidenceCellRegistryCandidate =
+        runtimeEnv.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID ??
+        existingManifest?.objects.allowed_residence_cell_registry_id;
+    const membershipPassCandidate =
+        runtimeEnv.SONARI_MEMBERSHIP_PASS_ID ?? existingManifest?.objects.membership_pass_id;
+    const baseObjects = await resolveBaseFixtureObjects({
+        candidates: buildBaseObjectCandidates(runtimeEnv, existingManifest, publishedTomlPackageId),
+        options: {
+            clientConfig: options.clientConfig,
+            env: fixtureEnv,
+        },
+        executor,
+        ...(options.publishIfMissing === undefined
+            ? {}
+            : { publishIfMissing: options.publishIfMissing }),
+    });
+    const allowedResidenceCellRegistryId = await resolveAllowedResidenceCellRegistryId({
+        baseObjects,
+        options: {
+            clientConfig: options.clientConfig,
+            env: fixtureEnv,
+        },
+        executor,
+        ...(allowedResidenceCellRegistryCandidate === undefined
+            ? {}
+            : { candidate: allowedResidenceCellRegistryCandidate }),
+    });
+    const passReadback = await resolveMembershipPassReadback({
+        baseObjects,
+        allowedResidenceCellRegistryId,
+        options: {
+            clientConfig: options.clientConfig,
+            env: fixtureEnv,
+        },
+        executor,
+        ...(membershipPassCandidate === undefined ? {} : { candidate: membershipPassCandidate }),
+    });
+    const manifest = buildMembershipIdentityFixtureManifest({
+        network: fixtureEnv,
+        generatedAt: (options.now ?? (() => new Date()))().toISOString(),
+        suiClientConfig: options.clientConfig,
+        objects: {
+            packageId: baseObjects.packageId,
+            adminCapId: baseObjects.adminCapId,
+            pauseStateId: baseObjects.pauseStateId,
+            identityRegistryId: baseObjects.identityRegistryId,
+            membershipRegistryId: baseObjects.membershipRegistryId,
+            verifierRegistryId: baseObjects.verifierRegistryId,
+            allowedResidenceCellRegistryId,
+            membershipPassId: passReadback.passId,
+        },
+        smoke: {
+            registryId: baseObjects.identityRegistryId,
+            membershipId: passReadback.passId,
+            owner: passReadback.owner,
+            termsVersion: DEFAULT_TERMS_VERSION,
+            signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
+            worldId: defaultWorldIdInput(),
+        },
+    });
+    await writeFixtureFiles(
+        options.outputDir,
+        buildMembershipIdentityFixtureFilesFromManifest(manifest),
+    );
+    return {
+        outputDir: options.outputDir,
+        manifestPath: path.join(options.outputDir, FIXTURE_MANIFEST_FILE),
+        envPath: path.join(options.outputDir, FIXTURE_ENV_FILE),
+        dummyWorldIdRequestPath: path.join(options.outputDir, FIXTURE_DUMMY_WORLD_ID_REQUEST_FILE),
+        manifest,
+    };
+}
+
 function assertHexObjectId(value: string, fieldName: string): void {
     if (!/^0x[0-9a-fA-F]+$/.test(value)) {
         throw new Error(`${fieldName} must be a 0x-prefixed hex object id`);
@@ -668,6 +770,205 @@ function assertNonEmpty(value: string, fieldName: string): void {
     if (value.length === 0) {
         throw new Error(`${fieldName} must be non-empty`);
     }
+}
+
+function buildMembershipIdentityFixtureFilesFromManifest(
+    manifest: MembershipIdentityFixtureManifest,
+): MembershipIdentityFixtureFiles {
+    return {
+        manifestJson: `${JSON.stringify(manifest, null, 2)}\n`,
+        envFile: renderMembershipIdentityFixtureEnv(manifest),
+        dummyWorldIdRequestJson: `${JSON.stringify(buildDummyWorldIdRequest(manifest), null, 2)}\n`,
+    };
+}
+
+function defaultWorldIdInput(): MembershipIdentityFixtureWorldIdInput {
+    return {
+        worldAppId: "app_staging_123",
+        nullifierHash: "12345678901234567890",
+        merkleRoot: "987654321",
+        proof: "0xproof",
+        verificationLevel: "orb",
+        action: WORLD_ID_ACTION,
+        signalHash: DEFAULT_WORLD_ID_SIGNAL_HASH,
+    };
+}
+
+async function resolveAllowedResidenceCellRegistryId(input: {
+    readonly baseObjects: MembershipIdentityFixtureBaseObjects;
+    readonly options: SuiClientOptions;
+    readonly executor: SuiCommandExecutor;
+    readonly candidate?: string;
+}): Promise<string> {
+    if (input.candidate !== undefined) {
+        assertHexObjectId(input.candidate, "allowedResidenceCellRegistryId");
+        const readback = await input.executor(
+            buildSuiObjectCommand(input.candidate, input.options),
+        );
+        const parsed = parseSuiJsonCommandResult(
+            readback,
+            "sui object allowedResidenceCellRegistryId",
+        );
+        assertSuiObjectType(
+            parseSuiObjectReadback(parsed),
+            EXPECTED_OBJECT_TYPES.allowedResidenceCellRegistry,
+            "allowedResidenceCellRegistryId",
+        );
+        return input.candidate;
+    }
+
+    const created = await input.executor(
+        buildCreateAllowedResidenceCellRegistryCommand(
+            {
+                packageId: input.baseObjects.packageId,
+                adminCapId: input.baseObjects.adminCapId,
+                root: DEFAULT_RESIDENCE_ROOT,
+                geoResolution: DEFAULT_GEO_RESOLUTION,
+                allowlistVersion: DEFAULT_ALLOWLIST_VERSION,
+                sourceHash: DEFAULT_RESIDENCE_SOURCE_HASH,
+            },
+            input.options,
+        ),
+    );
+    const parsed = parseSuiJsonCommandResult(created, "create allowed residence cell registry");
+    return parseAllowedResidenceCellRegistryId(parsed);
+}
+
+async function resolveMembershipPassReadback(input: {
+    readonly baseObjects: MembershipIdentityFixtureBaseObjects;
+    readonly allowedResidenceCellRegistryId: string;
+    readonly options: SuiClientOptions;
+    readonly executor: SuiCommandExecutor;
+    readonly candidate?: string;
+}): Promise<MembershipPassReadback> {
+    if (input.candidate !== undefined) {
+        return readMembershipPass(input.candidate, input.options, input.executor);
+    }
+
+    const created = await input.executor(
+        buildRegisterMemberPtbCommand(
+            {
+                packageId: input.baseObjects.packageId,
+                pauseStateId: input.baseObjects.pauseStateId,
+                membershipRegistryId: input.baseObjects.membershipRegistryId,
+                allowedResidenceCellRegistryId: input.allowedResidenceCellRegistryId,
+                homeCell: DEFAULT_HOME_CELL,
+                proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
+                proofRight: DEFAULT_RESIDENCE_PROOF_RIGHT,
+                termsVersion: DEFAULT_TERMS_VERSION,
+                signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
+            },
+            input.options,
+        ),
+    );
+    const parsed = parseSuiJsonCommandResult(created, "register membership pass");
+    const passId = parseMembershipPassIssuedId(parsed);
+    return readMembershipPass(passId, input.options, input.executor);
+}
+
+async function readMembershipPass(
+    passId: string,
+    options: SuiClientOptions,
+    executor: SuiCommandExecutor,
+): Promise<MembershipPassReadback> {
+    const output = await executor(buildSuiObjectCommand(passId, options));
+    const parsed = parseSuiJsonCommandResult(output, "sui object membershipPassId");
+    return parseUnverifiedMembershipPassReadback(parsed, passId);
+}
+
+function buildBaseObjectCandidates(
+    env: Record<string, string | undefined>,
+    manifest: MembershipIdentityFixtureManifest | undefined,
+    publishedTomlPackageId: string | undefined,
+): MembershipIdentityFixtureBaseObjectCandidates {
+    const packageId =
+        env.SONARI_IDENTITY_PACKAGE_ID ?? manifest?.objects.package_id ?? publishedTomlPackageId;
+    const adminCapId =
+        env.SONARI_IDENTITY_ADMIN_CAP_ID ?? env.ADMIN_CAP_ID ?? manifest?.objects.admin_cap_id;
+    const pauseStateId = env.SONARI_IDENTITY_PAUSE_STATE_ID ?? manifest?.objects.pause_state_id;
+    const identityRegistryId =
+        env.SONARI_IDENTITY_REGISTRY_ID ?? manifest?.objects.identity_registry_id;
+    const membershipRegistryId =
+        env.SONARI_MEMBERSHIP_REGISTRY_ID ?? manifest?.objects.membership_registry_id;
+    const verifierRegistryId =
+        env.SONARI_VERIFIER_REGISTRY_ID ?? manifest?.objects.verifier_registry_id;
+    return {
+        ...(packageId === undefined ? {} : { packageId }),
+        ...(adminCapId === undefined ? {} : { adminCapId }),
+        ...(pauseStateId === undefined ? {} : { pauseStateId }),
+        ...(identityRegistryId === undefined ? {} : { identityRegistryId }),
+        ...(membershipRegistryId === undefined ? {} : { membershipRegistryId }),
+        ...(verifierRegistryId === undefined ? {} : { verifierRegistryId }),
+    };
+}
+
+async function readExistingManifest(
+    outputDir: string,
+): Promise<MembershipIdentityFixtureManifest | undefined> {
+    try {
+        const parsed = JSON.parse(
+            await readFile(path.join(outputDir, FIXTURE_MANIFEST_FILE), "utf8"),
+        ) as unknown;
+        if (!isRecord(parsed) || parsed.schema !== "sonari.membership_identity.testnet_fixture") {
+            throw new Error("existing manifest has an unexpected schema");
+        }
+        return parsed as unknown as MembershipIdentityFixtureManifest;
+    } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") {
+            return undefined;
+        }
+        throw error;
+    }
+}
+
+async function readPublishedTomlPackageId(env: FixtureNetwork): Promise<string | undefined> {
+    try {
+        return parsePublishedTomlPackageId(await readFile("contracts/Published.toml", "utf8"), env);
+    } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") {
+            return undefined;
+        }
+        throw error;
+    }
+}
+
+async function writeFixtureFiles(
+    outputDir: string,
+    files: MembershipIdentityFixtureFiles,
+): Promise<void> {
+    await mkdir(outputDir, { recursive: true });
+    await Promise.all([
+        writeFile(path.join(outputDir, FIXTURE_MANIFEST_FILE), files.manifestJson),
+        writeFile(path.join(outputDir, FIXTURE_ENV_FILE), files.envFile),
+        writeFile(
+            path.join(outputDir, FIXTURE_DUMMY_WORLD_ID_REQUEST_FILE),
+            files.dummyWorldIdRequestJson,
+        ),
+    ]);
+}
+
+async function executeSuiCommand(plan: SuiCommandPlan): Promise<SuiCommandResult> {
+    return new Promise((resolve, reject) => {
+        const child = spawn(plan.command, plan.args, { stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdout += chunk;
+        });
+        child.stderr.on("data", (chunk: string) => {
+            stderr += chunk;
+        });
+        child.on("error", reject);
+        child.on("close", (code) => {
+            resolve({ code: code ?? 1, stdout, stderr });
+        });
+    });
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+    return error instanceof Error && "code" in error;
 }
 
 function parsePublishedPackageId(input: unknown): string {
@@ -867,7 +1168,89 @@ function errorMessage(error: unknown): string {
 }
 
 async function main(): Promise<void> {
-    throw new Error("membership identity fixture execution is implemented in a later step");
+    const options = parseCliArgs(process.argv.slice(2));
+    const result = await runMembershipIdentityTestnetFixture(options);
+    process.stdout.write(
+        `${JSON.stringify(
+            {
+                ok: true,
+                manifest: result.manifestPath,
+                env: result.envPath,
+                dummy_world_id_request: result.dummyWorldIdRequestPath,
+                membership_pass_id: result.manifest.objects.membership_pass_id,
+                identity_registry_id: result.manifest.objects.identity_registry_id,
+            },
+            null,
+            2,
+        )}\n`,
+    );
+}
+
+function parseCliArgs(argv: readonly string[]): RunMembershipIdentityTestnetFixtureOptions {
+    let env = assertFixtureNetwork(process.env.SONARI_FIXTURE_SUI_ENV ?? "testnet");
+    let clientConfig =
+        process.env.SUI_CLIENT_CONFIG ?? ".local/sonari-dev/sui_wallets/admin/sui_config.yaml";
+    let outputDir = DEFAULT_FIXTURE_OUTPUT_DIR;
+    let publishIfMissing = false;
+
+    for (let index = 0; index < argv.length; index += 1) {
+        const arg = argv[index];
+        if (arg === "--sui-env") {
+            env = assertFixtureNetwork(requiredArg(argv, index, "--sui-env"));
+            index += 1;
+            continue;
+        }
+        if (arg === "--sui-config") {
+            clientConfig = requiredArg(argv, index, "--sui-config");
+            index += 1;
+            continue;
+        }
+        if (arg === "--output-dir") {
+            outputDir = requiredArg(argv, index, "--output-dir");
+            index += 1;
+            continue;
+        }
+        if (arg === "--publish-if-missing") {
+            publishIfMissing = true;
+            continue;
+        }
+        if (arg === "--") {
+            continue;
+        }
+        if (arg === "--help" || arg === "-h") {
+            process.stdout.write(cliUsage());
+            process.exit(0);
+        }
+        throw new Error(`unknown arg: ${arg}`);
+    }
+
+    return {
+        env,
+        clientConfig,
+        outputDir,
+        publishIfMissing,
+    };
+}
+
+function requiredArg(argv: readonly string[], index: number, flag: string): string {
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+        throw new Error(`${flag} requires a value`);
+    }
+    return value;
+}
+
+function cliUsage(): string {
+    return [
+        "Usage:",
+        "  pnpm identity:testnet-fixture [--sui-env testnet] [--sui-config <path>] [--output-dir <path>] [--publish-if-missing]",
+        "",
+        "Outputs:",
+        `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_MANIFEST_FILE)}`,
+        `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_ENV_FILE)}`,
+        `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_DUMMY_WORLD_ID_REQUEST_FILE)}`,
+        "",
+    ].join("\n");
 }
 
 const mainPath = process.argv[1] === undefined ? null : pathToFileURL(process.argv[1]).href;

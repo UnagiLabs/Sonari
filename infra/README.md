@@ -155,6 +155,37 @@ SONARI_MEMBERSHIP_REGISTRY_ID=$MEMBERSHIP_REGISTRY_ID
 SONARI_VERIFIER_REGISTRY_ID=$VERIFIER_REGISTRY_ID
 ```
 
+## Membership dummy smoke fixture
+
+dummy World ID smoke の前に、testnet 用 MembershipPass fixture を用意します。
+この script は mainnet では動きません。
+
+既存 object を使う場合は、先に env を渡します。
+
+```bash
+export SONARI_IDENTITY_PACKAGE_ID="$PACKAGE_ID"
+export SONARI_IDENTITY_ADMIN_CAP_ID="$ADMIN_CAP_ID"
+export SONARI_IDENTITY_PAUSE_STATE_ID="$PAUSE_STATE_ID"
+export SONARI_IDENTITY_REGISTRY_ID="$IDENTITY_REGISTRY_ID"
+export SONARI_MEMBERSHIP_REGISTRY_ID="$MEMBERSHIP_REGISTRY_ID"
+export SONARI_VERIFIER_REGISTRY_ID="$VERIFIER_REGISTRY_ID"
+
+pnpm identity:testnet-fixture \
+  --sui-config .local/sonari-dev/sui_wallets/admin/sui_config.yaml \
+  --sui-env testnet
+```
+
+必要な object がなく、新しく publish してよい場合だけ
+`--publish-if-missing` を付けます。
+publish は `contracts/Published.toml` を更新することがあります。
+実行後は git diff を確認してください。
+
+出力は `.local/sonari-dev/membership-identity-fixture/` に保存します。
+`fixture.env` は runner / handoff 用の object id を持ちます。
+`dummy-world-id-request.json` は AWS submit Lambda へ渡す request です。
+`manifest.json` は AdminCap と allowlist registry も含む作業メモです。
+secret、private key、wallet file は保存しません。
+
 4. PCR 登録トランザクションをまとめて実行
 
 GA サマリの PCR をセットします。
