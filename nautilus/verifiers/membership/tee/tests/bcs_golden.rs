@@ -1,7 +1,29 @@
 use membership_tee::{
-    INTENT, IdentityProvider, IdentityTeeResult, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY,
-    VERIFIER_VERSION, encoding::identity_bcs::payload_bcs_bytes,
+    INTENT, IdentityTeeResult, PROVIDER_KYC, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
+    encoding::identity_bcs::payload_bcs_bytes,
 };
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct IdentityResultVectors {
+    field_order: Vec<String>,
+    provider_enum: ProviderEnum,
+    vectors: Vec<IdentityResultVector>,
+}
+
+#[derive(Deserialize)]
+struct ProviderEnum {
+    kyc: u8,
+    world_id: u8,
+}
+
+#[derive(Deserialize)]
+struct IdentityResultVector {
+    case_id: String,
+    source_fixture: String,
+    result: IdentityTeeResult,
+    payload_bcs_hex: String,
+}
 
 #[test]
 fn pins_bcs_numeric_enums_to_typescript_contract() {
@@ -14,32 +36,56 @@ fn pins_bcs_numeric_enums_to_typescript_contract() {
 
 #[test]
 fn bcs_golden_matches_typescript_reference() {
-    let result = IdentityTeeResult {
-        intent: INTENT.to_owned(),
-        verifier_family: VERIFIER_FAMILY.to_owned(),
-        verifier_version: VERIFIER_VERSION,
-        registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111"
-            .to_owned(),
-        membership_id: "0x2222222222222222222222222222222222222222222222222222222222222222"
-            .to_owned(),
-        owner: "0x3333333333333333333333333333333333333333333333333333333333333333".to_owned(),
-        provider: IdentityProvider::WorldId,
-        verified: true,
-        duplicate_key_hash: "0x4444444444444444444444444444444444444444444444444444444444444444"
-            .to_owned(),
-        evidence_hash: "0x5555555555555555555555555555555555555555555555555555555555555555"
-            .to_owned(),
-        issued_at_ms: 1_800_000_000_000,
-        expires_at_ms: 1_831_536_000_000,
-        terms_version: 1,
-        signed_statement_hash: "0x6666666666666666666666666666666666666666666666666666666666666666"
-            .to_owned(),
-    };
+    let vectors = identity_result_vectors();
+    assert_eq!(
+        vectors.field_order,
+        [
+            "intent",
+            "verifier_family",
+            "verifier_version",
+            "registry_id",
+            "membership_id",
+            "owner",
+            "provider",
+            "verified",
+            "duplicate_key_hash",
+            "evidence_hash",
+            "issued_at_ms",
+            "expires_at_ms",
+            "terms_version",
+            "signed_statement_hash",
+        ]
+    );
+    assert_eq!(vectors.provider_enum.kyc, PROVIDER_KYC);
+    assert_eq!(vectors.provider_enum.world_id, PROVIDER_WORLD_ID);
 
-    let encoded = payload_bcs_bytes(&result).expect("identity payload BCS should encode");
+    let vector = vectors
+        .vectors
+        .iter()
+        .find(|vector| vector.case_id == "world_id_success_v1")
+        .expect("world_id_success_v1 vector should exist");
+    let fixture: IdentityTeeResult = serde_json::from_str(include_str!(
+        "../../fixtures/identity/world_id_success.json"
+    ))
+    .expect("world_id_success fixture should parse");
+
+    assert_eq!(
+        vector.source_fixture,
+        "nautilus/verifiers/membership/fixtures/identity/world_id_success.json"
+    );
+    assert_eq!(vector.result, fixture);
+
+    let encoded = payload_bcs_bytes(&vector.result).expect("identity payload BCS should encode");
 
     assert_eq!(
         format!("0x{}", hex::encode(encoded)),
-        "0x1f534f4e4152495f4944454e544954595f564552494649434154494f4e5f5631086964656e74697479010000000000000011111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222333333333333333333333333333333333333333333333333333333333333333302014444444444444444444444444444444444444444444444444444444444444444555555555555555555555555555555555555555555555555555555555555555500505c18a3010000007c0d70aa01000001000000000000006666666666666666666666666666666666666666666666666666666666666666"
+        vector.payload_bcs_hex
     );
+}
+
+fn identity_result_vectors() -> IdentityResultVectors {
+    serde_json::from_str(include_str!(
+        "../../../../../schemas/examples/identity_result_vectors.json"
+    ))
+    .expect("identity result vectors should parse")
 }

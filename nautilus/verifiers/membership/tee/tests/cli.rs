@@ -212,7 +212,8 @@ fn fixture_command_rejects_nested_world_id_unknown_request_field() {
 
 #[test]
 fn encode_only_outputs_only_payload_bcs_hex_for_verified_result() {
-    let result = verified_identity_result();
+    let vector = world_id_success_vector();
+    let result = vector["result"].clone();
     let output = run_encode_only(&result);
 
     assert!(
@@ -229,6 +230,7 @@ fn encode_only_outputs_only_payload_bcs_hex_for_verified_result() {
         fields.keys().map(String::as_str).collect::<Vec<_>>(),
         vec!["payload_bcs_hex"]
     );
+    assert_eq!(json["payload_bcs_hex"], vector["payload_bcs_hex"]);
     let payload_bytes = decode_hex_field(&json, "payload_bcs_hex");
     let payload = bcs::from_bytes::<IdentityPayloadBcs>(&payload_bytes)
         .expect("payload_bcs_hex should decode as identity payload BCS");
@@ -446,6 +448,20 @@ fn run_encode_only(result: &serde_json::Value) -> std::process::Output {
     child
         .wait_with_output()
         .expect("failed to run membership-tee --encode-only")
+}
+
+fn world_id_success_vector() -> serde_json::Value {
+    let vectors: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../schemas/examples/identity_result_vectors.json"
+    ))
+    .expect("identity result vectors should parse");
+    vectors["vectors"]
+        .as_array()
+        .expect("vectors should be an array")
+        .iter()
+        .find(|vector| vector["case_id"] == "world_id_success_v1")
+        .expect("world_id_success_v1 vector should exist")
+        .clone()
 }
 
 fn run_production(request: &serde_json::Value, envs: &[(&str, &str)]) -> std::process::Output {
