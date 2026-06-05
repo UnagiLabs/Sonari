@@ -64,8 +64,16 @@ export {
 
 const INLINE_TEST_RUNNER_TIMEOUT_MS = 90_000;
 
+export interface WorkflowStartRequest {
+    sourceEventId: string;
+    executionName: string;
+    attempt?: number;
+    action?: "register_affected_cells_proof";
+    resultS3Key?: string;
+}
+
 export interface WorkflowStarter {
-    start(input: { sourceEventId: string; executionName: string; attempt?: number }): Promise<void>;
+    start(input: WorkflowStartRequest): Promise<void>;
 }
 
 export interface StepFunctionsClientLike {
@@ -82,19 +90,19 @@ export class StepFunctionsWorkflowStarter implements WorkflowStarter {
         this.client = client ?? new SFNClient({});
     }
 
-    async start(input: {
-        sourceEventId: string;
-        executionName: string;
-        attempt?: number;
-    }): Promise<void> {
+    async start(input: WorkflowStartRequest): Promise<void> {
         await this.client.send(
             new StartExecutionCommand({
                 stateMachineArn: this.stateMachineArn,
                 name: input.executionName,
                 input: JSON.stringify({
                     verifier_kind: EARTHQUAKE_VERIFIER_KIND,
+                    ...(input.action === undefined ? {} : { action: input.action }),
                     source_event_id: input.sourceEventId,
                     attempt: input.attempt ?? 1,
+                    ...(input.resultS3Key === undefined
+                        ? {}
+                        : { result_s3_key: input.resultS3Key }),
                 }),
             }),
         );
@@ -128,7 +136,16 @@ export function createScheduledHandler(options: ScheduledHandlerOptions) {
             nowMs,
             options.dueLimit ?? DEFAULT_DUE_LIMIT,
         );
-        return { scanned: candidates.length, workflow_started: started };
+        const proofRegistrationStarted =
+            started === 0
+                ? await startDueAffectedCellsProofRegistrationRetries(
+                      options.repository,
+                      options.workflow,
+                      nowMs,
+                      options.dueLimit ?? DEFAULT_DUE_LIMIT,
+                  )
+                : 0;
+        return { scanned: candidates.length, workflow_started: started + proofRegistrationStarted };
     };
 }
 
@@ -337,6 +354,42 @@ export async function startDueWorkflows(
                 start.attempt,
             );
             await repository.markWorkflowStopped(row.source_event_id, start.attempt, nowMs);
+            break;
+        }
+        started += 1;
+        break;
+    }
+    return started;
+}
+
+export async function startDueAffectedCellsProofRegistrationRetries(
+    repository: StateRepository,
+    workflow: WorkflowStarter,
+    nowMs: number,
+    limit = DEFAULT_DUE_LIMIT,
+): Promise<number> {
+    const staleBeforeMs = nowMs - PROCESSING_STALE_AFTER_MS;
+    if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
+        return 0;
+    }
+    const rows = await repository.listDueAffectedCellsProofRegistrations(nowMs, limit);
+    let started = 0;
+    for (const row of rows) {
+        const attempt = row.affected_cells_proof_registration_attempt ?? row.runner_attempt;
+        const resultS3Key = row.runner_result_s3_key;
+        if (attempt === null || resultS3Key === null) {
+            continue;
+        }
+        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-proof-registration-${attempt}-${nowMs}`;
+        try {
+            await workflow.start({
+                sourceEventId: row.source_event_id,
+                executionName,
+                attempt,
+                action: "register_affected_cells_proof",
+                resultS3Key,
+            });
+        } catch {
             break;
         }
         started += 1;

@@ -173,6 +173,10 @@ export interface StateRepository {
     ): Promise<void>;
     get(sourceEventId: string): Promise<EarthquakeEventRow | null>;
     listDue(nowMs: number, limit: number): Promise<EarthquakeEventRow[]>;
+    listDueAffectedCellsProofRegistrations(
+        nowMs: number,
+        limit: number,
+    ): Promise<EarthquakeEventRow[]>;
     hasActiveRunnerWorkflow(staleBeforeMs?: number): Promise<boolean>;
     tryStartRunnerWorkflowExclusively(
         sourceEventId: string,
@@ -379,6 +383,21 @@ export class InMemoryStateRepository implements StateRepository {
         return [...this.rows.values()]
             .filter((row) => DUE_STATUSES.has(row.status) && isReadyForRetryOrDeadline(row, nowMs))
             .sort((a, b) => a.updated_at_ms - b.updated_at_ms)
+            .slice(0, limit)
+            .map((row) => structuredClone(row));
+    }
+
+    async listDueAffectedCellsProofRegistrations(
+        nowMs: number,
+        limit: number,
+    ): Promise<EarthquakeEventRow[]> {
+        return [...this.rows.values()]
+            .filter((row) => isDueAffectedCellsProofRegistration(row, nowMs))
+            .sort(
+                (a, b) =>
+                    (a.affected_cells_proof_registration_next_retry_at_ms ?? a.updated_at_ms) -
+                    (b.affected_cells_proof_registration_next_retry_at_ms ?? b.updated_at_ms),
+            )
             .slice(0, limit)
             .map((row) => structuredClone(row));
     }
@@ -913,6 +932,20 @@ export class DynamoDbStateRepository implements StateRepository {
         return (await this.scanRows())
             .filter((row) => DUE_STATUSES.has(row.status) && isReadyForRetryOrDeadline(row, nowMs))
             .sort((a, b) => a.updated_at_ms - b.updated_at_ms)
+            .slice(0, limit);
+    }
+
+    async listDueAffectedCellsProofRegistrations(
+        nowMs: number,
+        limit: number,
+    ): Promise<EarthquakeEventRow[]> {
+        return (await this.scanRows())
+            .filter((row) => isDueAffectedCellsProofRegistration(row, nowMs))
+            .sort(
+                (a, b) =>
+                    (a.affected_cells_proof_registration_next_retry_at_ms ?? a.updated_at_ms) -
+                    (b.affected_cells_proof_registration_next_retry_at_ms ?? b.updated_at_ms),
+            )
             .slice(0, limit);
     }
 
@@ -2030,6 +2063,17 @@ function isReadyForRetryOrDeadline(row: EarthquakeEventRow, nowMs: number): bool
         return true;
     }
     return row.next_retry_at_ms === null || row.next_retry_at_ms <= nowMs;
+}
+
+function isDueAffectedCellsProofRegistration(row: EarthquakeEventRow, nowMs: number): boolean {
+    return (
+        row.affected_cells_proof_registration_status === "retryable_failed" &&
+        row.affected_cells_proof_registration_next_retry_at_ms !== null &&
+        row.affected_cells_proof_registration_next_retry_at_ms <= nowMs &&
+        row.source_archive_status === "success" &&
+        row.runner_result_s3_key !== null &&
+        row.runner_attempt !== null
+    );
 }
 
 function isActiveRunnerWorkflow(row: EarthquakeEventRow, staleBeforeMs?: number): boolean {
