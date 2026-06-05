@@ -304,6 +304,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               sui_submission: "skipped" | "succeeded" | "failed";
               result: MembershipTeeResult;
               tx_digest?: string | undefined;
+              readback?: IdentityVerificationSubmitSuccess["readback"] | undefined;
           }
         | { job_id: string; attempt?: number | undefined; failed: true }
     );
@@ -699,6 +700,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                         attempt: event.attempt,
                         sui_submission: "failed",
                         result: event.result,
+                        ...(result.digest === undefined ? {} : { tx_digest: result.digest }),
                     });
                 }
                 const updated = await repository.markCompleted(
@@ -716,6 +718,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     sui_submission: "succeeded",
                     result: event.result,
                     tx_digest: completedRow?.tx_digest ?? result.value.digest,
+                    readback: result.value.readback,
                 });
             }
             case "mark_failed": {

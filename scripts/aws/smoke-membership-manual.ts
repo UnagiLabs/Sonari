@@ -40,6 +40,7 @@ export type LatestExecutionSummary = {
     jobId: string | null;
     registrationMetadata: RegistrationMetadataSummary | null;
     teeResult: TeeResultSummary | null;
+    suiSubmission: SuiSubmissionSummary | null;
 };
 
 export type JobSummary = {
@@ -56,6 +57,22 @@ export type RegistrationMetadataSummary = {
     verifierConfigKey: number;
     verifierConfigVersion: number | null;
     enclaveInstancePublicKey: string;
+};
+
+export type SuiSubmissionSummary = {
+    status: string;
+    txDigest: string | null;
+    readback: SuiMembershipPassReadbackSummary | null;
+};
+
+export type SuiMembershipPassReadbackSummary = {
+    objectId: string;
+    identityVerified: boolean;
+    identityProviderMask: number;
+    identityVerifiedAtMs: number;
+    identityExpiresAtMs: number;
+    termsVersion: number;
+    signedStatementHash: string;
 };
 
 export type TeeResultSummary =
@@ -204,6 +221,7 @@ async function describeLatestExecution(
         jobId: readRecordString(parsedInput, "job_id"),
         registrationMetadata: evidence.registrationMetadata,
         teeResult: evidence.teeResult,
+        suiSubmission: evidence.suiSubmission,
     };
 }
 
@@ -213,10 +231,12 @@ async function readLatestExecutionEvidence(
 ): Promise<{
     registrationMetadata: RegistrationMetadataSummary | null;
     teeResult: TeeResultSummary | null;
+    suiSubmission: SuiSubmissionSummary | null;
 }> {
     let nextToken: string | undefined;
     let registrationMetadata: RegistrationMetadataSummary | null = null;
     let teeResult: TeeResultSummary | null = null;
+    let suiSubmission: SuiSubmissionSummary | null = null;
     for (let page = 0; page < 25; page += 1) {
         const args = [
             "stepfunctions",
@@ -235,12 +255,13 @@ async function readLatestExecutionEvidence(
             readStateOutput(events, "RegisterEnclaveInstance"),
         );
         teeResult ??= readTeeResult(readStateOutput(events, "ReadResult"));
-        if (registrationMetadata !== null && teeResult !== null) {
-            return { registrationMetadata, teeResult };
+        suiSubmission ??= readSuiSubmission(readStateOutput(events, "SubmitSuiSubmission"));
+        if (registrationMetadata !== null && teeResult !== null && suiSubmission !== null) {
+            return { registrationMetadata, teeResult, suiSubmission };
         }
         const responseNextToken = readRecordString(response, "nextToken");
         if (responseNextToken === null) {
-            return { registrationMetadata, teeResult };
+            return { registrationMetadata, teeResult, suiSubmission };
         }
         if (responseNextToken === nextToken) {
             throw new Error("Step Functions execution history pagination did not advance");
@@ -315,6 +336,14 @@ function readRecordNumber(value: unknown, key: string): number | null {
     return typeof nested === "number" && Number.isSafeInteger(nested) ? nested : null;
 }
 
+function readRecordBoolean(value: unknown, key: string): boolean | null {
+    if (!isRecord(value)) {
+        return null;
+    }
+    const nested = value[key];
+    return typeof nested === "boolean" ? nested : null;
+}
+
 function readStateOutput(events: unknown[], stateName: string): unknown {
     for (const event of events) {
         if (!isRecord(event) || event.type !== "TaskStateExited") {
@@ -379,6 +408,54 @@ function readTeeResult(output: unknown): TeeResultSummary | null {
     return {
         status,
         errorCode: readRecordString(result, "error_code"),
+    };
+}
+
+function readSuiSubmission(output: unknown): SuiSubmissionSummary | null {
+    if (!isRecord(output)) {
+        return null;
+    }
+    const status = readRecordString(output, "sui_submission");
+    if (status === null) {
+        return null;
+    }
+    return {
+        status,
+        txDigest: readRecordString(output, "tx_digest"),
+        readback: readSuiMembershipPassReadback(output.readback),
+    };
+}
+
+function readSuiMembershipPassReadback(input: unknown): SuiMembershipPassReadbackSummary | null {
+    if (!isRecord(input)) {
+        return null;
+    }
+    const objectId = readRecordString(input, "objectId");
+    const identityVerified = readRecordBoolean(input, "identityVerified");
+    const identityProviderMask = readRecordNumber(input, "identityProviderMask");
+    const identityVerifiedAtMs = readRecordNumber(input, "identityVerifiedAtMs");
+    const identityExpiresAtMs = readRecordNumber(input, "identityExpiresAtMs");
+    const termsVersion = readRecordNumber(input, "termsVersion");
+    const signedStatementHash = readRecordString(input, "signedStatementHash");
+    if (
+        objectId === null ||
+        identityVerified === null ||
+        identityProviderMask === null ||
+        identityVerifiedAtMs === null ||
+        identityExpiresAtMs === null ||
+        termsVersion === null ||
+        signedStatementHash === null
+    ) {
+        return null;
+    }
+    return {
+        objectId,
+        identityVerified,
+        identityProviderMask,
+        identityVerifiedAtMs,
+        identityExpiresAtMs,
+        termsVersion,
+        signedStatementHash,
     };
 }
 

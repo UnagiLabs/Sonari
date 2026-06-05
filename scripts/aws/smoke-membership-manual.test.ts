@@ -39,6 +39,19 @@ describe("AWS membership manual batch smoke script", () => {
                     signature: `0x${"11".repeat(64)}`,
                     publicKey: `0x${"22".repeat(32)}`,
                 },
+                suiSubmission: {
+                    status: "succeeded",
+                    txDigest: "tx-submit-abc",
+                    readback: {
+                        objectId: `0x${"55".repeat(32)}`,
+                        identityVerified: true,
+                        identityProviderMask: 2,
+                        identityVerifiedAtMs: 1_800_000_000_000,
+                        identityExpiresAtMs: 1_800_000_000_001,
+                        termsVersion: 1,
+                        signedStatementHash: `0x${"44".repeat(32)}`,
+                    },
+                },
             },
             job: null,
         });
@@ -90,6 +103,10 @@ describe("AWS membership manual batch smoke script", () => {
         expect(result.latestExecution?.teeResult).toMatchObject({
             status: "verified",
             payloadBcsHex: "0x010203",
+        });
+        expect(result.latestExecution?.suiSubmission).toMatchObject({
+            status: "succeeded",
+            txDigest: "tx-submit-abc",
         });
         expect(cli.historyNextTokens).toEqual([null, "page-2"]);
     });
@@ -374,6 +391,19 @@ function executionHistory(teeStatus: "verified" | "pending_source"): unknown {
                   status: "pending_source",
                   error_code: "WORLD_ID_API_UNAVAILABLE",
               };
+    const submitOutput = {
+        sui_submission: "succeeded",
+        tx_digest: "tx-submit-abc",
+        readback: {
+            objectId: `0x${"55".repeat(32)}`,
+            identityVerified: true,
+            identityProviderMask: 2,
+            identityVerifiedAtMs: 1_800_000_000_000,
+            identityExpiresAtMs: 1_800_000_000_001,
+            termsVersion: 1,
+            signedStatementHash: `0x${"44".repeat(32)}`,
+        },
+    };
     return {
         events: [
             {
@@ -390,6 +420,17 @@ function executionHistory(teeStatus: "verified" | "pending_source"): unknown {
                     output: JSON.stringify({ result }),
                 },
             },
+            ...(teeStatus === "verified"
+                ? [
+                      {
+                          type: "TaskStateExited",
+                          stateExitedEventDetails: {
+                              name: "SubmitSuiSubmission",
+                              output: JSON.stringify(submitOutput),
+                          },
+                      },
+                  ]
+                : []),
         ],
     };
 }
