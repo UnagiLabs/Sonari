@@ -155,7 +155,7 @@ Parameters:
   WorldIdApiBase:
     Type: String
     Default: https://developer.world.org
-    Description: World ID API base URL passed as runtime configuration to the membership identity enclave process.
+    Description: Legacy parameter kept for deploy input compatibility. The membership server path pins the canonical https://developer.world.org base.
   RelayerMode:
     Type: String
     Default: ""
@@ -625,10 +625,7 @@ Resources:
             ${WorldIdAppId}
             SONARI_WORLD_ID_APP_ID
             )
-            world_id_api_base=$(cat <<'SONARI_WORLD_ID_API_BASE'
-            ${WorldIdApiBase}
-            SONARI_WORLD_ID_API_BASE
-            )
+            world_id_api_base="https://developer.world.org"
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2
@@ -767,7 +764,7 @@ Resources:
               echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
-              printf 'SONARI_WORLD_ID_API_BASE=%q\n' "$world_id_api_base"
+              echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"

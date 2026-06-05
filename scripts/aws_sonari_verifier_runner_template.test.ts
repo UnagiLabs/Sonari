@@ -393,9 +393,12 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // earthquake egress model -- never a host-controlled http://127.0.0.1 base.
         expect(template).not.toContain("SONARI_WORLD_ID_API_BASE=http://127.0.0.1:8000");
         expect(template).not.toContain("http://127.0.0.1:8000");
-        expect(template).toContain(
-            "printf 'SONARI_WORLD_ID_API_BASE=%q\\n' \"$world_id_api_base\"",
+        expect(template).toContain('world_id_api_base="https://developer.world.org"');
+        expect(template).toContain('echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"');
+        expect(template).not.toContain(
+            "$" + "{WorldIdApiBase}\n            SONARI_WORLD_ID_API_BASE",
         );
+        expect(template).not.toContain("printf 'SONARI_WORLD_ID_API_BASE=%q\\n'");
         // The canonical https base must keep its https scheme on the wire.
         expect(template).toContain("Default: https://developer.world.org");
         // World ID HTTPS traffic is forwarded through the same explicit egress proxy
@@ -657,7 +660,6 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             TeeEifS3Bucket: 58,
             TeeEifS3Key: 91,
             TeeEifSha256: 64,
-            WorldIdApiBase: 27,
             WorldIdAppId: 17,
         };
 
