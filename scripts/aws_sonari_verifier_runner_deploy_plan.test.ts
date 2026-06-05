@@ -22,9 +22,9 @@ const validInput = {
     membershipEifBucket: "membership-eif-artifacts",
     membershipEifSha256: validMembershipEifSha256,
     sourceArchiverTokenSecretArn:
-        "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-token",
+        "arn:aws:secretsmanager:ap-northeast-1:595103996064:secret:source-archiver-token",
     sourceArchiverPrivateKeySecretArn:
-        "arn:aws:secretsmanager:us-west-2:595103996064:secret:source-archiver-private-key",
+        "arn:aws:secretsmanager:ap-northeast-1:595103996064:secret:source-archiver-private-key",
     relayerNetwork: "testnet",
     worldIdProofMode: "dummy",
 } as const;
