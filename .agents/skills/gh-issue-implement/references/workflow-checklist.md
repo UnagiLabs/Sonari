@@ -34,9 +34,11 @@ Use this checklist while running `gh-issue-implement`.
    - a clean-context subagent runs the default Codex CLI `/review` command
    - `/review` uses PR-style comparison: implementation branch against `main`
    - review context includes issue summary, implementation summary, validation results, changed files, current branch, base branch, and `git diff --stat main...HEAD`
-   - unresolved findings stop PR creation
+   - unresolved blocking or high-confidence correctness/security/regression findings stop PR creation
+   - advice, nits, and low-confidence findings are either fixed or documented as follow-up / validation gaps in the PR body
    - local verification is rerun after review fixes
-   - `/review` is repeated in a clean-context subagent until there are no findings
+   - `/review` runs once by default
+   - `/review` is rerun at most once, only after high-risk changes or large blocking review fixes
 9. PR:
    - issue link
    - test results
