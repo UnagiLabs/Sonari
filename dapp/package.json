@@ -6,15 +6,18 @@
         "dev": "next dev",
         "build": "next build",
         "start": "next start",
+        "test": "vitest run app/claim",
         "typecheck": "next build"
     },
     "dependencies": {
+        "@sonari/proof-core": "workspace:*",
         "next": "^16.2.2",
         "react": "^19.2.0",
         "react-dom": "^19.2.0"
     },
     "devDependencies": {
         "@types/react": "^19.2.7",
-        "@types/react-dom": "^19.2.3"
+        "@types/react-dom": "^19.2.3",
+        "vitest": "^4.1.6"
     }
 }
