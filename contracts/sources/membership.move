@@ -189,6 +189,8 @@ public(package) fun duplicate_claim_key(pass: &MembershipPass, campaign_id: ID):
     (pass.pass_lineage_id, campaign_id)
 }
 
+// 権威書き込みは廃止。registry record が権威。STEP4 でテスト移行後に削除予定。
+#[allow(unused_function)]
 public(package) fun apply_identity_verification(
     pass: &mut MembershipPass,
     provider: u8,

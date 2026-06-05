@@ -1,7 +1,7 @@
 module contracts::identity_registry;
 
 use contracts::identity_result_v1::{Self, IdentityVerificationResult};
-use contracts::membership::{Self, MembershipPass};
+use contracts::membership;
 use sui::address;
 use sui::dynamic_field;
 use sui::event;
@@ -22,6 +22,7 @@ const EIdentityRecordNotFound: u64 = 7;
 const EIdentityRecordOwnerMismatch: u64 = 8;
 const EIdentityVerificationExpired: u64 = 9;
 const EIdentityProviderNotVerified: u64 = 10;
+const EMembershipRecordNotActive: u64 = 11;
 
 public struct IdentityRegistry has key {
     id: UID,
@@ -105,35 +106,43 @@ public(package) fun assert_duplicate_key_bound_to_pass(
 public(package) fun apply_identity_verification_result(
     registry: &mut IdentityRegistry,
     membership_registry: &membership::MembershipRegistry,
-    pass: &mut MembershipPass,
     result: &IdentityVerificationResult,
     applied_at_ms: u64,
 ) {
+    // 1. registry_id 照合
     let registry_id = object::id(registry);
     assert!(
         identity_result_v1::registry_id(result) == object::id_to_bytes(&registry_id),
         EIdentityRegistryMismatch,
     );
-    let pass_id = object::id(pass);
+    // 2. payload の owner(vector<u8>) を address に変換
+    let owner_addr = address::from_bytes(identity_result_v1::owner(result));
+    // 3. owner から lineage を解決（owner 未登録なら membership 側 ERegistryRecordNotFound で abort）
+    let lineage = membership::membership_owner_lineage_id(membership_registry, owner_addr);
+    // 4. record summary を取得
+    let (_rec_lineage, current_pass_id, current_owner, status, _issued, _updated) =
+        membership::membership_record_summary(membership_registry, lineage);
+    // 5. membership_id 照合
     assert!(
-        identity_result_v1::membership_id(result) == object::id_to_bytes(&pass_id),
+        identity_result_v1::membership_id(result) == object::id_to_bytes(&current_pass_id),
         EMembershipIdMismatch,
     );
-    let pass_owner = membership::membership_pass_owner(pass);
-    assert!(
-        identity_result_v1::owner(result) == address::to_bytes(pass_owner),
-        EOwnerMismatch,
-    );
-
-    membership::assert_current_pass_precheck(membership_registry, pass, pass_owner);
+    // 6. owner 整合（防御的）
+    assert!(current_owner == owner_addr, EOwnerMismatch);
+    // 7. status active 確認
+    assert!(status == membership::status_active(), EMembershipRecordNotActive);
+    // 8. dedup 登録
     bind_duplicate_key(
         registry,
-        membership::membership_pass_lineage_id(pass),
+        lineage,
         identity_result_v1::provider(result),
         identity_result_v1::duplicate_key_hash(result),
     );
-    membership::apply_identity_verification(
-        pass,
+    // 9. record 保存
+    record_identity_verification(
+        registry,
+        lineage,
+        owner_addr,
         identity_result_v1::provider(result),
         applied_at_ms,
         identity_result_v1::expires_at_ms(result),
