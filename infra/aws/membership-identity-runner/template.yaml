@@ -871,9 +871,17 @@ Resources:
             "DryRunSuiSubmissionComplete": {
               "Type": "Choice",
               "Choices": [
-                { "Variable": "$.sui_submission", "StringEquals": "failed", "Next": "StopInstance" }
+                { "Variable": "$.sui_submission", "StringEquals": "failed", "Next": "StopInstance" },
+                { "Variable": "$.sui_submission", "StringEquals": "succeeded", "Next": "SubmitSuiSubmission" }
               ],
               "Default": "ApplyResult"
+            },
+            "SubmitSuiSubmission": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "submit_sui_submission", "job_id.$": "$.job_id", "attempt.$": "$.attempt", "result.$": "$.result" },
+              "Next": "StopInstance",
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ApplyResult": {
               "Type": "Task",
