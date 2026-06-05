@@ -182,7 +182,7 @@ export async function loadProofShard(
  * R2 保存用の shard JSON を構築する。
  * shard entry の bigint フィールド（h3_index / oracle_version）は decimal string 化。
  */
-function serializeShardEntries(entries: AffectedCellsProofShardEntry[]): string {
+export function serializeShardEntries(entries: AffectedCellsProofShardEntry[]): string {
     const serializable = entries.map((e) => ({
         event_uid: e.event_uid,
         event_revision: e.event_revision,
