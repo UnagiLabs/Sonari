@@ -249,7 +249,7 @@ Resources:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euo pipefail
-            dnf install -y awscli amazon-ssm-agent libstdc++ aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent libstdc++ aws-nitro-enclaves-cli
+            dnf install -y awscli amazon-ssm-agent libstdc++ python3 aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel || yum install -y awscli amazon-ssm-agent libstdc++ python3 aws-nitro-enclaves-cli
             systemctl enable --now amazon-ssm-agent || true
             usermod -aG ne ec2-user || true
             allocator_spec=/etc/nitro_enclaves/allocator.yaml

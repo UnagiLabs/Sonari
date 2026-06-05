@@ -57,6 +57,8 @@ describe("AWS membership identity runner CloudFormation template", () => {
             'sed -i "s/^memory_mib:.*/memory_mib: $' + '{NitroEnclaveMemoryMiB}/"',
         );
         expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
+        expect(template).toContain("dnf install -y awscli amazon-ssm-agent libstdc++ python3");
+        expect(template).toContain("yum install -y awscli amazon-ssm-agent libstdc++ python3");
         expect(template).toContain("Default: /opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("/opt/sonari/bin/run-membership-identity-enclave");
         expect(template).toContain("printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q");
