@@ -72,7 +72,7 @@ GitHub issue を **Claude Code だけで完結**させる repo-local workflow。
 8. 各 step は完了直後に **その step 専用の 1 commit** を作る
 9. ローカル検証を実行
 10. fresh context の `verification-reviewer` サブエージェントに PR 前ゲートレビューを実行させる
-11. 指摘事項を修正し、指摘がなくなるまでレビューと再検証を繰り返す
+11. blocking 指摘を修正し、必要な場合だけ最大 1 回の再レビューを行う
 12. `prepare-pr` の規約で PR を作成する
 13. worktree と作業ブランチを cleanup する
 14. cleanup 完了を確認してからユーザーへ完了報告する
@@ -181,13 +181,16 @@ issue 本文に `依存関係`、`前提issue`、`依存するissue`、`blocked 
 承認後、計画を issue 本文に追記する。
 
 ```bash
-gh issue edit <number> --repo <owner>/<repo> --body "<original_body>
+tmp_body="$(mktemp)"
+trap 'rm -f "$tmp_body"' EXIT
+{
+  printf '%s\n\n' "<original_body>"
+  printf '%s\n' "---"
+  printf '%s\n' "## 実装計画"
+  printf '%s\n' "<plan_content>"
+} > "$tmp_body"
 
----
-
-## 実装計画
-
-<plan_content>"
+gh issue edit <number> --repo <owner>/<repo> --body-file "$tmp_body"
 ```
 
 追記する計画本文は `references/step-design.md` の issue 計画フォーマットに準拠させる。
@@ -209,7 +212,14 @@ git worktree add <path> -b feature/issue-<issue-number>-<slug> main
 
 実装は **フェーズ -> step** の順で進める。フェーズ数が複数ある場合は、各フェーズが意味のある塊になっていることを保つ。
 
-各 step では `issue-step-worker` サブエージェントに次を渡す:
+小規模 issue の fast path:
+
+- 1 phase / 1 step の小規模 issue で、高リスク surface に触れない場合は、オーケストレーター（Claude Code）本体が直接 TDD 実装してよい
+- 複数 step、複数レイヤー、高リスク変更、または worker 分離が有効な場合は `issue-step-worker` サブエージェントを使う
+- 高リスク surface には schema、BCS、signature、Merkle root、Move contract、trust boundary、auth、secret、AWS 実行系を含む
+- fast path の場合も `1 step = 1 commit`、worktree clean、`draft-commit-message` 使用は維持する
+
+`issue-step-worker` サブエージェントを使う場合は次を渡す:
 
 - step 番号
 - step タイトル
@@ -243,15 +253,23 @@ step 完了の定義:
 
 ## Phase 6: ローカル検証
 
-変更に応じて対象 workspace を特定し、利用可能な script を実行する。このリポジトリ（pnpm workspace）では少なくとも次を優先する:
+変更に応じて対象 workspace を特定し、root `package.json` と対象 package / crate / Move package の設定を確認して利用可能な script を実行する。
+
+Sonari の標準例:
 
 ```bash
-pnpm run check
-pnpm run typecheck
-pnpm test
+pnpm check
+# 必要に応じて対象テストを追加する
+pnpm --filter <workspace> test
 ```
 
-変更が広い場合や runtime/build 影響がある場合は `pnpm run build` まで実行する。Move パッケージが対象なら `pnpm check:move` も走らせる。
+Move ファイル、`contracts/Move.toml`、`contracts/Move.lock` を変更した場合は次も実行する:
+
+```bash
+pnpm check:move
+```
+
+`pnpm check` は typecheck を含むため、常に `pnpm typecheck` を重複実行しない。変更が広い場合、CI 相当の確認が必要な場合、runtime/build 影響がある場合は `pnpm test` や該当 build script を追加する。
 
 ## Phase 7: 最終レビュー
 
@@ -272,10 +290,13 @@ pnpm test
 最終レビューのルール:
 
 - レビュー結果を PR 前ゲートとして扱う
-- 指摘事項は severity に関係なく、解消するまで修正する
-- 修正後は影響範囲のローカル検証をやり直す
-- 指摘事項が 0 件になるまで、fresh context の `verification-reviewer` サブエージェントで再レビューする
-- 指摘事項が解消できない場合は PR を作らず停止する
+- 通常は fresh context の `verification-reviewer` レビューを 1 回だけ実行する
+- PR 作成を止めるのは `blocking` または high-confidence の correctness / security / regression 指摘だけにする
+- advice、nit、low-confidence 指摘は、直さない場合 PR 本文の follow-up または検証ギャップに記載する
+- 指摘を修正した後は、影響範囲のローカル検証をやり直す
+- 再レビューは最大 1 回までにする
+- 再レビューは schema、BCS、signature、Merkle root、Move contract、trust boundary、auth、secret、AWS 実行系の変更、または blocking 指摘の修正が大きい場合だけ実行する
+- blocking 指摘が解消できない場合は PR を作らず停止する
 
 ## Phase 8: PR 作成
 
@@ -324,7 +345,7 @@ cleanup で詰まりやすい例:
 - `gh` 認証失敗
 - 必須のローカル check が失敗し、解消できない
 - `plan-reviewer` の `blocking` 指摘が未解消
-- `verification-reviewer` の指摘事項が未解消
+- `verification-reviewer` の `blocking` 指摘が未解消
 - PR 作成後の worktree cleanup が完了しない
 
 ## 重要事項
@@ -333,7 +354,7 @@ cleanup で詰まりやすい例:
 - 計画監査は fresh context のサブエージェントで実行する
 - 最終レビューは **必ず fresh context の `verification-reviewer` サブエージェントに実行させる**
 - レビューは PR 方式で、実装ブランチと `main` を比較する
-- レビューは指摘事項が 0 件になるまで繰り返す
+- 最終レビューは通常 1 回だけ実行し、高リスク変更または大きな blocking 修正後だけ最大 1 回再実行する
 - 既存の未関連変更は巻き戻さない
 - `issue-planner` / `plan-reviewer` / `issue-step-worker` / `verification-reviewer` の役割をまたいで責務を混ぜない
 - オーケストレーターは複数 step の変更を溜めてからまとめて commit してはならない
