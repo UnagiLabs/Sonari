@@ -97,12 +97,42 @@ SourceArchiver 単体は `pnpm aws:verify:source-archiver` で先に確認しま
 
 Membership dummy proof smoke は devnet または testnet 専用です。`pnpm identity:smoke` と同じ request shape の dummy proof payload を使い、submit Lambda を invoke して membership workflow が成功することを確認します。
 
+先に Sui testnet 上の fixture を用意します。
+この fixture は未認証の `MembershipPass` から始まります。
+
+```bash
+SUI_CLIENT_CONFIG="${SUI_CLIENT_CONFIG:?set admin Sui config path}"
+
+pnpm identity:testnet-fixture \
+  --sui-config "$SUI_CLIENT_CONFIG" \
+  --sui-env testnet
+
+set -a
+. .local/sonari-dev/membership-identity-fixture/fixture.env
+set +a
+```
+
+`fixture.env` は runner と `identity:move-handoff` が読む object id を持ちます。
+`dummy-world-id-request.json` は submit Lambda へ渡す request です。
+`SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID` は manifest-only です。
+AWS runner parameter へ写す値は次の通りです。
+
+```text
+SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID
+SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID
+SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID
+```
+
 ```bash
 test "${RELAYER_NETWORK:-testnet}" != mainnet
 
+jq -c '{body: (. | tostring)}' \
+  .local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json \
+  > /tmp/sonari-membership-dummy-proof-event.json
+
 aws lambda invoke \
   --function-name "$submit_verification_lambda_name" \
-  --payload fileb://dist/aws/membership-dummy-proof-devnet.json \
+  --payload fileb:///tmp/sonari-membership-dummy-proof-event.json \
   /tmp/sonari-membership-dummy-proof-response.json
 
 aws stepfunctions list-executions \

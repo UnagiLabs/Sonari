@@ -38,6 +38,7 @@
         "oracle:e2e:fake-binding": "tsx scripts/nautilus_fake_binding_e2e.ts",
         "oracle:e2e:live": "tsx scripts/nautilus_live_e2e.ts",
         "identity:smoke": "tsx scripts/membership_identity_smoke.ts",
+        "identity:testnet-fixture": "tsx scripts/membership_identity_testnet_fixture.ts",
         "identity:sidecar:local": "tsx scripts/membership_identity_sidecar.ts",
         "identity:move-handoff": "tsx scripts/membership_identity_move_handoff.ts",
         "identity:live-gate": "tsx scripts/membership_identity_live_gate.ts",
