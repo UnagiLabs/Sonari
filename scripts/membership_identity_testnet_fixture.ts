@@ -372,9 +372,9 @@ export function parseSuiObjectReadback(input: unknown): SuiObjectReadback {
         throw new Error("sui object JSON must be an object");
     }
     const objectId = stringField(data, ["objectId", "object_id"], "object id");
-    const type = stringField(data, ["type", "objectType", "object_type"], "object type");
+    const type = stringField(data, ["type", "objType", "objectType", "object_type"], "object type");
     const content = isRecord(data.content) ? data.content : undefined;
-    const fields = content !== undefined && isRecord(content.fields) ? content.fields : {};
+    const fields = content === undefined ? {} : isRecord(content.fields) ? content.fields : content;
     return { objectId, type, fields };
 }
 
@@ -553,6 +553,18 @@ export function buildSuiPtbCommand(
     };
 }
 
+// Sui CLI 1.71.1 PTB does not accept a raw `0x..` hex string as a `vector<u8>`
+// move-call argument (it is parsed as an address/integer literal). Encode the
+// bytes as an explicit `vector[..u8]` literal instead.
+export function hexToMoveU8Vector(value: string): string {
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    const bytes: string[] = [];
+    for (let index = 0; index < hex.length; index += 2) {
+        bytes.push(`${Number.parseInt(hex.slice(index, index + 2), 16)}u8`);
+    }
+    return `vector[${bytes.join(",")}]`;
+}
+
 export function buildRegisterMemberPtbCommand(
     input: MembershipPassFixtureInput,
     options: SuiClientOptions,
@@ -568,12 +580,12 @@ export function buildRegisterMemberPtbCommand(
     return buildSuiPtbCommand(options, [
         "--move-call",
         `${input.packageId}::accessor::new_residence_proof_step_left`,
-        input.proofLeft,
+        hexToMoveU8Vector(input.proofLeft),
         "--assign",
         "proof_left",
         "--move-call",
         `${input.packageId}::accessor::new_residence_proof_step_right`,
-        input.proofRight,
+        hexToMoveU8Vector(input.proofRight),
         "--assign",
         "proof_right",
         "--make-move-vec",
@@ -589,7 +601,7 @@ export function buildRegisterMemberPtbCommand(
         input.homeCell,
         "residence_proof",
         input.termsVersion.toString(),
-        input.signedStatementHash,
+        hexToMoveU8Vector(input.signedStatementHash),
     ]);
 }
 
