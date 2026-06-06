@@ -1291,6 +1291,51 @@ mod tests {
             unset_env_before_server(SUI_NETWORK_ENV);
         }
 
+        /// testnet + dummy → the resolved state carries a diagnostic observation
+        /// that echoes the raw bootstrap values and the resolved mode. This is the
+        /// signal that reveals issue #190: an operator can confirm from outside the
+        /// enclave whether it received dummy/testnet yet resolved to real.
+        #[test]
+        fn enclave_state_on_testnet_dummy_exposes_observation_raw_values() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
+            set_env_before_server(SUI_NETWORK_ENV, "testnet");
+
+            let state = enclave_state_from_env(TEST_SEED).expect("dummy+testnet must succeed");
+            let observation = &state.world_id_mode_observation;
+            assert_eq!(observation.resolved_mode, "dummy");
+            assert_eq!(observation.received_proof_mode.as_deref(), Some("dummy"));
+            assert_eq!(observation.received_network.as_deref(), Some("testnet"));
+            assert!(!observation.redacted);
+
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+        }
+
+        /// mainnet + real (the only mainnet startup the fail-closed gate allows) →
+        /// the observation must redact the raw host-supplied values and report the
+        /// resolved mode as real, so production never echoes bootstrap inputs.
+        #[test]
+        fn enclave_state_on_mainnet_real_redacts_observation() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "real");
+            set_env_before_server(SUI_NETWORK_ENV, "mainnet");
+
+            let state = enclave_state_from_env(TEST_SEED).expect("real+mainnet must succeed");
+            let observation = &state.world_id_mode_observation;
+            assert_eq!(observation.resolved_mode, "real");
+            assert!(observation.received_proof_mode.is_none());
+            assert!(observation.received_network.is_none());
+            assert!(observation.redacted);
+
+            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+        }
+
         /// dummy + testnet → Ok, and the resolved mode must be Dummy.
         #[test]
         fn enclave_state_allows_dummy_mode_on_testnet() {

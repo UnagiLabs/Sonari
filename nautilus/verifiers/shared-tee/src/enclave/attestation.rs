@@ -199,4 +199,33 @@ mod tests {
             "base function must not contain observation key"
         );
     }
+
+    #[test]
+    fn observation_rides_outside_the_signed_document() {
+        // The observation is a plaintext sibling of the attestation document, never
+        // folded into it. Adding the observation must not change the document hex or
+        // public key, proving it cannot alter the signed attestation bytes (it is
+        // diagnostic-only, not attestation-bound).
+        let document = [0x01, 0x02, 0x03];
+        let public_key = format!("0x{}", "33".repeat(32));
+        let observation = serde_json::json!({
+            "resolved_mode": "dummy",
+            "received_proof_mode": "dummy",
+            "received_network": "testnet",
+            "redacted": false,
+        });
+
+        let with = attestation_response_json_with_observation(&document, &public_key, &observation);
+        let without = attestation_response_json(&document, &public_key);
+
+        assert_eq!(
+            with["attestation_document_hex"], without["attestation_document_hex"],
+            "observation must not change the attestation document"
+        );
+        assert_eq!(
+            with["public_key"], without["public_key"],
+            "observation must not change the embedded public key"
+        );
+        assert_eq!(with.get("world_id_mode_observation"), Some(&observation));
+    }
 }

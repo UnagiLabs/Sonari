@@ -162,6 +162,20 @@ mod tests {
         assert_eq!(obs.received_network, Some("testnet".to_owned()));
     }
 
+    // 未知 network（dev でない）では生値を伏せる。dev 判定は testnet/devnet 限定なので、
+    // 想定外の network 文字列が来ても観測値が host 入力を漏らさないことを担保する。
+    #[test]
+    fn observation_redacts_on_unknown_network() {
+        let obs = world_id_mode_observation(
+            Some("dummy"),
+            Some("staging"),
+            ResolvedWorldIdVerifierMode::Real,
+        );
+        assert!(obs.redacted);
+        assert_eq!(obs.received_proof_mode, None);
+        assert_eq!(obs.received_network, None);
+    }
+
     // env キー定数値が期待文字列であること
     #[test]
     fn env_key_constants_have_correct_values() {
