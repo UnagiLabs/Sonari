@@ -635,6 +635,28 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(scheduleStateUsageCount).toBe(2);
     });
 
+    it("delivers the World ID proof mode and Sui network to the membership enclave bootstrap", async () => {
+        const template = await readTemplate();
+
+        // CFN parameter carries the operator's proof mode choice with a safe
+        // default so the committed template deploys with real World ID verification.
+        expect(template).toContain("WorldIdProofMode:");
+        // proof mode only allows real|dummy at deploy time and defaults to real.
+        expect(template).toContain("      - real\n      - dummy");
+        // runner.env exposes both values to the enclave wrapper, which sources it
+        // before running the bootstrap jq. The `$' + `{` split keeps biome from
+        // treating these CloudFormation substitutions as JS template literals.
+        expect(template).toContain('echo "SONARI_WORLD_ID_PROOF_MODE=$' + '{WorldIdProofMode}"');
+        expect(template).toContain('echo "RELAYER_NETWORK=$' + '{RelayerNetwork}"');
+        // The bootstrap jq forwards both into the enclave config so the TEE-side
+        // fail-closed gate can allow dummy only on testnet/devnet. The wrapper
+        // sources runner.env first so bare $VAR references are safe here.
+        expect(template).toContain('--arg network "$RELAYER_NETWORK"');
+        expect(template).toContain('--arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE"');
+        // shorthand keys must appear in the jq output object
+        expect(template).toContain(",$network,$proof_mode}");
+    });
+
     it("escapes bash parameter expansions so every Fn::Sub variable name stays valid", async () => {
         const template = await readTemplate();
 
@@ -687,6 +709,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             NitroEnclaveCpuCount: 1,
             NitroEnclaveMemoryMiB: 4,
             NitroEnclaveProcessCommand: 35,
+            RelayerNetwork: 7,
             RunnerTokenSecretArn: 106,
             SigningMaterialKmsKey: 36,
             SigningSeedCiphertextS3Bucket: 58,
@@ -698,6 +721,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             TeeEifS3Key: 91,
             TeeEifSha256: 64,
             WorldIdAppId: 17,
+            WorldIdProofMode: 5,
         };
 
         // Extract the "Fn::Base64: !Sub |" block and de-indent it the way a YAML
