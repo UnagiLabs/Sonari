@@ -599,6 +599,7 @@ jobs:
             "SourceArchiverWalrusUploadRelayTipMaxMist",
             "SourceArchiverWalrusEpochs",
             "SourceArchiverWalrusDeletable",
+            "WorldIdProofMode",
           ];
           for (const key of requiredParameterKeys) {
             if (
