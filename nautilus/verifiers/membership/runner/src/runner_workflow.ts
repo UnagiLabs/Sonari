@@ -990,7 +990,7 @@ function buildSsmShellCommand(input: {
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
-        "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
+        "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
         buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
         buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
@@ -1022,7 +1022,7 @@ export function buildRunnerBootstrapReadinessShellCommand(): string {
         buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
         'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
         "systemctl is-active --quiet nitro-enclaves-allocator.service",
-        "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
+        "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
     ].join("\n");
 }
 
