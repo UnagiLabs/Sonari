@@ -1,3 +1,5 @@
+import { computeWorldIdSignalHash } from "@sonari/proof-core";
+
 export type IdentityProvider = "kyc" | "world_id";
 
 export interface WorldIdProofRequest {
@@ -36,24 +38,41 @@ export function readFormString(formData: FormDataLike, name: string): string {
     return trimmed;
 }
 
-export function buildIdentitySubmitRequest(
+export async function buildIdentitySubmitRequest(
     formData: FormDataLike,
     registryId: string,
-): IdentitySubmitRequest {
+): Promise<IdentitySubmitRequest> {
     const provider = parseIdentityProvider(readFormString(formData, "identityProvider"));
+    const membershipId = readFormString(formData, "membershipId");
+    const owner = readFormString(formData, "owner");
+    const signedStatementHash = readFormString(formData, "signedStatementHash");
+    const termsVersion = parseSafeUnsignedInteger(readFormString(formData, "termsVersion"));
+    const worldId =
+        provider === "world_id"
+            ? await buildWorldIdProof(formData, { owner, membershipId, signedStatementHash })
+            : undefined;
     const request: IdentitySubmitRequest = {
         registry_id: requireString(registryId, "NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID"),
-        membership_id: readFormString(formData, "membershipId"),
-        owner: readFormString(formData, "owner"),
+        membership_id: membershipId,
+        owner,
         provider,
-        terms_version: parseSafeUnsignedInteger(readFormString(formData, "termsVersion")),
-        signed_statement_hash: readFormString(formData, "signedStatementHash"),
-        ...(provider === "world_id" ? { world_id: buildWorldIdProof(formData) } : {}),
+        terms_version: termsVersion,
+        signed_statement_hash: signedStatementHash,
+        ...(worldId === undefined ? {} : { world_id: worldId }),
     };
     return request;
 }
 
-function buildWorldIdProof(formData: FormDataLike): WorldIdProofRequest {
+interface WorldIdSignalBinding {
+    readonly owner: string;
+    readonly membershipId: string;
+    readonly signedStatementHash: string;
+}
+
+async function buildWorldIdProof(
+    formData: FormDataLike,
+    binding: WorldIdSignalBinding,
+): Promise<WorldIdProofRequest> {
     return {
         world_app_id: readFormString(formData, "worldAppId"),
         nullifier_hash: readFormString(formData, "nullifierHash"),
@@ -61,7 +80,14 @@ function buildWorldIdProof(formData: FormDataLike): WorldIdProofRequest {
         proof: readFormString(formData, "proof"),
         verification_level: readFormString(formData, "verificationLevel"),
         action: readFormString(formData, "worldIdAction"),
-        signal_hash: readFormString(formData, "signalHash"),
+        // The enclave rejects any signal_hash that is not the binding derived
+        // from owner, membership, and signed statement, so it is computed here
+        // instead of being read from the form.
+        signal_hash: await computeWorldIdSignalHash(
+            binding.owner,
+            binding.membershipId,
+            binding.signedStatementHash,
+        ),
     };
 }
 

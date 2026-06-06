@@ -24,6 +24,7 @@ const nextConfig: NextConfig = {
             "./merkle.js": `${proofCoreSrc}/merkle.ts`,
             "./schema.js": `${proofCoreSrc}/schema.ts`,
             "./shard.js": `${proofCoreSrc}/shard.ts`,
+            "./world-id-signal.js": `${proofCoreSrc}/world-id-signal.ts`,
         },
     },
 };
