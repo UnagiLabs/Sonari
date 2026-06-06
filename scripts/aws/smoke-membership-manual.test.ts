@@ -1,31 +1,85 @@
-import { writeFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AwsCli } from "./shared.js";
 import { runSmokeMembershipManual } from "./smoke-membership-manual.js";
 
 const STACK = "sonari-verifier-runner-dev";
 const EXPECTED_ACCOUNT = "595103996064";
 const STATE_MACHINE_ARN = "arn:aws:states:ap-northeast-1:595103996064:stateMachine:membership";
-const LATEST_EXECUTION_ARN =
-    "arn:aws:states:ap-northeast-1:595103996064:execution:membership:membership-exec-1";
+const MATCHED_EXECUTION_ARN =
+    "arn:aws:states:ap-northeast-1:595103996064:execution:membership:membership-job-abc-1";
+const FIXED_NOW_MS = 1_800_000_000_000;
+const REQUEST_TEMPLATE = {
+    registry_id: `0x${"22".repeat(32)}`,
+    membership_id: `0x${"66".repeat(32)}`,
+    owner: `0x${"77".repeat(32)}`,
+    provider: "world_id",
+    terms_version: 2,
+    signed_statement_hash: `0x${"44".repeat(32)}`,
+    world_id: {
+        world_app_id: "app_staging_123",
+        nullifier_hash: "12345678901234567890",
+        merkle_root: "987654321",
+        proof: "0xproof",
+        verification_level: "orb",
+        action: "sonari_membership_register_v1",
+        signal_hash: `0x${"55".repeat(32)}`,
+    },
+} as const;
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+    await Promise.all(
+        tempDirs.splice(0).map(async (directory) => {
+            await import("node:fs/promises").then(({ rm }) =>
+                rm(directory, { recursive: true, force: true }),
+            );
+        }),
+    );
+});
 
 describe("AWS membership manual batch smoke script", () => {
-    it("invokes the batch lambda, lists executions, and reads the latest execution input", async () => {
+    it("submits a uniqueized request, triggers batch, and tracks the matching execution", async () => {
         const cli = new RecordingAwsCli();
+        const requestFile = await createRequestFile();
 
         const result = await runSmokeMembershipManual({
             aws: cli,
             stack: STACK,
             expectedAccount: EXPECTED_ACCOUNT,
+            requestFile,
+            now: () => FIXED_NOW_MS,
         });
 
         expect(result).toMatchObject({
+            submitVerificationLambdaName: "submit-verification",
             batchVerifierLambdaName: "batch-verifier",
             stateMachineArn: STATE_MACHINE_ARN,
-            workflowStarted: 2,
-            latestExecution: {
-                executionArn: LATEST_EXECUTION_ARN,
-                status: "RUNNING",
+            runnerAutoScalingGroupName: "runner-asg",
+            requestFile,
+            submitResponse: {
+                statusCode: 202,
+                jobId: "job-abc",
+                status: "queued",
+                duplicate: false,
+                txDigest: null,
+            },
+            workflowStarted: 1,
+            job: {
+                jobId: "job-abc",
+                status: "completed",
+                workflowExecutionName: "membership-job-abc-1",
+                retryCount: 0,
+                errorCode: null,
+                errorMessage: null,
+                txDigest: "tx-submit-abc",
+            },
+            matchedExecution: {
+                executionArn: MATCHED_EXECUTION_ARN,
+                status: "SUCCEEDED",
                 verifierKind: "membership_identity",
                 jobId: "job-abc",
                 registrationMetadata: {
@@ -46,171 +100,259 @@ describe("AWS membership manual batch smoke script", () => {
                         objectId: `0x${"55".repeat(32)}`,
                         identityVerified: true,
                         identityProviderMask: 2,
-                        identityVerifiedAtMs: 1_800_000_000_000,
-                        identityExpiresAtMs: 1_800_000_000_001,
+                        identityVerifiedAtMs: FIXED_NOW_MS,
+                        identityExpiresAtMs: FIXED_NOW_MS + 1,
                         termsVersion: 1,
                         signedStatementHash: `0x${"44".repeat(32)}`,
                     },
                 },
             },
-            job: null,
+            idleVerified: true,
         });
         expect(result.executions).toEqual([
-            { executionArn: LATEST_EXECUTION_ARN, name: "membership-exec-1", status: "RUNNING" },
+            {
+                executionArn: MATCHED_EXECUTION_ARN,
+                name: "membership-job-abc-1",
+                status: "SUCCEEDED",
+            },
         ]);
 
-        const operations = cli.operations.map((operation) => operation.label);
-        expect(operations).toEqual([
+        expect(cli.invokeFunctionNames).toEqual(["submit-verification", "batch-verifier"]);
+        expect(cli.submitBodies).toHaveLength(1);
+        expect(cli.submitBodies[0]).toMatchObject({
+            world_id: {
+                nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}:${FIXED_NOW_MS}`,
+            },
+        });
+        expect(cli.lambdaPayloads).toEqual([
+            {
+                body: JSON.stringify({
+                    ...REQUEST_TEMPLATE,
+                    world_id: {
+                        ...REQUEST_TEMPLATE.world_id,
+                        nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}:${FIXED_NOW_MS}`,
+                    },
+                }),
+            },
+            { verifier_kind: "membership_identity" },
+        ]);
+        expect(cli.getItemKeys).toEqual([
+            { job_id: { S: "job-abc" } },
+            { job_id: { S: "job-abc" } },
+        ]);
+        expect(cli.operations.map((operation) => operation.label)).toEqual([
             "sts:get-caller-identity",
             "cloudformation:describe-stacks",
             "scheduler:get-schedule:watcher-schedule",
             "scheduler:get-schedule:batch-schedule",
-            "lambda:invoke",
+            "lambda:invoke:submit-verification",
+            "lambda:invoke:batch-verifier",
+            "dynamodb:get-item",
+            "dynamodb:get-item",
             "stepfunctions:list-executions",
             "stepfunctions:describe-execution",
             "stepfunctions:get-execution-history",
+            "autoscaling:describe-auto-scaling-groups",
+            "ec2:describe-instances",
         ]);
-        expect(operations).not.toContain("dynamodb:get-item");
     });
 
-    it("summarizes non-verified TEE results without signature fields", async () => {
-        const result = await runSmokeMembershipManual({
-            aws: new RecordingAwsCli({ teeStatus: "pending_source" }),
-            stack: STACK,
-            expectedAccount: EXPECTED_ACCOUNT,
-        });
+    it("fails closed when the TEE result never reaches the happy path", async () => {
+        const requestFile = await createRequestFile();
 
-        expect(result.latestExecution?.teeResult).toEqual({
-            status: "pending_source",
-            errorCode: "WORLD_ID_API_UNAVAILABLE",
-        });
-        expect(JSON.stringify(result.latestExecution?.teeResult)).not.toContain("signature");
-        expect(JSON.stringify(result.latestExecution?.teeResult)).not.toContain("publicKey");
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ teeStatus: "pending_source" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+                poll: { intervalMs: 1, timeoutMs: 5 },
+            }),
+        ).rejects.toThrow("did not become ready");
     });
 
     it("paginates execution history until registration metadata and TEE result are found", async () => {
         const cli = new RecordingAwsCli({ paginatedHistory: true });
+        const requestFile = await createRequestFile();
 
         const result = await runSmokeMembershipManual({
             aws: cli,
             stack: STACK,
             expectedAccount: EXPECTED_ACCOUNT,
+            requestFile,
+            now: () => FIXED_NOW_MS,
         });
 
-        expect(result.latestExecution?.registrationMetadata).toMatchObject({
+        expect(result.matchedExecution.registrationMetadata).toMatchObject({
             verifierConfigKey: 2,
         });
-        expect(result.latestExecution?.teeResult).toMatchObject({
+        expect(result.matchedExecution.teeResult).toMatchObject({
             status: "verified",
             payloadBcsHex: "0x010203",
         });
-        expect(result.latestExecution?.suiSubmission).toMatchObject({
+        expect(result.matchedExecution.suiSubmission).toMatchObject({
             status: "succeeded",
             txDigest: "tx-submit-abc",
         });
         expect(cli.historyNextTokens).toEqual([null, "page-2"]);
     });
 
+    it("fails closed when submit returns duplicate=true", async () => {
+        const requestFile = await createRequestFile();
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ submitDuplicate: true }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("duplicate=true");
+    });
+
+    it("fails closed when stack relayer network is mainnet", async () => {
+        const requestFile = await createRequestFile();
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ relayerNetwork: "mainnet" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("RelayerNetwork to be testnet or devnet");
+    });
+
+    it("fails closed when stack proof mode or submit settings are not happy-path ready", async () => {
+        const requestFile = await createRequestFile();
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ worldIdProofMode: "real" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("WorldIdProofMode=dummy");
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ identityRelayerMode: "dry_run" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("IdentityRelayerMode=submit");
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ relayerAllowSubmit: "false" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("RelayerAllowSubmit=true");
+    });
+
+    it("fails closed when no matching execution appears for the claimed job", async () => {
+        const requestFile = await createRequestFile();
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ executionName: "someone-else" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+                poll: { intervalMs: 1, timeoutMs: 5 },
+            }),
+        ).rejects.toThrow("did not become ready");
+    });
+
+    it("fails closed when the execution or job does not reach the happy path terminal state", async () => {
+        const requestFile = await createRequestFile();
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ executionStatus: "FAILED" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("did not succeed: FAILED");
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli({ jobStatus: "retry" }),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow("did not complete: retry");
+    });
+
     it("fails closed when execution history pagination does not advance", async () => {
+        const requestFile = await createRequestFile();
+
         await expect(
             runSmokeMembershipManual({
                 aws: new RecordingAwsCli({ stuckHistoryToken: true }),
                 stack: STACK,
                 expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
             }),
         ).rejects.toThrow("Step Functions execution history pagination did not advance");
     });
 
-    it("invokes the batch lambda with the membership_identity verifier_kind payload", async () => {
-        const cli = new RecordingAwsCli();
-
-        await runSmokeMembershipManual({
-            aws: cli,
-            stack: STACK,
-            expectedAccount: EXPECTED_ACCOUNT,
-        });
-
-        expect(cli.invokeFunctionNames).toEqual(["batch-verifier"]);
-        expect(cli.lambdaPayloads).toEqual([{ verifier_kind: "membership_identity" }]);
-    });
-
-    it("reads the target job status when a job id is given", async () => {
-        const cli = new RecordingAwsCli();
-
-        const result = await runSmokeMembershipManual({
-            aws: cli,
-            stack: STACK,
-            expectedAccount: EXPECTED_ACCOUNT,
-            jobId: "job-abc",
-        });
-
-        expect(result.job).toEqual({
-            jobId: "job-abc",
-            status: "processing",
-            workflowExecutionName: "membership-exec-1",
-            retryCount: 0,
-            errorCode: "WORLD_ID_API_UNAVAILABLE",
-            errorMessage: "waiting for World ID",
-            txDigest: "tee-result:abc123",
-        });
-        expect(cli.getItemKeys).toEqual([{ job_id: { S: "job-abc" } }]);
-        expect(cli.operations.map((operation) => operation.label)).toContain("dynamodb:get-item");
-    });
-
-    it("skips describe-execution when no executions exist yet", async () => {
-        const cli = new RecordingAwsCli({ executionsEmpty: true });
-
-        const result = await runSmokeMembershipManual({
-            aws: cli,
-            stack: STACK,
-            expectedAccount: EXPECTED_ACCOUNT,
-        });
-
-        expect(result.executions).toEqual([]);
-        expect(result.latestExecution).toBeNull();
-        expect(cli.operations.map((operation) => operation.label)).not.toContain(
-            "stepfunctions:describe-execution",
-        );
-    });
-
     it("fails closed when the AWS account does not match", async () => {
+        const requestFile = await createRequestFile();
+
         await expect(
             runSmokeMembershipManual({
                 aws: new RecordingAwsCli({ account: "111111111111" }),
                 stack: STACK,
                 expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
             }),
         ).rejects.toThrow("AWS account mismatch");
     });
 
     it("fails closed when the batch schedule is not DISABLED", async () => {
+        const requestFile = await createRequestFile();
+
         await expect(
             runSmokeMembershipManual({
                 aws: new RecordingAwsCli({ scheduleState: "ENABLED" }),
                 stack: STACK,
                 expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
             }),
         ).rejects.toThrow("must be DISABLED");
     });
 
     it("fails closed when a required stack output is missing", async () => {
-        await expect(
-            runSmokeMembershipManual({
-                aws: new RecordingAwsCli({ omitOutput: "BatchVerifierLambdaName" }),
-                stack: STACK,
-                expectedAccount: EXPECTED_ACCOUNT,
-            }),
-        ).rejects.toThrow("CloudFormation output BatchVerifierLambdaName is required");
-    });
+        const requestFile = await createRequestFile();
 
-    it("fails closed when the batch lambda reports a FunctionError", async () => {
         await expect(
             runSmokeMembershipManual({
-                aws: new RecordingAwsCli({ functionError: true }),
+                aws: new RecordingAwsCli({ omitOutput: "SubmitVerificationLambdaName" }),
                 stack: STACK,
                 expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
             }),
-        ).rejects.toThrow("BatchVerifier Lambda invocation failed");
+        ).rejects.toThrow("CloudFormation output SubmitVerificationLambdaName is required");
     });
 });
 
@@ -219,17 +361,26 @@ type RecordingAwsCliOptions = {
     scheduleState?: string;
     omitOutput?: string;
     functionError?: boolean;
-    executionsEmpty?: boolean;
+    submitDuplicate?: boolean;
+    submitStatusCode?: number;
     workflowStarted?: number;
     teeStatus?: "verified" | "pending_source";
     paginatedHistory?: boolean;
     stuckHistoryToken?: boolean;
+    executionName?: string;
+    executionStatus?: "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMED_OUT";
+    jobStatus?: "processing" | "completed" | "retry" | "failed";
+    relayerNetwork?: "mainnet" | "testnet" | "devnet" | "";
+    worldIdProofMode?: "real" | "dummy";
+    identityRelayerMode?: "" | "dry_run" | "submit";
+    relayerAllowSubmit?: "true" | "false";
 };
 
 class RecordingAwsCli implements AwsCli {
     readonly operations: Array<{ label: string; args: readonly string[] }> = [];
     readonly lambdaPayloads: unknown[] = [];
     readonly invokeFunctionNames: string[] = [];
+    readonly submitBodies: unknown[] = [];
     readonly getItemKeys: unknown[] = [];
     readonly historyNextTokens: Array<string | null> = [];
 
@@ -241,45 +392,65 @@ class RecordingAwsCli implements AwsCli {
 
         switch (label) {
             case "sts:get-caller-identity":
-                return { Account: this.options.account ?? "595103996064" };
+                return { Account: this.options.account ?? EXPECTED_ACCOUNT };
             case "cloudformation:describe-stacks":
-                return stackResponse(this.options.omitOutput);
+                return stackResponse(this.options);
             case "scheduler:get-schedule:watcher-schedule":
             case "scheduler:get-schedule:batch-schedule":
                 return { State: this.options.scheduleState ?? "DISABLED" };
-            case "lambda:invoke": {
-                this.invokeFunctionNames.push(args[args.indexOf("--function-name") + 1] ?? "");
-                const payload = args[args.indexOf("--payload") + 1];
-                this.lambdaPayloads.push(JSON.parse(payload ?? "{}") as unknown);
+            case "lambda:invoke:submit-verification":
+            case "lambda:invoke:batch-verifier": {
+                const functionName = args[args.indexOf("--function-name") + 1] ?? "";
+                this.invokeFunctionNames.push(functionName);
+                const payload = JSON.parse(args[args.indexOf("--payload") + 1] ?? "{}") as unknown;
+                this.lambdaPayloads.push(payload);
+                if (label === "lambda:invoke:submit-verification" && isRecord(payload)) {
+                    this.submitBodies.push(
+                        typeof payload.body === "string" ? JSON.parse(payload.body) : payload.body,
+                    );
+                }
                 const responsePath = args.at(-1);
                 if (responsePath === undefined) {
                     throw new Error("lambda invoke response path missing");
                 }
-                await writeFile(
-                    responsePath,
-                    JSON.stringify({ workflow_started: this.options.workflowStarted ?? 2 }),
-                );
+                if (label === "lambda:invoke:submit-verification") {
+                    await writeFile(
+                        responsePath,
+                        JSON.stringify({
+                            statusCode: this.options.submitStatusCode ?? 202,
+                            body: JSON.stringify({
+                                ok: true,
+                                job_id: "job-abc",
+                                status: "queued",
+                                duplicate: this.options.submitDuplicate ?? false,
+                            }),
+                        }),
+                    );
+                } else {
+                    await writeFile(
+                        responsePath,
+                        JSON.stringify({ workflow_started: this.options.workflowStarted ?? 1 }),
+                    );
+                }
                 return this.options.functionError
                     ? { StatusCode: 200, FunctionError: "Unhandled" }
                     : { StatusCode: 200 };
             }
             case "stepfunctions:list-executions":
-                return this.options.executionsEmpty === true
-                    ? { executions: [] }
-                    : {
-                          executions: [
-                              {
-                                  executionArn: LATEST_EXECUTION_ARN,
-                                  name: "membership-exec-1",
-                                  status: "RUNNING",
-                                  startDate: "2026-06-05T00:00:00.000Z",
-                              },
-                          ],
-                      };
+                return {
+                    executions: [
+                        {
+                            executionArn: MATCHED_EXECUTION_ARN,
+                            name: this.options.executionName ?? "membership-job-abc-1",
+                            status: this.options.executionStatus ?? "SUCCEEDED",
+                            startDate: "2026-06-05T00:00:00.000Z",
+                        },
+                    ],
+                };
             case "stepfunctions:describe-execution":
                 return {
-                    executionArn: LATEST_EXECUTION_ARN,
-                    status: "RUNNING",
+                    executionArn: MATCHED_EXECUTION_ARN,
+                    status: this.options.executionStatus ?? "SUCCEEDED",
                     input: JSON.stringify({
                         verifier_kind: "membership_identity",
                         job_id: "job-abc",
@@ -294,15 +465,26 @@ class RecordingAwsCli implements AwsCli {
                 return {
                     Item: {
                         job_id: { S: "job-abc" },
-                        status: { S: "processing" },
-                        workflow_execution_name: { S: "membership-exec-1" },
+                        status: { S: this.options.jobStatus ?? "completed" },
+                        workflow_execution_name: { S: "membership-job-abc-1" },
                         retry_count: { N: "0" },
-                        error_code: { S: "WORLD_ID_API_UNAVAILABLE" },
-                        error_message: { S: "waiting for World ID" },
-                        tx_digest: { S: "tee-result:abc123" },
+                        tx_digest: { S: "tx-submit-abc" },
                     },
                 };
             }
+            case "autoscaling:describe-auto-scaling-groups":
+                return {
+                    AutoScalingGroups: [
+                        {
+                            AutoScalingGroupName: "runner-asg",
+                            DesiredCapacity: 0,
+                            MaxSize: 1,
+                            Instances: [],
+                        },
+                    ],
+                };
+            case "ec2:describe-instances":
+                return { Reservations: [] };
             default:
                 throw new Error(`unexpected AWS call: ${label}`);
         }
@@ -336,7 +518,7 @@ class RecordingAwsCli implements AwsCli {
             return `scheduler:get-schedule:${args[args.indexOf("--name") + 1]}`;
         }
         if (service === "lambda" && operation === "invoke") {
-            return "lambda:invoke";
+            return `lambda:invoke:${args[args.indexOf("--function-name") + 1]}`;
         }
         if (service === "stepfunctions" && operation === "list-executions") {
             return "stepfunctions:list-executions";
@@ -350,13 +532,31 @@ class RecordingAwsCli implements AwsCli {
         if (service === "dynamodb" && operation === "get-item") {
             return "dynamodb:get-item";
         }
+        if (service === "autoscaling" && operation === "describe-auto-scaling-groups") {
+            return "autoscaling:describe-auto-scaling-groups";
+        }
+        if (service === "ec2" && operation === "describe-instances") {
+            return "ec2:describe-instances";
+        }
         return `${service}:${operation}`;
     }
+}
+
+async function createRequestFile(): Promise<string> {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-smoke-"));
+    tempDirs.push(directory);
+    const file = path.join(directory, "dummy-world-id-request.json");
+    await writeFile(file, `${JSON.stringify(REQUEST_TEMPLATE, null, 2)}\n`);
+    return file;
 }
 
 function readArg(args: readonly string[], name: string): string | null {
     const index = args.indexOf(name);
     return index === -1 ? null : (args[index + 1] ?? null);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function fillerHistoryEvents(): unknown[] {
@@ -398,8 +598,8 @@ function executionHistory(teeStatus: "verified" | "pending_source"): unknown {
             objectId: `0x${"55".repeat(32)}`,
             identityVerified: true,
             identityProviderMask: 2,
-            identityVerifiedAtMs: 1_800_000_000_000,
-            identityExpiresAtMs: 1_800_000_000_001,
+            identityVerifiedAtMs: FIXED_NOW_MS,
+            identityExpiresAtMs: FIXED_NOW_MS + 1,
             termsVersion: 1,
             signedStatementHash: `0x${"44".repeat(32)}`,
         },
@@ -435,20 +635,40 @@ function executionHistory(teeStatus: "verified" | "pending_source"): unknown {
     };
 }
 
-function stackResponse(omitOutput?: string): unknown {
+function stackResponse(options: RecordingAwsCliOptions = {}): unknown {
     const outputs = [
+        { OutputKey: "SubmitVerificationLambdaName", OutputValue: "submit-verification" },
         { OutputKey: "BatchVerifierLambdaName", OutputValue: "batch-verifier" },
         { OutputKey: "MembershipRunnerStateMachineArn", OutputValue: STATE_MACHINE_ARN },
         { OutputKey: "VerificationJobsTableName", OutputValue: "verification-jobs" },
+        { OutputKey: "RunnerAutoScalingGroupName", OutputValue: "runner-asg" },
         { OutputKey: "WatcherScheduleName", OutputValue: "watcher-schedule" },
         { OutputKey: "BatchScheduleName", OutputValue: "batch-schedule" },
-    ].filter((output) => output.OutputKey !== omitOutput);
+    ].filter((output) => output.OutputKey !== options.omitOutput);
     return {
         Stacks: [
             {
                 StackName: STACK,
                 StackStatus: "UPDATE_COMPLETE",
                 Outputs: outputs,
+                Parameters: [
+                    {
+                        ParameterKey: "RelayerNetwork",
+                        ParameterValue: options.relayerNetwork ?? "testnet",
+                    },
+                    {
+                        ParameterKey: "WorldIdProofMode",
+                        ParameterValue: options.worldIdProofMode ?? "dummy",
+                    },
+                    {
+                        ParameterKey: "IdentityRelayerMode",
+                        ParameterValue: options.identityRelayerMode ?? "submit",
+                    },
+                    {
+                        ParameterKey: "RelayerAllowSubmit",
+                        ParameterValue: options.relayerAllowSubmit ?? "true",
+                    },
+                ],
             },
         ],
     };

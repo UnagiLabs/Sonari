@@ -97,6 +97,16 @@ SourceArchiver 単体は `pnpm aws:verify:source-archiver` で先に確認しま
 
 Membership dummy proof smoke は devnet または testnet 専用です。`pnpm identity:smoke` と同じ request shape の dummy proof payload を使い、submit Lambda を invoke して membership workflow が成功することを確認します。
 
+いまの推奨入口は `pnpm aws:smoke:membership-manual` です。script は fixture の `dummy-world-id-request.json` を読み、`world_id.nullifier_hash` を毎回ユニーク化して `SubmitVerificationLambda` へ送ります。返却 `job_id` を基準に `BatchVerifierLambda` を起動し、DynamoDB job の `workflow_execution_name` と一致する execution だけを追います。
+
+実行前の fail-closed 条件:
+
+- `RelayerNetwork` が `testnet` または `devnet`
+- `WorldIdProofMode=dummy`
+- `IdentityRelayerMode=submit`
+- `RelayerAllowSubmit=true`
+- `WatcherScheduleName` と `BatchScheduleName` が `DISABLED`
+
 先に Sui testnet 上の fixture を用意します。
 この fixture は未認証の `MembershipPass` から始まります。
 
@@ -155,6 +165,23 @@ aws stepfunctions list-executions \
   --status-filter SUCCEEDED \
   --max-results 1
 ```
+
+推奨コマンド:
+
+```bash
+pnpm aws:smoke:membership-manual \
+  -- --stack sonari-verifier-runner-dev --region ap-northeast-1
+```
+
+成功判定:
+
+- 対象 job の `workflow_execution_name` に一致する execution が `SUCCEEDED`
+- DynamoDB job が `completed`
+- job `tx_digest` が non-null
+- readback の `identityVerified` が `true`
+- 最後に `RunnerAutoScalingGroupName` の `DesiredCapacity=0`
+- pending/running EC2 が `0`
+- `WatcherScheduleName` と `BatchScheduleName` が `DISABLED`
 
 ## enclave が解決した verifier mode を確認する（issue #190 観測手順）
 

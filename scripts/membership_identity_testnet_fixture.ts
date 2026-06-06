@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Transaction } from "@mysten/sui/transactions";
 
 export const DEFAULT_FIXTURE_OUTPUT_DIR = ".local/sonari-dev/membership-identity-fixture";
 export const FIXTURE_MANIFEST_FILE = "manifest.json";
@@ -167,6 +171,25 @@ export interface SuiClientOptions {
     readonly clientConfig: string;
     readonly env: FixtureNetwork;
     readonly gasBudget?: string;
+}
+
+export interface ParsedSuiClientConfig {
+    readonly keystoreFile: string;
+    readonly activeEnv?: string;
+    readonly activeAddress?: string;
+    readonly envRpcByAlias: Readonly<Record<string, string>>;
+}
+
+export interface MembershipPassSdkClient {
+    signAndExecuteTransaction(input: {
+        readonly transaction: Transaction;
+        readonly signer: Ed25519Keypair;
+        readonly include: {
+            readonly effects: true;
+            readonly events: true;
+            readonly objectTypes: true;
+        };
+    }): Promise<unknown>;
 }
 
 export type SuiCommandExecutor = (plan: SuiCommandPlan) => Promise<SuiCommandResult>;
@@ -478,6 +501,29 @@ export function parseMembershipPassIssuedId(input: unknown): string {
     throw new Error("transaction result did not include MembershipPassIssued event");
 }
 
+// `SuiGrpcClient.signAndExecuteTransaction` (@mysten/sui) resolves to a `TransactionResult`
+// discriminated union (`{ $kind: "Transaction", Transaction: { events } }` or a
+// `FailedTransaction` variant), whose events use gRPC field names (`eventType` / `json`)
+// instead of the JSON-RPC shape (`type` / `parsedJson`). Adapt the gRPC result into the
+// JSON-RPC-ish shape so `parseMembershipPassIssuedId` can extract the issued pass id.
+export function parseMembershipPassIssuedIdFromSdkResult(response: unknown): string {
+    if (!isRecord(response)) {
+        throw new Error("sui SDK transaction result must be an object");
+    }
+    const transaction = isRecord(response.Transaction) ? response.Transaction : undefined;
+    if (response.$kind === "FailedTransaction" || transaction === undefined) {
+        throw new Error("sui SDK register_member transaction did not succeed");
+    }
+    const events = Array.isArray(transaction.events) ? transaction.events : [];
+    const adapted = {
+        events: events
+            .filter(isRecord)
+            .filter((event) => typeof event.eventType === "string" && isRecord(event.json))
+            .map((event) => ({ type: event.eventType, parsedJson: event.json })),
+    };
+    return parseMembershipPassIssuedId(adapted);
+}
+
 export function buildSuiObjectCommand(objectId: string, options: SuiClientOptions): SuiCommandPlan {
     assertHexObjectId(objectId, "objectId");
     return {
@@ -642,6 +688,126 @@ export function buildRegisterMemberPtbCommand(
         input.termsVersion.toString(),
         hexToMoveU8Vector(input.signedStatementHash),
     ]);
+}
+
+export function parseSuiClientConfigYaml(input: string, configPath: string): ParsedSuiClientConfig {
+    const keystoreFileMatch = /\nkeystore:\s*\n\s+File:\s*(.+)\n/u.exec(`\n${input}`);
+    const keystoreFileRaw =
+        keystoreFileMatch?.[1] === undefined ? undefined : parseYamlScalar(keystoreFileMatch[1]);
+    if (keystoreFileRaw === undefined) {
+        throw new Error("sui client config did not include keystore File");
+    }
+
+    const activeEnv = matchYamlScalar(input, /^active_env:\s*(.+)$/mu);
+    const activeAddress = matchYamlScalar(input, /^active_address:\s*(.+)$/mu);
+    if (activeAddress !== undefined) {
+        assertHexObjectId(activeAddress, "sui client config active_address");
+    }
+
+    const envRpcByAlias: Record<string, string> = {};
+    let currentAlias: string | undefined;
+    for (const line of input.split(/\r?\n/u)) {
+        const aliasMatch = /^\s*-\s+alias:\s*(.+)$/u.exec(line);
+        if (aliasMatch !== null) {
+            const alias = aliasMatch[1];
+            if (alias !== undefined) {
+                currentAlias = parseYamlScalar(alias);
+            }
+            continue;
+        }
+        const rpcMatch = /^\s+rpc:\s*(.+)$/u.exec(line);
+        if (rpcMatch !== null && currentAlias !== undefined) {
+            const rawRpc = rpcMatch[1];
+            const rpc = rawRpc === undefined ? undefined : parseYamlScalar(rawRpc);
+            if (rpc !== undefined) {
+                envRpcByAlias[currentAlias] = rpc;
+            }
+        }
+    }
+
+    return {
+        keystoreFile: resolveConfigRelativePath(configPath, keystoreFileRaw),
+        ...(activeEnv === undefined ? {} : { activeEnv }),
+        ...(activeAddress === undefined ? {} : { activeAddress }),
+        envRpcByAlias,
+    };
+}
+
+export function createRegisterMemberTransaction(
+    input: MembershipPassFixtureInput,
+    senderAddress: string,
+): Transaction {
+    assertHexObjectId(senderAddress, "senderAddress");
+    assertDecimalU64String(input.homeCell, "membershipPass.homeCell");
+
+    const tx = new Transaction();
+    tx.setSender(senderAddress);
+
+    const proofLeft = tx.moveCall({
+        target: `${input.packageId}::accessor::new_residence_proof_step_left`,
+        arguments: [tx.pure.vector("u8", hexToByteVector(input.proofLeft))],
+    });
+    const proofRight = tx.moveCall({
+        target: `${input.packageId}::accessor::new_residence_proof_step_right`,
+        arguments: [tx.pure.vector("u8", hexToByteVector(input.proofRight))],
+    });
+    const residenceProof = tx.makeMoveVec({
+        type: `${input.packageId}::allowed_residence_cell::ProofStep`,
+        elements: [proofLeft, proofRight],
+    });
+
+    tx.moveCall({
+        target: `${input.packageId}::accessor::register_member`,
+        arguments: [
+            tx.object(input.pauseStateId),
+            tx.object(input.membershipRegistryId),
+            tx.object(input.allowedResidenceCellRegistryId),
+            tx.pure.u64(BigInt(input.homeCell)),
+            residenceProof,
+            tx.pure.u64(BigInt(input.termsVersion)),
+            tx.pure.vector("u8", hexToByteVector(input.signedStatementHash)),
+        ],
+    });
+    return tx;
+}
+
+export async function registerMembershipPassWithSdk(
+    input: MembershipPassFixtureInput,
+    options: SuiClientOptions,
+    overrides: {
+        readonly readTextFile?: (filePath: string) => Promise<string>;
+        readonly clientFactory?: (input: {
+            readonly grpcUrl: string;
+            readonly network: FixtureNetwork;
+        }) => MembershipPassSdkClient;
+    } = {},
+): Promise<string> {
+    const readTextFile =
+        overrides.readTextFile ?? (async (filePath: string) => readFile(filePath, "utf8"));
+    const clientConfig = parseSuiClientConfigYaml(
+        await readTextFile(options.clientConfig),
+        options.clientConfig,
+    );
+    const grpcUrl = clientConfig.envRpcByAlias[options.env];
+    if (grpcUrl === undefined) {
+        throw new Error(`sui client config did not include rpc for env ${options.env}`);
+    }
+
+    const keystoreJson = await readTextFile(clientConfig.keystoreFile);
+    const signer = loadEd25519SignerFromKeystoreJson(keystoreJson, clientConfig.activeAddress);
+    const client =
+        overrides.clientFactory?.({ grpcUrl, network: options.env }) ??
+        createMembershipPassSdkClient({ grpcUrl, network: options.env });
+    const response = await client.signAndExecuteTransaction({
+        transaction: createRegisterMemberTransaction(input, signer.toSuiAddress()),
+        signer,
+        include: {
+            effects: true,
+            events: true,
+            objectTypes: true,
+        },
+    });
+    return parseMembershipPassIssuedIdFromSdkResult(response);
 }
 
 export async function resolveBaseFixtureObjects(
@@ -836,6 +1002,12 @@ function canonicalHex32Lower(value: string, fieldName: string): string {
     return `0x${value.slice(2).toLowerCase()}`;
 }
 
+function assertDecimalU64String(value: string, fieldName: string): void {
+    if (!/^\d+$/u.test(value)) {
+        throw new Error(`${fieldName} must be a decimal u64 string`);
+    }
+}
+
 function assertNonEmpty(value: string, fieldName: string): void {
     if (value.length === 0) {
         throw new Error(`${fieldName} must be non-empty`);
@@ -943,24 +1115,28 @@ async function resolveMembershipPassReadback(input: {
         );
     }
 
-    const created = await input.executor(
-        buildRegisterMemberPtbCommand(
-            {
-                packageId: input.baseObjects.packageId,
-                pauseStateId: input.baseObjects.pauseStateId,
-                membershipRegistryId: input.baseObjects.membershipRegistryId,
-                allowedResidenceCellRegistryId: input.allowedResidenceCellRegistryId,
-                homeCell: DEFAULT_HOME_CELL,
-                proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
-                proofRight: DEFAULT_RESIDENCE_PROOF_RIGHT,
-                termsVersion: DEFAULT_TERMS_VERSION,
-                signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
-            },
-            input.options,
-        ),
-    );
-    const parsed = parseSuiJsonCommandResult(created, "register membership pass");
-    const passId = parseMembershipPassIssuedId(parsed);
+    const registrationInput = {
+        packageId: input.baseObjects.packageId,
+        pauseStateId: input.baseObjects.pauseStateId,
+        membershipRegistryId: input.baseObjects.membershipRegistryId,
+        allowedResidenceCellRegistryId: input.allowedResidenceCellRegistryId,
+        homeCell: DEFAULT_HOME_CELL,
+        proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
+        proofRight: DEFAULT_RESIDENCE_PROOF_RIGHT,
+        termsVersion: DEFAULT_TERMS_VERSION,
+        signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
+    } as const;
+    const passId =
+        input.executor === executeSuiCommand
+            ? await registerMembershipPassWithSdk(registrationInput, input.options)
+            : parseMembershipPassIssuedId(
+                  parseSuiJsonCommandResult(
+                      await input.executor(
+                          buildRegisterMemberPtbCommand(registrationInput, input.options),
+                      ),
+                      "register membership pass",
+                  ),
+              );
     return readMembershipPass(passId, input.baseObjects.packageId, input.options, input.executor);
 }
 
@@ -1187,6 +1363,92 @@ function requiredCandidate(value: string | undefined, fieldName: string): string
 function expectedPackageType(packageId: string, typeSuffix: string): string {
     assertHexObjectId(packageId, "packageId");
     return `${packageId}${typeSuffix}`;
+}
+
+function parseYamlScalar(input: string): string | undefined {
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed === "~") {
+        return undefined;
+    }
+    if (
+        (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+        (trimmed.startsWith("'") && trimmed.endsWith("'"))
+    ) {
+        return trimmed.slice(1, -1);
+    }
+    return trimmed;
+}
+
+function matchYamlScalar(input: string, pattern: RegExp): string | undefined {
+    const match = pattern.exec(input);
+    return match?.[1] === undefined ? undefined : parseYamlScalar(match[1]);
+}
+
+function resolveConfigRelativePath(configPath: string, value: string): string {
+    return path.isAbsolute(value) ? value : path.resolve(path.dirname(configPath), value);
+}
+
+function loadEd25519SignerFromKeystoreJson(
+    input: string,
+    activeAddress: string | undefined,
+): Ed25519Keypair {
+    const parsed = JSON.parse(input) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== "string")) {
+        throw new Error("sui keystore JSON must be an array of encoded private keys");
+    }
+    const signers = parsed.map((entry) => signerFromKeystoreEntry(entry));
+    if (activeAddress === undefined) {
+        if (signers.length !== 1) {
+            throw new Error(
+                "sui keystore must contain exactly one key when active_address is unset",
+            );
+        }
+        return signers[0] as Ed25519Keypair;
+    }
+
+    const normalizedActiveAddress = activeAddress.toLowerCase();
+    const matched = signers.find(
+        (signer) => signer.toSuiAddress().toLowerCase() === normalizedActiveAddress,
+    );
+    if (matched === undefined) {
+        throw new Error(`sui keystore did not contain active_address ${activeAddress}`);
+    }
+    return matched;
+}
+
+function signerFromKeystoreEntry(entry: string): Ed25519Keypair {
+    const trimmed = entry.trim();
+    if (trimmed.startsWith("suiprivkey")) {
+        const decoded = decodeSuiPrivateKey(trimmed);
+        if (decoded.scheme !== "ED25519") {
+            throw new Error("Only Ed25519 Sui private keys are supported for fixture generation");
+        }
+        return Ed25519Keypair.fromSecretKey(decoded.secretKey);
+    }
+
+    const bytes = Buffer.from(trimmed, "base64");
+    if (bytes.length !== 33) {
+        throw new Error("sui keystore entry must be a 33-byte base64 key with scheme prefix");
+    }
+    if (bytes[0] !== 0) {
+        throw new Error("Only Ed25519 Sui private keys are supported for fixture generation");
+    }
+    return Ed25519Keypair.fromSecretKey(bytes.subarray(1));
+}
+
+function createMembershipPassSdkClient(input: {
+    readonly grpcUrl: string;
+    readonly network: FixtureNetwork;
+}): MembershipPassSdkClient {
+    return new SuiGrpcClient({
+        network: input.network,
+        baseUrl: input.grpcUrl,
+    }) as unknown as MembershipPassSdkClient;
+}
+
+function hexToByteVector(value: string): number[] {
+    assertHex32(value, "hexBytes");
+    return [...Buffer.from(value.slice(2), "hex")];
 }
 
 function parseCreatedObjectId(input: unknown, expectedType: string, name: string): string {

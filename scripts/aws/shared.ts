@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 
 export const DEFAULT_STACK = "sonari-verifier-runner-dev";
 export const DEFAULT_EXPECTED_ACCOUNT = "595103996064";
-export const DEFAULT_REGION = "us-west-2";
+export const DEFAULT_REGION = "ap-northeast-1";
 
 const EARTHQUAKE_PAYLOAD_FIELD_ORDER = [
     "intent",

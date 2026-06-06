@@ -13,6 +13,7 @@ import {
     buildSuiObjectCommand,
     buildSuiPtbCommand,
     computeWorldIdSignalHash,
+    createRegisterMemberTransaction,
     DEFAULT_ALLOWLIST_VERSION,
     DEFAULT_GEO_RESOLUTION,
     DEFAULT_HOME_CELL,
@@ -34,11 +35,14 @@ import {
     parseAllowedResidenceCellRegistryId,
     parseCliArgs,
     parseMembershipPassIssuedId,
+    parseMembershipPassIssuedIdFromSdkResult,
     parsePublishedTomlPackageId,
     parsePublishFixtureObjects,
+    parseSuiClientConfigYaml,
     parseSuiJsonCommandResult,
     parseSuiObjectReadback,
     parseUnverifiedMembershipPassReadback,
+    registerMembershipPassWithSdk,
     resolveBaseFixtureObjects,
     runMembershipIdentityTestnetFixture,
     type SuiCommandExecutor,
@@ -184,6 +188,40 @@ describe("membership identity Sui JSON parsing", () => {
         ).toBe(objectId("66"));
     });
 
+    it("reads pass id from a Sui SDK gRPC TransactionResult", () => {
+        expect(
+            parseMembershipPassIssuedIdFromSdkResult({
+                $kind: "Transaction",
+                Transaction: {
+                    events: [
+                        {
+                            eventType: `${objectId("aa")}::membership::MembershipPassIssued`,
+                            json: { pass_id: objectId("66") },
+                        },
+                    ],
+                },
+            }),
+        ).toBe(objectId("66"));
+    });
+
+    it("rejects a failed Sui SDK register_member transaction", () => {
+        expect(() =>
+            parseMembershipPassIssuedIdFromSdkResult({
+                $kind: "FailedTransaction",
+                FailedTransaction: { events: [] },
+            }),
+        ).toThrow("sui SDK register_member transaction did not succeed");
+    });
+
+    it("rejects a Sui SDK result without the MembershipPassIssued event", () => {
+        expect(() =>
+            parseMembershipPassIssuedIdFromSdkResult({
+                $kind: "Transaction",
+                Transaction: { events: [] },
+            }),
+        ).toThrow("transaction result did not include MembershipPassIssued event");
+    });
+
     it("rejects object type mismatches on readback", () => {
         const object = parseSuiObjectReadback({
             data: {
@@ -203,6 +241,26 @@ describe("membership identity Sui JSON parsing", () => {
         ).toThrow(
             `identityRegistryId must be ${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
         );
+    });
+
+    it("accepts current Sui CLI object shape with objType and direct content fields", () => {
+        const object = parseSuiObjectReadback({
+            objectId: objectId("22"),
+            objType: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.pauseState}`,
+            content: {
+                global_paused: false,
+                paused_targets: { contents: [] },
+            },
+        });
+
+        expect(object).toEqual({
+            objectId: objectId("22"),
+            type: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.pauseState}`,
+            fields: {
+                global_paused: false,
+                paused_targets: { contents: [] },
+            },
+        });
     });
 
     it("converts Sui CLI failures and invalid JSON into clear errors", () => {
@@ -370,6 +428,35 @@ describe("membership identity base object resolution", () => {
 });
 
 describe("membership identity pass fixture planning", () => {
+    it("parses Sui client config YAML with relative keystore paths", () => {
+        expect(
+            parseSuiClientConfigYaml(
+                [
+                    "---",
+                    "keystore:",
+                    "  File: keys/sui.keystore",
+                    "envs:",
+                    "  - alias: testnet",
+                    '    rpc: "https://fullnode.testnet.sui.io:443"',
+                    "  - alias: devnet",
+                    '    rpc: "https://fullnode.devnet.sui.io:443"',
+                    "active_env: testnet",
+                    `active_address: "${objectId("77")}"`,
+                    "",
+                ].join("\n"),
+                "/tmp/sonari/sui_config.yaml",
+            ),
+        ).toEqual({
+            keystoreFile: "/tmp/sonari/keys/sui.keystore",
+            activeEnv: "testnet",
+            activeAddress: objectId("77"),
+            envRpcByAlias: {
+                testnet: "https://fullnode.testnet.sui.io:443",
+                devnet: "https://fullnode.devnet.sui.io:443",
+            },
+        });
+    });
+
     it("plans allowed residence registry creation with the pinned fixture root", () => {
         expect(
             buildCreateAllowedResidenceCellRegistryCommand(
@@ -445,6 +532,130 @@ describe("membership identity pass fixture planning", () => {
                 hexToMoveU8Vector(DEFAULT_SIGNED_STATEMENT_HASH),
             ]),
         );
+    });
+
+    it("builds register_member via SDK transaction primitives", () => {
+        const transaction = createRegisterMemberTransaction(
+            {
+                packageId: objectId("aa"),
+                pauseStateId: objectId("11"),
+                membershipRegistryId: objectId("33"),
+                allowedResidenceCellRegistryId: objectId("55"),
+                homeCell: DEFAULT_HOME_CELL,
+                proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
+                proofRight: DEFAULT_RESIDENCE_PROOF_RIGHT,
+                termsVersion: DEFAULT_TERMS_VERSION,
+                signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
+            },
+            objectId("77"),
+        );
+
+        const data = transaction.getData();
+        const commandNames = data.commands.map((command) =>
+            command.$kind === "MoveCall" ? command.MoveCall.function : command.$kind,
+        );
+
+        expect(data.sender).toBe(objectId("77"));
+        expect(commandNames).toEqual([
+            "new_residence_proof_step_left",
+            "new_residence_proof_step_right",
+            "MakeMoveVec",
+            "register_member",
+        ]);
+
+        const proofVector = data.commands[2];
+        expect(proofVector?.$kind).toBe("MakeMoveVec");
+        if (proofVector?.$kind !== "MakeMoveVec") {
+            throw new Error("third command must be MakeMoveVec");
+        }
+        expect(proofVector.MakeMoveVec.type).toBe(
+            `${objectId("aa")}::allowed_residence_cell::ProofStep`,
+        );
+
+        const register = data.commands.at(-1);
+        expect(register?.$kind).toBe("MoveCall");
+        if (register?.$kind !== "MoveCall") {
+            throw new Error("last command must be MoveCall");
+        }
+        expect(register.MoveCall).toMatchObject({
+            package: objectId("aa"),
+            module: "accessor",
+            function: "register_member",
+        });
+        expect(register.MoveCall.arguments).toHaveLength(7);
+        expect(register.MoveCall.arguments[4]).toEqual({ Result: 2, $kind: "Result" });
+    });
+
+    it("submits register_member through the Sui SDK using config-keystore resolution", async () => {
+        const configPath = "/tmp/sonari/sui_config.yaml";
+        const keystorePath = "/tmp/sonari/keys/sui.keystore";
+        const reads: string[] = [];
+        const calls: Array<{ grpcUrl: string; network: string }> = [];
+
+        const passId = await registerMembershipPassWithSdk(
+            {
+                packageId: objectId("aa"),
+                pauseStateId: objectId("11"),
+                membershipRegistryId: objectId("33"),
+                allowedResidenceCellRegistryId: objectId("55"),
+                homeCell: DEFAULT_HOME_CELL,
+                proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
+                proofRight: DEFAULT_RESIDENCE_PROOF_RIGHT,
+                termsVersion: DEFAULT_TERMS_VERSION,
+                signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
+            },
+            {
+                clientConfig: configPath,
+                env: "testnet",
+            },
+            {
+                readTextFile: async (filePath) => {
+                    reads.push(filePath);
+                    if (filePath === configPath) {
+                        return [
+                            "keystore:",
+                            "  File: keys/sui.keystore",
+                            "envs:",
+                            "  - alias: testnet",
+                            '    rpc: "https://fullnode.testnet.sui.io:443"',
+                            "",
+                        ].join("\n");
+                    }
+                    if (filePath === keystorePath) {
+                        return JSON.stringify(["AAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"]);
+                    }
+                    throw new Error(`unexpected read: ${filePath}`);
+                },
+                clientFactory: ({ grpcUrl, network }) => {
+                    calls.push({ grpcUrl, network });
+                    return {
+                        signAndExecuteTransaction: async ({ transaction, signer }) => {
+                            expect(transaction.getData().sender).toBe(signer.toSuiAddress());
+                            return {
+                                $kind: "Transaction",
+                                Transaction: {
+                                    events: [
+                                        {
+                                            eventType: `${objectId("aa")}::membership::MembershipPassIssued`,
+                                            json: { pass_id: objectId("66") },
+                                        },
+                                    ],
+                                },
+                            };
+                        },
+                    };
+                },
+            },
+        );
+
+        expect(passId).toBe(objectId("66"));
+        expect(reads).toEqual([configPath, keystorePath]);
+        expect(calls).toEqual([
+            {
+                grpcUrl: "https://fullnode.testnet.sui.io:443",
+                network: "testnet",
+            },
+        ]);
     });
 
     it("reads allowed residence registry id from root update event", () => {

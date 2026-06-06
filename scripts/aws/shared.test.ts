@@ -22,7 +22,7 @@ describe("AWS script shared helpers", () => {
                         {
                             OutputKey: "EarthquakeRunnerStateMachineArn",
                             OutputValue:
-                                "arn:aws:states:us-west-2:595103996064:stateMachine:runner",
+                                "arn:aws:states:ap-northeast-1:595103996064:stateMachine:runner",
                         },
                         { OutputKey: "ManualWatcherLambdaName", OutputValue: "manual-watcher" },
                         { OutputKey: "SourceArchiverLambdaName", OutputValue: "source-archiver" },

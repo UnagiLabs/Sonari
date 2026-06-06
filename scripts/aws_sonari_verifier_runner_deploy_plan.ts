@@ -31,6 +31,7 @@ const DEPLOY_PARAMETER_KEYS = [
     "TeeEifSha256",
     "GitCommitSha",
     "ScheduleState",
+    "WorldIdProofMode",
     "SourceArchiverTokenSecretArn",
     "SourceArchiverPrivateKeySecretArn",
     "SourceArchiverSuiNetwork",
