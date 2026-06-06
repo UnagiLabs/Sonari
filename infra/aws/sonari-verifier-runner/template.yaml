@@ -181,6 +181,13 @@ Parameters:
       - testnet
       - devnet
     Description: Sui network for AWS earthquake relayer dry-run or submit.
+  WorldIdProofMode:
+    Type: String
+    Default: real
+    AllowedValues:
+      - real
+      - dummy
+    Description: World ID proof mode delivered to the membership identity enclave bootstrap. dummy is for testnet/devnet smoke only; the enclave fail-closed gate keeps mainnet on real verification.
   RelayerTarget:
     Type: String
     Default: ""
@@ -588,7 +595,7 @@ Resources:
               rm -f /tmp/se
               nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || { cat /tmp/m.err >&2; exit 1; }
               sleep 2
-              jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
+              jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" --arg network "$RELAYER_NETWORK" --arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url,$network,$proof_mode}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
               touch "$m"
             }
             ensure_membership_enclave
@@ -639,7 +646,7 @@ Resources:
             world_id_api_base="https://developer.world.org"
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
-              echo "WorldIdApiBase must be an http(s) URL" >&2
+              echo "WorldIdApiBase must be http(s)" >&2
               exit 1
             fi
             vsock_proxy_path="$(command -v vsock-proxy || true)"
@@ -775,6 +782,8 @@ Resources:
               echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
+              echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
+              echo "RELAYER_NETWORK=${RelayerNetwork}"
               echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"

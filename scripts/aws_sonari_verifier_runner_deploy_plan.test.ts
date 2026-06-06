@@ -155,6 +155,23 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         ).toThrow("dummy World ID proof mode is not allowed on mainnet");
     });
 
+    it("includes WorldIdProofMode=dummy in parameterOverrideArgs when worldIdProofMode is dummy", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan({
+            ...validInput,
+            relayerNetwork: "testnet",
+            worldIdProofMode: "dummy",
+        });
+
+        expect(plan.parameterOverrideArgs).toContain("WorldIdProofMode=dummy");
+    });
+
+    it("defaults WorldIdProofMode to real in parameterOverrideArgs when worldIdProofMode is not specified", () => {
+        const { worldIdProofMode: _omit, ...inputWithoutProofMode } = validInput;
+        const plan = buildAwsSonariVerifierRunnerDeployPlan(inputWithoutProofMode);
+
+        expect(plan.parameterOverrideArgs).toContain("WorldIdProofMode=real");
+    });
+
     it("exposes CLI flags for the mainnet dummy World ID proof mode gate", async () => {
         await expect(
             execFileAsync("pnpm", [

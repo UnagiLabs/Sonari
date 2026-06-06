@@ -343,6 +343,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "SourceArchiverWalrusUploadRelayTipMaxMist",
             "SourceArchiverWalrusEpochs",
             "SourceArchiverWalrusDeletable",
+            "WorldIdProofMode",
             "ScheduleState=DISABLED",
             "--parameter-overrides",
             "aws cloudformation deploy",
