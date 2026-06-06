@@ -1,4 +1,5 @@
 use crate::IdentityError;
+use serde::Serialize;
 
 pub const WORLD_ID_PROOF_MODE_ENV: &str = "SONARI_WORLD_ID_PROOF_MODE";
 pub const SUI_NETWORK_ENV: &str = "SONARI_SUI_NETWORK";
@@ -7,6 +8,61 @@ pub const SUI_NETWORK_ENV: &str = "SONARI_SUI_NETWORK";
 pub enum ResolvedWorldIdVerifierMode {
     Real,
     Dummy,
+}
+
+/// enclave 起動時に受信した proof_mode/network と解決済みの verifier mode をまとめた観測値。
+///
+/// この観測値は診断専用。network/proof_mode は host が bootstrap で渡す入力であり、
+/// 観測値はその echo に過ぎない。dev 判定（network ベースの redact）はセキュリティ境界では
+/// なく、本番での情報露出を避けるための hygiene。実際の fail-closed 安全装置は
+/// `resolve_world_id_verifier_mode` 側にある。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorldIdModeObservation {
+    /// 解決した verifier mode（"real" / "dummy"）。mainnet でも公開して問題ない確定値。
+    pub resolved_mode: &'static str,
+    /// bootstrap から受信した生の proof_mode。dev(testnet/devnet)限定。非 dev では None。
+    pub received_proof_mode: Option<String>,
+    /// bootstrap から受信した生の network。dev 限定。非 dev では None。
+    pub received_network: Option<String>,
+    /// 非 dev ネットワークで生値を伏せたとき true。
+    pub redacted: bool,
+}
+
+/// bootstrap から受信した proof_mode/network と解決済み verifier mode から観測値を組み立てる。
+///
+/// この観測値は診断専用。network/proof_mode は host が bootstrap で渡す入力であり、
+/// 観測値はその echo に過ぎない。dev 判定（network ベースの redact）はセキュリティ境界では
+/// なく、本番での情報露出を避けるための hygiene。実際の fail-closed 安全装置は
+/// `resolve_world_id_verifier_mode` 側にある。
+pub fn world_id_mode_observation(
+    proof_mode: Option<&str>,
+    network: Option<&str>,
+    resolved: ResolvedWorldIdVerifierMode,
+) -> WorldIdModeObservation {
+    let resolved_mode = match resolved {
+        ResolvedWorldIdVerifierMode::Real => "real",
+        ResolvedWorldIdVerifierMode::Dummy => "dummy",
+    };
+    let is_dev = network
+        .map(str::trim)
+        .map(|n| n == "testnet" || n == "devnet")
+        .unwrap_or(false);
+
+    if is_dev {
+        WorldIdModeObservation {
+            resolved_mode,
+            received_proof_mode: proof_mode.map(str::to_owned),
+            received_network: network.map(str::to_owned),
+            redacted: false,
+        }
+    } else {
+        WorldIdModeObservation {
+            resolved_mode,
+            received_proof_mode: None,
+            received_network: None,
+            redacted: true,
+        }
+    }
 }
 
 pub fn resolve_world_id_verifier_mode(
@@ -44,6 +100,67 @@ pub fn resolve_world_id_verifier_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- world_id_mode_observation ---
+
+    #[test]
+    fn observation_dummy_testnet_exposes_raw_values() {
+        let obs = world_id_mode_observation(
+            Some("dummy"),
+            Some("testnet"),
+            ResolvedWorldIdVerifierMode::Dummy,
+        );
+        assert_eq!(obs.resolved_mode, "dummy");
+        assert_eq!(obs.received_proof_mode, Some("dummy".to_owned()));
+        assert_eq!(obs.received_network, Some("testnet".to_owned()));
+        assert!(!obs.redacted);
+    }
+
+    #[test]
+    fn observation_real_mainnet_redacts_raw_values() {
+        let obs = world_id_mode_observation(
+            Some("real"),
+            Some("mainnet"),
+            ResolvedWorldIdVerifierMode::Real,
+        );
+        assert_eq!(obs.resolved_mode, "real");
+        assert_eq!(obs.received_proof_mode, None);
+        assert_eq!(obs.received_network, None);
+        assert!(obs.redacted);
+    }
+
+    #[test]
+    fn observation_dummy_devnet_exposes_raw_values() {
+        let obs = world_id_mode_observation(
+            Some("dummy"),
+            Some("devnet"),
+            ResolvedWorldIdVerifierMode::Dummy,
+        );
+        assert_eq!(obs.resolved_mode, "dummy");
+        assert_eq!(obs.received_proof_mode, Some("dummy".to_owned()));
+        assert_eq!(obs.received_network, Some("devnet".to_owned()));
+        assert!(!obs.redacted);
+    }
+
+    #[test]
+    fn observation_none_network_redacts() {
+        let obs = world_id_mode_observation(None, None, ResolvedWorldIdVerifierMode::Real);
+        assert_eq!(obs.resolved_mode, "real");
+        assert_eq!(obs.received_proof_mode, None);
+        assert_eq!(obs.received_network, None);
+        assert!(obs.redacted);
+    }
+
+    #[test]
+    fn observation_empty_proof_mode_on_dev_network_echoes_empty_string() {
+        // 空文字 proof_mode でも dev ネットワークなら received_proof_mode=Some("") が載る。
+        // 空文字と未設定を診断で区別できることを確認する。
+        let obs =
+            world_id_mode_observation(Some(""), Some("testnet"), ResolvedWorldIdVerifierMode::Real);
+        assert!(!obs.redacted);
+        assert_eq!(obs.received_proof_mode, Some("".to_owned()));
+        assert_eq!(obs.received_network, Some("testnet".to_owned()));
+    }
 
     // env キー定数値が期待文字列であること
     #[test]
