@@ -8,14 +8,15 @@ use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityProvider,
     IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV,
     WORLD_ID_API_BASE_CANONICAL, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
-    WORLD_ID_PROOF_MODE_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
-    WorldIdVerificationStatus, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
-    process_identity_with_verifier, resolve_world_id_verifier_mode,
+    WORLD_ID_PROOF_MODE_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdModeObservation,
+    WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
+    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
+    resolve_world_id_verifier_mode, world_id_mode_observation,
 };
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::enclave::{
     EnclaveRegistrationMetadata, HttpRequest, ProcessDataHandler, ProcessOutput, TeeContext,
-    VsockListener, enclave_attestation_response, error_response,
+    VsockListener, enclave_attestation_response_with_observation, error_response,
     generate_ephemeral_signing_key_seed, handle_connection, health_check_response,
 };
 use sonari_tee_core::registry::{
@@ -208,6 +209,11 @@ struct EnclaveState {
     /// it can select the dummy or cloud World ID verifier per request without
     /// re-reading the host-supplied bootstrap env.
     world_id_verifier_mode: ResolvedWorldIdVerifierMode,
+    /// Diagnostic observation of the proof_mode/network received at bootstrap and
+    /// the resolved verifier mode. Surfaced on the get_attestation response in the
+    /// plaintext envelope (NOT inside the signed NSM document), so it carries no
+    /// secrets and is diagnostic-only, never an attestation-bound trust anchor.
+    world_id_mode_observation: WorldIdModeObservation,
 }
 
 /// Runs the production Nautilus server: ephemeral key signing, NSM attestation,
@@ -259,12 +265,21 @@ fn enclave_state_from_env(
     // network), the server refuses to start rather than silently degrading.
     let world_id_verifier_mode =
         resolve_world_id_verifier_mode(proof_mode.as_deref(), network.as_deref())?;
+    // Build the diagnostic observation from the same env values that drove the
+    // resolution above, so the get_attestation response can surface what the
+    // enclave actually received and resolved (dev-only raw echo, mainnet redacted).
+    let world_id_mode_observation = world_id_mode_observation(
+        proof_mode.as_deref(),
+        network.as_deref(),
+        world_id_verifier_mode,
+    );
     Ok(EnclaveState {
         ephemeral_signing_key_seed,
         ctx: tee_context_from_env(),
         world_id_base_url: server_world_id_base_url(),
         world_id_app_id,
         world_id_verifier_mode,
+        world_id_mode_observation,
     })
 }
 
@@ -295,9 +310,16 @@ fn route_request(
         ("GET", "/health_check") => Ok((200, health_check_response())),
         ("GET", "/get_attestation") => {
             let signer = LocalEd25519Signer::new(state.ephemeral_signing_key_seed);
+            // The observation rides in the plaintext envelope only (the signed NSM
+            // document keeps user_data: None), so it stays diagnostic-only.
+            let observation = serde_json::to_value(&state.world_id_mode_observation)?;
             Ok((
                 200,
-                enclave_attestation_response(&signer, ATTESTATION_PUBLIC_KEY_LABEL)?,
+                enclave_attestation_response_with_observation(
+                    &signer,
+                    ATTESTATION_PUBLIC_KEY_LABEL,
+                    &observation,
+                )?,
             ))
         }
         ("POST", "/process_data") => {
@@ -1072,6 +1094,11 @@ mod tests {
                 world_id_base_url: "https://developer.world.org".to_owned(),
                 world_id_app_id: "app_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
+                world_id_mode_observation: membership_tee::world_id_mode_observation(
+                    None,
+                    None,
+                    ResolvedWorldIdVerifierMode::Real,
+                ),
             };
             // The base URL is unreachable in tests so the real World ID call maps
             // to pending_source: this still proves the route wires the handler,
@@ -1098,6 +1125,11 @@ mod tests {
                 world_id_base_url: "https://developer.world.org".to_owned(),
                 world_id_app_id: "app_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
+                world_id_mode_observation: membership_tee::world_id_mode_observation(
+                    None,
+                    None,
+                    ResolvedWorldIdVerifierMode::Real,
+                ),
             };
             let request = sonari_tee_core::enclave::HttpRequest {
                 method: "GET".to_owned(),
@@ -1153,6 +1185,68 @@ mod tests {
             assert_eq!(
                 serialized, golden,
                 "get_attestation bytes drifted from golden vector"
+            );
+        }
+
+        /// route_get_attestation returns world_id_mode_observation key in response.
+        #[test]
+        fn route_get_attestation_includes_world_id_mode_observation() {
+            use membership_tee::{ResolvedWorldIdVerifierMode, world_id_mode_observation};
+            use sonari_tee_core::enclave::attestation_response_json_with_observation;
+
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+            let signature = signer.sign_payload(ATTESTATION_PUBLIC_KEY_LABEL);
+            let obs = world_id_mode_observation(
+                Some("dummy"),
+                Some("testnet"),
+                ResolvedWorldIdVerifierMode::Dummy,
+            );
+            let obs_json = serde_json::to_value(&obs).expect("observation should serialize");
+            let value = attestation_response_json_with_observation(
+                &[0xABu8, 0xCD, 0xEF],
+                &signature.public_key,
+                &obs_json,
+            );
+
+            assert!(
+                value.get("world_id_mode_observation").is_some(),
+                "get_attestation response must contain world_id_mode_observation"
+            );
+            assert_eq!(value["world_id_mode_observation"]["resolved_mode"], "dummy");
+            assert_eq!(
+                value["world_id_mode_observation"]["received_network"],
+                "testnet"
+            );
+        }
+
+        /// Pins the get_attestation-with-observation response bytes (dummy+testnet,
+        /// fixed ephemeral seed, fixed document) so wire drift is caught.
+        #[test]
+        fn get_attestation_with_observation_bytes_are_byte_stable_for_fixed_seed() {
+            use membership_tee::{ResolvedWorldIdVerifierMode, world_id_mode_observation};
+            use sonari_tee_core::enclave::attestation_response_json_with_observation;
+
+            let signer = LocalEd25519Signer::new(SERVER_SEED);
+            let signature = signer.sign_payload(ATTESTATION_PUBLIC_KEY_LABEL);
+            let obs = world_id_mode_observation(
+                Some("dummy"),
+                Some("testnet"),
+                ResolvedWorldIdVerifierMode::Dummy,
+            );
+            let obs_json = serde_json::to_value(&obs).expect("observation should serialize");
+            let value = attestation_response_json_with_observation(
+                &[0xABu8, 0xCD, 0xEF],
+                &signature.public_key,
+                &obs_json,
+            );
+            let serialized = serde_json::to_string(&value)
+                .expect("attestation with observation should serialize");
+
+            let golden =
+                include_str!("testdata/get_attestation_with_observation.golden.json").trim_end();
+            assert_eq!(
+                serialized, golden,
+                "get_attestation_with_observation bytes drifted from golden vector"
             );
         }
     }
