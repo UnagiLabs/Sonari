@@ -27,6 +27,7 @@ import {
     GENESIS_KIND_MEMBERSHIP_REGISTRY,
     GENESIS_KIND_PAUSE_STATE,
     GENESIS_KIND_VERIFIER_REGISTRY,
+    hexToMoveU8Vector,
     type MembershipIdentityFixtureManifestInput,
     parseAllowedResidenceCellRegistryId,
     parseMembershipPassIssuedId,
@@ -395,10 +396,10 @@ describe("membership identity pass fixture planning", () => {
             expect.arrayContaining([
                 "ptb",
                 `${objectId("aa")}::accessor::new_residence_proof_step_left`,
-                DEFAULT_RESIDENCE_PROOF_LEFT,
+                hexToMoveU8Vector(DEFAULT_RESIDENCE_PROOF_LEFT),
                 "proof_left",
                 `${objectId("aa")}::accessor::new_residence_proof_step_right`,
-                DEFAULT_RESIDENCE_PROOF_RIGHT,
+                hexToMoveU8Vector(DEFAULT_RESIDENCE_PROOF_RIGHT),
                 "proof_right",
                 `<${objectId("aa")}::allowed_residence_cell::ProofStep>`,
                 "[proof_left,proof_right]",
@@ -409,7 +410,7 @@ describe("membership identity pass fixture planning", () => {
                 `@${objectId("55")}`,
                 DEFAULT_HOME_CELL,
                 DEFAULT_TERMS_VERSION.toString(),
-                DEFAULT_SIGNED_STATEMENT_HASH,
+                hexToMoveU8Vector(DEFAULT_SIGNED_STATEMENT_HASH),
             ]),
         );
     });
