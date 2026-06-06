@@ -12,6 +12,7 @@ import {
     buildRegisterMemberPtbCommand,
     buildSuiObjectCommand,
     buildSuiPtbCommand,
+    computeWorldIdSignalHash,
     DEFAULT_ALLOWLIST_VERSION,
     DEFAULT_GEO_RESOLUTION,
     DEFAULT_HOME_CELL,
@@ -21,7 +22,6 @@ import {
     DEFAULT_RESIDENCE_SOURCE_HASH,
     DEFAULT_SIGNED_STATEMENT_HASH,
     DEFAULT_TERMS_VERSION,
-    DEFAULT_WORLD_ID_SIGNAL_HASH,
     EXPECTED_OBJECT_TYPES,
     GENESIS_KIND_IDENTITY_REGISTRY,
     GENESIS_KIND_MEMBERSHIP_REGISTRY,
@@ -88,7 +88,11 @@ describe("membership identity testnet fixture files", () => {
                 proof: "0xproof",
                 verification_level: "orb",
                 action: WORLD_ID_ACTION,
-                signal_hash: DEFAULT_WORLD_ID_SIGNAL_HASH,
+                signal_hash: computeWorldIdSignalHash(
+                    objectId("77"),
+                    objectId("66"),
+                    DEFAULT_SIGNED_STATEMENT_HASH,
+                ),
             },
         });
         expect(files.manifestJson).not.toMatch(/private|secret|keystore|suiprivkey/i);
@@ -100,6 +104,20 @@ describe("membership identity testnet fixture files", () => {
         const manifest = buildMembershipIdentityFixtureManifest(fixtureInput());
 
         expect(buildDummyWorldIdRequest(manifest)).toEqual(manifest.smoke);
+    });
+
+    it("computes the World ID signal hash from the owner, membership, and statement binding", () => {
+        expect(
+            computeWorldIdSignalHash(objectId("77"), objectId("66"), DEFAULT_SIGNED_STATEMENT_HASH),
+        ).toBe("0x4b71aa2dffa6b2a16467a508e2e1836d697729bc96849519a80f598699354901");
+    });
+
+    it("binds the dummy request signal hash to the smoke owner, membership, and statement", () => {
+        const manifest = buildMembershipIdentityFixtureManifest(fixtureInput());
+
+        expect(manifest.smoke.world_id.signal_hash).toBe(
+            computeWorldIdSignalHash(objectId("77"), objectId("66"), DEFAULT_SIGNED_STATEMENT_HASH),
+        );
     });
 
     it("fails closed on mainnet", () => {
@@ -524,7 +542,6 @@ function fixtureInput(): MembershipIdentityFixtureManifestInput {
                 proof: "0xproof",
                 verificationLevel: "orb",
                 action: WORLD_ID_ACTION,
-                signalHash: DEFAULT_WORLD_ID_SIGNAL_HASH,
             },
         },
     };
