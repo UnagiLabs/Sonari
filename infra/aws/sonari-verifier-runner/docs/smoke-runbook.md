@@ -141,6 +141,36 @@ aws stepfunctions list-executions \
   --max-results 1
 ```
 
+## enclave が解決した verifier mode を確認する（issue #190 観測手順）
+
+membership enclave が起動時に受信した `proof_mode`/`network` と、実際に選んだ verifier mode を smoke の後に確認できます。get_attestation 応答に `world_id_mode_observation` フィールドが載るようになりました。
+
+手順:
+
+1. このフィールドを含む観測ビルドを dev stack へ再デプロイします。EIF measurement は再ビルドのたびにドリフトするので、再デプロイ後に `scripts/register-verifier-configs.sh` で identity config の PCR を再登録します。あわせて deploy plan に渡した `membership-identity-tee.eif` の SHA-256 と、実機 instance が起動した EIF measurement が一致することを確認します（EIF ドリフトを論理バグと取り違えないため）。
+2. 上の Membership dummy proof smoke を実行します。
+3. runner が get_attestation の結果を書く S3 result object を読みます。runner は get_attestation command の結果を result bucket の result key へ保存し、`readEnclaveAttestation` で読み戻します。`readEnclaveAttestation` は未知フィールドを無視しますが、S3 の生 JSON には `world_id_mode_observation` が残ります。
+
+```bash
+# 該当 job の get_attestation command が書いた result object を読む
+aws s3 cp "s3://$result_bucket/$get_attestation_result_s3_key" - | jq .world_id_mode_observation
+```
+
+読み取れる値:
+
+- `resolved_mode`: enclave が選んだ mode（`"real"` または `"dummy"`）。
+- `received_proof_mode` / `received_network`: testnet/devnet では bootstrap で受信した生値。dev 以外（mainnet など）では `null`（`redacted: true`）。
+
+判断:
+
+- `resolved_mode` が `"dummy"` なら dummy verifier が使われています（期待どおり）。
+- `resolved_mode` が `"real"` なのに host が `proof_mode=dummy` / `network=testnet` を送っているなら、issue #190 の runtime 乖離です。`received_proof_mode` / `received_network` の生値で、enclave に dummy が届いていたか（空文字や欠落でないか）を切り分けられます。
+
+注意:
+
+- この観測値は診断専用です。署名済みの NSM attestation document の外側にある平文で、host が bootstrap で渡した入力の写しに過ぎません。信頼の根拠（trust anchor）には使いません。
+- mainnet では生値を伏せます（`redacted: true`）。fail-closed の安全装置（mainnet で dummy 不可）は `resolve_world_id_verifier_mode` が担保します。
+
 ## 必須の smoke result
 
 - earthquake manual workflow が Step Functions `SUCCEEDED` に到達する。

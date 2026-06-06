@@ -25,6 +25,8 @@ OIDC role の trust policy は、`repo:UnagiLabs/Sonari:environment:aws-sonari-v
 
 devnet / testnet の dummy World ID proof では、任意 variables として World ID proof mode を `dummy`、relayer network を `testnet` に設定します。`NITRO_ENCLAVE_PCR3` は runner role ARN から `docs/pcr-config.md` の手順で再計算し、stack parameter と一致させてください。
 
+再デプロイ後に dummy mode が実機で効いているかは、enclave が解決した verifier mode を get_attestation 応答の `world_id_mode_observation` で確認できます。手順は `docs/smoke-runbook.md` の「enclave が解決した verifier mode を確認する（issue #190 観測手順）」を参照してください。再ビルドのたびに EIF measurement はドリフトするため、再デプロイ後は deploy plan に渡した EIF の SHA-256 と実機 measurement の一致も確認します。
+
 ## 必須 artifact set
 
 各 deploy は、deploy 対象の Git commit をそのまま使い、すべての artifact を `sonari-verifier-runner/<commit>/` 配下へ uploadします。
