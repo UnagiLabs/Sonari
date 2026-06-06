@@ -474,6 +474,22 @@ KYC / World ID は複数アカウント対策として payout 前に必要だが
 - device info はオンチェーンに出さない
 - 表示は H3 cell / verification status / pass status に限定する
 
+### World ID signal_hash の導出ルール
+
+World ID 登録では `signal_hash` を利用者に手入力させない。dapp が次の束縛から導出する。
+
+- `signal_hash = sha256("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)` を計算する
+- `owner` / `membership_id` / `signed_statement_hash` は `0x` 始まりの 32 バイト hex を小文字へ正規化してから使う
+- 計算は `@sonari/proof-core` の `computeWorldIdSignalHash` に集約し、enclave の `compute_world_id_signal_hash` と同一アルゴリズムにする
+- World ID widget に渡す `signal` も、この束縛（owner / membership_id / signed_statement_hash）と一致させる
+
+enclave は受け取った `signal_hash` を同じ式で再計算して照合する。次の入力は enclave 側で拒否されるため、dapp でも作らない。
+
+- `0x` / `0X` で始まらない hex
+- 32 バイト以外の長さ
+- hex 以外の文字や空文字
+- 上記の束縛から外れた値（手入力や別経路の値）
+
 ---
 
 ## 6.8 `/claim`
