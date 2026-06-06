@@ -22,6 +22,8 @@ import {
     DEFAULT_RESIDENCE_SOURCE_HASH,
     DEFAULT_SIGNED_STATEMENT_HASH,
     DEFAULT_TERMS_VERSION,
+    DEFAULT_WORLD_APP_ID,
+    defaultWorldIdInput,
     EXPECTED_OBJECT_TYPES,
     GENESIS_KIND_IDENTITY_REGISTRY,
     GENESIS_KIND_MEMBERSHIP_REGISTRY,
@@ -140,6 +142,17 @@ describe("membership identity testnet fixture files", () => {
                 smoke: { ...fixtureInput().smoke, membershipId: objectId("99") },
             }),
         ).toThrow("smoke membership_id must match SONARI_MEMBERSHIP_PASS_ID");
+    });
+});
+
+describe("membership identity default World ID input", () => {
+    it("defaults the world_app_id to DEFAULT_WORLD_APP_ID", () => {
+        expect(DEFAULT_WORLD_APP_ID).toBe("app_staging_123");
+        expect(defaultWorldIdInput().worldAppId).toBe(DEFAULT_WORLD_APP_ID);
+    });
+
+    it("uses the provided world_app_id when given one", () => {
+        expect(defaultWorldIdInput("app_staging_dummy").worldAppId).toBe("app_staging_dummy");
     });
 });
 
@@ -502,12 +515,17 @@ describe("membership identity fixture runner", () => {
                 `"membership_id": "${objectId("66")}"`,
             );
             const manifest = JSON.parse(await readFile(result.manifestPath, "utf8")) as {
-                readonly smoke: { readonly owner: string; readonly terms_version: number };
+                readonly smoke: {
+                    readonly owner: string;
+                    readonly terms_version: number;
+                    readonly world_id: { readonly world_app_id: string };
+                };
             };
             expect(manifest.smoke).toMatchObject({
                 owner: objectId("77"),
                 terms_version: DEFAULT_TERMS_VERSION,
             });
+            expect(manifest.smoke.world_id.world_app_id).toBe(DEFAULT_WORLD_APP_ID);
         } finally {
             await rm(outputDir, { recursive: true, force: true });
         }

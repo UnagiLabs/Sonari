@@ -26,6 +26,12 @@ export const DEFAULT_RESIDENCE_PROOF_LEFT =
 export const DEFAULT_RESIDENCE_PROOF_RIGHT =
     "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7";
 export const WORLD_ID_ACTION = "sonari_membership_register_v1";
+// Fallback World ID app id for the dummy smoke fixture. Real smoke runs override
+// this with the target stack's `WORLD_ID_APP_ID` (CloudFormation `WorldIdAppId`),
+// because the enclave's trusted-boundary check rejects any request whose
+// `world_app_id` differs from the stack's configured value. Kept as the default so
+// the golden fixture tests stay stable when no override is supplied.
+export const DEFAULT_WORLD_APP_ID = "app_staging_123";
 export const GENESIS_KIND_PAUSE_STATE = 2;
 export const GENESIS_KIND_MEMBERSHIP_REGISTRY = 6;
 export const GENESIS_KIND_VERIFIER_REGISTRY = 7;
@@ -792,7 +798,7 @@ export async function runMembershipIdentityTestnetFixture(
             owner: passReadback.owner,
             termsVersion: DEFAULT_TERMS_VERSION,
             signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
-            worldId: defaultWorldIdInput(),
+            worldId: defaultWorldIdInput(DEFAULT_WORLD_APP_ID),
         },
     });
     await writeFixtureFiles(
@@ -843,9 +849,11 @@ function buildMembershipIdentityFixtureFilesFromManifest(
     };
 }
 
-function defaultWorldIdInput(): MembershipIdentityFixtureWorldIdInput {
+export function defaultWorldIdInput(
+    worldAppId: string = DEFAULT_WORLD_APP_ID,
+): MembershipIdentityFixtureWorldIdInput {
     return {
-        worldAppId: "app_staging_123",
+        worldAppId,
         nullifierHash: "12345678901234567890",
         merkleRoot: "987654321",
         proof: "0xproof",
