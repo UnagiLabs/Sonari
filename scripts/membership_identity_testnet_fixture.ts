@@ -501,6 +501,29 @@ export function parseMembershipPassIssuedId(input: unknown): string {
     throw new Error("transaction result did not include MembershipPassIssued event");
 }
 
+// `SuiGrpcClient.signAndExecuteTransaction` (@mysten/sui) resolves to a `TransactionResult`
+// discriminated union (`{ $kind: "Transaction", Transaction: { events } }` or a
+// `FailedTransaction` variant), whose events use gRPC field names (`eventType` / `json`)
+// instead of the JSON-RPC shape (`type` / `parsedJson`). Adapt the gRPC result into the
+// JSON-RPC-ish shape so `parseMembershipPassIssuedId` can extract the issued pass id.
+export function parseMembershipPassIssuedIdFromSdkResult(response: unknown): string {
+    if (!isRecord(response)) {
+        throw new Error("sui SDK transaction result must be an object");
+    }
+    const transaction = isRecord(response.Transaction) ? response.Transaction : undefined;
+    if (response.$kind === "FailedTransaction" || transaction === undefined) {
+        throw new Error("sui SDK register_member transaction did not succeed");
+    }
+    const events = Array.isArray(transaction.events) ? transaction.events : [];
+    const adapted = {
+        events: events
+            .filter(isRecord)
+            .filter((event) => typeof event.eventType === "string" && isRecord(event.json))
+            .map((event) => ({ type: event.eventType, parsedJson: event.json })),
+    };
+    return parseMembershipPassIssuedId(adapted);
+}
+
 export function buildSuiObjectCommand(objectId: string, options: SuiClientOptions): SuiCommandPlan {
     assertHexObjectId(objectId, "objectId");
     return {
@@ -784,7 +807,7 @@ export async function registerMembershipPassWithSdk(
             objectTypes: true,
         },
     });
-    return parseMembershipPassIssuedId(response);
+    return parseMembershipPassIssuedIdFromSdkResult(response);
 }
 
 export async function resolveBaseFixtureObjects(

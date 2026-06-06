@@ -35,6 +35,7 @@ import {
     parseAllowedResidenceCellRegistryId,
     parseCliArgs,
     parseMembershipPassIssuedId,
+    parseMembershipPassIssuedIdFromSdkResult,
     parsePublishedTomlPackageId,
     parsePublishFixtureObjects,
     parseSuiClientConfigYaml,
@@ -185,6 +186,40 @@ describe("membership identity Sui JSON parsing", () => {
                 ],
             }),
         ).toBe(objectId("66"));
+    });
+
+    it("reads pass id from a Sui SDK gRPC TransactionResult", () => {
+        expect(
+            parseMembershipPassIssuedIdFromSdkResult({
+                $kind: "Transaction",
+                Transaction: {
+                    events: [
+                        {
+                            eventType: `${objectId("aa")}::membership::MembershipPassIssued`,
+                            json: { pass_id: objectId("66") },
+                        },
+                    ],
+                },
+            }),
+        ).toBe(objectId("66"));
+    });
+
+    it("rejects a failed Sui SDK register_member transaction", () => {
+        expect(() =>
+            parseMembershipPassIssuedIdFromSdkResult({
+                $kind: "FailedTransaction",
+                FailedTransaction: { events: [] },
+            }),
+        ).toThrow("sui SDK register_member transaction did not succeed");
+    });
+
+    it("rejects a Sui SDK result without the MembershipPassIssued event", () => {
+        expect(() =>
+            parseMembershipPassIssuedIdFromSdkResult({
+                $kind: "Transaction",
+                Transaction: { events: [] },
+            }),
+        ).toThrow("transaction result did not include MembershipPassIssued event");
     });
 
     it("rejects object type mismatches on readback", () => {
@@ -597,12 +632,15 @@ describe("membership identity pass fixture planning", () => {
                         signAndExecuteTransaction: async ({ transaction, signer }) => {
                             expect(transaction.getData().sender).toBe(signer.toSuiAddress());
                             return {
-                                events: [
-                                    {
-                                        type: `${objectId("aa")}::membership::MembershipPassIssued`,
-                                        parsedJson: { pass_id: objectId("66") },
-                                    },
-                                ],
+                                $kind: "Transaction",
+                                Transaction: {
+                                    events: [
+                                        {
+                                            eventType: `${objectId("aa")}::membership::MembershipPassIssued`,
+                                            json: { pass_id: objectId("66") },
+                                        },
+                                    ],
+                                },
                             };
                         },
                     };
