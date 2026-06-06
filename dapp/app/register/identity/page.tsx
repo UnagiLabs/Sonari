@@ -63,7 +63,7 @@ export default function RegisterIdentityPage() {
             if (!isSubmitConfigured) {
                 throw new Error("Identity submit endpoint is not configured.");
             }
-            const request = buildIdentitySubmitRequest(
+            const request = await buildIdentitySubmitRequest(
                 new FormData(event.currentTarget),
                 registryId,
             );
@@ -205,6 +205,14 @@ export default function RegisterIdentityPage() {
                                 {provider === "world_id" ? (
                                     <fieldset className="control-group">
                                         <legend>World ID proof</legend>
+                                        <div className="field-note">
+                                            <strong>Signal hash is derived automatically</strong>
+                                            <small>
+                                                It is computed from your owner address, Membership
+                                                SBT, and signed statement. Use that same binding as
+                                                the World ID signal when you generate the proof.
+                                            </small>
+                                        </div>
                                         <div className="identity-proof-grid">
                                             <label className="text-field" htmlFor="world-app-id">
                                                 <span>World app ID</span>
@@ -250,15 +258,6 @@ export default function RegisterIdentityPage() {
                                                     defaultValue="sonari_membership_register_v1"
                                                     id="world-action"
                                                     name="worldIdAction"
-                                                    type="text"
-                                                />
-                                            </label>
-                                            <label className="text-field" htmlFor="signal-hash">
-                                                <span>Signal hash</span>
-                                                <input
-                                                    id="signal-hash"
-                                                    name="signalHash"
-                                                    placeholder="0x..."
                                                     type="text"
                                                 />
                                             </label>
