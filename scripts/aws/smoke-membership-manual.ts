@@ -480,9 +480,11 @@ function uniqueizeDummyWorldIdRequest(input: unknown, nowMs: number): unknown {
     }
     return {
         ...input,
+        // The enclave duplicate-key check requires the nullifier to be a decimal or
+        // 0x-prefixed hex string, so keep the uniqueizing suffix numeric (no separator).
         world_id: {
             ...input.world_id,
-            nullifier_hash: `${input.world_id.nullifier_hash}:${nowMs}`,
+            nullifier_hash: `${input.world_id.nullifier_hash}${nowMs}`,
         },
     };
 }

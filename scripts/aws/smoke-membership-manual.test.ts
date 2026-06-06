@@ -121,7 +121,7 @@ describe("AWS membership manual batch smoke script", () => {
         expect(cli.submitBodies).toHaveLength(1);
         expect(cli.submitBodies[0]).toMatchObject({
             world_id: {
-                nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}:${FIXED_NOW_MS}`,
+                nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}${FIXED_NOW_MS}`,
             },
         });
         expect(cli.lambdaPayloads).toEqual([
@@ -130,7 +130,7 @@ describe("AWS membership manual batch smoke script", () => {
                     ...REQUEST_TEMPLATE,
                     world_id: {
                         ...REQUEST_TEMPLATE.world_id,
-                        nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}:${FIXED_NOW_MS}`,
+                        nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}${FIXED_NOW_MS}`,
                     },
                 }),
             },
