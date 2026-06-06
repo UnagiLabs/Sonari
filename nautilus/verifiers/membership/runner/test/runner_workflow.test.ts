@@ -169,7 +169,7 @@ describe("membership runner workflow", () => {
         const readiness = buildRunnerBootstrapReadinessShellCommand();
         expect(readiness).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
         expect(readiness).toContain(
-            "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
+            "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
         );
         expect(readiness).toContain("SONARI_WORLD_ID_API_BASE is required");
         expect(readiness).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL is required");
@@ -220,7 +220,7 @@ describe("membership runner workflow", () => {
         expect(row).not.toBeNull();
         expect(command).toContain("source /opt/sonari/runner.env");
         expect(command).toContain(
-            "systemctl is-active --quiet sonari-world-id-vsock-proxy.service",
+            "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
         );
         expect(command).toContain(
             "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_EGRESS_PROXY_URL SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
