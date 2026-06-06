@@ -49,6 +49,7 @@
     "devDependencies": {
         "@aws-sdk/client-dynamodb": "^3.948.0",
         "@biomejs/biome": "^2.4.15",
+        "@mysten/sui": "^2.16.3",
         "@sonari/verifier-contracts": "workspace:*",
         "@types/node": "^24.10.2",
         "@types/yazl": "^3.3.1",
