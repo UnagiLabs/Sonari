@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,7 +13,11 @@ export const DEFAULT_GEO_RESOLUTION = "7";
 export const DEFAULT_ALLOWLIST_VERSION = "1";
 export const DEFAULT_TERMS_VERSION = 2;
 export const DEFAULT_SIGNED_STATEMENT_HASH = `0x${"44".repeat(32)}`;
-export const DEFAULT_WORLD_ID_SIGNAL_HASH = `0x${"55".repeat(32)}`;
+// Must match the enclave's `WORLD_ID_SIGNAL_HASH_PREFIX`
+// (nautilus/verifiers/membership/tee/src/core/processing.rs). The enclave rejects
+// any World ID request whose `signal_hash` is not the derived binding below, so the
+// fixture computes it instead of carrying a free-form placeholder.
+export const WORLD_ID_SIGNAL_HASH_PREFIX = "sonari:world_id_signal:v1";
 export const DEFAULT_RESIDENCE_ROOT =
     "0xa26a12dc49754fde5b90e6bff69d1bc8b51fb8a3de07aa9122a9a2958bb75020";
 export const DEFAULT_RESIDENCE_SOURCE_HASH = `0x${"11".repeat(32)}`;
@@ -65,7 +70,6 @@ export interface MembershipIdentityFixtureWorldIdInput {
     readonly proof: string;
     readonly verificationLevel: string;
     readonly action: string;
-    readonly signalHash: string;
 }
 
 export interface MembershipIdentityFixtureManifestInput {
@@ -242,6 +246,31 @@ export function buildMembershipIdentityFixtureFiles(
     };
 }
 
+/**
+ * Derives the World ID `signal_hash` exactly as the enclave does in
+ * `compute_world_id_signal_hash` (nautilus/verifiers/membership/tee/src/core/processing.rs):
+ * `sha256` over the NUL-joined `prefix, owner, membership_id, signed_statement_hash`,
+ * each id canonicalised to lowercase 0x-hex. The enclave's trusted-boundary check
+ * rejects any request whose `signal_hash` is not this binding, so the fixture
+ * computes it instead of emitting a free-form placeholder.
+ */
+export function computeWorldIdSignalHash(
+    owner: string,
+    membershipId: string,
+    signedStatementHash: string,
+): string {
+    const parts = [
+        WORLD_ID_SIGNAL_HASH_PREFIX,
+        canonicalHex32Lower(owner, "owner"),
+        canonicalHex32Lower(membershipId, "membership_id"),
+        canonicalHex32Lower(signedStatementHash, "signed_statement_hash"),
+    ];
+    const digest = createHash("sha256")
+        .update(Buffer.from(parts.join("\0"), "utf8"))
+        .digest("hex");
+    return `0x${digest}`;
+}
+
 export function buildMembershipIdentityFixtureManifest(
     input: MembershipIdentityFixtureManifestInput,
 ): MembershipIdentityFixtureManifest {
@@ -285,7 +314,11 @@ export function buildMembershipIdentityFixtureManifest(
                 proof: input.smoke.worldId.proof,
                 verification_level: input.smoke.worldId.verificationLevel,
                 action: input.smoke.worldId.action,
-                signal_hash: input.smoke.worldId.signalHash,
+                signal_hash: computeWorldIdSignalHash(
+                    input.smoke.owner,
+                    input.smoke.membershipId,
+                    input.smoke.signedStatementHash,
+                ),
             },
         },
     };
@@ -327,7 +360,6 @@ export function validateSmokeInput(input: MembershipIdentityFixtureSmokeInput): 
     assertHexObjectId(input.membershipId, "membershipId");
     assertHexObjectId(input.owner, "owner");
     assertHex32(input.signedStatementHash, "signedStatementHash");
-    assertHex32(input.worldId.signalHash, "worldId.signalHash");
     if (!Number.isSafeInteger(input.termsVersion) || input.termsVersion < 0) {
         throw new Error("termsVersion must be a non-negative safe integer");
     }
@@ -788,6 +820,13 @@ function assertHex32(value: string, fieldName: string): void {
     }
 }
 
+function canonicalHex32Lower(value: string, fieldName: string): string {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+        throw new Error(`${fieldName} must be a 0x-prefixed 32-byte hex string`);
+    }
+    return `0x${value.slice(2).toLowerCase()}`;
+}
+
 function assertNonEmpty(value: string, fieldName: string): void {
     if (value.length === 0) {
         throw new Error(`${fieldName} must be non-empty`);
@@ -812,7 +851,6 @@ function defaultWorldIdInput(): MembershipIdentityFixtureWorldIdInput {
         proof: "0xproof",
         verificationLevel: "orb",
         action: WORLD_ID_ACTION,
-        signalHash: DEFAULT_WORLD_ID_SIGNAL_HASH,
     };
 }
 
