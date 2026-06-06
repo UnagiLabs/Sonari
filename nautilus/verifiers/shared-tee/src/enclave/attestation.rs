@@ -32,6 +32,27 @@ pub fn attestation_response_json(
     })
 }
 
+/// `attestation_response_json` に診断用の観測値を `world_id_mode_observation`
+/// キーで追記したもの。membership enclave 専用。
+///
+/// 重要: 観測値は署名済み NSM attestation document の「外側」の平文 JSON エンベロープ
+/// に載るだけで、attestation document（user_data）には一切含めない。よって診断専用で
+/// あり attestation により保証された値ではない（host が渡した入力の echo に過ぎない）。
+pub fn attestation_response_json_with_observation(
+    attestation_document: &[u8],
+    public_key: &str,
+    world_id_mode_observation: &serde_json::Value,
+) -> serde_json::Value {
+    let mut value = attestation_response_json(attestation_document, public_key);
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "world_id_mode_observation".to_owned(),
+            world_id_mode_observation.clone(),
+        );
+    }
+    value
+}
+
 /// Produces an NSM attestation document binding the signer's ephemeral public
 /// key, returning the `get_attestation` response body.
 ///
@@ -42,6 +63,24 @@ pub fn attestation_response_json(
 pub fn enclave_attestation_response<S: PayloadSigner>(
     signer: &S,
     public_key_label: &[u8],
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    enclave_attestation_response_inner(signer, public_key_label, None)
+}
+
+/// 観測値付きの get_attestation 応答。観測値は平文エンベロープにのみ載り、
+/// NSM attestation document（user_data）には含めない（診断専用）。
+pub fn enclave_attestation_response_with_observation<S: PayloadSigner>(
+    signer: &S,
+    public_key_label: &[u8],
+    world_id_mode_observation: &serde_json::Value,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    enclave_attestation_response_inner(signer, public_key_label, Some(world_id_mode_observation))
+}
+
+fn enclave_attestation_response_inner<S: PayloadSigner>(
+    signer: &S,
+    public_key_label: &[u8],
+    world_id_mode_observation: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let signature = signer.sign_payload(public_key_label);
     let public_key_bytes = hex::decode(signature.public_key.trim_start_matches("0x"))?;
@@ -55,7 +94,15 @@ pub fn enclave_attestation_response<S: PayloadSigner>(
     driver::nsm_exit(fd);
     match response {
         NsmResponse::Attestation { document } => {
-            Ok(attestation_response_json(&document, &signature.public_key))
+            let json = match world_id_mode_observation {
+                Some(obs) => attestation_response_json_with_observation(
+                    &document,
+                    &signature.public_key,
+                    obs,
+                ),
+                None => attestation_response_json(&document, &signature.public_key),
+            };
+            Ok(json)
         }
         _ => Err("unexpected NSM attestation response".into()),
     }
@@ -63,7 +110,9 @@ pub fn enclave_attestation_response<S: PayloadSigner>(
 
 #[cfg(test)]
 mod tests {
-    use super::{attestation_response_json, read_seed_from};
+    use super::{
+        attestation_response_json, attestation_response_json_with_observation, read_seed_from,
+    };
 
     #[test]
     fn read_seed_from_consumes_exactly_32_bytes() {
@@ -105,5 +154,78 @@ mod tests {
             .map(String::as_str)
             .collect::<Vec<_>>();
         assert_eq!(keys, ["attestation_document_hex", "public_key"]);
+    }
+
+    #[test]
+    fn attestation_response_json_with_observation_adds_observation_key() {
+        let document = [0xAB, 0xCD, 0xEF];
+        let public_key = format!("0x{}", "11".repeat(32));
+        let observation = serde_json::json!({
+            "resolved_mode": "dummy",
+            "received_proof_mode": "dummy",
+            "received_network": "testnet",
+            "redacted": false,
+        });
+
+        let value =
+            attestation_response_json_with_observation(&document, &public_key, &observation);
+
+        // world_id_mode_observation キーが存在し中身が一致する
+        assert_eq!(value.get("world_id_mode_observation"), Some(&observation));
+        // 既存の 2 キーも残る
+        assert_eq!(
+            value
+                .get("attestation_document_hex")
+                .and_then(serde_json::Value::as_str),
+            Some("0xabcdef")
+        );
+        assert_eq!(
+            value.get("public_key").and_then(serde_json::Value::as_str),
+            Some(public_key.as_str())
+        );
+    }
+
+    #[test]
+    fn attestation_response_json_without_observation_stays_two_keys() {
+        let document = [0xAB, 0xCD, 0xEF];
+        let public_key = format!("0x{}", "22".repeat(32));
+
+        let value = attestation_response_json(&document, &public_key);
+
+        let key_count = value.as_object().unwrap().len();
+        assert_eq!(key_count, 2, "base function must produce exactly 2 keys");
+        assert!(
+            value.get("world_id_mode_observation").is_none(),
+            "base function must not contain observation key"
+        );
+    }
+
+    #[test]
+    fn observation_rides_outside_the_signed_document() {
+        // The observation is a plaintext sibling of the attestation document, never
+        // folded into it. Adding the observation must not change the document hex or
+        // public key, proving it cannot alter the signed attestation bytes (it is
+        // diagnostic-only, not attestation-bound).
+        let document = [0x01, 0x02, 0x03];
+        let public_key = format!("0x{}", "33".repeat(32));
+        let observation = serde_json::json!({
+            "resolved_mode": "dummy",
+            "received_proof_mode": "dummy",
+            "received_network": "testnet",
+            "redacted": false,
+        });
+
+        let with = attestation_response_json_with_observation(&document, &public_key, &observation);
+        let without = attestation_response_json(&document, &public_key);
+
+        assert_eq!(
+            with["attestation_document_hex"], without["attestation_document_hex"],
+            "observation must not change the attestation document"
+        );
+        assert_eq!(
+            with["public_key"], without["public_key"],
+            "observation must not change the embedded public key"
+        );
+        assert_eq!(with.get("world_id_mode_observation"), Some(&observation));
     }
 }

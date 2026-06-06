@@ -13,7 +13,9 @@ pub mod server;
 pub mod vsock;
 
 pub use attestation::{
-    attestation_response_json, enclave_attestation_response, generate_ephemeral_signing_key_seed,
+    attestation_response_json, attestation_response_json_with_observation,
+    enclave_attestation_response, enclave_attestation_response_with_observation,
+    generate_ephemeral_signing_key_seed,
 };
 pub use http::{HttpRequest, find_header_end, read_http_request, write_http_json_response};
 pub use registration::EnclaveRegistrationMetadata;
