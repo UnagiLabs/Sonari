@@ -160,9 +160,12 @@ wrangler deploy
 - **手動トリガ**: GitHub Actions の画面から `workflow_dispatch`（手動実行）でも deploy できます。
 - workflow 定義は `.github/workflows/residence-proof-worker-deploy.yml` です。
 
-自動デプロイで CI に渡すのは **Cloudflare API token のみ** です。GitHub の environment
-`cloudflare-affected-cells-proof-worker` に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を
-secret として登録します。
+自動デプロイで CI に渡すのは **Cloudflare API token のみ** です。Cloudflare 認証情報は
+GitHub の共通 environment `cloudflare-affected-cells-proof-worker` に
+`CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を secret として登録します。
+
+workflow は deploy 成功後に `cloudflare-residence-proof-worker` の deployment history を更新します。
+そのため、residence worker 専用 environment に Cloudflare secret を重複登録する必要はありません。
 
 `AFFECTED_PROOF_REGISTER_TOKEN` のようなアプリ secret は CI には渡しません。必要なら
 上記「2. Secret を登録する」の `wrangler secret put` で Cloudflare 側に別管理します。

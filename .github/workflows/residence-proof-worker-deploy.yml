@@ -22,8 +22,8 @@ jobs:
   deploy:
     name: Deploy worker to Cloudflare
     runs-on: ubuntu-latest
-    # environment 配下の secret として CLOUDFLARE_API_TOKEN（必要なら CLOUDFLARE_ACCOUNT_ID）
-    # を参照する。secret は GitHub の Settings で別途登録する（本リポジトリには平文を置かない）。
+    # 既存の Cloudflare 認証情報を持つ共通 environment を使う。
+    # GitHub Environment secret は environment 間で参照できないため、credentials はここに集約する。
     environment: cloudflare-affected-cells-proof-worker
     timeout-minutes: 30
     # 同一 worker への同時デプロイを直列化する。実行中の deploy は途中で殺さない。
@@ -106,3 +106,17 @@ jobs:
           packageManager: pnpm
           workingDirectory: packages/residence-proof-worker
           command: deploy
+
+  record-residence-deployment:
+    name: Record residence deployment
+    runs-on: ubuntu-latest
+    needs: deploy
+    # 実際の deploy が成功した場合だけ、residence worker の deployment history を更新する。
+    # credentials は deploy job 側の共通 environment から読み、ここでは secret を使わない。
+    environment: cloudflare-residence-proof-worker
+    steps:
+      - name: Record successful deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Residence proof worker deployment completed."
