@@ -124,3 +124,45 @@ pnpm --filter @sonari/residence-proof-worker test
 pnpm --filter @sonari/residence-proof-worker typecheck
 pnpm check:ts
 ```
+
+## デプロイ手順
+
+実際の deploy には Cloudflare アカウントと認証が必要です。
+
+### 1. R2 bucket を作成する
+
+```bash
+wrangler r2 bucket create sonari-residence-proofs-v1-res7
+```
+
+### 2. Secret を登録する
+
+現時点では runtime secret は未定義ですが、将来追加する場合は `wrangler secret put` で
+Cloudflare に登録します。絶対に repo にコミットしないこと。
+
+### 3. デプロイ（初回・手動）
+
+初回セットアップやフォールバック用途として、手動で deploy します。
+
+```bash
+wrangler deploy
+```
+
+### 4. 自動デプロイ（GitHub Actions）
+
+通常の更新は手動 deploy 不要です。GitHub Actions が自動で deploy します。
+
+- **自動トリガ**: 次の path の変更が `main` に入ると、自動で `wrangler deploy` が走ります。
+  - `packages/residence-proof-worker/**`（worker 本体）
+  - `packages/proof-core/**`（worker が依存する proof ロジック。ここの変更でも再デプロイされる）
+  - `pnpm-lock.yaml`（依存解決の変更を反映する）
+  - `.github/workflows/residence-proof-worker-deploy.yml`（ワークフロー変更）
+- **手動トリガ**: GitHub Actions の画面から `workflow_dispatch`（手動実行）でも deploy できます。
+- workflow 定義は `.github/workflows/residence-proof-worker-deploy.yml` です。
+
+自動デプロイで CI に渡すのは **Cloudflare API token のみ** です。GitHub の environment
+`cloudflare-affected-cells-proof-worker` に `CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` を
+secret として登録します。
+
+`AFFECTED_PROOF_REGISTER_TOKEN` のようなアプリ secret は CI には渡しません。必要なら
+上記「2. Secret を登録する」の `wrangler secret put` で Cloudflare 側に別管理します。
