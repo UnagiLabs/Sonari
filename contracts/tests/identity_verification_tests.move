@@ -40,8 +40,6 @@ const MEMBERSHIP_ID_OFFSET: u64 = 81;
 const OWNER_OFFSET: u64 = 144;
 const PROVIDER_OFFSET: u64 = 145;
 const VERIFIED_OFFSET: u64 = 146;
-const TERMS_VERSION_OFFSET: u64 = 227;
-const SIGNED_STATEMENT_HASH_OFFSET: u64 = 235;
 
 #[test]
 fun relayer_without_admin_cap_can_submit_signed_kyc_result() {
@@ -82,7 +80,7 @@ fun relayer_without_admin_cap_can_submit_signed_world_id_result() {
 }
 
 #[test]
-fun rust_fixture_signed_world_id_result_updates_identity_pass() {
+fun rust_fixture_signed_world_id_result_updates_identity_registry_record() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_MS);
     let mut scenario = initialized_with_registered_member();
@@ -95,7 +93,8 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
         let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
         let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        let mut pass = test_scenario::take_from_address<membership::MembershipPass>(
+        // pass は payload 構築用の object::id(&pass) を取得するためだけに take する。accessor には渡さない。
+        let pass = test_scenario::take_from_address<membership::MembershipPass>(
             &scenario,
             MEMBER,
         );
@@ -105,7 +104,6 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
             &mut identity_registry,
             &membership_registry,
             &verifier_registry,
-            &mut pass,
             &clock,
             rust_fixture_payload_bcs(),
             rust_fixture_signature(),
@@ -113,26 +111,21 @@ fun rust_fixture_signed_world_id_result_updates_identity_pass() {
             scenario.ctx(),
         );
 
-        let (
-            _account_created_at_ms,
-            _home_cell,
-            _home_cell_registered_at_ms,
-            identity_verified,
-            identity_provider_mask,
-            identity_verified_at_ms,
-            identity_expires_at_ms,
-            terms_version,
-            signed_statement_hash,
-        ) = membership::membership_pass_mvp_summary(&pass);
-        assert!(identity_verified);
-        assert!(identity_provider_mask == identity_registry::provider_world_id());
-        assert!(identity_verified_at_ms == NOW_MS);
-        assert!(identity_expires_at_ms == EXPIRES_AT_MS);
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        let (owner, provider_mask, verified_at_ms, expires_at_ms, terms_version, signed_statement_hash) =
+            identity_registry::identity_verification_record_for_testing(
+                &identity_registry,
+                pass_lineage_id,
+            );
+        assert!(owner == MEMBER);
+        assert!(provider_mask == identity_registry::provider_world_id());
+        assert!(verified_at_ms == NOW_MS);
+        assert!(expires_at_ms == EXPIRES_AT_MS);
         assert!(terms_version == TERMS_VERSION);
         assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
         identity_registry::assert_duplicate_key_bound_to_pass(
             &identity_registry,
-            &pass,
+            pass_lineage_id,
             identity_registry::provider_world_id(),
             rust_fixture_world_id_duplicate_key_hash(),
         );
@@ -199,8 +192,9 @@ fun signed_identity_result_wrong_membership_is_rejected_at_public_accessor() {
     submit_mutated_step5_kyc_result(MEMBERSHIP_ID_OFFSET, 0x73, step5_wrong_membership_signature());
 }
 
-#[test, expected_failure(abort_code = identity_registry::EOwnerMismatch)]
+#[test, expected_failure(abort_code = membership::ERegistryRecordNotFound)]
 fun signed_identity_result_wrong_owner_is_rejected_at_public_accessor() {
+    // owner 改ざん → owner から lineage を引けず ERegistryRecordNotFound で abort
     submit_mutated_step5_kyc_result(OWNER_OFFSET, 0x1b, step5_wrong_owner_signature());
 }
 
@@ -214,21 +208,10 @@ fun signed_identity_result_verified_false_is_rejected_at_public_accessor() {
     submit_mutated_step5_kyc_result(VERIFIED_OFFSET, 0, step5_verified_false_signature());
 }
 
-#[test, expected_failure(abort_code = membership::EIdentityTermsVersionMismatch)]
-fun signed_identity_result_terms_mismatch_is_rejected_at_public_accessor() {
-    submit_mutated_step5_kyc_result(TERMS_VERSION_OFFSET, 8, step5_terms_mismatch_signature());
-}
+// terms_mismatch / statement_hash_mismatch テストは STEP3 設計で削除:
+// 新設計では payload 値をそのまま registry record に記録し、register 値との照合を行わない。
 
-#[test, expected_failure(abort_code = membership::EIdentitySignedStatementHashMismatch)]
-fun signed_identity_result_statement_hash_mismatch_is_rejected_at_public_accessor() {
-    submit_mutated_step5_kyc_result(
-        SIGNED_STATEMENT_HASH_OFFSET,
-        0x77,
-        step5_statement_hash_mismatch_signature(),
-    );
-}
-
-#[test, expected_failure(abort_code = membership::EIdentityProviderReplay)]
+#[test, expected_failure(abort_code = identity_registry::EIdentityProviderReplay)]
 fun signed_identity_result_replay_is_rejected_at_public_accessor() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NOW_MS);
@@ -707,7 +690,8 @@ fun submit_identity_result_for_key(
         let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
         let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        let mut pass = test_scenario::take_from_address<membership::MembershipPass>(
+        // pass は payload 構築（membership_id 取得）のためだけに take する。accessor には渡さない。
+        let pass = test_scenario::take_from_address<membership::MembershipPass>(
             scenario,
             MEMBER,
         );
@@ -724,7 +708,6 @@ fun submit_identity_result_for_key(
             &mut identity_registry,
             &membership_registry,
             &verifier_registry,
-            &mut pass,
             clock,
             payload_bcs,
             signature,
@@ -732,21 +715,15 @@ fun submit_identity_result_for_key(
             scenario.ctx(),
         );
 
-        let (
-            _account_created_at_ms,
-            _home_cell,
-            _home_cell_registered_at_ms,
-            identity_verified,
-            identity_provider_mask,
-            identity_verified_at_ms,
-            identity_expires_at_ms,
-            terms_version,
-            signed_statement_hash,
-        ) = membership::membership_pass_mvp_summary(&pass);
-        assert!(identity_verified);
-        assert!(identity_provider_mask == provider);
-        assert!(identity_verified_at_ms == NOW_MS);
-        assert!(identity_expires_at_ms == EXPIRES_AT_MS);
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        let (_, provider_mask, verified_at_ms, expires_at_ms, terms_version, signed_statement_hash) =
+            identity_registry::identity_verification_record_for_testing(
+                &identity_registry,
+                pass_lineage_id,
+            );
+        assert!(provider_mask == provider);
+        assert!(verified_at_ms == NOW_MS);
+        assert!(expires_at_ms == EXPIRES_AT_MS);
         assert!(terms_version == TERMS_VERSION);
         assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
 
@@ -792,7 +769,8 @@ fun submit_mutated_identity_result_for_key(
         let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
         let membership_registry = scenario.take_shared<membership::MembershipRegistry>();
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
-        let mut pass = test_scenario::take_from_address<membership::MembershipPass>(
+        // pass は payload 構築（membership_id 取得）のためだけに take する。accessor には渡さない。
+        let pass = test_scenario::take_from_address<membership::MembershipPass>(
             scenario,
             MEMBER,
         );
@@ -810,7 +788,6 @@ fun submit_mutated_identity_result_for_key(
             &mut identity_registry,
             &membership_registry,
             &verifier_registry,
-            &mut pass,
             clock,
             payload_bcs,
             signature,
@@ -923,12 +900,4 @@ fun step5_wrong_provider_signature(): vector<u8> {
 
 fun step5_verified_false_signature(): vector<u8> {
     x"c87b5c04fe879623dc884af9975061b4884aa6041ff1c3e8e510c46269050c520e0873ae68cf96d0d5b4c6c89dadd997796fad150946567e3c13c7b5363bbe06"
-}
-
-fun step5_terms_mismatch_signature(): vector<u8> {
-    x"c779c31ada6c17fb833ec8871da48c20a97b01619fecd4a3452a6d3716a536222049370505c7c43cc3b4c5acc5810c9ee8b4bd0818fab5d23c5fdf6ca5170a07"
-}
-
-fun step5_statement_hash_mismatch_signature(): vector<u8> {
-    x"50488632dda2b7a7eec5624beeeac356aae5ec545daa6544c4998a4ec8c4c55222b07752320bd1eea59c0072e37a74d95b8034248e3d43ed6a719d25f7a57006"
 }

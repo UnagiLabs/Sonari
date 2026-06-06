@@ -34,13 +34,83 @@ const KYC_DUPLICATE_KEY_HASH: vector<u8> =
 const WORLD_ID_DUPLICATE_KEY_HASH: vector<u8> =
     x"9999999999999999999999999999999999999999999999999999999999999999";
 
-#[test, expected_failure(abort_code = claim::EUnverifiedMembership)]
+#[test, expected_failure(abort_code = identity_registry::EIdentityRecordNotFound)]
 fun disaster_claim_rejects_unverified_membership() {
     let mut clock = clock::create_for_testing(&mut tx_context::dummy());
     clock.set_for_testing(NINETY_ONE_DAYS_MS);
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_clock(&mut scenario, &clock);
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityVerificationExpired)]
+fun disaster_claim_rejects_expired_identity_record() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    // expires_at_ms を claim 時刻(NINETY_ONE_DAYS_MS)以下にして期限切れにする
+    verify_member_with_expired_record(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+        NINETY_ONE_DAYS_MS - 1, // expires_at_ms < now_ms ではなく now_ms >= expires_at_ms
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    execute_disaster_claim_with_clock(&mut scenario, &clock);
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityProviderNotVerified)]
+fun disaster_claim_rejects_provider_mismatch() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    // KYC で record を書くが、claim 時は WORLD_ID provider を指定
+    verify_member_with_provider(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
+    test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
+    create_disaster_claim_objects(&mut scenario);
+
+    // dedup も WORLD_ID で bind して dedup チェックは通過させた上で provider チェックで落とす
+    // assert_identity_verified が dedup より先なので provider 不一致で落ちる
+    execute_disaster_claim_with_identity(
+        &mut scenario,
+        identity_registry::provider_world_id(),
+        KYC_DUPLICATE_KEY_HASH, // dedup key は KYC で bind 済みなので通過しない
+    );
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityRecordOwnerMismatch)]
+fun disaster_claim_rejects_owner_mismatch() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(NINETY_ONE_DAYS_MS);
+    let mut scenario = initialized();
+    fund_pools_directly(&mut scenario);
+    register_member(&mut scenario);
+    // record の owner を別アドレスにして owner 不一致を起こす
+    verify_member_with_wrong_owner(
+        &mut scenario,
+        identity_registry::provider_kyc(),
+        KYC_DUPLICATE_KEY_HASH,
+    );
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
@@ -458,11 +528,12 @@ fun disaster_claim_rejects_missing_duplicate_key_binding() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = identity_registry::EIdentityKeyNotBound)]
+#[test, expected_failure(abort_code = identity_registry::EIdentityProviderNotVerified)]
 fun disaster_claim_rejects_duplicate_key_with_wrong_provider() {
     let mut scenario = initialized();
     fund_pools_directly(&mut scenario);
     register_member(&mut scenario);
+    // KYC で record + dedup を書く
     verify_member_with_provider(
         &mut scenario,
         identity_registry::provider_kyc(),
@@ -471,6 +542,7 @@ fun disaster_claim_rejects_duplicate_key_with_wrong_provider() {
     test_scenario::later_epoch(&mut scenario, NINETY_ONE_DAYS_MS, ADMIN);
     create_disaster_claim_objects(&mut scenario);
 
+    // WORLD_ID provider で claim → assert_identity_verified で EIdentityProviderNotVerified
     execute_disaster_claim_with_identity(
         &mut scenario,
         identity_registry::provider_world_id(),
@@ -603,15 +675,17 @@ fun verify_member_with_provider(
     scenario.next_tx(MEMBER);
     {
         let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
-        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
         identity_registry::bind_duplicate_key(
             &mut identity_registry,
-            &pass,
+            membership::membership_pass_lineage_id(&pass),
             provider,
             duplicate_key_hash,
         );
-        membership::apply_identity_verification(
-            &mut pass,
+        identity_registry::record_identity_verification(
+            &mut identity_registry,
+            membership::membership_pass_lineage_id(&pass),
+            membership::membership_pass_owner(&pass),
             provider,
             1,
             CLAIM_WINDOW_END_MS + 1,
@@ -623,21 +697,91 @@ fun verify_member_with_provider(
     };
 }
 
-fun mark_member_identity_verified_without_binding(
+fun verify_member_with_expired_record(
     scenario: &mut test_scenario::Scenario,
     provider: u8,
+    duplicate_key_hash: vector<u8>,
+    expires_at_ms: u64,
 ) {
     scenario.next_tx(MEMBER);
     {
-        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
-        membership::apply_identity_verification(
-            &mut pass,
+        let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        identity_registry::bind_duplicate_key(
+            &mut identity_registry,
+            membership::membership_pass_lineage_id(&pass),
+            provider,
+            duplicate_key_hash,
+        );
+        identity_registry::record_identity_verification(
+            &mut identity_registry,
+            membership::membership_pass_lineage_id(&pass),
+            membership::membership_pass_owner(&pass),
+            provider,
+            1,
+            expires_at_ms,
+            0,
+            b"",
+        );
+        test_scenario::return_shared(identity_registry);
+        scenario.return_to_sender(pass);
+    };
+}
+
+fun verify_member_with_wrong_owner(
+    scenario: &mut test_scenario::Scenario,
+    provider: u8,
+    duplicate_key_hash: vector<u8>,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        let other_pass = membership::create_pass_for_testing(@0xBAD, scenario.ctx());
+        // dedup は MEMBER の pass_lineage_id で bind（dedup チェックは通過させる）
+        identity_registry::bind_duplicate_key(
+            &mut identity_registry,
+            membership::membership_pass_lineage_id(&pass),
+            provider,
+            duplicate_key_hash,
+        );
+        // record は別 owner アドレスで書く（owner 不一致を起こす）
+        identity_registry::record_identity_verification(
+            &mut identity_registry,
+            membership::membership_pass_lineage_id(&pass),
+            @0xBAD, // 別アドレス（MEMBER とは異なる）
             provider,
             1,
             CLAIM_WINDOW_END_MS + 1,
             0,
             b"",
         );
+        membership::destroy_pass_for_testing(other_pass);
+        test_scenario::return_shared(identity_registry);
+        scenario.return_to_sender(pass);
+    };
+}
+
+fun mark_member_identity_verified_without_binding(
+    scenario: &mut test_scenario::Scenario,
+    provider: u8,
+) {
+    scenario.next_tx(MEMBER);
+    {
+        let mut identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        // dedup binding は作らず、record だけ書く
+        identity_registry::record_identity_verification(
+            &mut identity_registry,
+            membership::membership_pass_lineage_id(&pass),
+            membership::membership_pass_owner(&pass),
+            provider,
+            1,
+            CLAIM_WINDOW_END_MS + 1,
+            0,
+            b"",
+        );
+        test_scenario::return_shared(identity_registry);
         scenario.return_to_sender(pass);
     };
 }
@@ -653,7 +797,7 @@ fun bind_duplicate_key_to_other_pass(
         let other_pass = membership::create_pass_for_testing(@0xC0FFEE, scenario.ctx());
         identity_registry::bind_duplicate_key(
             &mut identity_registry,
-            &other_pass,
+            membership::membership_pass_lineage_id(&other_pass),
             provider,
             duplicate_key_hash,
         );

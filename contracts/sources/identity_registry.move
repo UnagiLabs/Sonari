@@ -1,7 +1,7 @@
 module contracts::identity_registry;
 
 use contracts::identity_result_v1::{Self, IdentityVerificationResult};
-use contracts::membership::{Self, MembershipPass};
+use contracts::membership;
 use sui::address;
 use sui::dynamic_field;
 use sui::event;
@@ -17,6 +17,12 @@ const EIdentityRegistryMismatch: u64 = 2;
 const EMembershipIdMismatch: u64 = 3;
 const EOwnerMismatch: u64 = 4;
 const EIdentityKeyNotBound: u64 = 5;
+const EIdentityProviderReplay: u64 = 6;
+const EIdentityRecordNotFound: u64 = 7;
+const EIdentityRecordOwnerMismatch: u64 = 8;
+const EIdentityVerificationExpired: u64 = 9;
+const EIdentityProviderNotVerified: u64 = 10;
+const EMembershipRecordNotActive: u64 = 11;
 
 public struct IdentityRegistry has key {
     id: UID,
@@ -26,6 +32,15 @@ public struct IdentityRegistry has key {
 public struct IdentityKey has copy, drop, store {
     provider: u8,
     duplicate_key_hash: vector<u8>,
+}
+
+public struct IdentityVerificationRecord has copy, drop, store {
+    owner: address,
+    provider_mask: u8,
+    verified_at_ms: u64,
+    expires_at_ms: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
 }
 
 public struct RegistryCreated has copy, drop {
@@ -50,12 +65,11 @@ public(package) fun create_identity_registry(ctx: &mut TxContext): ID {
 
 public(package) fun bind_duplicate_key(
     registry: &mut IdentityRegistry,
-    pass: &MembershipPass,
+    pass_lineage_id: ID,
     provider: u8,
     duplicate_key_hash: vector<u8>,
 ) {
     assert_known_provider(provider);
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
     let key = IdentityKey {
         provider,
         duplicate_key_hash,
@@ -72,12 +86,11 @@ public(package) fun bind_duplicate_key(
 
 public(package) fun assert_duplicate_key_bound_to_pass(
     registry: &IdentityRegistry,
-    pass: &MembershipPass,
+    pass_lineage_id: ID,
     provider: u8,
     duplicate_key_hash: vector<u8>,
 ) {
     assert_known_provider(provider);
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
     let key = IdentityKey {
         provider,
         duplicate_key_hash,
@@ -93,41 +106,105 @@ public(package) fun assert_duplicate_key_bound_to_pass(
 public(package) fun apply_identity_verification_result(
     registry: &mut IdentityRegistry,
     membership_registry: &membership::MembershipRegistry,
-    pass: &mut MembershipPass,
     result: &IdentityVerificationResult,
     applied_at_ms: u64,
 ) {
+    // 1. registry_id 照合
     let registry_id = object::id(registry);
     assert!(
         identity_result_v1::registry_id(result) == object::id_to_bytes(&registry_id),
         EIdentityRegistryMismatch,
     );
-    let pass_id = object::id(pass);
+    // 2. payload の owner(vector<u8>) を address に変換
+    let owner_addr = address::from_bytes(identity_result_v1::owner(result));
+    // 3. owner から lineage を解決（owner 未登録なら membership 側 ERegistryRecordNotFound で abort）
+    let lineage = membership::membership_owner_lineage_id(membership_registry, owner_addr);
+    // 4. record summary を取得
+    let (_rec_lineage, current_pass_id, current_owner, status, _issued, _updated) =
+        membership::membership_record_summary(membership_registry, lineage);
+    // 5. membership_id 照合
     assert!(
-        identity_result_v1::membership_id(result) == object::id_to_bytes(&pass_id),
+        identity_result_v1::membership_id(result) == object::id_to_bytes(&current_pass_id),
         EMembershipIdMismatch,
     );
-    let pass_owner = membership::membership_pass_owner(pass);
-    assert!(
-        identity_result_v1::owner(result) == address::to_bytes(pass_owner),
-        EOwnerMismatch,
-    );
-
-    membership::assert_current_pass_precheck(membership_registry, pass, pass_owner);
+    // 6. owner 整合（防御的）
+    assert!(current_owner == owner_addr, EOwnerMismatch);
+    // 7. status active 確認
+    assert!(status == membership::status_active(), EMembershipRecordNotActive);
+    // 8. dedup 登録
     bind_duplicate_key(
         registry,
-        pass,
+        lineage,
         identity_result_v1::provider(result),
         identity_result_v1::duplicate_key_hash(result),
     );
-    membership::apply_identity_verification(
-        pass,
+    // 9. record 保存
+    record_identity_verification(
+        registry,
+        lineage,
+        owner_addr,
         identity_result_v1::provider(result),
         applied_at_ms,
         identity_result_v1::expires_at_ms(result),
         identity_result_v1::terms_version(result),
         identity_result_v1::signed_statement_hash(result),
     );
+}
+
+public(package) fun record_identity_verification(
+    registry: &mut IdentityRegistry,
+    pass_lineage_id: ID,
+    owner: address,
+    provider: u8,
+    verified_at_ms: u64,
+    expires_at_ms: u64,
+    terms_version: u64,
+    signed_statement_hash: vector<u8>,
+) {
+    assert_known_provider(provider);
+    if (dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id)) {
+        let record = dynamic_field::borrow_mut<ID, IdentityVerificationRecord>(
+            &mut registry.id,
+            pass_lineage_id,
+        );
+        assert!(record.owner == owner, EIdentityRecordOwnerMismatch);
+        assert!(record.provider_mask & provider == 0, EIdentityProviderReplay);
+        record.provider_mask = record.provider_mask + provider;
+        record.verified_at_ms = verified_at_ms;
+        record.expires_at_ms = expires_at_ms;
+        record.terms_version = terms_version;
+        record.signed_statement_hash = signed_statement_hash;
+    } else {
+        dynamic_field::add(
+            &mut registry.id,
+            pass_lineage_id,
+            IdentityVerificationRecord {
+                owner,
+                provider_mask: provider,
+                verified_at_ms,
+                expires_at_ms,
+                terms_version,
+                signed_statement_hash,
+            },
+        );
+    };
+}
+
+public(package) fun assert_identity_verified(
+    registry: &IdentityRegistry,
+    pass_lineage_id: ID,
+    owner: address,
+    provider: u8,
+    now_ms: u64,
+) {
+    assert!(
+        dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id),
+        EIdentityRecordNotFound,
+    );
+    let record = dynamic_field::borrow<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id);
+    assert!(record.owner == owner, EIdentityRecordOwnerMismatch);
+    assert!(record.provider_mask & provider != 0, EIdentityProviderNotVerified);
+    assert!(now_ms < record.expires_at_ms, EIdentityVerificationExpired);
 }
 
 public(package) fun registry_id(registry: &IdentityRegistry): ID {
@@ -214,6 +291,38 @@ public fun remove_binding_for_testing(
     );
     let _ = dynamic_field::remove<IdentityKey, ID>(&mut registry.id, key);
     registry.binding_count = registry.binding_count - 1;
+}
+
+#[test_only]
+public fun identity_verification_record_for_testing(
+    registry: &IdentityRegistry,
+    pass_lineage_id: ID,
+): (address, u8, u64, u64, u64, vector<u8>) {
+    assert!(
+        dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id),
+        EIdentityRecordNotFound,
+    );
+    let record = dynamic_field::borrow<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id);
+    (
+        record.owner,
+        record.provider_mask,
+        record.verified_at_ms,
+        record.expires_at_ms,
+        record.terms_version,
+        record.signed_statement_hash,
+    )
+}
+
+#[test_only]
+public fun remove_identity_record_for_testing(
+    registry: &mut IdentityRegistry,
+    pass_lineage_id: ID,
+) {
+    assert!(
+        dynamic_field::exists_with_type<ID, IdentityVerificationRecord>(&registry.id, pass_lineage_id),
+        EIdentityRecordNotFound,
+    );
+    let _ = dynamic_field::remove<ID, IdentityVerificationRecord>(&mut registry.id, pass_lineage_id);
 }
 
 #[test_only]

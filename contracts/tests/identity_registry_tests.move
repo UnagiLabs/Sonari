@@ -18,18 +18,19 @@ const EVIDENCE_HASH: vector<u8> =
     x"5555555555555555555555555555555555555555555555555555555555555555";
 const SIGNED_STATEMENT_HASH: vector<u8> =
     x"6666666666666666666666666666666666666666666666666666666666666666";
-const OTHER_SIGNED_STATEMENT_HASH: vector<u8> =
-    x"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const TERMS_VERSION: u64 = 7;
 const NOW_MS: u64 = 1_800_000_000_000;
 const ISSUED_AT_MS: u64 = 1_800_000_000_000;
 const APPLY_TIME_MS: u64 = 1_800_000_010_000;
 const EXPIRES_AT_MS: u64 = 1_831_536_000_000;
 
+// ── STEP 3: apply without pass ──────────────────────────────────────────────
+
 #[test]
-fun decoded_kyc_result_updates_membership_pass_identity_fields() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+fun decoded_kyc_result_updates_identity_registry_record() {
+    let (mut registry, membership_registry, pass) = setup_step3();
     let pass_id = object::id(&pass);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
     let result = decoded_result(
         object::id(&registry),
         pass_id,
@@ -43,46 +44,35 @@ fun decoded_kyc_result_updates_membership_pass_identity_fields() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
 
-    let (
-        _account_created_at_ms,
-        _home_cell,
-        _home_cell_registered_at_ms,
-        identity_verified,
-        identity_provider_mask,
-        identity_verified_at_ms,
-        identity_expires_at_ms,
-        terms_version,
-        signed_statement_hash,
-    ) = membership::membership_pass_mvp_summary(&pass);
-    assert!(identity_verified);
-    assert!(identity_provider_mask == identity_registry::provider_kyc());
-    assert!(identity_verified_at_ms == APPLY_TIME_MS);
-    assert!(identity_expires_at_ms == EXPIRES_AT_MS);
+    let (owner, provider_mask, verified_at_ms, expires_at_ms, terms_version, signed_statement_hash) =
+        identity_registry::identity_verification_record_for_testing(&registry, pass_lineage_id);
+    assert!(owner == MEMBER);
+    assert!(provider_mask == identity_registry::provider_kyc());
+    assert!(verified_at_ms == APPLY_TIME_MS);
+    assert!(expires_at_ms == EXPIRES_AT_MS);
     assert!(terms_version == TERMS_VERSION);
     assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
-    let (_, provider_label) = membership::membership_pass_display_labels(&pass);
-    assert!(provider_label == b"KYC".to_string());
     assert!(identity_registry::binding_count_for_testing(&registry) == 1);
     assert!(
         identity_registry::bound_pass_lineage_id_for_testing(
             &registry,
             identity_registry::provider_kyc(),
             RESULT_DUPLICATE_KEY_HASH,
-        ) == membership::membership_pass_lineage_id(&pass),
+        ) == pass_lineage_id,
     );
 
     cleanup_step3(registry, membership_registry, pass, MEMBER);
 }
 
 #[test]
-fun decoded_world_id_result_accumulates_provider_mask() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+fun decoded_world_id_result_accumulates_provider_mask_in_registry_record() {
+    let (mut registry, membership_registry, pass) = setup_step3();
     let pass_id = object::id(&pass);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
     let kyc_result = decoded_result(
         object::id(&registry),
         pass_id,
@@ -105,36 +95,60 @@ fun decoded_world_id_result_accumulates_provider_mask() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &kyc_result,
         APPLY_TIME_MS,
     );
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &world_id_result,
         APPLY_TIME_MS + 1,
     );
 
-    let (_, _, _, identity_verified, identity_provider_mask, identity_verified_at_ms, _, _, _) =
-        membership::membership_pass_mvp_summary(&pass);
-    assert!(identity_verified);
+    let (_, provider_mask, verified_at_ms, _, _, _) =
+        identity_registry::identity_verification_record_for_testing(&registry, pass_lineage_id);
     assert!(
-        identity_provider_mask ==
-            identity_registry::provider_kyc() + identity_registry::provider_world_id(),
+        provider_mask == identity_registry::provider_kyc() + identity_registry::provider_world_id(),
     );
-    let (_, provider_label) = membership::membership_pass_display_labels(&pass);
-    assert!(provider_label == b"KYC + World ID".to_string());
-    assert!(identity_verified_at_ms == APPLY_TIME_MS + 1);
+    assert!(verified_at_ms == APPLY_TIME_MS + 1);
     assert!(identity_registry::binding_count_for_testing(&registry) == 2);
 
     cleanup_step3_with_two_bindings(registry, membership_registry, pass, MEMBER);
 }
 
+#[test]
+fun terms_version_and_signed_statement_hash_are_stored_in_registry_record() {
+    let (mut registry, membership_registry, pass) = setup_step3();
+    let pass_id = object::id(&pass);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+    let result = decoded_result(
+        object::id(&registry),
+        pass_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        RESULT_DUPLICATE_KEY_HASH,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::apply_identity_verification_result(
+        &mut registry,
+        &membership_registry,
+        &result,
+        APPLY_TIME_MS,
+    );
+
+    let (_, _, _, _, terms_version, signed_statement_hash) =
+        identity_registry::identity_verification_record_for_testing(&registry, pass_lineage_id);
+    assert!(terms_version == TERMS_VERSION);
+    assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
+
+    cleanup_step3(registry, membership_registry, pass, MEMBER);
+}
+
 #[test, expected_failure(abort_code = identity_registry::EIdentityRegistryMismatch)]
 fun decoded_result_rejects_wrong_identity_registry() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+    let (mut registry, membership_registry, pass) = setup_step3();
     let result = decoded_result(
         object::id(&pass),
         object::id(&pass),
@@ -148,7 +162,6 @@ fun decoded_result_rejects_wrong_identity_registry() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
@@ -158,7 +171,7 @@ fun decoded_result_rejects_wrong_identity_registry() {
 
 #[test, expected_failure(abort_code = identity_registry::EMembershipIdMismatch)]
 fun decoded_result_rejects_wrong_membership_id() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+    let (mut registry, membership_registry, pass) = setup_step3();
     let (other_membership_registry, other_pass) = setup_other_step3_pass();
     let result = decoded_result(
         object::id(&registry),
@@ -173,7 +186,6 @@ fun decoded_result_rejects_wrong_membership_id() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
@@ -187,28 +199,23 @@ fun decoded_result_rejects_wrong_membership_id() {
     membership::destroy_pass_for_testing(other_pass);
 }
 
-#[test, expected_failure(abort_code = membership::ERegistryPassMismatch)]
-fun decoded_result_rejects_pass_that_is_not_membership_registry_current_sbt() {
-    let (mut registry, mut membership_registry, mut pass) = setup_step3();
+#[test, expected_failure(abort_code = membership::ERegistryRecordNotFound)]
+fun decoded_result_rejects_unregistered_owner() {
+    // owner が membership_registry に未登録 → lineage 解決で abort する
+    let (mut registry, membership_registry, pass) = setup_step3();
     let result = decoded_result(
         object::id(&registry),
         object::id(&pass),
-        MEMBER,
+        OTHER, // OTHER は membership_registry に登録されていない
         identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
         SIGNED_STATEMENT_HASH,
     );
-    membership::set_current_pass_id_for_testing(
-        &mut membership_registry,
-        membership::membership_pass_lineage_id(&pass),
-        object::id(&registry),
-    );
 
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
@@ -216,13 +223,52 @@ fun decoded_result_rejects_pass_that_is_not_membership_registry_current_sbt() {
     cleanup_step3(registry, membership_registry, pass, MEMBER);
 }
 
-#[test, expected_failure(abort_code = identity_registry::EOwnerMismatch)]
-fun decoded_result_rejects_wrong_owner() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+#[test, expected_failure(abort_code = identity_registry::EMembershipIdMismatch)]
+fun decoded_result_rejects_wrong_membership_id_owner_registered() {
+    // owner は registered だが pass_id が別の pass を指す
+    let (mut registry, membership_registry, pass) = setup_step3();
+    let (other_membership_registry, other_pass) = setup_other_step3_pass();
+    // MEMBER で登録されているが、other_pass の ID を指す
     let result = decoded_result(
         object::id(&registry),
-        object::id(&pass),
+        object::id(&other_pass),
+        MEMBER,
+        identity_registry::provider_kyc(),
+        RESULT_DUPLICATE_KEY_HASH,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::apply_identity_verification_result(
+        &mut registry,
+        &membership_registry,
+        &result,
+        APPLY_TIME_MS,
+    );
+
+    cleanup_step3(registry, membership_registry, pass, MEMBER);
+    membership::destroy_membership_registry_for_testing(
+        other_membership_registry,
         OTHER,
+        membership::membership_pass_lineage_id(&other_pass),
+    );
+    membership::destroy_pass_for_testing(other_pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EMembershipRecordNotActive)]
+fun decoded_result_rejects_non_active_membership_record() {
+    let (mut registry, mut membership_registry, pass) = setup_step3();
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+    // registry record を非 active に変更
+    membership::set_membership_record_status_for_testing(
+        &mut membership_registry,
+        pass_lineage_id,
+        membership::status_suspended(),
+    );
+    let result = decoded_result(
+        object::id(&registry),
+        object::id(&pass),
+        MEMBER,
         identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
         TERMS_VERSION,
@@ -232,55 +278,6 @@ fun decoded_result_rejects_wrong_owner() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
-        &result,
-        APPLY_TIME_MS,
-    );
-
-    cleanup_step3(registry, membership_registry, pass, MEMBER);
-}
-
-#[test, expected_failure(abort_code = membership::EIdentityTermsVersionMismatch)]
-fun decoded_result_rejects_terms_version_mismatch() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
-    let result = decoded_result(
-        object::id(&registry),
-        object::id(&pass),
-        MEMBER,
-        identity_registry::provider_kyc(),
-        RESULT_DUPLICATE_KEY_HASH,
-        TERMS_VERSION + 1,
-        SIGNED_STATEMENT_HASH,
-    );
-
-    identity_registry::apply_identity_verification_result(
-        &mut registry,
-        &membership_registry,
-        &mut pass,
-        &result,
-        APPLY_TIME_MS,
-    );
-
-    cleanup_step3(registry, membership_registry, pass, MEMBER);
-}
-
-#[test, expected_failure(abort_code = membership::EIdentitySignedStatementHashMismatch)]
-fun decoded_result_rejects_signed_statement_hash_mismatch() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
-    let result = decoded_result(
-        object::id(&registry),
-        object::id(&pass),
-        MEMBER,
-        identity_registry::provider_kyc(),
-        RESULT_DUPLICATE_KEY_HASH,
-        TERMS_VERSION,
-        OTHER_SIGNED_STATEMENT_HASH,
-    );
-
-    identity_registry::apply_identity_verification_result(
-        &mut registry,
-        &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
@@ -290,11 +287,11 @@ fun decoded_result_rejects_signed_statement_hash_mismatch() {
 
 #[test, expected_failure(abort_code = identity_registry::EIdentityKeyAlreadyBound)]
 fun decoded_result_rejects_duplicate_key_bound_to_another_sbt() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+    let (mut registry, membership_registry, pass) = setup_step3();
     let (other_membership_registry, other_pass) = setup_other_step3_pass();
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
@@ -311,7 +308,6 @@ fun decoded_result_rejects_duplicate_key_bound_to_another_sbt() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
@@ -320,9 +316,9 @@ fun decoded_result_rejects_duplicate_key_bound_to_another_sbt() {
     cleanup_other_step3_pass(other_membership_registry, other_pass);
 }
 
-#[test, expected_failure(abort_code = membership::EIdentityProviderReplay)]
+#[test, expected_failure(abort_code = identity_registry::EIdentityProviderReplay)]
 fun decoded_result_rejects_replay_for_same_provider() {
-    let (mut registry, membership_registry, mut pass) = setup_step3();
+    let (mut registry, membership_registry, pass) = setup_step3();
     let result = decoded_result(
         object::id(&registry),
         object::id(&pass),
@@ -336,14 +332,12 @@ fun decoded_result_rejects_replay_for_same_provider() {
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS,
     );
     identity_registry::apply_identity_verification_result(
         &mut registry,
         &membership_registry,
-        &mut pass,
         &result,
         APPLY_TIME_MS + 1,
     );
@@ -351,19 +345,21 @@ fun decoded_result_rejects_replay_for_same_provider() {
     cleanup_step3(registry, membership_registry, pass, MEMBER);
 }
 
+// ── bind_duplicate_key / assert_duplicate_key_bound_to_pass ─────────────────
+
 #[test, expected_failure(abort_code = identity_registry::EIdentityKeyAlreadyBound)]
 fun kyc_duplicate_key_rejects_different_pass() {
     let (mut registry, pass, other_pass) = setup();
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -377,13 +373,13 @@ fun world_id_duplicate_key_rejects_different_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
@@ -397,13 +393,13 @@ fun same_hash_across_providers_is_allowed() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
@@ -443,13 +439,13 @@ fun same_key_same_pass_is_idempotent() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -477,13 +473,13 @@ fun duplicate_key_binding_check_accepts_same_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -502,7 +498,7 @@ fun duplicate_key_binding_check_rejects_missing_key() {
 
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -516,13 +512,13 @@ fun duplicate_key_binding_check_rejects_different_pass() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &other_pass,
+        membership::membership_pass_lineage_id(&other_pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
@@ -536,13 +532,13 @@ fun duplicate_key_binding_check_rejects_wrong_provider() {
 
     identity_registry::bind_duplicate_key(
         &mut registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_kyc(),
         DUPLICATE_KEY_HASH,
     );
     identity_registry::assert_duplicate_key_bound_to_pass(
         &registry,
-        &pass,
+        membership::membership_pass_lineage_id(&pass),
         identity_registry::provider_world_id(),
         DUPLICATE_KEY_HASH,
     );
@@ -554,6 +550,259 @@ fun duplicate_key_binding_check_rejects_wrong_provider() {
     );
     cleanup(registry, pass, other_pass);
 }
+
+// ── STEP 1: IdentityVerificationRecord tests ────────────────────────────────
+
+const VERIFIED_AT_MS: u64 = 1_800_000_005_000;
+
+#[test]
+fun record_identity_verification_stores_and_reads_back() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    let (owner, provider_mask, verified_at_ms, expires_at_ms, terms_version, signed_statement_hash) =
+        identity_registry::identity_verification_record_for_testing(&registry, pass_lineage_id);
+    assert!(owner == MEMBER);
+    assert!(provider_mask == identity_registry::provider_kyc());
+    assert!(verified_at_ms == VERIFIED_AT_MS);
+    assert!(expires_at_ms == EXPIRES_AT_MS);
+    assert!(terms_version == TERMS_VERSION);
+    assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
+    assert!(identity_registry::binding_count_for_testing(&registry) == 0); // record は binding_count に影響しない
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test]
+fun record_identity_verification_second_provider_accumulates_mask() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_world_id(),
+        VERIFIED_AT_MS + 1,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    let (_, provider_mask, verified_at_ms, _, _, _) =
+        identity_registry::identity_verification_record_for_testing(&registry, pass_lineage_id);
+    assert!(provider_mask == identity_registry::provider_kyc() + identity_registry::provider_world_id());
+    assert!(verified_at_ms == VERIFIED_AT_MS + 1);
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityProviderReplay)]
+fun record_identity_verification_rejects_same_provider_replay() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS + 1,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test]
+fun assert_identity_verified_passes_for_valid_record() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::assert_identity_verified(
+        &registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS + 1, // now_ms < expires_at_ms
+    );
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityRecordNotFound)]
+fun assert_identity_verified_rejects_missing_record() {
+    let mut ctx = tx_context::dummy();
+    let registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::assert_identity_verified(
+        &registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+    );
+
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityRecordOwnerMismatch)]
+fun assert_identity_verified_rejects_owner_mismatch() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::assert_identity_verified(
+        &registry,
+        pass_lineage_id,
+        OTHER, // wrong owner
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS + 1,
+    );
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityProviderNotVerified)]
+fun assert_identity_verified_rejects_provider_not_in_mask() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::assert_identity_verified(
+        &registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_world_id(), // not registered
+        VERIFIED_AT_MS + 1,
+    );
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+#[test, expected_failure(abort_code = identity_registry::EIdentityVerificationExpired)]
+fun assert_identity_verified_rejects_expired_record() {
+    let mut ctx = tx_context::dummy();
+    let mut registry = identity_registry::create_identity_registry_for_testing(&mut ctx);
+    let pass = membership::create_pass_for_testing(MEMBER, &mut ctx);
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+    identity_registry::record_identity_verification(
+        &mut registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        VERIFIED_AT_MS,
+        EXPIRES_AT_MS,
+        TERMS_VERSION,
+        SIGNED_STATEMENT_HASH,
+    );
+
+    identity_registry::assert_identity_verified(
+        &registry,
+        pass_lineage_id,
+        MEMBER,
+        identity_registry::provider_kyc(),
+        EXPIRES_AT_MS, // now_ms == expires_at_ms → expired
+    );
+
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
+    identity_registry::destroy_identity_registry_for_testing(registry);
+    membership::destroy_pass_for_testing(pass);
+}
+
+// ── End of STEP 1 tests ─────────────────────────────────────────────────────
 
 fun setup(): (
     identity_registry::IdentityRegistry,
@@ -609,16 +858,18 @@ fun cleanup_step3(
     pass: membership::MembershipPass,
     owner: address,
 ) {
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
     identity_registry::remove_binding_for_testing(
         &mut registry,
         identity_registry::provider_kyc(),
         RESULT_DUPLICATE_KEY_HASH,
     );
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
     identity_registry::destroy_identity_registry_for_testing(registry);
     membership::destroy_membership_registry_for_testing(
         membership_registry,
         owner,
-        membership::membership_pass_lineage_id(&pass),
+        pass_lineage_id,
     );
     membership::destroy_pass_for_testing(pass);
 }
@@ -629,6 +880,7 @@ fun cleanup_step3_with_two_bindings(
     pass: membership::MembershipPass,
     owner: address,
 ) {
+    let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
     identity_registry::remove_binding_for_testing(
         &mut registry,
         identity_registry::provider_kyc(),
@@ -639,11 +891,12 @@ fun cleanup_step3_with_two_bindings(
         identity_registry::provider_world_id(),
         OTHER_DUPLICATE_KEY_HASH,
     );
+    identity_registry::remove_identity_record_for_testing(&mut registry, pass_lineage_id);
     identity_registry::destroy_identity_registry_for_testing(registry);
     membership::destroy_membership_registry_for_testing(
         membership_registry,
         owner,
-        membership::membership_pass_lineage_id(&pass),
+        pass_lineage_id,
     );
     membership::destroy_pass_for_testing(pass);
 }

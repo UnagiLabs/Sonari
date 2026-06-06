@@ -190,7 +190,6 @@ public fun update_identity_verification(
     identity_registry: &mut identity_registry::IdentityRegistry,
     membership_registry: &membership::MembershipRegistry,
     verifier_registry: &metadata_verifier::VerifierRegistry,
-    pass: &mut membership::MembershipPass,
     clock: &Clock,
     payload_bcs: vector<u8>,
     signature: vector<u8>,
@@ -226,7 +225,6 @@ public fun update_identity_verification(
     identity_registry::apply_identity_verification_result(
         identity_registry,
         membership_registry,
-        pass,
         &result,
         now_ms,
     );

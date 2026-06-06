@@ -311,7 +311,6 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               sui_submission: "skipped" | "succeeded" | "failed";
               result: MembershipTeeResult;
               tx_digest?: string | undefined;
-              readback?: IdentityVerificationSubmitSuccess["readback"] | undefined;
           }
         | { job_id: string; attempt?: number | undefined; failed: true }
     );
@@ -735,7 +734,6 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     sui_submission: "succeeded",
                     result: event.result,
                     tx_digest: completedRow?.tx_digest ?? result.value.digest,
-                    readback: result.value.readback,
                 });
             }
             case "mark_failed": {
@@ -1358,7 +1356,6 @@ function readStoredSuiRequest(
                     input.verifierRegistryId,
                     "request.verifierRegistryId",
                 ),
-                membershipPassId: parseHex32(input.membershipPassId, "request.membershipPassId"),
                 clockId: parseString(input.clockId, "request.clockId"),
                 arguments: readStoredSuiRequestArguments(input.arguments),
             },
@@ -1371,19 +1368,20 @@ function readStoredSuiRequest(
 function readStoredSuiRequestArguments(
     input: unknown,
 ): IdentityVerificationDryRunSuccess["request"]["arguments"] {
-    if (!Array.isArray(input) || input.length !== 9) {
-        throw new Error("request.arguments must contain 9 items");
+    // STEP 5: MembershipPass オブジェクトを除外した 8 要素配列
+    // 新順序: [pauseState, identityRegistry, membershipRegistry, verifierRegistry, clock, payload, signature, publicKey]
+    if (!Array.isArray(input) || input.length !== 8) {
+        throw new Error("request.arguments must contain 8 items");
     }
     return [
         parseString(input[0], "request.arguments[0]"),
         parseString(input[1], "request.arguments[1]"),
         parseString(input[2], "request.arguments[2]"),
         parseString(input[3], "request.arguments[3]"),
-        parseHex32(input[4], "request.arguments[4]"),
-        parseString(input[5], "request.arguments[5]"),
+        parseString(input[4], "request.arguments[4]"),
+        readNumberArrayOrThrow(input[5], "request.arguments[5]"),
         readNumberArrayOrThrow(input[6], "request.arguments[6]"),
         readNumberArrayOrThrow(input[7], "request.arguments[7]"),
-        readNumberArrayOrThrow(input[8], "request.arguments[8]"),
     ];
 }
 
@@ -1398,23 +1396,17 @@ function validateStoredSuiRequest(
             return configMatch;
         }
     }
-    if (
-        request.membershipPassId !== signedPayload.membership_id ||
-        request.arguments[4] !== signedPayload.membership_id
-    ) {
-        return relayerSubmitFailed(
-            "Stored Sui dry-run request membership id does not match payload",
-        );
-    }
-    if (!sameNumberArray(request.arguments[6], hexToBytes(signedPayload.payload_bcs_hex))) {
+    // STEP 5: membershipPassId は tx args から除外済み。
+    // membership_id は payload_bcs に含まれ Move 側で照合されるため、ここでの検証は不要。
+    if (!sameNumberArray(request.arguments[5], hexToBytes(signedPayload.payload_bcs_hex))) {
         return relayerSubmitFailed("Stored Sui dry-run request payload bytes do not match payload");
     }
-    if (!sameNumberArray(request.arguments[7], hexToBytes(signedPayload.signature))) {
+    if (!sameNumberArray(request.arguments[6], hexToBytes(signedPayload.signature))) {
         return relayerSubmitFailed(
             "Stored Sui dry-run request signature bytes do not match payload",
         );
     }
-    if (!sameNumberArray(request.arguments[8], hexToBytes(signedPayload.public_key))) {
+    if (!sameNumberArray(request.arguments[7], hexToBytes(signedPayload.public_key))) {
         return relayerSubmitFailed(
             "Stored Sui dry-run request public key bytes do not match payload",
         );
@@ -1439,7 +1431,8 @@ function validateStoredSuiRequestConfig(
         ["arguments[1]", request.arguments[1], config.identityRegistryId],
         ["arguments[2]", request.arguments[2], config.membershipRegistryId],
         ["arguments[3]", request.arguments[3], config.verifierRegistryId],
-        ["arguments[5]", request.arguments[5], config.clockId],
+        // STEP 5: arguments[4] が clockId (旧 arguments[5])
+        ["arguments[4]", request.arguments[4], config.clockId],
     ];
     for (const [field, actual, expected] of checks) {
         if (actual !== expected) {
