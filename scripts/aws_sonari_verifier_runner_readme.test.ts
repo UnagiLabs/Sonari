@@ -105,6 +105,10 @@ describe("AWS Sonari verifier runner README", () => {
             "SourceArchiverFunctionUrlOutput",
             "membership dummy proof smoke",
             "pnpm identity:testnet-fixture",
+            "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue",
+            "stack_parameter WorldIdAppId",
+            "export SONARI_WORLD_ID_APP_ID=",
+            '--world-app-id "$SONARI_WORLD_ID_APP_ID"',
             [
                 'SUI_CLIENT_CONFIG="',
                 "$",

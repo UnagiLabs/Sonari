@@ -26,6 +26,12 @@ export const DEFAULT_RESIDENCE_PROOF_LEFT =
 export const DEFAULT_RESIDENCE_PROOF_RIGHT =
     "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7";
 export const WORLD_ID_ACTION = "sonari_membership_register_v1";
+// Fallback World ID app id for the dummy smoke fixture. Real smoke runs override
+// this with the target stack's `WORLD_ID_APP_ID` (CloudFormation `WorldIdAppId`),
+// because the enclave's trusted-boundary check rejects any request whose
+// `world_app_id` differs from the stack's configured value. Kept as the default so
+// the golden fixture tests stay stable when no override is supplied.
+export const DEFAULT_WORLD_APP_ID = "app_staging_123";
 export const GENESIS_KIND_PAUSE_STATE = 2;
 export const GENESIS_KIND_MEMBERSHIP_REGISTRY = 6;
 export const GENESIS_KIND_VERIFIER_REGISTRY = 7;
@@ -198,6 +204,7 @@ export interface RunMembershipIdentityTestnetFixtureOptions {
     readonly executor?: SuiCommandExecutor;
     readonly processEnv?: Record<string, string | undefined>;
     readonly now?: () => Date;
+    readonly worldAppId?: string;
 }
 
 export interface ResidenceFixtureInput {
@@ -792,7 +799,9 @@ export async function runMembershipIdentityTestnetFixture(
             owner: passReadback.owner,
             termsVersion: DEFAULT_TERMS_VERSION,
             signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
-            worldId: defaultWorldIdInput(),
+            worldId: defaultWorldIdInput(
+                resolveWorldAppId(options.worldAppId, runtimeEnv.SONARI_WORLD_ID_APP_ID),
+            ),
         },
     });
     await writeFixtureFiles(
@@ -843,15 +852,36 @@ function buildMembershipIdentityFixtureFilesFromManifest(
     };
 }
 
-function defaultWorldIdInput(): MembershipIdentityFixtureWorldIdInput {
+export function defaultWorldIdInput(
+    worldAppId: string = DEFAULT_WORLD_APP_ID,
+): MembershipIdentityFixtureWorldIdInput {
     return {
-        worldAppId: "app_staging_123",
+        worldAppId,
         nullifierHash: "12345678901234567890",
         merkleRoot: "987654321",
         proof: "0xproof",
         verificationLevel: "orb",
         action: WORLD_ID_ACTION,
     };
+}
+
+/**
+ * Resolves the World ID `world_app_id` for the dummy smoke request. The explicit
+ * option wins, then the `SONARI_WORLD_ID_APP_ID` env var, then `DEFAULT_WORLD_APP_ID`.
+ * Real smoke runs pass the target stack's `WORLD_ID_APP_ID` so the request matches
+ * the enclave's trusted-boundary check; tests omit it and keep the stable default.
+ */
+export function resolveWorldAppId(
+    optionValue: string | undefined,
+    envValue: string | undefined,
+): string {
+    if (optionValue !== undefined && optionValue.length > 0) {
+        return optionValue;
+    }
+    if (envValue !== undefined && envValue.length > 0) {
+        return envValue;
+    }
+    return DEFAULT_WORLD_APP_ID;
 }
 
 async function resolveAllowedResidenceCellRegistryId(input: {
@@ -1264,17 +1294,21 @@ async function main(): Promise<void> {
     );
 }
 
-function parseCliArgs(argv: readonly string[]): RunMembershipIdentityTestnetFixtureOptions {
-    let env = assertFixtureNetwork(process.env.SONARI_FIXTURE_SUI_ENV ?? "testnet");
+export function parseCliArgs(
+    argv: readonly string[],
+    env: Record<string, string | undefined> = process.env,
+): RunMembershipIdentityTestnetFixtureOptions {
+    let suiEnv = assertFixtureNetwork(env.SONARI_FIXTURE_SUI_ENV ?? "testnet");
     let clientConfig =
-        process.env.SUI_CLIENT_CONFIG ?? ".local/sonari-dev/sui_wallets/admin/sui_config.yaml";
+        env.SUI_CLIENT_CONFIG ?? ".local/sonari-dev/sui_wallets/admin/sui_config.yaml";
     let outputDir = DEFAULT_FIXTURE_OUTPUT_DIR;
     let publishIfMissing = false;
+    let worldAppId = env.SONARI_WORLD_ID_APP_ID;
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--sui-env") {
-            env = assertFixtureNetwork(requiredArg(argv, index, "--sui-env"));
+            suiEnv = assertFixtureNetwork(requiredArg(argv, index, "--sui-env"));
             index += 1;
             continue;
         }
@@ -1285,6 +1319,11 @@ function parseCliArgs(argv: readonly string[]): RunMembershipIdentityTestnetFixt
         }
         if (arg === "--output-dir") {
             outputDir = requiredArg(argv, index, "--output-dir");
+            index += 1;
+            continue;
+        }
+        if (arg === "--world-app-id") {
+            worldAppId = requiredArg(argv, index, "--world-app-id");
             index += 1;
             continue;
         }
@@ -1303,10 +1342,11 @@ function parseCliArgs(argv: readonly string[]): RunMembershipIdentityTestnetFixt
     }
 
     return {
-        env,
+        env: suiEnv,
         clientConfig,
         outputDir,
         publishIfMissing,
+        ...(worldAppId === undefined || worldAppId.length === 0 ? {} : { worldAppId }),
     };
 }
 
@@ -1321,8 +1361,10 @@ function requiredArg(argv: readonly string[], index: number, flag: string): stri
 function cliUsage(): string {
     return [
         "Usage:",
-        "  pnpm identity:testnet-fixture [--sui-env testnet] [--sui-config <path>] [--output-dir <path>] [--publish-if-missing]",
+        "  pnpm identity:testnet-fixture [--sui-env testnet] [--sui-config <path>] [--output-dir <path>] [--world-app-id <id>] [--publish-if-missing]",
         "",
+        "  --world-app-id overrides the dummy request world_app_id (default reads SONARI_WORLD_ID_APP_ID, else app_staging_123).",
+        "  Pass the target stack's WORLD_ID_APP_ID so the enclave trusted-boundary check accepts the request.",
         "Outputs:",
         `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_MANIFEST_FILE)}`,
         `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_ENV_FILE)}`,

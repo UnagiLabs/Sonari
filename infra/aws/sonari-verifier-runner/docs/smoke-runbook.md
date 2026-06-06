@@ -100,12 +100,27 @@ Membership dummy proof smoke は devnet または testnet 専用です。`pnpm i
 先に Sui testnet 上の fixture を用意します。
 この fixture は未認証の `MembershipPass` から始まります。
 
+fixture が出す `world_app_id` は、対象スタックの `WORLD_ID_APP_ID` と一致させます。enclave は本人確認の前に、リクエストの `world_app_id` が自分の設定値と一致するか確認するからです。値がずれると `WORLD_ID_VERIFICATION_FAILED` で必ず落ちます。
+
+`WORLD_ID_APP_ID` は CloudFormation の `WorldIdAppId` Parameter です。`describe-stacks` の `Stacks[0].Parameters` から読み、`SONARI_WORLD_ID_APP_ID` として export してから fixture を実行します。fixture は `--world-app-id`、env `SONARI_WORLD_ID_APP_ID`、既定値の順で `world_app_id` を解決します。
+
 ```bash
 SUI_CLIENT_CONFIG="${SUI_CLIENT_CONFIG:?set admin Sui config path}"
 
+# stack_output と同じ要領で Parameter を読むヘルパー。
+stack_parameter() {
+  aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" \
+    --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue | [0]" \
+    --output text
+}
+
+export SONARI_WORLD_ID_APP_ID="$(stack_parameter WorldIdAppId)"
+
 pnpm identity:testnet-fixture \
   --sui-config "$SUI_CLIENT_CONFIG" \
-  --sui-env testnet
+  --sui-env testnet \
+  --world-app-id "$SONARI_WORLD_ID_APP_ID"
 
 set -a
 . .local/sonari-dev/membership-identity-fixture/fixture.env
