@@ -13,6 +13,7 @@ const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.te
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = "1000";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_EPOCHS = "1";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE = false;
+const DEFAULT_WORLD_ID_PROOF_MODE = "real";
 const DEPLOY_PARAMETER_KEYS = [
     "LambdaCodeS3Bucket",
     "LambdaCodeS3Key",
@@ -38,6 +39,7 @@ const DEPLOY_PARAMETER_KEYS = [
     "SourceArchiverWalrusUploadRelayTipMaxMist",
     "SourceArchiverWalrusEpochs",
     "SourceArchiverWalrusDeletable",
+    "WorldIdProofMode",
 ] as const;
 
 type DeployParameterKey = (typeof DEPLOY_PARAMETER_KEYS)[number];
@@ -145,6 +147,7 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
         SourceArchiverWalrusDeletable: String(
             input.sourceArchiverWalrusDeletable ?? DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE,
         ),
+        WorldIdProofMode: input.worldIdProofMode ?? DEFAULT_WORLD_ID_PROOF_MODE,
     };
 
     return {
