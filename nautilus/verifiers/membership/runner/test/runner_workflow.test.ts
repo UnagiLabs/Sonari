@@ -878,6 +878,55 @@ describe("membership runner workflow", () => {
         expect(submitter.submits).toEqual([verifiedTeeResult()]);
     });
 
+    it("persists the submit tx digest to the job row and runner output on success", async () => {
+        // 完了条件1・2 の回帰ロック: submit 成功時に job 行と runner 戻り値の
+        // 両方へ送信の追跡番号(tx_digest)が残ることを固定する。
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            submitDigest: "tx-step1-digest",
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "dry_run_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+
+        // (2) runner 戻り値に tx_digest が載る
+        await expect(
+            handler({
+                action: "submit_sui_submission",
+                job_id: job.row.job_id,
+                attempt: 1,
+                result: verifiedTeeResult(),
+            }),
+        ).resolves.toMatchObject({
+            sui_submission: "succeeded",
+            tx_digest: "tx-step1-digest",
+        });
+
+        // (1) submit 成功直後に job 行の tx_digest が空でない値になる
+        const row = await repository.get(job.row.job_id);
+        expect(row).toMatchObject({
+            status: "completed",
+            tx_digest: "tx-step1-digest",
+        });
+        expect(row?.tx_digest).not.toBeNull();
+    });
+
     it("records submit tx digest when post-submit waitForTransaction fails (digest-based result)", async () => {
         // STEP 5: readback 廃止のため waitForTransaction 失敗のケースをテスト
         const repository = new InMemoryVerificationJobRepository();
