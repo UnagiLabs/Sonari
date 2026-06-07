@@ -44,6 +44,9 @@ importers:
 
   dapp:
     dependencies:
+      '@googlemaps/js-api-loader':
+        specifier: ^2.1.0
+        version: 2.1.0
       '@mysten/sui':
         specifier: ^2.16.3
         version: 2.16.3(typescript@5.9.3)
@@ -63,6 +66,9 @@ importers:
         specifier: ^19.2.0
         version: 19.2.6(react@19.2.6)
     devDependencies:
+      '@types/google.maps':
+        specifier: ^3.65.0
+        version: 3.65.1
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.14
@@ -602,6 +608,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@googlemaps/js-api-loader@2.1.0':
+    resolution: {integrity: sha512-aZii781WEfncmJAFk1UPv6bdwT1mgRZzY8IWmpmx9mGAMCt97JZrXpn95LTsYinj7E4tC+LJv3FE8k2xRAsYgg==}
+
   '@gql.tada/cli-utils@1.7.3':
     resolution: {integrity: sha512-3iQY5E/jvv3Lnh6D1Mh7zr+Bb9C/TGk1DHkm+lbIjQBnZAu2m+BcTcr1e3spUt6Aa6HG/xAN2XxpbWw9oZALEg==}
     peerDependencies:
@@ -1019,6 +1028,9 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/google.maps@3.65.1':
+    resolution: {integrity: sha512-O9monmoXfyWsuyR4Wz3TZU26qai9y7jUV7DSRySluae6O5tQt3Obw5ETt0HKfNsjctnlF/yx/Tfn3WQNmKRXZA==}
 
   '@types/node@24.12.4':
     resolution: {integrity: sha512-GUUEShf+PBCGW2KaXwcIt3Yk+e3pkKwWKb9GSyM9WQVE+ep2jzmHdGsHzu4wgcZy5fN9FBdVzjpBQsYlpfpgLA==}
@@ -2005,6 +2017,10 @@ snapshots:
   '@esbuild/win32-x64@0.28.0':
     optional: true
 
+  '@googlemaps/js-api-loader@2.1.0':
+    dependencies:
+      '@types/google.maps': 3.65.1
+
   '@gql.tada/cli-utils@1.7.3(@0no-co/graphqlsp@1.15.4(graphql@16.14.0)(typescript@5.9.3))(graphql@16.14.0)(typescript@5.9.3)':
     dependencies:
       '@0no-co/graphqlsp': 1.15.4(graphql@16.14.0)(typescript@5.9.3)
@@ -2347,6 +2363,8 @@ snapshots:
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.9': {}
+
+  '@types/google.maps@3.65.1': {}
 
   '@types/node@24.12.4':
     dependencies:
