@@ -1477,7 +1477,6 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
                 digest: this.options.submitDigest,
             };
         }
-        // STEP 5: digest ベース判定。readback フィールドなし
         return {
             ok: true as const,
             value: {
@@ -1485,6 +1484,7 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
                 request: fakeSuiRequest(),
                 digest: this.options.submitDigest ?? "tx-default",
                 effects: {},
+                readback: null,
             },
         };
     }

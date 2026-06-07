@@ -12,9 +12,11 @@ import {
     parseHexByteVector,
     readEnclaveRegistrationMetadata,
 } from "@sonari/verifier-contracts";
-
-// NOTE: shared IdentityRegistry の record に対する成功判定(readback)の本実装は #158 へ委譲。
-// 本 issue では digest ベースの成功判定に留める。
+import {
+    type IdentityRecordReadbackClient,
+    type IdentityVerificationReadback,
+    readIdentityVerificationRecord,
+} from "./identity_readback.js";
 
 export const RELAYER_SUBMIT_FAILED = "RELAYER_SUBMIT_FAILED";
 export const MOVE_REJECTED = "MOVE_REJECTED";
@@ -48,6 +50,7 @@ export interface IdentityVerificationSubmitConfig {
     readonly signer?: IdentityVerificationSigner;
     readonly client?: IdentityVerificationSubmitClient;
     readonly transaction?: unknown;
+    readonly now?: (() => number) | undefined;
 }
 
 export interface IdentityVerificationSuiRequest {
@@ -73,6 +76,7 @@ export interface IdentityVerificationSubmitSuccess {
     readonly request: IdentityVerificationSuiRequest;
     readonly digest: string;
     readonly effects: Record<string, unknown>;
+    readonly readback: IdentityVerificationReadback | null;
 }
 
 export interface IdentityVerificationSubmitTransaction {
@@ -90,6 +94,9 @@ export interface IdentityVerificationSubmitClient {
         include: { effects: true; events: true; objectTypes: true };
     }): Promise<IdentityVerificationExecutionResponse>;
     waitForTransaction(input: { digest: string }): Promise<unknown>;
+    getObjects?(input: { objectIds: string[]; include: { json: true } }): Promise<{
+        objects: Array<{ objectId: string; json: Record<string, unknown> | null } | Error>;
+    }>;
 }
 
 export type IdentityVerificationExecutionResponse =
@@ -276,13 +283,12 @@ export async function submitIdentityVerificationPayload(
         if (!isNonEmptyString(result.value.digest)) {
             return relayerSubmitFailed("Sui response did not include transaction digest");
         }
-        // STEP 5: digest ベースの成功判定。
-        // shared IdentityRegistry の record readback は #158 で実装予定。
         try {
             await client.waitForTransaction({ digest: result.value.digest });
         } catch (error) {
             return relayerSubmitFailedWithDigest(errorMessage(error), result.value.digest);
         }
+        const readback = await resolveSubmitReadback(input, config, client);
         return {
             ok: true,
             value: {
@@ -290,10 +296,46 @@ export async function submitIdentityVerificationPayload(
                 request: request.value,
                 digest: result.value.digest,
                 effects: result.value.effects,
+                readback,
             },
         };
     } catch (error) {
         return relayerSubmitFailed(errorMessage(error));
+    }
+}
+
+async function resolveSubmitReadback(
+    input: unknown,
+    config: IdentityVerificationSubmitConfig,
+    client: IdentityVerificationSubmitClient,
+): Promise<IdentityVerificationReadback | null> {
+    try {
+        if (!isRecord(input) || typeof input.owner !== "string") {
+            return null;
+        }
+        const owner = input.owner;
+        if (!/^0x[0-9a-fA-F]+$/.test(owner)) {
+            return null;
+        }
+        if (
+            !isNonEmptyString(config.membershipRegistryId) ||
+            !isNonEmptyString(config.identityRegistryId)
+        ) {
+            return null;
+        }
+        if (typeof client.getObjects !== "function") {
+            return null;
+        }
+        const nowMs = config.now?.() ?? Date.now();
+        return await readIdentityVerificationRecord({
+            client: client as unknown as IdentityRecordReadbackClient,
+            membershipRegistryId: config.membershipRegistryId,
+            identityRegistryId: config.identityRegistryId,
+            owner,
+            nowMs,
+        });
+    } catch {
+        return null;
     }
 }
 
