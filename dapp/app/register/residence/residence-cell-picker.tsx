@@ -98,7 +98,8 @@ export function ResidenceCellPicker() {
     const [notice, setNotice] = useState<string | null>(null);
 
     const mapElRef = useRef<HTMLDivElement | null>(null);
-    const searchInputRef = useRef<HTMLInputElement | null>(null);
+    const autocompleteHostRef = useRef<HTMLDivElement | null>(null);
+    const autocompleteElRef = useRef<google.maps.places.PlaceAutocompleteElement | null>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
     const polygonsRef = useRef<Map<string, google.maps.Polygon>>(new Map());
     const classCacheRef = useRef<Map<string, ResidenceCellClass>>(new Map());
@@ -210,6 +211,21 @@ export function ResidenceCellPicker() {
             map.panTo(residenceCellCenter(h3DecimalToHex(decimal)));
         }
     }, []);
+
+    // 緯度経度へ地図を寄せ、対応セルを選択する共通処理。
+    // 検索候補の選択と現在地ボタンが同じ pan/zoom + セル選択を行うため共通化する。
+    const focusLatLng = useCallback(
+        (lat: number, lng: number) => {
+            const map = mapRef.current;
+            if (map !== null) {
+                map.panTo({ lat, lng });
+                map.setZoom(MAX_ZOOM);
+            }
+            const cell = latLngToResidenceCell(lat, lng);
+            void applySelection(cell.decimal);
+        },
+        [applySelection],
+    );
 
     // viewport 内のセルからポリゴンを差分更新する。
     const syncPolygons = useCallback(
@@ -346,21 +362,27 @@ export function ResidenceCellPicker() {
                     scheduleRebuild();
                 });
 
-                const input = searchInputRef.current;
-                if (input !== null) {
-                    const autocomplete = new google.maps.places.Autocomplete(input, {
-                        fields: ["geometry"],
-                    });
-                    autocomplete.addListener("place_changed", () => {
-                        const place = autocomplete.getPlace();
-                        const location = place.geometry?.location;
-                        if (location === undefined) {
+                const host = autocompleteHostRef.current;
+                if (host !== null) {
+                    // 後継 API の PlaceAutocompleteElement（Web Component）。
+                    // 旧 Autocomplete は 2025-03-01 以降の新規顧客に提供されない非推奨 API。
+                    // options 引数は必須（全プロパティ optional）。
+                    const placeAutocomplete = new google.maps.places.PlaceAutocompleteElement({});
+                    placeAutocomplete.placeholder = "Shibuya, Tokyo";
+                    host.replaceChildren(placeAutocomplete);
+                    autocompleteElRef.current = placeAutocomplete;
+                    placeAutocomplete.addEventListener("gmp-select", async (event) => {
+                        const place = event.placePrediction.toPlace();
+                        try {
+                            await place.fetchFields({ fields: ["location"] });
+                        } catch {
                             return;
                         }
-                        map.panTo(location);
-                        map.setZoom(MAX_ZOOM);
-                        const cell = latLngToResidenceCell(location.lat(), location.lng());
-                        void applySelection(cell.decimal);
+                        const location = place.location;
+                        if (location === null || location === undefined) {
+                            return;
+                        }
+                        focusLatLng(location.lat(), location.lng());
                     });
                 }
 
@@ -387,8 +409,13 @@ export function ResidenceCellPicker() {
             if (map !== null) {
                 google.maps.event.clearInstanceListeners(map);
             }
+            // 生成した Web Component を DOM から外す（リスナごと GC される）。
+            if (autocompleteElRef.current !== null) {
+                autocompleteElRef.current.remove();
+                autocompleteElRef.current = null;
+            }
         };
-    }, [applySelection, scheduleRebuild]);
+    }, [applySelection, focusLatLng, scheduleRebuild]);
 
     // 現在地ボタン。座標は一時利用のみで保存しない。
     const handleUseCurrentLocation = useCallback(() => {
@@ -399,19 +426,13 @@ export function ResidenceCellPicker() {
         navigator.geolocation.getCurrentPosition(
             (position) => {
                 const { latitude, longitude } = position.coords;
-                const map = mapRef.current;
-                if (map !== null) {
-                    map.panTo({ lat: latitude, lng: longitude });
-                    map.setZoom(MAX_ZOOM);
-                }
-                const cell = latLngToResidenceCell(latitude, longitude);
-                void applySelection(cell.decimal);
+                focusLatLng(latitude, longitude);
             },
             () => {
                 setNotice("現在地の取得が許可されませんでした。");
             },
         );
-    }, [applySelection]);
+    }, [focusLatLng]);
 
     // advanced 入力欄の確定。16進セルIDを正規化して選択へ反映する。
     const handleAdvancedCommit = useCallback(
@@ -438,21 +459,14 @@ export function ResidenceCellPicker() {
     return (
         <div className="residence-selector">
             <div className="residence-search-row">
-                <label className="text-field" htmlFor="residence-search">
+                <div className="text-field">
                     <span>Search city, station, or address</span>
-                    <input
-                        autoComplete="off"
-                        disabled={!isReady}
-                        id="residence-search"
-                        placeholder="Shibuya, Tokyo"
-                        ref={searchInputRef}
-                        type="text"
-                    />
+                    <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
                     <small>
                         Search text may be sent to a map provider. Sonari stores the selected H3
                         cell only.
                     </small>
-                </label>
+                </div>
                 <button
                     className="btn btn-secondary"
                     disabled={!isReady}

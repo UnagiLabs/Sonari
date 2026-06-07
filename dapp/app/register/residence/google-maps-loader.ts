@@ -2,7 +2,7 @@ import type { APIOptions } from "@googlemaps/js-api-loader";
 
 export type MapsLoaderStatus = "unconfigured" | "loading" | "ready" | "error";
 
-// 住所検索の Places Autocomplete と地図描画に必要なライブラリ。
+// 住所検索の PlaceAutocompleteElement と地図描画に必要なライブラリ。
 const RESIDENCE_MAPS_LIBRARIES = ["maps", "places"] as const;
 
 // --- 純粋関数（テスト対象） ---
