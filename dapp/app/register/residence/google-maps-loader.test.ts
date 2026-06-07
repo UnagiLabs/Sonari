@@ -9,18 +9,16 @@ import {
 } from "./google-maps-loader";
 
 describe("readGoogleMapsApiKey", () => {
-    it("NEXT_PUBLIC_GOOGLE_MAPS_API_KEY がある場合 trim して返す", () => {
-        expect(
-            readGoogleMapsApiKey({ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: "  abc  " }),
-        ).toBe("abc");
+    it("前後の空白を trim して返す", () => {
+        expect(readGoogleMapsApiKey("  abc  ")).toBe("abc");
     });
 
-    it("未設定の場合は空文字を返す", () => {
-        expect(readGoogleMapsApiKey({})).toBe("");
+    it("空文字はそのまま空文字", () => {
+        expect(readGoogleMapsApiKey("")).toBe("");
     });
 
-    it("undefined の場合も空文字を返す", () => {
-        expect(readGoogleMapsApiKey({ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: undefined })).toBe("");
+    it("空白のみは空文字になる", () => {
+        expect(readGoogleMapsApiKey("   ")).toBe("");
     });
 });
 

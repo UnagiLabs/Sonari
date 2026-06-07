@@ -8,18 +8,18 @@ const RESIDENCE_MAPS_LIBRARIES = ["maps", "places"] as const;
 // --- 純粋関数（テスト対象） ---
 
 /**
- * env から API key を読む。既定は process.env。
- * NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を trim して返す（無ければ ""）。
- * output: "export" では process.env.NEXT_PUBLIC_* はビルド時静的置換されるため、
- * テスト可能にするため env を引数で注入できるようにしている。
+ * API key を trim して返す（無ければ ""）。
+ *
+ * 既定値を「静的な process.env.NEXT_PUBLIC_* メンバー参照」にしているのが要点。
+ * Next/Turbopack はこの静的形だけをクライアントバンドルへインライン展開する。
+ * process.env を別名へ入れて env["..."] のように動的アクセスすると展開されず、
+ * クライアントでは値が空になり地図が出ない（過去の不具合の原因）。
+ * テストでは raw に文字列を直接渡して検証する。
  */
 export function readGoogleMapsApiKey(
-    env: Record<string, string | undefined> = process.env as Record<
-        string,
-        string | undefined
-    >,
+    raw: string | undefined = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
 ): string {
-    return (env["NEXT_PUBLIC_GOOGLE_MAPS_API_KEY"] ?? "").trim();
+    return (raw ?? "").trim();
 }
 
 /** trim 後に非空なら true。 */
