@@ -259,7 +259,9 @@ function parseSignedHash(raw: unknown): string | null {
         if (/^0x[0-9a-fA-F]*$/.test(raw)) {
             return raw.toLowerCase();
         }
-        return null;
+        // SuiGrpcClient serializes Move `vector<u8>` fields as a base64 string,
+        // so a non-hex string is treated as base64-encoded bytes.
+        return base64ToHex(raw);
     }
     if (Array.isArray(raw)) {
         if (!raw.every((b) => typeof b === "number" && b >= 0 && b <= 255)) {
@@ -269,6 +271,25 @@ function parseSignedHash(raw: unknown): string | null {
         return `0x${hex}`;
     }
     return null;
+}
+
+/**
+ * Decode a canonical base64 string to a 0x-prefixed lowercase hex string.
+ * Returns null when the input is not valid canonical base64.
+ */
+function base64ToHex(value: string): string | null {
+    if (value.length === 0 || value.length % 4 !== 0) {
+        return null;
+    }
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+        return null;
+    }
+    const decoded = Buffer.from(value, "base64");
+    // Reject non-canonical base64 (Buffer is lenient) by round-tripping.
+    if (decoded.toString("base64") !== value) {
+        return null;
+    }
+    return `0x${decoded.toString("hex")}`;
 }
 
 // ============================================================

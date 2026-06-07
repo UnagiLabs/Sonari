@@ -157,6 +157,27 @@ describe("AWS membership manual batch smoke script", () => {
         ]);
     });
 
+    it("polls the idle assertion until the runner ASG finishes draining", async () => {
+        const cli = new RecordingAwsCli({ asgBusyCalls: 2 });
+        const requestFile = await createRequestFile();
+
+        const result = await runSmokeMembershipManual({
+            aws: cli,
+            stack: STACK,
+            expectedAccount: EXPECTED_ACCOUNT,
+            requestFile,
+            now: () => FIXED_NOW_MS,
+            poll: { intervalMs: 1, timeoutMs: 5_000 },
+        });
+
+        expect(result.idleVerified).toBe(true);
+        const asgDescribes = cli.operations.filter(
+            (op) => op.label === "autoscaling:describe-auto-scaling-groups",
+        );
+        // Two draining reports, then idle: the smoke must have re-polled.
+        expect(asgDescribes.length).toBeGreaterThanOrEqual(3);
+    });
+
     it("fails closed when the TEE result never reaches the happy path", async () => {
         const requestFile = await createRequestFile();
 
@@ -374,6 +395,10 @@ type RecordingAwsCliOptions = {
     worldIdProofMode?: "real" | "dummy";
     identityRelayerMode?: "" | "dry_run" | "submit";
     relayerAllowSubmit?: "true" | "false";
+    // Number of leading describe-auto-scaling-groups calls that report a still
+    // draining instance before the ASG settles to idle. Models the EC2
+    // termination lag after the runner workflow scales the ASG to 0.
+    asgBusyCalls?: number;
 };
 
 class RecordingAwsCli implements AwsCli {
@@ -383,6 +408,7 @@ class RecordingAwsCli implements AwsCli {
     readonly submitBodies: unknown[] = [];
     readonly getItemKeys: unknown[] = [];
     readonly historyNextTokens: Array<string | null> = [];
+    private asgDescribeCount = 0;
 
     constructor(private readonly options: RecordingAwsCliOptions = {}) {}
 
@@ -472,17 +498,22 @@ class RecordingAwsCli implements AwsCli {
                     },
                 };
             }
-            case "autoscaling:describe-auto-scaling-groups":
+            case "autoscaling:describe-auto-scaling-groups": {
+                this.asgDescribeCount += 1;
+                const draining = this.asgDescribeCount <= (this.options.asgBusyCalls ?? 0);
                 return {
                     AutoScalingGroups: [
                         {
                             AutoScalingGroupName: "runner-asg",
                             DesiredCapacity: 0,
                             MaxSize: 1,
-                            Instances: [],
+                            Instances: draining
+                                ? [{ InstanceId: "i-draining", LifecycleState: "Terminating" }]
+                                : [],
                         },
                     ],
                 };
+            }
             case "ec2:describe-instances":
                 return { Reservations: [] };
             default:

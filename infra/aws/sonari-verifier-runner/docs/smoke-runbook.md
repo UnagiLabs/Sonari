@@ -183,6 +183,15 @@ pnpm aws:smoke:membership-manual \
 - pending/running EC2 が `0`
 - `WatcherScheduleName` と `BatchScheduleName` が `DISABLED`
 
+### 再実行ノウハウ（issue #203）
+
+- **毎回 fresh な未認証 MembershipPass が必要**。成功 smoke は owner の本人確認を確定させるため、同じ owner / 同じ provider（World ID）で再 submit すると `identity_registry::record_identity_verification` が `EIdentityProviderReplay`（abort 6）で落ちる。再実行時は新しい鍵で member を登録し直す。
+  - 新 owner 鍵を作成し gas を送金 → `active-address` を新 owner に切替 → `pnpm identity:testnet-fixture`（現スタックの `SONARI_IDENTITY_PACKAGE_ID` 等を env で渡す。`SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID` は既存値を渡し AdminCap の二重作成 `EAllowedResidenceCellRegistryAlreadyCreated`(abort 2) を避ける）で fresh pass を mint。
+  - register 直後の object 読み戻しは fullnode のレプリカ遅延で `not found` になることがある。その場合は mint 済み pass id を `SONARI_MEMBERSHIP_PASS_ID` に渡して reuse モードで fixture を書き直す。
+  - fixture の `world_id.world_app_id` は対象スタックの `WorldIdAppId` Parameter と一致させる（不一致は `WORLD_ID_VERIFICATION_FAILED`）。
+- **PCR drift（identity config key=2）**。EIF は再ビルドのたびに measurement がドリフトする。runner registration が `metadata_verifier::assert_attestation_pcr_matches`（abort 21 = `EEnclavePcrMismatch`）で落ちたら、現 EIF を `nitro-cli describe-eif` で計測し `admin::update_identity_verifier_config_pcrs`（または `scripts/register-verifier-configs.sh`）で `VerifierRegistry` の identity config を再登録する。
+- smoke スクリプトは cold boot を許容する（terminal 待ちと idle 復帰待ちを polling する）。ASG の termination lag で即時 idle 判定に失敗しない。
+
 ## enclave が解決した verifier mode を確認する（issue #190 観測手順）
 
 membership enclave が起動時に受信した `proof_mode`/`network` と、実際に選んだ verifier mode を smoke の後に確認できます。get_attestation 応答に `world_id_mode_observation` フィールドが載るようになりました。
