@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { WalletConnect } from "../wallet/wallet-connect";
 
 type DonationType = {
     id: string;
@@ -87,9 +88,7 @@ export default function DonatePage() {
                         <div className="donate-wallet-panel">
                             <span className="tag tag-neutral">Wallet</span>
                             <p>Connect a wallet to prepare a donation transaction.</p>
-                            <button className="btn btn-primary" type="button">
-                                Connect wallet
-                            </button>
+                            <WalletConnect />
                         </div>
                     </header>
 
@@ -304,10 +303,7 @@ function DonateTopbar() {
                     </a>
                 </nav>
                 <div className="topbar-spacer" />
-                <button className="wallet-btn" type="button">
-                    <span className="wallet-dot" />
-                    Connect wallet
-                </button>
+                <WalletConnect />
             </div>
         </header>
     );

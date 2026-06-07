@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { WalletConnect } from "../wallet/wallet-connect";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
@@ -236,9 +237,7 @@ export default function ClaimPage() {
                         <div className="claim-wallet-panel">
                             <span className="tag tag-neutral">Wallet</span>
                             <p>Connect a wallet to load MembershipPass and claim history.</p>
-                            <button className="btn btn-primary" type="button">
-                                Connect wallet
-                            </button>
+                            <WalletConnect />
                         </div>
                     </header>
 
@@ -500,10 +499,7 @@ function ClaimTopbar() {
                     </a>
                 </nav>
                 <div className="topbar-spacer" />
-                <button className="wallet-btn" type="button">
-                    <span className="wallet-dot" />
-                    Connect wallet
-                </button>
+                <WalletConnect />
             </div>
         </header>
     );

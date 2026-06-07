@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
+import { WalletConnect } from "./wallet/wallet-connect";
 
 type IconName =
     | "arrowRight"
@@ -188,6 +189,7 @@ export default function LandingPage() {
                             <span className="wallet-dot" />
                             Donate now
                         </a>
+                        <WalletConnect />
                     </div>
                 </header>
 
