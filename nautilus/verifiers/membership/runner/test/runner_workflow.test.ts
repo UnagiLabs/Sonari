@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import type { IdentityVerificationReadback } from "../src/identity_readback.js";
 import { InMemoryVerificationJobRepository } from "../src/index.js";
 import {
     type AutoScalingClientLike,
@@ -927,6 +928,113 @@ describe("membership runner workflow", () => {
         expect(row?.tx_digest).not.toBeNull();
     });
 
+    it("surfaces the identity readback in the runner output on submit success", async () => {
+        // 完了条件2・3: submit 成功時に runner 出力へ readback(identityVerified 等)が載り、
+        // smoke が要求する camelCase 7 フィールドの形で SubmitSuiSubmission 出力に届く。
+        const sampleReadback: IdentityVerificationReadback = {
+            objectId: `0x${"55".repeat(32)}`,
+            identityVerified: true,
+            identityProviderMask: 2,
+            identityVerifiedAtMs: baseNowMs,
+            identityExpiresAtMs: baseNowMs + 10,
+            termsVersion: 1,
+            signedStatementHash: `0x${"44".repeat(32)}`,
+        };
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            submitDigest: "tx-readback",
+            submitReadback: sampleReadback,
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "dry_run_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+        const result = await handler({
+            action: "submit_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+
+        expect(result).toMatchObject({
+            sui_submission: "succeeded",
+            tx_digest: "tx-readback",
+            readback: sampleReadback,
+        });
+        // camelCase の readback が混在出力(snake_case の sui_submission/tx_digest)の中で生存し、
+        // smoke パーサ(readSuiMembershipPassReadback)の 7 キーと一致する。
+        const readback = (result as { readback?: Record<string, unknown> | null }).readback;
+        expect(readback).not.toBeNull();
+        expect(Object.keys(readback ?? {}).sort()).toEqual([
+            "identityExpiresAtMs",
+            "identityProviderMask",
+            "identityVerified",
+            "identityVerifiedAtMs",
+            "objectId",
+            "signedStatementHash",
+            "termsVersion",
+        ]);
+    });
+
+    it("keeps sui_submission succeeded with a null readback when readback is unavailable", async () => {
+        // readback 失敗時も送信は成功扱いのまま digest を保持し、二重送信や誤った失敗化を防ぐ。
+        const repository = new InMemoryVerificationJobRepository();
+        const job = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.claimNextDue(baseNowMs + 1);
+        const submitter = new RecordingSuiSubmissionAdapter({
+            submitDigest: "tx-no-readback",
+            submitReadback: null,
+        });
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            suiSubmission: submitter,
+            now: () => baseNowMs + 2,
+            config: baseConfig(),
+        });
+
+        await handler({
+            action: "dry_run_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+        const result = await handler({
+            action: "submit_sui_submission",
+            job_id: job.row.job_id,
+            attempt: 1,
+            result: verifiedTeeResult(),
+        });
+
+        expect(result).toMatchObject({
+            sui_submission: "succeeded",
+            tx_digest: "tx-no-readback",
+            readback: null,
+        });
+        await expect(repository.get(job.row.job_id)).resolves.toMatchObject({
+            status: "completed",
+            tx_digest: "tx-no-readback",
+        });
+    });
+
     it("records submit tx digest when post-submit waitForTransaction fails (digest-based result)", async () => {
         // STEP 5: readback 廃止のため waitForTransaction 失敗のケースをテスト
         const repository = new InMemoryVerificationJobRepository();
@@ -1449,6 +1557,7 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
             dryRunDigest?: string;
             submitDigest?: string;
             submitFailureMessage?: string;
+            submitReadback?: IdentityVerificationReadback | null;
         } = {},
     ) {}
 
@@ -1484,7 +1593,7 @@ class RecordingSuiSubmissionAdapter implements SuiSubmissionAdapter {
                 request: fakeSuiRequest(),
                 digest: this.options.submitDigest ?? "tx-default",
                 effects: {},
-                readback: null,
+                readback: this.options.submitReadback ?? null,
             },
         };
     }

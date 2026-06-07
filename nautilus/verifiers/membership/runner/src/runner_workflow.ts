@@ -28,6 +28,7 @@ import {
     setRunnerDesiredCapacity,
     withVerifierKind,
 } from "@sonari/verifier-contracts";
+import type { IdentityVerificationReadback } from "./identity_readback.js";
 import {
     DEFAULT_RETRY_BACKOFF_MS,
     DynamoDbVerificationJobRepository,
@@ -311,6 +312,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               sui_submission: "skipped" | "succeeded" | "failed";
               result: MembershipTeeResult;
               tx_digest?: string | undefined;
+              readback?: IdentityVerificationReadback | null | undefined;
           }
         | { job_id: string; attempt?: number | undefined; failed: true }
     );
@@ -734,6 +736,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     sui_submission: "succeeded",
                     result: event.result,
                     tx_digest: completedRow?.tx_digest ?? result.value.digest,
+                    readback: result.value.readback,
                 });
             }
             case "mark_failed": {
