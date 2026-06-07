@@ -1,7 +1,11 @@
 "use client";
 
+import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import Image from "next/image";
 import { useState } from "react";
+import { dAppKit } from "../wallet/dapp-kit";
+import { WalletConnect } from "../wallet/wallet-connect";
+import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
@@ -133,7 +137,8 @@ type ProofState =
 type TxState =
     | { readonly status: "idle"; readonly message: string }
     | { readonly status: "building"; readonly message: string }
-    | { readonly status: "ready"; readonly message: string; readonly commandCount: number }
+    | { readonly status: "submitting"; readonly message: string }
+    | { readonly status: "submitted"; readonly message: string; readonly digest: string }
     | { readonly status: "failed"; readonly message: string };
 
 export default function ClaimPage() {
@@ -147,10 +152,13 @@ export default function ClaimPage() {
         status: "idle",
         message: "Waiting for claim action.",
     });
+    const account = useCurrentAccount();
     const selectedEvent =
         claimableEvents.find((event) => event.id === selectedEventId) ?? defaultEvent;
     const checks = buildEligibilityChecks(proofState);
-    const isClaimDisabled = proofState.status !== "ready" || txState.status === "building";
+    const isWalletConnected = account !== null;
+    const isClaimInFlight = txState.status === "building" || txState.status === "submitting";
+    const isClaimDisabled = proofState.status !== "ready" || isClaimInFlight || !isWalletConnected;
 
     async function handleCheckEligibility() {
         setProofState({ status: "checking", message: "Checking affected cells proof." });
@@ -182,14 +190,22 @@ export default function ClaimPage() {
         }
     }
 
-    function handleBuildClaim() {
+    async function handleBuildClaim() {
         if (proofState.status !== "ready") {
+            return;
+        }
+        if (account === null) {
+            setTxState({
+                status: "failed",
+                message: "Connect a wallet before claiming.",
+            });
             return;
         }
 
         setTxState({ status: "building", message: "Building claim transaction." });
         try {
             const { transaction } = buildClaimDisasterUsdcTransaction({
+                senderAddress: account.address,
                 packageId: selectedEvent.packageId,
                 proof: proofState.proof,
                 context: {
@@ -204,10 +220,16 @@ export default function ClaimPage() {
                     "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 userMaxAmountUsdc: "50000000",
             });
+
             setTxState({
-                status: "ready",
-                message: "Claim transaction is ready.",
-                commandCount: transaction.getData().commands.length,
+                status: "submitting",
+                message: "Approve the transaction in your wallet.",
+            });
+            const { digest } = await executeWalletTransaction(dAppKit, { transaction });
+            setTxState({
+                status: "submitted",
+                message: "Claim transaction submitted.",
+                digest,
             });
         } catch (error) {
             setTxState({
@@ -236,9 +258,7 @@ export default function ClaimPage() {
                         <div className="claim-wallet-panel">
                             <span className="tag tag-neutral">Wallet</span>
                             <p>Connect a wallet to load MembershipPass and claim history.</p>
-                            <button className="btn btn-primary" type="button">
-                                Connect wallet
-                            </button>
+                            <WalletConnect />
                         </div>
                     </header>
 
@@ -457,11 +477,17 @@ function claimErrorMessage(error: unknown): string {
 }
 
 function transactionStatusDetail(txState: TxState): string {
-    if (txState.status === "ready") {
-        return `Built ${txState.commandCount} Move commands for wallet signing.`;
+    if (txState.status === "submitted") {
+        return `Transaction digest: ${txState.digest}`;
+    }
+    if (txState.status === "submitting") {
+        return "Approve the claim transaction in your connected wallet.";
+    }
+    if (txState.status === "building") {
+        return "Preparing the claim transaction for signing.";
     }
     if (txState.status === "failed") {
-        return "The claim transaction was not created.";
+        return "The claim transaction was not completed.";
     }
     return "The transaction digest, receipt link, and status can render here after signing.";
 }
@@ -500,10 +526,7 @@ function ClaimTopbar() {
                     </a>
                 </nav>
                 <div className="topbar-spacer" />
-                <button className="wallet-btn" type="button">
-                    <span className="wallet-dot" />
-                    Connect wallet
-                </button>
+                <WalletConnect />
             </div>
         </header>
     );

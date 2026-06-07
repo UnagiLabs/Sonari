@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import { WalletProvider } from "./wallet/wallet-provider";
 
 export const metadata: Metadata = {
     title: "Sonari — Donations you can actually follow",
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                     rel="stylesheet"
                 />
             </head>
-            <body id="top">{children}</body>
+            <body id="top">
+                <WalletProvider>{children}</WalletProvider>
+            </body>
         </html>
     );
 }
