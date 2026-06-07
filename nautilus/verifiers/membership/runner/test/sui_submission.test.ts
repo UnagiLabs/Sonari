@@ -232,7 +232,7 @@ describe("membership identity Sui submission", () => {
             message: "submit requires signer material",
         });
 
-        // STEP 5: submit 成功はdigest ベース判定。readback フィールドなし
+        // submit 成功は digest ベース判定。readback フィールドは present（getObjects 未提供時は null）
         await expect(
             submitIdentityVerificationPayload(verifiedResult(), {
                 ...baseConfig(),
@@ -251,7 +251,7 @@ describe("membership identity Sui submission", () => {
             },
         });
 
-        // readback フィールドが存在しないこと
+        // readback フィールドが present で、getObjects 未提供の fakeClient では null になること
         const result = await submitIdentityVerificationPayload(verifiedResult(), {
             ...baseConfig(),
             network,
@@ -263,7 +263,8 @@ describe("membership identity Sui submission", () => {
         });
         expect(result.ok).toBe(true);
         if (!result.ok) return;
-        expect(Object.hasOwn(result.value, "readback")).toBe(false);
+        expect(Object.hasOwn(result.value, "readback")).toBe(true);
+        expect(result.value.readback).toBeNull();
     });
 
     it("fails closed when configured sender address does not match the submit signer", async () => {
@@ -695,3 +696,169 @@ function successfulTransaction(digest: string) {
         },
     };
 }
+
+// ============================================================
+// STEP 3: readback 配線テスト
+// ============================================================
+
+describe("STEP 3: submit success includes readback", () => {
+    const OWNER = `0x${"ab".repeat(32)}`;
+    const LINEAGE_ID = `0x${"cd".repeat(32)}`;
+    const RECORD_OBJECT_ID = `0x${"ef".repeat(32)}`;
+    const NOW_MS = 1_000_000;
+    const EXPIRES_AT_FUTURE = NOW_MS + 10_000;
+
+    const signer = createEd25519SuiSignerFromPrivateKey(
+        "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf",
+    );
+
+    function verifiedResultWithOwner(): Record<string, unknown> {
+        return {
+            ...verifiedResult(),
+            owner: OWNER,
+        };
+    }
+
+    function makeRecordValue() {
+        return {
+            owner: OWNER,
+            provider_mask: 2,
+            verified_at_ms: String(NOW_MS - 100),
+            expires_at_ms: String(EXPIRES_AT_FUTURE),
+            terms_version: String(1),
+            signed_statement_hash: `0x${"de".repeat(32)}`,
+        };
+    }
+
+    function makeGetObjects(lineageId: string, recordObjectId: string, recordValue: unknown) {
+        let callIndex = 0;
+        return async (_input: { objectIds: string[]; include: { json: true } }) => {
+            const i = callIndex;
+            callIndex += 1;
+            if (i === 0) {
+                // Hop 1: owner → lineage id
+                return {
+                    objects: [
+                        {
+                            objectId: `0x${"99".repeat(32)}`,
+                            json: { id: {}, name: OWNER, value: lineageId },
+                        },
+                    ],
+                };
+            }
+            // Hop 2: lineage id → record
+            return {
+                objects: [
+                    {
+                        objectId: recordObjectId,
+                        json: { id: {}, name: lineageId, value: recordValue },
+                    },
+                ],
+            };
+        };
+    }
+
+    it("(a) 送信成功 + readback 成功: result.ok===true、digest保持、readback非null・identityVerified===true", async () => {
+        const getObjects = makeGetObjects(LINEAGE_ID, RECORD_OBJECT_ID, makeRecordValue());
+        const client = {
+            ...fakeClient({
+                signAndExecuteTransaction: async () => successfulTransaction("readback-digest"),
+            }),
+            getObjects,
+        };
+
+        const result = await submitIdentityVerificationPayload(verifiedResultWithOwner(), {
+            ...baseConfig(),
+            network,
+            grpcUrl,
+            allowSubmit: true,
+            signer,
+            client,
+            transaction: {},
+            now: () => NOW_MS,
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.digest).toBe("readback-digest");
+        expect(result.value.readback).not.toBeNull();
+        expect(result.value.readback?.identityVerified).toBe(true);
+        expect(result.value.readback?.objectId).toBe(RECORD_OBJECT_ID);
+        expect(result.value.readback?.identityProviderMask).toBe(2);
+        expect(result.value.readback?.identityVerifiedAtMs).toBe(NOW_MS - 100);
+        expect(result.value.readback?.identityExpiresAtMs).toBe(EXPIRES_AT_FUTURE);
+        expect(result.value.readback?.termsVersion).toBe(1);
+        expect(result.value.readback?.signedStatementHash).toBe(`0x${"de".repeat(32)}`);
+    });
+
+    it("(b) 送信成功 + readback 失敗: result.ok===true、digest保持、readback===null", async () => {
+        let getObjectsCalled = false;
+        const client = {
+            ...fakeClient({
+                signAndExecuteTransaction: async () =>
+                    successfulTransaction("readback-fail-digest"),
+            }),
+            getObjects: async (_input: { objectIds: string[]; include: { json: true } }) => {
+                getObjectsCalled = true;
+                // Hop 1 で Error 要素を返す
+                return {
+                    objects: [new Error("object not found")],
+                };
+            },
+        };
+
+        const result = await submitIdentityVerificationPayload(verifiedResultWithOwner(), {
+            ...baseConfig(),
+            network,
+            grpcUrl,
+            allowSubmit: true,
+            signer,
+            client,
+            transaction: {},
+            now: () => NOW_MS,
+        });
+
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        // digest は失われない
+        expect(result.value.digest).toBe("readback-fail-digest");
+        expect(result.value.readback).toBeNull();
+        expect(getObjectsCalled).toBe(true);
+    });
+
+    it("(c) 送信失敗時は readback を呼ばない(fail-closed 維持)", async () => {
+        let getObjectsCalled = false;
+        const failingGetObjects = async (_input: {
+            objectIds: string[];
+            include: { json: true };
+        }) => {
+            getObjectsCalled = true;
+            throw new Error("getObjects should not be called on submit failure");
+        };
+
+        const client = {
+            ...fakeClient({
+                signAndExecuteTransaction: async () => successfulTransaction("fail-digest"),
+                waitForTransaction: async () => {
+                    throw new Error("waitForTransaction timed out");
+                },
+            }),
+            getObjects: failingGetObjects,
+        };
+
+        const result = await submitIdentityVerificationPayload(verifiedResultWithOwner(), {
+            ...baseConfig(),
+            network,
+            grpcUrl,
+            allowSubmit: true,
+            signer,
+            client,
+            transaction: {},
+            now: () => NOW_MS,
+        });
+
+        expect(result.ok).toBe(false);
+        // getObjects は呼ばれていないこと
+        expect(getObjectsCalled).toBe(false);
+    });
+});
