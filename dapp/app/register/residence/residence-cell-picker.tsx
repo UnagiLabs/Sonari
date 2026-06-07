@@ -89,9 +89,9 @@ const polygonStyleByKind: Record<OverlayCellKind, google.maps.PolygonOptions> = 
 };
 
 export function ResidenceCellPicker() {
-    const [status, setStatus] = useState<MapsLoaderStatus>(() =>
-        isGoogleMapsConfigured(mapsApiKey) ? "loading" : "unconfigured",
-    );
+    // 初回描画はサーバー・クライアントで必ず一致させるため env に依存させない。
+    // 実際の状態（unconfigured/ready/error）はマウント後の useEffect で決める。
+    const [status, setStatus] = useState<MapsLoaderStatus>("loading");
     const [selectedDecimal, setSelectedDecimal] = useState<string | null>(null);
     const [selectedClass, setSelectedClass] = useState<ResidenceCellClass | undefined>(undefined);
     const [advancedInput, setAdvancedInput] = useState<string>("");
