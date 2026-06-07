@@ -3,8 +3,8 @@ import {
     RegisterProgress,
     RegisterSidePanel,
     RegisterTopbar,
-    ResidenceMapPreview,
 } from "../register-shared";
+import { ResidenceCellPicker } from "./residence-cell-picker";
 
 const residenceStatements = [
     "This cell is my active residence area for Sonari eligibility checks.",
@@ -47,65 +47,7 @@ export default function RegisterResidencePage() {
 
                                 <fieldset className="control-group">
                                     <legend>Find area</legend>
-                                    <div className="residence-selector">
-                                        <div className="residence-search-row">
-                                            <label
-                                                className="text-field"
-                                                htmlFor="residence-search"
-                                            >
-                                                <span>Search city, station, or address</span>
-                                                <input
-                                                    id="residence-search"
-                                                    name="residenceSearch"
-                                                    placeholder="Shibuya, Tokyo"
-                                                    type="text"
-                                                />
-                                                <small>
-                                                    Search text may be sent to a map provider.
-                                                    Sonari stores the selected H3 cell only.
-                                                </small>
-                                            </label>
-                                            <button className="btn btn-secondary" type="button">
-                                                Use current location
-                                            </button>
-                                        </div>
-
-                                        <ResidenceMapPreview />
-
-                                        <div className="selected-area-summary">
-                                            <div>
-                                                <span>Selected residence area</span>
-                                                <strong>Shibuya, Tokyo · approx. 0.74 km2</strong>
-                                            </div>
-                                            <div>
-                                                <span>H3 resolution</span>
-                                                <strong>7</strong>
-                                            </div>
-                                            <div>
-                                                <span>Cell ID</span>
-                                                <strong className="mono-value">
-                                                    h3-8a30a10cfffffff
-                                                </strong>
-                                            </div>
-                                            <div>
-                                                <span>Allowlist</span>
-                                                <strong>land_allowlist_res7 pending</strong>
-                                            </div>
-                                        </div>
-
-                                        <details className="advanced-cell-input">
-                                            <summary>Advanced cell input</summary>
-                                            <label className="text-field" htmlFor="home-cell">
-                                                <span>H3 resolution 7 cell</span>
-                                                <input
-                                                    defaultValue="h3-8a30a10cfffffff"
-                                                    id="home-cell"
-                                                    name="homeCell"
-                                                    type="text"
-                                                />
-                                            </label>
-                                        </details>
-                                    </div>
+                                    <ResidenceCellPicker />
                                 </fieldset>
 
                                 <fieldset className="control-group">
