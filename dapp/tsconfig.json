@@ -14,7 +14,7 @@
                 "name": "next"
             }
         ],
-        "types": ["node", "react", "react-dom"]
+        "types": ["node", "react", "react-dom", "google.maps"]
     },
     "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
     "exclude": ["node_modules"]
