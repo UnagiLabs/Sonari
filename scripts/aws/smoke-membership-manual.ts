@@ -25,8 +25,13 @@ const DEFAULT_REQUEST_FILE =
     ".local/sonari-dev/membership-identity-fixture/dummy-world-id-request.json";
 const MAX_EXECUTIONS = 20;
 const POLL = {
-    intervalMs: 1_000,
-    timeoutMs: 120_000,
+    intervalMs: 5_000,
+    // The membership runner cold-boots an EC2 Nitro Enclave and walks through
+    // readiness, attestation, registration, process_data, dry-run, submit and
+    // readback. The Step Functions fixed waits alone sum to ~2 minutes, and a
+    // cold boot pushes the end-to-end happy path to ~3 minutes, so the terminal
+    // wait must allow well beyond that for the smoke to go green unattended.
+    timeoutMs: 600_000,
 };
 
 export type SmokeMembershipManualOptions = {
@@ -217,7 +222,18 @@ export async function runSmokeMembershipManual(
             return { currentJob, executions, matchedExecution };
         },
     );
-    await assertAsgIdle(aws, runnerAutoScalingGroupName);
+    // The runner workflow's StopInstance step sets the ASG desired capacity to 0
+    // as its final action, but the EC2 instance keeps draining for a short while
+    // after the execution reaches SUCCEEDED. Poll the idle assertion so the smoke
+    // tolerates that termination lag instead of failing on a transient instance.
+    await waitFor(`runner ASG ${runnerAutoScalingGroupName} idle`, poll, async () => {
+        try {
+            await assertAsgIdle(aws, runnerAutoScalingGroupName);
+            return true;
+        } catch {
+            return null;
+        }
+    });
 
     return {
         submitVerificationLambdaName,

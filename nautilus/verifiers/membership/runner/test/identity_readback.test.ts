@@ -23,6 +23,8 @@ const TERMS_VERSION = 1;
 const SIGNED_HASH_HEX = `0x${"de".repeat(32)}`;
 // signed_statement_hash as number[] (byte array representation)
 const SIGNED_HASH_BYTES = Array.from({ length: 32 }, () => 0xde);
+// signed_statement_hash as base64 string (how SuiGrpcClient serializes Move vector<u8>)
+const SIGNED_HASH_BASE64 = Buffer.from(SIGNED_HASH_BYTES).toString("base64");
 
 // ----------------------------------------------------------------
 // Helper: build a mock IdentityRecordReadbackClient
@@ -127,6 +129,33 @@ describe("readIdentityVerificationRecord", () => {
         // All 7 fields must be present
         // biome: avoid non-null assertion — result is asserted non-null above
         expect(Object.keys(result ?? {})).toHaveLength(7);
+    });
+
+    it("case 1b: signed_statement_hash arrives as base64 (gRPC vector<u8> encoding) → decoded to 0x hex, identityVerified=true", async () => {
+        // SuiGrpcClient serializes Move `vector<u8>` fields as a base64 string,
+        // not as a number[] or 0x hex string. The readback must decode it.
+        const recordValue = {
+            owner: OWNER_ADDR,
+            provider_mask: 2,
+            verified_at_ms: String(VERIFIED_AT_MS),
+            expires_at_ms: String(EXPIRES_AT_FUTURE),
+            terms_version: String(TERMS_VERSION),
+            signed_statement_hash: SIGNED_HASH_BASE64,
+        };
+
+        const client = stubClient(makeHop1Response(LINEAGE_ID), makeHop2Response(recordValue));
+
+        const result = await readIdentityVerificationRecord({
+            client,
+            membershipRegistryId: MEMBERSHIP_REGISTRY_ID,
+            identityRegistryId: IDENTITY_REGISTRY_ID,
+            owner: OWNER_ADDR,
+            nowMs: NOW_MS,
+        });
+
+        expect(result).not.toBeNull();
+        expect(result?.identityVerified).toBe(true);
+        expect(result?.signedStatementHash).toBe(SIGNED_HASH_HEX);
     });
 
     it("case 2: stale — record exists but expires_at_ms <= nowMs → identityVerified=false", async () => {

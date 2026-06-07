@@ -435,11 +435,20 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
             completed_at_ms: null,
         };
 
+        // Omit tx_digest / completed_at_ms from the stored item. DynamoDB
+        // `if_not_exists(attr, value)` — used by markCompleted /
+        // recordSuiSubmitDigest — treats an attribute that exists as NULL as
+        // already-set and would never record the real digest. Leaving these
+        // attributes absent keeps "unset" distinct from "set", so the digest
+        // and completion time are recorded on the first writer. Reads
+        // reconstruct them as null via parseStoredRow.
+        const { tx_digest: _txDigest, completed_at_ms: _completedAtMs, ...storedItem } = row;
+
         try {
             await this.documentClient.send(
                 new PutCommand({
                     TableName: this.tableName,
-                    Item: row,
+                    Item: storedItem,
                     ConditionExpression: "attribute_not_exists(job_id)",
                 }),
             );
