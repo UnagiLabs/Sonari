@@ -21,6 +21,14 @@ export class ResidenceProofError extends Error {
     }
 }
 
+// 居住セル proof はブラウザ（dapp）から直接 fetch される公開の読み取り API のため
+// CORS を許可する。資格情報（Cookie 等）は使わないので origin は "*" で十分。
+export const CORS_HEADERS: Record<string, string> = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, OPTIONS",
+    "access-control-allow-headers": "*",
+};
+
 export function errorResponse(error: ResidenceProofError): Response {
     return new Response(
         JSON.stringify({
@@ -33,6 +41,7 @@ export function errorResponse(error: ResidenceProofError): Response {
             status: error.status,
             headers: {
                 "content-type": "application/json; charset=utf-8",
+                ...CORS_HEADERS,
             },
         },
     );

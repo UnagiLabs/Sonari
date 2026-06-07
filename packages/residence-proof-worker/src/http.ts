@@ -1,4 +1,9 @@
-import { errorResponse, ResidenceProofError, toResidenceProofError } from "./errors.js";
+import {
+    CORS_HEADERS,
+    errorResponse,
+    ResidenceProofError,
+    toResidenceProofError,
+} from "./errors.js";
 import {
     findProofEntry,
     parseH3Index,
@@ -34,6 +39,13 @@ async function handleResidenceProofRequestUnchecked(request: Request, env: Env):
     const url = new URL(request.url);
     if (url.pathname !== "/api/residence-proof") {
         throw new ResidenceProofError("not_found", "Not found", 404);
+    }
+    if (request.method === "OPTIONS") {
+        // CORS プリフライト。ブラウザからの cross-origin fetch を許可する。
+        return new Response(null, {
+            status: 204,
+            headers: { ...CORS_HEADERS, "access-control-max-age": "86400" },
+        });
     }
     if (request.method !== "GET") {
         throw new ResidenceProofError("method_not_allowed", "Only GET is supported", 405);
@@ -87,6 +99,7 @@ export function jsonResponse(body: unknown, status = 200): Response {
         status,
         headers: {
             "content-type": "application/json; charset=utf-8",
+            ...CORS_HEADERS,
         },
     });
 }
