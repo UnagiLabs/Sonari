@@ -11,7 +11,8 @@
     },
     "dependencies": {
         "@googlemaps/js-api-loader": "^2.1.0",
-        "@mysten/sui": "^2.16.3",
+        "@mysten/dapp-kit-react": "^2.0.3",
+        "@mysten/sui": "^2.17.0",
         "@sonari/proof-core": "workspace:*",
         "h3-js": "^4.4.0",
         "next": "^16.2.2",
