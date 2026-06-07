@@ -91,6 +91,32 @@ describe("residence proof Worker API", () => {
         );
     });
 
+    it("includes permissive CORS headers and answers OPTIONS preflight", async () => {
+        const env = await buildEnvWithFixtureR2();
+
+        const ok = await worker.fetch(
+            new Request("https://worker.example/api/residence-proof?h3_index=608819013681676287"),
+            env,
+        );
+        expect(ok.status).toBe(200);
+        expect(ok.headers.get("access-control-allow-origin")).toBe("*");
+
+        const errorResponse = await worker.fetch(
+            new Request("https://worker.example/api/residence-proof"),
+            env,
+        );
+        expect(errorResponse.status).toBe(400);
+        expect(errorResponse.headers.get("access-control-allow-origin")).toBe("*");
+
+        const preflight = await worker.fetch(
+            new Request("https://worker.example/api/residence-proof", { method: "OPTIONS" }),
+            env,
+        );
+        expect(preflight.status).toBe(204);
+        expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+        expect(preflight.headers.get("access-control-allow-methods")).toContain("GET");
+    });
+
     it("fails closed when R2 artifacts are missing or inconsistent", async () => {
         await expectErrorCode(
             await worker.fetch(

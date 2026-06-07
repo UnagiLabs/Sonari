@@ -16,27 +16,6 @@ type SummaryRow = {
     value: string;
 };
 
-export const mapCells = [
-    "north-west",
-    "north",
-    "north-east",
-    "west-ridge",
-    "center-west",
-    "center-north",
-    "center-east",
-    "east-ridge",
-    "selected",
-    "south-west",
-    "south",
-    "south-east",
-    "river-west",
-    "river",
-    "river-east",
-    "outer-west",
-    "outer-south",
-    "outer-east",
-];
-
 export const privacyRows: SummaryRow[] = [
     { label: "Wallet address", value: "SBT owner only" },
     { label: "Nickname", value: "Can be added later" },
@@ -230,18 +209,5 @@ export function RegisterSidePanel() {
                 </div>
             </section>
         </aside>
-    );
-}
-
-export function ResidenceMapPreview() {
-    return (
-        <div className="residence-map-picker" aria-hidden="true">
-            <div className="map-grid" aria-hidden="true">
-                {mapCells.map((cell) => (
-                    <span className={cell === "selected" ? "selected" : undefined} key={cell} />
-                ))}
-            </div>
-            <div className="map-pin" aria-hidden="true" />
-        </div>
     );
 }
