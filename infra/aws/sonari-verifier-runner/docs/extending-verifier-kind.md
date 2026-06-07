@@ -2,6 +2,9 @@
 
 この runbook は 3 例目の `verifier_kind` を追加するときの複製単位と、earthquake 経路の非回帰制約を扱います。
 
+runner の外側処理は `@sonari/verifier-contracts` の shared helper を前提にします。
+新しい kind では、shell の共通骨格を増やすより、helper の引数に kind 固有の env と service check を渡します。
+
 ## 3 例目の verifier_kind を追加するときの手順
 
 新しい verifier_kind（例: `new_verifier`）を追加するには、以下の単位を丸ごと複製して調整してください。
@@ -18,6 +21,7 @@
 ### 2. dispatcher (`run-sonari-verifier`) の拡張
 
 EC2 user-data 内の `run-sonari-verifier` スクリプト（`SONARI_VERIFIER_KIND` で分岐する `case` 文）に新しい kind の `case` を追加します。
+共通 helper が shell 骨格を持つので、この `case` では wrapper の選択だけを行います。
 
 ```bash
 case "${SONARI_VERIFIER_KIND:-earthquake}" in
@@ -40,6 +44,7 @@ user-data に `run-new-verifier-enclave` の wrapper スクリプトを追加し
 ### 4. runner.env の env namespace
 
 `runner.env` 書き込みブロックに新 kind のエントリを追加します。
+共通 helper が読む `bootstrap-complete` と `runner.env` の前提は変えず、kind ごとの env namespace だけを足します。
 
 - `SONARI_<KIND>_ENCLAVE_CID=${NitroEnclaveCid}` — 共有 NitroEnclaveCid から出力
 - `SONARI_<KIND>_EIF_PATH` — 新 EIF のダウンロードパス
@@ -59,11 +64,11 @@ user-data に `run-new-verifier-enclave` の wrapper スクリプトを追加し
 
 ### 8. runner src の `SONARI_VERIFIER_KIND` export
 
-`buildSsmShellCommand`（runner src）の新 kind 向け呼び出し箇所で `SONARI_VERIFIER_KIND=new_verifier` を `export` するよう追加します。earthquake は `runner_workflow.ts` の SSM dispatch で直接 set するのではなく enclave wrapper が使う既定値で処理し、membership は `buildSsmShellCommand` で `export SONARI_VERIFIER_KIND=membership_identity` を先頭に追加します。
+`buildSsmShellCommand`（runner src）の新 kind 向け呼び出し箇所で `SONARI_VERIFIER_KIND=new_verifier` を `export` するよう追加します。earthquake は `runner_workflow.ts` の SSM dispatch で直接 set するのではなく enclave wrapper が使う既定値で処理し、membership は `buildSsmShellCommand` の共通 skeleton に `export SONARI_VERIFIER_KIND=membership_identity` を渡します。
 
 ### 9. deploy workflow の追加ステップ
 
-`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` に次を追加します。
+`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml` に次を追加します。GitHub Actions で build と upload を行い、手動の copy は増やしません。
 
 - `pnpm build:aws-new-verifier-tee-artifact` — TEE artifact ビルド
 - `pnpm build:aws-new-verifier-eif` — EIF ビルドと PCR サマリ出力

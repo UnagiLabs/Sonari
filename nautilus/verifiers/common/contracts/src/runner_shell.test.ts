@@ -7,11 +7,14 @@ import {
     shellSingleQuote,
 } from "./runner_shell.js";
 
+const SONARI_FOO_REQUIRED = `: "\${SONARI_FOO:?SONARI_FOO is required}"`;
+const WALRUS_CLI_REQUIRED = `: "\${SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"`;
+const WALRUS_N_SHARDS_REQUIRED = `: "\${SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"`;
+const MEMBERSHIP_IDENTITY_EIF_REQUIRED = `: "\${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"`;
+
 describe("shell helpers", () => {
     it("builds required env checks in the same fail-closed shape", () => {
-        expect(buildRequiredShellEnvCheck("SONARI_FOO")).toBe(
-            ': "${SONARI_FOO:?SONARI_FOO is required}"',
-        );
+        expect(buildRequiredShellEnvCheck("SONARI_FOO")).toBe(SONARI_FOO_REQUIRED);
     });
 
     it("single-quotes shell values safely", () => {
@@ -19,12 +22,9 @@ describe("shell helpers", () => {
     });
 
     it("parses valid Nitro command strings with quotes and escapes", () => {
-        expect(parseNitroEnclaveProcessCommand(`/opt/bin/run 'hello world' foo\\ bar "baz qux"`)).toEqual([
-            "/opt/bin/run",
-            "hello world",
-            "foo bar",
-            "baz qux",
-        ]);
+        expect(
+            parseNitroEnclaveProcessCommand(`/opt/bin/run 'hello world' foo\\ bar "baz qux"`),
+        ).toEqual(["/opt/bin/run", "hello world", "foo bar", "baz qux"]);
     });
 
     it("fails closed on malformed Nitro command strings", () => {
@@ -48,10 +48,10 @@ describe("shell helpers", () => {
         expect(command).toContain("test -f /opt/sonari/bootstrap-complete");
         expect(command).toContain("test -s /opt/sonari/runner.env");
         expect(command).toContain("source /opt/sonari/runner.env");
-        expect(command).toContain(': "${SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"');
-        expect(command).toContain(': "${SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"');
+        expect(command).toContain(WALRUS_CLI_REQUIRED);
+        expect(command).toContain(WALRUS_N_SHARDS_REQUIRED);
         expect(command).toContain('test -x "$SONARI_WALRUS_CLI"');
-        expect(command.indexOf(': "${SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"')).toBeLessThan(
+        expect(command.indexOf(WALRUS_N_SHARDS_REQUIRED)).toBeLessThan(
             command.indexOf('test -x "$SONARI_WALRUS_CLI"'),
         );
         expect(command.indexOf('test -x "$SONARI_WALRUS_CLI"')).toBeLessThan(
@@ -82,11 +82,13 @@ describe("shell helpers", () => {
         expect(command).toContain("set -euo pipefail");
         expect(command).toContain("source /opt/sonari/runner.env");
         expect(command).toContain("systemctl is-active --quiet nitro-enclaves-allocator.service");
-        expect(command).toContain("systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service");
         expect(command).toContain(
-            ': "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"',
+            "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
         );
-        expect(command).toContain("export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_VERIFIER_KIND=membership_identity");
+        expect(command).toContain(MEMBERSHIP_IDENTITY_EIF_REQUIRED);
+        expect(command).toContain(
+            "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_VERIFIER_KIND=membership_identity",
+        );
         expect(command).toContain('test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"');
         expect(command).toContain("RESULT_S3_KEY='results/job-1/1800000000123.json'");
         expect(command).toContain(
@@ -99,17 +101,21 @@ describe("shell helpers", () => {
         expect(command).toContain(
             "aws s3 cp '/tmp/sonari-membership-tee-result-job-1-1800000000123.json' 's3://runner-results/results/job-1/1800000000123.json'",
         );
-        expect(command.indexOf("systemctl is-active --quiet nitro-enclaves-allocator.service")).toBeLessThan(
-            command.indexOf(': "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"'),
-        );
-        expect(command.indexOf("systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service")).toBeLessThan(
-            command.indexOf(': "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"'),
-        );
-        expect(command.indexOf(': "${SONARI_MEMBERSHIP_IDENTITY_EIF_PATH:?SONARI_MEMBERSHIP_IDENTITY_EIF_PATH is required}"')).toBeLessThan(
+        expect(
+            command.indexOf("systemctl is-active --quiet nitro-enclaves-allocator.service"),
+        ).toBeLessThan(command.indexOf(MEMBERSHIP_IDENTITY_EIF_REQUIRED));
+        expect(
+            command.indexOf(
+                "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
+            ),
+        ).toBeLessThan(command.indexOf(MEMBERSHIP_IDENTITY_EIF_REQUIRED));
+        expect(command.indexOf(MEMBERSHIP_IDENTITY_EIF_REQUIRED)).toBeLessThan(
             command.indexOf('test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"'),
         );
         expect(command.indexOf('test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"')).toBeLessThan(
-            command.indexOf("export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_VERIFIER_KIND=membership_identity"),
+            command.indexOf(
+                "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_VERIFIER_KIND=membership_identity",
+            ),
         );
     });
 });
