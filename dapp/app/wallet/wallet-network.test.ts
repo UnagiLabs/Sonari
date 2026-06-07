@@ -62,41 +62,11 @@ describe("resolveNetwork", () => {
 });
 
 describe("resolveGrpcBaseUrl", () => {
-    it("returns the testnet default URL when no env override is given", () => {
+    it("returns the hardcoded testnet gRPC URL", () => {
         expect(resolveGrpcBaseUrl("testnet")).toBe("https://fullnode.testnet.sui.io:443");
     });
 
-    it("returns the localnet default URL when no env override is given", () => {
+    it("returns the hardcoded localnet gRPC URL", () => {
         expect(resolveGrpcBaseUrl("localnet")).toBe("http://127.0.0.1:9000");
-    });
-
-    it("returns the custom testnet URL when env.testnet is set", () => {
-        expect(resolveGrpcBaseUrl("testnet", { testnet: "https://custom:443" })).toBe(
-            "https://custom:443",
-        );
-    });
-
-    it("returns the custom localnet URL when env.localnet is set", () => {
-        expect(
-            resolveGrpcBaseUrl("localnet", { localnet: "http://192.168.1.1:9000" }),
-        ).toBe("http://192.168.1.1:9000");
-    });
-
-    it("falls back to default when env.testnet is empty string", () => {
-        expect(resolveGrpcBaseUrl("testnet", { testnet: "" })).toBe(
-            "https://fullnode.testnet.sui.io:443",
-        );
-    });
-
-    it("falls back to default when env.localnet is empty string", () => {
-        expect(resolveGrpcBaseUrl("localnet", { localnet: "" })).toBe(
-            "http://127.0.0.1:9000",
-        );
-    });
-
-    it("ignores localnet override when resolving testnet", () => {
-        expect(
-            resolveGrpcBaseUrl("testnet", { localnet: "http://ignored:9000" }),
-        ).toBe("https://fullnode.testnet.sui.io:443");
     });
 });
