@@ -15,6 +15,8 @@ import {
 } from "@aws-sdk/client-ssm";
 import { encodeIdentityVerificationResultBcsHex } from "@sonari/membership-verifier-shared";
 import {
+    buildRunnerBootstrapReadinessShellCommand as buildSharedRunnerBootstrapReadinessShellCommand,
+    buildRunnerSsmShellCommand as buildSharedRunnerSsmShellCommand,
     dispatchRunnerCommand,
     type EnclaveAttestationResult,
     type EnclaveVerificationMetadata,
@@ -985,52 +987,50 @@ function buildSsmShellCommand(input: {
     nitroEnclaveProcessCommand: string;
 }): string {
     const tempResultPath = `/tmp/sonari-membership-tee-result-${input.jobId}-${input.dispatchTimestampMs}.json`;
-    const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
-        .map(shellSingleQuote)
-        .join(" ");
-    const teeInput = input.teeInput;
-    return [
-        "set -euo pipefail",
-        "source /opt/sonari/runner.env",
-        "systemctl is-active --quiet nitro-enclaves-allocator.service",
-        "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
-        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
-        buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
-        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
-        buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
-        buildRequiredShellEnvCheck("SONARI_WORLD_ID_EGRESS_PROXY_URL"),
-        buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
-        buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
-        'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_EGRESS_PROXY_URL SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
-        `export SONARI_VERIFIER_KIND=${MEMBERSHIP_IDENTITY_VERIFIER_KIND}`,
-        `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
-        `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
-        `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
-    ].join("\n");
+    return buildSharedRunnerSsmShellCommand({
+        resultBucket: input.resultBucket,
+        resultS3Key: input.resultS3Key,
+        nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
+        teeInput: input.teeInput,
+        preEnvCommands: [
+            "systemctl is-active --quiet nitro-enclaves-allocator.service",
+            "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
+        ],
+        requiredEnvNames: [
+            "SONARI_MEMBERSHIP_IDENTITY_EIF_PATH",
+            "SONARI_NITRO_RUN_ENCLAVE_ARGS",
+            "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID",
+            "SONARI_WORLD_ID_API_BASE",
+            "SONARI_WORLD_ID_EGRESS_PROXY_URL",
+            "SONARI_WORLD_ID_APP_ID",
+            "NITRO_ENCLAVE_PROCESS_COMMAND",
+        ],
+        postEnvCommands: [
+            'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
+            "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_EGRESS_PROXY_URL SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
+            `export SONARI_VERIFIER_KIND=${MEMBERSHIP_IDENTITY_VERIFIER_KIND}`,
+        ],
+        tempResultPath,
+    });
 }
 
 export function buildRunnerBootstrapReadinessShellCommand(): string {
-    return [
-        "set -euo pipefail",
-        "test -f /opt/sonari/bootstrap-complete",
-        "test -s /opt/sonari/runner.env",
-        "source /opt/sonari/runner.env",
-        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"),
-        buildRequiredShellEnvCheck("SONARI_NITRO_RUN_ENCLAVE_ARGS"),
-        buildRequiredShellEnvCheck("SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"),
-        buildRequiredShellEnvCheck("SONARI_WORLD_ID_API_BASE"),
-        buildRequiredShellEnvCheck("SONARI_WORLD_ID_EGRESS_PROXY_URL"),
-        buildRequiredShellEnvCheck("SONARI_WORLD_ID_APP_ID"),
-        buildRequiredShellEnvCheck("NITRO_ENCLAVE_PROCESS_COMMAND"),
-        'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
-        "systemctl is-active --quiet nitro-enclaves-allocator.service",
-        "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
-    ].join("\n");
-}
-
-function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
-    return `: "\${${name}:?${message}}"`;
+    return buildSharedRunnerBootstrapReadinessShellCommand({
+        requiredEnvNames: [
+            "SONARI_MEMBERSHIP_IDENTITY_EIF_PATH",
+            "SONARI_NITRO_RUN_ENCLAVE_ARGS",
+            "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID",
+            "SONARI_WORLD_ID_API_BASE",
+            "SONARI_WORLD_ID_EGRESS_PROXY_URL",
+            "SONARI_WORLD_ID_APP_ID",
+            "NITRO_ENCLAVE_PROCESS_COMMAND",
+        ],
+        postEnvCommands: [
+            'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
+            "systemctl is-active --quiet nitro-enclaves-allocator.service",
+            "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
+        ],
+    });
 }
 
 function parseTeeResult(text: string, request: IdentityVerifyRequest): MembershipTeeResult {
@@ -1734,85 +1734,6 @@ function appendConfigurationError(existing: string | undefined, next: string): s
 
 function readSuiNetwork(value: string | undefined): SuiNetwork | undefined {
     return value === "mainnet" || value === "testnet" || value === "devnet" ? value : undefined;
-}
-
-function parseNitroEnclaveProcessCommand(command: string): string[] {
-    const words: string[] = [];
-    let current = "";
-    let quote: "'" | '"' | undefined;
-    let wordStarted = false;
-
-    for (let index = 0; index < command.length; index += 1) {
-        const char = command[index];
-        if (char === undefined) {
-            throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND");
-        }
-        if (quote === "'") {
-            if (char === "'") {
-                quote = undefined;
-            } else {
-                current += char;
-            }
-            continue;
-        }
-        if (quote === '"') {
-            if (char === '"') {
-                quote = undefined;
-                continue;
-            }
-            if (char === "\\") {
-                const next = command[index + 1];
-                if (next === undefined) {
-                    throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: trailing escape");
-                }
-                current += next;
-                index += 1;
-                continue;
-            }
-            current += char;
-            continue;
-        }
-        if (char === "'" || char === '"') {
-            quote = char;
-            wordStarted = true;
-            continue;
-        }
-        if (char === "\\") {
-            const next = command[index + 1];
-            if (next === undefined) {
-                throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: trailing escape");
-            }
-            current += next;
-            wordStarted = true;
-            index += 1;
-            continue;
-        }
-        if (/\s/.test(char)) {
-            if (wordStarted) {
-                words.push(current);
-                current = "";
-                wordStarted = false;
-            }
-            continue;
-        }
-        current += char;
-        wordStarted = true;
-    }
-
-    if (quote !== undefined) {
-        throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: unterminated quote");
-    }
-    if (wordStarted) {
-        words.push(current);
-    }
-    if (words.length === 0 || words[0]?.length === 0) {
-        throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: command is empty");
-    }
-    return words;
-}
-
-function shellSingleQuote(value: string): string {
-    return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function requireRepository(options: RunnerControlHandlerOptions): VerificationJobRepository {

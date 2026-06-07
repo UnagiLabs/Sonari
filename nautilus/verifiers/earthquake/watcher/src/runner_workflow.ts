@@ -39,6 +39,8 @@ import {
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
 import {
+    buildRunnerBootstrapReadinessShellCommand as buildSharedRunnerBootstrapReadinessShellCommand,
+    buildRunnerSsmShellCommand as buildSharedRunnerSsmShellCommand,
     createSuiEnclaveRegistrationTransaction,
     dispatchRunnerCommand,
     EARTHQUAKE_VERIFIER_KIND,
@@ -1605,10 +1607,6 @@ function buildSsmShellCommand(input: {
     registrationMetadata?: EnclaveVerificationMetadata | undefined;
     teeInput?: unknown;
 }): string {
-    const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
-    const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
-        .map(shellSingleQuote)
-        .join(" ");
     const teeInput =
         input.teeInput ??
         (input.registrationMetadata === undefined
@@ -1618,37 +1616,40 @@ function buildSsmShellCommand(input: {
                   payload: buildEarthquakeVerifierRequest(input.sourceEventId),
                   registration_metadata: input.registrationMetadata,
               });
-    return [
-        "set -euo pipefail",
-        "source /opt/sonari/runner.env",
-        buildRequiredShellEnvCheck("SONARI_WALRUS_CLI"),
-        buildRequiredShellEnvCheck("SONARI_WALRUS_N_SHARDS"),
-        buildRequiredShellEnvCheck("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
-        "export SONARI_WALRUS_CLI SONARI_WALRUS_N_SHARDS SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
-        `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
-        `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
-        "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' ${shellSingleQuote(JSON.stringify(teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
-        `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
-    ].join("\n");
+    const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
+    return buildSharedRunnerSsmShellCommand({
+        resultBucket: input.resultBucket,
+        resultS3Key: input.resultS3Key,
+        nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
+        teeInput,
+        requiredEnvNames: [
+            "SONARI_WALRUS_CLI",
+            "SONARI_WALRUS_N_SHARDS",
+            "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+        ],
+        postEnvCommands: [
+            "export SONARI_WALRUS_CLI SONARI_WALRUS_N_SHARDS SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+        ],
+        tempResultPath,
+    });
 }
 
 export function buildRunnerBootstrapReadinessShellCommand(): string {
-    return [
-        "set -euo pipefail",
-        "test -f /opt/sonari/bootstrap-complete",
-        "test -s /opt/sonari/runner.env",
-        "source /opt/sonari/runner.env",
-        buildRequiredShellEnvCheck("RUNNER_TOKEN_FILE"),
-        buildRequiredShellEnvCheck("SONARI_WALRUS_CLI"),
-        buildRequiredShellEnvCheck("SONARI_WALRUS_N_SHARDS"),
-        buildRequiredShellEnvCheck("SONARI_EARTHQUAKE_EGRESS_PROXY_URL"),
-        'test -s "$RUNNER_TOKEN_FILE"',
-        'test -x "$SONARI_WALRUS_CLI"',
-        "systemctl is-active --quiet nitro-enclaves-allocator.service",
-        "systemctl is-active --quiet sonari-earthquake-egress-connect-proxy.service",
-        "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
-    ].join("\n");
+    return buildSharedRunnerBootstrapReadinessShellCommand({
+        requiredEnvNames: [
+            "RUNNER_TOKEN_FILE",
+            "SONARI_WALRUS_CLI",
+            "SONARI_WALRUS_N_SHARDS",
+            "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
+        ],
+        postEnvCommands: [
+            'test -s "$RUNNER_TOKEN_FILE"',
+            'test -x "$SONARI_WALRUS_CLI"',
+            "systemctl is-active --quiet nitro-enclaves-allocator.service",
+            "systemctl is-active --quiet sonari-earthquake-egress-connect-proxy.service",
+            "systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service",
+        ],
+    });
 }
 
 function buildSourceArchiveFromConfig(options: RunnerControlHandlerOptions): SourceArchiveAdapter {
@@ -2232,89 +2233,6 @@ function sanitizeS3KeySegment(value: string): string {
 export class RetryableSourceArchiveError extends Error {}
 export class IntegritySourceArchiveError extends Error {}
 export class ConfigurationSourceArchiveError extends Error {}
-
-function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
-    return `: "\${${name}:?${message}}"`;
-}
-
-function parseNitroEnclaveProcessCommand(command: string): string[] {
-    const words: string[] = [];
-    let current = "";
-    let quote: "'" | '"' | undefined;
-    let wordStarted = false;
-
-    for (let index = 0; index < command.length; index += 1) {
-        const char = command[index];
-        if (char === undefined) {
-            throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND");
-        }
-        if (quote === "'") {
-            if (char === "'") {
-                quote = undefined;
-            } else {
-                current += char;
-            }
-            continue;
-        }
-        if (quote === '"') {
-            if (char === '"') {
-                quote = undefined;
-                continue;
-            }
-            if (char === "\\") {
-                const next = command[index + 1];
-                if (next === undefined) {
-                    throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: trailing escape");
-                }
-                current += next;
-                index += 1;
-                continue;
-            }
-            current += char;
-            continue;
-        }
-        if (char === "'" || char === '"') {
-            quote = char;
-            wordStarted = true;
-            continue;
-        }
-        if (char === "\\") {
-            const next = command[index + 1];
-            if (next === undefined) {
-                throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: trailing escape");
-            }
-            current += next;
-            wordStarted = true;
-            index += 1;
-            continue;
-        }
-        if (/\s/.test(char)) {
-            if (wordStarted) {
-                words.push(current);
-                current = "";
-                wordStarted = false;
-            }
-            continue;
-        }
-        current += char;
-        wordStarted = true;
-    }
-
-    if (quote !== undefined) {
-        throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: unterminated quote");
-    }
-    if (wordStarted) {
-        words.push(current);
-    }
-    if (words.length === 0 || words[0]?.length === 0) {
-        throw new Error("invalid NITRO_ENCLAVE_PROCESS_COMMAND: command is empty");
-    }
-    return words;
-}
-
-function shellSingleQuote(value: string): string {
-    return `'${value.replace(/'/g, "'\\''")}'`;
-}
 
 function readRunnerFailureErrorCode(errorCode: string | undefined): OracleErrorCode {
     if (errorCode === undefined) {

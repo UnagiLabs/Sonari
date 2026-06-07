@@ -59,6 +59,11 @@ export function parseExpectedVerifierKind(
     return verifierKind;
 }
 
+export {
+    buildRunnerBootstrapReadinessShellCommand,
+    buildRunnerSsmShellCommand,
+} from "./runner_shell.js";
+
 export function withVerifierKind<T extends object>(
     verifierKind: VerifierKind | undefined,
     output: T,
