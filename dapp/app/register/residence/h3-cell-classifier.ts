@@ -51,9 +51,12 @@ export async function classifyResidenceCell(
     const base = workerUrl.replace(/\/+$/u, "");
     const url = `${base}/api/residence-proof?h3_index=${encodeURIComponent(cellDecimal)}`;
 
+    // exactOptionalPropertyTypes 環境では signal: undefined を直接渡せないため条件付きで組み立てる。
+    const init: RequestInit = signal === undefined ? { method: "GET" } : { method: "GET", signal };
+
     let response: Response;
     try {
-        response = await fetchImpl(url, { method: "GET", signal });
+        response = await fetchImpl(url, init);
     } catch (error) {
         const reason =
             error instanceof Error ? error.message : "Residence proof request failed (network).";

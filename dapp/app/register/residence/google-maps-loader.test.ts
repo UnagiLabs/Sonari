@@ -39,9 +39,9 @@ describe("isGoogleMapsConfigured", () => {
 });
 
 describe("buildMapsLoaderConfig", () => {
-    it("apiKey が一致する", () => {
+    it("key が一致する", () => {
         const config = buildMapsLoaderConfig("k");
-        expect(config.apiKey).toBe("k");
+        expect(config.key).toBe("k");
     });
 
     it("libraries に 'places' が含まれる", () => {

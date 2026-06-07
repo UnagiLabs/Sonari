@@ -1,15 +1,18 @@
-import type { LoaderOptions } from "@googlemaps/js-api-loader";
+import type { APIOptions } from "@googlemaps/js-api-loader";
 
 export type MapsLoaderStatus = "unconfigured" | "loading" | "ready" | "error";
+
+// 住所検索の Places Autocomplete と地図描画に必要なライブラリ。
+const RESIDENCE_MAPS_LIBRARIES = ["maps", "places"] as const;
 
 // --- 純粋関数（テスト対象） ---
 
 /**
-  * env から API key を読む。既定は process.env。
-  * NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を trim して返す（無ければ ""）。
-  * output: "export" では process.env.NEXT_PUBLIC_* はビルド時静的置換されるため、
-  * テスト可能にするため env を引数で注入できるようにしている。
-  */
+ * env から API key を読む。既定は process.env。
+ * NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を trim して返す（無ければ ""）。
+ * output: "export" では process.env.NEXT_PUBLIC_* はビルド時静的置換されるため、
+ * テスト可能にするため env を引数で注入できるようにしている。
+ */
 export function readGoogleMapsApiKey(
     env: Record<string, string | undefined> = process.env as Record<
         string,
@@ -24,13 +27,14 @@ export function isGoogleMapsConfigured(apiKey: string): boolean {
     return apiKey.trim().length > 0;
 }
 
-/** Loader へ渡す設定。libraries には必ず "places" を含める。 */
-export function buildMapsLoaderConfig(
-    apiKey: string,
-): Pick<LoaderOptions, "apiKey" | "libraries"> {
+/**
+ * Maps JavaScript API へ渡すオプション。
+ * v2 では key（v1 の apiKey ではない）と libraries を使う。
+ */
+export function buildMapsLoaderConfig(apiKey: string): APIOptions {
     return {
-        apiKey,
-        libraries: ["places"],
+        key: apiKey,
+        libraries: [...RESIDENCE_MAPS_LIBRARIES],
     };
 }
 
@@ -56,14 +60,15 @@ export function resolveLoadedMapsStatus(
 // --- 副作用ラッパ（テスト対象外・薄く） ---
 
 /**
-  * Google Maps の必要ライブラリ（maps, places, marker）を読み込む。
-  * Loader はランタイム動的 import（node テスト環境で DOM 依存コードを読み込まないため）。
-  * 失敗時は例外を投げる（呼び出し側が error 状態へ）。
-  */
+ * Google Maps の必要ライブラリ（maps, places）を読み込む。
+ * v2 の関数 API（setOptions + importLibrary）を使う。Loader クラスは非推奨のため使わない。
+ * ランタイム実装は動的 import（node テスト環境で DOM 依存コードを読み込まないため）。
+ * 失敗時は例外を投げる（呼び出し側が error 状態へ）。
+ */
 export async function loadGoogleMapsLibraries(apiKey: string): Promise<void> {
-    const { Loader } = await import("@googlemaps/js-api-loader");
-    const loader = new Loader(buildMapsLoaderConfig(apiKey));
-    await loader.importLibrary("maps");
-    await loader.importLibrary("places");
-    await loader.importLibrary("marker");
+    const { setOptions, importLibrary } = await import("@googlemaps/js-api-loader");
+    setOptions(buildMapsLoaderConfig(apiKey));
+    for (const library of RESIDENCE_MAPS_LIBRARIES) {
+        await importLibrary(library);
+    }
 }
