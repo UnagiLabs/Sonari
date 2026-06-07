@@ -267,6 +267,15 @@ export function ResidenceCellPicker() {
             cellsHex = cellsHex.slice(0, MAX_VIEWPORT_CELLS);
         }
 
+        // 切り捨ての影響で選択中セルのハイライトが消えないよう、必ず含める。
+        const selected = selectedDecimalRef.current;
+        if (selected !== null) {
+            const selectedHex = h3DecimalToHex(selected);
+            if (!cellsHex.includes(selectedHex)) {
+                cellsHex = [...cellsHex, selectedHex];
+            }
+        }
+
         const overlay = buildOverlayCells({
             viewportCellsHex: cellsHex,
             classifications: classCacheRef.current,
