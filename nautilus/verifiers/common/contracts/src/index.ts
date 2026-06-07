@@ -60,11 +60,8 @@ export function parseExpectedVerifierKind(
 }
 
 export {
-    buildRequiredShellEnvCheck,
     buildRunnerBootstrapReadinessShellCommand,
     buildRunnerSsmShellCommand,
-    parseNitroEnclaveProcessCommand,
-    shellSingleQuote,
 } from "./runner_shell.js";
 
 export function withVerifierKind<T extends object>(

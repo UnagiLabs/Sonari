@@ -1616,9 +1616,8 @@ function buildSsmShellCommand(input: {
                   payload: buildEarthquakeVerifierRequest(input.sourceEventId),
                   registration_metadata: input.registrationMetadata,
               });
+    const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
     return buildSharedRunnerSsmShellCommand({
-        workflowId: input.sourceEventId,
-        dispatchTimestampMs: input.dispatchTimestampMs,
         resultBucket: input.resultBucket,
         resultS3Key: input.resultS3Key,
         nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
@@ -1628,10 +1627,10 @@ function buildSsmShellCommand(input: {
             "SONARI_WALRUS_N_SHARDS",
             "SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         ],
-        exportLines: [
+        postEnvCommands: [
             "export SONARI_WALRUS_CLI SONARI_WALRUS_N_SHARDS SONARI_EARTHQUAKE_EGRESS_PROXY_URL",
         ],
-        tempResultPathPrefix: "/tmp/sonari-tee-result",
+        tempResultPath,
     });
 }
 

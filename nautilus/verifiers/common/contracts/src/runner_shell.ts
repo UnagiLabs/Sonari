@@ -1,12 +1,10 @@
-export interface RunnerBootstrapReadinessShellCommandInput {
+interface RunnerBootstrapReadinessShellCommandInput {
     requiredEnvNames?: readonly string[] | undefined;
     preEnvCommands?: readonly string[] | undefined;
     postEnvCommands?: readonly string[] | undefined;
 }
 
-export interface RunnerSsmShellCommandInput {
-    workflowId: string;
-    dispatchTimestampMs: number;
+interface RunnerSsmShellCommandInput {
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
@@ -14,8 +12,7 @@ export interface RunnerSsmShellCommandInput {
     requiredEnvNames?: readonly string[] | undefined;
     preEnvCommands?: readonly string[] | undefined;
     postEnvCommands?: readonly string[] | undefined;
-    exportLines?: readonly string[] | undefined;
-    tempResultPathPrefix: string;
+    tempResultPath: string;
 }
 
 export function buildRunnerBootstrapReadinessShellCommand(
@@ -33,7 +30,6 @@ export function buildRunnerBootstrapReadinessShellCommand(
 }
 
 export function buildRunnerSsmShellCommand(input: RunnerSsmShellCommandInput): string {
-    const tempResultPath = `${input.tempResultPathPrefix}-${input.workflowId}-${input.dispatchTimestampMs}.json`;
     const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
         .map(shellSingleQuote)
         .join(" ");
@@ -43,20 +39,19 @@ export function buildRunnerSsmShellCommand(input: RunnerSsmShellCommandInput): s
         ...(input.preEnvCommands ?? []),
         ...(input.requiredEnvNames ?? []).map((name) => buildRequiredShellEnvCheck(name)),
         ...(input.postEnvCommands ?? []),
-        ...(input.exportLines ?? []),
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' ${shellSingleQuote(JSON.stringify(input.teeInput))} | ${commandInvocation} > ${shellSingleQuote(tempResultPath)}`,
-        `aws s3 cp ${shellSingleQuote(tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(input.teeInput))} | ${commandInvocation} > ${shellSingleQuote(input.tempResultPath)}`,
+        `aws s3 cp ${shellSingleQuote(input.tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
 
-export function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
+function buildRequiredShellEnvCheck(name: string, message = `${name} is required`): string {
     return `: "\${${name}:?${message}}"`;
 }
 
-export function parseNitroEnclaveProcessCommand(command: string): string[] {
+function parseNitroEnclaveProcessCommand(command: string): string[] {
     const words: string[] = [];
     let current = "";
     let quote: "'" | '"' | undefined;
@@ -131,6 +126,6 @@ export function parseNitroEnclaveProcessCommand(command: string): string[] {
     return words;
 }
 
-export function shellSingleQuote(value: string): string {
+function shellSingleQuote(value: string): string {
     return `'${value.replace(/'/g, "'\\''")}'`;
 }

@@ -986,9 +986,8 @@ function buildSsmShellCommand(input: {
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
 }): string {
+    const tempResultPath = `/tmp/sonari-membership-tee-result-${input.jobId}-${input.dispatchTimestampMs}.json`;
     return buildSharedRunnerSsmShellCommand({
-        workflowId: input.jobId,
-        dispatchTimestampMs: input.dispatchTimestampMs,
         resultBucket: input.resultBucket,
         resultS3Key: input.resultS3Key,
         nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
@@ -1006,12 +1005,12 @@ function buildSsmShellCommand(input: {
             "SONARI_WORLD_ID_APP_ID",
             "NITRO_ENCLAVE_PROCESS_COMMAND",
         ],
-        postEnvCommands: ['test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"'],
-        exportLines: [
+        postEnvCommands: [
+            'test -s "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"',
             "export SONARI_MEMBERSHIP_IDENTITY_EIF_PATH SONARI_NITRO_RUN_ENCLAVE_ARGS SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID SONARI_WORLD_ID_API_BASE SONARI_WORLD_ID_EGRESS_PROXY_URL SONARI_WORLD_ID_APP_ID NITRO_ENCLAVE_PROCESS_COMMAND",
             `export SONARI_VERIFIER_KIND=${MEMBERSHIP_IDENTITY_VERIFIER_KIND}`,
         ],
-        tempResultPathPrefix: "/tmp/sonari-membership-tee-result",
+        tempResultPath,
     });
 }
 
