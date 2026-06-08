@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { WORLD_ID_ACTION } from "./world-id-action";
 import {
+    areIdentityStatementsAccepted,
     buildIdentitySubmitRequest,
     canSubmitIdentity,
+    type IdentitySubmitInputs,
     parseIdkitResponse,
 } from "./request";
+import { WORLD_ID_ACTION } from "./world-id-action";
 
 const REGISTRY_ID = `0x${"11".repeat(32)}`;
 const MEMBERSHIP_ID = `0x${"22".repeat(32)}`;
@@ -34,14 +36,21 @@ const VALID_IDKIT_RESPONSE = {
     ],
 };
 
+function inputs(overrides: Partial<IdentitySubmitInputs> = {}): IdentitySubmitInputs {
+    return {
+        provider: "world_id",
+        membershipId: MEMBERSHIP_ID,
+        owner: OWNER,
+        termsVersion: 1,
+        signedStatementHash: SIGNED_STATEMENT_HASH,
+        ...overrides,
+    };
+}
+
 describe("dapp register identity request builder (v4)", () => {
     describe("buildIdentitySubmitRequest – world_id provider", () => {
         it("forwards idkit_response as-is inside world_id wrapper", () => {
-            const request = buildIdentitySubmitRequest(
-                worldIdForm(),
-                REGISTRY_ID,
-                VALID_IDKIT_RESPONSE,
-            );
+            const request = buildIdentitySubmitRequest(inputs(), REGISTRY_ID, VALID_IDKIT_RESPONSE);
 
             expect(request).toEqual({
                 registry_id: REGISTRY_ID,
@@ -57,38 +66,22 @@ describe("dapp register identity request builder (v4)", () => {
         });
 
         it("world_id has only idkit_response key – no top-level signal_hash or v2 fields", () => {
-            const request = buildIdentitySubmitRequest(
-                worldIdForm(),
-                REGISTRY_ID,
-                VALID_IDKIT_RESPONSE,
-            );
+            const request = buildIdentitySubmitRequest(inputs(), REGISTRY_ID, VALID_IDKIT_RESPONSE);
 
             expect(Object.keys(request.world_id ?? {})).toEqual(["idkit_response"]);
-            // top-level request also must not contain signal_hash
             expect("signal_hash" in request).toBe(false);
         });
 
         it("idkit_response is forwarded deep-equal (extra fields preserved)", () => {
             const responseWithExtra = { ...VALID_IDKIT_RESPONSE, custom_extra: "keep-me" };
-            const request = buildIdentitySubmitRequest(
-                worldIdForm(),
-                REGISTRY_ID,
-                responseWithExtra,
-            );
+            const request = buildIdentitySubmitRequest(inputs(), REGISTRY_ID, responseWithExtra);
 
             expect(request.world_id?.idkit_response).toEqual(responseWithExtra);
         });
 
-        it("PII in form fields does not leak into the request JSON", () => {
+        it("does not leak unexpected input fields into the request JSON", () => {
             const request = buildIdentitySubmitRequest(
-                formData({
-                    identityProvider: "world_id",
-                    membershipId: MEMBERSHIP_ID,
-                    owner: OWNER,
-                    termsVersion: "1",
-                    signedStatementHash: SIGNED_STATEMENT_HASH,
-                    rawKycImage: "data:image/png;base64,raw-pii",
-                }),
+                { ...inputs(), rawKycImage: "data:image/png;base64,raw-pii" } as IdentitySubmitInputs,
                 REGISTRY_ID,
                 VALID_IDKIT_RESPONSE,
             );
@@ -98,13 +91,13 @@ describe("dapp register identity request builder (v4)", () => {
 
         it("throws when worldIdResult is undefined", () => {
             expect(() =>
-                buildIdentitySubmitRequest(worldIdForm(), REGISTRY_ID, undefined),
+                buildIdentitySubmitRequest(inputs(), REGISTRY_ID, undefined),
             ).toThrow();
         });
 
         it("throws when worldIdResult is not an object", () => {
             expect(() =>
-                buildIdentitySubmitRequest(worldIdForm(), REGISTRY_ID, "bad"),
+                buildIdentitySubmitRequest(inputs(), REGISTRY_ID, "bad"),
             ).toThrow("World ID response must be an object");
         });
     });
@@ -112,13 +105,7 @@ describe("dapp register identity request builder (v4)", () => {
     describe("buildIdentitySubmitRequest – kyc provider", () => {
         it("omits world_id for KYC requests", () => {
             const request = buildIdentitySubmitRequest(
-                formData({
-                    identityProvider: "kyc",
-                    membershipId: MEMBERSHIP_ID,
-                    owner: OWNER,
-                    termsVersion: "2",
-                    signedStatementHash: SIGNED_STATEMENT_HASH,
-                }),
+                inputs({ provider: "kyc", termsVersion: 2 }),
                 REGISTRY_ID,
             );
 
@@ -135,13 +122,7 @@ describe("dapp register identity request builder (v4)", () => {
 
         it("ignores worldIdResult when provider is kyc", () => {
             const request = buildIdentitySubmitRequest(
-                formData({
-                    identityProvider: "kyc",
-                    membershipId: MEMBERSHIP_ID,
-                    owner: OWNER,
-                    termsVersion: "1",
-                    signedStatementHash: SIGNED_STATEMENT_HASH,
-                }),
+                inputs({ provider: "kyc" }),
                 REGISTRY_ID,
                 VALID_IDKIT_RESPONSE,
             );
@@ -150,53 +131,60 @@ describe("dapp register identity request builder (v4)", () => {
         });
     });
 
-    describe("buildIdentitySubmitRequest – base form validation", () => {
+    describe("buildIdentitySubmitRequest – base input validation", () => {
         it("rejects empty membershipId", () => {
             expect(() =>
                 buildIdentitySubmitRequest(
-                    formData({
-                        identityProvider: "world_id",
-                        membershipId: "",
-                        owner: OWNER,
-                        termsVersion: "1",
-                        signedStatementHash: SIGNED_STATEMENT_HASH,
-                    }),
+                    inputs({ membershipId: "" }),
                     REGISTRY_ID,
                     VALID_IDKIT_RESPONSE,
                 ),
             ).toThrow("membershipId is required");
         });
 
-        it("rejects non-integer termsVersion", () => {
+        it("rejects empty owner", () => {
             expect(() =>
                 buildIdentitySubmitRequest(
-                    formData({
-                        identityProvider: "kyc",
-                        membershipId: MEMBERSHIP_ID,
-                        owner: OWNER,
-                        termsVersion: "1.5",
-                        signedStatementHash: SIGNED_STATEMENT_HASH,
-                    }),
+                    inputs({ owner: "" }),
                     REGISTRY_ID,
+                    VALID_IDKIT_RESPONSE,
                 ),
+            ).toThrow("owner is required");
+        });
+
+        it("rejects empty signedStatementHash", () => {
+            expect(() =>
+                buildIdentitySubmitRequest(
+                    inputs({ signedStatementHash: "" }),
+                    REGISTRY_ID,
+                    VALID_IDKIT_RESPONSE,
+                ),
+            ).toThrow("signedStatementHash is required");
+        });
+
+        it("rejects non-integer termsVersion", () => {
+            expect(() =>
+                buildIdentitySubmitRequest(inputs({ provider: "kyc", termsVersion: 1.5 }), REGISTRY_ID),
             ).toThrow("termsVersion must be a safe unsigned integer");
+        });
+
+        it("rejects negative termsVersion", () => {
+            expect(() =>
+                buildIdentitySubmitRequest(inputs({ provider: "kyc", termsVersion: -1 }), REGISTRY_ID),
+            ).toThrow("termsVersion must be a safe unsigned integer");
+        });
+
+        it("rejects empty registryId", () => {
+            expect(() =>
+                buildIdentitySubmitRequest(inputs({ provider: "kyc" }), ""),
+            ).toThrow("NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID is required");
         });
     });
 
     describe("buildIdentitySubmitRequest – is synchronous", () => {
         it("returns IdentitySubmitRequest directly (not a Promise)", () => {
-            const result = buildIdentitySubmitRequest(
-                formData({
-                    identityProvider: "kyc",
-                    membershipId: MEMBERSHIP_ID,
-                    owner: OWNER,
-                    termsVersion: "1",
-                    signedStatementHash: SIGNED_STATEMENT_HASH,
-                }),
-                REGISTRY_ID,
-            );
+            const result = buildIdentitySubmitRequest(inputs({ provider: "kyc" }), REGISTRY_ID);
 
-            // A Promise is a thenable; a plain object is not.
             expect(typeof (result as unknown as Promise<unknown>).then).toBe("undefined");
         });
     });
@@ -413,22 +401,24 @@ describe("canSubmitIdentity", () => {
     });
 });
 
-// ---- helpers ----
-
-function worldIdForm(): { get(name: string): string | null } {
-    return formData({
-        identityProvider: "world_id",
-        membershipId: MEMBERSHIP_ID,
-        owner: OWNER,
-        termsVersion: "1",
-        signedStatementHash: SIGNED_STATEMENT_HASH,
+describe("areIdentityStatementsAccepted", () => {
+    it("returns true when every statement is checked", () => {
+        expect(areIdentityStatementsAccepted([true, true, true])).toBe(true);
     });
-}
 
-function formData(values: Record<string, string>): { get(name: string): string | null } {
-    return {
-        get(name: string): string | null {
-            return values[name] ?? null;
-        },
-    };
-}
+    it("returns false when any statement is unchecked", () => {
+        expect(areIdentityStatementsAccepted([true, false, true])).toBe(false);
+    });
+
+    it("returns false when all statements are unchecked", () => {
+        expect(areIdentityStatementsAccepted([false, false, false])).toBe(false);
+    });
+
+    it("returns false for an empty acceptance list", () => {
+        expect(areIdentityStatementsAccepted([])).toBe(false);
+    });
+
+    it("returns true for a single checked statement", () => {
+        expect(areIdentityStatementsAccepted([true])).toBe(true);
+    });
+});

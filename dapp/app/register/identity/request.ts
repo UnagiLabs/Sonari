@@ -16,32 +16,33 @@ export interface IdentitySubmitRequest {
     readonly world_id?: WorldIdProofRequest;
 }
 
-interface FormDataLike {
-    get(name: string): unknown;
-}
-
-export function readFormString(formData: FormDataLike, name: string): string {
-    const value = formData.get(name);
-    if (typeof value !== "string") {
-        throw new Error(`${name} is required`);
-    }
-    const trimmed = value.trim();
-    if (trimmed.length === 0) {
-        throw new Error(`${name} is required`);
-    }
-    return trimmed;
+/**
+ * Inputs the identity page supplies to the request builder.
+ *
+ * These are all derived automatically by the page (owner from the connected
+ * wallet, membership_id from the on-chain MembershipPass lookup, and
+ * signed_statement_hash from the fixed `computeIdentityStatementHash`) rather
+ * than typed by the member, so the builder takes a typed object instead of raw
+ * FormData.
+ */
+export interface IdentitySubmitInputs {
+    readonly provider: IdentityProvider;
+    readonly membershipId: string;
+    readonly owner: string;
+    readonly termsVersion: number;
+    readonly signedStatementHash: string;
 }
 
 export function buildIdentitySubmitRequest(
-    formData: FormDataLike,
+    inputs: IdentitySubmitInputs,
     registryId: string,
     worldIdResult?: unknown,
 ): IdentitySubmitRequest {
-    const provider = parseIdentityProvider(readFormString(formData, "identityProvider"));
-    const membershipId = readFormString(formData, "membershipId");
-    const owner = readFormString(formData, "owner");
-    const signedStatementHash = readFormString(formData, "signedStatementHash");
-    const termsVersion = parseSafeUnsignedInteger(readFormString(formData, "termsVersion"));
+    const provider = parseIdentityProvider(inputs.provider);
+    const membershipId = requireString(inputs.membershipId, "membershipId");
+    const owner = requireString(inputs.owner, "owner");
+    const signedStatementHash = requireString(inputs.signedStatementHash, "signedStatementHash");
+    const termsVersion = parseSafeUnsignedInteger(inputs.termsVersion);
 
     const worldId =
         provider === "world_id"
@@ -150,6 +151,18 @@ export function canSubmitIdentity(
     return typeof worldIdResponse === "object" && worldIdResponse !== null;
 }
 
+/**
+ * Gate for the duplicate-account statement.
+ *
+ * The member must affirm every duplicate-account statement before any identity
+ * action (World ID verification or KYC submit) is offered, so the page disables
+ * those actions until this returns true. Requires at least one statement and all
+ * of them checked, so an empty acceptance list never reads as "accepted".
+ */
+export function areIdentityStatementsAccepted(accepted: readonly boolean[]): boolean {
+    return accepted.length > 0 && accepted.every(Boolean);
+}
+
 function parseIdentityProvider(value: string): IdentityProvider {
     if (value === "kyc" || value === "world_id") {
         return value;
@@ -157,12 +170,11 @@ function parseIdentityProvider(value: string): IdentityProvider {
     throw new Error("identityProvider must be kyc or world_id");
 }
 
-function parseSafeUnsignedInteger(value: string): number {
-    const parsed = Number(value);
-    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+function parseSafeUnsignedInteger(value: number): number {
+    if (!Number.isSafeInteger(value) || value < 0) {
         throw new Error("termsVersion must be a safe unsigned integer");
     }
-    return parsed;
+    return value;
 }
 
 function requireString(value: string, name: string): string {

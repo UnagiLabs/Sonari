@@ -45,6 +45,10 @@ export {
     parseH3Index,
     validateH3CellLayout,
 } from "./h3.js";
+export {
+    computeIdentityStatementHash,
+    IDENTITY_DUPLICATE_ACCOUNT_STATEMENT,
+} from "./identity-statement-hash.js";
 export { hashLeafBytes } from "./leaf-hash.js";
 export {
     buildProofEntries,
