@@ -166,31 +166,31 @@ describe("IdentityVerificationResult", () => {
     it("pins the World ID duplicate key hash rule", () => {
         expect(
             computeWorldIdDuplicateKeyHash({
-                world_app_id: "app_staging_123",
+                rp_id: "rp_staging_123",
                 action: "sonari_membership_register_v1",
                 nullifier: "12345678901234567890",
             }),
-        ).toBe("0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74");
+        ).toBe("0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878");
     });
 
     it("canonicalizes equivalent World ID nullifier formats before hashing", () => {
         const decimal = computeWorldIdDuplicateKeyHash({
-            world_app_id: "app_staging_123",
+            rp_id: "rp_staging_123",
             action: "sonari_membership_register_v1",
             nullifier: "12345678901234567890",
         });
         const decimalWithZeroes = computeWorldIdDuplicateKeyHash({
-            world_app_id: "app_staging_123",
+            rp_id: "rp_staging_123",
             action: "sonari_membership_register_v1",
             nullifier: "00012345678901234567890",
         });
         const hex = computeWorldIdDuplicateKeyHash({
-            world_app_id: "app_staging_123",
+            rp_id: "rp_staging_123",
             action: "sonari_membership_register_v1",
             nullifier: "0xAB54A98CEB1F0AD2",
         });
         const upperPrefixHex = computeWorldIdDuplicateKeyHash({
-            world_app_id: "app_staging_123",
+            rp_id: "rp_staging_123",
             action: "sonari_membership_register_v1",
             nullifier: "0XAB54A98CEB1F0AD2",
         });
@@ -221,7 +221,7 @@ describe("IdentityVerificationResult", () => {
         expect(worldId).toEqual(worldIdSuccessVector.result);
         expect(worldId.duplicate_key_hash).toBe(
             computeWorldIdDuplicateKeyHash({
-                world_app_id: "app_staging_123",
+                rp_id: "rp_staging_123",
                 action: "sonari_membership_register_v1",
                 nullifier: "12345678901234567890",
             }),

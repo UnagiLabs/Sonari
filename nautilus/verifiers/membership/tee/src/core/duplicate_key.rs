@@ -125,7 +125,7 @@ mod tests {
     fn duplicate_key_hashes_match_typescript_vectors_from_crate_root() {
         let kyc = compute_kyc_duplicate_key_hash("sumsub", "applicant-123").unwrap();
         let world_id = compute_world_id_duplicate_key_hash(
-            "app_staging_123",
+            "rp_staging_123",
             "sonari_membership_register_v1",
             "12345678901234567890",
         )
@@ -137,7 +137,7 @@ mod tests {
         );
         assert_eq!(
             world_id,
-            "0x2f963d1ddb2b4059c677d33264146dbef5020e44781ee5f8c8992237632f4a2c"
+            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
         );
     }
 
