@@ -76,4 +76,8 @@ export {
     type JsonRecord,
 } from "./schema.js";
 export { proofShardId } from "./shard.js";
-export { computeWorldIdSignalHash, WORLD_ID_SIGNAL_HASH_PREFIX } from "./world-id-signal.js";
+export {
+    computeWorldIdSignalHash,
+    WORLD_ID_SIGNAL_HASH_PREFIX,
+    worldIdSignalString,
+} from "./world-id-signal.js";

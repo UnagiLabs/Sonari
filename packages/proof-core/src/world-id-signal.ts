@@ -12,6 +12,33 @@ import { bytesToPrefixedHex, type PrefixedHex32 } from "./bytes.js";
 export const WORLD_ID_SIGNAL_HASH_PREFIX = "sonari:world_id_signal:v1";
 
 /**
+ * Returns the canonical signal string that the dapp must pass to IDKit so that
+ * World ID derives the same `signal_hash` as the enclave.
+ *
+ * The enclave computes `signal_hash = hashToField(canonical_signal_bytes)`
+ * where the canonical signal is the NUL-joined concatenation of the domain
+ * prefix and the three 32-byte hex identifiers (each normalised to lowercase
+ * `0x`-hex). IDKit internally applies the same hashToField before writing the
+ * value into the ZK proof, so the frontend must supply exactly this string.
+ *
+ * Mirrors the enclave's `canonical_signal` construction in
+ * `compute_world_id_signal_hash`
+ * (nautilus/verifiers/membership/tee/src/core/processing.rs).
+ */
+export function worldIdSignalString(
+    owner: string,
+    membershipId: string,
+    signedStatementHash: string,
+): string {
+    return [
+        WORLD_ID_SIGNAL_HASH_PREFIX,
+        canonicalHex32Lower(owner, "owner"),
+        canonicalHex32Lower(membershipId, "membership_id"),
+        canonicalHex32Lower(signedStatementHash, "signed_statement_hash"),
+    ].join("\0");
+}
+
+/**
  * Derives the World ID `signal_hash` exactly as the enclave does in
  * `compute_world_id_signal_hash`
  * (nautilus/verifiers/membership/tee/src/core/processing.rs): World ID v4
@@ -28,13 +55,9 @@ export async function computeWorldIdSignalHash(
     membershipId: string,
     signedStatementHash: string,
 ): Promise<PrefixedHex32> {
-    const parts = [
-        WORLD_ID_SIGNAL_HASH_PREFIX,
-        canonicalHex32Lower(owner, "owner"),
-        canonicalHex32Lower(membershipId, "membership_id"),
-        canonicalHex32Lower(signedStatementHash, "signed_statement_hash"),
-    ];
-    const encoded = new TextEncoder().encode(parts.join("\0"));
+    const encoded = new TextEncoder().encode(
+        worldIdSignalString(owner, membershipId, signedStatementHash),
+    );
     return hashToFieldBytes(encoded);
 }
 
