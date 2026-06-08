@@ -204,9 +204,13 @@ fn verified_output(
     signer: &impl PayloadSigner,
     issued_at_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
-    let duplicate_key_hash =
-        compute_world_id_duplicate_key_hash(&evidence.rp_id, &evidence.action, &evidence.nullifier)?;
-    let evidence_hash = compute_world_id_evidence_hash(evidence, &duplicate_key_hash, issued_at_ms)?;
+    let duplicate_key_hash = compute_world_id_duplicate_key_hash(
+        &evidence.rp_id,
+        &evidence.action,
+        &evidence.nullifier,
+    )?;
+    let evidence_hash =
+        compute_world_id_evidence_hash(evidence, &duplicate_key_hash, issued_at_ms)?;
     let validity_ms = request.validity_ms.unwrap_or(IDENTITY_RESULT_TTL_MS);
     if validity_ms == 0 {
         return Err(IdentityError::Request(
@@ -308,8 +312,8 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
-        fn expected_app_id(&self) -> &str {
-            "app_staging_123"
+        fn expected_rp_id(&self) -> &str {
+            "rp_staging_123"
         }
 
         fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {

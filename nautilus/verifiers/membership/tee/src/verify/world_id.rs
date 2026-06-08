@@ -13,7 +13,6 @@ pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
 /// This value satisfies [`normalize_base_url`]'s `https` requirement.
 pub const WORLD_ID_API_BASE_CANONICAL: &str = "https://developer.world.org";
 pub const WORLD_ID_API_BASE_STAGING: &str = "https://staging-developer.worldcoin.org";
-pub const WORLD_ID_APP_ID_ENV: &str = "SONARI_WORLD_ID_APP_ID";
 pub const WORLD_ID_RP_ID_ENV: &str = "SONARI_WORLD_ID_RP_ID";
 pub const WORLD_ID_ENVIRONMENT_ENV: &str = "SONARI_WORLD_ID_ENVIRONMENT";
 /// Optional egress proxy URL the enclave routes World ID HTTPS traffic through.
@@ -50,13 +49,7 @@ pub struct WorldIdVerifiedEvidence {
 }
 
 pub trait WorldIdVerifier {
-    fn expected_rp_id(&self) -> &str {
-        self.expected_app_id()
-    }
-
-    fn expected_app_id(&self) -> &str {
-        self.expected_rp_id()
-    }
+    fn expected_rp_id(&self) -> &str;
 
     fn expected_environment(&self) -> &str {
         "staging"
@@ -225,13 +218,12 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
             return classify_success_response(&self.rp_id, self.expected_environment, proof, &body);
         }
 
-        let body = if status == StatusCode::BAD_REQUEST {
-            Some(response.text().unwrap_or_default())
-        } else {
-            None
-        };
+        if status == StatusCode::BAD_REQUEST {
+            let body = response.text().unwrap_or_default();
+            return classify_bad_request(&self.rp_id, self.expected_environment, proof, &body);
+        }
 
-        classify_http_status(status, body.as_deref())
+        classify_http_status(status)
     }
 }
 
@@ -305,8 +297,19 @@ fn normalize_rp_id(rp_id: String) -> Result<String, IdentityError> {
     Ok(trimmed)
 }
 
-fn classify_bad_request(body: &str) -> WorldIdVerificationStatus {
+fn classify_bad_request(
+    rp_id: &str,
+    expected_environment: WorldIdEnvironment,
+    proof: &WorldIdProofRequest,
+    body: &str,
+) -> WorldIdVerificationStatus {
     match world_id_error_code(body).as_deref() {
+        Some("already_verified") | Some("nullifier_replayed") => {
+            match classify_success_response(rp_id, expected_environment, proof, body) {
+                verified @ WorldIdVerificationStatus::Verified { .. } => verified,
+                _ => rejected(),
+            }
+        }
         Some("max_verifications_reached") => rejected(),
         _ => rejected(),
     }
@@ -370,15 +373,9 @@ fn classify_success_response(
     }
 }
 
-fn classify_http_status(
-    status: StatusCode,
-    bad_request_body: Option<&str>,
-) -> WorldIdVerificationStatus {
+fn classify_http_status(status: StatusCode) -> WorldIdVerificationStatus {
     if status.is_success() {
         return pending_source();
-    }
-    if status == StatusCode::BAD_REQUEST {
-        return classify_bad_request(bad_request_body.unwrap_or(""));
     }
     if status.is_redirection() || status.is_server_error() || status.is_client_error() {
         return pending_source();
@@ -409,8 +406,8 @@ fn pending_source() -> WorldIdVerificationStatus {
 }
 
 /// A dummy World ID verifier that skips the HTTP call to the World ID API and
-/// returns [`WorldIdVerificationStatus::Verified`] directly when `app_id` and
-/// `action` match. All other validation (app_id normalisation, action check)
+/// returns [`WorldIdVerificationStatus::Verified`] directly when `rp_id` and
+/// `action` match. All other validation (rp_id normalisation, action check)
 /// follows the same path as [`CloudWorldIdVerifier`] so that request shape,
 /// payload, and signature-target bytes are identical to the real verifier.
 ///
@@ -492,7 +489,7 @@ mod tests {
     // ---- DummyWorldIdVerifier tests ----
 
     #[test]
-    fn dummy_world_id_verifier_returns_verified_when_app_id_and_action_match() {
+    fn dummy_world_id_verifier_returns_verified_when_rp_id_and_action_match() {
         let verifier = DummyWorldIdVerifier::new("rp_staging_123").unwrap();
         let proof = world_id_proof();
 
@@ -507,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn dummy_world_id_verifier_rejects_mismatched_app_id() {
+    fn dummy_world_id_verifier_rejects_mismatched_action() {
         let verifier = DummyWorldIdVerifier::new("rp_staging_123").unwrap();
         let mut proof = world_id_proof();
         proof.idkit_response["action"] = serde_json::json!("attacker_action");
@@ -521,10 +518,10 @@ mod tests {
     }
 
     #[test]
-    fn dummy_world_id_verifier_rejects_mismatched_action() {
+    fn dummy_world_id_verifier_rejects_mismatched_environment() {
         let verifier = DummyWorldIdVerifier::new("rp_staging_123").unwrap();
         let mut proof = world_id_proof();
-        proof.idkit_response["action"] = serde_json::json!("attacker_action");
+        proof.idkit_response["environment"] = serde_json::json!("production");
 
         assert_eq!(
             verifier.verify_world_id(&proof),
@@ -652,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn world_id_verifier_rejects_noncanonical_app_or_action_before_http() {
+    fn world_id_verifier_rejects_noncanonical_rp_or_action_before_http() {
         let verifier =
             CloudWorldIdVerifier::new(WorldIdEnvironment::Staging, "rp_staging_123").unwrap();
         let mut proof = world_id_proof();
@@ -677,7 +674,13 @@ mod tests {
 
     #[test]
     fn world_id_400_invalid_proof_is_sanitized_rejection() {
-        let status = classify_bad_request(r#"{"code":"invalid_proof","detail":"raw proof"}"#);
+        let proof = world_id_proof();
+        let status = classify_bad_request(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
+            &proof,
+            r#"{"code":"invalid_proof","detail":"raw proof"}"#,
+        );
 
         assert_eq!(
             status,
@@ -689,8 +692,14 @@ mod tests {
     }
 
     #[test]
-    fn world_id_400_already_verified_is_success_for_stateless_tee() {
-        let status = classify_bad_request(r#"{"code":"already_verified"}"#);
+    fn world_id_400_already_verified_without_evidence_is_rejected() {
+        let proof = world_id_proof();
+        let status = classify_bad_request(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
+            &proof,
+            r#"{"code":"already_verified"}"#,
+        );
 
         assert_eq!(
             status,
@@ -701,8 +710,31 @@ mod tests {
     }
 
     #[test]
+    fn world_id_400_nullifier_replayed_with_verified_evidence_is_success() {
+        let proof = world_id_proof();
+        let status = classify_bad_request(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
+            &proof,
+            r#"{"code":"nullifier_replayed","success":true,"results":[{"identifier":"orb","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
+        );
+        let WorldIdVerificationStatus::Verified { evidence } = status else {
+            panic!("evidence-bearing replay should return verified evidence");
+        };
+        assert_eq!(evidence.rp_id, "rp_staging_123");
+        assert_eq!(evidence.nullifier, "12345678901234567890");
+        assert_eq!(evidence.identifier, "orb");
+    }
+
+    #[test]
     fn world_id_400_max_verifications_reached_is_rejection() {
-        let status = classify_bad_request(r#"{"code":"max_verifications_reached"}"#);
+        let proof = world_id_proof();
+        let status = classify_bad_request(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
+            &proof,
+            r#"{"code":"max_verifications_reached"}"#,
+        );
 
         assert_eq!(
             status,
@@ -765,7 +797,7 @@ mod tests {
     #[test]
     fn world_id_non_ok_success_status_is_pending_source() {
         assert_eq!(
-            classify_http_status(StatusCode::ACCEPTED, None),
+            classify_http_status(StatusCode::ACCEPTED),
             WorldIdVerificationStatus::PendingSource {
                 error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
             }
@@ -784,7 +816,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
         ] {
             assert_eq!(
-                classify_http_status(status, None),
+                classify_http_status(status),
                 WorldIdVerificationStatus::PendingSource {
                     error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
                 }

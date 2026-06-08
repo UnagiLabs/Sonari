@@ -78,7 +78,7 @@ pub enum TeeJsonResult {
 /// verification pipeline and emitting the unsigned identity BCS payload. It
 /// carries no signing key, attestation logic, or transport state.
 ///
-/// The World ID base URL and app id are resolved once in the orchestration layer
+/// The World ID base URL and rp_id are resolved once in the orchestration layer
 /// (`main.rs`) and injected at construction; the handler never reads the process
 /// environment during `process`. The egress proxy URL still arrives through the
 /// [`TeeContext`] so the verifier's HTTPS client can be routed through the
@@ -86,7 +86,7 @@ pub enum TeeJsonResult {
 #[derive(Debug, Clone)]
 pub struct IdentityProcessHandler {
     world_id_base_url: String,
-    world_id_app_id: String,
+    world_id_rp_id: String,
     world_id_verifier_mode: ResolvedWorldIdVerifierMode,
 }
 
@@ -99,12 +99,12 @@ impl IdentityProcessHandler {
     /// already proven safe.
     pub fn new(
         world_id_base_url: impl Into<String>,
-        world_id_app_id: impl Into<String>,
+        world_id_rp_id: impl Into<String>,
         world_id_verifier_mode: ResolvedWorldIdVerifierMode,
     ) -> Self {
         Self {
             world_id_base_url: world_id_base_url.into(),
-            world_id_app_id: world_id_app_id.into(),
+            world_id_rp_id: world_id_rp_id.into(),
             world_id_verifier_mode,
         }
     }
@@ -130,14 +130,14 @@ impl ProcessDataHandler for IdentityProcessHandler {
         // bytes stay identical between the two modes.
         match self.world_id_verifier_mode {
             ResolvedWorldIdVerifierMode::Dummy => {
-                let verifier = DummyWorldIdVerifier::new(self.world_id_app_id.clone())
+                let verifier = DummyWorldIdVerifier::new(self.world_id_rp_id.clone())
                     .map_err(|error| process_failed(error.to_string()))?;
                 process_with_verifier(request, &verifier, issued_at_ms)
             }
             ResolvedWorldIdVerifierMode::Real => {
                 let verifier = CloudWorldIdVerifier::with_proxy(
                     environment_from_base_url(&self.world_id_base_url),
-                    self.world_id_app_id.clone(),
+                    self.world_id_rp_id.clone(),
                     ctx.get(EGRESS_PROXY_URL_KEY),
                 )
                 .map_err(|error| process_failed(error.to_string()))?;
@@ -274,7 +274,7 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
-        fn expected_app_id(&self) -> &str {
+        fn expected_rp_id(&self) -> &str {
             "rp_staging_123"
         }
 

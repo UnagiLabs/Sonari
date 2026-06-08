@@ -76,7 +76,7 @@ struct FixtureArgs {
     #[arg(long)]
     signing_key_seed: Option<String>,
     #[arg(long, default_value = "rp_staging_123")]
-    world_app_id: String,
+    world_rp_id: String,
     #[arg(long, value_enum, default_value = "verified")]
     world_id_status: FixtureWorldIdStatus,
 }
@@ -143,7 +143,7 @@ fn fixture_result(args: FixtureArgs) -> Result<TeeJsonResult, Box<dyn std::error
         request.issued_at_ms.unwrap_or(0)
     };
     let verifier = FixtureWorldIdVerifier {
-        expected_app_id: args.world_app_id,
+        expected_rp_id: args.world_rp_id,
         status: args.world_id_status,
     };
     let seed = signing_key_seed_from_env(
@@ -204,7 +204,7 @@ struct EnclaveState {
     ephemeral_signing_key_seed: [u8; 32],
     ctx: TeeContext,
     world_id_base_url: String,
-    world_id_app_id: String,
+    world_id_rp_id: String,
     /// Resolved once at startup by the fail-closed gate. Passed to the handler so
     /// it can select the dummy or cloud World ID verifier per request without
     /// re-reading the host-supplied bootstrap env.
@@ -251,12 +251,12 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
 /// adversarial host cannot redirect the signed-result origin to an arbitrary
 /// https base. Only the egress proxy URL is host-variable (injected through the
 /// [`TeeContext`]), mirroring the earthquake egress model where the base is fixed
-/// and the proxy merely steers the TCP connection. The app id is still read from
+/// and the proxy merely steers the TCP connection. The rp_id is still read from
 /// the bootstrap env; the egress proxy is resolved into the [`TeeContext`].
 fn enclave_state_from_env(
     ephemeral_signing_key_seed: [u8; 32],
 ) -> Result<EnclaveState, Box<dyn std::error::Error>> {
-    let world_id_app_id = non_empty_env(WORLD_ID_RP_ID_ENV)
+    let world_id_rp_id = non_empty_env(WORLD_ID_RP_ID_ENV)
         .ok_or(format!("{WORLD_ID_RP_ID_ENV} is required for server mode"))?;
     let proof_mode = non_empty_env(WORLD_ID_PROOF_MODE_ENV);
     let network = non_empty_env(SUI_NETWORK_ENV);
@@ -277,7 +277,7 @@ fn enclave_state_from_env(
         ephemeral_signing_key_seed,
         ctx: tee_context_from_env(),
         world_id_base_url: server_world_id_base_url(),
-        world_id_app_id,
+        world_id_rp_id,
         world_id_verifier_mode,
         world_id_mode_observation,
     })
@@ -329,7 +329,7 @@ fn route_request(
             let envelope = parse_process_data_envelope(&request.body)?;
             let handler = IdentityProcessHandler::new(
                 &state.world_id_base_url,
-                &state.world_id_app_id,
+                &state.world_id_rp_id,
                 state.world_id_verifier_mode,
             );
             let output = handler
@@ -468,7 +468,7 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     // bootstrap config: the production server path pins it to
     // `WORLD_ID_API_BASE_CANONICAL` so the host cannot redirect the signed-result
     // origin. The field is still accepted on the wire for backward compatibility.
-    set_env_before_server(WORLD_ID_RP_ID_ENV, &config.world_id_app_id);
+    set_env_before_server(WORLD_ID_RP_ID_ENV, &config.world_id_rp_id);
     apply_egress_proxy_env(config.egress_proxy_url.as_deref());
     apply_network_env(config.network.as_deref());
     apply_proof_mode_env(config.proof_mode.as_deref());
@@ -515,7 +515,8 @@ struct BootstrapConfig {
     /// World ID base to [`WORLD_ID_API_BASE_CANONICAL`].
     #[allow(dead_code)]
     world_id_api_base: String,
-    world_id_app_id: String,
+    #[serde(alias = "world_id_app_id")]
+    world_id_rp_id: String,
     egress_proxy_url: Option<String>,
     /// Sui network name supplied by the host (e.g. `"testnet"`, `"mainnet"`).
     /// Optional for backward compatibility; absence is treated as unset (will
@@ -544,13 +545,13 @@ fn unset_env_before_server(name: &str) {
 
 #[derive(Debug)]
 struct FixtureWorldIdVerifier {
-    expected_app_id: String,
+    expected_rp_id: String,
     status: FixtureWorldIdStatus,
 }
 
 impl WorldIdVerifier for FixtureWorldIdVerifier {
-    fn expected_app_id(&self) -> &str {
-        &self.expected_app_id
+    fn expected_rp_id(&self) -> &str {
+        &self.expected_rp_id
     }
 
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
@@ -563,7 +564,7 @@ impl WorldIdVerifier for FixtureWorldIdVerifier {
                 };
                 WorldIdVerificationStatus::Verified {
                     evidence: WorldIdVerifiedEvidence {
-                        rp_id: self.expected_app_id.clone(),
+                        rp_id: self.expected_rp_id.clone(),
                         environment: claims.environment,
                         action: claims.action,
                         protocol_version: claims.protocol_version,
@@ -756,7 +757,7 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
-        fn expected_app_id(&self) -> &str {
+        fn expected_rp_id(&self) -> &str {
             "rp_staging_123"
         }
 
@@ -873,8 +874,8 @@ mod tests {
         }
 
         impl WorldIdVerifier for MockWorldIdVerifier {
-            fn expected_app_id(&self) -> &str {
-                "app_staging_123"
+            fn expected_rp_id(&self) -> &str {
+                "rp_staging_123"
             }
 
             fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
@@ -1170,7 +1171,7 @@ mod tests {
                 ephemeral_signing_key_seed: SERVER_SEED,
                 ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]),
                 world_id_base_url: membership_tee::WORLD_ID_API_BASE_STAGING.to_owned(),
-                world_id_app_id: "rp_staging_123".to_owned(),
+                world_id_rp_id: "rp_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
                     None,
@@ -1201,7 +1202,7 @@ mod tests {
                 ephemeral_signing_key_seed: SERVER_SEED,
                 ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:18080")]),
                 world_id_base_url: "https://developer.world.org".to_owned(),
-                world_id_app_id: "rp_staging_123".to_owned(),
+                world_id_rp_id: "rp_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
                     None,
