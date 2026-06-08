@@ -2,7 +2,7 @@ use crate::IdentityError;
 use sonari_tee_core::{sha256_bytes, to_hex};
 
 const KYC_DUPLICATE_KEY_PREFIX: &str = "sonari:kyc:v1";
-const WORLD_ID_DUPLICATE_KEY_PREFIX: &str = "sonari:world_id:v1";
+const WORLD_ID_DUPLICATE_KEY_PREFIX: &str = "sonari:world_id:v2";
 
 pub fn compute_kyc_duplicate_key_hash(
     provider_id: &str,
@@ -12,14 +12,14 @@ pub fn compute_kyc_duplicate_key_hash(
 }
 
 pub fn compute_world_id_duplicate_key_hash(
-    app_id: &str,
+    rp_id: &str,
     action: &str,
     nullifier: &str,
 ) -> Result<String, IdentityError> {
     let canonical_nullifier = canonical_world_id_nullifier(nullifier)?;
     compute_duplicate_key_hash(&[
         WORLD_ID_DUPLICATE_KEY_PREFIX,
-        app_id,
+        rp_id,
         action,
         &canonical_nullifier,
     ])
@@ -125,7 +125,7 @@ mod tests {
     fn duplicate_key_hashes_match_typescript_vectors_from_crate_root() {
         let kyc = compute_kyc_duplicate_key_hash("sumsub", "applicant-123").unwrap();
         let world_id = compute_world_id_duplicate_key_hash(
-            "app_staging_123",
+            "rp_staging_123",
             "sonari_membership_register_v1",
             "12345678901234567890",
         )
@@ -137,7 +137,7 @@ mod tests {
         );
         assert_eq!(
             world_id,
-            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74"
+            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
         );
     }
 

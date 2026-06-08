@@ -7,11 +7,11 @@ use membership_tee::server::{EGRESS_PROXY_URL_KEY, IdentityProcessHandler};
 use membership_tee::{
     CloudWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus, IdentityProvider,
     IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV,
-    WORLD_ID_API_BASE_CANONICAL, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
-    WORLD_ID_PROOF_MODE_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdModeObservation,
-    WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
-    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
-    resolve_world_id_verifier_mode, world_id_mode_observation,
+    WORLD_ID_API_BASE_CANONICAL, WORLD_ID_API_UNAVAILABLE, WORLD_ID_ENVIRONMENT_ENV,
+    WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
+    WorldIdModeObservation, WorldIdProofRequest, WorldIdVerificationStatus,
+    WorldIdVerifiedEvidence, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
+    process_identity_with_verifier, resolve_world_id_verifier_mode, world_id_mode_observation,
 };
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::enclave::{
@@ -75,8 +75,8 @@ struct ServerArgs {
 struct FixtureArgs {
     #[arg(long)]
     signing_key_seed: Option<String>,
-    #[arg(long, default_value = "app_staging_123")]
-    world_app_id: String,
+    #[arg(long, default_value = "rp_staging_123")]
+    world_rp_id: String,
     #[arg(long, value_enum, default_value = "verified")]
     world_id_status: FixtureWorldIdStatus,
 }
@@ -143,7 +143,7 @@ fn fixture_result(args: FixtureArgs) -> Result<TeeJsonResult, Box<dyn std::error
         request.issued_at_ms.unwrap_or(0)
     };
     let verifier = FixtureWorldIdVerifier {
-        expected_app_id: args.world_app_id,
+        expected_rp_id: args.world_rp_id,
         status: args.world_id_status,
     };
     let seed = signing_key_seed_from_env(
@@ -204,7 +204,7 @@ struct EnclaveState {
     ephemeral_signing_key_seed: [u8; 32],
     ctx: TeeContext,
     world_id_base_url: String,
-    world_id_app_id: String,
+    world_id_rp_id: String,
     /// Resolved once at startup by the fail-closed gate. Passed to the handler so
     /// it can select the dummy or cloud World ID verifier per request without
     /// re-reading the host-supplied bootstrap env.
@@ -251,13 +251,13 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
 /// adversarial host cannot redirect the signed-result origin to an arbitrary
 /// https base. Only the egress proxy URL is host-variable (injected through the
 /// [`TeeContext`]), mirroring the earthquake egress model where the base is fixed
-/// and the proxy merely steers the TCP connection. The app id is still read from
+/// and the proxy merely steers the TCP connection. The rp_id is still read from
 /// the bootstrap env; the egress proxy is resolved into the [`TeeContext`].
 fn enclave_state_from_env(
     ephemeral_signing_key_seed: [u8; 32],
 ) -> Result<EnclaveState, Box<dyn std::error::Error>> {
-    let world_id_app_id = non_empty_env(WORLD_ID_APP_ID_ENV)
-        .ok_or(format!("{WORLD_ID_APP_ID_ENV} is required for server mode"))?;
+    let world_id_rp_id = non_empty_env(WORLD_ID_RP_ID_ENV)
+        .ok_or(format!("{WORLD_ID_RP_ID_ENV} is required for server mode"))?;
     let proof_mode = non_empty_env(WORLD_ID_PROOF_MODE_ENV);
     let network = non_empty_env(SUI_NETWORK_ENV);
     // Fail-closed gate: evaluate once at startup. If the proof_mode/network
@@ -277,7 +277,7 @@ fn enclave_state_from_env(
         ephemeral_signing_key_seed,
         ctx: tee_context_from_env(),
         world_id_base_url: server_world_id_base_url(),
-        world_id_app_id,
+        world_id_rp_id,
         world_id_verifier_mode,
         world_id_mode_observation,
     })
@@ -286,7 +286,10 @@ fn enclave_state_from_env(
 /// Returns the canonical World ID base URL the production server path signs
 /// against, independent of any host/bootstrap-supplied env value.
 fn server_world_id_base_url() -> String {
-    WORLD_ID_API_BASE_CANONICAL.to_owned()
+    match non_empty_env(WORLD_ID_ENVIRONMENT_ENV).as_deref() {
+        Some("staging") => membership_tee::WORLD_ID_API_BASE_STAGING.to_owned(),
+        _ => WORLD_ID_API_BASE_CANONICAL.to_owned(),
+    }
 }
 
 /// Builds the dependency-injection context from the bootstrap-populated env.
@@ -326,7 +329,7 @@ fn route_request(
             let envelope = parse_process_data_envelope(&request.body)?;
             let handler = IdentityProcessHandler::new(
                 &state.world_id_base_url,
-                &state.world_id_app_id,
+                &state.world_id_rp_id,
                 state.world_id_verifier_mode,
             );
             let output = handler
@@ -465,7 +468,7 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     // bootstrap config: the production server path pins it to
     // `WORLD_ID_API_BASE_CANONICAL` so the host cannot redirect the signed-result
     // origin. The field is still accepted on the wire for backward compatibility.
-    set_env_before_server(WORLD_ID_APP_ID_ENV, &config.world_id_app_id);
+    set_env_before_server(WORLD_ID_RP_ID_ENV, &config.world_id_rp_id);
     apply_egress_proxy_env(config.egress_proxy_url.as_deref());
     apply_network_env(config.network.as_deref());
     apply_proof_mode_env(config.proof_mode.as_deref());
@@ -512,7 +515,8 @@ struct BootstrapConfig {
     /// World ID base to [`WORLD_ID_API_BASE_CANONICAL`].
     #[allow(dead_code)]
     world_id_api_base: String,
-    world_id_app_id: String,
+    #[serde(alias = "world_id_app_id")]
+    world_id_rp_id: String,
     egress_proxy_url: Option<String>,
     /// Sui network name supplied by the host (e.g. `"testnet"`, `"mainnet"`).
     /// Optional for backward compatibility; absence is treated as unset (will
@@ -541,18 +545,37 @@ fn unset_env_before_server(name: &str) {
 
 #[derive(Debug)]
 struct FixtureWorldIdVerifier {
-    expected_app_id: String,
+    expected_rp_id: String,
     status: FixtureWorldIdStatus,
 }
 
 impl WorldIdVerifier for FixtureWorldIdVerifier {
-    fn expected_app_id(&self) -> &str {
-        &self.expected_app_id
+    fn expected_rp_id(&self) -> &str {
+        &self.expected_rp_id
     }
 
-    fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
+    fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
         match self.status {
-            FixtureWorldIdStatus::Verified => WorldIdVerificationStatus::Verified,
+            FixtureWorldIdStatus::Verified => {
+                let Ok(claims) = proof.uniqueness_proof() else {
+                    return WorldIdVerificationStatus::Rejected {
+                        error_code: WORLD_ID_VERIFICATION_FAILED.to_owned(),
+                    };
+                };
+                WorldIdVerificationStatus::Verified {
+                    evidence: WorldIdVerifiedEvidence {
+                        rp_id: self.expected_rp_id.clone(),
+                        environment: claims.environment,
+                        action: claims.action,
+                        protocol_version: claims.protocol_version,
+                        identifier: claims.identifier,
+                        nullifier: claims.nullifier,
+                        signal_hash: claims.signal_hash,
+                        created_at: None,
+                        session_id: None,
+                    },
+                }
+            }
             FixtureWorldIdStatus::Rejected => WorldIdVerificationStatus::Rejected {
                 error_code: WORLD_ID_VERIFICATION_FAILED.to_owned(),
             },
@@ -638,7 +661,7 @@ mod tests {
     use membership_tee::{
         INTENT, IdentityProvider, IdentityVerifyRequest, VERIFIER_FAMILY, VERIFIER_VERSION,
         WORLD_ID_ACTION, WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED,
-        WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
+        WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
     };
     use sonari_tee_core::{LocalEd25519Signer, signing_key_seed_from_env};
 
@@ -650,7 +673,7 @@ mod tests {
         let result = production_result_with_verifier(
             world_id_request(Some(1_800_000_000_000)),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             1_900_000_000_000,
@@ -680,7 +703,7 @@ mod tests {
         let result = production_result_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             1_900_000_000_000,
@@ -734,8 +757,8 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
-        fn expected_app_id(&self) -> &str {
-            "app_staging_123"
+        fn expected_rp_id(&self) -> &str {
+            "rp_staging_123"
         }
 
         fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
@@ -754,6 +777,23 @@ mod tests {
         LocalEd25519Signer::new(seed)
     }
 
+    fn verified_status() -> WorldIdVerificationStatus {
+        WorldIdVerificationStatus::Verified {
+            evidence: WorldIdVerifiedEvidence {
+                rp_id: "rp_staging_123".to_owned(),
+                environment: "staging".to_owned(),
+                action: WORLD_ID_ACTION.to_owned(),
+                protocol_version: "4.0".to_owned(),
+                identifier: "orb".to_owned(),
+                nullifier: "12345678901234567890".to_owned(),
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                    .to_owned(),
+                created_at: None,
+                session_id: None,
+            },
+        }
+    }
+
     fn world_id_request(issued_at_ms: Option<u64>) -> IdentityVerifyRequest {
         IdentityVerifyRequest {
             registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111"
@@ -768,14 +808,21 @@ mod tests {
             signed_statement_hash:
                 "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
             world_id: Some(WorldIdProofRequest {
-                world_app_id: "app_staging_123".to_owned(),
-                nullifier_hash: "12345678901234567890".to_owned(),
-                merkle_root: "987654321".to_owned(),
-                proof: "0xproof".to_owned(),
-                verification_level: "orb".to_owned(),
-                action: WORLD_ID_ACTION.to_owned(),
-                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
-                    .to_owned(),
+                idkit_response: serde_json::json!({
+                    "protocol_version": "4.0",
+                    "nonce": "nonce-123",
+                    "action": WORLD_ID_ACTION,
+                    "environment": "staging",
+                    "responses": [
+                        {
+                            "identifier": "orb",
+                            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                            "proof": "0xproof",
+                            "merkle_root": "987654321",
+                            "nullifier": "12345678901234567890"
+                        }
+                    ]
+                }),
             }),
         }
     }
@@ -815,7 +862,7 @@ mod tests {
         use membership_tee::{
             ResolvedWorldIdVerifierMode, VERIFIER_FAMILY, WORLD_ID_ACTION,
             WORLD_ID_API_UNAVAILABLE, WorldIdProofRequest, WorldIdVerificationStatus,
-            WorldIdVerifier,
+            WorldIdVerifiedEvidence, WorldIdVerifier,
         };
         use sonari_tee_core::enclave::{EnclaveRegistrationMetadata, ProcessOutput, TeeContext};
         use sonari_tee_core::{LocalEd25519Signer, PayloadSigner};
@@ -827,12 +874,30 @@ mod tests {
         }
 
         impl WorldIdVerifier for MockWorldIdVerifier {
-            fn expected_app_id(&self) -> &str {
-                "app_staging_123"
+            fn expected_rp_id(&self) -> &str {
+                "rp_staging_123"
             }
 
             fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
                 self.status.clone()
+            }
+        }
+
+        fn verified_status() -> WorldIdVerificationStatus {
+            WorldIdVerificationStatus::Verified {
+                evidence: WorldIdVerifiedEvidence {
+                    rp_id: "rp_staging_123".to_owned(),
+                    environment: "staging".to_owned(),
+                    action: WORLD_ID_ACTION.to_owned(),
+                    protocol_version: "4.0".to_owned(),
+                    identifier: "orb".to_owned(),
+                    nullifier: "12345678901234567890".to_owned(),
+                    signal_hash:
+                        "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                            .to_owned(),
+                    created_at: None,
+                    session_id: None,
+                },
             }
         }
 
@@ -859,15 +924,21 @@ mod tests {
                 signed_statement_hash:
                     "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
                 world_id: Some(WorldIdProofRequest {
-                    world_app_id: "app_staging_123".to_owned(),
-                    nullifier_hash: "12345678901234567890".to_owned(),
-                    merkle_root: "987654321".to_owned(),
-                    proof: "0xproof".to_owned(),
-                    verification_level: "orb".to_owned(),
-                    action: WORLD_ID_ACTION.to_owned(),
-                    signal_hash:
-                        "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
-                            .to_owned(),
+                    idkit_response: serde_json::json!({
+                        "protocol_version": "4.0",
+                        "nonce": "nonce-123",
+                        "action": WORLD_ID_ACTION,
+                        "environment": "staging",
+                        "responses": [
+                            {
+                                "identifier": "orb",
+                                "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                                "proof": "0xproof",
+                                "merkle_root": "987654321",
+                                "nullifier": "12345678901234567890"
+                            }
+                        ]
+                    }),
                 }),
             }
         }
@@ -885,13 +956,21 @@ mod tests {
                     "terms_version": 1,
                     "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
                     "world_id": {
-                        "world_app_id": "app_staging_123",
-                        "nullifier_hash": "12345678901234567890",
-                        "merkle_root": "987654321",
-                        "proof": "0xproof",
-                        "verification_level": "orb",
-                        "action": WORLD_ID_ACTION,
-                        "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                        "idkit_response": {
+                            "protocol_version": "4.0",
+                            "nonce": "nonce-123",
+                            "action": WORLD_ID_ACTION,
+                            "environment": "staging",
+                            "responses": [
+                                {
+                                    "identifier": "orb",
+                                    "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                                    "proof": "0xproof",
+                                    "merkle_root": "987654321",
+                                    "nullifier": "12345678901234567890"
+                                }
+                            ]
+                        },
                     },
                 },
                 "registration_metadata": {
@@ -913,7 +992,7 @@ mod tests {
             let output = process_with_verifier(
                 world_id_request(),
                 &MockWorldIdVerifier {
-                    status: WorldIdVerificationStatus::Verified,
+                    status: verified_status(),
                 },
                 1_900_000_000_000,
             )
@@ -983,7 +1062,7 @@ mod tests {
                 let output = process_with_verifier(
                     world_id_request(),
                     &MockWorldIdVerifier {
-                        status: WorldIdVerificationStatus::Verified,
+                        status: verified_status(),
                     },
                     1_900_000_000_000,
                 )
@@ -1090,9 +1169,9 @@ mod tests {
         fn route_process_data_signs_and_injects_metadata_end_to_end() {
             let state = EnclaveState {
                 ephemeral_signing_key_seed: SERVER_SEED,
-                ctx: TeeContext::new(),
-                world_id_base_url: "https://developer.world.org".to_owned(),
-                world_id_app_id: "app_staging_123".to_owned(),
+                ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]),
+                world_id_base_url: membership_tee::WORLD_ID_API_BASE_STAGING.to_owned(),
+                world_id_rp_id: "rp_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
                     None,
@@ -1123,7 +1202,7 @@ mod tests {
                 ephemeral_signing_key_seed: SERVER_SEED,
                 ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:18080")]),
                 world_id_base_url: "https://developer.world.org".to_owned(),
-                world_id_app_id: "app_staging_123".to_owned(),
+                world_id_rp_id: "rp_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
                     None,
@@ -1149,7 +1228,7 @@ mod tests {
             let output = process_with_verifier(
                 world_id_request(),
                 &MockWorldIdVerifier {
-                    status: WorldIdVerificationStatus::Verified,
+                    status: verified_status(),
                 },
                 1_900_000_000_000,
             )
@@ -1262,7 +1341,7 @@ mod tests {
         use membership_tee::server::EGRESS_PROXY_URL_KEY;
         use membership_tee::{
             ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_API_BASE_CANONICAL,
-            WORLD_ID_APP_ID_ENV, WORLD_ID_PROOF_MODE_ENV,
+            WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV,
         };
         use std::sync::Mutex;
 
@@ -1276,7 +1355,7 @@ mod tests {
         #[test]
         fn enclave_state_rejects_dummy_mode_on_mainnet() {
             let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
             set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
             set_env_before_server(SUI_NETWORK_ENV, "mainnet");
 
@@ -1286,7 +1365,7 @@ mod tests {
                 "dummy mode on mainnet must be rejected at startup (fail-closed)"
             );
 
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
             unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
             unset_env_before_server(SUI_NETWORK_ENV);
         }
@@ -1298,7 +1377,7 @@ mod tests {
         #[test]
         fn enclave_state_on_testnet_dummy_exposes_observation_raw_values() {
             let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
             set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
             set_env_before_server(SUI_NETWORK_ENV, "testnet");
 
@@ -1309,7 +1388,7 @@ mod tests {
             assert_eq!(observation.received_network.as_deref(), Some("testnet"));
             assert!(!observation.redacted);
 
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
             unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
             unset_env_before_server(SUI_NETWORK_ENV);
         }
@@ -1320,7 +1399,7 @@ mod tests {
         #[test]
         fn enclave_state_on_mainnet_real_redacts_observation() {
             let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
             set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "real");
             set_env_before_server(SUI_NETWORK_ENV, "mainnet");
 
@@ -1331,7 +1410,7 @@ mod tests {
             assert!(observation.received_network.is_none());
             assert!(observation.redacted);
 
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
             unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
             unset_env_before_server(SUI_NETWORK_ENV);
         }
@@ -1340,7 +1419,7 @@ mod tests {
         #[test]
         fn enclave_state_allows_dummy_mode_on_testnet() {
             let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
             set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
             set_env_before_server(SUI_NETWORK_ENV, "testnet");
 
@@ -1351,7 +1430,7 @@ mod tests {
                 "world_id_verifier_mode must be Dummy on testnet"
             );
 
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
             unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
             unset_env_before_server(SUI_NETWORK_ENV);
         }
@@ -1361,7 +1440,7 @@ mod tests {
         #[test]
         fn enclave_state_rejects_dummy_mode_when_network_unset() {
             let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
             set_env_before_server(WORLD_ID_PROOF_MODE_ENV, "dummy");
             unset_env_before_server(SUI_NETWORK_ENV);
 
@@ -1371,7 +1450,7 @@ mod tests {
                 "dummy mode with no network must be rejected at startup (fail-closed)"
             );
 
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
             unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
         }
 
@@ -1379,7 +1458,7 @@ mod tests {
         #[test]
         fn enclave_state_defaults_to_real_mode_when_proof_mode_unset() {
             let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
             unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
             unset_env_before_server(SUI_NETWORK_ENV);
 
@@ -1391,7 +1470,7 @@ mod tests {
                 "unset proof_mode must resolve to Real"
             );
 
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
         }
 
         #[test]
@@ -1404,7 +1483,7 @@ mod tests {
                 membership_tee::WORLD_ID_API_BASE_ENV,
                 "https://attacker.example.com",
             );
-            set_env_before_server(WORLD_ID_APP_ID_ENV, "app_staging_123");
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
 
             assert_eq!(server_world_id_base_url(), WORLD_ID_API_BASE_CANONICAL);
 
@@ -1419,7 +1498,7 @@ mod tests {
             );
 
             unset_env_before_server(membership_tee::WORLD_ID_API_BASE_ENV);
-            unset_env_before_server(WORLD_ID_APP_ID_ENV);
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
         }
 
         #[test]

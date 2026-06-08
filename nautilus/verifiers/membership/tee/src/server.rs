@@ -22,8 +22,8 @@
 
 use crate::{
     CloudWorldIdVerifier, DummyWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus,
-    IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, WorldIdVerifier,
-    process_identity_with_verifier,
+    IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, WorldIdEnvironment,
+    WorldIdVerifier, process_identity_with_verifier,
 };
 use serde::Serialize;
 use sonari_tee_core::{
@@ -78,7 +78,7 @@ pub enum TeeJsonResult {
 /// verification pipeline and emitting the unsigned identity BCS payload. It
 /// carries no signing key, attestation logic, or transport state.
 ///
-/// The World ID base URL and app id are resolved once in the orchestration layer
+/// The World ID base URL and rp_id are resolved once in the orchestration layer
 /// (`main.rs`) and injected at construction; the handler never reads the process
 /// environment during `process`. The egress proxy URL still arrives through the
 /// [`TeeContext`] so the verifier's HTTPS client can be routed through the
@@ -86,7 +86,7 @@ pub enum TeeJsonResult {
 #[derive(Debug, Clone)]
 pub struct IdentityProcessHandler {
     world_id_base_url: String,
-    world_id_app_id: String,
+    world_id_rp_id: String,
     world_id_verifier_mode: ResolvedWorldIdVerifierMode,
 }
 
@@ -99,12 +99,12 @@ impl IdentityProcessHandler {
     /// already proven safe.
     pub fn new(
         world_id_base_url: impl Into<String>,
-        world_id_app_id: impl Into<String>,
+        world_id_rp_id: impl Into<String>,
         world_id_verifier_mode: ResolvedWorldIdVerifierMode,
     ) -> Self {
         Self {
             world_id_base_url: world_id_base_url.into(),
-            world_id_app_id: world_id_app_id.into(),
+            world_id_rp_id: world_id_rp_id.into(),
             world_id_verifier_mode,
         }
     }
@@ -130,20 +130,28 @@ impl ProcessDataHandler for IdentityProcessHandler {
         // bytes stay identical between the two modes.
         match self.world_id_verifier_mode {
             ResolvedWorldIdVerifierMode::Dummy => {
-                let verifier = DummyWorldIdVerifier::new(self.world_id_app_id.clone())
+                let verifier = DummyWorldIdVerifier::new(self.world_id_rp_id.clone())
                     .map_err(|error| process_failed(error.to_string()))?;
                 process_with_verifier(request, &verifier, issued_at_ms)
             }
             ResolvedWorldIdVerifierMode::Real => {
                 let verifier = CloudWorldIdVerifier::with_proxy(
-                    self.world_id_base_url.clone(),
-                    self.world_id_app_id.clone(),
+                    environment_from_base_url(&self.world_id_base_url),
+                    self.world_id_rp_id.clone(),
                     ctx.get(EGRESS_PROXY_URL_KEY),
                 )
                 .map_err(|error| process_failed(error.to_string()))?;
                 process_with_verifier(request, &verifier, issued_at_ms)
             }
         }
+    }
+}
+
+fn environment_from_base_url(base_url: &str) -> WorldIdEnvironment {
+    if base_url.trim().trim_end_matches('/') == crate::WORLD_ID_API_BASE_STAGING {
+        WorldIdEnvironment::Staging
+    } else {
+        WorldIdEnvironment::Production
     }
 }
 
@@ -257,7 +265,7 @@ mod tests {
         DummyWorldIdVerifier, INTENT, IdentityProvider, IdentityVerifyRequest,
         ResolvedWorldIdVerifierMode, VERIFIER_FAMILY, VERIFIER_VERSION, WORLD_ID_ACTION,
         WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
-        WorldIdVerificationStatus, WorldIdVerifier,
+        WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
     };
     use sonari_tee_core::{PayloadSigner, ProcessDataHandler, ProcessOutput, TeeContext};
 
@@ -266,8 +274,8 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
-        fn expected_app_id(&self) -> &str {
-            "app_staging_123"
+        fn expected_rp_id(&self) -> &str {
+            "rp_staging_123"
         }
 
         fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
@@ -289,14 +297,21 @@ mod tests {
             signed_statement_hash:
                 "0x6666666666666666666666666666666666666666666666666666666666666666".to_owned(),
             world_id: Some(WorldIdProofRequest {
-                world_app_id: "app_staging_123".to_owned(),
-                nullifier_hash: "12345678901234567890".to_owned(),
-                merkle_root: "987654321".to_owned(),
-                proof: "0xproof".to_owned(),
-                verification_level: "orb".to_owned(),
-                action: WORLD_ID_ACTION.to_owned(),
-                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
-                    .to_owned(),
+                idkit_response: serde_json::json!({
+                    "protocol_version": "4.0",
+                    "nonce": "nonce-123",
+                    "action": WORLD_ID_ACTION,
+                    "environment": "staging",
+                    "responses": [
+                        {
+                            "identifier": "orb",
+                            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                            "proof": "0xproof",
+                            "merkle_root": "987654321",
+                            "nullifier": "12345678901234567890"
+                        }
+                    ]
+                }),
             }),
         }
     }
@@ -312,13 +327,21 @@ mod tests {
             "terms_version": 1,
             "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
             "world_id": {
-                "world_app_id": "app_staging_123",
-                "nullifier_hash": "12345678901234567890",
-                "merkle_root": "987654321",
-                "proof": "0xproof",
-                "verification_level": "orb",
-                "action": WORLD_ID_ACTION,
-                "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                "idkit_response": {
+                    "protocol_version": "4.0",
+                    "nonce": "nonce-123",
+                    "action": WORLD_ID_ACTION,
+                    "environment": "staging",
+                    "responses": [
+                        {
+                            "identifier": "orb",
+                            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                            "proof": "0xproof",
+                            "merkle_root": "987654321",
+                            "nullifier": "12345678901234567890"
+                        }
+                    ]
+                },
             },
         })
     }
@@ -350,7 +373,7 @@ mod tests {
         let output = process_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -424,7 +447,7 @@ mod tests {
         let output = process_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -439,7 +462,7 @@ mod tests {
         let mut output = crate::process_identity_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &PlaceholderSigner,
             1_900_000_000_000,
@@ -463,8 +486,8 @@ mod tests {
     #[test]
     fn handler_rejects_malformed_request_input() {
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let error = handler
@@ -476,8 +499,8 @@ mod tests {
     #[test]
     fn handler_rejects_request_with_unknown_field() {
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let mut body = request_json();
@@ -500,8 +523,8 @@ mod tests {
         // resolves to pending_source. This proves the proxy is wired through the
         // context (a direct client would instead reach DNS/the real host).
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
@@ -520,7 +543,7 @@ mod tests {
         let output = process_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -545,14 +568,14 @@ mod tests {
     #[test]
     fn dummy_verifier_produces_signable_output_identical_to_mock_verified() {
         let dummy =
-            DummyWorldIdVerifier::new("app_staging_123").expect("dummy verifier should construct");
+            DummyWorldIdVerifier::new("rp_staging_123").expect("dummy verifier should construct");
         let output_dummy = process_with_verifier(world_id_request(), &dummy, 1_900_000_000_000)
             .expect("dummy verifier should produce a signable result");
 
         let output_mock = process_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -587,7 +610,7 @@ mod tests {
     fn handler_dummy_mode_returns_verified_without_http() {
         let handler = IdentityProcessHandler::new(
             "https://unreachable.invalid",
-            "app_staging_123",
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Dummy,
         );
         let output = handler
@@ -609,8 +632,8 @@ mod tests {
     #[test]
     fn handler_real_mode_returns_pending_source_with_unreachable_url() {
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
@@ -622,5 +645,22 @@ mod tests {
         assert!(matches!(output, ProcessOutput::Unsigned { .. }));
         assert_eq!(output.result_json()["status"], "pending_source");
         assert_eq!(output.result_json()["error_code"], WORLD_ID_API_UNAVAILABLE);
+    }
+
+    fn verified_status() -> WorldIdVerificationStatus {
+        WorldIdVerificationStatus::Verified {
+            evidence: WorldIdVerifiedEvidence {
+                rp_id: "rp_staging_123".to_owned(),
+                environment: "staging".to_owned(),
+                action: WORLD_ID_ACTION.to_owned(),
+                protocol_version: "4.0".to_owned(),
+                identifier: "orb".to_owned(),
+                nullifier: "12345678901234567890".to_owned(),
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                    .to_owned(),
+                created_at: None,
+                session_id: None,
+            },
+        }
     }
 }

@@ -4,8 +4,8 @@ use std::process::{Command, Stdio};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use membership_tee::{
     INTENT, KYC_UNSUPPORTED, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
-    WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
-    WORLD_ID_VERIFICATION_FAILED,
+    WORLD_ID_API_UNAVAILABLE, WORLD_ID_EGRESS_PROXY_URL_ENV, WORLD_ID_ENVIRONMENT_ENV,
+    WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
 };
 use serde::Deserialize;
 
@@ -146,15 +146,6 @@ fn fixture_command_returns_pending_source_world_id_without_signature_fields() {
 }
 
 #[test]
-fn fixture_command_rejects_mismatched_world_app_id_without_signature_fields() {
-    let mut request = world_id_request();
-    request["world_id"]["world_app_id"] = serde_json::json!("app_attacker");
-    let output = run_fixture(&[], &request);
-
-    assert_status_only(output, "rejected", WORLD_ID_VERIFICATION_FAILED);
-}
-
-#[test]
 fn fixture_command_rejects_zero_validity_before_signing() {
     let mut request = world_id_request();
     request["validity_ms"] = serde_json::json!(0);
@@ -280,29 +271,13 @@ fn encode_only_rejects_unknown_result_field() {
 }
 
 #[test]
-fn production_command_returns_rejected_before_http_for_mismatched_world_app_id() {
-    let mut request = world_id_request();
-    request["world_id"]["world_app_id"] = serde_json::json!("app_attacker");
-
-    let output = run_production(
-        &request,
-        &[
-            (WORLD_ID_API_BASE_ENV, "https://developer.world.org"),
-            (WORLD_ID_APP_ID_ENV, "app_staging_123"),
-            (PRODUCTION_SIGNING_KEY_SEED_ENV, TEST_SIGNING_KEY_SEED),
-        ],
-    );
-
-    assert_status_only(output, "rejected", WORLD_ID_VERIFICATION_FAILED);
-}
-
-#[test]
 fn production_command_returns_pending_source_when_world_id_api_is_unavailable() {
     let output = run_production(
         &world_id_request(),
         &[
-            (WORLD_ID_API_BASE_ENV, "https://127.0.0.1:9"),
-            (WORLD_ID_APP_ID_ENV, "app_staging_123"),
+            (WORLD_ID_RP_ID_ENV, "rp_staging_123"),
+            (WORLD_ID_ENVIRONMENT_ENV, "staging"),
+            (WORLD_ID_EGRESS_PROXY_URL_ENV, "http://127.0.0.1:9"),
             (PRODUCTION_SIGNING_KEY_SEED_ENV, TEST_SIGNING_KEY_SEED),
         ],
     );
@@ -315,8 +290,8 @@ fn production_command_requires_issue_signing_key_env_without_dev_fallback() {
     let output = run_production(
         &world_id_request(),
         &[
-            (WORLD_ID_API_BASE_ENV, "https://developer.world.org"),
-            (WORLD_ID_APP_ID_ENV, "app_staging_123"),
+            (WORLD_ID_RP_ID_ENV, "rp_staging_123"),
+            (WORLD_ID_ENVIRONMENT_ENV, "staging"),
             (
                 "SONARI_IDENTITY_TEE_SIGNING_KEY_SEED",
                 TEST_SIGNING_KEY_SEED,
@@ -475,8 +450,9 @@ fn run_production(request: &serde_json::Value, envs: &[(&str, &str)]) -> std::pr
         .env_remove("SONARI_IDENTITY_TEE_SIGNING_KEY_SEED_FILE")
         .env_remove("SONARI_TEE_SIGNING_KEY_SEED")
         .env_remove("SONARI_TEE_SIGNING_KEY_SEED_FILE")
-        .env_remove(WORLD_ID_API_BASE_ENV)
-        .env_remove(WORLD_ID_APP_ID_ENV);
+        .env_remove(WORLD_ID_RP_ID_ENV)
+        .env_remove(WORLD_ID_ENVIRONMENT_ENV)
+        .env_remove(WORLD_ID_EGRESS_PROXY_URL_ENV);
     for (name, value) in envs {
         command.env(name, value);
     }
@@ -506,13 +482,21 @@ fn world_id_request() -> serde_json::Value {
         "terms_version": TERMS_VERSION,
         "signed_statement_hash": SIGNED_STATEMENT_HASH,
         "world_id": {
-            "world_app_id": "app_staging_123",
-            "nullifier_hash": "12345678901234567890",
-            "merkle_root": "987654321",
-            "proof": "0xproof",
-            "verification_level": "orb",
-            "action": "sonari_membership_register_v1",
-            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+            "idkit_response": {
+                "protocol_version": "4.0",
+                "nonce": "nonce-123",
+                "action": "sonari_membership_register_v1",
+                "environment": "staging",
+                "responses": [
+                    {
+                        "identifier": "orb",
+                        "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                        "proof": "0xproof",
+                        "merkle_root": "987654321",
+                        "nullifier": "12345678901234567890"
+                    }
+                ]
+            },
         },
     })
 }
@@ -527,8 +511,8 @@ fn verified_identity_result() -> serde_json::Value {
         "owner": OWNER,
         "provider": "world_id",
         "verified": true,
-        "duplicate_key_hash": "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
-        "evidence_hash": "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f",
+        "duplicate_key_hash": "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878",
+        "evidence_hash": "0x010a2748d34ebf54ffdfab4ed7abbca41de9b414b90bbfc31825b3b21bea1717",
         "issued_at_ms": ISSUED_AT_MS,
         "expires_at_ms": ISSUED_AT_MS + VALIDITY_MS,
         "terms_version": TERMS_VERSION,

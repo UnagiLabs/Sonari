@@ -245,7 +245,7 @@ export interface KycDuplicateKeyInput {
 }
 
 export interface WorldIdDuplicateKeyInput {
-    readonly world_app_id: string;
+    readonly rp_id: string;
     readonly action: string;
     readonly nullifier: string;
 }
@@ -259,8 +259,8 @@ export function computeKycDuplicateKeyHash(input: KycDuplicateKeyInput): string 
 export function computeWorldIdDuplicateKeyHash(input: WorldIdDuplicateKeyInput): string {
     return sha256Hex(
         joinDuplicateKeyParts([
-            "sonari:world_id:v1",
-            input.world_app_id,
+            "sonari:world_id:v2",
+            input.rp_id,
             input.action,
             canonicalWorldIdNullifier(input.nullifier),
         ]),

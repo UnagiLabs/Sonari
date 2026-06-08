@@ -157,7 +157,7 @@ World ID の duplicate key は、app、action、nullifier から作る。
 
 ```text
 kyc_duplicate_key = hash(kyc_provider_id, provider_user_unique_id)
-world_duplicate_key = hash(world_app_id, action, nullifier)
+world_duplicate_key = hash(rp_id, action, nullifier)
 ```
 
 同じ provider 内で duplicate key が別 SBT に使用済みなら、

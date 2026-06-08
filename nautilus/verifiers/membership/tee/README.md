@@ -59,16 +59,10 @@ issued_at_ms
 validity_ms
 terms_version
 signed_statement_hash
-world_id.world_app_id
-world_id.nullifier_hash
-world_id.merkle_root
-world_id.proof
-world_id.verification_level
-world_id.action
-world_id.signal_hash
+world_id.idkit_response
 ```
 
-未知の field は拒否します。top-level の field も、`world_id` の中の field も同じです。これは、raw PII や想定外の proof detail を TEE 境界に混ぜないためです。
+未知の field は拒否します。top-level の field も、`world_id` の中の field も同じです。`idkit_response` の中身は World ID v4 の Uniqueness proof として厳格に検査します。
 
 ## 出力 status
 

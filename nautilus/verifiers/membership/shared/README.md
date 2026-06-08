@@ -20,6 +20,8 @@ TEE、runner、Move contract-facing test が同じ identity result layout を参
 
 `duplicate_key_hash` は provider 内の重複登録を防ぐ値です。KYC と World ID で計算 rule が異なるため、caller 側で ad hoc に組み立てず、この package の helper を使います。
 
+World ID の duplicate key は `sonari:world_id:v2`、`rp_id`、`action`、正規化済み `nullifier` から計算します。旧 `world_app_id` 名や `sonari:world_id:v1` は使いません。
+
 ## 検証
 
 ```bash

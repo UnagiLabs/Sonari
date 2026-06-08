@@ -107,8 +107,8 @@ membership-tee --encode-only
 fixture はローカル検証と golden vector 用である。
 World ID の verified fixture では `issued_at_ms` が必須である。
 `validity_ms` は fixture でだけ任意の有効期間として使える。
-`--world-app-id` は期待する World ID app id を固定する。
-request の `world_id.world_app_id` が一致しない場合は reject する。
+`--world-rp-id` は期待する World ID `rp_id` を固定する。
+request の `world_id.idkit_response` が期待する action / environment / signal と一致しない場合は reject する。
 
 `membership-tee server` は AWS / Nautilus production entrypoint である。
 server path は enclave-local ephemeral key を起動時に作る。
@@ -222,7 +222,7 @@ signed_statement_hash: 32 bytes
 
 ```text
 kyc_duplicate_key = hash(kyc_provider_id, provider_user_unique_id)
-world_duplicate_key = hash(world_app_id, action, nullifier)
+world_duplicate_key = hash(rp_id, action, nullifier)
 ```
 
 実装では SHA-256 を使う。
@@ -231,7 +231,7 @@ input は UTF-8 文字列を NUL byte で区切る。
 
 ```text
 KYC: sonari:kyc:v1\0{provider_id}\0{provider_user_unique_id}
-World ID: sonari:world_id:v1\0{world_app_id}\0{action}\0{nullifier}
+World ID: sonari:world_id:v2\0{rp_id}\0{action}\0{nullifier}
 ```
 
 World ID の `nullifier` は、hash 前に正規化する。

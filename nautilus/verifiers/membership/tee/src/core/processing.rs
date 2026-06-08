@@ -1,6 +1,7 @@
 use crate::verify::kyc::{KYC_UNSUPPORTED, verify_kyc_unsupported};
 use crate::verify::world_id::{
-    WORLD_ID_ACTION, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifier,
+    WORLD_ID_ACTION, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus,
+    WorldIdVerifiedEvidence, WorldIdVerifier,
 };
 use crate::{
     INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
@@ -51,9 +52,9 @@ pub fn process_identity_with_verifier(
                 ));
             }
             Ok(match verifier.verify_world_id(&proof) {
-                WorldIdVerificationStatus::Verified => {
+                WorldIdVerificationStatus::Verified { evidence } => {
                     let issued_at_ms = request.issued_at_ms.unwrap_or(now_ms);
-                    verified_output(request, &proof, signer, issued_at_ms)?
+                    verified_output(request, &evidence, signer, issued_at_ms)?
                 }
                 WorldIdVerificationStatus::Rejected { error_code } => {
                     status_only(IdentityProcessingStatus::Rejected, Some(error_code))
@@ -137,15 +138,51 @@ pub fn compute_identity_evidence_hash(
     Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
 }
 
+pub fn compute_world_id_evidence_hash(
+    evidence: &WorldIdVerifiedEvidence,
+    duplicate_key_hash_hex: &str,
+    issued_at_ms: u64,
+) -> Result<String, IdentityError> {
+    validate_lowercase_hex_32("duplicate_key_hash_hex", duplicate_key_hash_hex)?;
+    let issued_at_ms_decimal = issued_at_ms.to_string();
+    let parts = [
+        IDENTITY_EVIDENCE_HASH_PREFIX,
+        "world_id",
+        duplicate_key_hash_hex,
+        &evidence.rp_id,
+        &evidence.environment,
+        &evidence.action,
+        &evidence.protocol_version,
+        &evidence.identifier,
+        &evidence.nullifier,
+        &evidence.signal_hash,
+        &issued_at_ms_decimal,
+    ];
+    for part in parts {
+        if part.is_empty() || part.contains('\0') {
+            return Err(IdentityError::Request(
+                "World ID evidence hash inputs must be non-empty strings without NUL".to_owned(),
+            ));
+        }
+    }
+
+    Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
+}
+
 fn world_id_request_matches_trusted_boundary(
     request: &IdentityVerifyRequest,
     proof: &crate::WorldIdProofRequest,
     verifier: &impl WorldIdVerifier,
 ) -> Result<bool, IdentityError> {
-    if proof.world_app_id != verifier.expected_app_id() {
+    let claims = match proof.uniqueness_proof() {
+        Ok(claims) => claims,
+        Err(IdentityError::Request(_)) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    if claims.action != WORLD_ID_ACTION {
         return Ok(false);
     }
-    if proof.action != WORLD_ID_ACTION {
+    if claims.environment != verifier.expected_environment() {
         return Ok(false);
     }
     let expected_signal_hash = compute_world_id_signal_hash(
@@ -154,7 +191,7 @@ fn world_id_request_matches_trusted_boundary(
         &request.signed_statement_hash,
     )?;
 
-    let Ok(actual_signal_hash) = canonical_hex_32_lower("signal_hash", &proof.signal_hash) else {
+    let Ok(actual_signal_hash) = canonical_hex_32_lower("signal_hash", &claims.signal_hash) else {
         return Ok(false);
     };
 
@@ -163,21 +200,17 @@ fn world_id_request_matches_trusted_boundary(
 
 fn verified_output(
     request: IdentityVerifyRequest,
-    proof: &crate::WorldIdProofRequest,
+    evidence: &WorldIdVerifiedEvidence,
     signer: &impl PayloadSigner,
     issued_at_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
     let duplicate_key_hash = compute_world_id_duplicate_key_hash(
-        &proof.world_app_id,
-        &proof.action,
-        &proof.nullifier_hash,
+        &evidence.rp_id,
+        &evidence.action,
+        &evidence.nullifier,
     )?;
-    let evidence_hash = compute_identity_evidence_hash(
-        IdentityProvider::WorldId,
-        &duplicate_key_hash,
-        &proof.verification_level,
-        issued_at_ms,
-    )?;
+    let evidence_hash =
+        compute_world_id_evidence_hash(evidence, &duplicate_key_hash, issued_at_ms)?;
     let validity_ms = request.validity_ms.unwrap_or(IDENTITY_RESULT_TTL_MS);
     if validity_ms == 0 {
         return Err(IdentityError::Request(
@@ -269,7 +302,7 @@ mod tests {
     use crate::{
         IdentityProvider, IdentityVerifyRequest, KYC_UNSUPPORTED, WORLD_ID_ACTION,
         WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
-        WorldIdVerificationStatus, WorldIdVerifier,
+        WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
     };
     use sonari_tee_core::{PayloadSigner, SignatureArtifact, to_hex};
     use std::cell::Cell;
@@ -279,8 +312,8 @@ mod tests {
     }
 
     impl WorldIdVerifier for MockWorldIdVerifier {
-        fn expected_app_id(&self) -> &str {
-            "app_staging_123"
+        fn expected_rp_id(&self) -> &str {
+            "rp_staging_123"
         }
 
         fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
@@ -318,7 +351,7 @@ mod tests {
         let output = process_identity_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             now_ms,
@@ -332,16 +365,39 @@ mod tests {
         let signature = output.signature.as_ref().unwrap();
         assert_eq!(
             result.duplicate_key_hash,
-            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74"
+            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
         );
         assert_eq!(
             result.evidence_hash,
-            "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f"
+            "0x8db7350f283169b1ad3f8939a09ccdbff0c4d60b11f3b25316039372bdd049f2"
         );
         assert_eq!(result.issued_at_ms, now_ms);
         assert_eq!(result.expires_at_ms, now_ms + IDENTITY_RESULT_TTL_MS);
         assert_eq!(signature.signature, to_hex(payload));
         assert_eq!(signer.calls.get(), 1);
+    }
+
+    #[test]
+    fn process_identity_uses_verified_evidence_nullifier_for_duplicate_key() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["nullifier"] =
+            serde_json::json!("99999999999999999999");
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Verified);
+        assert_eq!(
+            output.result.unwrap().duplicate_key_hash,
+            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
+        );
     }
 
     #[test]
@@ -419,7 +475,7 @@ mod tests {
                 ..base_request()
             },
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             1_800_000_000_000,
@@ -433,38 +489,15 @@ mod tests {
     }
 
     #[test]
-    fn process_identity_rejects_noncanonical_app_id_before_signing() {
-        let signer = CountingSigner::new();
-        let mut request = world_id_request();
-        request.world_id.as_mut().unwrap().world_app_id = "app_attacker".to_owned();
-        let output = process_identity_with_verifier(
-            request,
-            &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
-            },
-            &signer,
-            1_800_000_000_000,
-        )
-        .unwrap();
-
-        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
-        assert_eq!(
-            output.error_code,
-            Some(WORLD_ID_VERIFICATION_FAILED.to_owned())
-        );
-        assert_non_verified_output(&output);
-        assert_eq!(signer.calls.get(), 0);
-    }
-
-    #[test]
     fn process_identity_rejects_noncanonical_action_before_signing() {
         let signer = CountingSigner::new();
         let mut request = world_id_request();
-        request.world_id.as_mut().unwrap().action = "attacker_action".to_owned();
+        request.world_id.as_mut().unwrap().idkit_response["action"] =
+            serde_json::json!("attacker_action");
         let output = process_identity_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             1_800_000_000_000,
@@ -480,12 +513,100 @@ mod tests {
     fn process_identity_rejects_mismatched_signal_hash_before_signing() {
         let signer = CountingSigner::new();
         let mut request = world_id_request();
-        request.world_id.as_mut().unwrap().signal_hash =
-            "0x4444444444444444444444444444444444444444444444444444444444444444".to_owned();
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["signal_hash"] =
+            serde_json::json!("0x4444444444444444444444444444444444444444444444444444444444444444");
         let output = process_identity_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn process_identity_rejects_mismatched_environment_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["environment"] =
+            serde_json::json!("production");
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn process_identity_rejects_session_proof_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["session_id"] =
+            serde_json::json!("session-123");
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn process_identity_rejects_multiple_world_id_responses_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        let extra_response =
+            request.world_id.as_ref().unwrap().idkit_response["responses"][0].clone();
+        request.world_id.as_mut().unwrap().idkit_response["responses"]
+            .as_array_mut()
+            .unwrap()
+            .push(extra_response);
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Rejected);
+        assert_non_verified_output(&output);
+        assert_eq!(signer.calls.get(), 0);
+    }
+
+    #[test]
+    fn process_identity_rejects_unallowed_identifier_before_signing() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["identifier"] =
+            serde_json::json!("session");
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
             },
             &signer,
             1_800_000_000_000,
@@ -504,19 +625,44 @@ mod tests {
         request.owner = upper_hex_digits(&request.owner);
         request.membership_id = upper_hex_digits(&request.membership_id);
         request.signed_statement_hash = upper_hex_digits(&request.signed_statement_hash);
-        request.world_id.as_mut().unwrap().signal_hash = upper_hex_digits(
-            &compute_world_id_signal_hash(
-                &request.owner,
-                &request.membership_id,
-                &request.signed_statement_hash,
-            )
-            .unwrap(),
-        );
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["signal_hash"] =
+            serde_json::json!(upper_hex_digits(
+                &compute_world_id_signal_hash(
+                    &request.owner,
+                    &request.membership_id,
+                    &request.signed_statement_hash,
+                )
+                .unwrap(),
+            ));
 
         let output = process_identity_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Verified);
+        assert!(output.result.is_some());
+        assert_eq!(signer.calls.get(), 1);
+    }
+
+    #[test]
+    fn process_identity_allows_idkit_response_extra_fields_before_forwarding() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["max_age"] =
+            serde_json::json!(604800);
+        request.world_id.as_mut().unwrap().idkit_response["verification_extra"] =
+            serde_json::json!("preserved-for-world-api");
+
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
             },
             &signer,
             1_800_000_000_000,
@@ -602,18 +748,42 @@ mod tests {
         assert_eq!(output.signature, None);
     }
 
+    fn verified_status() -> WorldIdVerificationStatus {
+        WorldIdVerificationStatus::Verified {
+            evidence: WorldIdVerifiedEvidence {
+                rp_id: "rp_staging_123".to_owned(),
+                environment: "staging".to_owned(),
+                action: WORLD_ID_ACTION.to_owned(),
+                protocol_version: "4.0".to_owned(),
+                identifier: "orb".to_owned(),
+                nullifier: "12345678901234567890".to_owned(),
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                    .to_owned(),
+                created_at: None,
+                session_id: None,
+            },
+        }
+    }
+
     fn world_id_request() -> IdentityVerifyRequest {
         IdentityVerifyRequest {
             provider: IdentityProvider::WorldId,
             world_id: Some(WorldIdProofRequest {
-                world_app_id: "app_staging_123".to_owned(),
-                nullifier_hash: "12345678901234567890".to_owned(),
-                merkle_root: "987654321".to_owned(),
-                proof: "0xproof".to_owned(),
-                verification_level: "orb".to_owned(),
-                action: WORLD_ID_ACTION.to_owned(),
-                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
-                    .to_owned(),
+                idkit_response: serde_json::json!({
+                    "protocol_version": "4.0",
+                    "nonce": "nonce-123",
+                    "action": WORLD_ID_ACTION,
+                    "environment": "staging",
+                    "responses": [
+                        {
+                            "identifier": "orb",
+                            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                            "proof": "0xproof",
+                            "merkle_root": "987654321",
+                            "nullifier": "12345678901234567890"
+                        }
+                    ]
+                }),
             }),
             ..base_request()
         }

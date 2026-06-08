@@ -7,7 +7,7 @@
     "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
     "provider": "world_id",
     "verified": false,
-    "duplicate_key_hash": "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
+    "duplicate_key_hash": "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878",
     "evidence_hash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "issued_at_ms": 1800000000000,
     "expires_at_ms": 1831536000000,

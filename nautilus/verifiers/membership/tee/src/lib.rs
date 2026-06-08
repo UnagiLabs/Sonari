@@ -10,7 +10,7 @@ pub use core::duplicate_key::{
 };
 pub use core::processing::{
     IdentityProcessingOutput, IdentityProcessingStatus, compute_identity_evidence_hash,
-    compute_world_id_signal_hash, process_identity_with_verifier,
+    compute_world_id_evidence_hash, compute_world_id_signal_hash, process_identity_with_verifier,
 };
 pub use core::types::{
     IdentityProvider, IdentityTeeResult, IdentityVerifyRequest, WorldIdProofRequest,
@@ -23,9 +23,10 @@ pub use verify::proof_mode::{
 };
 pub use verify::world_id::{
     CloudWorldIdVerifier, DummyWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_BASE_CANONICAL,
-    WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
-    WORLD_ID_EGRESS_PROXY_URL_ENV, WORLD_ID_MAX_AGE_SECONDS, WORLD_ID_VERIFICATION_FAILED,
-    WorldIdVerificationStatus, WorldIdVerifier,
+    WORLD_ID_API_BASE_ENV, WORLD_ID_API_BASE_STAGING, WORLD_ID_API_UNAVAILABLE,
+    WORLD_ID_EGRESS_PROXY_URL_ENV, WORLD_ID_ENVIRONMENT_ENV, WORLD_ID_MAX_AGE_SECONDS,
+    WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdEnvironment,
+    WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
 };
 
 pub const INTENT: &str = "SONARI_IDENTITY_VERIFICATION_V1";

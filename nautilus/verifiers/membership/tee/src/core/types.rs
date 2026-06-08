@@ -28,13 +28,135 @@ pub struct IdentityVerifyRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldIdProofRequest {
-    pub world_app_id: String,
-    pub nullifier_hash: String,
-    pub merkle_root: String,
-    pub proof: String,
-    pub verification_level: String,
+    pub idkit_response: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldIdUniquenessProof {
+    pub protocol_version: String,
     pub action: String,
+    pub environment: String,
+    pub identifier: String,
     pub signal_hash: String,
+    pub nullifier: String,
+}
+
+impl WorldIdProofRequest {
+    pub fn action(&self) -> Option<&str> {
+        self.idkit_response
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+    }
+
+    pub fn signal_hash(&self) -> Option<&str> {
+        self.first_response_field("signal_hash")
+    }
+
+    pub fn nullifier(&self) -> Option<&str> {
+        self.first_response_field("nullifier")
+    }
+
+    pub fn merkle_root(&self) -> Option<&str> {
+        self.first_response_field("merkle_root")
+    }
+
+    pub fn proof(&self) -> Option<&str> {
+        self.first_response_field("proof")
+    }
+
+    pub fn identifier(&self) -> Option<&str> {
+        self.first_response_field("identifier")
+    }
+
+    fn first_response_field(&self, field: &str) -> Option<&str> {
+        self.idkit_response
+            .get("responses")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|responses| responses.first())
+            .and_then(|response| response.get(field))
+            .and_then(serde_json::Value::as_str)
+    }
+
+    pub fn uniqueness_proof(&self) -> Result<WorldIdUniquenessProof, crate::IdentityError> {
+        self.idkit_response.as_object().ok_or_else(|| {
+            crate::IdentityError::Request("World ID idkit_response must be an object".to_owned())
+        })?;
+        if self.idkit_response.get("session_id").is_some() {
+            return Err(crate::IdentityError::Request(
+                "World ID Session proof is not supported".to_owned(),
+            ));
+        }
+        let protocol_version = required_string(&self.idkit_response, "protocol_version")?;
+        if protocol_version != "4.0" {
+            return Err(crate::IdentityError::Request(
+                "World ID protocol_version must be 4.0".to_owned(),
+            ));
+        }
+        let action = required_string(&self.idkit_response, "action")?;
+        let environment = required_string(&self.idkit_response, "environment")?;
+        let responses = self
+            .idkit_response
+            .get("responses")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                crate::IdentityError::Request(
+                    "World ID idkit_response.responses must be an array".to_owned(),
+                )
+            })?;
+        if responses.len() != 1 {
+            return Err(crate::IdentityError::Request(
+                "World ID uniqueness proof must include exactly one response".to_owned(),
+            ));
+        }
+        let response = responses[0].as_object().ok_or_else(|| {
+            crate::IdentityError::Request(
+                "World ID idkit_response.responses[0] must be an object".to_owned(),
+            )
+        })?;
+        let identifier = required_response_string(response, "identifier")?;
+        if identifier != "orb" {
+            return Err(crate::IdentityError::Request(
+                "World ID identifier must be orb".to_owned(),
+            ));
+        }
+
+        Ok(WorldIdUniquenessProof {
+            protocol_version: protocol_version.to_owned(),
+            action: action.to_owned(),
+            environment: environment.to_owned(),
+            identifier: identifier.to_owned(),
+            signal_hash: required_response_string(response, "signal_hash")?.to_owned(),
+            nullifier: required_response_string(response, "nullifier")?.to_owned(),
+        })
+    }
+}
+
+fn required_string<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Result<&'a str, crate::IdentityError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            crate::IdentityError::Request(format!(
+                "World ID idkit_response.{field} must be a string"
+            ))
+        })
+}
+
+fn required_response_string<'a>(
+    value: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<&'a str, crate::IdentityError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            crate::IdentityError::Request(format!(
+                "World ID idkit_response.responses[0].{field} must be a string"
+            ))
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
