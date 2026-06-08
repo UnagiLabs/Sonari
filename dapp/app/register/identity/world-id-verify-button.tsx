@@ -16,14 +16,14 @@
  *     verification (verified={true} reflects parent state, skip is allowed).
  */
 
+import { worldIdSignalString } from "@sonari/proof-core";
 import {
+    type IDKitErrorCodes,
     IDKitRequestWidget,
-    proofOfHuman,
-    IDKitErrorCodes,
     type IDKitResult,
+    proofOfHuman,
     type RpContext,
 } from "@worldcoin/idkit";
-import { worldIdSignalString } from "@sonari/proof-core";
 import { useState } from "react";
 import { WORLD_ID_ACTION } from "./world-id-action";
 import {
@@ -168,9 +168,7 @@ export function WorldIdVerifyButton({
             <div className="world-id-verified" role="status">
                 <span className="world-id-verified-label">World ID Verified</span>
                 {fingerprint !== null ? (
-                    <span className="world-id-nullifier-hint" aria-label="Nullifier fingerprint">
-                        {fingerprint}
-                    </span>
+                    <span className="world-id-nullifier-hint">{fingerprint}</span>
                 ) : null}
             </div>
         );

@@ -1,7 +1,7 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
 import dynamic from "next/dynamic";
+import { type FormEvent, useState } from "react";
 import {
     RegisterHero,
     RegisterProgress,
