@@ -108,6 +108,15 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain("aws kms decrypt");
     });
 
+    it("defines World ID v4 rp_id and environment parameters for operator deploy configuration", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("WorldIdRpId:");
+        expect(template).toContain("WorldIdEnvironment:");
+        expect(template).toContain("      - production\n      - staging");
+        expect(template).toContain("Default: production");
+    });
+
     it("delivers the World ID proof mode and Sui network to the enclave bootstrap for the fail-closed dummy gate", async () => {
         const template = await readFile(templatePath, "utf8");
 

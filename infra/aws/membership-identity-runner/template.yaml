@@ -63,6 +63,16 @@ Parameters:
   WorldIdAppId:
     Type: String
     Description: World ID app id passed as runtime configuration to the enclave process.
+  WorldIdRpId:
+    Type: String
+    Description: World ID v4 rp_id (relying party id) delivered to the enclave bootstrap as the canonical World ID identifier on the server path. Supersedes the legacy WorldIdAppId.
+  WorldIdEnvironment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+    Description: World ID environment selecting the canonical World ID API host. production pins https://developer.world.org; staging pins https://staging-developer.worldcoin.org. The enclave selects the signed-result origin from this value, and mainnet + staging is rejected fail-closed at startup.
   WorldIdApiBase:
     Type: String
     Default: https://developer.world.org
