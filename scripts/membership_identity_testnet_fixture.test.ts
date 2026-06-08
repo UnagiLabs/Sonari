@@ -116,7 +116,7 @@ describe("membership identity testnet fixture files", () => {
     it("computes the World ID signal hash from the owner, membership, and statement binding", () => {
         expect(
             computeWorldIdSignalHash(objectId("77"), objectId("66"), DEFAULT_SIGNED_STATEMENT_HASH),
-        ).toBe("0x4b71aa2dffa6b2a16467a508e2e1836d697729bc96849519a80f598699354901");
+        ).toBe("0x008adae86808b9ae8e10fc4d9e260d1b0ce6c2bee9dc6ffa4aa18886cffb6f60");
     });
 
     it("binds the dummy request signal hash to the smoke owner, membership, and statement", () => {

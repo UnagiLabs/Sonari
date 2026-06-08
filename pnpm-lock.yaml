@@ -198,7 +198,11 @@ importers:
         specifier: workspace:*
         version: link:../proof-core
 
-  packages/proof-core: {}
+  packages/proof-core:
+    dependencies:
+      '@noble/hashes':
+        specifier: 2.2.0
+        version: 2.2.0
 
   packages/residence-proof-worker:
     dependencies:

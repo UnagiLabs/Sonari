@@ -10,5 +10,8 @@
     "scripts": {
         "test": "vitest run src",
         "typecheck": "tsc -b --noEmit"
+    },
+    "dependencies": {
+        "@noble/hashes": "2.2.0"
     }
 }

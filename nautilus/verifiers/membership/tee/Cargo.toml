@@ -15,6 +15,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
+sha3 = "0.10"
 sonari-tee-core = { path = "../../shared-tee" }
 thiserror = "2"
 

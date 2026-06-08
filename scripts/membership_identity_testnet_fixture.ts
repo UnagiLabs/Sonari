@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,6 +6,7 @@ import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
+import { hashToFieldBytes } from "../packages/proof-core/src/world-id-signal.js";
 
 export const DEFAULT_FIXTURE_OUTPUT_DIR = ".local/sonari-dev/membership-identity-fixture";
 export const FIXTURE_MANIFEST_FILE = "manifest.json";
@@ -279,10 +279,11 @@ export function buildMembershipIdentityFixtureFiles(
 /**
  * Derives the World ID `signal_hash` exactly as the enclave does in
  * `compute_world_id_signal_hash` (nautilus/verifiers/membership/tee/src/core/processing.rs):
- * `sha256` over the NUL-joined `prefix, owner, membership_id, signed_statement_hash`,
- * each id canonicalised to lowercase 0x-hex. The enclave's trusted-boundary check
- * rejects any request whose `signal_hash` is not this binding, so the fixture
- * computes it instead of emitting a free-form placeholder.
+ * World ID v4 hashToField over the NUL-joined
+ * `prefix, owner, membership_id, signed_statement_hash`, each id canonicalised
+ * to lowercase 0x-hex. The enclave's trusted-boundary check rejects any request
+ * whose `signal_hash` is not this binding, so the fixture computes it instead
+ * of emitting a free-form placeholder.
  */
 export function computeWorldIdSignalHash(
     owner: string,
@@ -295,10 +296,7 @@ export function computeWorldIdSignalHash(
         canonicalHex32Lower(membershipId, "membership_id"),
         canonicalHex32Lower(signedStatementHash, "signed_statement_hash"),
     ];
-    const digest = createHash("sha256")
-        .update(Buffer.from(parts.join("\0"), "utf8"))
-        .digest("hex");
-    return `0x${digest}`;
+    return hashToFieldBytes(new TextEncoder().encode(parts.join("\0")));
 }
 
 export function buildMembershipIdentityFixtureManifest(

@@ -774,7 +774,7 @@ mod tests {
                 proof: "0xproof".to_owned(),
                 verification_level: "orb".to_owned(),
                 action: WORLD_ID_ACTION.to_owned(),
-                signal_hash: "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
                     .to_owned(),
             }),
         }
@@ -866,7 +866,7 @@ mod tests {
                     verification_level: "orb".to_owned(),
                     action: WORLD_ID_ACTION.to_owned(),
                     signal_hash:
-                        "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
+                        "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
                             .to_owned(),
                 }),
             }
@@ -891,7 +891,7 @@ mod tests {
                         "proof": "0xproof",
                         "verification_level": "orb",
                         "action": WORLD_ID_ACTION,
-                        "signal_hash": "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268",
+                        "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
                     },
                 },
                 "registration_metadata": {

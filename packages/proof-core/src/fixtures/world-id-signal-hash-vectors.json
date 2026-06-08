@@ -1,0 +1,36 @@
+{
+    "official_hash_to_field": [
+        {
+            "name": "empty string",
+            "input_utf8": "",
+            "input_bytes_hex": "0x",
+            "expected_hash_to_field": "0x00c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a4"
+        },
+        {
+            "name": "test_signal",
+            "input_utf8": "test_signal",
+            "input_bytes_hex": "0x746573745f7369676e616c",
+            "expected_hash_to_field": "0x00c1636e0a961a3045054c4d61374422c31a95846b8442f0927ad2ff1d6112ed"
+        },
+        {
+            "name": "raw bytes",
+            "input_utf8": null,
+            "input_bytes_hex": "0x010203",
+            "expected_hash_to_field": "0x00f1885eda54b7a053318cd41e2093220dab15d65381b1157a3633a83bfd5c92"
+        },
+        {
+            "name": "hello",
+            "input_utf8": "hello",
+            "input_bytes_hex": "0x68656c6c6f",
+            "expected_hash_to_field": "0x001c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36dea"
+        }
+    ],
+    "sonari_signal_hash": {
+        "name": "owner 33 membership 22 statement 66",
+        "owner": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "membership_id": "0x2222222222222222222222222222222222222222222222222222222222222222",
+        "signed_statement_hash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+        "canonical_signal": "sonari:world_id_signal:v1\u00000x3333333333333333333333333333333333333333333333333333333333333333\u00000x2222222222222222222222222222222222222222222222222222222222222222\u00000x6666666666666666666666666666666666666666666666666666666666666666",
+        "expected_signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+    }
+}

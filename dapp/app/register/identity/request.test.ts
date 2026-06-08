@@ -8,7 +8,7 @@ const OWNER = `0x${"33".repeat(32)}`;
 const SIGNED_STATEMENT_HASH = `0x${"44".repeat(32)}`;
 // computeWorldIdSignalHash(OWNER, MEMBERSHIP_ID, SIGNED_STATEMENT_HASH)
 const DERIVED_SIGNAL_HASH =
-    "0x85cd1fac1b3f932eaffa68cd474e722e669cdd0d25827f3d92013c1fb4ac7943";
+    "0x001cbfc1f055dd0a0929731bb1ad2f78d6641aa4e2160879253f4f1254c7b01f";
 
 describe("dapp register identity request builder", () => {
     it("derives the World ID signal_hash from owner, membership, and statement", async () => {
