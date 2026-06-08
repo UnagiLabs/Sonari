@@ -265,7 +265,7 @@ mod tests {
         DummyWorldIdVerifier, INTENT, IdentityProvider, IdentityVerifyRequest,
         ResolvedWorldIdVerifierMode, VERIFIER_FAMILY, VERIFIER_VERSION, WORLD_ID_ACTION,
         WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED, WorldIdProofRequest,
-        WorldIdVerificationStatus, WorldIdVerifier,
+        WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
     };
     use sonari_tee_core::{PayloadSigner, ProcessDataHandler, ProcessOutput, TeeContext};
 
@@ -373,7 +373,7 @@ mod tests {
         let output = process_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -447,7 +447,7 @@ mod tests {
         let output = process_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -462,7 +462,7 @@ mod tests {
         let mut output = crate::process_identity_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &PlaceholderSigner,
             1_900_000_000_000,
@@ -543,7 +543,7 @@ mod tests {
         let output = process_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -575,7 +575,7 @@ mod tests {
         let output_mock = process_with_verifier(
             world_id_request(),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             1_900_000_000_000,
         )
@@ -645,5 +645,22 @@ mod tests {
         assert!(matches!(output, ProcessOutput::Unsigned { .. }));
         assert_eq!(output.result_json()["status"], "pending_source");
         assert_eq!(output.result_json()["error_code"], WORLD_ID_API_UNAVAILABLE);
+    }
+
+    fn verified_status() -> WorldIdVerificationStatus {
+        WorldIdVerificationStatus::Verified {
+            evidence: WorldIdVerifiedEvidence {
+                rp_id: "rp_staging_123".to_owned(),
+                environment: "staging".to_owned(),
+                action: WORLD_ID_ACTION.to_owned(),
+                protocol_version: "4.0".to_owned(),
+                identifier: "orb".to_owned(),
+                nullifier: "12345678901234567890".to_owned(),
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                    .to_owned(),
+                created_at: None,
+                session_id: None,
+            },
+        }
     }
 }

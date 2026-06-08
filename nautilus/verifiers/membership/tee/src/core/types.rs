@@ -31,6 +31,16 @@ pub struct WorldIdProofRequest {
     pub idkit_response: serde_json::Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldIdUniquenessProof {
+    pub protocol_version: String,
+    pub action: String,
+    pub environment: String,
+    pub identifier: String,
+    pub signal_hash: String,
+    pub nullifier: String,
+}
+
 impl WorldIdProofRequest {
     pub fn action(&self) -> Option<&str> {
         self.idkit_response
@@ -66,6 +76,119 @@ impl WorldIdProofRequest {
             .and_then(|response| response.get(field))
             .and_then(serde_json::Value::as_str)
     }
+
+    pub fn uniqueness_proof(&self) -> Result<WorldIdUniquenessProof, crate::IdentityError> {
+        let object = self.idkit_response.as_object().ok_or_else(|| {
+            crate::IdentityError::Request("World ID idkit_response must be an object".to_owned())
+        })?;
+        reject_unknown_keys(
+            "World ID idkit_response",
+            object.keys().map(String::as_str),
+            &[
+                "protocol_version",
+                "nonce",
+                "action",
+                "environment",
+                "responses",
+            ],
+        )?;
+        let protocol_version = required_string(&self.idkit_response, "protocol_version")?;
+        if protocol_version != "4.0" {
+            return Err(crate::IdentityError::Request(
+                "World ID protocol_version must be 4.0".to_owned(),
+            ));
+        }
+        let action = required_string(&self.idkit_response, "action")?;
+        let environment = required_string(&self.idkit_response, "environment")?;
+        let responses = self
+            .idkit_response
+            .get("responses")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                crate::IdentityError::Request(
+                    "World ID idkit_response.responses must be an array".to_owned(),
+                )
+            })?;
+        if responses.len() != 1 {
+            return Err(crate::IdentityError::Request(
+                "World ID uniqueness proof must include exactly one response".to_owned(),
+            ));
+        }
+        let response = responses[0].as_object().ok_or_else(|| {
+            crate::IdentityError::Request(
+                "World ID idkit_response.responses[0] must be an object".to_owned(),
+            )
+        })?;
+        reject_unknown_keys(
+            "World ID idkit_response.responses[0]",
+            response.keys().map(String::as_str),
+            &[
+                "identifier",
+                "signal_hash",
+                "proof",
+                "merkle_root",
+                "nullifier",
+            ],
+        )?;
+        let identifier = required_response_string(response, "identifier")?;
+        if identifier != "orb" {
+            return Err(crate::IdentityError::Request(
+                "World ID identifier must be orb".to_owned(),
+            ));
+        }
+
+        Ok(WorldIdUniquenessProof {
+            protocol_version: protocol_version.to_owned(),
+            action: action.to_owned(),
+            environment: environment.to_owned(),
+            identifier: identifier.to_owned(),
+            signal_hash: required_response_string(response, "signal_hash")?.to_owned(),
+            nullifier: required_response_string(response, "nullifier")?.to_owned(),
+        })
+    }
+}
+
+fn required_string<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Result<&'a str, crate::IdentityError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            crate::IdentityError::Request(format!(
+                "World ID idkit_response.{field} must be a string"
+            ))
+        })
+}
+
+fn required_response_string<'a>(
+    value: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<&'a str, crate::IdentityError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            crate::IdentityError::Request(format!(
+                "World ID idkit_response.responses[0].{field} must be a string"
+            ))
+        })
+}
+
+fn reject_unknown_keys<'a>(
+    context: &str,
+    keys: impl Iterator<Item = &'a str>,
+    allowed: &[&str],
+) -> Result<(), crate::IdentityError> {
+    for key in keys {
+        if !allowed.contains(&key) {
+            return Err(crate::IdentityError::Request(format!(
+                "{context} contains unknown field `{key}`"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

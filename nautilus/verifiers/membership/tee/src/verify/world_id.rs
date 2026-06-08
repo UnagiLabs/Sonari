@@ -31,9 +31,22 @@ pub const WORLD_ID_API_UNAVAILABLE: &str = "WORLD_ID_API_UNAVAILABLE";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorldIdVerificationStatus {
-    Verified,
+    Verified { evidence: WorldIdVerifiedEvidence },
     Rejected { error_code: String },
     PendingSource { error_code: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldIdVerifiedEvidence {
+    pub rp_id: String,
+    pub environment: String,
+    pub action: String,
+    pub protocol_version: String,
+    pub identifier: String,
+    pub nullifier: String,
+    pub signal_hash: String,
+    pub created_at: Option<String>,
+    pub session_id: Option<String>,
 }
 
 pub trait WorldIdVerifier {
@@ -43,6 +56,10 @@ pub trait WorldIdVerifier {
 
     fn expected_app_id(&self) -> &str {
         self.expected_rp_id()
+    }
+
+    fn expected_environment(&self) -> &str {
+        "staging"
     }
 
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus;
@@ -172,16 +189,19 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
         &self.rp_id
     }
 
+    fn expected_environment(&self) -> &str {
+        self.expected_environment.as_str()
+    }
+
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
-        if proof.action() != Some(WORLD_ID_ACTION) {
+        let claims = match proof.uniqueness_proof() {
+            Ok(claims) => claims,
+            Err(_) => return rejected(),
+        };
+        if claims.action != WORLD_ID_ACTION {
             return rejected();
         }
-        if proof
-            .idkit_response
-            .get("environment")
-            .and_then(serde_json::Value::as_str)
-            != Some(self.expected_environment.as_str())
-        {
+        if claims.environment != self.expected_environment.as_str() {
             return rejected();
         }
         let request_body = match serde_json::to_vec(&proof.idkit_response) {
@@ -202,7 +222,7 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
         let status = response.status();
         if status == StatusCode::OK {
             let body = response.text().unwrap_or_default();
-            return classify_success_response(proof, &body);
+            return classify_success_response(&self.rp_id, self.expected_environment, proof, &body);
         }
 
         let body = if status == StatusCode::BAD_REQUEST {
@@ -219,7 +239,21 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
 struct WorldIdApiSuccessResponse {
     success: bool,
     action: String,
-    nullifier_hash: String,
+    nullifier: String,
+    environment: String,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+    results: Vec<WorldIdApiResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorldIdApiResult {
+    identifier: String,
+    success: bool,
+    #[serde(default)]
+    nullifier: Option<String>,
 }
 
 fn normalize_base_url(base_url: String) -> Result<Url, IdentityError> {
@@ -273,33 +307,67 @@ fn normalize_rp_id(rp_id: String) -> Result<String, IdentityError> {
 
 fn classify_bad_request(body: &str) -> WorldIdVerificationStatus {
     match world_id_error_code(body).as_deref() {
-        Some("already_verified") => WorldIdVerificationStatus::Verified,
         Some("max_verifications_reached") => rejected(),
         _ => rejected(),
     }
 }
 
-fn classify_success_response(proof: &WorldIdProofRequest, body: &str) -> WorldIdVerificationStatus {
+fn classify_success_response(
+    rp_id: &str,
+    expected_environment: WorldIdEnvironment,
+    proof: &WorldIdProofRequest,
+    body: &str,
+) -> WorldIdVerificationStatus {
+    let Ok(claims) = proof.uniqueness_proof() else {
+        return pending_source();
+    };
     let Ok(response) = serde_json::from_str::<WorldIdApiSuccessResponse>(body) else {
         return pending_source();
     };
-    if !response.success || proof.action() != Some(response.action.as_str()) {
+    if !response.success
+        || response.action != claims.action
+        || response.environment != expected_environment.as_str()
+        || response.session_id.is_some()
+    {
         return pending_source();
     }
-    let Ok(response_nullifier) = canonical_world_id_nullifier(&response.nullifier_hash) else {
+    let Some(result) = response.results.iter().find(|result| result.success) else {
         return pending_source();
     };
-    let Some(proof_nullifier) = proof.nullifier() else {
+    if result.identifier != claims.identifier {
+        return pending_source();
+    }
+    let Ok(response_nullifier) = canonical_world_id_nullifier(&response.nullifier) else {
         return pending_source();
     };
-    let Ok(proof_nullifier) = canonical_world_id_nullifier(proof_nullifier) else {
+    if let Some(result_nullifier) = &result.nullifier {
+        let Ok(result_nullifier) = canonical_world_id_nullifier(result_nullifier) else {
+            return pending_source();
+        };
+        if result_nullifier != response_nullifier {
+            return pending_source();
+        }
+    }
+    let Ok(request_nullifier) = canonical_world_id_nullifier(&claims.nullifier) else {
         return pending_source();
     };
-    if response_nullifier != proof_nullifier {
+    if response_nullifier != request_nullifier {
         return pending_source();
     }
 
-    WorldIdVerificationStatus::Verified
+    WorldIdVerificationStatus::Verified {
+        evidence: WorldIdVerifiedEvidence {
+            rp_id: rp_id.to_owned(),
+            environment: response.environment,
+            action: response.action,
+            protocol_version: claims.protocol_version,
+            identifier: result.identifier.clone(),
+            nullifier: response_nullifier,
+            signal_hash: claims.signal_hash,
+            created_at: response.created_at,
+            session_id: None,
+        },
+    }
 }
 
 fn classify_http_status(
@@ -376,19 +444,37 @@ impl WorldIdVerifier for DummyWorldIdVerifier {
         &self.rp_id
     }
 
+    fn expected_environment(&self) -> &str {
+        self.expected_environment.as_str()
+    }
+
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
-        if proof.action() != Some(WORLD_ID_ACTION) {
+        let claims = match proof.uniqueness_proof() {
+            Ok(claims) => claims,
+            Err(_) => return rejected(),
+        };
+        if claims.action != WORLD_ID_ACTION {
             return rejected();
         }
-        if proof
-            .idkit_response
-            .get("environment")
-            .and_then(serde_json::Value::as_str)
-            != Some(self.expected_environment.as_str())
-        {
+        if claims.environment != self.expected_environment.as_str() {
             return rejected();
         }
-        WorldIdVerificationStatus::Verified
+        let claims = proof
+            .uniqueness_proof()
+            .expect("validated uniqueness proof should parse");
+        WorldIdVerificationStatus::Verified {
+            evidence: WorldIdVerifiedEvidence {
+                rp_id: self.rp_id.clone(),
+                environment: claims.environment,
+                action: claims.action,
+                protocol_version: claims.protocol_version,
+                identifier: claims.identifier,
+                nullifier: claims.nullifier,
+                signal_hash: claims.signal_hash,
+                created_at: None,
+                session_id: None,
+            },
+        }
     }
 }
 
@@ -410,10 +496,14 @@ mod tests {
         let verifier = DummyWorldIdVerifier::new("rp_staging_123").unwrap();
         let proof = world_id_proof();
 
-        assert_eq!(
-            verifier.verify_world_id(&proof),
-            WorldIdVerificationStatus::Verified
-        );
+        let WorldIdVerificationStatus::Verified { evidence } = verifier.verify_world_id(&proof)
+        else {
+            panic!("dummy verifier should return verified evidence");
+        };
+        assert_eq!(evidence.rp_id, "rp_staging_123");
+        assert_eq!(evidence.environment, "staging");
+        assert_eq!(evidence.identifier, "orb");
+        assert_eq!(evidence.nullifier, "12345678901234567890");
     }
 
     #[test]
@@ -602,7 +692,12 @@ mod tests {
     fn world_id_400_already_verified_is_success_for_stateless_tee() {
         let status = classify_bad_request(r#"{"code":"already_verified"}"#);
 
-        assert_eq!(status, WorldIdVerificationStatus::Verified);
+        assert_eq!(
+            status,
+            WorldIdVerificationStatus::Rejected {
+                error_code: WORLD_ID_VERIFICATION_FAILED.to_owned()
+            }
+        );
     }
 
     #[test]
@@ -621,14 +716,30 @@ mod tests {
     fn world_id_200_success_body_must_match_proof() {
         let proof = world_id_proof();
         let status = classify_success_response(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"action":"sonari_membership_register_v1","nullifier_hash":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00"}"#,
+            r#"{"success":true,"results":[{"identifier":"orb","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
         );
-        assert_eq!(status, WorldIdVerificationStatus::Verified);
+        let WorldIdVerificationStatus::Verified { evidence } = status else {
+            panic!("success response should return verified evidence");
+        };
+        assert_eq!(evidence.rp_id, "rp_staging_123");
+        assert_eq!(evidence.environment, "staging");
+        assert_eq!(evidence.action, WORLD_ID_ACTION);
+        assert_eq!(evidence.protocol_version, "4.0");
+        assert_eq!(evidence.identifier, "orb");
+        assert_eq!(evidence.nullifier, "12345678901234567890");
+        assert_eq!(
+            evidence.signal_hash, "0xsignal",
+            "response evidence should retain request-side signal_hash"
+        );
 
         let mismatched_action = classify_success_response(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"action":"attacker_action","nullifier_hash":"12345678901234567890"}"#,
+            r#"{"success":true,"results":[{"identifier":"orb","success":true,"nullifier":"12345678901234567890"}],"action":"attacker_action","nullifier":"12345678901234567890","environment":"staging"}"#,
         );
         assert_eq!(
             mismatched_action,
@@ -638,8 +749,10 @@ mod tests {
         );
 
         let mismatched_nullifier = classify_success_response(
+            "rp_staging_123",
+            WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"action":"sonari_membership_register_v1","nullifier_hash":"123"}"#,
+            r#"{"success":true,"results":[{"identifier":"orb","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v1","nullifier":"123","environment":"staging"}"#,
         );
         assert_eq!(
             mismatched_nullifier,

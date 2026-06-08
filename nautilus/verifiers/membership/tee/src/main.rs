@@ -9,9 +9,9 @@ use membership_tee::{
     IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV,
     WORLD_ID_API_BASE_CANONICAL, WORLD_ID_API_UNAVAILABLE, WORLD_ID_ENVIRONMENT_ENV,
     WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
-    WorldIdModeObservation, WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
-    encoding::identity_bcs::payload_bcs_bytes, process_identity_with_verifier,
-    resolve_world_id_verifier_mode, world_id_mode_observation,
+    WorldIdModeObservation, WorldIdProofRequest, WorldIdVerificationStatus,
+    WorldIdVerifiedEvidence, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
+    process_identity_with_verifier, resolve_world_id_verifier_mode, world_id_mode_observation,
 };
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::enclave::{
@@ -553,9 +553,28 @@ impl WorldIdVerifier for FixtureWorldIdVerifier {
         &self.expected_app_id
     }
 
-    fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
+    fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
         match self.status {
-            FixtureWorldIdStatus::Verified => WorldIdVerificationStatus::Verified,
+            FixtureWorldIdStatus::Verified => {
+                let Ok(claims) = proof.uniqueness_proof() else {
+                    return WorldIdVerificationStatus::Rejected {
+                        error_code: WORLD_ID_VERIFICATION_FAILED.to_owned(),
+                    };
+                };
+                WorldIdVerificationStatus::Verified {
+                    evidence: WorldIdVerifiedEvidence {
+                        rp_id: self.expected_app_id.clone(),
+                        environment: claims.environment,
+                        action: claims.action,
+                        protocol_version: claims.protocol_version,
+                        identifier: claims.identifier,
+                        nullifier: claims.nullifier,
+                        signal_hash: claims.signal_hash,
+                        created_at: None,
+                        session_id: None,
+                    },
+                }
+            }
             FixtureWorldIdStatus::Rejected => WorldIdVerificationStatus::Rejected {
                 error_code: WORLD_ID_VERIFICATION_FAILED.to_owned(),
             },
@@ -641,7 +660,7 @@ mod tests {
     use membership_tee::{
         INTENT, IdentityProvider, IdentityVerifyRequest, VERIFIER_FAMILY, VERIFIER_VERSION,
         WORLD_ID_ACTION, WORLD_ID_API_UNAVAILABLE, WORLD_ID_VERIFICATION_FAILED,
-        WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifier,
+        WorldIdProofRequest, WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
     };
     use sonari_tee_core::{LocalEd25519Signer, signing_key_seed_from_env};
 
@@ -653,7 +672,7 @@ mod tests {
         let result = production_result_with_verifier(
             world_id_request(Some(1_800_000_000_000)),
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             1_900_000_000_000,
@@ -683,7 +702,7 @@ mod tests {
         let result = production_result_with_verifier(
             request,
             &MockWorldIdVerifier {
-                status: WorldIdVerificationStatus::Verified,
+                status: verified_status(),
             },
             &signer,
             1_900_000_000_000,
@@ -757,6 +776,23 @@ mod tests {
         LocalEd25519Signer::new(seed)
     }
 
+    fn verified_status() -> WorldIdVerificationStatus {
+        WorldIdVerificationStatus::Verified {
+            evidence: WorldIdVerifiedEvidence {
+                rp_id: "rp_staging_123".to_owned(),
+                environment: "staging".to_owned(),
+                action: WORLD_ID_ACTION.to_owned(),
+                protocol_version: "4.0".to_owned(),
+                identifier: "orb".to_owned(),
+                nullifier: "12345678901234567890".to_owned(),
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                    .to_owned(),
+                created_at: None,
+                session_id: None,
+            },
+        }
+    }
+
     fn world_id_request(issued_at_ms: Option<u64>) -> IdentityVerifyRequest {
         IdentityVerifyRequest {
             registry_id: "0x1111111111111111111111111111111111111111111111111111111111111111"
@@ -825,7 +861,7 @@ mod tests {
         use membership_tee::{
             ResolvedWorldIdVerifierMode, VERIFIER_FAMILY, WORLD_ID_ACTION,
             WORLD_ID_API_UNAVAILABLE, WorldIdProofRequest, WorldIdVerificationStatus,
-            WorldIdVerifier,
+            WorldIdVerifiedEvidence, WorldIdVerifier,
         };
         use sonari_tee_core::enclave::{EnclaveRegistrationMetadata, ProcessOutput, TeeContext};
         use sonari_tee_core::{LocalEd25519Signer, PayloadSigner};
@@ -838,11 +874,29 @@ mod tests {
 
         impl WorldIdVerifier for MockWorldIdVerifier {
             fn expected_app_id(&self) -> &str {
-                "rp_staging_123"
+                "app_staging_123"
             }
 
             fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
                 self.status.clone()
+            }
+        }
+
+        fn verified_status() -> WorldIdVerificationStatus {
+            WorldIdVerificationStatus::Verified {
+                evidence: WorldIdVerifiedEvidence {
+                    rp_id: "rp_staging_123".to_owned(),
+                    environment: "staging".to_owned(),
+                    action: WORLD_ID_ACTION.to_owned(),
+                    protocol_version: "4.0".to_owned(),
+                    identifier: "orb".to_owned(),
+                    nullifier: "12345678901234567890".to_owned(),
+                    signal_hash:
+                        "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
+                            .to_owned(),
+                    created_at: None,
+                    session_id: None,
+                },
             }
         }
 
@@ -937,7 +991,7 @@ mod tests {
             let output = process_with_verifier(
                 world_id_request(),
                 &MockWorldIdVerifier {
-                    status: WorldIdVerificationStatus::Verified,
+                    status: verified_status(),
                 },
                 1_900_000_000_000,
             )
@@ -1007,7 +1061,7 @@ mod tests {
                 let output = process_with_verifier(
                     world_id_request(),
                     &MockWorldIdVerifier {
-                        status: WorldIdVerificationStatus::Verified,
+                        status: verified_status(),
                     },
                     1_900_000_000_000,
                 )
@@ -1114,8 +1168,8 @@ mod tests {
         fn route_process_data_signs_and_injects_metadata_end_to_end() {
             let state = EnclaveState {
                 ephemeral_signing_key_seed: SERVER_SEED,
-                ctx: TeeContext::new(),
-                world_id_base_url: "https://developer.world.org".to_owned(),
+                ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]),
+                world_id_base_url: membership_tee::WORLD_ID_API_BASE_STAGING.to_owned(),
                 world_id_app_id: "rp_staging_123".to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
@@ -1173,7 +1227,7 @@ mod tests {
             let output = process_with_verifier(
                 world_id_request(),
                 &MockWorldIdVerifier {
-                    status: WorldIdVerificationStatus::Verified,
+                    status: verified_status(),
                 },
                 1_900_000_000_000,
             )

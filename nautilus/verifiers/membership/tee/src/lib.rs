@@ -26,7 +26,7 @@ pub use verify::world_id::{
     WORLD_ID_API_BASE_ENV, WORLD_ID_API_BASE_STAGING, WORLD_ID_API_UNAVAILABLE,
     WORLD_ID_APP_ID_ENV, WORLD_ID_EGRESS_PROXY_URL_ENV, WORLD_ID_ENVIRONMENT_ENV,
     WORLD_ID_MAX_AGE_SECONDS, WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED, WorldIdEnvironment,
-    WorldIdVerificationStatus, WorldIdVerifier,
+    WorldIdVerificationStatus, WorldIdVerifiedEvidence, WorldIdVerifier,
 };
 
 pub const INTENT: &str = "SONARI_IDENTITY_VERIFICATION_V1";
