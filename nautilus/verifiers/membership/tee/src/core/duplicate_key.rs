@@ -2,7 +2,7 @@ use crate::IdentityError;
 use sonari_tee_core::{sha256_bytes, to_hex};
 
 const KYC_DUPLICATE_KEY_PREFIX: &str = "sonari:kyc:v1";
-const WORLD_ID_DUPLICATE_KEY_PREFIX: &str = "sonari:world_id:v1";
+const WORLD_ID_DUPLICATE_KEY_PREFIX: &str = "sonari:world_id:v2";
 
 pub fn compute_kyc_duplicate_key_hash(
     provider_id: &str,
@@ -12,14 +12,14 @@ pub fn compute_kyc_duplicate_key_hash(
 }
 
 pub fn compute_world_id_duplicate_key_hash(
-    app_id: &str,
+    rp_id: &str,
     action: &str,
     nullifier: &str,
 ) -> Result<String, IdentityError> {
     let canonical_nullifier = canonical_world_id_nullifier(nullifier)?;
     compute_duplicate_key_hash(&[
         WORLD_ID_DUPLICATE_KEY_PREFIX,
-        app_id,
+        rp_id,
         action,
         &canonical_nullifier,
     ])
@@ -137,7 +137,7 @@ mod tests {
         );
         assert_eq!(
             world_id,
-            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74"
+            "0x2f963d1ddb2b4059c677d33264146dbef5020e44781ee5f8c8992237632f4a2c"
         );
     }
 

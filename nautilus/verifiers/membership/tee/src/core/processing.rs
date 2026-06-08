@@ -1,6 +1,7 @@
 use crate::verify::kyc::{KYC_UNSUPPORTED, verify_kyc_unsupported};
 use crate::verify::world_id::{
-    WORLD_ID_ACTION, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifier,
+    WORLD_ID_ACTION, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus,
+    WorldIdVerifiedEvidence, WorldIdVerifier,
 };
 use crate::{
     INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
@@ -51,15 +52,9 @@ pub fn process_identity_with_verifier(
                 ));
             }
             Ok(match verifier.verify_world_id(&proof) {
-                WorldIdVerificationStatus::Verified { evidence: _ } => {
+                WorldIdVerificationStatus::Verified { evidence } => {
                     let issued_at_ms = request.issued_at_ms.unwrap_or(now_ms);
-                    verified_output(
-                        request,
-                        &proof,
-                        verifier.expected_app_id(),
-                        signer,
-                        issued_at_ms,
-                    )?
+                    verified_output(request, &evidence, signer, issued_at_ms)?
                 }
                 WorldIdVerificationStatus::Rejected { error_code } => {
                     status_only(IdentityProcessingStatus::Rejected, Some(error_code))
@@ -143,6 +138,37 @@ pub fn compute_identity_evidence_hash(
     Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
 }
 
+pub fn compute_world_id_evidence_hash(
+    evidence: &WorldIdVerifiedEvidence,
+    duplicate_key_hash_hex: &str,
+    issued_at_ms: u64,
+) -> Result<String, IdentityError> {
+    validate_lowercase_hex_32("duplicate_key_hash_hex", duplicate_key_hash_hex)?;
+    let issued_at_ms_decimal = issued_at_ms.to_string();
+    let parts = [
+        IDENTITY_EVIDENCE_HASH_PREFIX,
+        "world_id",
+        duplicate_key_hash_hex,
+        &evidence.rp_id,
+        &evidence.environment,
+        &evidence.action,
+        &evidence.protocol_version,
+        &evidence.identifier,
+        &evidence.nullifier,
+        &evidence.signal_hash,
+        &issued_at_ms_decimal,
+    ];
+    for part in parts {
+        if part.is_empty() || part.contains('\0') {
+            return Err(IdentityError::Request(
+                "World ID evidence hash inputs must be non-empty strings without NUL".to_owned(),
+            ));
+        }
+    }
+
+    Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
+}
+
 fn world_id_request_matches_trusted_boundary(
     request: &IdentityVerifyRequest,
     proof: &crate::WorldIdProofRequest,
@@ -174,31 +200,13 @@ fn world_id_request_matches_trusted_boundary(
 
 fn verified_output(
     request: IdentityVerifyRequest,
-    proof: &crate::WorldIdProofRequest,
-    app_scope: &str,
+    evidence: &WorldIdVerifiedEvidence,
     signer: &impl PayloadSigner,
     issued_at_ms: u64,
 ) -> Result<IdentityProcessingOutput, IdentityError> {
-    let action = proof.action().ok_or_else(|| {
-        IdentityError::Request("World ID idkit_response.action is required".to_owned())
-    })?;
-    let nullifier = proof.nullifier().ok_or_else(|| {
-        IdentityError::Request(
-            "World ID idkit_response.responses[0].nullifier is required".to_owned(),
-        )
-    })?;
-    let verification_level = proof.identifier().ok_or_else(|| {
-        IdentityError::Request(
-            "World ID idkit_response.responses[0].identifier is required".to_owned(),
-        )
-    })?;
-    let duplicate_key_hash = compute_world_id_duplicate_key_hash(app_scope, action, nullifier)?;
-    let evidence_hash = compute_identity_evidence_hash(
-        IdentityProvider::WorldId,
-        &duplicate_key_hash,
-        verification_level,
-        issued_at_ms,
-    )?;
+    let duplicate_key_hash =
+        compute_world_id_duplicate_key_hash(&evidence.rp_id, &evidence.action, &evidence.nullifier)?;
+    let evidence_hash = compute_world_id_evidence_hash(evidence, &duplicate_key_hash, issued_at_ms)?;
     let validity_ms = request.validity_ms.unwrap_or(IDENTITY_RESULT_TTL_MS);
     if validity_ms == 0 {
         return Err(IdentityError::Request(
@@ -353,16 +361,39 @@ mod tests {
         let signature = output.signature.as_ref().unwrap();
         assert_eq!(
             result.duplicate_key_hash,
-            "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74"
+            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
         );
         assert_eq!(
             result.evidence_hash,
-            "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f"
+            "0x8db7350f283169b1ad3f8939a09ccdbff0c4d60b11f3b25316039372bdd049f2"
         );
         assert_eq!(result.issued_at_ms, now_ms);
         assert_eq!(result.expires_at_ms, now_ms + IDENTITY_RESULT_TTL_MS);
         assert_eq!(signature.signature, to_hex(payload));
         assert_eq!(signer.calls.get(), 1);
+    }
+
+    #[test]
+    fn process_identity_uses_verified_evidence_nullifier_for_duplicate_key() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["nullifier"] =
+            serde_json::json!("99999999999999999999");
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Verified);
+        assert_eq!(
+            output.result.unwrap().duplicate_key_hash,
+            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
+        );
     }
 
     #[test]

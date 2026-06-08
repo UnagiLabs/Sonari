@@ -10,7 +10,7 @@ pub use core::duplicate_key::{
 };
 pub use core::processing::{
     IdentityProcessingOutput, IdentityProcessingStatus, compute_identity_evidence_hash,
-    compute_world_id_signal_hash, process_identity_with_verifier,
+    compute_world_id_evidence_hash, compute_world_id_signal_hash, process_identity_with_verifier,
 };
 pub use core::types::{
     IdentityProvider, IdentityTeeResult, IdentityVerifyRequest, WorldIdProofRequest,
