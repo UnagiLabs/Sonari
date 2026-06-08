@@ -442,7 +442,14 @@ Resources:
             ${WorldIdRpId}
             SONARI_WORLD_ID_RP_ID
             )
-            world_id_api_base="https://developer.world.org"
+            case "${WorldIdEnvironment}" in
+              staging)
+                world_id_api_base="https://staging-developer.worldcoin.org"
+                ;;
+              *)
+                world_id_api_base="https://developer.world.org"
+                ;;
+            esac
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2

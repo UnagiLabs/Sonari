@@ -248,6 +248,20 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain('"Next": "StopInstance"');
     });
 
+    it("selects World ID API base host from WorldIdEnvironment parameter at deploy time", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // case block must branch on WorldIdEnvironment
+        expect(template).toContain('case "$' + '{WorldIdEnvironment}" in');
+        // staging branch must point to the staging host
+        expect(template).toContain('world_id_api_base="https://staging-developer.worldcoin.org"');
+        // production / default branch must point to the production host
+        expect(template).toContain('world_id_api_base="https://developer.world.org"');
+        // host extraction and allowlist write must be preserved
+        expect(template).toContain('"$world_id_api_host:443"');
+        expect(template).toContain("world-id-egress-allowlist");
+    });
+
     it("passes membership identity dry-run object IDs to RunnerControlLambda", async () => {
         const template = await readFile(templatePath, "utf8");
 
