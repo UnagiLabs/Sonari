@@ -70,6 +70,14 @@ export default function RegisterIdentityPage() {
         setWorldIdResponse(null);
     }
 
+    // Editing a signal-bound field invalidates any prior World ID verification:
+    // the proof's signal_hash is bound to owner + membership + signed statement,
+    // so a stale proof would fail at the enclave. Reset so the user re-verifies.
+    function handleBindingChange(setter: (value: string) => void, value: string) {
+        setter(value);
+        setWorldIdResponse(null);
+    }
+
     function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setSubmitState({ status: "submitting", message: "Submitting verification request." });
@@ -185,7 +193,12 @@ export default function RegisterIdentityPage() {
                                             <input
                                                 id="membership-id"
                                                 name="membershipId"
-                                                onChange={(e) => setMembershipId(e.target.value)}
+                                                onChange={(e) =>
+                                                    handleBindingChange(
+                                                        setMembershipId,
+                                                        e.target.value,
+                                                    )
+                                                }
                                                 placeholder="0x..."
                                                 type="text"
                                                 value={membershipId}
@@ -196,7 +209,9 @@ export default function RegisterIdentityPage() {
                                             <input
                                                 id="owner"
                                                 name="owner"
-                                                onChange={(e) => setOwner(e.target.value)}
+                                                onChange={(e) =>
+                                                    handleBindingChange(setOwner, e.target.value)
+                                                }
                                                 placeholder="0x..."
                                                 type="text"
                                                 value={owner}
@@ -221,7 +236,10 @@ export default function RegisterIdentityPage() {
                                                 id="signed-statement-hash"
                                                 name="signedStatementHash"
                                                 onChange={(e) =>
-                                                    setSignedStatementHash(e.target.value)
+                                                    handleBindingChange(
+                                                        setSignedStatementHash,
+                                                        e.target.value,
+                                                    )
                                                 }
                                                 placeholder="0x..."
                                                 type="text"
