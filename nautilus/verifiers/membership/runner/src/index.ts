@@ -18,13 +18,7 @@ export const DEFAULT_RETRY_BACKOFF_MS = 15 * 60 * 1000;
 export type VerificationJobStatus = "queued" | "processing" | "retry" | "failed" | "completed";
 
 export interface WorldIdProofRequest {
-    readonly world_app_id: string;
-    readonly nullifier_hash: string;
-    readonly merkle_root: string;
-    readonly proof: string;
-    readonly verification_level: string;
-    readonly action: string;
-    readonly signal_hash: string;
+    readonly idkit_response: Record<string, unknown>;
 }
 
 export interface IdentityVerifyRequest {
@@ -762,59 +756,18 @@ function parseOptionalWorldId(input: unknown): ParseResult<WorldIdProofRequest |
     if (!isRecord(input)) {
         return parseError("world_id must be an object");
     }
-    const unexpectedWorldId = unexpectedKey(input, [
-        "world_app_id",
-        "nullifier_hash",
-        "merkle_root",
-        "proof",
-        "verification_level",
-        "action",
-        "signal_hash",
-    ]);
+    const unexpectedWorldId = unexpectedKey(input, ["idkit_response"]);
     if (unexpectedWorldId !== undefined) {
         return parseError(`unexpected world_id field: ${unexpectedWorldId}`);
     }
-    const worldAppId = parseNonEmptyString(input.world_app_id, "world_id.world_app_id");
-    if (!worldAppId.ok) {
-        return worldAppId;
+    if (input.idkit_response === undefined) {
+        return parseError("world_id.idkit_response is required");
     }
-    const nullifierHash = parseNonEmptyString(input.nullifier_hash, "world_id.nullifier_hash");
-    if (!nullifierHash.ok) {
-        return nullifierHash;
-    }
-    const merkleRoot = parseNonEmptyString(input.merkle_root, "world_id.merkle_root");
-    if (!merkleRoot.ok) {
-        return merkleRoot;
-    }
-    const proof = parseNonEmptyString(input.proof, "world_id.proof");
-    if (!proof.ok) {
-        return proof;
-    }
-    const verificationLevel = parseNonEmptyString(
-        input.verification_level,
-        "world_id.verification_level",
-    );
-    if (!verificationLevel.ok) {
-        return verificationLevel;
-    }
-    const action = parseNonEmptyString(input.action, "world_id.action");
-    if (!action.ok) {
-        return action;
-    }
-    const signalHash = parseHex32(input.signal_hash, "world_id.signal_hash");
-    if (!signalHash.ok) {
-        return signalHash;
+    if (!isRecord(input.idkit_response)) {
+        return parseError("world_id.idkit_response must be an object");
     }
 
-    return parseOk({
-        world_app_id: worldAppId.value,
-        nullifier_hash: nullifierHash.value,
-        merkle_root: merkleRoot.value,
-        proof: proof.value,
-        verification_level: verificationLevel.value,
-        action: action.value,
-        signal_hash: signalHash.value,
-    });
+    return parseOk({ idkit_response: input.idkit_response });
 }
 
 type ParseResult<T> =
@@ -881,13 +834,6 @@ function parseOptionalU64(value: unknown, field: string): ParseResult<number | u
 function parseU64(value: unknown, field: string): ParseResult<number> {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
         return parseError(`${field} must be a safe unsigned integer`);
-    }
-    return parseOk(value);
-}
-
-function parseNonEmptyString(value: unknown, field: string): ParseResult<string> {
-    if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
-        return parseError(`${field} must be a non-empty string without NUL`);
     }
     return parseOk(value);
 }

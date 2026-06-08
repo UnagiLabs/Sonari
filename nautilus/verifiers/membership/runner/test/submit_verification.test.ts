@@ -130,4 +130,206 @@ describe("SubmitVerification Lambda", () => {
         expect(response.statusCode).toBe(400);
         await expect(repository.all()).resolves.toEqual([]);
     });
+
+    it("rejects old v2 world_id fields (world_app_id, nullifier_hash, etc.) with 400", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const response = await handler({
+            body: JSON.stringify({
+                ...validRequest(),
+                world_id: {
+                    world_app_id: "app_staging_123",
+                    nullifier_hash: "12345678901234567890",
+                    merkle_root: "0xabc",
+                    proof: "0xproof",
+                    verification_level: "orb",
+                    action: "sonari_membership_register_v1",
+                    signal_hash: `0x${"55".repeat(32)}`,
+                },
+            }),
+        });
+
+        expect(response.statusCode).toBe(400);
+        await expect(repository.all()).resolves.toEqual([]);
+    });
+
+    it("rejects world_id with unexpected extra fields (not idkit_response) with 400", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const response = await handler({
+            body: JSON.stringify({
+                ...validRequest(),
+                world_id: {
+                    idkit_response: { protocol_version: "4.0" },
+                    extra_field: "should-be-rejected",
+                },
+            }),
+        });
+
+        expect(response.statusCode).toBe(400);
+        await expect(repository.all()).resolves.toEqual([]);
+    });
+
+    it("rejects world_id without idkit_response with 400", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const response = await handler({
+            body: JSON.stringify({
+                ...validRequest(),
+                world_id: {},
+            }),
+        });
+
+        expect(response.statusCode).toBe(400);
+        await expect(repository.all()).resolves.toEqual([]);
+    });
+
+    it("rejects world_id.idkit_response that is an array with 400", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const response = await handler({
+            body: JSON.stringify({
+                ...validRequest(),
+                world_id: { idkit_response: [] },
+            }),
+        });
+
+        expect(response.statusCode).toBe(400);
+        await expect(repository.all()).resolves.toEqual([]);
+    });
+
+    it("rejects world_id.idkit_response that is a string with 400", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const response = await handler({
+            body: JSON.stringify({
+                ...validRequest(),
+                world_id: { idkit_response: "not-an-object" },
+            }),
+        });
+
+        expect(response.statusCode).toBe(400);
+        await expect(repository.all()).resolves.toEqual([]);
+    });
+
+    it("returns the same job_id for idempotent v4 duplicate submit", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const first = await handler({ body: JSON.stringify(validRequest()) });
+        const firstBody = JSON.parse(first.body) as { job_id: string; duplicate: boolean };
+        expect(first.statusCode).toBe(202);
+        expect(firstBody.duplicate).toBe(false);
+
+        const second = await handler({ body: JSON.stringify(validRequest()) });
+        const secondBody = JSON.parse(second.body) as { job_id: string; duplicate: boolean };
+        expect(second.statusCode).toBe(200);
+        expect(secondBody.job_id).toBe(firstBody.job_id);
+        expect(secondBody.duplicate).toBe(true);
+    });
+
+    it("produces the same job_id regardless of idkit_response key order (nested idempotency)", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+
+        const req1 = {
+            ...validRequest(),
+            world_id: {
+                idkit_response: {
+                    protocol_version: "4.0",
+                    nonce: "nonce-123",
+                    action: "sonari_membership_register_v1",
+                },
+            },
+        };
+        // Same content, different key order
+        const req2 = {
+            ...validRequest(),
+            world_id: {
+                idkit_response: {
+                    action: "sonari_membership_register_v1",
+                    nonce: "nonce-123",
+                    protocol_version: "4.0",
+                },
+            },
+        };
+
+        const result1 = await repository.upsertRequest(req1, baseNowMs);
+        const result2 = await repository.upsertRequest(req2, baseNowMs);
+
+        expect(result1.row.job_id).toBe(result2.row.job_id);
+        expect(result2.duplicate).toBe(true);
+    });
+
+    it("accepts idkit_response with unknown future fields and preserves them in request_json", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createSubmitVerificationHandler({
+            repository,
+            now: () => baseNowMs,
+        });
+
+        const requestWithExtraFields = {
+            ...validRequest(),
+            world_id: {
+                idkit_response: {
+                    protocol_version: "4.0",
+                    nonce: "nonce-123",
+                    action: "sonari_membership_register_v1",
+                    extra_meta: "future-field",
+                    responses: [
+                        {
+                            identifier: "orb",
+                            signal_hash:
+                                "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                            proof: "0xproof",
+                            merkle_root: "987654321",
+                            nullifier: "12345678901234567890",
+                            future_field: "allowed-passthrough",
+                        },
+                    ],
+                },
+            },
+        };
+
+        const response = await handler({ body: JSON.stringify(requestWithExtraFields) });
+        expect(response.statusCode).toBe(202);
+
+        const rows = await repository.all();
+        expect(rows).toHaveLength(1);
+        // biome-ignore lint/style/noNonNullAssertion: asserted by toHaveLength(1) above
+        const storedRequest = JSON.parse(rows[0]!.request_json) as {
+            world_id?: {
+                idkit_response?: {
+                    extra_meta?: string;
+                    responses?: Array<{ future_field?: string }>;
+                };
+            };
+        };
+        expect(storedRequest.world_id?.idkit_response?.extra_meta).toBe("future-field");
+        expect(storedRequest.world_id?.idkit_response?.responses?.[0]?.future_field).toBe(
+            "allowed-passthrough",
+        );
+    });
 });
