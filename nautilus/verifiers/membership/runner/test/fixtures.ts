@@ -9,13 +9,22 @@ export function validRequest(): IdentityVerifyRequest {
         terms_version: 1,
         signed_statement_hash: `0x${"44".repeat(32)}`,
         world_id: {
-            world_app_id: "app_staging_123",
-            nullifier_hash: "12345678901234567890",
-            merkle_root: "0xabc",
-            proof: "0xproof",
-            verification_level: "orb",
-            action: "sonari_membership_register_v1",
-            signal_hash: `0x${"55".repeat(32)}`,
+            idkit_response: {
+                protocol_version: "4.0",
+                nonce: "nonce-123",
+                action: "sonari_membership_register_v1",
+                environment: "staging",
+                responses: [
+                    {
+                        identifier: "orb",
+                        signal_hash:
+                            "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                        proof: "0xproof",
+                        merkle_root: "987654321",
+                        nullifier: "12345678901234567890",
+                    },
+                ],
+            },
         },
     };
 }
