@@ -705,14 +705,14 @@ mod tests {
         let evidence_hash = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
             "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
-            "orb",
+            "proof_of_human",
             1_800_000_000_000,
         )
         .unwrap();
 
         assert_eq!(
             evidence_hash,
-            "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f"
+            "0xcf572d6cf4b82b52799b745061946372af6106e0abf52fd7142a4b6c095e1634"
         );
     }
 
@@ -721,7 +721,7 @@ mod tests {
         let error = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
             "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
-            concat!("or", "\0", "b"),
+            concat!("proof_of_hum", "\0", "an"),
             1_800_000_000_000,
         )
         .unwrap_err();
@@ -734,7 +734,7 @@ mod tests {
         let error = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
             "0xB9DABCFC937C5422B28DDD2DB18466A02C1F9FADB5637D120A3A455E23E88A74",
-            "orb",
+            "proof_of_human",
             1_800_000_000_000,
         )
         .unwrap_err();
