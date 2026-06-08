@@ -1,14 +1,21 @@
 "use client";
 
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import {
     RegisterHero,
     RegisterProgress,
     RegisterSidePanel,
     RegisterTopbar,
 } from "../register-shared";
-import { buildIdentitySubmitRequest, canSubmitIdentity, type IdentityProvider } from "./request";
+import { lookupMembershipPass, type MembershipLookupResult } from "./membership-lookup";
+import {
+    areIdentityStatementsAccepted,
+    buildIdentitySubmitRequest,
+    type IdentityProvider,
+} from "./request";
 
 const WorldIdVerifyButton = dynamic(
     () => import("./world-id-verify-button").then((m) => m.WorldIdVerifyButton),
@@ -17,6 +24,14 @@ const WorldIdVerifyButton = dynamic(
 
 const submitUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL ?? "";
 const registryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
+const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
+
+// Fixed terms version for the duplicate-account statement. The statement is no
+// longer hand-entered; the dapp derives a deterministic signed_statement_hash
+// from this version (see computeIdentityStatementHash). The enclave only feeds
+// this value into the World ID signal_hash binding, so a fixed value is safe.
+const IDENTITY_TERMS_VERSION = 1;
+const signedStatementHash = computeIdentityStatementHash(IDENTITY_TERMS_VERSION);
 
 interface IdentityOption {
     readonly id: IdentityProvider;
@@ -56,30 +71,81 @@ type SubmitState =
       }
     | { readonly status: "failed"; readonly message: string };
 
+// On-chain MembershipPass lookup state, including the pre-network "idle" and
+// in-flight "loading" phases on top of the lookup's own discriminated result.
+type MembershipLookupState =
+    | { readonly kind: "idle" }
+    | { readonly kind: "loading" }
+    | MembershipLookupResult;
+
 export default function RegisterIdentityPage() {
     const [provider, setProvider] = useState<IdentityProvider>("world_id");
     const [submitState, setSubmitState] = useState<SubmitState>({ status: "idle" });
-    const [owner, setOwner] = useState("");
-    const [membershipId, setMembershipId] = useState("");
-    const [signedStatementHash, setSignedStatementHash] = useState("");
     const [worldIdResponse, setWorldIdResponse] = useState<Record<string, unknown> | null>(null);
+    const [lookup, setLookup] = useState<MembershipLookupState>({ kind: "idle" });
+    // One acceptance flag per duplicate-account statement. The member must affirm
+    // every statement before any identity action (World ID verify / KYC submit) is
+    // enabled, so verification is always preceded by the statement.
+    const [acceptedStatements, setAcceptedStatements] = useState<readonly boolean[]>(() =>
+        identityStatements.map(() => false),
+    );
+
+    const account = useCurrentAccount();
+    const client = useCurrentClient();
+    const owner = account?.address ?? "";
+    const membershipId = lookup.kind === "ok" ? lookup.membershipId : "";
     const isSubmitConfigured = submitUrl.length > 0 && registryId.length > 0;
+    // owner + membership_id are both required to build a valid submit request;
+    // owner non-empty implies a connected wallet, membershipId non-empty implies
+    // a successful single-pass lookup.
+    const isBindingReady = owner.length > 0 && membershipId.length > 0;
+    // The duplicate-account statement must be fully affirmed before verification.
+    const allStatementsAccepted = areIdentityStatementsAccepted(acceptedStatements);
+
+    // Look up the connected wallet's MembershipPass on chain whenever the wallet
+    // or network changes. A cancelled flag drops stale results so a slow lookup
+    // for a previous wallet/network never overwrites the current one.
+    useEffect(() => {
+        if (owner.length === 0) {
+            setLookup({ kind: "idle" });
+            return;
+        }
+        let cancelled = false;
+        setLookup({ kind: "loading" });
+        lookupMembershipPass(client, owner, membershipPackageId)
+            .then((result) => {
+                if (!cancelled) {
+                    setLookup(result);
+                }
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setLookup({
+                        kind: "error",
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : "Could not look up your Membership SBT.",
+                    });
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [owner, client]);
 
     function handleProviderChange(next: IdentityProvider) {
         setProvider(next);
         setWorldIdResponse(null);
     }
 
-    // Editing a signal-bound field invalidates any prior World ID verification:
-    // the proof's signal_hash is bound to owner + membership + signed statement,
-    // so a stale proof would fail at the enclave. Reset so the user re-verifies.
-    function handleBindingChange(setter: (value: string) => void, value: string) {
-        setter(value);
-        setWorldIdResponse(null);
+    function handleStatementToggle(index: number, checked: boolean) {
+        setAcceptedStatements((current) =>
+            current.map((value, position) => (position === index ? checked : value)),
+        );
     }
 
-    function handleSubmit(event: FormEvent<HTMLFormElement>) {
-        event.preventDefault();
+    function runSubmit(worldIdResult: Record<string, unknown> | undefined) {
         setSubmitState({ status: "submitting", message: "Submitting verification request." });
 
         try {
@@ -87,9 +153,15 @@ export default function RegisterIdentityPage() {
                 throw new Error("Identity submit endpoint is not configured.");
             }
             const request = buildIdentitySubmitRequest(
-                new FormData(event.currentTarget),
+                {
+                    provider,
+                    membershipId,
+                    owner,
+                    termsVersion: IDENTITY_TERMS_VERSION,
+                    signedStatementHash,
+                },
                 registryId,
-                worldIdResponse ?? undefined,
+                worldIdResult,
             );
             fetch(submitUrl, {
                 method: "POST",
@@ -126,6 +198,26 @@ export default function RegisterIdentityPage() {
                 message: error instanceof Error ? error.message : "Verification request failed.",
             });
         }
+    }
+
+    function handleSubmit(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        // World ID submits automatically on verification; only KYC uses this form
+        // submit path (it has no verification button of its own).
+        if (provider !== "kyc") {
+            return;
+        }
+        // Defense in depth against an Enter-key submit: the duplicate-account
+        // statement must be affirmed before any identity submission.
+        if (!allStatementsAccepted) {
+            return;
+        }
+        runSubmit(undefined);
+    }
+
+    function handleWorldIdVerified(idkitResponse: Record<string, unknown>) {
+        setWorldIdResponse(idkitResponse);
+        runSubmit(idkitResponse);
     }
 
     return (
@@ -186,105 +278,45 @@ export default function RegisterIdentityPage() {
                                 </fieldset>
 
                                 <fieldset className="control-group">
-                                    <legend>Membership request</legend>
-                                    <div className="identity-fields">
-                                        <label className="text-field" htmlFor="membership-id">
-                                            <span>Membership SBT object ID</span>
-                                            <input
-                                                id="membership-id"
-                                                name="membershipId"
-                                                onChange={(e) =>
-                                                    handleBindingChange(
-                                                        setMembershipId,
-                                                        e.target.value,
-                                                    )
-                                                }
-                                                placeholder="0x..."
-                                                type="text"
-                                                value={membershipId}
-                                            />
-                                        </label>
-                                        <label className="text-field" htmlFor="owner">
-                                            <span>Owner address</span>
-                                            <input
-                                                id="owner"
-                                                name="owner"
-                                                onChange={(e) =>
-                                                    handleBindingChange(setOwner, e.target.value)
-                                                }
-                                                placeholder="0x..."
-                                                type="text"
-                                                value={owner}
-                                            />
-                                        </label>
-                                        <label className="text-field" htmlFor="terms-version">
-                                            <span>Terms version</span>
-                                            <input
-                                                defaultValue="1"
-                                                id="terms-version"
-                                                min="0"
-                                                name="termsVersion"
-                                                type="number"
-                                            />
-                                        </label>
-                                        <label
-                                            className="text-field identity-wide-field"
-                                            htmlFor="signed-statement-hash"
-                                        >
-                                            <span>Signed statement hash</span>
-                                            <input
-                                                id="signed-statement-hash"
-                                                name="signedStatementHash"
-                                                onChange={(e) =>
-                                                    handleBindingChange(
-                                                        setSignedStatementHash,
-                                                        e.target.value,
-                                                    )
-                                                }
-                                                placeholder="0x..."
-                                                type="text"
-                                                value={signedStatementHash}
-                                            />
-                                            <small>
-                                                Hash the signed duplicate-account statement before
-                                                submission.
-                                            </small>
-                                        </label>
+                                    <legend>Membership</legend>
+                                    <MembershipBindingStatus lookup={lookup} owner={owner} />
+                                </fieldset>
+
+                                <fieldset className="control-group">
+                                    <legend>Duplicate-account statement</legend>
+                                    <div className="terms-list">
+                                        {identityStatements.map((statement, index) => (
+                                            <label className="terms-row" key={statement}>
+                                                <input
+                                                    checked={acceptedStatements[index] ?? false}
+                                                    name="identityTerms"
+                                                    onChange={(event) =>
+                                                        handleStatementToggle(
+                                                            index,
+                                                            event.target.checked,
+                                                        )
+                                                    }
+                                                    type="checkbox"
+                                                />
+                                                <span>{statement}</span>
+                                            </label>
+                                        ))}
                                     </div>
                                 </fieldset>
 
                                 {provider === "world_id" ? (
                                     <fieldset className="control-group">
                                         <legend>World ID proof</legend>
-                                        <div className="field-note">
-                                            <strong>Signal hash is derived automatically</strong>
-                                            <small>
-                                                It is computed from your owner address, Membership
-                                                SBT, and signed statement. Use that same binding as
-                                                the World ID signal when you generate the proof.
-                                            </small>
-                                        </div>
                                         <WorldIdVerifyButton
                                             membershipId={membershipId}
-                                            onVerified={(r) => setWorldIdResponse(r)}
+                                            onVerified={handleWorldIdVerified}
                                             owner={owner}
                                             signedStatementHash={signedStatementHash}
+                                            statementsAccepted={allStatementsAccepted}
                                             verified={worldIdResponse !== null}
                                         />
                                     </fieldset>
                                 ) : null}
-
-                                <fieldset className="control-group">
-                                    <legend>Duplicate-account statement</legend>
-                                    <div className="terms-list">
-                                        {identityStatements.map((statement) => (
-                                            <label className="terms-row" key={statement}>
-                                                <input name="identityTerms" type="checkbox" />
-                                                <span>{statement}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </fieldset>
 
                                 <div className="claim-requirement-band">
                                     <div>
@@ -313,19 +345,22 @@ export default function RegisterIdentityPage() {
                                     >
                                         Back
                                     </a>
-                                    <button
-                                        className="btn btn-primary btn-lg"
-                                        disabled={
-                                            submitState.status === "submitting" ||
-                                            !isSubmitConfigured ||
-                                            !canSubmitIdentity(provider, worldIdResponse)
-                                        }
-                                        type="submit"
-                                    >
-                                        {submitState.status === "submitting"
-                                            ? "Submitting"
-                                            : "Start identity check"}
-                                    </button>
+                                    {provider === "kyc" ? (
+                                        <button
+                                            className="btn btn-primary btn-lg"
+                                            disabled={
+                                                submitState.status === "submitting" ||
+                                                !isSubmitConfigured ||
+                                                !isBindingReady ||
+                                                !allStatementsAccepted
+                                            }
+                                            type="submit"
+                                        >
+                                            {submitState.status === "submitting"
+                                                ? "Submitting"
+                                                : "Start identity check"}
+                                        </button>
+                                    ) : null}
                                     <button className="btn btn-secondary btn-lg" type="button">
                                         Skip and finish signup
                                     </button>
@@ -339,6 +374,72 @@ export default function RegisterIdentityPage() {
             </div>
         </>
     );
+}
+
+function MembershipBindingStatus({
+    lookup,
+    owner,
+}: {
+    readonly lookup: MembershipLookupState;
+    readonly owner: string;
+}) {
+    if (owner.length === 0) {
+        return (
+            <div className="field-note" role="status">
+                <strong>Connect a wallet to continue</strong>
+                <small>
+                    Sonari reads your Membership SBT and wallet address automatically — no manual
+                    entry.
+                </small>
+            </div>
+        );
+    }
+
+    if (lookup.kind === "idle" || lookup.kind === "loading") {
+        return (
+            <div className="field-note" role="status">
+                <strong>Checking your Membership SBT…</strong>
+                <small>Looking up the pass owned by your connected wallet.</small>
+            </div>
+        );
+    }
+
+    if (lookup.kind === "ok") {
+        return (
+            <div className="field-note" role="status">
+                <strong>Membership SBT detected</strong>
+                <span>{shortId(lookup.membershipId)}</span>
+                <small>Verification binds to this pass and your connected wallet.</small>
+            </div>
+        );
+    }
+
+    if (lookup.kind === "none") {
+        return (
+            <div className="submit-status submit-status-failed" role="alert">
+                No Membership SBT found for this wallet. Complete Step 1 first.
+            </div>
+        );
+    }
+
+    if (lookup.kind === "multiple") {
+        return (
+            <div className="submit-status submit-status-failed" role="alert">
+                Multiple Membership SBTs found for this wallet. Please contact support before
+                verifying.
+            </div>
+        );
+    }
+
+    return (
+        <div className="submit-status submit-status-failed" role="alert">
+            {lookup.message.length > 0 ? lookup.message : "Could not look up your Membership SBT."}
+        </div>
+    );
+}
+
+function shortId(value: string): string {
+    return value.length > 14 ? `${value.slice(0, 10)}…${value.slice(-4)}` : value;
 }
 
 function SubmitStatus({

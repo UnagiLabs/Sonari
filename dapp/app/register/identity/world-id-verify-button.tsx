@@ -54,6 +54,8 @@ export interface WorldIdVerifyButtonProps {
     readonly membershipId: string;
     /** Signed statement hash (0x-hex 32 bytes) */
     readonly signedStatementHash: string;
+    /** True once every duplicate-account statement has been affirmed */
+    readonly statementsAccepted: boolean;
     /** True when the parent already has a verified IDKit response */
     readonly verified: boolean;
     /** Called with the idkit_response when World ID verification succeeds */
@@ -74,6 +76,7 @@ export function WorldIdVerifyButton({
     owner,
     membershipId,
     signedStatementHash,
+    statementsAccepted,
     verified,
     onVerified,
 }: WorldIdVerifyButtonProps) {
@@ -84,6 +87,11 @@ export function WorldIdVerifyButton({
     const [nullifier, setNullifier] = useState<string>("");
 
     const isConfigured = appId.length > 0 && rpId.length > 0;
+    // owner + membershipId are supplied by the parent from the connected wallet
+    // and the on-chain MembershipPass lookup. Until both are present the signal
+    // binding cannot be derived, so the verify button stays disabled (the parent
+    // also renders guidance explaining which one is missing).
+    const isBindingReady = owner.length > 0 && membershipId.length > 0;
 
     // -----------------------------------------------------------------------
     // Derived display state
@@ -96,6 +104,14 @@ export function WorldIdVerifyButton({
     // -----------------------------------------------------------------------
 
     async function handleOpenClick() {
+        // The duplicate-account statement must be affirmed before verifying. The
+        // button is disabled until then; this guards an unexpected programmatic call.
+        if (!statementsAccepted) {
+            setStatus("error");
+            setErrorMessage("Accept the duplicate-account statement above first.");
+            return;
+        }
+
         // Validate the bound inputs before touching IDKit
         let signalString: string;
         try {
@@ -184,12 +200,23 @@ export function WorldIdVerifyButton({
 
             <button
                 className="btn btn-primary"
-                disabled={!isConfigured || status === "preparing"}
+                disabled={
+                    !isConfigured ||
+                    !isBindingReady ||
+                    !statementsAccepted ||
+                    status === "preparing"
+                }
                 onClick={handleOpenClick}
                 type="button"
             >
                 {status === "preparing" ? "Preparing…" : "Verify with World ID"}
             </button>
+
+            {isConfigured && isBindingReady && !statementsAccepted ? (
+                <p className="world-id-hint" role="note">
+                    Affirm the duplicate-account statement above to enable verification.
+                </p>
+            ) : null}
 
             {status === "error" && errorMessage.length > 0 ? (
                 <p className="world-id-error-message" role="alert">
