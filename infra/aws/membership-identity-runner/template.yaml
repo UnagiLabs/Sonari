@@ -63,6 +63,16 @@ Parameters:
   WorldIdAppId:
     Type: String
     Description: World ID app id passed as runtime configuration to the enclave process.
+  WorldIdRpId:
+    Type: String
+    Description: World ID v4 rp_id (relying party id) delivered to the enclave bootstrap as the canonical World ID identifier on the server path. Supersedes the legacy WorldIdAppId.
+  WorldIdEnvironment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+    Description: World ID environment selecting the canonical World ID API host. production pins https://developer.world.org; staging pins https://staging-developer.worldcoin.org. The enclave selects the signed-result origin from this value, and mainnet + staging is rejected fail-closed at startup.
   WorldIdApiBase:
     Type: String
     Default: https://developer.world.org
@@ -353,6 +363,7 @@ Resources:
             : "${SONARI_WORLD_ID_API_BASE:?SONARI_WORLD_ID_API_BASE is required}"
             : "${SONARI_WORLD_ID_EGRESS_PROXY_URL:?SONARI_WORLD_ID_EGRESS_PROXY_URL is required}"
             : "${SONARI_WORLD_ID_APP_ID:?SONARI_WORLD_ID_APP_ID is required}"
+            : "${SONARI_WORLD_ID_RP_ID:?SONARI_WORLD_ID_RP_ID is required}"
             SONARI_MEMBERSHIP_VSOCK_TIMEOUT_SECONDS=180
 
             marker=/tmp/sonari-membership-enclave-bootstrapped
@@ -373,7 +384,7 @@ Resources:
                 fi
               }
               sleep 2
-              jq -n                 --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE"                 --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID"                 --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"                 --arg network "${RELAYER_NETWORK:-}"                 --arg proof_mode "${SONARI_WORLD_ID_PROOF_MODE:-}"                 '{world_id_api_base: $world_id_api_base, world_id_app_id: $world_id_app_id, egress_proxy_url: $egress_proxy_url, network: $network, proof_mode: $proof_mode}'                 | socat -t "$SONARI_MEMBERSHIP_VSOCK_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:7777" >/dev/null
+              jq -n                 --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE"                 --arg world_id_rp_id "$SONARI_WORLD_ID_RP_ID"                 --arg world_id_environment "${SONARI_WORLD_ID_ENVIRONMENT:-}"                 --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"                 --arg network "${RELAYER_NETWORK:-}"                 --arg proof_mode "${SONARI_WORLD_ID_PROOF_MODE:-}"                 '{world_id_api_base: $world_id_api_base, world_id_rp_id: $world_id_rp_id, world_id_environment: $world_id_environment, egress_proxy_url: $egress_proxy_url, network: $network, proof_mode: $proof_mode}'                 | socat -t "$SONARI_MEMBERSHIP_VSOCK_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID:7777" >/dev/null
               touch "$marker"
             }
 
@@ -427,7 +438,22 @@ Resources:
             ${WorldIdAppId}
             SONARI_WORLD_ID_APP_ID
             )
-            world_id_api_base="https://developer.world.org"
+            world_id_rp_id=$(cat <<'SONARI_WORLD_ID_RP_ID'
+            ${WorldIdRpId}
+            SONARI_WORLD_ID_RP_ID
+            )
+            case "${WorldIdEnvironment}" in
+              staging)
+                world_id_api_base="https://staging-developer.worldcoin.org"
+                ;;
+              *)
+                world_id_api_base="https://developer.world.org"
+                ;;
+            esac
+            if [ "${RelayerNetwork}" = "mainnet" ] && [ "${WorldIdEnvironment}" = "staging" ]; then
+              echo "WorldIdEnvironment=staging is not allowed on RelayerNetwork=mainnet (fail-closed)" >&2
+              exit 1
+            fi
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2
@@ -536,6 +562,8 @@ Resources:
               echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
+              printf 'SONARI_WORLD_ID_RP_ID=%q\n' "$world_id_rp_id"
+              echo "SONARI_WORLD_ID_ENVIRONMENT=${WorldIdEnvironment}"
               echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"

@@ -76,6 +76,15 @@ bootstrap JSON は `world_id_app_id` と `egress_proxy_url` を渡します。
 `world_id_api_base` は互換のため wire 上に残りますが、server path はこの値を production source of truth として使いません。
 runner env は `SONARI_WORLD_ID_EGRESS_PROXY_URL` を TEE process env に入れます。
 
+World ID v4 では `rp_id` が canonical な識別子です。runner env は `SONARI_WORLD_ID_RP_ID` を TEE process env に出力します。
+environment は `production` または `staging` を選びます。runner env は `SONARI_WORLD_ID_ENVIRONMENT` を TEE process env に出力します。
+production の egress 正規ホストは `https://developer.world.org` の :443 のみ許可します。
+staging の egress 正規ホストは `https://staging-developer.worldcoin.org` の :443 のみ許可します。
+egress allowlist は選んだ environment のホストに絞ります。
+mainnet と staging の組み合わせは起動時に fail-closed で拒否します。
+enclave 起動時が一次防御です。AWS UserData の deploy 時 exit が補助的に同じ制約を強制します。
+`WorldIdAppId` は legacy 互換のみです。`WorldIdApiBase` は server path の source of truth ではありません。
+
 Status は次の値に固定します。
 
 ```text
@@ -167,8 +176,10 @@ Placeholder measurement で deploy してはいけません。不一致は encry
 
 mainnet live smoke では real World ID proof input を使います。
 
-- `SONARI_WORLD_ID_APP_ID`
+- `SONARI_WORLD_ID_APP_ID`: legacy 互換のみ
 - `SONARI_WORLD_ID_API_BASE`: deploy compatibility 用。server path は `https://developer.world.org` を canonical base として使う
+- `SONARI_WORLD_ID_RP_ID`: World ID v4 の canonical な識別子 rp_id。Stack parameter `WorldIdRpId` から TEE process env に注入する
+- `SONARI_WORLD_ID_ENVIRONMENT`: `production` または `staging`。Stack parameter `WorldIdEnvironment` から TEE process env に注入する
 - `SONARI_WORLD_ID_EGRESS_PROXY_URL`: enclave path 内の vsock-proxy endpoint
 - `world_id.world_app_id`
 - `world_id.nullifier_hash`
@@ -218,8 +229,10 @@ AWS deployment には、少なくとも次の stack parameter が必要です。
 - `SigningSeedCiphertextS3Key`
 - `NitroEnclaveImageSha384`
 - `NitroEnclavePcr3`
-- `WorldIdAppId`
-- `WorldIdApiBase`
+- `WorldIdAppId`: legacy 互換のみ
+- `WorldIdApiBase`: deploy compatibility 用。server path は canonical base を使う
+- `WorldIdRpId`: 必須。World ID v4 の canonical な識別子 rp_id。legacy の WorldIdAppId を置き換える
+- `WorldIdEnvironment`: `production` または `staging`。Default `production`。egress allowlist のホストを選ぶ
 - `ScheduleState`
 - `GitCommitSha`
 
@@ -315,6 +328,8 @@ aws cloudformation deploy \
     NitroEnclavePcr3="$NITRO_ENCLAVE_PCR3" \
     WorldIdAppId="$SONARI_WORLD_ID_APP_ID" \
     WorldIdApiBase="$SONARI_WORLD_ID_API_BASE" \
+    WorldIdRpId="$SONARI_WORLD_ID_RP_ID" \
+    WorldIdEnvironment="$SONARI_WORLD_ID_ENVIRONMENT" \
     GitCommitSha="$(git rev-parse HEAD)"
 ```
 

@@ -260,6 +260,12 @@ fn enclave_state_from_env(
         .ok_or(format!("{WORLD_ID_RP_ID_ENV} is required for server mode"))?;
     let proof_mode = non_empty_env(WORLD_ID_PROOF_MODE_ENV);
     let network = non_empty_env(SUI_NETWORK_ENV);
+    let world_id_environment = non_empty_env(WORLD_ID_ENVIRONMENT_ENV);
+    // Fail-closed gate: mainnet × staging is never allowed. The staging World ID
+    // endpoint is weaker than production; a mainnet deployment must always verify
+    // against the production endpoint. This gate is orthogonal to the dummy gate
+    // below (which only inspects the Sui network × proof_mode combination).
+    reject_mainnet_staging(network.as_deref(), world_id_environment.as_deref())?;
     // Fail-closed gate: evaluate once at startup. If the proof_mode/network
     // combination is disallowed (e.g. dummy on mainnet or with unknown/unset
     // network), the server refuses to start rather than silently degrading.
@@ -281,6 +287,26 @@ fn enclave_state_from_env(
         world_id_verifier_mode,
         world_id_mode_observation,
     })
+}
+
+/// Fail-closed startup gate for the Sui-network × World-ID-environment pair.
+///
+/// Refuses to start when the Sui network is mainnet while the World ID
+/// environment is staging, so a mainnet deployment can never verify against the
+/// weaker staging World ID endpoint. This is a distinct axis from the dummy gate
+/// in `resolve_world_id_verifier_mode` (which only inspects the Sui network).
+fn reject_mainnet_staging(
+    network: Option<&str>,
+    environment: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let net = network.map(str::trim).unwrap_or("");
+    let env = environment.map(str::trim).unwrap_or("");
+    if net == "mainnet" && env == "staging" {
+        return Err(
+            "World ID environment \"staging\" is not allowed on Sui mainnet (fail-closed)".into(),
+        );
+    }
+    Ok(())
 }
 
 /// Returns the canonical World ID base URL the production server path signs
@@ -472,6 +498,7 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     apply_egress_proxy_env(config.egress_proxy_url.as_deref());
     apply_network_env(config.network.as_deref());
     apply_proof_mode_env(config.proof_mode.as_deref());
+    apply_environment_env(config.world_id_environment.as_deref());
     Ok(())
 }
 
@@ -494,6 +521,17 @@ fn apply_proof_mode_env(proof_mode: Option<&str>) {
     match proof_mode {
         Some(m) => set_env_before_server(WORLD_ID_PROOF_MODE_ENV, m),
         None => unset_env_before_server(WORLD_ID_PROOF_MODE_ENV),
+    }
+}
+
+/// Installs or clears the World ID environment env from the bootstrap config.
+///
+/// `Some(env)` installs the host-supplied value; `None` explicitly clears the env
+/// so a stale environment from a prior run can never select the wrong base.
+fn apply_environment_env(environment: Option<&str>) {
+    match environment {
+        Some(e) => set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, e),
+        None => unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV),
     }
 }
 
@@ -525,6 +563,10 @@ struct BootstrapConfig {
     /// World ID proof mode supplied by the host (`"real"` or `"dummy"`).
     /// Optional for backward compatibility; absence defaults to real mode.
     proof_mode: Option<String>,
+    /// World ID environment (`"production"` or `"staging"`) supplied by the host.
+    /// Optional for backward compatibility; absence is treated as unset, and the
+    /// server path then pins the canonical production base.
+    world_id_environment: Option<String>,
 }
 
 fn set_env_before_server(name: &str, value: &str) {
@@ -1335,13 +1377,14 @@ mod tests {
     /// process environment is global state shared across the test binary.
     mod bootstrap_env {
         use super::super::{
-            EnclaveState, apply_egress_proxy_env, enclave_state_from_env, server_world_id_base_url,
-            set_env_before_server, tee_context_from_env, unset_env_before_server,
+            EnclaveState, apply_egress_proxy_env, apply_environment_env, enclave_state_from_env,
+            server_world_id_base_url, set_env_before_server, tee_context_from_env,
+            unset_env_before_server,
         };
         use membership_tee::server::EGRESS_PROXY_URL_KEY;
         use membership_tee::{
             ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_API_BASE_CANONICAL,
-            WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV,
+            WORLD_ID_ENVIRONMENT_ENV, WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV,
         };
         use std::sync::Mutex;
 
@@ -1533,6 +1576,121 @@ mod tests {
             );
 
             unset_env_before_server(EGRESS_PROXY_URL_KEY);
+        }
+
+        /// `apply_environment_env(Some("staging"))` → `server_world_id_base_url()` returns
+        /// the staging base so the host can legitimately select the staging endpoint.
+        #[test]
+        fn bootstrap_staging_environment_selects_staging_base() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            apply_environment_env(Some("staging"));
+
+            assert_eq!(
+                server_world_id_base_url(),
+                membership_tee::WORLD_ID_API_BASE_STAGING,
+                "staging environment must select the staging World ID base URL"
+            );
+
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
+        }
+
+        /// `apply_environment_env(None)` → `server_world_id_base_url()` returns the
+        /// canonical production base (no env set means canonical).
+        #[test]
+        fn bootstrap_no_environment_selects_canonical_base() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
+            apply_environment_env(None);
+
+            assert_eq!(
+                server_world_id_base_url(),
+                WORLD_ID_API_BASE_CANONICAL,
+                "absent environment must yield the canonical World ID base URL"
+            );
+        }
+
+        /// A stale `"staging"` value left in the env from a prior run must be cleared
+        /// when `apply_environment_env(None)` is called, so the server resolves to
+        /// canonical rather than re-using the stale staging value.
+        #[test]
+        fn bootstrap_with_stale_environment_is_cleared_by_none() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            // Simulate a stale value left by a prior bootstrap run.
+            set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, "staging");
+            // A new bootstrap that omits the field must erase the stale value.
+            apply_environment_env(None);
+
+            assert_eq!(
+                server_world_id_base_url(),
+                WORLD_ID_API_BASE_CANONICAL,
+                "None environment must clear a stale staging value and yield canonical"
+            );
+        }
+
+        /// mainnet + staging → `enclave_state_from_env` must return Err (fail-closed).
+        ///
+        /// A mainnet deployment must never verify against the weaker staging World ID
+        /// endpoint. This gate is independent of the dummy gate: it fires even when
+        /// proof_mode=real.
+        #[test]
+        fn enclave_state_rejects_staging_on_mainnet() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
+            set_env_before_server(SUI_NETWORK_ENV, "mainnet");
+            set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, "staging");
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+
+            let result = enclave_state_from_env(TEST_SEED);
+            assert!(
+                result.is_err(),
+                "staging environment on mainnet must be rejected at startup (fail-closed)"
+            );
+
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
+        }
+
+        /// mainnet + production → Ok (allowed combination).
+        #[test]
+        fn enclave_state_allows_production_on_mainnet() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
+            set_env_before_server(SUI_NETWORK_ENV, "mainnet");
+            set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, "production");
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+
+            let result = enclave_state_from_env(TEST_SEED);
+            assert!(
+                result.is_ok(),
+                "production environment on mainnet must be allowed: {:?}",
+                result.err()
+            );
+
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
+        }
+
+        /// testnet + staging → Ok (not restricted; staging is only blocked on mainnet).
+        #[test]
+        fn enclave_state_allows_staging_on_testnet() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
+            set_env_before_server(SUI_NETWORK_ENV, "testnet");
+            set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, "staging");
+            unset_env_before_server(WORLD_ID_PROOF_MODE_ENV);
+
+            let result = enclave_state_from_env(TEST_SEED);
+            assert!(
+                result.is_ok(),
+                "staging environment on testnet must be allowed: {:?}",
+                result.err()
+            );
+
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
+            unset_env_before_server(SUI_NETWORK_ENV);
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
         }
     }
 }

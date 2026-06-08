@@ -181,6 +181,22 @@ describe("membership identity AWS interface docs", () => {
         expect(awsReadme).not.toContain("dummy World ID verifier");
     });
 
+    it("documents World ID v4 rp_id and environment stack parameters", async () => {
+        const { awsReadme } = await readDocs();
+
+        expect(awsReadme).toContain("WorldIdRpId");
+        expect(awsReadme).toContain("WorldIdEnvironment");
+        expect(awsReadme).toContain("staging-developer.worldcoin.org");
+        expect(awsReadme).toContain(
+            "mainnet と staging の組み合わせは起動時に fail-closed で拒否します。",
+        );
+        expect(awsReadme).toContain("SONARI_WORLD_ID_RP_ID");
+        expect(awsReadme).toContain("SONARI_WORLD_ID_ENVIRONMENT");
+
+        expect(awsReadme).not.toContain("dummy proof mode");
+        expect(awsReadme).not.toContain("dummy World ID verifier");
+    });
+
     it("documents the operator runbook and evidence capture terms for issue 74 step 6", async () => {
         const [{ awsReadme }, awsEvidenceTemplate] = await Promise.all([
             readDocs(),

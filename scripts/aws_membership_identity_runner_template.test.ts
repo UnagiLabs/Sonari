@@ -108,6 +108,34 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).not.toContain("aws kms decrypt");
     });
 
+    it("defines World ID v4 rp_id and environment parameters for operator deploy configuration", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        expect(template).toContain("WorldIdRpId:");
+        expect(template).toContain("WorldIdEnvironment:");
+        expect(template).toContain("      - production\n      - staging");
+        expect(template).toContain("Default: production");
+    });
+
+    it("wires rp_id and environment into runner.env and enclave bootstrap replacing the legacy app_id key", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // runner.env must output both rp_id and environment lines
+        expect(template).toContain("printf 'SONARI_WORLD_ID_RP_ID=%q");
+        expect(template).toContain('echo "SONARI_WORLD_ID_ENVIRONMENT=$' + '{WorldIdEnvironment}"');
+        // bootstrap jq must use rp_id (not app_id) as the canonical key
+        expect(template).toContain('--arg world_id_rp_id "$SONARI_WORLD_ID_RP_ID"');
+        expect(template).toContain(
+            '--arg world_id_environment "$' + '{SONARI_WORLD_ID_ENVIRONMENT:-}"',
+        );
+        expect(template).toContain("world_id_rp_id: $world_id_rp_id");
+        expect(template).toContain("world_id_environment: $world_id_environment");
+        // enclave wrapper must require rp_id at runtime
+        expect(template).toContain("$" + "{SONARI_WORLD_ID_RP_ID:?");
+        // bootstrap JSON must NOT contain both app_id and rp_id (serde alias collision)
+        expect(template).not.toContain("world_id_app_id: $world_id_app_id");
+    });
+
     it("delivers the World ID proof mode and Sui network to the enclave bootstrap for the fail-closed dummy gate", async () => {
         const template = await readFile(templatePath, "utf8");
 
@@ -218,6 +246,32 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain('"Next": "SubmitSuiSubmission"');
         expect(template).toContain('"Default": "ApplyResult"');
         expect(template).toContain('"Next": "StopInstance"');
+    });
+
+    it("selects World ID API base host from WorldIdEnvironment parameter at deploy time", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // case block must branch on WorldIdEnvironment
+        expect(template).toContain('case "$' + '{WorldIdEnvironment}" in');
+        // staging branch must point to the staging host
+        expect(template).toContain('world_id_api_base="https://staging-developer.worldcoin.org"');
+        // production / default branch must point to the production host
+        expect(template).toContain('world_id_api_base="https://developer.world.org"');
+        // host extraction and allowlist write must be preserved
+        expect(template).toContain('"$world_id_api_host:443"');
+        expect(template).toContain("world-id-egress-allowlist");
+    });
+
+    it("rejects mainnet + staging combination fail-closed in UserData", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // The host-side guard must check the two-axis condition before the enclave starts.
+        expect(template).toContain(
+            '[ "$' +
+                '{RelayerNetwork}" = "mainnet" ] && [ "$' +
+                '{WorldIdEnvironment}" = "staging" ]',
+        );
+        expect(template).toContain("is not allowed on RelayerNetwork=mainnet (fail-closed)");
     });
 
     it("passes membership identity dry-run object IDs to RunnerControlLambda", async () => {
