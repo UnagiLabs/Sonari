@@ -6,7 +6,6 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const proofCoreSrc = "../packages/proof-core/src";
 
 const nextConfig: NextConfig = {
-    output: "export",
     transpilePackages: ["@sonari/proof-core"],
     images: {
         unoptimized: true,

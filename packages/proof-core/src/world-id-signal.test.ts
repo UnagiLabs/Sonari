@@ -4,6 +4,7 @@ import {
     computeWorldIdSignalHash,
     hashToFieldBytes,
     WORLD_ID_SIGNAL_HASH_PREFIX,
+    worldIdSignalString,
 } from "./world-id-signal.js";
 
 const OWNER = `0x${"33".repeat(32)}`;
@@ -118,6 +119,7 @@ interface SonariSignalHashVector {
     readonly owner: `0x${string}`;
     readonly membership_id: `0x${string}`;
     readonly signed_statement_hash: `0x${string}`;
+    readonly canonical_signal: string;
     readonly expected_signal_hash: `0x${string}`;
 }
 
@@ -163,6 +165,7 @@ function isSonariSignalHashVector(value: unknown): value is SonariSignalHashVect
         isPrefixedHex(value.owner) &&
         isPrefixedHex(value.membership_id) &&
         isPrefixedHex(value.signed_statement_hash) &&
+        typeof value.canonical_signal === "string" &&
         isPrefixedHex(value.expected_signal_hash)
     );
 }
@@ -174,6 +177,66 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isPrefixedHex(value: unknown): value is `0x${string}` {
     return typeof value === "string" && /^0x[0-9a-f]*$/.test(value);
 }
+
+describe("worldIdSignalString", () => {
+    it("matches the fixture canonical_signal for golden vector inputs", () => {
+        const { owner, membership_id, signed_statement_hash, canonical_signal } =
+            GOLDEN_VECTORS.sonari_signal_hash;
+        expect(worldIdSignalString(owner, membership_id, signed_statement_hash)).toBe(
+            canonical_signal,
+        );
+    });
+
+    it("normalizes uppercase hex inputs to lowercase canonical string", () => {
+        const upper = `0X${"AB".repeat(32)}` as const;
+        const lower = `0x${"ab".repeat(32)}` as const;
+        const fromUpper = worldIdSignalString(upper, MEMBERSHIP_ID, SIGNED_STATEMENT_HASH);
+        const fromLower = worldIdSignalString(lower, MEMBERSHIP_ID, SIGNED_STATEMENT_HASH);
+        expect(fromUpper).toBe(fromLower);
+        expect(fromUpper).toContain(`0x${"ab".repeat(32)}`);
+    });
+
+    it("rejects owner without 0x prefix", () => {
+        expect(() =>
+            worldIdSignalString("33".repeat(32), MEMBERSHIP_ID, SIGNED_STATEMENT_HASH),
+        ).toThrow("owner must be a 0x-prefixed 32-byte hex string");
+    });
+
+    it("rejects membership_id that is too short", () => {
+        expect(() => worldIdSignalString(OWNER, "0x33", SIGNED_STATEMENT_HASH)).toThrow(
+            "membership_id must be a 0x-prefixed 32-byte hex string",
+        );
+    });
+
+    it("rejects signed_statement_hash that is too long", () => {
+        expect(() => worldIdSignalString(OWNER, MEMBERSHIP_ID, `0x${"66".repeat(33)}`)).toThrow(
+            "signed_statement_hash must be a 0x-prefixed 32-byte hex string",
+        );
+    });
+
+    it("rejects non-hex characters", () => {
+        expect(() =>
+            worldIdSignalString(`0x${"zz".repeat(32)}`, MEMBERSHIP_ID, SIGNED_STATEMENT_HASH),
+        ).toThrow("owner must be a 0x-prefixed 32-byte hex string");
+    });
+
+    it("rejects empty signed_statement_hash", () => {
+        expect(() => worldIdSignalString(OWNER, MEMBERSHIP_ID, "")).toThrow(
+            "signed_statement_hash must be a 0x-prefixed 32-byte hex string",
+        );
+    });
+
+    it("is consistent with computeWorldIdSignalHash: hashToFieldBytes(encode(worldIdSignalString)) equals the async result", async () => {
+        const signalStr = worldIdSignalString(OWNER, MEMBERSHIP_ID, SIGNED_STATEMENT_HASH);
+        const fromString = hashToFieldBytes(new TextEncoder().encode(signalStr));
+        const fromAsync = await computeWorldIdSignalHash(
+            OWNER,
+            MEMBERSHIP_ID,
+            SIGNED_STATEMENT_HASH,
+        );
+        expect(fromString).toBe(fromAsync);
+    });
+});
 
 function hexBytes(value: `0x${string}`): Uint8Array {
     const hex = value.slice(2);

@@ -14,6 +14,7 @@
         "@mysten/dapp-kit-react": "^2.0.3",
         "@mysten/sui": "^2.17.0",
         "@sonari/proof-core": "workspace:*",
+        "@worldcoin/idkit": "^4.1.8",
         "h3-js": "^4.4.0",
         "next": "^16.2.2",
         "react": "^19.2.0",
