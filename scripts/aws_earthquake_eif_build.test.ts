@@ -38,7 +38,7 @@ describe("AWS earthquake EIF build script", () => {
             "--cpu-count",
             "2",
             "--memory",
-            "1024",
+            "4096",
             "--enclave-cid",
             "16",
             "--eif-path",

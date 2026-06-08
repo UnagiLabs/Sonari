@@ -23,7 +23,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub const EGRESS_PROXY_URL_KEY: &str = "SONARI_EARTHQUAKE_EGRESS_PROXY_URL";
 
 /// Maximum time spent on a single upstream USGS / ShakeMap fetch.
-const PRODUCTION_FETCH_TIMEOUT_MS: u64 = 30_000;
+///
+/// 大規模地震の grid.xml は最大約 29MiB に達する。30 秒では大容量取得が途中で
+/// 打ち切られる恐れがあるため、余裕をもって 90 秒に設定する。
+const PRODUCTION_FETCH_TIMEOUT_MS: u64 = 90_000;
 
 /// Placeholder string the handler writes into `signature` / `public_key`.
 ///

@@ -339,6 +339,14 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(runnerLaunchTemplate).not.toContain("SONARI_WALRUS_UPLOAD_RELAY");
     });
 
+    it("allocates 4096 MiB to the Nitro enclave so large ShakeMap grids fit", async () => {
+        const template = await readTemplate();
+
+        // 128MiB grid を多重保持する処理ピークに耐えるだけのメモリを既定で割り当てる。
+        // このパラメータは earthquake と membership の両 enclave で共有される。
+        expect(template).toMatch(/NitroEnclaveMemoryMiB:\s*\n\s*Type: Number\s*\n\s*Default: 4096/);
+    });
+
     it("adds a token-protected source archiver Lambda with isolated SDK private key secret", async () => {
         const template = await readTemplate();
 

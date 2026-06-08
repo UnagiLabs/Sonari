@@ -8,7 +8,8 @@ const DEFAULT_EIF_PATH = "dist/aws/earthquake-tee.eif";
 const DEFAULT_WORK_DIR = ".build/aws-earthquake-eif";
 const DEFAULT_DOCKER_URI = "sonari/earthquake-tee:local";
 const DEFAULT_CPU_COUNT = 2;
-const DEFAULT_MEMORY_MIB = 1024;
+// 128MiB grid を多重保持する処理ピーク（約0.5-0.7GiB）に十分な余裕を持たせる。
+const DEFAULT_MEMORY_MIB = 4096;
 const DEFAULT_ENCLAVE_CID = 16;
 const EARTHQUAKE_TEE_BIN = "/opt/sonari/tee-artifact/bin/tee";
 const EARTHQUAKE_VSOCK_TCP_BRIDGE_BIN = "/opt/sonari/tee-artifact/bin/vsock-tcp-bridge";

@@ -139,7 +139,7 @@ Parameters:
     Default: 2
   NitroEnclaveMemoryMiB:
     Type: Number
-    Default: 1024
+    Default: 4096
   NitroEnclaveCid:
     Type: Number
     Default: 16
