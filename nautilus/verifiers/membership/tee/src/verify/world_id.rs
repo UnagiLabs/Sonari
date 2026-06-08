@@ -499,7 +499,7 @@ mod tests {
         };
         assert_eq!(evidence.rp_id, "rp_staging_123");
         assert_eq!(evidence.environment, "staging");
-        assert_eq!(evidence.identifier, "orb");
+        assert_eq!(evidence.identifier, "proof_of_human");
         assert_eq!(evidence.nullifier, "12345678901234567890");
     }
 
@@ -716,14 +716,14 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"code":"nullifier_replayed","success":true,"results":[{"identifier":"orb","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
+            r#"{"code":"nullifier_replayed","success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
         );
         let WorldIdVerificationStatus::Verified { evidence } = status else {
             panic!("evidence-bearing replay should return verified evidence");
         };
         assert_eq!(evidence.rp_id, "rp_staging_123");
         assert_eq!(evidence.nullifier, "12345678901234567890");
-        assert_eq!(evidence.identifier, "orb");
+        assert_eq!(evidence.identifier, "proof_of_human");
     }
 
     #[test]
@@ -751,7 +751,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"results":[{"identifier":"orb","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
+            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
         );
         let WorldIdVerificationStatus::Verified { evidence } = status else {
             panic!("success response should return verified evidence");
@@ -760,7 +760,7 @@ mod tests {
         assert_eq!(evidence.environment, "staging");
         assert_eq!(evidence.action, WORLD_ID_ACTION);
         assert_eq!(evidence.protocol_version, "4.0");
-        assert_eq!(evidence.identifier, "orb");
+        assert_eq!(evidence.identifier, "proof_of_human");
         assert_eq!(evidence.nullifier, "12345678901234567890");
         assert_eq!(
             evidence.signal_hash, "0xsignal",
@@ -771,7 +771,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"results":[{"identifier":"orb","success":true,"nullifier":"12345678901234567890"}],"action":"attacker_action","nullifier":"12345678901234567890","environment":"staging"}"#,
+            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"attacker_action","nullifier":"12345678901234567890","environment":"staging"}"#,
         );
         assert_eq!(
             mismatched_action,
@@ -784,7 +784,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"results":[{"identifier":"orb","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v1","nullifier":"123","environment":"staging"}"#,
+            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v1","nullifier":"123","environment":"staging"}"#,
         );
         assert_eq!(
             mismatched_nullifier,
@@ -852,7 +852,8 @@ mod tests {
                 "environment": "staging",
                 "responses": [
                     {
-                        "identifier": "orb",
+                        "identifier": "proof_of_human",
+                        "issuer_schema_id": 1,
                         "signal_hash": "0xsignal",
                         "proof": "0xproof",
                         "merkle_root": "987654321",

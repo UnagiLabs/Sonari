@@ -369,7 +369,7 @@ mod tests {
         );
         assert_eq!(
             result.evidence_hash,
-            "0x8db7350f283169b1ad3f8939a09ccdbff0c4d60b11f3b25316039372bdd049f2"
+            "0x8fcc40112c9550f46f6e3172a9fca299cb3523c2f2ef788c19c91891b836b3cc"
         );
         assert_eq!(result.issued_at_ms, now_ms);
         assert_eq!(result.expires_at_ms, now_ms + IDENTITY_RESULT_TTL_MS);
@@ -705,14 +705,14 @@ mod tests {
         let evidence_hash = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
             "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
-            "orb",
+            "proof_of_human",
             1_800_000_000_000,
         )
         .unwrap();
 
         assert_eq!(
             evidence_hash,
-            "0x68893c4e14f913225e4883e1f2f6c2768a0f2673f5ef253386bec3ffda2ac84f"
+            "0xcf572d6cf4b82b52799b745061946372af6106e0abf52fd7142a4b6c095e1634"
         );
     }
 
@@ -721,7 +721,7 @@ mod tests {
         let error = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
             "0xb9dabcfc937c5422b28ddd2db18466a02c1f9fadb5637d120a3a455e23e88a74",
-            concat!("or", "\0", "b"),
+            concat!("proof_of_hum", "\0", "an"),
             1_800_000_000_000,
         )
         .unwrap_err();
@@ -734,7 +734,7 @@ mod tests {
         let error = compute_identity_evidence_hash(
             IdentityProvider::WorldId,
             "0xB9DABCFC937C5422B28DDD2DB18466A02C1F9FADB5637D120A3A455E23E88A74",
-            "orb",
+            "proof_of_human",
             1_800_000_000_000,
         )
         .unwrap_err();
@@ -755,7 +755,7 @@ mod tests {
                 environment: "staging".to_owned(),
                 action: WORLD_ID_ACTION.to_owned(),
                 protocol_version: "4.0".to_owned(),
-                identifier: "orb".to_owned(),
+                identifier: "proof_of_human".to_owned(),
                 nullifier: "12345678901234567890".to_owned(),
                 signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
                     .to_owned(),
@@ -776,7 +776,8 @@ mod tests {
                     "environment": "staging",
                     "responses": [
                         {
-                            "identifier": "orb",
+                            "identifier": "proof_of_human",
+                            "issuer_schema_id": 1,
                             "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
                             "proof": "0xproof",
                             "merkle_root": "987654321",

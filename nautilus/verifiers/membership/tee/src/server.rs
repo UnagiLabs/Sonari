@@ -304,7 +304,8 @@ mod tests {
                     "environment": "staging",
                     "responses": [
                         {
-                            "identifier": "orb",
+                            "identifier": "proof_of_human",
+                            "issuer_schema_id": 1,
                             "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
                             "proof": "0xproof",
                             "merkle_root": "987654321",
@@ -334,7 +335,8 @@ mod tests {
                     "environment": "staging",
                     "responses": [
                         {
-                            "identifier": "orb",
+                            "identifier": "proof_of_human",
+                            "issuer_schema_id": 1,
                             "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
                             "proof": "0xproof",
                             "merkle_root": "987654321",
@@ -654,7 +656,7 @@ mod tests {
                 environment: "staging".to_owned(),
                 action: WORLD_ID_ACTION.to_owned(),
                 protocol_version: "4.0".to_owned(),
-                identifier: "orb".to_owned(),
+                identifier: "proof_of_human".to_owned(),
                 nullifier: "12345678901234567890".to_owned(),
                 signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
                     .to_owned(),

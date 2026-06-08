@@ -114,9 +114,15 @@ impl WorldIdProofRequest {
             )
         })?;
         let identifier = required_response_string(response, "identifier")?;
-        if identifier != "orb" {
+        if identifier != "proof_of_human" {
             return Err(crate::IdentityError::Request(
-                "World ID identifier must be orb".to_owned(),
+                "World ID identifier must be proof_of_human".to_owned(),
+            ));
+        }
+        let issuer_schema_id = required_response_u64(response, "issuer_schema_id")?;
+        if issuer_schema_id != 1 {
+            return Err(crate::IdentityError::Request(
+                "World ID issuer_schema_id must be 1 (Orb)".to_owned(),
             ));
         }
 
@@ -157,6 +163,172 @@ fn required_response_string<'a>(
                 "World ID idkit_response.responses[0].{field} must be a string"
             ))
         })
+}
+
+fn required_response_u64(
+    value: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<u64, crate::IdentityError> {
+    value
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            crate::IdentityError::Request(format!(
+                "World ID idkit_response.responses[0].{field} must be a number"
+            ))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::IdentityError;
+
+    fn minimal_proof_of_human_response() -> serde_json::Value {
+        serde_json::json!({
+            "protocol_version": "4.0",
+            "action": "sonari_membership_register_v1",
+            "environment": "staging",
+            "responses": [
+                {
+                    "identifier": "proof_of_human",
+                    "issuer_schema_id": 1,
+                    "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                    "nullifier": "12345678901234567890"
+                }
+            ]
+        })
+    }
+
+    #[test]
+    fn uniqueness_proof_accepts_proof_of_human_with_issuer_schema_id_1() {
+        let req = WorldIdProofRequest {
+            idkit_response: minimal_proof_of_human_response(),
+        };
+        let proof = req
+            .uniqueness_proof()
+            .expect("proof_of_human + issuer_schema_id:1 must be accepted");
+        assert_eq!(proof.identifier, "proof_of_human");
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_identifier_orb() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["identifier"] = serde_json::json!("orb");
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "identifier orb must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_identifier_device() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["identifier"] = serde_json::json!("device");
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "identifier device must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_identifier_selfie() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["identifier"] = serde_json::json!("selfie");
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "identifier selfie must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_identifier_passport() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["identifier"] = serde_json::json!("passport");
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "identifier passport must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_identifier_mnc() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["identifier"] = serde_json::json!("mnc");
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "identifier mnc must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_proof_of_human_with_issuer_schema_id_2() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["issuer_schema_id"] = serde_json::json!(2);
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "issuer_schema_id 2 must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_proof_of_human_with_missing_issuer_schema_id() {
+        let mut idkit = minimal_proof_of_human_response();
+        if let Some(r) = idkit["responses"][0].as_object_mut() {
+            r.remove("issuer_schema_id");
+        }
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "missing issuer_schema_id must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_proof_of_human_with_issuer_schema_id_as_string() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["issuer_schema_id"] = serde_json::json!("1");
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "issuer_schema_id as string must be rejected"
+        );
+    }
+
+    #[test]
+    fn uniqueness_proof_rejects_proof_of_human_with_issuer_schema_id_null() {
+        let mut idkit = minimal_proof_of_human_response();
+        idkit["responses"][0]["issuer_schema_id"] = serde_json::json!(null);
+        let req = WorldIdProofRequest {
+            idkit_response: idkit,
+        };
+        assert!(
+            matches!(req.uniqueness_proof(), Err(IdentityError::Request(_))),
+            "issuer_schema_id null must be rejected"
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

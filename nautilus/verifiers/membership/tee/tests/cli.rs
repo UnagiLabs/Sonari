@@ -489,7 +489,8 @@ fn world_id_request() -> serde_json::Value {
                 "environment": "staging",
                 "responses": [
                     {
-                        "identifier": "orb",
+                        "identifier": "proof_of_human",
+                        "issuer_schema_id": 1,
                         "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
                         "proof": "0xproof",
                         "merkle_root": "987654321",
@@ -512,7 +513,7 @@ fn verified_identity_result() -> serde_json::Value {
         "provider": "world_id",
         "verified": true,
         "duplicate_key_hash": "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878",
-        "evidence_hash": "0x010a2748d34ebf54ffdfab4ed7abbca41de9b414b90bbfc31825b3b21bea1717",
+        "evidence_hash": "0x21105f066b4f63e157a4ef036b49197f502b88659376389a2d6ba567ed7fae4b",
         "issued_at_ms": ISSUED_AT_MS,
         "expires_at_ms": ISSUED_AT_MS + VALIDITY_MS,
         "terms_version": TERMS_VERSION,
