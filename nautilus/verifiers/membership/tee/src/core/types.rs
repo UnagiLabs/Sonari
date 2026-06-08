@@ -78,20 +78,14 @@ impl WorldIdProofRequest {
     }
 
     pub fn uniqueness_proof(&self) -> Result<WorldIdUniquenessProof, crate::IdentityError> {
-        let object = self.idkit_response.as_object().ok_or_else(|| {
+        self.idkit_response.as_object().ok_or_else(|| {
             crate::IdentityError::Request("World ID idkit_response must be an object".to_owned())
         })?;
-        reject_unknown_keys(
-            "World ID idkit_response",
-            object.keys().map(String::as_str),
-            &[
-                "protocol_version",
-                "nonce",
-                "action",
-                "environment",
-                "responses",
-            ],
-        )?;
+        if self.idkit_response.get("session_id").is_some() {
+            return Err(crate::IdentityError::Request(
+                "World ID Session proof is not supported".to_owned(),
+            ));
+        }
         let protocol_version = required_string(&self.idkit_response, "protocol_version")?;
         if protocol_version != "4.0" {
             return Err(crate::IdentityError::Request(
@@ -119,17 +113,6 @@ impl WorldIdProofRequest {
                 "World ID idkit_response.responses[0] must be an object".to_owned(),
             )
         })?;
-        reject_unknown_keys(
-            "World ID idkit_response.responses[0]",
-            response.keys().map(String::as_str),
-            &[
-                "identifier",
-                "signal_hash",
-                "proof",
-                "merkle_root",
-                "nullifier",
-            ],
-        )?;
         let identifier = required_response_string(response, "identifier")?;
         if identifier != "orb" {
             return Err(crate::IdentityError::Request(
@@ -174,21 +157,6 @@ fn required_response_string<'a>(
                 "World ID idkit_response.responses[0].{field} must be a string"
             ))
         })
-}
-
-fn reject_unknown_keys<'a>(
-    context: &str,
-    keys: impl Iterator<Item = &'a str>,
-    allowed: &[&str],
-) -> Result<(), crate::IdentityError> {
-    for key in keys {
-        if !allowed.contains(&key) {
-            return Err(crate::IdentityError::Request(format!(
-                "{context} contains unknown field `{key}`"
-            )));
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -651,6 +651,30 @@ mod tests {
     }
 
     #[test]
+    fn process_identity_allows_idkit_response_extra_fields_before_forwarding() {
+        let signer = CountingSigner::new();
+        let mut request = world_id_request();
+        request.world_id.as_mut().unwrap().idkit_response["responses"][0]["max_age"] =
+            serde_json::json!(604800);
+        request.world_id.as_mut().unwrap().idkit_response["verification_extra"] =
+            serde_json::json!("preserved-for-world-api");
+
+        let output = process_identity_with_verifier(
+            request,
+            &MockWorldIdVerifier {
+                status: verified_status(),
+            },
+            &signer,
+            1_800_000_000_000,
+        )
+        .unwrap();
+
+        assert_eq!(output.status, IdentityProcessingStatus::Verified);
+        assert!(output.result.is_some());
+        assert_eq!(signer.calls.get(), 1);
+    }
+
+    #[test]
     fn world_id_hash_to_field_matches_official_vectors() {
         let vectors = golden_vectors();
         for vector in vectors.official_hash_to_field {
