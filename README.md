@@ -22,117 +22,50 @@ Charitable giving is a large real-world capital flow, not a niche behavior. In t
 
 For Sui, this creates an opportunity beyond crypto-native DeFi liquidity: real-world donation capital can become transparent, programmable, and auditable on-chain TVL. Sonari is designed to make that capital useful for sponsors, donors, communities, and recipients without weakening the trust boundaries that aid programs require.
 
-## Sonari's Edge
+## Product Overview
 
-Most donation platforms show where money was collected. Sonari goes further: it makes the eligibility decision itself verifiable. The first MVP is **parametric disaster support**, where Nautilus checks real-world earthquake impact and produces transparent proof that a recipient is in an affected area before aid is paid.
+Sonari is a donation platform first. Its edge is that it makes both sides of an aid program inspectable: where donated funds are held, and why a recipient is eligible to receive support.
 
-Sonari combines transparent donation pools, explicit support policies, Nautilus-backed eligibility verification, direct aid payments, and impact receipts. The result is a donation platform where sponsors and donors can inspect how funds are used, communities can explain why support was distributed, and recipients can claim aid under rules enforced by Sui Move.
+The first MVP is **parametric disaster support** for earthquake relief. Donors and sponsors fund transparent pools, support programs define payout rules, Nautilus verifies real-world earthquake and identity facts, and Sui Move enforces the final claim conditions before funds move.
 
 > Sonari is donation-backed support infrastructure, not insurance. Donations do not create guaranteed payouts. Aid depends on pool balances, eligibility rules, program policy, fraud controls, and any verification requirements for the support program.
 
-## What Sonari Solves
+## How Sonari Works
 
-Donation programs often struggle to earn trust after funds are collected:
+> **Overview diagram placeholder:** add the final system overview image here when it is ready. Suggested path: `docs/assets/sonari-overview.png`.
 
-| Problem | What it means in practice |
+Sonari turns donation-backed aid into a clear, verifiable flow:
+
+1. **Funds enter pools.** General donations go to the Main Pool. Designated donations can fund a relief pool while also keeping the Main Pool available as a policy-controlled backstop.
+2. **Programs define the rules.** A support program connects a funding policy, claim window, payout policy, and eligibility requirements.
+3. **Nautilus verifies external facts.** Verifiers re-fetch source data inside a TEE, normalize it, and produce signed payloads that Move can verify.
+4. **Proof services distribute inclusion proofs.** Workers can serve Merkle proofs, but they are not trusted. Move replays proofs against signed roots before accepting a claim.
+5. **Move enforces the claim.** The contract checks membership, identity, residence timing, affected-cell proof, duplicate-claim state, pool balances, and campaign budget.
+6. **Aid and receipts are created.** Eligible recipients receive Relief Cash, and ClaimReceipt / Impact Receipt records connect the payout to the program, event, funding source, and verification result.
+
+## MVP Claim Model
+
+The earthquake MVP is intentionally narrow. A recipient cannot claim only because an earthquake happened near them. A valid claim combines three things:
+
+| Layer | What it proves |
 | --- | --- |
-| Fund opacity | Donors cannot easily see where money is reserved, routed, or spent. |
-| Opaque recipient selection | It is often unclear why one person, household, or region receives support while another does not. |
-| Manual operations | Aid teams must coordinate eligibility, approvals, treasury movement, and reporting by hand. |
-| Weak impact visibility | Sponsors and communities lack clear receipts that connect donations to outcomes. |
-| Hard-to-scale programs | Each new campaign or support category often needs a new operational process. |
-| Slow emergency response | In time-sensitive cases, support may arrive after the most urgent window has passed. |
+| **Disaster proof** | Nautilus verified the earthquake source data and signed a DisasterEvent with an `affected_cells_root`. |
+| **Membership and identity** | The claimant has an active Membership SBT and a valid KYC or World ID verification result. |
+| **Residence and inclusion** | The claimant registered a valid `home_cell` before the earthquake cutoff, and that cell is included in the affected cells Merkle root. |
 
-Sonari reframes donation programs as programmable aid flows: transparent pools, explicit policies, Nautilus-backed eligibility verification, and receipt trails that make both funding and recipient selection easier to inspect.
+Move performs the final decision. It does not trust the frontend, worker, relayer, or storage layer to decide eligibility.
 
-## Platform Concept
+## Reference Links
 
-Sonari is built around five platform primitives:
+Detailed component documentation lives in focused docs and package READMEs:
 
-| Primitive | Purpose |
+| Area | Details |
 | --- | --- |
-| **Donation Pools** | Visible funding pools for general aid, campaigns, regions, disaster categories, or sponsor programs. |
-| **Support Programs** | Programmable rules that define who can receive aid, when funds can be used, and which pool pays first. |
-| **Nautilus Verification** | Transparent decisioning that checks external facts and produces auditable proof of who qualifies. |
-| **Aid Payments** | Direct support sent to eligible recipients. In the first MVP, this appears as Relief Cash. |
-| **Impact Receipts** | Transparent records that connect donations, eligibility decisions, recipients, and sponsor impact reporting. |
-
-Parametric disaster relief is one support program type. Over time, the same platform can support other donation-backed aid flows where eligibility needs to be explained and audited, such as regional assistance, community grants, emergency campaigns, nonprofit distributions, or sponsor-funded programs.
-
-## Platform Flow
-
-```mermaid
-flowchart LR
-  donor[Sponsor, donor, or community] --> donation[Donation]
-  donation --> pool[Donation Pool]
-  pool --> program{Support Program}
-  program --> earthquake[First MVP: parametric earthquake relief]
-  program --> future[Future aid programs]
-  future --> regional[Regional assistance]
-  future --> grants[Community grants]
-  future --> emergency[Emergency campaigns]
-  earthquake --> nautilus[Nautilus eligibility verification]
-  regional --> nautilus
-  grants --> nautilus
-  emergency --> nautilus
-  nautilus --> decision[Auditable recipient decision]
-  decision --> policy[Program policy checks]
-  policy --> payment[Aid payment]
-  payment --> recipient[Recipient]
-  payment --> receipt[Impact Receipt]
-  receipt --> dashboard[Donor and sponsor dashboard]
-```
-
-The long-term product loop is simple: collect donations into transparent pools, attach them to support programs, use Nautilus to verify who qualifies, move funds under clear rules, and make outcomes visible through receipts and dashboards.
-
-## Core Participants
-
-| Participant | Role |
-| --- | --- |
-| Donors and sponsors | Fund general pools, campaign pools, or program-specific pools. |
-| Communities and operators | Create support programs and define how donated funds should be used. |
-| Recipients | Receive aid when Nautilus verification and program rules show they qualify. |
-| Nautilus verification layer | Checks external facts and produces auditable eligibility decisions for support programs. |
-| Sui Move contracts | Enforce pool policy, eligibility, payout rules, and receipt creation. |
-| Dashboard | Shows donation flow, pool balances, program status, claims, and impact reporting. |
-
-## First MVP: Parametric Disaster Support
-
-The initial MVP proves Sonari through an earthquake relief program:
-
-```mermaid
-sequenceDiagram
-  participant Donor as Donor or Sponsor
-  participant Pool as Donation Pool
-  participant Watcher as Earthquake Watcher
-  participant Nautilus as Nautilus / TEE
-  participant Move as Sui Move
-  participant User as Affected User
-  participant Dashboard as Impact Dashboard
-
-  Donor->>Pool: Fund Main Pool or Earthquake Pool
-  Watcher->>Watcher: Detect candidate earthquake
-  Watcher->>Nautilus: Request eligibility verification
-  Nautilus->>Nautilus: Re-fetch source data and compute affected cells
-  Nautilus-->>Move: Signed affected-area proof
-  User->>Move: Claim Relief Cash
-  Move->>Move: Verify proof, eligibility, policy, and balances
-  Move-->>User: Aid payment and Impact Receipt
-  Move-->>Dashboard: Decision, program, and receipt data
-```
-
-MVP payout priority:
-
-1. Use the **Earthquake Pool** first for earthquake-specific support.
-2. Use the **Main Pool** as a policy-controlled backstop when the Earthquake Pool is insufficient.
-3. Produce an **Impact Receipt** so each payout can be connected back to the support program, Nautilus decision, verified event, and funding source.
-
-This MVP is intentionally narrow. Earthquakes provide a concrete way to test Sonari's core difference from ordinary donation tools: transparent donations plus verifiable recipient selection. Nautilus determines whether a claimant is connected to an affected area, and Sui Move enforces the program rules before funds move.
-
-## Why Sui
-
-Sui is a strong fit for Sonari because donations, pools, program policies, eligibility proofs, receipts, and recipient-facing assets can be represented as composable on-chain objects. Programmable Transaction Blocks can combine multi-step aid flows into a single user action, while Move contracts enforce transparent rules around how donated funds are used.
-
-## What to Remember
-
-Sonari is a donation platform first. Its key difference is that Nautilus helps verify and decide who should receive support in a transparent, auditable way. Parametric earthquake relief is the first MVP because it clearly proves that model: transparent donations, explicit support rules, trusted external signals, verifiable recipient selection, aid payments, and impact receipts.
+| Product and web app | [docs/webapp.md](docs/webapp.md) |
+| Business logic | [docs/business_logic.md](docs/business_logic.md) |
+| Sui Move contract rules | [contracts/spec.md](contracts/spec.md) |
+| Nautilus verifier overview | [nautilus/verifiers/README.md](nautilus/verifiers/README.md) |
+| Earthquake verifier | [nautilus/verifiers/earthquake/README.md](nautilus/verifiers/earthquake/README.md) |
+| Identity verifier | [nautilus/verifiers/membership/README.md](nautilus/verifiers/membership/README.md) |
+| Affected cells proof worker | [packages/affected-cells-proof-worker/README.md](packages/affected-cells-proof-worker/README.md) |
+| Residence proof worker | [packages/residence-proof-worker/README.md](packages/residence-proof-worker/README.md) |
