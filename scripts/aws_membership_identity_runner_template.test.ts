@@ -262,6 +262,18 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("world-id-egress-allowlist");
     });
 
+    it("rejects mainnet + staging combination fail-closed in UserData", async () => {
+        const template = await readFile(templatePath, "utf8");
+
+        // The host-side guard must check the two-axis condition before the enclave starts.
+        expect(template).toContain(
+            '[ "$' +
+                '{RelayerNetwork}" = "mainnet" ] && [ "$' +
+                '{WorldIdEnvironment}" = "staging" ]',
+        );
+        expect(template).toContain("is not allowed on RelayerNetwork=mainnet (fail-closed)");
+    });
+
     it("passes membership identity dry-run object IDs to RunnerControlLambda", async () => {
         const template = await readFile(templatePath, "utf8");
 

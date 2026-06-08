@@ -450,6 +450,10 @@ Resources:
                 world_id_api_base="https://developer.world.org"
                 ;;
             esac
+            if [ "${RelayerNetwork}" = "mainnet" ] && [ "${WorldIdEnvironment}" = "staging" ]; then
+              echo "WorldIdEnvironment=staging is not allowed on RelayerNetwork=mainnet (fail-closed)" >&2
+              exit 1
+            fi
             world_id_api_host="$(printf '%s' "$world_id_api_base" | sed -E 's#^https?://([^/:]+).*#\1#')"
             if [ -z "$world_id_api_host" ] || [ "$world_id_api_host" = "$world_id_api_base" ]; then
               echo "WorldIdApiBase must be an http(s) URL" >&2
