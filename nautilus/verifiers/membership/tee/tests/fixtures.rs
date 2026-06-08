@@ -12,7 +12,7 @@ fn world_id_success_fixture_uses_computed_evidence_hash() {
     let evidence_hash = compute_identity_evidence_hash(
         IdentityProvider::WorldId,
         &fixture.duplicate_key_hash,
-        "orb",
+        "proof_of_human",
         fixture.issued_at_ms,
     )
     .expect("fixture evidence hash inputs should be valid");
