@@ -1,15 +1,9 @@
-import { computeWorldIdSignalHash } from "@sonari/proof-core";
+import { WORLD_ID_ACTION } from "./world-id-action";
 
 export type IdentityProvider = "kyc" | "world_id";
 
 export interface WorldIdProofRequest {
-    readonly world_app_id: string;
-    readonly nullifier_hash: string;
-    readonly merkle_root: string;
-    readonly proof: string;
-    readonly verification_level: string;
-    readonly action: string;
-    readonly signal_hash: string;
+    readonly idkit_response: Record<string, unknown>;
 }
 
 export interface IdentitySubmitRequest {
@@ -38,19 +32,22 @@ export function readFormString(formData: FormDataLike, name: string): string {
     return trimmed;
 }
 
-export async function buildIdentitySubmitRequest(
+export function buildIdentitySubmitRequest(
     formData: FormDataLike,
     registryId: string,
-): Promise<IdentitySubmitRequest> {
+    worldIdResult?: unknown,
+): IdentitySubmitRequest {
     const provider = parseIdentityProvider(readFormString(formData, "identityProvider"));
     const membershipId = readFormString(formData, "membershipId");
     const owner = readFormString(formData, "owner");
     const signedStatementHash = readFormString(formData, "signedStatementHash");
     const termsVersion = parseSafeUnsignedInteger(readFormString(formData, "termsVersion"));
+
     const worldId =
         provider === "world_id"
-            ? await buildWorldIdProof(formData, { owner, membershipId, signedStatementHash })
+            ? { idkit_response: parseIdkitResponse(worldIdResult) }
             : undefined;
+
     const request: IdentitySubmitRequest = {
         registry_id: requireString(registryId, "NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID"),
         membership_id: membershipId,
@@ -63,32 +60,56 @@ export async function buildIdentitySubmitRequest(
     return request;
 }
 
-interface WorldIdSignalBinding {
-    readonly owner: string;
-    readonly membershipId: string;
-    readonly signedStatementHash: string;
-}
+/**
+ * Validates that `value` is a well-formed IDKit v4 response and returns it
+ * as-is (no remapping). Mirrors the TEE `uniqueness_proof()` validation so
+ * malformed payloads are caught client-side before the network round-trip.
+ */
+export function parseIdkitResponse(value: unknown): Record<string, unknown> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("World ID response must be an object");
+    }
+    const obj = value as Record<string, unknown>;
 
-async function buildWorldIdProof(
-    formData: FormDataLike,
-    binding: WorldIdSignalBinding,
-): Promise<WorldIdProofRequest> {
-    return {
-        world_app_id: readFormString(formData, "worldAppId"),
-        nullifier_hash: readFormString(formData, "nullifierHash"),
-        merkle_root: readFormString(formData, "merkleRoot"),
-        proof: readFormString(formData, "proof"),
-        verification_level: readFormString(formData, "verificationLevel"),
-        action: readFormString(formData, "worldIdAction"),
-        // The enclave rejects any signal_hash that is not the binding derived
-        // from owner, membership, and signed statement, so it is computed here
-        // instead of being read from the form.
-        signal_hash: await computeWorldIdSignalHash(
-            binding.owner,
-            binding.membershipId,
-            binding.signedStatementHash,
-        ),
-    };
+    if (obj.session_id !== undefined) {
+        throw new Error("World ID session proofs are not supported");
+    }
+
+    if (obj.protocol_version !== "4.0") {
+        throw new Error("World ID protocol_version must be 4.0");
+    }
+
+    if (typeof obj.action !== "string" || obj.action !== WORLD_ID_ACTION) {
+        throw new Error("World ID action does not match the expected Sonari action");
+    }
+
+    if (typeof obj.environment !== "string" || obj.environment.length === 0) {
+        throw new Error("World ID environment must be a non-empty string");
+    }
+
+    if (!Array.isArray(obj.responses) || obj.responses.length !== 1) {
+        throw new Error("World ID responses must be an array with exactly one element");
+    }
+
+    const response = obj.responses[0];
+    if (typeof response !== "object" || response === null || Array.isArray(response)) {
+        throw new Error("World ID responses[0] must be an object");
+    }
+    const r = response as Record<string, unknown>;
+
+    if (r.identifier !== "orb") {
+        throw new Error("World ID responses[0].identifier must be orb");
+    }
+
+    if (typeof r.signal_hash !== "string" || r.signal_hash.length === 0) {
+        throw new Error("World ID responses[0].signal_hash must be a non-empty string");
+    }
+
+    if (typeof r.nullifier !== "string" || r.nullifier.length === 0) {
+        throw new Error("World ID responses[0].nullifier must be a non-empty string");
+    }
+
+    return obj;
 }
 
 function parseIdentityProvider(value: string): IdentityProvider {
