@@ -1,13 +1,19 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import dynamic from "next/dynamic";
 import {
     RegisterHero,
     RegisterProgress,
     RegisterSidePanel,
     RegisterTopbar,
 } from "../register-shared";
-import { buildIdentitySubmitRequest, type IdentityProvider } from "./request";
+import { buildIdentitySubmitRequest, canSubmitIdentity, type IdentityProvider } from "./request";
+
+const WorldIdVerifyButton = dynamic(
+    () => import("./world-id-verify-button").then((m) => m.WorldIdVerifyButton),
+    { ssr: false },
+);
 
 const submitUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL ?? "";
 const registryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
@@ -53,9 +59,18 @@ type SubmitState =
 export default function RegisterIdentityPage() {
     const [provider, setProvider] = useState<IdentityProvider>("world_id");
     const [submitState, setSubmitState] = useState<SubmitState>({ status: "idle" });
+    const [owner, setOwner] = useState("");
+    const [membershipId, setMembershipId] = useState("");
+    const [signedStatementHash, setSignedStatementHash] = useState("");
+    const [worldIdResponse, setWorldIdResponse] = useState<Record<string, unknown> | null>(null);
     const isSubmitConfigured = submitUrl.length > 0 && registryId.length > 0;
 
-    async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    function handleProviderChange(next: IdentityProvider) {
+        setProvider(next);
+        setWorldIdResponse(null);
+    }
+
+    function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         setSubmitState({ status: "submitting", message: "Submitting verification request." });
 
@@ -63,30 +78,40 @@ export default function RegisterIdentityPage() {
             if (!isSubmitConfigured) {
                 throw new Error("Identity submit endpoint is not configured.");
             }
-            const request = await buildIdentitySubmitRequest(
+            const request = buildIdentitySubmitRequest(
                 new FormData(event.currentTarget),
                 registryId,
+                worldIdResponse ?? undefined,
             );
-            const response = await fetch(submitUrl, {
+            fetch(submitUrl, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify(request),
-            });
-            const body = await readSubmitResponse(response);
-            if (!response.ok) {
-                throw new Error(readResponseMessage(body, response.status));
-            }
-            const jobId = readString(body.job_id, "job_id");
-            const jobStatus = readString(body.status, "status");
-            setSubmitState({
-                status: "success",
-                message:
-                    jobStatus === "queued"
-                        ? "Verification job queued."
-                        : "Verification request accepted.",
-                jobId,
-                jobStatus,
-            });
+            })
+                .then(async (response) => {
+                    const body = await readSubmitResponse(response);
+                    if (!response.ok) {
+                        throw new Error(readResponseMessage(body, response.status));
+                    }
+                    const jobId = readString(body.job_id, "job_id");
+                    const jobStatus = readString(body.status, "status");
+                    setSubmitState({
+                        status: "success",
+                        message:
+                            jobStatus === "queued"
+                                ? "Verification job queued."
+                                : "Verification request accepted.",
+                        jobId,
+                        jobStatus,
+                    });
+                })
+                .catch((error: unknown) => {
+                    setSubmitState({
+                        status: "failed",
+                        message:
+                            error instanceof Error ? error.message : "Verification request failed.",
+                    });
+                });
         } catch (error) {
             setSubmitState({
                 status: "failed",
@@ -139,7 +164,7 @@ export default function RegisterIdentityPage() {
                                                 <input
                                                     checked={provider === option.id}
                                                     name="identityProvider"
-                                                    onChange={() => setProvider(option.id)}
+                                                    onChange={() => handleProviderChange(option.id)}
                                                     type="radio"
                                                     value={option.id}
                                                 />
@@ -160,8 +185,10 @@ export default function RegisterIdentityPage() {
                                             <input
                                                 id="membership-id"
                                                 name="membershipId"
+                                                onChange={(e) => setMembershipId(e.target.value)}
                                                 placeholder="0x..."
                                                 type="text"
+                                                value={membershipId}
                                             />
                                         </label>
                                         <label className="text-field" htmlFor="owner">
@@ -169,8 +196,10 @@ export default function RegisterIdentityPage() {
                                             <input
                                                 id="owner"
                                                 name="owner"
+                                                onChange={(e) => setOwner(e.target.value)}
                                                 placeholder="0x..."
                                                 type="text"
+                                                value={owner}
                                             />
                                         </label>
                                         <label className="text-field" htmlFor="terms-version">
@@ -191,8 +220,12 @@ export default function RegisterIdentityPage() {
                                             <input
                                                 id="signed-statement-hash"
                                                 name="signedStatementHash"
+                                                onChange={(e) =>
+                                                    setSignedStatementHash(e.target.value)
+                                                }
                                                 placeholder="0x..."
                                                 type="text"
+                                                value={signedStatementHash}
                                             />
                                             <small>
                                                 Hash the signed duplicate-account statement before
@@ -213,62 +246,13 @@ export default function RegisterIdentityPage() {
                                                 the World ID signal when you generate the proof.
                                             </small>
                                         </div>
-                                        <div className="identity-proof-grid">
-                                            <label className="text-field" htmlFor="world-app-id">
-                                                <span>World app ID</span>
-                                                <input
-                                                    id="world-app-id"
-                                                    name="worldAppId"
-                                                    placeholder="app_staging_..."
-                                                    type="text"
-                                                />
-                                            </label>
-                                            <label className="text-field" htmlFor="nullifier-hash">
-                                                <span>Nullifier hash</span>
-                                                <input
-                                                    id="nullifier-hash"
-                                                    name="nullifierHash"
-                                                    type="text"
-                                                />
-                                            </label>
-                                            <label className="text-field" htmlFor="merkle-root">
-                                                <span>Merkle root</span>
-                                                <input
-                                                    id="merkle-root"
-                                                    name="merkleRoot"
-                                                    placeholder="0x..."
-                                                    type="text"
-                                                />
-                                            </label>
-                                            <label
-                                                className="text-field"
-                                                htmlFor="verification-level"
-                                            >
-                                                <span>Verification level</span>
-                                                <input
-                                                    defaultValue="orb"
-                                                    id="verification-level"
-                                                    name="verificationLevel"
-                                                    type="text"
-                                                />
-                                            </label>
-                                            <label className="text-field" htmlFor="world-action">
-                                                <span>Action</span>
-                                                <input
-                                                    defaultValue="sonari_membership_register_v1"
-                                                    id="world-action"
-                                                    name="worldIdAction"
-                                                    type="text"
-                                                />
-                                            </label>
-                                            <label
-                                                className="text-field identity-wide-field"
-                                                htmlFor="proof"
-                                            >
-                                                <span>Proof</span>
-                                                <textarea id="proof" name="proof" rows={4} />
-                                            </label>
-                                        </div>
+                                        <WorldIdVerifyButton
+                                            membershipId={membershipId}
+                                            onVerified={(r) => setWorldIdResponse(r)}
+                                            owner={owner}
+                                            signedStatementHash={signedStatementHash}
+                                            verified={worldIdResponse !== null}
+                                        />
                                     </fieldset>
                                 ) : null}
 
@@ -315,7 +299,8 @@ export default function RegisterIdentityPage() {
                                         className="btn btn-primary btn-lg"
                                         disabled={
                                             submitState.status === "submitting" ||
-                                            !isSubmitConfigured
+                                            !isSubmitConfigured ||
+                                            !canSubmitIdentity(provider, worldIdResponse)
                                         }
                                         type="submit"
                                     >

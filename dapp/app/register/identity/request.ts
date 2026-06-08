@@ -132,6 +132,24 @@ export function parseIdkitResponse(value: unknown): Record<string, unknown> {
     return obj;
 }
 
+/**
+ * Gate function for the submit button.
+ *
+ * - `kyc`:      always submittable (World ID is not required).
+ * - `world_id`: submittable only when `worldIdResponse` is a non-null object,
+ *               i.e. the user has completed IDKit verification and the parent
+ *               has received a real idkit_response payload.
+ */
+export function canSubmitIdentity(
+    provider: IdentityProvider,
+    worldIdResponse: unknown,
+): boolean {
+    if (provider === "kyc") {
+        return true;
+    }
+    return typeof worldIdResponse === "object" && worldIdResponse !== null;
+}
+
 function parseIdentityProvider(value: string): IdentityProvider {
     if (value === "kyc" || value === "world_id") {
         return value;

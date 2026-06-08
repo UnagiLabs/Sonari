@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WORLD_ID_ACTION } from "./world-id-action";
 import {
     buildIdentitySubmitRequest,
+    canSubmitIdentity,
     parseIdkitResponse,
 } from "./request";
 
@@ -379,6 +380,36 @@ describe("parseIdkitResponse", () => {
         const result = parseIdkitResponse(withExtra);
         expect(result).toEqual(withExtra);
         expect((result as Record<string, unknown>).custom_field).toBe("extra");
+    });
+});
+
+describe("canSubmitIdentity", () => {
+    it("returns true for kyc even when worldIdResponse is null", () => {
+        expect(canSubmitIdentity("kyc", null)).toBe(true);
+    });
+
+    it("returns true for kyc when worldIdResponse is undefined", () => {
+        expect(canSubmitIdentity("kyc", undefined)).toBe(true);
+    });
+
+    it("returns false for world_id when worldIdResponse is null", () => {
+        expect(canSubmitIdentity("world_id", null)).toBe(false);
+    });
+
+    it("returns false for world_id when worldIdResponse is undefined", () => {
+        expect(canSubmitIdentity("world_id", undefined)).toBe(false);
+    });
+
+    it("returns true for world_id when worldIdResponse is a non-null object", () => {
+        expect(canSubmitIdentity("world_id", VALID_IDKIT_RESPONSE)).toBe(true);
+    });
+
+    it("returns false for world_id when worldIdResponse is a string", () => {
+        expect(canSubmitIdentity("world_id", "bad")).toBe(false);
+    });
+
+    it("returns false for world_id when worldIdResponse is a number", () => {
+        expect(canSubmitIdentity("world_id", 42)).toBe(false);
     });
 });
 
