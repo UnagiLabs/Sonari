@@ -6,8 +6,11 @@ use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-pub(crate) const MAX_GRID_ZIP_BYTES: usize = 8 * 1024 * 1024;
-pub(crate) const MAX_GRID_XML_BYTES: usize = 16 * 1024 * 1024;
+// ShakeMap grid のサイズ上限。実測最大は約 29MiB（2026 Philippines M7.8 等）で、
+// マグニチュードに比例せず extent×解像度で決まる。実測最大に十分な余裕を持たせ、
+// 上限超えのみ OOM/DoS 防御として弾く。zip は圧縮済みのため XML 上限の半分を充てる。
+pub(crate) const MAX_GRID_ZIP_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const MAX_GRID_XML_BYTES: usize = 128 * 1024 * 1024;
 pub(crate) const MAX_GRID_ZIP_FILES: usize = 8;
 
 #[derive(Debug, Deserialize)]
@@ -418,7 +421,37 @@ fn grid_point_from_fields(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_grid_points;
+    use super::{
+        MAX_GRID_XML_BYTES, MAX_GRID_ZIP_BYTES, grid_xml_from_artifact, parse_grid_points,
+    };
+
+    const MIB: usize = 1024 * 1024;
+
+    #[test]
+    fn grid_size_caps_match_expected_values() {
+        // Issue #228: 実測最大約 29MiB の grid を finalize できるよう上限を拡張する。
+        assert_eq!(MAX_GRID_XML_BYTES, 128 * MIB);
+        assert_eq!(MAX_GRID_ZIP_BYTES, 64 * MIB);
+    }
+
+    #[test]
+    fn grid_xml_from_artifact_accepts_large_grid_below_xml_cap() {
+        // 旧上限 16MiB を超える実在サイズ（約30MiB）の grid.xml を受理できること。
+        // uri は .zip 以外にし、XML 直経路を通す。
+        let bytes = vec![b' '; 30 * MIB];
+        let result = grid_xml_from_artifact("https://example.com/download/grid.xml", &bytes)
+            .expect("30MiB grid.xml should be accepted under the 128MiB cap");
+        assert_eq!(result.len(), 30 * MIB);
+    }
+
+    #[test]
+    fn grid_xml_from_artifact_rejects_grid_above_xml_cap() {
+        // 上限直上（128MiB+1）は OOM/DoS 防御として従来どおり拒否する。
+        let bytes = vec![b' '; MAX_GRID_XML_BYTES + 1];
+        let error = grid_xml_from_artifact("https://example.com/download/grid.xml", &bytes)
+            .expect_err("grid.xml above the cap must be rejected");
+        assert!(error.to_string().contains("exceeds maximum size"));
+    }
 
     #[test]
     fn parse_grid_points_uses_grid_field_indexes_for_multicolumn_shakemap() {
