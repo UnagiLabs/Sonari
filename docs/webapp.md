@@ -477,11 +477,18 @@ KYC / World ID は複数アカウント対策として payout 前に必要だが
 ### World ID signal_hash の導出ルール
 
 World ID 登録では `signal_hash` を利用者に手入力させない。dapp が次の束縛から導出する。
+`signal_hash` とは「だれが・どの会員番号で・どの署名文に対して」を 1 つの値に固めた合言葉である。
 
-- `signal_hash = sha256("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)` を計算する
+- `signal_hash = hashToField("sonari:world_id_signal:v1" \0 owner \0 membership_id \0 signed_statement_hash)` を計算する
+- `hashToField` は World ID v4 の方式で、Keccak（ハッシュ計算の一種）の結果を World ID が扱える数値範囲へ収める
+- 具体的には Keccak256 の結果の先頭 31 バイトを使い、先頭 1 バイトを `0x00` にした 32 バイトにする（`uint256(keccak256(input)) >> 8` と同じ）
+- prefix（合言葉の頭につける固定文字）は `sonari:world_id_signal:v1` のまま据え置く
 - `owner` / `membership_id` / `signed_statement_hash` は `0x` 始まりの 32 バイト hex を小文字へ正規化してから使う
 - 計算は `@sonari/proof-core` の `computeWorldIdSignalHash` に集約し、enclave の `compute_world_id_signal_hash` と同一アルゴリズムにする
 - World ID widget に渡す `signal` も、この束縛（owner / membership_id / signed_statement_hash）と一致させる
+
+旧方式（legacy）との違い: v2 では `signal_hash` を `sha256(...)` で計算していた。
+v4 では上記の hashToField に置き換わったため、旧 sha256 手順は使わない。
 
 enclave は受け取った `signal_hash` を同じ式で再計算して照合する。次の入力は enclave 側で拒否されるため、dapp でも作らない。
 
@@ -489,6 +496,26 @@ enclave は受け取った `signal_hash` を同じ式で再計算して照合す
 - 32 バイト以外の長さ
 - hex 以外の文字や空文字
 - 上記の束縛から外れた値（手入力や別経路の値）
+
+### World ID v4 proof で受理する値
+
+enclave は World ID v4 の proof（本人確認データ）を厳格に検査する。次の値だけを受理する。
+
+- `protocol_version` は `4.0` のみ受理する
+- `identifier` は `orb`（Orb による認証）のみ受理する
+  - 受理する identifier は docs 準拠で `orb` とする。実機の IDKit 4.x fixture での最終確定は follow-up（後日対応）とする
+- `responses`（proof の本体）はちょうど 1 件のみ受理する
+- session proof（`session_id` を含む proof）は受理しない
+
+### duplicate_key と evidence_hash の v4 semantics
+
+重複登録の判定や証跡のハッシュも v4 化されている。意味づけだけ記す（dapp が値を作るわけではない）。
+
+- duplicate_key は `rp_id`（旧 `app_id` ではない）を基準にする。contract 名は `sonari:world_id:v2` である
+  - 注意: duplicate_key contract の `v2` と signal_hash prefix の `v1` は別軸の版番号で、混同しない
+- evidence_hash は v4 の入力（rp_id / environment / action / protocol_version / identifier / nullifier / signal_hash など）から作る
+- `VERIFIER_VERSION` は 1 のまま据え置きだが、duplicate_key と evidence_hash の中身は v4 の意味になっている
+- golden vector（`schemas/examples/identity_result_vectors.json`）の hash 値は決め打ちのテスト用の値で、実機の TEE 計算と一致させる必要はない
 
 ---
 
