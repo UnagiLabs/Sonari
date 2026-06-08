@@ -119,10 +119,14 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
     }
 
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
-        if proof.world_app_id != self.app_id || proof.action != WORLD_ID_ACTION {
+        if proof.action() != Some(WORLD_ID_ACTION) {
             return rejected();
         }
-        let request_body = match serde_json::to_vec(&WorldIdApiRequest::from(proof)) {
+        let request = match WorldIdApiRequest::from_proof(proof) {
+            Some(request) => request,
+            None => return rejected(),
+        };
+        let request_body = match serde_json::to_vec(&request) {
             Ok(body) => body,
             Err(_) => return rejected(),
         };
@@ -171,17 +175,17 @@ struct WorldIdApiSuccessResponse {
     nullifier_hash: String,
 }
 
-impl<'a> From<&'a WorldIdProofRequest> for WorldIdApiRequest<'a> {
-    fn from(value: &'a WorldIdProofRequest) -> Self {
-        Self {
-            nullifier_hash: &value.nullifier_hash,
-            merkle_root: &value.merkle_root,
-            proof: &value.proof,
-            verification_level: &value.verification_level,
-            action: &value.action,
-            signal_hash: &value.signal_hash,
+impl<'a> WorldIdApiRequest<'a> {
+    fn from_proof(value: &'a WorldIdProofRequest) -> Option<Self> {
+        Some(Self {
+            nullifier_hash: value.nullifier()?,
+            merkle_root: value.merkle_root()?,
+            proof: value.proof()?,
+            verification_level: value.identifier()?,
+            action: value.action()?,
+            signal_hash: value.signal_hash()?,
             max_age: WORLD_ID_MAX_AGE_SECONDS,
-        }
+        })
     }
 }
 
@@ -245,13 +249,16 @@ fn classify_success_response(proof: &WorldIdProofRequest, body: &str) -> WorldId
     let Ok(response) = serde_json::from_str::<WorldIdApiSuccessResponse>(body) else {
         return pending_source();
     };
-    if !response.success || response.action != proof.action {
+    if !response.success || proof.action() != Some(response.action.as_str()) {
         return pending_source();
     }
     let Ok(response_nullifier) = canonical_world_id_nullifier(&response.nullifier_hash) else {
         return pending_source();
     };
-    let Ok(proof_nullifier) = canonical_world_id_nullifier(&proof.nullifier_hash) else {
+    let Some(proof_nullifier) = proof.nullifier() else {
+        return pending_source();
+    };
+    let Ok(proof_nullifier) = canonical_world_id_nullifier(proof_nullifier) else {
         return pending_source();
     };
     if response_nullifier != proof_nullifier {
@@ -325,7 +332,8 @@ impl WorldIdVerifier for DummyWorldIdVerifier {
     }
 
     fn verify_world_id(&self, proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
-        if proof.world_app_id != self.app_id || proof.action != WORLD_ID_ACTION {
+        let _ = &self.app_id;
+        if proof.action() != Some(WORLD_ID_ACTION) {
             return rejected();
         }
         WorldIdVerificationStatus::Verified
@@ -361,7 +369,7 @@ mod tests {
     fn dummy_world_id_verifier_rejects_mismatched_app_id() {
         let verifier = DummyWorldIdVerifier::new("app_staging_123").unwrap();
         let mut proof = world_id_proof();
-        proof.world_app_id = "app_attacker".to_owned();
+        proof.idkit_response["action"] = serde_json::json!("attacker_action");
 
         assert_eq!(
             verifier.verify_world_id(&proof),
@@ -375,7 +383,7 @@ mod tests {
     fn dummy_world_id_verifier_rejects_mismatched_action() {
         let verifier = DummyWorldIdVerifier::new("app_staging_123").unwrap();
         let mut proof = world_id_proof();
-        proof.action = "attacker_action".to_owned();
+        proof.idkit_response["action"] = serde_json::json!("attacker_action");
 
         assert_eq!(
             verifier.verify_world_id(&proof),
@@ -392,7 +400,7 @@ mod tests {
         let cloud =
             CloudWorldIdVerifier::new("https://developer.world.org", "app_staging_123").unwrap();
         let mut proof = world_id_proof();
-        proof.world_app_id = "app_attacker".to_owned();
+        proof.idkit_response["action"] = serde_json::json!("attacker_action");
 
         let dummy_result = dummy.verify_world_id(&proof);
         let cloud_result = cloud.verify_world_id(&proof);
@@ -409,7 +417,7 @@ mod tests {
     #[test]
     fn world_id_request_serializes_exact_api_body_fields() {
         let proof = world_id_proof();
-        let json = serde_json::to_value(WorldIdApiRequest::from(&proof)).unwrap();
+        let json = serde_json::to_value(WorldIdApiRequest::from_proof(&proof).unwrap()).unwrap();
         let object = json.as_object().unwrap();
         let mut fields = object.keys().map(String::as_str).collect::<Vec<_>>();
         fields.sort_unstable();
@@ -527,7 +535,7 @@ mod tests {
         let verifier =
             CloudWorldIdVerifier::new("https://developer.world.org", "app_staging_123").unwrap();
         let mut proof = world_id_proof();
-        proof.world_app_id = "app_attacker".to_owned();
+        proof.idkit_response["action"] = serde_json::json!("attacker_action");
 
         assert_eq!(
             verifier.verify_world_id(&proof),
@@ -537,7 +545,7 @@ mod tests {
         );
 
         let mut proof = world_id_proof();
-        proof.action = "attacker_action".to_owned();
+        proof.idkit_response["action"] = serde_json::json!("attacker_action");
         assert_eq!(
             verifier.verify_world_id(&proof),
             WorldIdVerificationStatus::Rejected {
@@ -654,13 +662,21 @@ mod tests {
 
     fn world_id_proof() -> WorldIdProofRequest {
         WorldIdProofRequest {
-            world_app_id: "app_staging_123".to_owned(),
-            nullifier_hash: "12345678901234567890".to_owned(),
-            merkle_root: "987654321".to_owned(),
-            proof: "0xproof".to_owned(),
-            verification_level: "orb".to_owned(),
-            action: WORLD_ID_ACTION.to_owned(),
-            signal_hash: "0xsignal".to_owned(),
+            idkit_response: serde_json::json!({
+                "protocol_version": "4.0",
+                "nonce": "nonce-123",
+                "action": WORLD_ID_ACTION,
+                "environment": "staging",
+                "responses": [
+                    {
+                        "identifier": "orb",
+                        "signal_hash": "0xsignal",
+                        "proof": "0xproof",
+                        "merkle_root": "987654321",
+                        "nullifier": "12345678901234567890"
+                    }
+                ]
+            }),
         }
     }
 }

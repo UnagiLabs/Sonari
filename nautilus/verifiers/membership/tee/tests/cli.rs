@@ -146,15 +146,6 @@ fn fixture_command_returns_pending_source_world_id_without_signature_fields() {
 }
 
 #[test]
-fn fixture_command_rejects_mismatched_world_app_id_without_signature_fields() {
-    let mut request = world_id_request();
-    request["world_id"]["world_app_id"] = serde_json::json!("app_attacker");
-    let output = run_fixture(&[], &request);
-
-    assert_status_only(output, "rejected", WORLD_ID_VERIFICATION_FAILED);
-}
-
-#[test]
 fn fixture_command_rejects_zero_validity_before_signing() {
     let mut request = world_id_request();
     request["validity_ms"] = serde_json::json!(0);
@@ -277,23 +268,6 @@ fn encode_only_rejects_unknown_result_field() {
         "expected serde unknown field error, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-#[test]
-fn production_command_returns_rejected_before_http_for_mismatched_world_app_id() {
-    let mut request = world_id_request();
-    request["world_id"]["world_app_id"] = serde_json::json!("app_attacker");
-
-    let output = run_production(
-        &request,
-        &[
-            (WORLD_ID_API_BASE_ENV, "https://developer.world.org"),
-            (WORLD_ID_APP_ID_ENV, "app_staging_123"),
-            (PRODUCTION_SIGNING_KEY_SEED_ENV, TEST_SIGNING_KEY_SEED),
-        ],
-    );
-
-    assert_status_only(output, "rejected", WORLD_ID_VERIFICATION_FAILED);
 }
 
 #[test]
@@ -506,13 +480,21 @@ fn world_id_request() -> serde_json::Value {
         "terms_version": TERMS_VERSION,
         "signed_statement_hash": SIGNED_STATEMENT_HASH,
         "world_id": {
-            "world_app_id": "app_staging_123",
-            "nullifier_hash": "12345678901234567890",
-            "merkle_root": "987654321",
-            "proof": "0xproof",
-            "verification_level": "orb",
-            "action": "sonari_membership_register_v1",
-            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+            "idkit_response": {
+                "protocol_version": "4.0",
+                "nonce": "nonce-123",
+                "action": "sonari_membership_register_v1",
+                "environment": "staging",
+                "responses": [
+                    {
+                        "identifier": "orb",
+                        "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
+                        "proof": "0xproof",
+                        "merkle_root": "987654321",
+                        "nullifier": "12345678901234567890"
+                    }
+                ]
+            },
         },
     })
 }

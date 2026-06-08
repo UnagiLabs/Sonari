@@ -28,13 +28,44 @@ pub struct IdentityVerifyRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldIdProofRequest {
-    pub world_app_id: String,
-    pub nullifier_hash: String,
-    pub merkle_root: String,
-    pub proof: String,
-    pub verification_level: String,
-    pub action: String,
-    pub signal_hash: String,
+    pub idkit_response: serde_json::Value,
+}
+
+impl WorldIdProofRequest {
+    pub fn action(&self) -> Option<&str> {
+        self.idkit_response
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+    }
+
+    pub fn signal_hash(&self) -> Option<&str> {
+        self.first_response_field("signal_hash")
+    }
+
+    pub fn nullifier(&self) -> Option<&str> {
+        self.first_response_field("nullifier")
+    }
+
+    pub fn merkle_root(&self) -> Option<&str> {
+        self.first_response_field("merkle_root")
+    }
+
+    pub fn proof(&self) -> Option<&str> {
+        self.first_response_field("proof")
+    }
+
+    pub fn identifier(&self) -> Option<&str> {
+        self.first_response_field("identifier")
+    }
+
+    fn first_response_field(&self, field: &str) -> Option<&str> {
+        self.idkit_response
+            .get("responses")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|responses| responses.first())
+            .and_then(|response| response.get(field))
+            .and_then(serde_json::Value::as_str)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
