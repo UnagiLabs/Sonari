@@ -4,8 +4,8 @@ use std::process::{Command, Stdio};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use membership_tee::{
     INTENT, KYC_UNSUPPORTED, PROVIDER_WORLD_ID, VERIFIER_FAMILY, VERIFIER_VERSION,
-    WORLD_ID_API_BASE_ENV, WORLD_ID_API_UNAVAILABLE, WORLD_ID_APP_ID_ENV,
-    WORLD_ID_VERIFICATION_FAILED,
+    WORLD_ID_API_UNAVAILABLE, WORLD_ID_EGRESS_PROXY_URL_ENV, WORLD_ID_ENVIRONMENT_ENV,
+    WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
 };
 use serde::Deserialize;
 
@@ -275,8 +275,9 @@ fn production_command_returns_pending_source_when_world_id_api_is_unavailable() 
     let output = run_production(
         &world_id_request(),
         &[
-            (WORLD_ID_API_BASE_ENV, "https://127.0.0.1:9"),
-            (WORLD_ID_APP_ID_ENV, "app_staging_123"),
+            (WORLD_ID_RP_ID_ENV, "rp_staging_123"),
+            (WORLD_ID_ENVIRONMENT_ENV, "staging"),
+            (WORLD_ID_EGRESS_PROXY_URL_ENV, "http://127.0.0.1:9"),
             (PRODUCTION_SIGNING_KEY_SEED_ENV, TEST_SIGNING_KEY_SEED),
         ],
     );
@@ -289,8 +290,8 @@ fn production_command_requires_issue_signing_key_env_without_dev_fallback() {
     let output = run_production(
         &world_id_request(),
         &[
-            (WORLD_ID_API_BASE_ENV, "https://developer.world.org"),
-            (WORLD_ID_APP_ID_ENV, "app_staging_123"),
+            (WORLD_ID_RP_ID_ENV, "rp_staging_123"),
+            (WORLD_ID_ENVIRONMENT_ENV, "staging"),
             (
                 "SONARI_IDENTITY_TEE_SIGNING_KEY_SEED",
                 TEST_SIGNING_KEY_SEED,
@@ -449,8 +450,9 @@ fn run_production(request: &serde_json::Value, envs: &[(&str, &str)]) -> std::pr
         .env_remove("SONARI_IDENTITY_TEE_SIGNING_KEY_SEED_FILE")
         .env_remove("SONARI_TEE_SIGNING_KEY_SEED")
         .env_remove("SONARI_TEE_SIGNING_KEY_SEED_FILE")
-        .env_remove(WORLD_ID_API_BASE_ENV)
-        .env_remove(WORLD_ID_APP_ID_ENV);
+        .env_remove(WORLD_ID_RP_ID_ENV)
+        .env_remove(WORLD_ID_ENVIRONMENT_ENV)
+        .env_remove(WORLD_ID_EGRESS_PROXY_URL_ENV);
     for (name, value) in envs {
         command.env(name, value);
     }

@@ -22,8 +22,8 @@
 
 use crate::{
     CloudWorldIdVerifier, DummyWorldIdVerifier, IdentityProcessingOutput, IdentityProcessingStatus,
-    IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, WorldIdVerifier,
-    process_identity_with_verifier,
+    IdentityTeeResult, IdentityVerifyRequest, ResolvedWorldIdVerifierMode, WorldIdEnvironment,
+    WorldIdVerifier, process_identity_with_verifier,
 };
 use serde::Serialize;
 use sonari_tee_core::{
@@ -136,7 +136,7 @@ impl ProcessDataHandler for IdentityProcessHandler {
             }
             ResolvedWorldIdVerifierMode::Real => {
                 let verifier = CloudWorldIdVerifier::with_proxy(
-                    self.world_id_base_url.clone(),
+                    environment_from_base_url(&self.world_id_base_url),
                     self.world_id_app_id.clone(),
                     ctx.get(EGRESS_PROXY_URL_KEY),
                 )
@@ -144,6 +144,14 @@ impl ProcessDataHandler for IdentityProcessHandler {
                 process_with_verifier(request, &verifier, issued_at_ms)
             }
         }
+    }
+}
+
+fn environment_from_base_url(base_url: &str) -> WorldIdEnvironment {
+    if base_url.trim().trim_end_matches('/') == crate::WORLD_ID_API_BASE_STAGING {
+        WorldIdEnvironment::Staging
+    } else {
+        WorldIdEnvironment::Production
     }
 }
 
@@ -267,7 +275,7 @@ mod tests {
 
     impl WorldIdVerifier for MockWorldIdVerifier {
         fn expected_app_id(&self) -> &str {
-            "app_staging_123"
+            "rp_staging_123"
         }
 
         fn verify_world_id(&self, _proof: &WorldIdProofRequest) -> WorldIdVerificationStatus {
@@ -478,8 +486,8 @@ mod tests {
     #[test]
     fn handler_rejects_malformed_request_input() {
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let error = handler
@@ -491,8 +499,8 @@ mod tests {
     #[test]
     fn handler_rejects_request_with_unknown_field() {
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let mut body = request_json();
@@ -515,8 +523,8 @@ mod tests {
         // resolves to pending_source. This proves the proxy is wired through the
         // context (a direct client would instead reach DNS/the real host).
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
@@ -560,7 +568,7 @@ mod tests {
     #[test]
     fn dummy_verifier_produces_signable_output_identical_to_mock_verified() {
         let dummy =
-            DummyWorldIdVerifier::new("app_staging_123").expect("dummy verifier should construct");
+            DummyWorldIdVerifier::new("rp_staging_123").expect("dummy verifier should construct");
         let output_dummy = process_with_verifier(world_id_request(), &dummy, 1_900_000_000_000)
             .expect("dummy verifier should produce a signable result");
 
@@ -602,7 +610,7 @@ mod tests {
     fn handler_dummy_mode_returns_verified_without_http() {
         let handler = IdentityProcessHandler::new(
             "https://unreachable.invalid",
-            "app_staging_123",
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Dummy,
         );
         let output = handler
@@ -624,8 +632,8 @@ mod tests {
     #[test]
     fn handler_real_mode_returns_pending_source_with_unreachable_url() {
         let handler = IdentityProcessHandler::new(
-            "https://developer.world.org",
-            "app_staging_123",
+            crate::WORLD_ID_API_BASE_STAGING,
+            "rp_staging_123",
             ResolvedWorldIdVerifierMode::Real,
         );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
