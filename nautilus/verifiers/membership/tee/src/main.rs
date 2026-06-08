@@ -472,6 +472,7 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     apply_egress_proxy_env(config.egress_proxy_url.as_deref());
     apply_network_env(config.network.as_deref());
     apply_proof_mode_env(config.proof_mode.as_deref());
+    apply_environment_env(config.world_id_environment.as_deref());
     Ok(())
 }
 
@@ -494,6 +495,17 @@ fn apply_proof_mode_env(proof_mode: Option<&str>) {
     match proof_mode {
         Some(m) => set_env_before_server(WORLD_ID_PROOF_MODE_ENV, m),
         None => unset_env_before_server(WORLD_ID_PROOF_MODE_ENV),
+    }
+}
+
+/// Installs or clears the World ID environment env from the bootstrap config.
+///
+/// `Some(env)` installs the host-supplied value; `None` explicitly clears the env
+/// so a stale environment from a prior run can never select the wrong base.
+fn apply_environment_env(environment: Option<&str>) {
+    match environment {
+        Some(e) => set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, e),
+        None => unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV),
     }
 }
 
@@ -525,6 +537,10 @@ struct BootstrapConfig {
     /// World ID proof mode supplied by the host (`"real"` or `"dummy"`).
     /// Optional for backward compatibility; absence defaults to real mode.
     proof_mode: Option<String>,
+    /// World ID environment (`"production"` or `"staging"`) supplied by the host.
+    /// Optional for backward compatibility; absence is treated as unset, and the
+    /// server path then pins the canonical production base.
+    world_id_environment: Option<String>,
 }
 
 fn set_env_before_server(name: &str, value: &str) {
@@ -1335,13 +1351,14 @@ mod tests {
     /// process environment is global state shared across the test binary.
     mod bootstrap_env {
         use super::super::{
-            EnclaveState, apply_egress_proxy_env, enclave_state_from_env, server_world_id_base_url,
-            set_env_before_server, tee_context_from_env, unset_env_before_server,
+            EnclaveState, apply_egress_proxy_env, apply_environment_env, enclave_state_from_env,
+            server_world_id_base_url, set_env_before_server, tee_context_from_env,
+            unset_env_before_server,
         };
         use membership_tee::server::EGRESS_PROXY_URL_KEY;
         use membership_tee::{
             ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_API_BASE_CANONICAL,
-            WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV,
+            WORLD_ID_ENVIRONMENT_ENV, WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV,
         };
         use std::sync::Mutex;
 
@@ -1533,6 +1550,55 @@ mod tests {
             );
 
             unset_env_before_server(EGRESS_PROXY_URL_KEY);
+        }
+
+        /// `apply_environment_env(Some("staging"))` → `server_world_id_base_url()` returns
+        /// the staging base so the host can legitimately select the staging endpoint.
+        #[test]
+        fn bootstrap_staging_environment_selects_staging_base() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            apply_environment_env(Some("staging"));
+
+            assert_eq!(
+                server_world_id_base_url(),
+                membership_tee::WORLD_ID_API_BASE_STAGING,
+                "staging environment must select the staging World ID base URL"
+            );
+
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
+        }
+
+        /// `apply_environment_env(None)` → `server_world_id_base_url()` returns the
+        /// canonical production base (no env set means canonical).
+        #[test]
+        fn bootstrap_no_environment_selects_canonical_base() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            unset_env_before_server(WORLD_ID_ENVIRONMENT_ENV);
+            apply_environment_env(None);
+
+            assert_eq!(
+                server_world_id_base_url(),
+                WORLD_ID_API_BASE_CANONICAL,
+                "absent environment must yield the canonical World ID base URL"
+            );
+        }
+
+        /// A stale `"staging"` value left in the env from a prior run must be cleared
+        /// when `apply_environment_env(None)` is called, so the server resolves to
+        /// canonical rather than re-using the stale staging value.
+        #[test]
+        fn bootstrap_with_stale_environment_is_cleared_by_none() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            // Simulate a stale value left by a prior bootstrap run.
+            set_env_before_server(WORLD_ID_ENVIRONMENT_ENV, "staging");
+            // A new bootstrap that omits the field must erase the stale value.
+            apply_environment_env(None);
+
+            assert_eq!(
+                server_world_id_base_url(),
+                WORLD_ID_API_BASE_CANONICAL,
+                "None environment must clear a stale staging value and yield canonical"
+            );
         }
     }
 }
