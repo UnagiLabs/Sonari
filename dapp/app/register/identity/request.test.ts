@@ -10,19 +10,25 @@ const MEMBERSHIP_ID = `0x${"22".repeat(32)}`;
 const OWNER = `0x${"33".repeat(32)}`;
 const SIGNED_STATEMENT_HASH = `0x${"44".repeat(32)}`;
 
-/** Valid idkit_response fixture that mirrors runner/test/fixtures.ts */
+/**
+ * Valid idkit_response fixture in the real IDKit v4 shape (ResponseItemV4):
+ * `identifier: "proof_of_human"` (Orb credential), `issuer_schema_id: 1`,
+ * `proof` as a string array. Only this Orb-verified credential is accepted.
+ */
 const VALID_IDKIT_RESPONSE = {
     protocol_version: "4.0",
     nonce: "nonce-123",
     action: WORLD_ID_ACTION,
     environment: "staging",
+    user_presence_completed: false,
     responses: [
         {
-            identifier: "orb",
+            identifier: "proof_of_human",
             signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
-            proof: "0xproof",
-            merkle_root: "987654321",
-            nullifier: "12345678901234567890",
+            proof: ["0x01", "0x02", "0x03", "0x04", "0x05"],
+            nullifier: "0x1234567890abcdef",
+            issuer_schema_id: 1,
+            expires_at_min: 1_780_000_000,
         },
     ],
 };
@@ -288,13 +294,46 @@ describe("parseIdkitResponse", () => {
         ).toThrow("responses[0] must be an object");
     });
 
-    it("rejects identifier !== orb", () => {
+    it("rejects identifier !== proof_of_human (e.g. selfie)", () => {
         expect(() =>
             parseIdkitResponse({
                 ...VALID_IDKIT_RESPONSE,
-                responses: [{ ...VALID_IDKIT_RESPONSE.responses[0], identifier: "device" }],
+                responses: [
+                    { ...VALID_IDKIT_RESPONSE.responses[0], identifier: "selfie" },
+                ],
             }),
-        ).toThrow("responses[0].identifier must be orb");
+        ).toThrow("responses[0].identifier must be proof_of_human (Orb-verified human)");
+    });
+
+    it("rejects the legacy placeholder identifier 'orb'", () => {
+        expect(() =>
+            parseIdkitResponse({
+                ...VALID_IDKIT_RESPONSE,
+                responses: [{ ...VALID_IDKIT_RESPONSE.responses[0], identifier: "orb" }],
+            }),
+        ).toThrow("responses[0].identifier must be proof_of_human (Orb-verified human)");
+    });
+
+    it("rejects a non-Orb issuer_schema_id (e.g. 11 = selfie)", () => {
+        expect(() =>
+            parseIdkitResponse({
+                ...VALID_IDKIT_RESPONSE,
+                responses: [
+                    { ...VALID_IDKIT_RESPONSE.responses[0], issuer_schema_id: 11 },
+                ],
+            }),
+        ).toThrow("responses[0].issuer_schema_id must be 1 (Orb proof_of_human credential)");
+    });
+
+    it("rejects a missing issuer_schema_id", () => {
+        const { issuer_schema_id: _schema, ...responseWithout } =
+            VALID_IDKIT_RESPONSE.responses[0];
+        expect(() =>
+            parseIdkitResponse({
+                ...VALID_IDKIT_RESPONSE,
+                responses: [responseWithout],
+            }),
+        ).toThrow("responses[0].issuer_schema_id must be 1 (Orb proof_of_human credential)");
     });
 
     it("rejects missing signal_hash", () => {

@@ -62,8 +62,20 @@ export function buildIdentitySubmitRequest(
 
 /**
  * Validates that `value` is a well-formed IDKit v4 response and returns it
- * as-is (no remapping). Mirrors the TEE `uniqueness_proof()` validation so
- * malformed payloads are caught client-side before the network round-trip.
+ * as-is (no remapping). Catches malformed payloads client-side before the
+ * network round-trip.
+ *
+ * Only an Orb-verified unique-human credential is accepted: the World ID v4
+ * `proof_of_human` credential (`issuer_schema_id: 1`), which is issued by the
+ * Orb iris scan. Weaker proofs (device-only legacy, selfie, passport, mnc) are
+ * rejected here so that someone who has not completed Orb verification cannot
+ * pass identity verification.
+ *
+ * Note: the enclave (`uniqueness_proof()` in
+ * nautilus/verifiers/membership/tee/src/core/types.rs) currently still expects
+ * the placeholder `identifier == "orb"`; aligning the enclave to the real
+ * `proof_of_human` identifier is the declared World ID v4 follow-up (#212,
+ * docs/webapp.md:506). The dapp forwards the real IDKit identifier faithfully.
  */
 export function parseIdkitResponse(value: unknown): Record<string, unknown> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -97,8 +109,16 @@ export function parseIdkitResponse(value: unknown): Record<string, unknown> {
     }
     const r = response as Record<string, unknown>;
 
-    if (r.identifier !== "orb") {
-        throw new Error("World ID responses[0].identifier must be orb");
+    if (r.identifier !== "proof_of_human") {
+        throw new Error(
+            "World ID responses[0].identifier must be proof_of_human (Orb-verified human)",
+        );
+    }
+
+    if (r.issuer_schema_id !== 1) {
+        throw new Error(
+            "World ID responses[0].issuer_schema_id must be 1 (Orb proof_of_human credential)",
+        );
     }
 
     if (typeof r.signal_hash !== "string" || r.signal_hash.length === 0) {
