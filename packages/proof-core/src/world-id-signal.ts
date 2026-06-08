@@ -1,4 +1,5 @@
-import { bytesToPrefixedHex, type PrefixedHex32, sha256Bytes } from "./bytes.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToPrefixedHex, type PrefixedHex32 } from "./bytes.js";
 
 /**
  * Domain prefix for the World ID `signal_hash` binding.
@@ -13,9 +14,10 @@ export const WORLD_ID_SIGNAL_HASH_PREFIX = "sonari:world_id_signal:v1";
 /**
  * Derives the World ID `signal_hash` exactly as the enclave does in
  * `compute_world_id_signal_hash`
- * (nautilus/verifiers/membership/tee/src/core/processing.rs): `sha256` over the
- * NUL-joined `prefix, owner, membership_id, signed_statement_hash`, each id
- * canonicalised to a lowercase 0x-hex 32-byte string.
+ * (nautilus/verifiers/membership/tee/src/core/processing.rs): World ID v4
+ * hashToField over the NUL-joined
+ * `prefix, owner, membership_id, signed_statement_hash`, each id canonicalised
+ * to a lowercase 0x-hex 32-byte string.
  *
  * The enclave's trusted-boundary check rejects any request whose `signal_hash`
  * is not this binding, so the value is derived from the request fields rather
@@ -33,7 +35,18 @@ export async function computeWorldIdSignalHash(
         canonicalHex32Lower(signedStatementHash, "signed_statement_hash"),
     ];
     const encoded = new TextEncoder().encode(parts.join("\0"));
-    return bytesToPrefixedHex(await sha256Bytes(encoded));
+    return hashToFieldBytes(encoded);
+}
+
+/**
+ * Implements World ID v4 hashToField:
+ * `uint256(keccak256(input_bytes)) >> 8` encoded back as 32 big-endian bytes.
+ */
+export function hashToFieldBytes(inputBytes: Uint8Array): PrefixedHex32 {
+    const digest = keccak_256(inputBytes);
+    const fieldBytes = new Uint8Array(32);
+    fieldBytes.set(digest.subarray(0, 31), 1);
+    return bytesToPrefixedHex(fieldBytes);
 }
 
 /**

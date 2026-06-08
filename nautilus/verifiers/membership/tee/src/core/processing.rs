@@ -7,6 +7,7 @@ use crate::{
     VERIFIER_FAMILY, VERIFIER_VERSION, compute_world_id_duplicate_key_hash,
     encoding::identity_bcs::payload_bcs_bytes,
 };
+use sha3::{Digest, Keccak256};
 use sonari_tee_core::{PayloadSigner, SignatureArtifact, hex_to_32, sha256_bytes, to_hex};
 
 const IDENTITY_EVIDENCE_HASH_PREFIX: &str = "sonari:identity_evidence:v1";
@@ -98,7 +99,14 @@ pub fn compute_world_id_signal_hash(
         }
     }
 
-    Ok(to_hex(&sha256_bytes(parts.join("\0").as_bytes())))
+    Ok(hash_to_field_bytes(parts.join("\0").as_bytes()))
+}
+
+fn hash_to_field_bytes(input_bytes: &[u8]) -> String {
+    let digest = Keccak256::digest(input_bytes);
+    let mut field_bytes = [0u8; 32];
+    field_bytes[1..].copy_from_slice(&digest[..31]);
+    to_hex(&field_bytes)
 }
 
 pub fn compute_identity_evidence_hash(
@@ -256,7 +264,7 @@ fn canonical_hex_32_lower(field: &str, value: &str) -> Result<String, IdentityEr
 mod tests {
     use super::{
         IDENTITY_RESULT_TTL_MS, IdentityProcessingStatus, compute_identity_evidence_hash,
-        compute_world_id_signal_hash, process_identity_with_verifier,
+        compute_world_id_signal_hash, hash_to_field_bytes, process_identity_with_verifier,
     };
     use crate::{
         IdentityProvider, IdentityVerifyRequest, KYC_UNSUPPORTED, WORLD_ID_ACTION,
@@ -521,18 +529,29 @@ mod tests {
     }
 
     #[test]
+    fn world_id_hash_to_field_matches_official_vectors() {
+        let vectors = golden_vectors();
+        for vector in vectors.official_hash_to_field {
+            assert_eq!(
+                hash_to_field_bytes(&vector.input_bytes()),
+                vector.expected_hash_to_field,
+                "{}",
+                vector.name
+            );
+        }
+    }
+
+    #[test]
     fn world_id_signal_hash_matches_fixed_formula() {
+        let vector = golden_vectors().sonari_signal_hash;
         let signal_hash = compute_world_id_signal_hash(
-            "0x3333333333333333333333333333333333333333333333333333333333333333",
-            "0x2222222222222222222222222222222222222222222222222222222222222222",
-            "0x6666666666666666666666666666666666666666666666666666666666666666",
+            &vector.owner,
+            &vector.membership_id,
+            &vector.signed_statement_hash,
         )
         .unwrap();
 
-        assert_eq!(
-            signal_hash,
-            "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
-        );
+        assert_eq!(signal_hash, vector.expected_signal_hash);
     }
 
     #[test]
@@ -593,7 +612,7 @@ mod tests {
                 proof: "0xproof".to_owned(),
                 verification_level: "orb".to_owned(),
                 action: WORLD_ID_ACTION.to_owned(),
-                signal_hash: "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268"
+                signal_hash: "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47"
                     .to_owned(),
             }),
             ..base_request()
@@ -619,5 +638,43 @@ mod tests {
 
     fn upper_hex_digits(value: &str) -> String {
         format!("0x{}", value.trim_start_matches("0x").to_ascii_uppercase())
+    }
+
+    #[derive(serde::Deserialize)]
+    struct GoldenVectors {
+        official_hash_to_field: Vec<OfficialHashToFieldVector>,
+        sonari_signal_hash: SonariSignalHashVector,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct OfficialHashToFieldVector {
+        name: String,
+        input_bytes_hex: String,
+        expected_hash_to_field: String,
+    }
+
+    impl OfficialHashToFieldVector {
+        fn input_bytes(&self) -> Vec<u8> {
+            let hex = self
+                .input_bytes_hex
+                .strip_prefix("0x")
+                .expect("golden vector input_bytes_hex must be 0x-prefixed");
+            hex::decode(hex).expect("golden vector input_bytes_hex must be valid hex")
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct SonariSignalHashVector {
+        owner: String,
+        membership_id: String,
+        signed_statement_hash: String,
+        expected_signal_hash: String,
+    }
+
+    fn golden_vectors() -> GoldenVectors {
+        serde_json::from_str(include_str!(
+            "../../../../../../packages/proof-core/src/fixtures/world-id-signal-hash-vectors.json"
+        ))
+        .expect("world-id signal hash golden vectors must be valid JSON")
     }
 }

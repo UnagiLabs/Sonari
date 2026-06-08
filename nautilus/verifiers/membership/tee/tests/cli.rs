@@ -512,7 +512,7 @@ fn world_id_request() -> serde_json::Value {
             "proof": "0xproof",
             "verification_level": "orb",
             "action": "sonari_membership_register_v1",
-            "signal_hash": "0x34b7cb40efe9b84ed3c26b036f2691f75c3bb1ecbfa695baf147a372aa2e3268",
+            "signal_hash": "0x004c584cd5e136507a762e7bc3bdd3f2e2535f5d32a7c6f343e17377886cca47",
         },
     })
 }
