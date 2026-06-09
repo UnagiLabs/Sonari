@@ -1010,3 +1010,97 @@ function nullableNumber(input: unknown): number | null {
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
 }
+
+// ---------------------------------------------------------------------------
+// DynamoDB Streams event types (aws-lambda 非依存の最小型定義)
+// ---------------------------------------------------------------------------
+
+export interface DynamoDbStreamRecordImage {
+    readonly job_id?: { readonly S?: string };
+}
+
+export interface DynamoDbStreamRecord {
+    readonly eventName?: string;
+    readonly dynamodb?: {
+        readonly NewImage?: DynamoDbStreamRecordImage;
+        readonly Keys?: DynamoDbStreamRecordImage;
+    };
+}
+
+export interface DynamoDbStreamEvent {
+    readonly Records?: ReadonlyArray<DynamoDbStreamRecord>;
+}
+
+// ---------------------------------------------------------------------------
+// Job stream handler
+// ---------------------------------------------------------------------------
+
+export interface JobStreamHandlerOptions {
+    readonly repository: VerificationJobRepository;
+    readonly workflow: WorkflowStarter;
+    readonly now?: () => number;
+}
+
+export interface JobStreamHandlerResult {
+    readonly workflow_started: number;
+}
+
+function extractJobId(record: DynamoDbStreamRecord): string | undefined {
+    const fromNewImage = record.dynamodb?.NewImage?.job_id?.S;
+    if (fromNewImage !== undefined && fromNewImage !== "") {
+        return fromNewImage;
+    }
+    const fromKeys = record.dynamodb?.Keys?.job_id?.S;
+    if (fromKeys !== undefined && fromKeys !== "") {
+        return fromKeys;
+    }
+    return undefined;
+}
+
+function isExecutionAlreadyExists(error: unknown): boolean {
+    return isRecord(error) && error.name === "ExecutionAlreadyExists";
+}
+
+export function createJobStreamHandler(options: JobStreamHandlerOptions) {
+    return async function jobStreamHandler(
+        event: DynamoDbStreamEvent,
+    ): Promise<JobStreamHandlerResult> {
+        const nowMs = options.now?.() ?? Date.now();
+        let workflowStarted = 0;
+
+        for (const record of event.Records ?? []) {
+            const jobId = extractJobId(record);
+            if (jobId === undefined) {
+                continue;
+            }
+
+            const claimed = await options.repository.claimJob(jobId, nowMs);
+            if (claimed === null) {
+                continue;
+            }
+
+            try {
+                await options.workflow.start({
+                    jobId: claimed.jobId,
+                    executionName: claimed.executionName,
+                    attempt: claimed.attempt,
+                });
+                workflowStarted += 1;
+            } catch (error) {
+                if (isExecutionAlreadyExists(error)) {
+                    // 重複実行名は成功扱い。processing のまま markRetry しない。
+                    workflowStarted += 1;
+                } else {
+                    await options.repository.markRetry(
+                        claimed.jobId,
+                        nowMs,
+                        nowMs + DEFAULT_RETRY_BACKOFF_MS,
+                        error instanceof Error ? error.message : String(error),
+                    );
+                }
+            }
+        }
+
+        return { workflow_started: workflowStarted };
+    };
+}
