@@ -106,23 +106,23 @@ describe("bytesToPrefixedHex", () => {
 });
 
 describe("sha256Hex", () => {
-    it('produces the standard SHA-256 vector for "abc"', async () => {
+    it('produces the standard SHA-256 vector for "abc"', () => {
         const input = new TextEncoder().encode("abc");
-        const result = await sha256Hex(input);
+        const result = sha256Hex(input);
         expect(result).toBe("0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     });
 });
 
 describe("sha256Bytes", () => {
-    it("returns 32 bytes for arbitrary input", async () => {
-        const result = await sha256Bytes(new Uint8Array(0));
+    it("returns 32 bytes for arbitrary input", () => {
+        const result = sha256Bytes(new Uint8Array(0));
         expect(result.length).toBe(32);
     });
 
-    it("matches sha256Hex output", async () => {
+    it("matches sha256Hex output", () => {
         const input = new TextEncoder().encode("hello");
-        const bytes = await sha256Bytes(input);
-        const hex = await sha256Hex(input);
+        const bytes = sha256Bytes(input);
+        const hex = sha256Hex(input);
         expect(bytesToPrefixedHex(bytes)).toBe(hex);
     });
 });
