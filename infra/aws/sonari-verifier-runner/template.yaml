@@ -21,7 +21,7 @@ Parameters:
     Description: Git commit SHA deployed by this stack update.
   ScheduleExpression:
     Type: String
-    Default: rate(12 hours)
+    Default: cron(0 0,12 * * ? *)
   MembershipScheduleExpression:
     Type: String
     Default: rate(1 day)
@@ -1679,6 +1679,7 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       ScheduleExpression: !Ref ScheduleExpression
+      ScheduleExpressionTimezone: Asia/Tokyo
       State: !Ref ScheduleState
       FlexibleTimeWindow:
         Mode: "OFF"
