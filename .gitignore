@@ -12,6 +12,7 @@ dist/
 dapp/.next/
 dapp/next-env.d.ts
 dapp/out/
+dapp/.open-next/
 site/.next/
 site/next-env.d.ts
 site/out/

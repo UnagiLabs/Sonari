@@ -6,8 +6,21 @@ node_modules/
 out/
 next-env.d.ts
 
+# OpenNext / Cloudflare generated output
+# .open-next/ はビルド成果物。cloudflare-env.d.ts は cf-typegen の生成物で commit しない
+# （CI が deploy 前に再生成する）。.wrangler/ は wrangler のローカルキャッシュ。
+.open-next/
+.wrangler/
+cloudflare-env.d.ts
+
 # Local environment files
 .env*.local
+
+# Local Worker secrets（wrangler dev / opennext preview が読む）。
+# 値入りはコミットしない。サンプルの .dev.vars.example だけは追跡する。
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 
 # Logs
 npm-debug.log*
