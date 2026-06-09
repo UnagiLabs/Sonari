@@ -146,6 +146,32 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         );
     });
 
+    it("overrides NitroEnclaveMemoryMiB with the 4096 default so PR #230 reaches the stack", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan(validInput);
+
+        expect(plan.parameterOverrides.NitroEnclaveMemoryMiB).toBe("4096");
+        expect(plan.parameterOverrideArgs).toContain("NitroEnclaveMemoryMiB=4096");
+    });
+
+    it("honors an explicit nitroEnclaveMemoryMiB override", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan({
+            ...validInput,
+            nitroEnclaveMemoryMiB: 8192,
+        });
+
+        expect(plan.parameterOverrides.NitroEnclaveMemoryMiB).toBe("8192");
+        expect(plan.parameterOverrideArgs).toContain("NitroEnclaveMemoryMiB=8192");
+    });
+
+    it("fails closed when nitroEnclaveMemoryMiB is not a positive integer", () => {
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                nitroEnclaveMemoryMiB: 0,
+            }),
+        ).toThrow("Invalid nitro enclave memory MiB");
+    });
+
     it("fails closed before planning a mainnet deploy with dummy World ID proof mode", () => {
         expect(() =>
             buildAwsSonariVerifierRunnerDeployPlan({
