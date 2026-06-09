@@ -348,8 +348,8 @@ describe("AWS Sonari verifier runner README", () => {
         // verifier_kind is added.
         expectContainsAll(readme, ["RELAYER_MODE", "RELAYER_NETWORK", "earthquake"]);
 
-        // The README must mention that the earthquake schedule default rate(5 minutes)
+        // The README must mention that the earthquake schedule default rate(12 hours)
         // must not be changed when extending to a third verifier kind.
-        expect(readme).toContain("rate(5 minutes)");
+        expect(readme).toContain("rate(12 hours)");
     });
 });
