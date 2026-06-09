@@ -49,44 +49,44 @@ const LEAF_THREE_PROOF: readonly ProofStep[] = [
 ];
 
 describe("replayProof", () => {
-    it("replays 1-step proof using the sample_proof.json golden vector", async () => {
+    it("replays 1-step proof using the sample_proof.json golden vector", () => {
         const step: ProofStep = {
             sibling_on_left: true,
             sibling_hash: GOLDEN_SIBLING,
         };
-        const root = await replayProof(GOLDEN_LEAF_HASH, [step]);
+        const root = replayProof(GOLDEN_LEAF_HASH, [step]);
         expect(root).toBe(GOLDEN_ROOT);
     });
 
-    it("returns leaf hash when proof is empty", async () => {
-        const result = await replayProof(LEAF_ONE_HASH, []);
+    it("returns leaf hash when proof is empty", () => {
+        const result = replayProof(LEAF_ONE_HASH, []);
         expect(result).toBe(LEAF_ONE_HASH);
     });
 
-    it("replays multi-step proofs consistent with Rust golden vectors (leaf one)", async () => {
-        expect(await replayProof(LEAF_ONE_HASH, LEAF_ONE_PROOF)).toBe(MERKLE_ROOT);
+    it("replays multi-step proofs consistent with Rust golden vectors (leaf one)", () => {
+        expect(replayProof(LEAF_ONE_HASH, LEAF_ONE_PROOF)).toBe(MERKLE_ROOT);
     });
 
-    it("replays multi-step proofs consistent with Rust golden vectors (leaf two)", async () => {
-        expect(await replayProof(LEAF_TWO_HASH, LEAF_TWO_PROOF)).toBe(MERKLE_ROOT);
+    it("replays multi-step proofs consistent with Rust golden vectors (leaf two)", () => {
+        expect(replayProof(LEAF_TWO_HASH, LEAF_TWO_PROOF)).toBe(MERKLE_ROOT);
     });
 
-    it("replays multi-step proofs consistent with Rust golden vectors (leaf three)", async () => {
-        expect(await replayProof(LEAF_THREE_HASH, LEAF_THREE_PROOF)).toBe(MERKLE_ROOT);
+    it("replays multi-step proofs consistent with Rust golden vectors (leaf three)", () => {
+        expect(replayProof(LEAF_THREE_HASH, LEAF_THREE_PROOF)).toBe(MERKLE_ROOT);
     });
 
-    it("throws for invalid leaf hash format", async () => {
-        await expect(replayProof("not-a-hash", [])).rejects.toThrow(
+    it("throws for invalid leaf hash format", () => {
+        expect(() => replayProof("not-a-hash", [])).toThrow(
             /must be a lowercase 0x-prefixed 32-byte hex string/,
         );
     });
 
-    it("throws for invalid sibling hash format", async () => {
+    it("throws for invalid sibling hash format", () => {
         const badStep: ProofStep = {
             sibling_on_left: false,
             sibling_hash: "0xinvalid" as `0x${string}`,
         };
-        await expect(replayProof(LEAF_ONE_HASH, [badStep])).rejects.toThrow(
+        expect(() => replayProof(LEAF_ONE_HASH, [badStep])).toThrow(
             /must be a lowercase 0x-prefixed 32-byte hex string/,
         );
     });
@@ -97,33 +97,33 @@ describe("replayProof", () => {
 // ---------------------------------------------------------------------------
 
 describe("merkleRootFromLeafHashes", () => {
-    it("returns the correct golden root for 2-leaf tree (expected_hashes.json)", async () => {
+    it("returns the correct golden root for 2-leaf tree (expected_hashes.json)", () => {
         // leaf_hashes array order from expected_hashes.json
         const leafHashes = [
             "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f" as const,
             "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f" as const,
         ];
-        const root = await merkleRootFromLeafHashes(leafHashes);
+        const root = merkleRootFromLeafHashes(leafHashes);
         expect(root).toBe(GOLDEN_ROOT);
     });
 
-    it("returns the single leaf as root for a 1-leaf tree", async () => {
-        const root = await merkleRootFromLeafHashes([GOLDEN_LEAF_HASH]);
+    it("returns the single leaf as root for a 1-leaf tree", () => {
+        const root = merkleRootFromLeafHashes([GOLDEN_LEAF_HASH]);
         expect(root).toBe(GOLDEN_LEAF_HASH);
     });
 
-    it("throws for empty leaf array", async () => {
-        await expect(merkleRootFromLeafHashes([])).rejects.toThrow(/empty Merkle tree/);
+    it("throws for empty leaf array", () => {
+        expect(() => merkleRootFromLeafHashes([])).toThrow(/empty Merkle tree/);
     });
 });
 
 describe("proofStepsFromLevels (2-leaf golden)", () => {
-    it("returns a single sibling_on_left step for index 1 matching sample_proof.json", async () => {
+    it("returns a single sibling_on_left step for index 1 matching sample_proof.json", () => {
         const leafHashes = [
             "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f" as const,
             "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f" as const,
         ];
-        const levels = await merkleLevelsFromLeafHashes(leafHashes);
+        const levels = merkleLevelsFromLeafHashes(leafHashes);
         const steps = proofStepsFromLevels(levels, 1);
         expect(steps).toHaveLength(1);
         expect(steps[0]).toEqual({
@@ -132,12 +132,12 @@ describe("proofStepsFromLevels (2-leaf golden)", () => {
         });
     });
 
-    it("returns a single sibling_on_right step for index 0", async () => {
+    it("returns a single sibling_on_right step for index 0", () => {
         const leafHashes = [
             "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f" as const,
             "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f" as const,
         ];
-        const levels = await merkleLevelsFromLeafHashes(leafHashes);
+        const levels = merkleLevelsFromLeafHashes(leafHashes);
         const steps = proofStepsFromLevels(levels, 0);
         expect(steps).toHaveLength(1);
         expect(steps[0]).toEqual({
@@ -146,41 +146,41 @@ describe("proofStepsFromLevels (2-leaf golden)", () => {
         });
     });
 
-    it("throws for out-of-range leafIndex", async () => {
+    it("throws for out-of-range leafIndex", () => {
         const leafHashes = [
             "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f" as const,
         ];
-        const levels = await merkleLevelsFromLeafHashes(leafHashes);
+        const levels = merkleLevelsFromLeafHashes(leafHashes);
         expect(() => proofStepsFromLevels(levels, -1)).toThrow();
         expect(() => proofStepsFromLevels(levels, 1)).toThrow();
     });
 });
 
 describe("generation <-> verification closure (2-leaf)", () => {
-    it("replayProof on generated proof reproduces root for both indices", async () => {
+    it("replayProof on generated proof reproduces root for both indices", () => {
         const leafHashes: import("./bytes.js").PrefixedHex32[] = [
             "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
             "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
         ];
-        const levels = await merkleLevelsFromLeafHashes(leafHashes);
-        const root = await merkleRootFromLeafHashes(leafHashes);
+        const levels = merkleLevelsFromLeafHashes(leafHashes);
+        const root = merkleRootFromLeafHashes(leafHashes);
         for (const leaf of leafHashes) {
             const i = leafHashes.indexOf(leaf);
             const steps = proofStepsFromLevels(levels, i);
-            const replayed = await replayProof(leaf, steps);
+            const replayed = replayProof(leaf, steps);
             expect(replayed).toBe(root);
         }
     });
 });
 
 describe("generation <-> verification closure (1-leaf)", () => {
-    it("replayProof on empty proof returns the single leaf as root", async () => {
+    it("replayProof on empty proof returns the single leaf as root", () => {
         const leafHashes: import("./bytes.js").PrefixedHex32[] = [GOLDEN_LEAF_HASH];
-        const levels = await merkleLevelsFromLeafHashes(leafHashes);
-        const root = await merkleRootFromLeafHashes(leafHashes);
+        const levels = merkleLevelsFromLeafHashes(leafHashes);
+        const root = merkleRootFromLeafHashes(leafHashes);
         const steps = proofStepsFromLevels(levels, 0);
         expect(steps).toHaveLength(0);
-        const replayed = await replayProof(GOLDEN_LEAF_HASH, steps);
+        const replayed = replayProof(GOLDEN_LEAF_HASH, steps);
         expect(replayed).toBe(root);
     });
 });
@@ -193,24 +193,24 @@ describe("generation <-> verification closure (3-leaf, odd promotion)", () => {
         LEAF_THREE_HASH,
     ];
 
-    it("merkleRootFromLeafHashes matches the Rust golden root", async () => {
-        const root = await merkleRootFromLeafHashes(THREE_LEAVES);
+    it("merkleRootFromLeafHashes matches the Rust golden root", () => {
+        const root = merkleRootFromLeafHashes(THREE_LEAVES);
         expect(root).toBe(MERKLE_ROOT);
     });
 
-    it("replayProof reproduces root for all three indices", async () => {
-        const levels = await merkleLevelsFromLeafHashes(THREE_LEAVES);
-        const root = await merkleRootFromLeafHashes(THREE_LEAVES);
+    it("replayProof reproduces root for all three indices", () => {
+        const levels = merkleLevelsFromLeafHashes(THREE_LEAVES);
+        const root = merkleRootFromLeafHashes(THREE_LEAVES);
         for (const leaf of THREE_LEAVES) {
             const i = THREE_LEAVES.indexOf(leaf);
             const steps = proofStepsFromLevels(levels, i);
-            const replayed = await replayProof(leaf, steps);
+            const replayed = replayProof(leaf, steps);
             expect(replayed).toBe(root);
         }
     });
 
-    it("index 2 (odd tail) has no level-0 step (promoted without hashing)", async () => {
-        const levels = await merkleLevelsFromLeafHashes(THREE_LEAVES);
+    it("index 2 (odd tail) has no level-0 step (promoted without hashing)", () => {
+        const levels = merkleLevelsFromLeafHashes(THREE_LEAVES);
         const steps = proofStepsFromLevels(levels, 2);
         // level 0 has 3 nodes: index 2 is the lone tail (odd), so no sibling at level 0
         // the proof ascends directly from level 1

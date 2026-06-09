@@ -193,9 +193,9 @@ describe("affectedCellLeavesFromInput", () => {
 // ---------------------------------------------------------------------------
 
 describe("affectedCellsLeafHashes", () => {
-    it("returns leaf hashes matching expected_hashes.json in order", async () => {
+    it("returns leaf hashes matching expected_hashes.json in order", () => {
         const input = parseAffectedCellsFile(affectedJson);
-        const hashes = await affectedCellsLeafHashes(input);
+        const hashes = affectedCellsLeafHashes(input);
         expect(hashes).toHaveLength(expectedHashes.leaf_hashes.length);
         for (let i = 0; i < hashes.length; i++) {
             expect(hashes[i]?.h3_index).toBe(expectedHashes.leaf_hashes[i]?.h3_index);
@@ -209,9 +209,9 @@ describe("affectedCellsLeafHashes", () => {
 // ---------------------------------------------------------------------------
 
 describe("affectedCellsRoot", () => {
-    it("returns the expected_hashes.affected_cells_root golden value", async () => {
+    it("returns the expected_hashes.affected_cells_root golden value", () => {
         const input = parseAffectedCellsFile(affectedJson);
-        const root = await affectedCellsRoot(input);
+        const root = affectedCellsRoot(input);
         expect(root).toBe(expectedHashes.affected_cells_root);
         // Explicitly: 0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f
         expect(root).toBe("0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f");
@@ -223,10 +223,10 @@ describe("affectedCellsRoot", () => {
 // ---------------------------------------------------------------------------
 
 describe("affectedCellProofSteps", () => {
-    it("generates proof for target cell matching sample_proof.json direction format", async () => {
+    it("generates proof for target cell matching sample_proof.json direction format", () => {
         const input = parseAffectedCellsFile(affectedJson);
         const targetH3 = sampleProof.target_leaf.h3_index; // "608819013597790207"
-        const steps = await affectedCellProofSteps(input, targetH3);
+        const steps = affectedCellProofSteps(input, targetH3);
         const directional = steps.map(proofStepToDirectional);
         expect(directional).toHaveLength(sampleProof.proof.length);
         for (let i = 0; i < directional.length; i++) {
@@ -235,18 +235,18 @@ describe("affectedCellProofSteps", () => {
         }
     });
 
-    it("throws for h3_index not present in the input", async () => {
+    it("throws for h3_index not present in the input", () => {
         const input = parseAffectedCellsFile(affectedJson);
-        await expect(affectedCellProofSteps(input, "9999999999999999999")).rejects.toThrow();
+        expect(() => affectedCellProofSteps(input, "9999999999999999999")).toThrow();
     });
 
-    it("replaying proof with converted steps reproduces the root", async () => {
+    it("replaying proof with converted steps reproduces the root", () => {
         const input = parseAffectedCellsFile(affectedJson);
-        const root = await affectedCellsRoot(input);
+        const root = affectedCellsRoot(input);
         const targetH3 = sampleProof.target_leaf.h3_index;
         const leafHash = sampleProof.target_leaf.leaf_hash;
-        const steps = await affectedCellProofSteps(input, targetH3);
-        const replayed = await replayProof(leafHash, steps);
+        const steps = affectedCellProofSteps(input, targetH3);
+        const replayed = replayProof(leafHash, steps);
         expect(replayed).toBe(root);
     });
 });
@@ -296,9 +296,9 @@ describe("proofStepToDirectional / directionalToProofStep round-trip", () => {
         expect(step.sibling_on_left).toBe(false);
     });
 
-    it("round-trip proofStep -> directional -> proofStep is identity", async () => {
+    it("round-trip proofStep -> directional -> proofStep is identity", () => {
         const input = parseAffectedCellsFile(affectedJson);
-        const steps = await affectedCellProofSteps(input, sampleProof.target_leaf.h3_index);
+        const steps = affectedCellProofSteps(input, sampleProof.target_leaf.h3_index);
         for (const step of steps) {
             const roundTripped = directionalToProofStep(proofStepToDirectional(step));
             expect(roundTripped.sibling_on_left).toBe(step.sibling_on_left);
@@ -306,7 +306,7 @@ describe("proofStepToDirectional / directionalToProofStep round-trip", () => {
         }
     });
 
-    it("round-trip directional -> proofStep -> directional is identity", async () => {
+    it("round-trip directional -> proofStep -> directional is identity", () => {
         for (const d of sampleProof.proof as DirectionalProofStep[]) {
             const roundTripped = proofStepToDirectional(directionalToProofStep(d));
             expect(roundTripped.direction).toBe(d.direction);

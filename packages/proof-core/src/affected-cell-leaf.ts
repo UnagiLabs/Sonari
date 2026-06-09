@@ -140,6 +140,6 @@ export function serializeAffectedCellLeaf(leaf: AffectedCellLeaf): Uint8Array {
  * Compute the leaf hash for an AffectedCellLeaf.
  * leaf hash = SHA-256(0x00 || BCS)
  */
-export async function affectedCellLeafHash(leaf: AffectedCellLeaf): Promise<PrefixedHex32> {
+export function affectedCellLeafHash(leaf: AffectedCellLeaf): PrefixedHex32 {
     return hashLeafBytes(serializeAffectedCellLeaf(leaf));
 }
