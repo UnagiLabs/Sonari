@@ -12,7 +12,7 @@ describe("Nautilus live oracle E2E harness", () => {
         vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
             const url = String(input);
             requests.push(url);
-            if (url.endsWith("/all_hour.geojson")) {
+            if (url.endsWith("/all_day.geojson")) {
                 return Response.json({ features: [] });
             }
             return new Response("missing", { status: 404 });
