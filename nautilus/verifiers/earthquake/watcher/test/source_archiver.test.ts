@@ -18,6 +18,8 @@ import {
     type WalrusSdkStoreConfig,
     type WalrusSdkStoreClientFactory,
     WalrusSdkStoreRunner,
+    type WalrusStoreClock,
+    type WalrusSdkStoreRunnerOptions,
     type WalrusStoreResult,
     type WalrusStoreRunner,
 } from "../src/source_archiver.js";
@@ -382,7 +384,9 @@ describe("source archiver Walrus store", () => {
     at walrus secret token frame
     at writeBlob`;
         const logger = new RecordingSourceArchiverLogger();
-        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, logger.log);
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, logger.log, {
+            clock: instantClock,
+        });
 
         await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
             kind: "retryable",
@@ -595,7 +599,12 @@ class RecordingWalrusSdkClientFactory implements WalrusSdkStoreClientFactory {
     }> = [];
     readonly writeBlobInputs: Array<Parameters<WalrusSdkStoreClient["walrus"]["writeBlob"]>[0]> =
         [];
+    /** Always throws on every call. Takes precedence over failWriteTimes. */
     failWrite?: Error;
+    /** Throws on the first N calls, then succeeds. */
+    failWriteTimes?: number;
+    /** Error to throw when failWriteTimes applies. Defaults to a generic 502-like error. */
+    failWriteError?: Error;
 
     constructor(
         private readonly result: {
@@ -618,6 +627,12 @@ class RecordingWalrusSdkClientFactory implements WalrusSdkStoreClientFactory {
                     this.writeBlobInputs.push(writeInput);
                     if (this.failWrite !== undefined) {
                         throw this.failWrite;
+                    }
+                    if (
+                        this.failWriteTimes !== undefined &&
+                        this.writeBlobInputs.length <= this.failWriteTimes
+                    ) {
+                        throw this.failWriteError ?? new Error("walrus upload relay 502");
                     }
                     await writeInput.onStep?.({
                         step: "registered",
@@ -721,3 +736,204 @@ describe("source archiver backoff delay", () => {
 function sha256Hex(bytes: Uint8Array): string {
     return `0x${createHash("sha256").update(bytes).digest("hex")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Helpers shared by the retry describe block
+// ---------------------------------------------------------------------------
+
+/** Clock that resolves sleep immediately and runs op() directly (no real timers). */
+const instantClock: WalrusStoreClock = {
+    sleep: () => Promise.resolve(),
+    runWithTimeout: <T>(_ms: number, op: () => Promise<T>) => op(),
+};
+
+// ---------------------------------------------------------------------------
+// source archiver Walrus store retry
+// ---------------------------------------------------------------------------
+
+describe("source archiver Walrus store retry", () => {
+    it("retries once on transient failure and succeeds", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+            txDigest: validTxDigest,
+        });
+        sdk.failWriteTimes = 1; // first call throws, second succeeds
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, undefined, {
+            clock: instantClock,
+            random: () => 0,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toMatchObject({
+            walrusBlobId: "testBlob_123456",
+        });
+        expect(sdk.writeBlobInputs).toHaveLength(2);
+    });
+
+    it("stops retrying after maxAttempts exhausted and rejects with retryable", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+        });
+        sdk.failWriteTimes = 10; // always fails within 3 attempts
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, undefined, {
+            retryPolicy: { maxAttempts: 3 },
+            clock: instantClock,
+            random: () => 0,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "retryable",
+            statusCode: 502,
+        });
+        expect(sdk.writeBlobInputs).toHaveLength(3);
+    });
+
+    it("does not retry on bad_request error", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+        });
+        sdk.failWriteTimes = 1;
+        sdk.failWriteError = new SourceArchiverError("invalid blob", "bad_request", 400);
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, undefined, {
+            clock: instantClock,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "bad_request",
+            statusCode: 400,
+        });
+        expect(sdk.writeBlobInputs).toHaveLength(1);
+    });
+
+    it("does not retry on configuration error", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+        });
+        sdk.failWriteTimes = 1;
+        sdk.failWriteError = new SourceArchiverError("misconfigured", "configuration", 500);
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, undefined, {
+            clock: instantClock,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "configuration",
+            statusCode: 500,
+        });
+        expect(sdk.writeBlobInputs).toHaveLength(1);
+    });
+
+    it("does not retry on integrity error", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+        });
+        sdk.failWriteTimes = 1;
+        sdk.failWriteError = new SourceArchiverError("hash mismatch", "integrity", 422);
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, undefined, {
+            clock: instantClock,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "integrity",
+            statusCode: 422,
+        });
+        expect(sdk.writeBlobInputs).toHaveLength(1);
+    });
+
+    it("times out a single attempt and rejects with retryable (real timer)", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        // SDK that never resolves
+        const neverSdk: WalrusSdkStoreClientFactory = {
+            create: () => ({
+                walrus: {
+                    writeBlob: () => new Promise<never>(() => { /* intentionally never resolves */ }),
+                },
+            }),
+        };
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, neverSdk, undefined, {
+            retryPolicy: { perAttemptTimeoutMs: 5, maxAttempts: 1 },
+            // no clock override — uses real timers
+        });
+
+        await expect(runner.store(await verifiedArtifact())).rejects.toMatchObject({
+            kind: "retryable",
+        });
+    }, 2000);
+
+    it("retries after per-attempt timeout injected via clock", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        let callCount = 0;
+        // clock that simulates timeout on first runWithTimeout call, succeeds on second
+        const timeoutOnFirstClock: WalrusStoreClock = {
+            sleep: () => Promise.resolve(),
+            runWithTimeout: <T>(_ms: number, op: () => Promise<T>): Promise<T> => {
+                callCount += 1;
+                if (callCount === 1) {
+                    return Promise.reject(
+                        new SourceArchiverError("timeout", "retryable", 504),
+                    ) as Promise<T>;
+                }
+                return op();
+            },
+        };
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+            txDigest: validTxDigest,
+        });
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, undefined, {
+            retryPolicy: { maxAttempts: 3 },
+            clock: timeoutOnFirstClock,
+            random: () => 0,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toMatchObject({
+            walrusBlobId: "testBlob_123456",
+        });
+        // writeBlob is only called during the second runWithTimeout (first was short-circuited)
+        expect(sdk.writeBlobInputs).toHaveLength(1);
+    });
+
+    it("emits retry log with redacted error message and no private key leakage", async () => {
+        const privateKey = Ed25519Keypair.generate().getSecretKey();
+        const sdk = new RecordingWalrusSdkClientFactory({
+            blobId: "testBlob_123456",
+            blobObjectId: validBlobObjectId,
+            txDigest: validTxDigest,
+        });
+        sdk.failWriteTimes = 1;
+        sdk.failWriteError = Object.assign(
+            new Error(`upload failed private key ${privateKey}`),
+            { stack: `Error: upload failed private key ${privateKey}\n    at someFrame` },
+        );
+        const logger = new RecordingSourceArchiverLogger();
+        const runner = new WalrusSdkStoreRunner({ suiPrivateKey: privateKey }, sdk, logger.log, {
+            clock: instantClock,
+            random: () => 0,
+        });
+
+        await expect(runner.store(await verifiedArtifact())).resolves.toMatchObject({
+            walrusBlobId: "testBlob_123456",
+        });
+
+        const retryEvent = logger.events.find(
+            (e) => e.event === "source_archiver.walrus_store.retry",
+        );
+        expect(retryEvent).toBeDefined();
+        if (retryEvent?.event !== "source_archiver.walrus_store.retry") {
+            throw new Error("expected retry event");
+        }
+        expect(retryEvent.errorMessage).toMatch(
+            /^\[redacted-sensitive-message sha256=[0-9a-f]{64}\]$/u,
+        );
+        expect(JSON.stringify(logger.events)).not.toContain(privateKey);
+    });
+});
