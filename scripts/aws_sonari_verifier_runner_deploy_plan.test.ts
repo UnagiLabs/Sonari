@@ -163,11 +163,11 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(plan.parameterOverrideArgs).toContain("NitroEnclaveMemoryMiB=8192");
     });
 
-    it("overrides ScheduleExpression with the rate(12 hours) default so issue #235 reaches the stack", () => {
+    it("overrides ScheduleExpression with the fixed JST cron default so the watcher runs at 00:00/12:00", () => {
         const plan = buildAwsSonariVerifierRunnerDeployPlan(validInput);
 
-        expect(plan.parameterOverrides.ScheduleExpression).toBe("rate(12 hours)");
-        expect(plan.parameterOverrideArgs).toContain("ScheduleExpression=rate(12 hours)");
+        expect(plan.parameterOverrides.ScheduleExpression).toBe("cron(0 0,12 * * ? *)");
+        expect(plan.parameterOverrideArgs).toContain("ScheduleExpression=cron(0 0,12 * * ? *)");
     });
 
     it("honors an explicit scheduleExpression override", () => {
