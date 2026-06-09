@@ -3,7 +3,9 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Secp256k1Keypair } from "@mysten/sui/keypairs/secp256k1";
 import { describe, expect, it } from "vitest";
 import {
+    computeBackoffDelayMs,
     createSourceArchiverHandler,
+    DEFAULT_WALRUS_STORE_RETRY_POLICY,
     loadVerifiedSourceArtifact,
     parseSourceArchiverEvent,
     readWalrusPrivateKeySecret,
@@ -658,6 +660,63 @@ async function verifiedArtifact() {
         s3: new RecordingS3Reader(validBytes),
     });
 }
+
+describe("source archiver backoff delay", () => {
+    const policy = {
+        initialDelayMs: 500,
+        backoffRate: 2,
+        maxDelayMs: 5_000,
+        jitterRatio: 0.25,
+    };
+
+    it("returns exponential base delay when jitter is zero (attempt 0,1,2)", () => {
+        expect(computeBackoffDelayMs(policy, 0, () => 0)).toBe(500);
+        expect(computeBackoffDelayMs(policy, 1, () => 0)).toBe(1_000);
+        expect(computeBackoffDelayMs(policy, 2, () => 0)).toBe(2_000);
+    });
+
+    it("caps delay at maxDelayMs when base exceeds it", () => {
+        // attempt=10: base = 500 * 2^10 = 512_000 >> 5_000
+        expect(computeBackoffDelayMs(policy, 10, () => 0)).toBe(5_000);
+    });
+
+    it("adds jitter up to capped * jitterRatio and never exceeds maxDelayMs * (1 + jitterRatio)", () => {
+        // attempt=10 で capped=5_000。jitter上振れ最大 = 5_000 * 0.25 = 1_250
+        const maxAllowed = Math.round(policy.maxDelayMs * (1 + policy.jitterRatio));
+        const result = computeBackoffDelayMs(policy, 10, () => 0.9999);
+        expect(result).toBeGreaterThanOrEqual(5_000);
+        expect(result).toBeLessThanOrEqual(maxAllowed);
+    });
+
+    it("always returns a non-negative integer", () => {
+        for (const attempt of [0, 1, 2, 5, 10]) {
+            const result = computeBackoffDelayMs(policy, attempt, () => Math.random());
+            expect(Number.isInteger(result)).toBe(true);
+            expect(result).toBeGreaterThanOrEqual(0);
+        }
+    });
+
+    it("DEFAULT_WALRUS_STORE_RETRY_POLICY total time budget is under 210 seconds", () => {
+        const p = DEFAULT_WALRUS_STORE_RETRY_POLICY;
+        // perAttemptTimeoutMs * maxAttempts (実行時間上限)
+        const executionBudget = p.perAttemptTimeoutMs * p.maxAttempts;
+        // attempt 0 .. maxAttempts-2 の最悪バックオフ合計 (random=()=>1 相当で最大ジッタ)
+        let worstCaseBackoffTotal = 0;
+        for (let attempt = 0; attempt < p.maxAttempts - 1; attempt++) {
+            worstCaseBackoffTotal += computeBackoffDelayMs(
+                {
+                    initialDelayMs: p.initialDelayMs,
+                    backoffRate: p.backoffRate,
+                    maxDelayMs: p.maxDelayMs,
+                    jitterRatio: p.jitterRatio,
+                },
+                attempt,
+                () => 0.9999,
+            );
+        }
+        expect(executionBudget + worstCaseBackoffTotal).toBeLessThan(210_000);
+    });
+});
 
 function sha256Hex(bytes: Uint8Array): string {
     return `0x${createHash("sha256").update(bytes).digest("hex")}`;

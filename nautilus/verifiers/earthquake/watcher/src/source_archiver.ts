@@ -16,6 +16,25 @@ const DEFAULT_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.spa
 const DEFAULT_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = 1_000;
 const DEFAULT_WALRUS_EPOCHS = 1;
 const DEFAULT_WALRUS_DELETABLE = false;
+
+export interface WalrusStoreRetryPolicy {
+    maxAttempts: number;
+    initialDelayMs: number;
+    backoffRate: number;
+    maxDelayMs: number;
+    jitterRatio: number;
+    perAttemptTimeoutMs: number;
+}
+
+export const DEFAULT_WALRUS_STORE_RETRY_POLICY: WalrusStoreRetryPolicy = {
+    maxAttempts: 3,
+    initialDelayMs: 500,
+    backoffRate: 2,
+    maxDelayMs: 5_000,
+    jitterRatio: 0.25,
+    perAttemptTimeoutMs: 60_000,
+};
+
 const SENSITIVE_OUTPUT_LINE_PATTERN =
     /\b(token|secret|private|keystore|wallet|credential|password|api[_-]?key|suiprivkey)\b/iu;
 const ERROR_CAUSE_CHAIN_MAX_DEPTH = 5;
@@ -940,4 +959,18 @@ function validateWalrusBlobIdFromOutput(blobId: string): string {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+export function computeBackoffDelayMs(
+    policy: Pick<
+        WalrusStoreRetryPolicy,
+        "initialDelayMs" | "backoffRate" | "maxDelayMs" | "jitterRatio"
+    >,
+    attempt: number,
+    random: () => number,
+): number {
+    const base = policy.initialDelayMs * policy.backoffRate ** attempt;
+    const capped = Math.min(base, policy.maxDelayMs);
+    const jitter = capped * policy.jitterRatio * random();
+    return Math.max(0, Math.round(capped + jitter));
 }
