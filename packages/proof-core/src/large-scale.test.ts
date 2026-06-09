@@ -115,3 +115,43 @@ describe("large-scale regression – 4000 cells", () => {
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// Scaling guard: ensure proof generation stays sub-quadratic
+// ---------------------------------------------------------------------------
+
+/**
+ * Measure the hot path (root + all proof entries) for `count` cells, taking the
+ * best of several runs after a warm-up so JIT/GC noise does not dominate.
+ */
+function bestBuildTimeMs(count: number, runs = 3): number {
+    const input = generateLargeScaleInput(count);
+    // Warm up the JIT before timing.
+    affectedCellsRoot(input);
+    buildProofEntries(input);
+    let best = Number.POSITIVE_INFINITY;
+    for (let r = 0; r < runs; r++) {
+        const start = performance.now();
+        affectedCellsRoot(input);
+        buildProofEntries(input);
+        best = Math.min(best, performance.now() - start);
+    }
+    return best;
+}
+
+describe("large-scale regression – scaling guard (sub-quadratic)", () => {
+    it("4x the cells cost far less than quadratic time", () => {
+        // The check is a ratio, not an absolute millisecond bound, so it is
+        // independent of the CI machine speed (both sizes run on the same host).
+        // With O(n log n) the 4000/1000 ratio is ~4.8; with O(n^2) it is ~16.
+        // A regression that reintroduces per-cell tree rebuilds (the original
+        // O(n^2) bug) blows past this bound and fails CI instead of just slowing.
+        const small = bestBuildTimeMs(1000);
+        const large = bestBuildTimeMs(4000);
+        const ratio = large / small;
+        console.log(
+            `[scaling] 1000c=${small.toFixed(1)}ms 4000c=${large.toFixed(1)}ms ratio=${ratio.toFixed(2)} (O(n log n)~4.8, O(n^2)~16)`,
+        );
+        expect(ratio).toBeLessThan(10);
+    });
+});
