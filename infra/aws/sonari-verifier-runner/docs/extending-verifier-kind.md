@@ -81,6 +81,6 @@ user-data に `run-new-verifier-enclave` の wrapper スクリプトを追加し
 earthquake の runner / relayer / deploy / egress 経路は、新しい verifier_kind を追加しても変更しないでください。
 
 - **RELAYER_MODE / RELAYER_NETWORK** など `RELAYER_*` namespace の env var は earthquake 専用です。新 kind の relayer には独自 namespace を使い、`RELAYER_*` を流用または改名しないでください。
-- **rate(5 minutes)** — earthquake の `ScheduleExpression` デフォルトは `rate(5 minutes)` を保持してください。membership の `MembershipScheduleExpression` デフォルト `rate(1 day)` も変更しないでください。
+- **rate(12 hours)** — earthquake の `ScheduleExpression` デフォルトは `rate(12 hours)` を保持してください。membership の `MembershipScheduleExpression` デフォルト `rate(1 day)` も変更しないでください。
 - **egress proxy** — earthquake の CONNECT proxy（port 18081）と vsock-proxy（18080 → 127.0.0.1:18081）は `earthquake.usgs.gov:443` allowlist とともに変更しないでください。
 - **enclave CID** — `SONARI_EARTHQUAKE_ENCLAVE_CID` は `${NitroEnclaveCid}` から出力する 1 行を保持してください。

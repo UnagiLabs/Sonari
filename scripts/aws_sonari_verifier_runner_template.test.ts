@@ -641,16 +641,21 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SigningSeedCiphertextS3BucketOutput");
     });
 
-    it("defaults membership schedule to once per day and keeps earthquake schedule unchanged", async () => {
+    it("defaults membership schedule to once per day and earthquake schedule to twice per day", async () => {
         const template = await readTemplate();
 
-        // membership は 1 日 1 回が既定
-        expect(template).toContain("MembershipScheduleExpression:");
-        expect(template).toContain("Default: rate(1 day)");
+        // membership は 1 日 1 回が既定（MembershipScheduleExpression ブロックに紐付けて検証）
+        expect(template).toMatch(
+            /\n {2}MembershipScheduleExpression:\n {4}Type: String\n {4}Default: rate\(1 day\)\n/,
+        );
 
-        // earthquake は既定のまま変えない（rate(5 minutes) を保持）
-        expect(template).toContain("ScheduleExpression:");
-        expect(template).toContain("Default: rate(5 minutes)");
+        // earthquake は 1 日 2 回（12 時間ごと）が既定。
+        // membership 側を誤って書き換えても検知できるよう ScheduleExpression ブロックに紐付ける
+        expect(template).toMatch(
+            /\n {2}ScheduleExpression:\n {4}Type: String\n {4}Default: rate\(12 hours\)\n/,
+        );
+        // 旧既定 rate(5 minutes) が残っていないことを確認する
+        expect(template).not.toContain("rate(5 minutes)");
 
         // 両 schedule の State 制御は共有 ScheduleState パラメータを参照する
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;

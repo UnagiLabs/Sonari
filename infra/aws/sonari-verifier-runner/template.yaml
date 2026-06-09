@@ -21,7 +21,7 @@ Parameters:
     Description: Git commit SHA deployed by this stack update.
   ScheduleExpression:
     Type: String
-    Default: rate(5 minutes)
+    Default: rate(12 hours)
   MembershipScheduleExpression:
     Type: String
     Default: rate(1 day)
