@@ -1,0 +1,7 @@
+# Cloudflare Workers が静的アセット配信時に適用する HTTP ヘッダ設定。
+# OpenNext は public/ の中身を .open-next/assets/ へコピーし、この _headers も配信される。
+#
+# Next.js の /_next/static/* はファイル名にハッシュが付き内容が変わらない（変われば名前も変わる）。
+# よってブラウザに 1 年・immutable で長期キャッシュさせ、再訪問の表示を速く・配信量を減らす。
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
