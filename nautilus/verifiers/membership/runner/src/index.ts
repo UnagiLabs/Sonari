@@ -71,6 +71,7 @@ export interface VerificationJobRepository {
     get(jobId: string): Promise<VerificationJobRow | null>;
     all(): Promise<VerificationJobRow[]>;
     claimNextDue(nowMs: number): Promise<DueVerificationJob | null>;
+    claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null>;
     markRetry(
         jobId: string,
         nowMs: number,
@@ -273,6 +274,25 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
             .filter((candidate) => isDue(candidate, nowMs))
             .sort((left, right) => left.updated_at_ms - right.updated_at_ms)[0];
         if (row === undefined) {
+            return null;
+        }
+
+        const attempt = row.retry_count + 1;
+        const executionName = workflowExecutionName(row.job_id, attempt);
+        const updated: VerificationJobRow = {
+            ...row,
+            status: "processing",
+            workflow_execution_name: executionName,
+            workflow_started_at_ms: nowMs,
+            updated_at_ms: nowMs,
+        };
+        this.rowsByJobId.set(row.job_id, updated);
+        return { jobId: row.job_id, attempt, executionName };
+    }
+
+    async claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null> {
+        const row = this.rowsByJobId.get(jobId);
+        if (row === undefined || !isDue(row, nowMs)) {
             return null;
         }
 
@@ -519,6 +539,43 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
             throw error;
         }
         return { jobId: due.job_id, attempt, executionName };
+    }
+
+    async claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null> {
+        const row = await this.get(jobId);
+        if (row === null || !isDue(row, nowMs)) {
+            return null;
+        }
+
+        const attempt = row.retry_count + 1;
+        const executionName = workflowExecutionName(row.job_id, attempt);
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { job_id: row.job_id },
+                    ConditionExpression:
+                        "#status IN (:queued, :retry) AND retry_count = :retry_count",
+                    UpdateExpression:
+                        "SET #status = :processing, workflow_execution_name = :execution_name, workflow_started_at_ms = :now_ms, updated_at_ms = :now_ms",
+                    ExpressionAttributeNames: { "#status": "status" },
+                    ExpressionAttributeValues: {
+                        ":queued": "queued",
+                        ":retry": "retry",
+                        ":processing": "processing",
+                        ":retry_count": row.retry_count,
+                        ":execution_name": executionName,
+                        ":now_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return null;
+            }
+            throw error;
+        }
+        return { jobId: row.job_id, attempt, executionName };
     }
 
     async markRetry(
@@ -952,4 +1009,98 @@ function nullableNumber(input: unknown): number | null {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+// ---------------------------------------------------------------------------
+// DynamoDB Streams event types (aws-lambda 非依存の最小型定義)
+// ---------------------------------------------------------------------------
+
+export interface DynamoDbStreamRecordImage {
+    readonly job_id?: { readonly S?: string };
+}
+
+export interface DynamoDbStreamRecord {
+    readonly eventName?: string;
+    readonly dynamodb?: {
+        readonly NewImage?: DynamoDbStreamRecordImage;
+        readonly Keys?: DynamoDbStreamRecordImage;
+    };
+}
+
+export interface DynamoDbStreamEvent {
+    readonly Records?: ReadonlyArray<DynamoDbStreamRecord>;
+}
+
+// ---------------------------------------------------------------------------
+// Job stream handler
+// ---------------------------------------------------------------------------
+
+export interface JobStreamHandlerOptions {
+    readonly repository: VerificationJobRepository;
+    readonly workflow: WorkflowStarter;
+    readonly now?: () => number;
+}
+
+export interface JobStreamHandlerResult {
+    readonly workflow_started: number;
+}
+
+function extractJobId(record: DynamoDbStreamRecord): string | undefined {
+    const fromNewImage = record.dynamodb?.NewImage?.job_id?.S;
+    if (fromNewImage !== undefined && fromNewImage !== "") {
+        return fromNewImage;
+    }
+    const fromKeys = record.dynamodb?.Keys?.job_id?.S;
+    if (fromKeys !== undefined && fromKeys !== "") {
+        return fromKeys;
+    }
+    return undefined;
+}
+
+function isExecutionAlreadyExists(error: unknown): boolean {
+    return isRecord(error) && error.name === "ExecutionAlreadyExists";
+}
+
+export function createJobStreamHandler(options: JobStreamHandlerOptions) {
+    return async function jobStreamHandler(
+        event: DynamoDbStreamEvent,
+    ): Promise<JobStreamHandlerResult> {
+        const nowMs = options.now?.() ?? Date.now();
+        let workflowStarted = 0;
+
+        for (const record of event.Records ?? []) {
+            const jobId = extractJobId(record);
+            if (jobId === undefined) {
+                continue;
+            }
+
+            const claimed = await options.repository.claimJob(jobId, nowMs);
+            if (claimed === null) {
+                continue;
+            }
+
+            try {
+                await options.workflow.start({
+                    jobId: claimed.jobId,
+                    executionName: claimed.executionName,
+                    attempt: claimed.attempt,
+                });
+                workflowStarted += 1;
+            } catch (error) {
+                if (isExecutionAlreadyExists(error)) {
+                    // 重複実行名は成功扱い。processing のまま markRetry しない。
+                    workflowStarted += 1;
+                } else {
+                    await options.repository.markRetry(
+                        claimed.jobId,
+                        nowMs,
+                        nowMs + DEFAULT_RETRY_BACKOFF_MS,
+                        error instanceof Error ? error.message : String(error),
+                    );
+                }
+            }
+        }
+
+        return { workflow_started: workflowStarted };
+    };
 }

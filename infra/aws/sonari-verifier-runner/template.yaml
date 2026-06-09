@@ -291,6 +291,8 @@ Resources:
       KeySchema:
         - AttributeName: job_id
           KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
 
   RunnerLeaseTable:
     Type: AWS::DynamoDB::Table
@@ -1700,6 +1702,80 @@ Resources:
         RoleArn: !GetAtt BatchScheduleRole.Arn
         Input: '{"verifier_kind": "membership_identity"}'
 
+  MembershipJobStreamDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+
+  MembershipJobStreamLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MembershipJobStreamAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:DescribeStream
+                  - dynamodb:GetRecords
+                  - dynamodb:GetShardIterator
+                  - dynamodb:ListStreams
+                Resource: !GetAtt VerificationJobsTable.StreamArn
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt VerificationJobsTable.Arn
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref MembershipRunnerStateMachine
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt MembershipJobStreamDlq.Arn
+
+  MembershipJobStreamLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.jobStreamHandler
+      Role: !GetAtt MembershipJobStreamLambdaRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+          RUNNER_STATE_MACHINE_ARN: !Ref MembershipRunnerStateMachine
+
+  MembershipJobStreamEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt VerificationJobsTable.StreamArn
+      FunctionName: !Ref MembershipJobStreamLambda
+      StartingPosition: LATEST
+      MaximumBatchingWindowInSeconds: 1
+      BisectBatchOnFunctionError: true
+      MaximumRetryAttempts: 5
+      MaximumRecordAgeInSeconds: 3600
+      DestinationConfig:
+        OnFailure:
+          Destination: !GetAtt MembershipJobStreamDlq.Arn
+      FilterCriteria:
+        Filters:
+          - Pattern: '{"eventName":["INSERT","MODIFY"],"dynamodb":{"NewImage":{"status":{"S":["queued","retry"]}}}}'
+
 Outputs:
   EventsTableName:
     Value: !Ref EventsTable
@@ -1755,6 +1831,10 @@ Outputs:
     Value: !GetAtt SubmitVerificationFunctionUrl.FunctionUrl
   BatchVerifierLambdaName:
     Value: !Ref BatchVerifierLambda
+  MembershipJobStreamLambdaName:
+    Value: !Ref MembershipJobStreamLambda
+  MembershipJobStreamDlqUrl:
+    Value: !Ref MembershipJobStreamDlq
   RunnerControlLambdaName:
     Value: !Ref RunnerControlLambda
   SourceArchiverLambdaName:

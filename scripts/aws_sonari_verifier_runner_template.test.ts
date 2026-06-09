@@ -615,6 +615,49 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
     });
 
+    it("wires DynamoDB Streams event-driven membership trigger with DLQ", async () => {
+        const template = await readTemplate();
+
+        // VerificationJobsTable に Stream 有効化
+        expect(template).toContain("StreamSpecification:");
+        expect(template).toContain("StreamViewType: NEW_AND_OLD_IMAGES");
+
+        // DLQ 用 SQS キュー
+        expect(template).toContain("MembershipJobStreamDlq:");
+        expect(template).toContain("Type: AWS::SQS::Queue");
+        expect(template).toContain("MessageRetentionPeriod: 1209600");
+
+        // 新 Lambda 用 IAM Role
+        expect(template).toContain("MembershipJobStreamLambdaRole:");
+        expect(template).toContain("dynamodb:DescribeStream");
+        expect(template).toContain("dynamodb:GetRecords");
+        expect(template).toContain("!GetAtt VerificationJobsTable.StreamArn");
+        expect(template).toContain("sqs:SendMessage");
+
+        // 新 Lambda
+        expect(template).toContain("MembershipJobStreamLambda:");
+        expect(template).toContain("Handler: dist/src/lambda.jobStreamHandler");
+
+        // EventSourceMapping
+        expect(template).toContain("MembershipJobStreamEventSourceMapping:");
+        expect(template).toContain("Type: AWS::Lambda::EventSourceMapping");
+        expect(template).toContain("EventSourceArn: !GetAtt VerificationJobsTable.StreamArn");
+        expect(template).toContain("StartingPosition: LATEST");
+        expect(template).toContain("BisectBatchOnFunctionError: true");
+        expect(template).toContain("FilterCriteria:");
+        expect(template).toContain('"status":{"S":["queued","retry"]}');
+
+        // Outputs
+        expect(template).toContain("MembershipJobStreamLambdaName:");
+        expect(template).toContain("MembershipJobStreamDlqUrl:");
+
+        // 非回帰: 既存リソースが残っていること
+        expect(template).toContain("BatchVerifierLambda:");
+        expect(template).toContain("BatchSchedule:");
+        expect(template).toContain("Handler: dist/src/lambda.batchVerifierHandler");
+        expect(template).toContain("SubmitVerificationLambda:");
+    });
+
     it("exposes key unified stack outputs without leaking ciphertext object names", async () => {
         const template = await readTemplate();
 
