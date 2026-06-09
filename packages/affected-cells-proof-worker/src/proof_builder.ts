@@ -8,14 +8,12 @@
  */
 
 import {
+    type AffectedCellLeaf,
     type AffectedCellsInput,
     affectedCellLeavesFromInput,
-    affectedCellLeafHash,
     affectedCellsRoot,
-    buildProofEntries,
     buildProofShardGroups,
     parseAffectedCellsFile,
-    proofShardId,
     sha256Hex,
 } from "@sonari/proof-core";
 import { AffectedCellsProofError } from "./errors.js";
@@ -121,22 +119,22 @@ export async function buildAndSaveProofArtifacts(
     // 5. proof 生成
     const SHARD_COUNT = 1;
     const shardGroups = buildProofShardGroups(parsedInput, SHARD_COUNT);
-    const proofEntries = buildProofEntries(parsedInput);
 
-    const leaves = affectedCellLeavesFromInput(parsedInput);
+    // Map<h3_index string, AffectedCellLeaf> を 1 回だけ構築して O(n) lookup に変換
+    const leafMap = new Map<string, AffectedCellLeaf>();
+    for (const leaf of affectedCellLeavesFromInput(parsedInput)) {
+        leafMap.set(leaf.h3_index.toString(), leaf);
+    }
+
     const shardEntriesMap = new Map<string, AffectedCellsProofShardEntry[]>();
 
     for (const group of shardGroups) {
         const shardKey = group.shard_id.toString();
         const entries: AffectedCellsProofShardEntry[] = [];
 
-        for (const proofEntry of proofEntries) {
-            const entryShardId = proofShardId(BigInt(proofEntry.h3_index), SHARD_COUNT);
-            if (entryShardId !== group.shard_id) {
-                continue;
-            }
-
-            const leaf = leaves.find((l) => l.h3_index.toString() === proofEntry.h3_index);
+        // group.proofs は buildProofShardGroups 内で h3_index 昇順 sort 済み
+        for (const proofEntry of group.proofs) {
+            const leaf = leafMap.get(proofEntry.h3_index);
             if (leaf === undefined) {
                 throw new AffectedCellsProofError(
                     "internal",
@@ -144,8 +142,6 @@ export async function buildAndSaveProofArtifacts(
                     500,
                 );
             }
-
-            const leafHash = affectedCellLeafHash(leaf);
 
             entries.push({
                 event_uid: leaf.event_uid,
@@ -158,7 +154,7 @@ export async function buildAndSaveProofArtifacts(
                 intensity_scale: leaf.intensity_scale,
                 cells_generation_method: leaf.cells_generation_method,
                 oracle_version: leaf.oracle_version,
-                leaf_hash: leafHash,
+                leaf_hash: proofEntry.leaf_hash,
                 proof: proofEntry.proof,
             });
         }
