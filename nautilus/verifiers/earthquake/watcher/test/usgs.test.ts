@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { screenUsgsCandidate } from "../src/screening.js";
 import {
     parseUsgsRecentFeed,
     resolveUsgsSourceEventId,
@@ -103,7 +104,7 @@ describe("USGS recent feed parser", () => {
         ).toEqual([]);
     });
 
-    it("ignores non-earthquake features and pins the all-hour feed", () => {
+    it("ignores non-earthquake features and pins the all-day feed", () => {
         expect(
             parseUsgsRecentFeed({
                 features: [
@@ -115,10 +116,72 @@ describe("USGS recent feed parser", () => {
             }),
         ).toEqual([]);
         expect(USGS_RECENT_FEED_URL).toBe(
-            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
+            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
         );
     });
 });
+
+describe("USGS all-day feed screening", () => {
+    it("keeps only above-threshold quakes when the larger all-day window returns many features", () => {
+        const feed = {
+            features: [
+                feature("us-strong-mag", { mag: 5.6, mmi: null, alert: null, tsunami: 0 }),
+                feature("us-boundary-mag", { mag: 5.5, mmi: null, alert: null, tsunami: 0 }),
+                feature("us-strong-mmi", { mag: 4.2, mmi: 6.4, alert: null, tsunami: 0 }),
+                feature("us-boundary-mmi", { mag: 4.2, mmi: 6.0, alert: null, tsunami: 0 }),
+                feature("us-alert-yellow", { mag: 4.0, mmi: 3.0, alert: "yellow", tsunami: 0 }),
+                feature("us-tsunami", { mag: 4.0, mmi: null, alert: null, tsunami: 1 }),
+                feature("us-weak-mag", { mag: 5.49, mmi: null, alert: null, tsunami: 0 }),
+                feature("us-weak-mmi", { mag: 3.1, mmi: 5.9, alert: null, tsunami: 0 }),
+                feature("us-alert-green", { mag: 3.0, mmi: 2.0, alert: "green", tsunami: 0 }),
+            ],
+        };
+
+        const eligibleIds = parseUsgsRecentFeed(feed)
+            .filter((candidate) => screenUsgsCandidate(candidate).runnerEligible)
+            .map((candidate) => candidate.source_event_id);
+
+        expect(eligibleIds).toEqual([
+            "us-strong-mag",
+            "us-boundary-mag",
+            "us-strong-mmi",
+            "us-boundary-mmi",
+            "us-alert-yellow",
+            "us-tsunami",
+        ]);
+    });
+
+    it("marks below-threshold quakes as ignored_small even within the all-day window", () => {
+        const weak = parseUsgsRecentFeed({
+            features: [feature("us-weak", { mag: 5.49, mmi: 5.9, alert: "green", tsunami: 0 })],
+        });
+
+        expect(weak).toHaveLength(1);
+        expect(screenUsgsCandidate(weak[0]!)).toEqual({
+            runnerEligible: false,
+            status: "ignored_small",
+            error_code: "WATCHER_BELOW_AUTO_THRESHOLD",
+        });
+    });
+});
+
+function feature(
+    id: string,
+    properties: { mag: number | null; mmi: number | null; alert: string | null; tsunami: number },
+): unknown {
+    return {
+        id,
+        properties: {
+            time: 1_700_000_000_000,
+            updated: 1_700_000_010_000,
+            type: "earthquake",
+            mag: properties.mag,
+            mmi: properties.mmi,
+            alert: properties.alert,
+            tsunami: properties.tsunami,
+        },
+    };
+}
 
 describe("USGS source event ID resolver", () => {
     it("fetches the deterministic USGS detail URL derived from the source event ID", async () => {

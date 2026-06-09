@@ -35,7 +35,7 @@ export type UsgsSourceEventIdResolver = (
 ) => Promise<UsgsSourceEventIdResolverResult | null>;
 
 export const USGS_RECENT_FEED_URL =
-    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson";
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson";
 
 export function usgsDetailUrl(sourceEventId: string): string {
     return `https://earthquake.usgs.gov/earthquakes/feed/v1.0/detail/${sourceEventId}.geojson`;
