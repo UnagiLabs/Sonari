@@ -1,0 +1,16 @@
+# Worker ランタイムのローカル用シークレットのサンプル。
+# opennextjs-cloudflare preview / wrangler dev がこのファイルの値を Worker の env に渡します。
+#
+# このファイルをコピーして dapp/.dev.vars を作り、値を入れてください。
+#   cp dapp/.dev.vars.example dapp/.dev.vars
+#
+# .dev.vars はサーバー側ランタイムだけが読む秘密値です。NEXT_PUBLIC_ は付けません
+# （ブラウザのバンドルに出ません）。値入りの dapp/.dev.vars はコミットされません（.gitignore 済み）。
+#
+# 本番（Cloudflare Worker）では .dev.vars ではなく次のコマンドで登録します。
+#   wrangler secret put WORLD_ID_RP_SIGNING_KEY --name sonari-dapp
+
+# World ID の RP 署名鍵。/api/world-id/rp-signature の signRequest だけが使う server-only 秘密鍵。
+# Developer Portal で発行した signing key（hex, 0x...）を入れます。
+# 未設定なら署名 API は 500（"World ID signing is not configured"）を返します。
+WORLD_ID_RP_SIGNING_KEY=
