@@ -71,6 +71,7 @@ export interface VerificationJobRepository {
     get(jobId: string): Promise<VerificationJobRow | null>;
     all(): Promise<VerificationJobRow[]>;
     claimNextDue(nowMs: number): Promise<DueVerificationJob | null>;
+    claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null>;
     markRetry(
         jobId: string,
         nowMs: number,
@@ -273,6 +274,25 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
             .filter((candidate) => isDue(candidate, nowMs))
             .sort((left, right) => left.updated_at_ms - right.updated_at_ms)[0];
         if (row === undefined) {
+            return null;
+        }
+
+        const attempt = row.retry_count + 1;
+        const executionName = workflowExecutionName(row.job_id, attempt);
+        const updated: VerificationJobRow = {
+            ...row,
+            status: "processing",
+            workflow_execution_name: executionName,
+            workflow_started_at_ms: nowMs,
+            updated_at_ms: nowMs,
+        };
+        this.rowsByJobId.set(row.job_id, updated);
+        return { jobId: row.job_id, attempt, executionName };
+    }
+
+    async claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null> {
+        const row = this.rowsByJobId.get(jobId);
+        if (row === undefined || !isDue(row, nowMs)) {
             return null;
         }
 
@@ -519,6 +539,43 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
             throw error;
         }
         return { jobId: due.job_id, attempt, executionName };
+    }
+
+    async claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null> {
+        const row = await this.get(jobId);
+        if (row === null || !isDue(row, nowMs)) {
+            return null;
+        }
+
+        const attempt = row.retry_count + 1;
+        const executionName = workflowExecutionName(row.job_id, attempt);
+        try {
+            await this.documentClient.send(
+                new UpdateCommand({
+                    TableName: this.tableName,
+                    Key: { job_id: row.job_id },
+                    ConditionExpression:
+                        "#status IN (:queued, :retry) AND retry_count = :retry_count",
+                    UpdateExpression:
+                        "SET #status = :processing, workflow_execution_name = :execution_name, workflow_started_at_ms = :now_ms, updated_at_ms = :now_ms",
+                    ExpressionAttributeNames: { "#status": "status" },
+                    ExpressionAttributeValues: {
+                        ":queued": "queued",
+                        ":retry": "retry",
+                        ":processing": "processing",
+                        ":retry_count": row.retry_count,
+                        ":execution_name": executionName,
+                        ":now_ms": nowMs,
+                    },
+                }),
+            );
+        } catch (error) {
+            if (isConditionalCheckFailed(error)) {
+                return null;
+            }
+            throw error;
+        }
+        return { jobId: row.job_id, attempt, executionName };
     }
 
     async markRetry(
