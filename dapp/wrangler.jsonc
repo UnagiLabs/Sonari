@@ -1,0 +1,41 @@
+{
+    // この設定で OpenNext のビルド成果物（.open-next/）を Cloudflare Workers に載せる。
+    // 値は `pnpm --filter @sonari/dapp deploy` と CI（.github/workflows/dapp-deploy.yml）が参照する。
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    // Worker 名。Cloudflare dashboard 上の Worker 名と一致させる。API 系 worker
+    // （sonari-affected-cells-proof-worker 等）とは別の独立した Worker。
+    "name": "sonari-dapp",
+    // OpenNext が出力する Worker エントリ。`opennextjs-cloudflare build` が生成する。
+    "main": ".open-next/worker.js",
+    // 既存 worker と揃える。OpenNext は 2024-09-23 以降を要求する。
+    "compatibility_date": "2026-06-01",
+    // Route Handler（/api/world-id/rp-signature, runtime="nodejs"）が Node 互換 API を
+    // 使うため必須。OpenNext も nodejs_compat を前提にする。
+    "compatibility_flags": ["nodejs_compat"],
+    // 静的アセット（/_next/static/* など）を配信する binding。OpenNext が .open-next/assets に出力する。
+    "assets": {
+        "binding": "ASSETS",
+        "directory": ".open-next/assets",
+    },
+    // 実行ログ・メトリクスを有効化する。障害調査の手がかりを残すため。
+    "observability": {
+        "enabled": true,
+    },
+    // ---------------------------------------------------------------------------
+    // Secrets（repo にハードコードしない・deploy 時に wrangler secret put で設定する）
+    // ---------------------------------------------------------------------------
+    //
+    // World ID の RP 署名鍵は server-only secret。repo / CI / NEXT_PUBLIC_* に出さない。
+    // 次のコマンドで Cloudflare 側に登録する（値はリポジトリ管理者が保持）。
+    //
+    //   wrangler secret put WORLD_ID_RP_SIGNING_KEY --name sonari-dapp
+    //
+    // 未設定のままだと /api/world-id/rp-signature は 500（"World ID signing is not configured"）を返す。
+    //
+    // ---------------------------------------------------------------------------
+    // Custom domain（sonari.help）
+    // ---------------------------------------------------------------------------
+    //
+    // ルートドメイン sonari.help への割り当ては、workers.dev での動作確認後に
+    // `routes` で custom_domain として追加する。最初の deploy は *.workers.dev で行う。
+}
