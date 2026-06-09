@@ -641,7 +641,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SigningSeedCiphertextS3BucketOutput");
     });
 
-    it("defaults membership schedule to once per day and earthquake schedule to twice per day", async () => {
+    it("defaults membership schedule to once per day and earthquake schedule to fixed JST times", async () => {
         const template = await readTemplate();
 
         // membership は 1 日 1 回が既定（MembershipScheduleExpression ブロックに紐付けて検証）
@@ -649,17 +649,31 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             /\n {2}MembershipScheduleExpression:\n {4}Type: String\n {4}Default: rate\(1 day\)\n/,
         );
 
-        // earthquake は 1 日 2 回（12 時間ごと）が既定。
+        // earthquake は毎日 00:00 / 12:00（JST 固定時刻）が既定。
         // membership 側を誤って書き換えても検知できるよう ScheduleExpression ブロックに紐付ける
         expect(template).toMatch(
-            /\n {2}ScheduleExpression:\n {4}Type: String\n {4}Default: rate\(12 hours\)\n/,
+            /\n {2}ScheduleExpression:\n {4}Type: String\n {4}Default: cron\(0 0,12 \* \* \? \*\)\n/,
         );
-        // 旧既定 rate(5 minutes) が残っていないことを確認する
+        // 旧既定 rate(5 minutes) / rate(12 hours) が残っていないことを確認する
         expect(template).not.toContain("rate(5 minutes)");
+        expect(template).not.toContain("rate(12 hours)");
 
         // 両 schedule の State 制御は共有 ScheduleState パラメータを参照する
         const scheduleStateUsageCount = template.match(/State: !Ref ScheduleState/g)?.length ?? 0;
         expect(scheduleStateUsageCount).toBe(2);
+    });
+
+    it("pins the earthquake watcher schedule to the Asia/Tokyo timezone only", async () => {
+        const template = await readTemplate();
+
+        // WatcherSchedule は cron を JST で解釈するためタイムゾーンを明示する
+        expect(template).toMatch(
+            /\n {2}WatcherSchedule:\n {4}Type: AWS::Scheduler::Schedule\n {4}Properties:\n {6}ScheduleExpression: !Ref ScheduleExpression\n {6}ScheduleExpressionTimezone: Asia\/Tokyo\n/,
+        );
+        // membership(BatchSchedule) には付けない。タイムゾーン指定は watcher の 1 箇所だけ
+        const timezoneUsageCount =
+            template.match(/ScheduleExpressionTimezone: Asia\/Tokyo/g)?.length ?? 0;
+        expect(timezoneUsageCount).toBe(1);
     });
 
     it("delivers the World ID proof mode and Sui network to the membership enclave bootstrap", async () => {
