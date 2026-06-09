@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+
 export const U64_MAX = 18_446_744_073_709_551_615n;
 export const U32_MAX = 4_294_967_295;
 export const U16_MAX = 65_535;
@@ -82,13 +84,10 @@ export function bytesToPrefixedHex(bytes: Uint8Array): PrefixedHex32 {
     return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export async function sha256Hex(bytes: Uint8Array): Promise<PrefixedHex32> {
-    return bytesToPrefixedHex(await sha256Bytes(bytes));
+export function sha256Hex(bytes: Uint8Array): PrefixedHex32 {
+    return bytesToPrefixedHex(sha256Bytes(bytes));
 }
 
-export async function sha256Bytes(bytes: Uint8Array): Promise<Uint8Array> {
-    const buffer = new ArrayBuffer(bytes.byteLength);
-    new Uint8Array(buffer).set(bytes);
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
-    return new Uint8Array(digest);
+export function sha256Bytes(bytes: Uint8Array): Uint8Array {
+    return sha256(bytes);
 }

@@ -8,14 +8,12 @@
  */
 
 import {
+    type AffectedCellLeaf,
     type AffectedCellsInput,
     affectedCellLeavesFromInput,
-    affectedCellLeafHash,
     affectedCellsRoot,
-    buildProofEntries,
     buildProofShardGroups,
     parseAffectedCellsFile,
-    proofShardId,
     sha256Hex,
 } from "@sonari/proof-core";
 import { AffectedCellsProofError } from "./errors.js";
@@ -69,7 +67,7 @@ export async function buildAndSaveProofArtifacts(
     } = params;
 
     // 1. SHA-256 照合
-    const computedHash = await sha256Hex(bytes);
+    const computedHash = sha256Hex(bytes);
     if (computedHash !== affectedCellsHash) {
         throw new AffectedCellsProofError(
             "affected_cells_hash_mismatch",
@@ -109,7 +107,7 @@ export async function buildAndSaveProofArtifacts(
     }
 
     // 4. root 照合
-    const computedRoot = await affectedCellsRoot(parsedInput);
+    const computedRoot = affectedCellsRoot(parsedInput);
     if (computedRoot !== expectedRoot) {
         throw new AffectedCellsProofError(
             "affected_cells_root_mismatch",
@@ -120,23 +118,23 @@ export async function buildAndSaveProofArtifacts(
 
     // 5. proof 生成
     const SHARD_COUNT = 1;
-    const shardGroups = await buildProofShardGroups(parsedInput, SHARD_COUNT);
-    const proofEntries = await buildProofEntries(parsedInput);
+    const shardGroups = buildProofShardGroups(parsedInput, SHARD_COUNT);
 
-    const leaves = affectedCellLeavesFromInput(parsedInput);
+    // Map<h3_index string, AffectedCellLeaf> を 1 回だけ構築して O(n) lookup に変換
+    const leafMap = new Map<string, AffectedCellLeaf>();
+    for (const leaf of affectedCellLeavesFromInput(parsedInput)) {
+        leafMap.set(leaf.h3_index.toString(), leaf);
+    }
+
     const shardEntriesMap = new Map<string, AffectedCellsProofShardEntry[]>();
 
     for (const group of shardGroups) {
         const shardKey = group.shard_id.toString();
         const entries: AffectedCellsProofShardEntry[] = [];
 
-        for (const proofEntry of proofEntries) {
-            const entryShardId = await proofShardId(BigInt(proofEntry.h3_index), SHARD_COUNT);
-            if (entryShardId !== group.shard_id) {
-                continue;
-            }
-
-            const leaf = leaves.find((l) => l.h3_index.toString() === proofEntry.h3_index);
+        // group.proofs は buildProofShardGroups 内で h3_index 昇順 sort 済み
+        for (const proofEntry of group.proofs) {
+            const leaf = leafMap.get(proofEntry.h3_index);
             if (leaf === undefined) {
                 throw new AffectedCellsProofError(
                     "internal",
@@ -144,8 +142,6 @@ export async function buildAndSaveProofArtifacts(
                     500,
                 );
             }
-
-            const leafHash = await affectedCellLeafHash(leaf);
 
             entries.push({
                 event_uid: leaf.event_uid,
@@ -158,7 +154,7 @@ export async function buildAndSaveProofArtifacts(
                 intensity_scale: leaf.intensity_scale,
                 cells_generation_method: leaf.cells_generation_method,
                 oracle_version: leaf.oracle_version,
-                leaf_hash: leafHash,
+                leaf_hash: proofEntry.leaf_hash,
                 proof: proofEntry.proof,
             });
         }
@@ -175,23 +171,19 @@ export async function buildAndSaveProofArtifacts(
         affected_cells_root: expectedRoot as `0x${string}`,
         affected_cell_count: affectedCellCount,
         geo_resolution: geoResolution,
-        shards: await Promise.all(
-            shardGroups.map(async (g) => {
-                const shardKey = g.shard_id.toString();
-                const entries = shardEntriesMap.get(shardKey) ?? [];
-                // R2 へ保存するバイト列と同じ正規バイト列から sha256 を計算し、
-                // 保存形と検証形（loadProofShard）のハッシュを一致させる。
-                const hash = await sha256Hex(
-                    new TextEncoder().encode(serializeShardEntries(entries)),
-                );
-                return {
-                    shard_key: shardKey,
-                    r2_key: shardR2Key(eventUid, eventRevision, shardKey),
-                    hash,
-                    cell_count: g.proof_count,
-                };
-            }),
-        ),
+        shards: shardGroups.map((g) => {
+            const shardKey = g.shard_id.toString();
+            const entries = shardEntriesMap.get(shardKey) ?? [];
+            // R2 へ保存するバイト列と同じ正規バイト列から sha256 を計算し、
+            // 保存形と検証形（loadProofShard）のハッシュを一致させる。
+            const hash = sha256Hex(new TextEncoder().encode(serializeShardEntries(entries)));
+            return {
+                shard_key: shardKey,
+                r2_key: shardR2Key(eventUid, eventRevision, shardKey),
+                hash,
+                cell_count: g.proof_count,
+            };
+        }),
     };
 
     await saveProofArtifacts({ bucket, manifest, shardEntriesMap });

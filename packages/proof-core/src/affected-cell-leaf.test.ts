@@ -88,13 +88,13 @@ describe("serializeAffectedCellLeaf", () => {
 });
 
 describe("affectedCellLeafHash", () => {
-    it("matches golden hash for cell 1", async () => {
-        const hash = await affectedCellLeafHash(CELL_1);
+    it("matches golden hash for cell 1", () => {
+        const hash = affectedCellLeafHash(CELL_1);
         expect(hash).toBe("0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f");
     });
 
-    it("matches golden hash for cell 2", async () => {
-        const hash = await affectedCellLeafHash(CELL_2);
+    it("matches golden hash for cell 2", () => {
+        const hash = affectedCellLeafHash(CELL_2);
         expect(hash).toBe("0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f");
     });
 });

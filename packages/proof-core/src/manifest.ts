@@ -1,12 +1,11 @@
 import {
     type AffectedCellsInput,
-    affectedCellProofSteps,
     affectedCellsLeafHashes,
     affectedCellsRoot,
 } from "./affected-cells.js";
 import type { PrefixedHex32 } from "./bytes.js";
 import { sha256Hex } from "./bytes.js";
-import type { ProofStep } from "./merkle.js";
+import { merkleLevelsFromLeafHashes, type ProofStep, proofStepsFromLevels } from "./merkle.js";
 import { proofShardId } from "./shard.js";
 
 // ---------------------------------------------------------------------------
@@ -72,12 +71,16 @@ function proofEntriesCanonicalBytes(entries: ProofEntry[]): Uint8Array {
 // buildProofEntries
 // ---------------------------------------------------------------------------
 
-export async function buildProofEntries(input: AffectedCellsInput): Promise<ProofEntry[]> {
-    const hashes = await affectedCellsLeafHashes(input);
+export function buildProofEntries(input: AffectedCellsInput): ProofEntry[] {
+    const hashes = affectedCellsLeafHashes(input); // O(n): leaf hashes in h3_index ascending order
+    const leafHashes = hashes.map((h) => h.leaf_hash);
+    const levels = merkleLevelsFromLeafHashes(leafHashes); // O(n): Merkle tree built once
     const entries: ProofEntry[] = [];
-    for (const { h3_index, leaf_hash } of hashes) {
-        const proof = await affectedCellProofSteps(input, h3_index);
-        entries.push({ h3_index, leaf_hash, proof });
+    for (let i = 0; i < hashes.length; i++) {
+        const entry = hashes[i];
+        if (entry === undefined) throw new Error(`unexpected undefined at index ${i}`);
+        const proof = proofStepsFromLevels(levels, i); // O(log n) per cell
+        entries.push({ h3_index: entry.h3_index, leaf_hash: entry.leaf_hash, proof });
     }
     return entries;
 }
@@ -86,20 +89,20 @@ export async function buildProofEntries(input: AffectedCellsInput): Promise<Proo
 // buildProofShardGroups
 // ---------------------------------------------------------------------------
 
-export async function buildProofShardGroups(
+export function buildProofShardGroups(
     input: AffectedCellsInput,
     shardCount: number,
-): Promise<ProofShardGroup[]> {
+): ProofShardGroup[] {
     if (!Number.isInteger(shardCount) || shardCount <= 0) {
         throw new Error("shardCount must be a positive integer");
     }
 
-    const entries = await buildProofEntries(input);
+    const entries = buildProofEntries(input);
 
     // Group entries by shard_id
     const shardMap = new Map<number, ProofEntry[]>();
     for (const entry of entries) {
-        const shardId = await proofShardId(BigInt(entry.h3_index), shardCount);
+        const shardId = proofShardId(BigInt(entry.h3_index), shardCount);
         const existing = shardMap.get(shardId);
         if (existing !== undefined) {
             existing.push(entry);
@@ -127,7 +130,7 @@ export async function buildProofShardGroups(
         });
 
         const bytes = proofEntriesCanonicalBytes(proofs);
-        const sha256Hash = await sha256Hex(bytes);
+        const sha256Hash = sha256Hex(bytes);
 
         groups.push({
             shard_id: shardId,
@@ -145,14 +148,9 @@ export async function buildProofShardGroups(
 // buildProofManifest
 // ---------------------------------------------------------------------------
 
-export async function buildProofManifest(
-    input: AffectedCellsInput,
-    shardCount: number,
-): Promise<ProofManifest> {
-    const [merkle_root, groups] = await Promise.all([
-        affectedCellsRoot(input),
-        buildProofShardGroups(input, shardCount),
-    ]);
+export function buildProofManifest(input: AffectedCellsInput, shardCount: number): ProofManifest {
+    const merkle_root = affectedCellsRoot(input);
+    const groups = buildProofShardGroups(input, shardCount);
 
     const total_proof_count = groups.reduce((sum, g) => sum + g.proof_count, 0);
 

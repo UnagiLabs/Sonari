@@ -266,9 +266,9 @@ export function affectedCellLeavesFromInput(input: AffectedCellsInput): Affected
 // affectedCellsLeafHashes
 // ---------------------------------------------------------------------------
 
-export async function affectedCellsLeafHashes(
+export function affectedCellsLeafHashes(
     input: AffectedCellsInput,
-): Promise<{ h3_index: string; leaf_hash: PrefixedHex32 }[]> {
+): { h3_index: string; leaf_hash: PrefixedHex32 }[] {
     const leaves = affectedCellLeavesFromInput(input);
     const results: { h3_index: string; leaf_hash: PrefixedHex32 }[] = [];
     // Use original string from affected_cells (sorted order)
@@ -279,7 +279,7 @@ export async function affectedCellsLeafHashes(
         if (leaf === undefined || cell === undefined) {
             throw new Error(`Unexpected undefined at index ${i}`);
         }
-        const leaf_hash = await affectedCellLeafHash(leaf);
+        const leaf_hash = affectedCellLeafHash(leaf);
         results.push({ h3_index: cell.h3_index, leaf_hash });
     }
     return results;
@@ -289,8 +289,8 @@ export async function affectedCellsLeafHashes(
 // affectedCellsRoot
 // ---------------------------------------------------------------------------
 
-export async function affectedCellsRoot(input: AffectedCellsInput): Promise<PrefixedHex32> {
-    const hashes = await affectedCellsLeafHashes(input);
+export function affectedCellsRoot(input: AffectedCellsInput): PrefixedHex32 {
+    const hashes = affectedCellsLeafHashes(input);
     return merkleRootFromLeafHashes(hashes.map((h) => h.leaf_hash));
 }
 
@@ -298,10 +298,7 @@ export async function affectedCellsRoot(input: AffectedCellsInput): Promise<Pref
 // affectedCellProofSteps
 // ---------------------------------------------------------------------------
 
-export async function affectedCellProofSteps(
-    input: AffectedCellsInput,
-    h3Index: string,
-): Promise<ProofStep[]> {
+export function affectedCellProofSteps(input: AffectedCellsInput, h3Index: string): ProofStep[] {
     const sortedCells = sortCellsByH3Index(input.affected_cells);
 
     const leafIndex = sortedCells.findIndex((c) => c.h3_index === h3Index);
@@ -309,9 +306,9 @@ export async function affectedCellProofSteps(
         throw new Error(`h3_index ${h3Index} not found in affected_cells`);
     }
 
-    const hashes = await affectedCellsLeafHashes(input);
+    const hashes = affectedCellsLeafHashes(input);
     const leafHashes = hashes.map((h) => h.leaf_hash);
-    const levels = await merkleLevelsFromLeafHashes(leafHashes);
+    const levels = merkleLevelsFromLeafHashes(leafHashes);
     return proofStepsFromLevels(levels, leafIndex);
 }
 

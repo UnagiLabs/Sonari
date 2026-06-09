@@ -144,7 +144,7 @@ export async function loadProofShard(
     const bytes = new TextEncoder().encode(text);
 
     // sha256 照合
-    const digest = await sha256Hex(bytes);
+    const digest = sha256Hex(bytes);
     if (digest !== shardEntry.hash) {
         throw new AffectedCellsProofError(
             "proof_shard_integrity_mismatch",

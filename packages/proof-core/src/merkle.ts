@@ -8,10 +8,7 @@ export interface ProofStep {
     sibling_hash: PrefixedHex32;
 }
 
-export async function replayProof(
-    leafHashValue: string,
-    proof: readonly ProofStep[],
-): Promise<PrefixedHex32> {
+export function replayProof(leafHashValue: string, proof: readonly ProofStep[]): PrefixedHex32 {
     let current = hexToBytes(expectPrefixedHex32("leaf_hash", leafHashValue));
     for (const step of proof) {
         const sibling = hexToBytes(expectPrefixedHex32("sibling_hash", step.sibling_hash));
@@ -24,24 +21,22 @@ export async function replayProof(
             input.set(current, 1);
             input.set(sibling, 33);
         }
-        current = await sha256Bytes(input);
+        current = sha256Bytes(input);
     }
     return bytesToPrefixedHex(current);
 }
 
-async function internalHash(left: PrefixedHex32, right: PrefixedHex32): Promise<PrefixedHex32> {
+function internalHash(left: PrefixedHex32, right: PrefixedHex32): PrefixedHex32 {
     const leftBytes = hexToBytes(left);
     const rightBytes = hexToBytes(right);
     const input = new Uint8Array(65);
     input[0] = INTERNAL_NODE_DOMAIN_SEPARATOR;
     input.set(leftBytes, 1);
     input.set(rightBytes, 33);
-    return bytesToPrefixedHex(await sha256Bytes(input));
+    return bytesToPrefixedHex(sha256Bytes(input));
 }
 
-export async function merkleLevelsFromLeafHashes(
-    leafHashes: PrefixedHex32[],
-): Promise<PrefixedHex32[][]> {
+export function merkleLevelsFromLeafHashes(leafHashes: PrefixedHex32[]): PrefixedHex32[][] {
     if (leafHashes.length === 0) {
         throw new Error("empty Merkle tree");
     }
@@ -60,7 +55,7 @@ export async function merkleLevelsFromLeafHashes(
                 const right = current[i + 1];
                 if (left === undefined || right === undefined)
                     throw new Error("unexpected undefined in pair");
-                next.push(await internalHash(left, right));
+                next.push(internalHash(left, right));
             }
         }
         levels.push(next);
@@ -69,10 +64,8 @@ export async function merkleLevelsFromLeafHashes(
     return levels;
 }
 
-export async function merkleRootFromLeafHashes(
-    leafHashes: PrefixedHex32[],
-): Promise<PrefixedHex32> {
-    const levels = await merkleLevelsFromLeafHashes(leafHashes);
+export function merkleRootFromLeafHashes(leafHashes: PrefixedHex32[]): PrefixedHex32 {
+    const levels = merkleLevelsFromLeafHashes(leafHashes);
     const rootLevel = levels[levels.length - 1];
     if (rootLevel === undefined || rootLevel[0] === undefined) {
         throw new Error("unexpected empty root level");

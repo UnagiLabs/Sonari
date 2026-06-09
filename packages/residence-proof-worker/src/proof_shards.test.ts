@@ -162,11 +162,11 @@ describe("proof shard contracts", () => {
         expect(await replayProof(LEAF_THREE.leaf_hash, LEAF_THREE.proof)).toBe(MERKLE_ROOT);
     });
 
-    it("hashes h3_index before assigning proof shard ids", async () => {
-        expect(await proofShardId(608819013513904127n, 5)).toBe(0);
-        expect(await proofShardId(608819013597790207n, 5)).toBe(1);
-        expect(await proofShardId(608819013681676287n, 5)).toBe(0);
-        await expect(proofShardId(1n, 0)).rejects.toThrow(/shard_count/i);
+    it("hashes h3_index before assigning proof shard ids", () => {
+        expect(proofShardId(608819013513904127n, 5)).toBe(0);
+        expect(proofShardId(608819013597790207n, 5)).toBe(1);
+        expect(proofShardId(608819013681676287n, 5)).toBe(0);
+        expect(() => proofShardId(1n, 0)).toThrow(/shard_count/i);
     });
 
     it("builds expected object keys and validates inventory integrity metadata", () => {
