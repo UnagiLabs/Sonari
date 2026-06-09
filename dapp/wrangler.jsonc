@@ -36,6 +36,13 @@
     // Custom domain（sonari.help）
     // ---------------------------------------------------------------------------
     //
-    // ルートドメイン sonari.help への割り当ては、workers.dev での動作確認後に
-    // `routes` で custom_domain として追加する。最初の deploy は *.workers.dev で行う。
+    // ルートドメインを sonari-dapp Worker に割り当てる。custom_domain=true にすると wrangler が
+    // 対象 zone（sonari.help）に DNS と Worker ルートを自動作成する。workers.dev URL も併存する。
+    // API 系 worker は別ホスト（例: api.sonari.help）に分ける想定。
+    "routes": [
+        {
+            "pattern": "sonari.help",
+            "custom_domain": true,
+        },
+    ],
 }
