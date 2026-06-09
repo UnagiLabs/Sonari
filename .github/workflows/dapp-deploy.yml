@@ -1,0 +1,115 @@
+name: dapp Deploy
+
+# dapp（Next.js）か依存先 packages/proof-core、注入元 contracts/Published.toml が main に
+# 入ると、OpenNext で Cloudflare Workers へ自動デプロイする。手動デプロイ漏れを防ぐのが目的。
+# パターンは .github/workflows/affected-cells-proof-worker-deploy.yml に倣う。
+# 通常の worker と違い、dapp は OpenNext のため `wrangler deploy` ではなく
+# `opennextjs-cloudflare deploy`（= pnpm --filter @sonari/dapp deploy）を使う。
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - dapp/**
+      - packages/proof-core/**
+      - contracts/Published.toml
+      - pnpm-lock.yaml
+      - .github/workflows/dapp-deploy.yml
+  workflow_dispatch:
+
+# Cloudflare は API トークン認証で OIDC 不要。AWS 版の id-token: write は持たせない。
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and deploy dapp to Cloudflare
+    runs-on: ubuntu-latest
+    # environment 配下の secret として CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID を参照する。
+    # secret は GitHub の Settings で別途登録する（本リポジトリには平文を置かない）。
+    environment: cloudflare-dapp-worker
+    timeout-minutes: 30
+    # 同一 Worker への同時デプロイを直列化する。実行中の deploy は途中で殺さない。
+    concurrency:
+      group: dapp-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      # dapp は @sonari/proof-core（workspace:*）を import し、next.config.ts は
+      # contracts/Published.toml を読む。どちらも repo 全体の checkout と workspace 解決を前提にする。
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "Missing required GitHub Environment secret: CLOUDFLARE_API_TOKEN"
+            echo "Set it in environment: cloudflare-dapp-worker"
+            exit 1
+          fi
+
+          if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+            echo "Missing required GitHub Environment secret: CLOUDFLARE_ACCOUNT_ID"
+            echo "Set it in environment: cloudflare-dapp-worker"
+            exit 1
+          fi
+
+      # deploy 前ゲート。テストが緑のときだけ deploy へ進む。
+      - name: Test dapp
+        shell: bash
+        run: pnpm --filter @sonari/dapp test
+
+      # `deploy` script は `opennextjs-cloudflare build && opennextjs-cloudflare deploy`。
+      # 前段の build が型検査も兼ねる（型エラーがあればここで失敗し deploy に進まない）。
+      # よって独立した `next build` step は冗長なため置かない。
+      #
+      # `pnpm deploy` は pnpm の予約コマンド（パッケージのバンドル）なので、必ず `run` を付けて
+      # package.json の deploy script を呼ぶ（`run` を省くと別物が走り失敗する）。
+      #
+      # NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる。本番値が必要なら、この step の env に
+      # NEXT_PUBLIC_GOOGLE_MAPS_API_KEY / NEXT_PUBLIC_WORLD_ID_* 等を渡してから deploy すること
+      # （NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID は next.config が Published.toml から自動注入）。
+      #
+      # アプリ secret（WORLD_ID_RP_SIGNING_KEY）は CI に置かない。`wrangler secret put` で
+      # Cloudflare 側に別管理する。CI が扱うのは Cloudflare API token と account id のみ。
+      - name: Build and deploy to Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: pnpm --filter @sonari/dapp run deploy
