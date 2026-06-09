@@ -1,12 +1,11 @@
 import {
     type AffectedCellsInput,
-    affectedCellProofSteps,
     affectedCellsLeafHashes,
     affectedCellsRoot,
 } from "./affected-cells.js";
 import type { PrefixedHex32 } from "./bytes.js";
 import { sha256Hex } from "./bytes.js";
-import type { ProofStep } from "./merkle.js";
+import { merkleLevelsFromLeafHashes, type ProofStep, proofStepsFromLevels } from "./merkle.js";
 import { proofShardId } from "./shard.js";
 
 // ---------------------------------------------------------------------------
@@ -73,11 +72,15 @@ function proofEntriesCanonicalBytes(entries: ProofEntry[]): Uint8Array {
 // ---------------------------------------------------------------------------
 
 export function buildProofEntries(input: AffectedCellsInput): ProofEntry[] {
-    const hashes = affectedCellsLeafHashes(input);
+    const hashes = affectedCellsLeafHashes(input); // O(n): leaf hashes in h3_index ascending order
+    const leafHashes = hashes.map((h) => h.leaf_hash);
+    const levels = merkleLevelsFromLeafHashes(leafHashes); // O(n): Merkle tree built once
     const entries: ProofEntry[] = [];
-    for (const { h3_index, leaf_hash } of hashes) {
-        const proof = affectedCellProofSteps(input, h3_index);
-        entries.push({ h3_index, leaf_hash, proof });
+    for (let i = 0; i < hashes.length; i++) {
+        const entry = hashes[i];
+        if (entry === undefined) throw new Error(`unexpected undefined at index ${i}`);
+        const proof = proofStepsFromLevels(levels, i); // O(log n) per cell
+        entries.push({ h3_index: entry.h3_index, leaf_hash: entry.leaf_hash, proof });
     }
     return entries;
 }

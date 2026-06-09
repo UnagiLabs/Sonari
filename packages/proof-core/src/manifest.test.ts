@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parseAffectedCellsFile } from "./affected-cells.js";
+import { affectedCellProofSteps, parseAffectedCellsFile } from "./affected-cells.js";
 import { buildProofEntries, buildProofManifest, buildProofShardGroups } from "./manifest.js";
+import { replayProof } from "./merkle.js";
 
 // ---------------------------------------------------------------------------
 // Load fixtures
@@ -192,5 +193,158 @@ describe("buildProofManifest", () => {
         expect(serialized).not.toContain("sonari.affected");
         expect(serialized).not.toContain("r2://");
         expect(serialized).not.toContain("gzip");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Characterization tests for buildProofEntries (proof step列の固定 - STEP 3 安全網)
+// ---------------------------------------------------------------------------
+
+// Hand-crafted 3-cell fixture (multi-level tree, odd-leaf promotion)
+// All cells satisfy parse constraints: h3_index ascending, no duplicates,
+// geo_resolution=7, cell_band 1..3, intensity_value <= 65535
+const THREE_CELL_JSON = {
+    event_uid: "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd",
+    event_revision: 1,
+    oracle_version: 1,
+    geo_resolution: 7,
+    cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1",
+    cell_metric: "USGS_MMI",
+    cell_aggregation: "GRID_POINT_P90",
+    intensity_scale: "MMI_X100",
+    affected_cells: [
+        { h3_index: "608819013513904127", intensity_value: 831, cell_band: 3 },
+        { h3_index: "608819013597790207", intensity_value: 723, cell_band: 1 },
+        { h3_index: "608819013681676287", intensity_value: 500, cell_band: 2 },
+    ],
+};
+
+describe("buildProofEntries – characterization (STEP 3 安全網)", () => {
+    // ---------------------------------------------------------------------------
+    // (a) 独立参照との一致: 3セル入力で buildProofEntries の出力が
+    //     affectedCellProofSteps 個別APIから組み立てた参照 ProofEntry 配列と完全一致する
+    // ---------------------------------------------------------------------------
+    it("3-cell: matches reference ProofEntry array built from affectedCellProofSteps", () => {
+        const input = parseAffectedCellsFile(THREE_CELL_JSON);
+        const entries = buildProofEntries(input);
+
+        const refEntries = entries.map((e) => ({
+            h3_index: e.h3_index,
+            leaf_hash: e.leaf_hash,
+            proof: affectedCellProofSteps(input, e.h3_index),
+        }));
+
+        expect(entries).toEqual(refEntries);
+    });
+
+    // ---------------------------------------------------------------------------
+    // (b) 固定スナップショット: 3セル入力で buildProofEntries の全フィールドをハードコード固定
+    //     (leaf_hash + proof step列 を含む)
+    // ---------------------------------------------------------------------------
+    it("3-cell: full output matches hardcoded snapshot (proof steps included)", () => {
+        const input = parseAffectedCellsFile(THREE_CELL_JSON);
+        const entries = buildProofEntries(input);
+
+        expect(entries).toEqual([
+            {
+                h3_index: "608819013513904127",
+                leaf_hash: "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                proof: [
+                    {
+                        sibling_on_left: false,
+                        sibling_hash:
+                            "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
+                    },
+                    {
+                        sibling_on_left: false,
+                        sibling_hash:
+                            "0x2c4d904fb8f69d0dc30e0c0ac71160044eea96df3898a87e7243e65cf6f9b609",
+                    },
+                ],
+            },
+            {
+                h3_index: "608819013597790207",
+                leaf_hash: "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
+                proof: [
+                    {
+                        sibling_on_left: true,
+                        sibling_hash:
+                            "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                    },
+                    {
+                        sibling_on_left: false,
+                        sibling_hash:
+                            "0x2c4d904fb8f69d0dc30e0c0ac71160044eea96df3898a87e7243e65cf6f9b609",
+                    },
+                ],
+            },
+            {
+                h3_index: "608819013681676287",
+                leaf_hash: "0x2c4d904fb8f69d0dc30e0c0ac71160044eea96df3898a87e7243e65cf6f9b609",
+                proof: [
+                    {
+                        sibling_on_left: true,
+                        sibling_hash:
+                            "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f",
+                    },
+                ],
+            },
+        ]);
+    });
+
+    // ---------------------------------------------------------------------------
+    // (c) 2セル fixture のフルスナップショット固定（既存 fixture、proof step列を追加固定）
+    // ---------------------------------------------------------------------------
+    it("2-cell fixture: full output matches hardcoded snapshot (proof steps included)", () => {
+        const input = parseAffectedCellsFile(affectedJson);
+        const entries = buildProofEntries(input);
+
+        expect(entries).toEqual([
+            {
+                h3_index: "608819013513904127",
+                leaf_hash: "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                proof: [
+                    {
+                        sibling_on_left: false,
+                        sibling_hash:
+                            "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
+                    },
+                ],
+            },
+            {
+                h3_index: "608819013597790207",
+                leaf_hash: "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
+                proof: [
+                    {
+                        sibling_on_left: true,
+                        sibling_hash:
+                            "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                    },
+                ],
+            },
+        ]);
+    });
+
+    // ---------------------------------------------------------------------------
+    // (d) replayProof で全 entry が root に整合することを確認
+    // ---------------------------------------------------------------------------
+    it("3-cell: each proof replays to the same merkle root", () => {
+        const input = parseAffectedCellsFile(THREE_CELL_JSON);
+        const entries = buildProofEntries(input);
+        // 3-cell root: pair(leaf0,leaf1) then promote leaf2 => root = internalHash(pair01, leaf2)
+        // The first entry's proof step[1].sibling_hash is leaf2 hash, and replaying both steps
+        // should produce the same root for all entries.
+        const roots = entries.map((e) => replayProof(e.leaf_hash, e.proof));
+        expect(roots[0]).toBe(roots[1]);
+        expect(roots[0]).toBe(roots[2]);
+    });
+
+    it("2-cell fixture: each proof replays to the same merkle root (golden root)", () => {
+        const input = parseAffectedCellsFile(affectedJson);
+        const entries = buildProofEntries(input);
+        const GOLDEN_ROOT = "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f";
+        for (const entry of entries) {
+            expect(replayProof(entry.leaf_hash, entry.proof)).toBe(GOLDEN_ROOT);
+        }
     });
 });
