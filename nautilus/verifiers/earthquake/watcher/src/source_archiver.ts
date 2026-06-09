@@ -16,6 +16,25 @@ const DEFAULT_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.spa
 const DEFAULT_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = 1_000;
 const DEFAULT_WALRUS_EPOCHS = 1;
 const DEFAULT_WALRUS_DELETABLE = false;
+
+export interface WalrusStoreRetryPolicy {
+    maxAttempts: number;
+    initialDelayMs: number;
+    backoffRate: number;
+    maxDelayMs: number;
+    jitterRatio: number;
+    perAttemptTimeoutMs: number;
+}
+
+export const DEFAULT_WALRUS_STORE_RETRY_POLICY: WalrusStoreRetryPolicy = {
+    maxAttempts: 3,
+    initialDelayMs: 500,
+    backoffRate: 2,
+    maxDelayMs: 5_000,
+    jitterRatio: 0.25,
+    perAttemptTimeoutMs: 60_000,
+};
+
 const SENSITIVE_OUTPUT_LINE_PATTERN =
     /\b(token|secret|private|keystore|wallet|credential|password|api[_-]?key|suiprivkey)\b/iu;
 const ERROR_CAUSE_CHAIN_MAX_DEPTH = 5;
@@ -39,8 +58,9 @@ export class SourceArchiverError extends Error {
         message: string,
         readonly kind: SourceArchiverErrorKind,
         readonly statusCode: number,
+        options?: ErrorOptions,
     ) {
-        super(message);
+        super(message, options);
         this.name = "SourceArchiverError";
     }
 }
@@ -192,6 +212,16 @@ export type SourceArchiverLogEvent =
           errorCauseChain: SourceArchiverErrorCauseDiagnostic[];
           stackTop: string[];
       })
+    | (SourceArchiverRequestLogContext & {
+          event: "source_archiver.walrus_store.retry";
+          attempt: number;
+          maxAttempts: number;
+          delayMs: number;
+          durationMs: number;
+          errorKind: SourceArchiverErrorKind;
+          errorName: string;
+          errorMessage: string;
+      })
     | (Partial<SourceArchiverRequestLogContext> & {
           event: "source_archiver.handler.failure";
           stage: SourceArchiverHandlerFailureStage;
@@ -200,6 +230,74 @@ export type SourceArchiverLogEvent =
       });
 
 export type SourceArchiverLogger = (event: SourceArchiverLogEvent) => void;
+
+export interface WalrusStoreClock {
+    /** Waits for ms milliseconds before resolving. */
+    sleep(ms: number): Promise<void>;
+    /**
+     * Runs operation and rejects with a retryable SourceArchiverError(504) if it
+     * does not complete within ms milliseconds.
+     * Note: the underlying writeBlob call cannot be cancelled on timeout;
+     * this is accepted because we operate within a Lambda timeout budget.
+     */
+    runWithTimeout<T>(ms: number, operation: () => Promise<T>): Promise<T>;
+}
+
+export interface WalrusSdkStoreRunnerOptions {
+    retryPolicy?: Partial<WalrusStoreRetryPolicy> | undefined;
+    clock?: WalrusStoreClock | undefined;
+    random?: (() => number) | undefined;
+}
+
+class RealWalrusStoreClock implements WalrusStoreClock {
+    sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    runWithTimeout<T>(ms: number, operation: () => Promise<T>): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(walrusAttemptTimeoutError(ms));
+            }, ms);
+            operation().then(
+                (value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                (error: unknown) => {
+                    clearTimeout(timer);
+                    reject(error);
+                },
+            );
+        });
+    }
+}
+
+function walrusAttemptTimeoutError(ms: number): SourceArchiverError {
+    return new SourceArchiverError(
+        `Walrus writeBlob attempt timed out after ${ms}ms`,
+        "retryable",
+        504,
+    );
+}
+
+function resolveWalrusStoreRetryPolicy(
+    partial?: Partial<WalrusStoreRetryPolicy>,
+): WalrusStoreRetryPolicy {
+    const merged = { ...DEFAULT_WALRUS_STORE_RETRY_POLICY, ...(partial ?? {}) };
+    return { ...merged, maxAttempts: Math.max(1, Math.trunc(merged.maxAttempts)) };
+}
+
+function classifyWriteBlobError(error: unknown): SourceArchiverError {
+    if (error instanceof SourceArchiverError) {
+        return error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    // Preserve the original error as cause so failure diagnostics retain full details.
+    return new SourceArchiverError(`Walrus SDK store failed: ${message}`, "retryable", 502, {
+        cause: error,
+    });
+}
 
 class DefaultWalrusSdkStoreClientFactory implements WalrusSdkStoreClientFactory {
     create(input: {
@@ -230,11 +328,15 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
     private readonly uploadRelayTipMaxMist: number;
     private readonly epochs: number;
     private readonly deletable: boolean;
+    private readonly retryPolicy: WalrusStoreRetryPolicy;
+    private readonly clock: WalrusStoreClock;
+    private readonly random: () => number;
 
     constructor(
         config: WalrusSdkStoreConfig,
         private readonly clientFactory: WalrusSdkStoreClientFactory = new DefaultWalrusSdkStoreClientFactory(),
         private readonly logger: SourceArchiverLogger = defaultSourceArchiverLogger,
+        options: WalrusSdkStoreRunnerOptions = {},
     ) {
         this.signer = signerFromRawSuiPrivateKey(config.suiPrivateKey);
         this.suiNetwork = validateSuiNetwork(config.suiNetwork ?? DEFAULT_SUI_NETWORK);
@@ -252,6 +354,9 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
             "Walrus epochs",
         );
         this.deletable = config.deletable ?? DEFAULT_WALRUS_DELETABLE;
+        this.retryPolicy = resolveWalrusStoreRetryPolicy(options.retryPolicy);
+        this.clock = options.clock ?? new RealWalrusStoreClock();
+        this.random = options.random ?? Math.random;
     }
 
     async store(input: VerifiedSourceArtifact): Promise<WalrusStoreResult> {
@@ -268,8 +373,6 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
             deletable: this.deletable,
         });
 
-        let registeredBlobObjectId: string | undefined;
-        let registeredTxDigest: string | undefined;
         try {
             const client = this.clientFactory.create({
                 suiNetwork: this.suiNetwork,
@@ -277,29 +380,22 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
                 uploadRelayUrl: this.uploadRelayUrl,
                 uploadRelayTipMaxMist: this.uploadRelayTipMaxMist,
             });
-            const result = await client.walrus.writeBlob({
+            const writtenBlob = await this.writeBlobWithRetry({
+                client,
                 blob: input.bytes,
-                signer: this.signer,
-                epochs: this.epochs,
-                deletable: this.deletable,
-                onStep: (step) => {
-                    this.logger(walrusStoreStepLogEvent(step, startedAt));
-                    if (step.step !== "registered") {
-                        return;
-                    }
-                    registeredBlobObjectId = step.blobObjectId;
-                    registeredTxDigest = step.txDigest;
-                },
+                context,
+                startedAt,
             });
-            const walrusBlobId = validateWalrusBlobIdFromOutput(result.blobId);
+            // Validation runs outside the retry loop; errors here are not retried.
+            const walrusBlobId = validateWalrusBlobIdFromOutput(writtenBlob.blobId);
             const walrusBlobObjectId = readWalrusBlobObjectId(
-                result.blobObject.id,
-                registeredBlobObjectId,
+                writtenBlob.blobObjectId,
+                writtenBlob.registeredBlobObjectId,
             );
             const storeResult = {
                 walrusBlobId,
                 ...optionalProperty("walrusBlobObjectId", walrusBlobObjectId),
-                ...optionalProperty("walrusTxDigest", registeredTxDigest),
+                ...optionalProperty("walrusTxDigest", writtenBlob.registeredTxDigest),
             };
             this.logger({
                 event: "source_archiver.walrus_store.success",
@@ -316,6 +412,73 @@ export class WalrusSdkStoreRunner implements WalrusStoreRunner {
             this.logger(walrusStoreFailureLogEvent(context, startedAt, error));
             const message = error instanceof Error ? error.message : String(error);
             throw new SourceArchiverError(`Walrus SDK store failed: ${message}`, "retryable", 502);
+        }
+    }
+
+    private async writeBlobWithRetry(args: {
+        client: WalrusSdkStoreClient;
+        blob: Uint8Array;
+        context: SourceArchiverRequestLogContext;
+        startedAt: number;
+    }): Promise<{
+        blobId: string;
+        blobObjectId: string;
+        registeredBlobObjectId?: string;
+        registeredTxDigest?: string;
+    }> {
+        let attempt = 0;
+        for (;;) {
+            // Capture variables are scoped to each attempt to prevent bleed-through.
+            let registeredBlobObjectId: string | undefined;
+            let registeredTxDigest: string | undefined;
+            try {
+                const result = await this.clock.runWithTimeout(
+                    this.retryPolicy.perAttemptTimeoutMs,
+                    () =>
+                        args.client.walrus.writeBlob({
+                            blob: args.blob,
+                            signer: this.signer,
+                            epochs: this.epochs,
+                            deletable: this.deletable,
+                            onStep: (step) => {
+                                this.logger(walrusStoreStepLogEvent(step, args.startedAt));
+                                if (step.step !== "registered") {
+                                    return;
+                                }
+                                registeredBlobObjectId = step.blobObjectId;
+                                registeredTxDigest = step.txDigest;
+                            },
+                        }),
+                );
+                return {
+                    blobId: result.blobId,
+                    blobObjectId: result.blobObject.id,
+                    ...optionalProperty("registeredBlobObjectId", registeredBlobObjectId),
+                    ...optionalProperty("registeredTxDigest", registeredTxDigest),
+                };
+            } catch (error) {
+                const classified = classifyWriteBlobError(error);
+                const nextAttempt = attempt + 1;
+                if (
+                    classified.kind !== "retryable" ||
+                    nextAttempt >= this.retryPolicy.maxAttempts
+                ) {
+                    throw classified;
+                }
+                const delayMs = computeBackoffDelayMs(this.retryPolicy, attempt, this.random);
+                this.logger(
+                    walrusStoreRetryLogEvent(
+                        args.context,
+                        args.startedAt,
+                        classified,
+                        nextAttempt,
+                        this.retryPolicy.maxAttempts,
+                        delayMs,
+                    ),
+                );
+                await this.clock.sleep(delayMs);
+                attempt = nextAttempt;
+            }
         }
     }
 }
@@ -535,19 +698,45 @@ function walrusStoreFailureLogEvent(
     startedAt: number,
     error: unknown,
 ): SourceArchiverLogEvent {
-    const errorCode = readDiagnosticStringProperty(error, "code");
+    // When classifyWriteBlobError wraps a non-SourceArchiverError, the original
+    // error is stored as cause.  Use the cause for rich diagnostics so that
+    // cause-chain, stack, and error code reflect the underlying failure.
+    const diagnostic =
+        error instanceof SourceArchiverError && error.cause !== undefined ? error.cause : error;
+    const errorCode = readDiagnosticStringProperty(diagnostic, "code");
     return {
         event: "source_archiver.walrus_store.failure",
         ...context,
         durationMs: durationMsSince(startedAt),
-        errorName: error instanceof Error ? error.name : typeof error,
+        errorName: diagnostic instanceof Error ? diagnostic.name : typeof diagnostic,
         errorMessage: redactSensitiveErrorMessage(
             error instanceof Error ? error.message : String(error),
         ),
-        errorClass: error instanceof Error ? error.constructor.name : typeof error,
+        errorClass: diagnostic instanceof Error ? diagnostic.constructor.name : typeof diagnostic,
         ...optionalProperty("errorCode", errorCode),
-        errorCauseChain: errorCauseChainDiagnostics(error),
-        stackTop: errorStackTop(error),
+        errorCauseChain: errorCauseChainDiagnostics(diagnostic),
+        stackTop: errorStackTop(diagnostic),
+    };
+}
+
+function walrusStoreRetryLogEvent(
+    context: SourceArchiverRequestLogContext,
+    startedAt: number,
+    error: SourceArchiverError,
+    attempt: number,
+    maxAttempts: number,
+    delayMs: number,
+): SourceArchiverLogEvent {
+    return {
+        event: "source_archiver.walrus_store.retry",
+        ...context,
+        attempt,
+        maxAttempts,
+        delayMs,
+        durationMs: durationMsSince(startedAt),
+        errorKind: error.kind,
+        errorName: error.name,
+        errorMessage: redactSensitiveErrorMessage(error.message),
     };
 }
 
@@ -940,4 +1129,18 @@ function validateWalrusBlobIdFromOutput(blobId: string): string {
 
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+export function computeBackoffDelayMs(
+    policy: Pick<
+        WalrusStoreRetryPolicy,
+        "initialDelayMs" | "backoffRate" | "maxDelayMs" | "jitterRatio"
+    >,
+    attempt: number,
+    random: () => number,
+): number {
+    const base = policy.initialDelayMs * policy.backoffRate ** attempt;
+    const capped = Math.min(base, policy.maxDelayMs);
+    const jitter = capped * policy.jitterRatio * random();
+    return Math.max(0, Math.round(capped + jitter));
 }

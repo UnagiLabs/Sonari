@@ -139,6 +139,21 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"verifier_kind": "membership_identity"');
     });
 
+    it("retries ArchiveSources on transient failure like the affected-cells proof step", async () => {
+        const template = await readTemplate();
+
+        const start = template.indexOf('"action": "archive_sources"');
+        const next = template.indexOf('"RegisterAffectedCellsProof": {', start);
+
+        expect(start).toBeGreaterThan(-1);
+        expect(next).toBeGreaterThan(start);
+
+        const archiveBlock = template.slice(start, next);
+        expect(archiveBlock).toContain(
+            '"Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }]',
+        );
+    });
+
     it("routes affected proof registration after archive and supports registration-only retry starts", async () => {
         const template = await readTemplate();
 
