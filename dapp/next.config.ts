@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,5 +83,9 @@ const nextConfig: NextConfig = {
         },
     },
 };
+
+// `next dev` 中に getCloudflareContext() を使えるようにする OpenNext の配線。
+// ビルド/本番では no-op に近く、既存の config 内容には一切影響しない。
+initOpenNextCloudflareForDev();
 
 export default nextConfig;
