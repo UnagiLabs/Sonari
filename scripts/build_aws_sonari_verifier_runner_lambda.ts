@@ -25,6 +25,7 @@ export {
 } from "./nautilus/verifiers/earthquake/watcher/src/lambda.js";
 export {
     batchVerifierHandler,
+    jobStreamHandler,
     submitVerificationHandler,
 } from "./nautilus/verifiers/membership/runner/src/lambda.js";
 `;

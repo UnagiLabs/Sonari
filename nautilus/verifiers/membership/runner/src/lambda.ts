@@ -1,7 +1,9 @@
 import { SFNClient } from "@aws-sdk/client-sfn";
 import {
     createBatchVerifierHandler,
+    createJobStreamHandler,
     createSubmitVerificationHandler,
+    type DynamoDbStreamEvent,
     DynamoDbVerificationJobRepository,
     StepFunctionsWorkflowStarter,
     type SubmitVerificationLambdaEvent,
@@ -27,6 +29,15 @@ export async function batchVerifierHandler(): Promise<unknown> {
         ),
         workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
     })();
+}
+
+export async function jobStreamHandler(event: DynamoDbStreamEvent): Promise<unknown> {
+    return createJobStreamHandler({
+        repository: new DynamoDbVerificationJobRepository(
+            requiredEnv("VERIFICATION_JOBS_TABLE_NAME"),
+        ),
+        workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
+    })(event);
 }
 
 function requiredEnv(name: string): string {
