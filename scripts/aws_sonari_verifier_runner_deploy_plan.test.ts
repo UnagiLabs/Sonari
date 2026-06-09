@@ -163,6 +163,23 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(plan.parameterOverrideArgs).toContain("NitroEnclaveMemoryMiB=8192");
     });
 
+    it("overrides ScheduleExpression with the rate(12 hours) default so issue #235 reaches the stack", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan(validInput);
+
+        expect(plan.parameterOverrides.ScheduleExpression).toBe("rate(12 hours)");
+        expect(plan.parameterOverrideArgs).toContain("ScheduleExpression=rate(12 hours)");
+    });
+
+    it("honors an explicit scheduleExpression override", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan({
+            ...validInput,
+            scheduleExpression: "rate(6 hours)",
+        });
+
+        expect(plan.parameterOverrides.ScheduleExpression).toBe("rate(6 hours)");
+        expect(plan.parameterOverrideArgs).toContain("ScheduleExpression=rate(6 hours)");
+    });
+
     it("fails closed when nitroEnclaveMemoryMiB is not a positive integer", () => {
         expect(() =>
             buildAwsSonariVerifierRunnerDeployPlan({

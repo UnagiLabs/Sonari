@@ -15,6 +15,7 @@ const DEFAULT_SOURCE_ARCHIVER_WALRUS_EPOCHS = "1";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE = false;
 const DEFAULT_WORLD_ID_PROOF_MODE = "real";
 const DEFAULT_NITRO_ENCLAVE_MEMORY_MIB = 4096;
+const DEFAULT_SCHEDULE_EXPRESSION = "rate(12 hours)";
 const DEPLOY_PARAMETER_KEYS = [
     "LambdaCodeS3Bucket",
     "LambdaCodeS3Key",
@@ -32,6 +33,7 @@ const DEPLOY_PARAMETER_KEYS = [
     "TeeEifSha256",
     "GitCommitSha",
     "ScheduleState",
+    "ScheduleExpression",
     "WorldIdProofMode",
     "SourceArchiverTokenSecretArn",
     "SourceArchiverPrivateKeySecretArn",
@@ -72,6 +74,7 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
     nitroEnclaveMemoryMiB?: number;
+    scheduleExpression?: string;
     prefix?: string;
 };
 
@@ -116,6 +119,7 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
         TeeEifSha256: validateSha256(input.membershipEifSha256, "membership EIF SHA-256"),
         GitCommitSha: commitSha,
         ScheduleState: "DISABLED",
+        ScheduleExpression: input.scheduleExpression ?? DEFAULT_SCHEDULE_EXPRESSION,
         SourceArchiverTokenSecretArn: validateArn(
             input.sourceArchiverTokenSecretArn,
             "source archiver token secret ARN",
