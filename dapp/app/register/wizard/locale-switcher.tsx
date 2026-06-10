@@ -23,7 +23,7 @@ export function LocaleSwitcher({ current }: { readonly current: SonariLocale }) 
     }
 
     return (
-        <div aria-label="Language" className="locale-switcher" role="group">
+        <fieldset aria-label="Language" className="locale-switcher">
             {SUPPORTED_LOCALES.map((locale) => (
                 <button
                     aria-pressed={locale === current}
@@ -35,6 +35,6 @@ export function LocaleSwitcher({ current }: { readonly current: SonariLocale }) 
                     {localeLabels[locale]}
                 </button>
             ))}
-        </div>
+        </fieldset>
     );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
     isGoogleMapsConfigured,
@@ -40,8 +41,6 @@ const CLASSIFY_CONCURRENCY = 6;
 const MAX_VIEWPORT_CELLS = 200;
 // pan/zoom 後の overlay 再構築をまとめるための debounce(ms)。
 const REBUILD_DEBOUNCE_MS = 150;
-
-const WATER_MESSAGE = "海上などのセルは居住地として選択できません。";
 
 /** classification を overlay 上の種別へ変換する（選択中セルの判定は呼び出し側が優先する）。 */
 function classToKind(cls: ResidenceCellClass): OverlayCellKind {
@@ -88,7 +87,20 @@ const polygonStyleByKind: Record<OverlayCellKind, google.maps.PolygonOptions> = 
     },
 };
 
-export function ResidenceCellPicker() {
+export interface ResidenceCellPickerProps {
+    /** 選択セル（10進）が変わるたびに呼ばれる。安定参照（useCallback）で渡すこと。 */
+    readonly onSelectionChange?: (decimal: string | null) => void;
+}
+
+export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerProps = {}) {
+    const t = useTranslations("register.wizard.residence.picker");
+    // 地図初期化 effect の依存に t を入れると locale 切替のたびに地図が
+    // 再初期化されてしまうため、コールバック内からは ref 経由で参照する。
+    const tRef = useRef(t);
+    useEffect(() => {
+        tRef.current = t;
+    });
+
     // 初回描画はサーバー・クライアントで必ず一致させるため env に依存させない。
     // 実際の状態（unconfigured/ready/error）はマウント後の useEffect で決める。
     const [status, setStatus] = useState<MapsLoaderStatus>("loading");
@@ -113,6 +125,11 @@ export function ResidenceCellPicker() {
     useEffect(() => {
         selectedDecimalRef.current = selectedDecimal;
     }, [selectedDecimal]);
+
+    // 親（ウィザード）へ選択セルの変化を通知する。
+    useEffect(() => {
+        onSelectionChange?.(selectedDecimal);
+    }, [selectedDecimal, onSelectionChange]);
 
     // 選択が変わったら advanced 入力欄に16進表記を反映する。
     useEffect(() => {
@@ -180,7 +197,8 @@ export function ResidenceCellPicker() {
         const previous = selectedDecimalRef.current;
         const outcome = selectResidenceCell({ selectedDecimal: previous }, decimal, cls);
         if (outcome.rejected) {
-            setNotice(outcome.message ?? WATER_MESSAGE);
+            // 拒否されるのは water セルのみ（selectResidenceCell の仕様）。
+            setNotice(tRef.current("waterMessage"));
             return;
         }
 
@@ -368,7 +386,7 @@ export function ResidenceCellPicker() {
                     // 旧 Autocomplete は 2025-03-01 以降の新規顧客に提供されない非推奨 API。
                     // options 引数は必須（全プロパティ optional）。
                     const placeAutocomplete = new google.maps.places.PlaceAutocompleteElement({});
-                    placeAutocomplete.placeholder = "Shibuya, Tokyo";
+                    placeAutocomplete.placeholder = tRef.current("searchPlaceholder");
                     host.replaceChildren(placeAutocomplete);
                     autocompleteElRef.current = placeAutocomplete;
                     placeAutocomplete.addEventListener("gmp-select", async (event) => {
@@ -420,7 +438,7 @@ export function ResidenceCellPicker() {
     // 現在地ボタン。座標は一時利用のみで保存しない。
     const handleUseCurrentLocation = useCallback(() => {
         if (typeof navigator === "undefined" || navigator.geolocation === undefined) {
-            setNotice("この端末では現在地を取得できません。");
+            setNotice(tRef.current("geolocationUnavailable"));
             return;
         }
         navigator.geolocation.getCurrentPosition(
@@ -429,7 +447,7 @@ export function ResidenceCellPicker() {
                 focusLatLng(latitude, longitude);
             },
             () => {
-                setNotice("現在地の取得が許可されませんでした。");
+                setNotice(tRef.current("geolocationDenied"));
             },
         );
     }, [focusLatLng]);
@@ -444,7 +462,7 @@ export function ResidenceCellPicker() {
             try {
                 decimal = normalizeResidenceCellInput(raw).decimal;
             } catch {
-                setNotice("H3 セルIDが正しくありません（resolution 7 の16進セルID）。");
+                setNotice(tRef.current("invalidCellInput"));
                 return;
             }
             void applySelection(decimal);
@@ -460,12 +478,9 @@ export function ResidenceCellPicker() {
         <div className="residence-selector">
             <div className="residence-search-row">
                 <div className="text-field">
-                    <span>Search city, station, or address</span>
+                    <span>{t("searchLabel")}</span>
                     <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
-                    <small>
-                        Search text may be sent to a map provider. Sonari stores the selected H3
-                        cell only.
-                    </small>
+                    <small>{t("searchHint")}</small>
                 </div>
                 <button
                     className="btn btn-secondary"
@@ -473,22 +488,19 @@ export function ResidenceCellPicker() {
                     onClick={handleUseCurrentLocation}
                     type="button"
                 >
-                    Use current location
+                    {t("useCurrentLocation")}
                 </button>
             </div>
 
             {status === "unconfigured" ? (
                 <div className="residence-map-fallback" role="status">
-                    <strong>Map preview is unavailable.</strong>
-                    <p>
-                        Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable the map. You can still enter
-                        an H3 cell manually from Advanced cell input below.
-                    </p>
+                    <strong>{t("unconfiguredTitle")}</strong>
+                    <p>{t("unconfiguredBody")}</p>
                 </div>
             ) : (
                 <div className="residence-map-picker">
                     <div
-                        aria-label="Residence cell map"
+                        aria-label={t("mapAria")}
                         className="residence-map-canvas"
                         ref={mapElRef}
                         role="application"
@@ -496,13 +508,12 @@ export function ResidenceCellPicker() {
                     />
                     {status === "loading" ? (
                         <div className="residence-map-overlay-note" role="status">
-                            Loading map…
+                            {t("loadingMap")}
                         </div>
                     ) : null}
                     {status === "error" ? (
                         <div className="residence-map-overlay-note" role="status">
-                            The map failed to load. Try again later, or use Advanced cell input
-                            below.
+                            {t("mapError")}
                         </div>
                     ) : null}
                 </div>
@@ -510,7 +521,7 @@ export function ResidenceCellPicker() {
 
             {workerUnavailable ? (
                 <p className="residence-notice" role="status">
-                    Land/sea check is unavailable, so all cells are selectable for now.
+                    {t("workerUnavailable")}
                 </p>
             ) : null}
             {notice !== null ? (
@@ -521,15 +532,15 @@ export function ResidenceCellPicker() {
 
             <div className="selected-area-summary">
                 <div>
-                    <span>H3 resolution</span>
+                    <span>{t("summaryResolution")}</span>
                     <strong>{summary.resolution}</strong>
                 </div>
                 <div>
-                    <span>Cell ID</span>
+                    <span>{t("summaryCellId")}</span>
                     <strong className="mono-value">{summary.cellHex ?? "—"}</strong>
                 </div>
                 <div>
-                    <span>Allowlist</span>
+                    <span>{t("summaryAllowlist")}</span>
                     <strong>{summary.allowlistStatus}</strong>
                 </div>
             </div>
@@ -537,9 +548,9 @@ export function ResidenceCellPicker() {
             <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
 
             <details className="advanced-cell-input">
-                <summary>Advanced cell input</summary>
+                <summary>{t("advancedSummary")}</summary>
                 <label className="text-field" htmlFor="home-cell-advanced">
-                    <span>H3 resolution 7 cell (hex)</span>
+                    <span>{t("advancedLabel")}</span>
                     <input
                         id="home-cell-advanced"
                         onBlur={(event) => {
@@ -558,10 +569,7 @@ export function ResidenceCellPicker() {
                         type="text"
                         value={advancedInput}
                     />
-                    <small>
-                        Debug only. Enter a hex H3 cell to override the selection. The saved value
-                        is the decimal cell ID.
-                    </small>
+                    <small>{t("advancedHelp")}</small>
                 </label>
             </details>
         </div>
