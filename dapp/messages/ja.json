@@ -187,6 +187,7 @@
                     "failedFallback": "検証リクエストに失敗しました。",
                     "notConfigured": "本人確認の送信先が設定されていません。",
                     "jobLine": "ジョブ {jobId} は {jobStatus} です。",
+                    "processingNotice": "処理に数分〜1時間程度かかります。処理状況はmypageで確認できます。",
                     "kycButton": "本人確認を開始",
                     "kycSubmitting": "送信中"
                 },
