@@ -21,7 +21,9 @@
         "@sonari/proof-core": "workspace:*",
         "@worldcoin/idkit": "^4.1.8",
         "h3-js": "^4.4.0",
+        "motion": "^12.40.0",
         "next": "^16.2.2",
+        "next-intl": "^4.13.0",
         "react": "^19.2.0",
         "react-dom": "^19.2.0"
     },
