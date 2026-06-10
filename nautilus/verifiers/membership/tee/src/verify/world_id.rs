@@ -22,7 +22,7 @@ pub const WORLD_ID_ENVIRONMENT_ENV: &str = "SONARI_WORLD_ID_ENVIRONMENT";
 /// where the TCP connection is forwarded so the host-side proxy enforces the
 /// egress allowlist (mirrors the earthquake egress proxy approach).
 pub const WORLD_ID_EGRESS_PROXY_URL_ENV: &str = "SONARI_WORLD_ID_EGRESS_PROXY_URL";
-pub const WORLD_ID_ACTION: &str = "sonari_membership_register_v1";
+pub const WORLD_ID_ACTION: &str = "sonari_membership_register_v2";
 pub const WORLD_ID_MAX_AGE_SECONDS: u64 = 604_800;
 pub const WORLD_ID_USER_AGENT: &str = "sonari-membership-tee/0.1";
 pub const WORLD_ID_VERIFICATION_FAILED: &str = "WORLD_ID_VERIFICATION_FAILED";
@@ -716,7 +716,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"code":"nullifier_replayed","success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
+            r#"{"code":"nullifier_replayed","success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v2","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
         );
         let WorldIdVerificationStatus::Verified { evidence } = status else {
             panic!("evidence-bearing replay should return verified evidence");
@@ -751,7 +751,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v1","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
+            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"12345678901234567890"}],"action":"sonari_membership_register_v2","nullifier":"12345678901234567890","created_at":"2023-02-18T11:20:39.530041+00:00","environment":"staging"}"#,
         );
         let WorldIdVerificationStatus::Verified { evidence } = status else {
             panic!("success response should return verified evidence");
@@ -784,7 +784,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v1","nullifier":"123","environment":"staging"}"#,
+            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v2","nullifier":"123","environment":"staging"}"#,
         );
         assert_eq!(
             mismatched_nullifier,

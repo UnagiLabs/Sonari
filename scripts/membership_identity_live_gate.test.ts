@@ -155,7 +155,7 @@ function completeEnv(): Record<string, string> {
         SONARI_WORLD_ID_MERKLE_ROOT: "0xabc",
         SONARI_WORLD_ID_PROOF: "0xproof",
         SONARI_WORLD_ID_VERIFICATION_LEVEL: "orb",
-        SONARI_WORLD_ID_ACTION: "sonari_membership_register_v1",
+        SONARI_WORLD_ID_ACTION: "sonari_membership_register_v2",
         SONARI_WORLD_ID_SIGNAL_HASH: `0x${"11".repeat(32)}`,
         SONARI_IDENTITY_PACKAGE_ID: "0xabc",
         SONARI_IDENTITY_PAUSE_STATE_ID: "0x111",

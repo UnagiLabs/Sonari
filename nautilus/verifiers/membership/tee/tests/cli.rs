@@ -485,7 +485,7 @@ fn world_id_request() -> serde_json::Value {
             "idkit_response": {
                 "protocol_version": "4.0",
                 "nonce": "nonce-123",
-                "action": "sonari_membership_register_v1",
+                "action": "sonari_membership_register_v2",
                 "environment": "staging",
                 "responses": [
                     {

@@ -365,11 +365,11 @@ mod tests {
         let signature = output.signature.as_ref().unwrap();
         assert_eq!(
             result.duplicate_key_hash,
-            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
+            "0x2495bdd8628419cba45dda015074a8637f7158616b76d53bac08e7dfe14ca250"
         );
         assert_eq!(
             result.evidence_hash,
-            "0x8fcc40112c9550f46f6e3172a9fca299cb3523c2f2ef788c19c91891b836b3cc"
+            "0x3a163204e93663fcb6062045a93b1a145a7686997c15105b75c6ca4432f6c764"
         );
         assert_eq!(result.issued_at_ms, now_ms);
         assert_eq!(result.expires_at_ms, now_ms + IDENTITY_RESULT_TTL_MS);
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(output.status, IdentityProcessingStatus::Verified);
         assert_eq!(
             output.result.unwrap().duplicate_key_hash,
-            "0xe0b489ec33cad56128dd39a060f165edc65c69f5c6dba23cd0b44d8dd4476878"
+            "0x2495bdd8628419cba45dda015074a8637f7158616b76d53bac08e7dfe14ca250"
         );
     }
 
