@@ -97,6 +97,11 @@ jobs:
       # アプリ secret（AFFECTED_PROOF_REGISTER_TOKEN 等）はこの workflow では一切扱わない。
       # それらは `wrangler secret put` で Cloudflare 側に別管理する。CI に渡すのは
       # Cloudflare API token（と必要なら account id）のみ。
+      #
+      # GEO_RESOLUTION / WALRUS_AGGREGATOR_URL は repo-level Variables（SONARI_*）を単一情報源とし、
+      # deploy 時に `--var KEY:VALUE` で注入する。wrangler.toml [vars] にはハードコードしない
+      # （1 箇所更新で dapp / 各 worker / AWS へ反映する方針）。`--var` は最初の `:` で KEY と VALUE を
+      # 分けるため、`https://...` を含む URL もそのまま渡せる。
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
@@ -105,4 +110,4 @@ jobs:
           wranglerVersion: "4.85.0"
           packageManager: pnpm
           workingDirectory: packages/affected-cells-proof-worker
-          command: deploy
+          command: deploy --var GEO_RESOLUTION:${{ vars.SONARI_GEO_RESOLUTION }} --var WALRUS_AGGREGATOR_URL:${{ vars.SONARI_WALRUS_AGGREGATOR_URL }}
