@@ -214,5 +214,65 @@
                 "homeCta": "Back to home"
             }
         }
+    },
+    "mypage": {
+        "topbar": {
+            "label": "My Page",
+            "brandHomeAria": "Sonari home",
+            "home": "Home",
+            "register": "Register"
+        },
+        "title": "My Page",
+        "subtitle": "Review the contents of your MembershipPass.",
+        "states": {
+            "disconnectedTitle": "Connect your wallet",
+            "disconnectedBody": "Connect a wallet to read your membership details.",
+            "loadingBody": "Reading your membership…",
+            "notRegisteredTitle": "No membership yet",
+            "notRegisteredBody": "Complete registration to see your membership here.",
+            "notRegisteredCta": "Go to registration",
+            "errorTitle": "Could not load your membership",
+            "errorBody": "We could not read your membership. Please try again later.",
+            "errorMultiple": "Multiple memberships were found for this wallet. Please contact support.",
+            "errorRetry": "Retry",
+            "unconfiguredTitle": "Currently unavailable",
+            "unconfiguredBody": "The membership source is not configured, so details cannot be shown."
+        },
+        "residence": {
+            "heading": "Residence",
+            "cellLabel": "Residence cell",
+            "registeredAtLabel": "Registered on"
+        },
+        "identity": {
+            "heading": "Identity",
+            "verifiedLabel": "Status",
+            "verifiedYes": "Verified",
+            "verifiedNo": "Not verified",
+            "providerLabel": "Provider",
+            "verifiedAtLabel": "Verified on",
+            "expiresAtLabel": "Expires on"
+        },
+        "status": {
+            "heading": "Pass status",
+            "stateLabel": "State",
+            "issuedAtLabel": "Issued on"
+        },
+        "statusLabels": {
+            "active": "Active",
+            "suspended": "Suspended",
+            "revoked": "Revoked",
+            "migrated": "Migrated",
+            "unknown": "Unknown"
+        },
+        "providerLabels": {
+            "kyc": "KYC",
+            "worldId": "World ID",
+            "none": "None"
+        },
+        "unset": "Not set",
+        "map": {
+            "unavailableTitle": "Map unavailable",
+            "unavailableBody": "Residence cell value: {cell}"
+        }
     }
 }

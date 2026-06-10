@@ -214,5 +214,65 @@
                 "homeCta": "ホームに戻る"
             }
         }
+    },
+    "mypage": {
+        "topbar": {
+            "label": "マイページ",
+            "brandHomeAria": "Sonari ホーム",
+            "home": "ホーム",
+            "register": "新規登録"
+        },
+        "title": "マイページ",
+        "subtitle": "あなたの会員証（MembershipPass）の内容を確認できます。",
+        "states": {
+            "disconnectedTitle": "ウォレットを接続してください",
+            "disconnectedBody": "会員証の内容を読み取るには、ウォレットの接続が必要です。",
+            "loadingBody": "会員証を読み取っています…",
+            "notRegisteredTitle": "会員証がまだありません",
+            "notRegisteredBody": "登録を済ませると、ここに会員証の内容が表示されます。",
+            "notRegisteredCta": "登録ページへ",
+            "errorTitle": "読み取りに失敗しました",
+            "errorBody": "会員証を読み取れませんでした。時間をおいて再試行してください。",
+            "errorMultiple": "このウォレットに複数の会員証が見つかりました。サポートへ連絡してください。",
+            "errorRetry": "再試行",
+            "unconfiguredTitle": "現在ご利用いただけません",
+            "unconfiguredBody": "会員証の参照先が設定されていないため、内容を表示できません。"
+        },
+        "residence": {
+            "heading": "居住地",
+            "cellLabel": "居住地セル",
+            "registeredAtLabel": "登録日"
+        },
+        "identity": {
+            "heading": "本人確認",
+            "verifiedLabel": "確認状況",
+            "verifiedYes": "確認済み",
+            "verifiedNo": "未確認",
+            "providerLabel": "認証プロバイダ",
+            "verifiedAtLabel": "確認日",
+            "expiresAtLabel": "有効期限"
+        },
+        "status": {
+            "heading": "会員証のステータス",
+            "stateLabel": "状態",
+            "issuedAtLabel": "発行日"
+        },
+        "statusLabels": {
+            "active": "有効",
+            "suspended": "停止中",
+            "revoked": "失効",
+            "migrated": "移行済み",
+            "unknown": "不明"
+        },
+        "providerLabels": {
+            "kyc": "KYC",
+            "worldId": "World ID",
+            "none": "なし"
+        },
+        "unset": "未設定",
+        "map": {
+            "unavailableTitle": "地図を表示できません",
+            "unavailableBody": "居住地セルの値: {cell}"
+        }
     }
 }
