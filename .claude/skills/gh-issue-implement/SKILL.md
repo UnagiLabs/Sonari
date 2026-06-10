@@ -32,7 +32,7 @@ GitHub issue を **Claude Code だけで完結**させる repo-local workflow。
   - `references/workflow-checklist.md`
 - supporting skills:
   - `prepare-issue`
-  - `draft-commit-message`
+  - `commit-auto`
   - `prepare-pr`
 
 ## 前提
@@ -223,7 +223,7 @@ git worktree add <path> -b feature/issue-<issue-number>-<slug> main
 - 1 phase / 1 step の小規模 issue で、高リスク surface に触れない場合は、オーケストレーター（Claude Code）本体が直接 TDD 実装してよい
 - 複数 step、複数レイヤー、高リスク変更、または worker 分離が有効な場合は `issue-step-worker` サブエージェントを使う
 - 高リスク surface には schema、BCS、signature、Merkle root、Move contract、trust boundary、auth、secret、AWS 実行系を含む
-- fast path の場合も `1 step = 1 commit`、worktree clean、`draft-commit-message` 使用は維持する
+- fast path の場合も `1 step = 1 commit`、worktree clean、`commit-auto` 使用は維持する
 
 `issue-step-worker` サブエージェントを使う場合は次を渡す:
 
@@ -253,10 +253,9 @@ step 完了の定義:
 - 次の step に進む前に `git status --short` が空であることを確認する
 - 複数 step の変更をまとめて 1 commit にしてはならない
 - step の変更が独立して commit できない計画は粒度が大きすぎるため、計画を分割し直す
-- **すべての commit message は `draft-commit-message` スキルを必ず使って作る**
+- **すべての commit は `commit-auto` スキルを必ず使って行う**
 - オーケストレーターやサブエージェントが commit message を手書きしてはならない
-
-コミットメッセージは `draft-commit-message` の規約に従う。
+- `commit-auto` はメッセージ作成と `git commit` を自動で行う。ユーザー確認なしに進める
 
 各 step 完了時には、フェーズ番号と step 番号が分かる形で進捗を短く共有する。自動 checkpoint は増やさない。
 
@@ -368,7 +367,7 @@ cleanup で詰まりやすい例:
 - `issue-planner` / `plan-reviewer` / `issue-step-worker` / `verification-reviewer` の役割をまたいで責務を混ぜない
 - オーケストレーターは複数 step の変更を溜めてからまとめて commit してはならない
 - 各 step の終了条件には「専用 commit が 1 つ作られ、worktree が clean」が含まれる
-- step commit、review 対応 commit、finalizer commit を含む **すべての commit** で `draft-commit-message` を先に使う
+- step commit、review 対応 commit、finalizer commit を含む **すべての commit** で `commit-auto` を使う
 - issue 本文へ計画を書き戻してから worktree に入る
 - PR 作成前に worktree と元の作業ツリーの状態を混同しない
 - PR 作成後の worktree cleanup は省略不可

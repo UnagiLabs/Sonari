@@ -1,6 +1,8 @@
 ---
 name: draft-commit-message
 description: Draft a commit message from the current git diff using the repository's Japanese commit message format. Use when the user asks for a commit message, asks how to summarize the current diff for a commit, or wants a commit body before running git commit.
+model: sonnet
+effort: low
 ---
 
 # draft-commit-message
