@@ -422,49 +422,70 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(workflow).not.toContain("set -x");
     });
 
-    it("passes identity relayer env to Deploy CloudFormation stack step and keeps earthquake unchanged", async () => {
+    it("wires shared object ids from repo-level variables and forwards them as CloudFormation parameters", async () => {
         const workflow = await readWorkflow();
 
-        // Identity env vars must be wired from GitHub variables into the deploy step
+        // 共有 object id は repo-level Variables（SONARI_*）= dapp / AWS の単一情報源から配線する。
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_PAUSE_STATE_ID: $" + "{{ vars.SONARI_IDENTITY_PAUSE_STATE_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_IDENTITY_REGISTRY_ID: $" + "{{ vars.SONARI_IDENTITY_REGISTRY_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_MEMBERSHIP_REGISTRY_ID: $" + "{{ vars.SONARI_MEMBERSHIP_REGISTRY_ID }}",
+        );
+        expect(workflow).toContain(
+            "SONARI_VERIFIER_REGISTRY_ID: $" + "{{ vars.SONARI_VERIFIER_REGISTRY_ID }}",
+        );
+
+        // identity relayer mode は引き続き dev-prefixed の environment-level variable。
         expect(workflow).toContain(
             "IDENTITY_RELAYER_MODE: $" +
                 "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}",
         );
-        expect(workflow).toContain(
-            "SONARI_IDENTITY_PACKAGE_ID: $" +
-                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}",
-        );
-        expect(workflow).toContain(
-            "SONARI_IDENTITY_PAUSE_STATE_ID: $" +
-                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PAUSE_STATE_ID }}",
-        );
-        expect(workflow).toContain(
-            "SONARI_IDENTITY_REGISTRY_ID: $" +
-                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_REGISTRY_ID }}",
-        );
-        expect(workflow).toContain(
-            "SONARI_MEMBERSHIP_REGISTRY_ID: $" +
-                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_MEMBERSHIP_REGISTRY_ID }}",
-        );
-        expect(workflow).toContain(
-            "SONARI_VERIFIER_REGISTRY_ID: $" +
-                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_VERIFIER_REGISTRY_ID }}",
-        );
 
-        // Identity env must be forwarded as CloudFormation parameters in the deploy step
+        // 共有値は CloudFormation パラメータとして deploy step から渡す。
         expect(workflow).toContain("IdentityRelayerMode=$IDENTITY_RELAYER_MODE");
         expect(workflow).toContain("SonariIdentityPackageId=$SONARI_IDENTITY_PACKAGE_ID");
         expect(workflow).toContain("SonariIdentityPauseStateId=$SONARI_IDENTITY_PAUSE_STATE_ID");
         expect(workflow).toContain("SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID");
         expect(workflow).toContain("SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID");
         expect(workflow).toContain("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID");
+    });
 
-        // Earthquake RELAYER_* wiring must remain unchanged
+    it("derives the Sonari package id from Published.toml instead of a GitHub variable", async () => {
+        const workflow = await readWorkflow();
+
+        // package id は GH 変数の手書きをやめ、contracts/Published.toml の published-at から導出する。
+        expect(workflow).toContain("Resolve Sonari Move package id from Published.toml");
+        expect(workflow).toContain("contracts/Published.toml");
+        // deploy step の env では SONARI_IDENTITY_PACKAGE_ID を vars から再宣言しない
+        // （前段 step が GITHUB_ENV に書いた toml 由来の値を使うため）。
+        expect(workflow).not.toContain(
+            "SONARI_IDENTITY_PACKAGE_ID: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_SONARI_IDENTITY_PACKAGE_ID }}",
+        );
+    });
+
+    it("wires the affected proof registrar URL from the shared repo-level variable", async () => {
+        const workflow = await readWorkflow();
+
+        // affected-cells proof の register URL は dapp と同じ repo-level 単一情報源を使う。
+        expect(workflow).toContain(
+            "AFFECTED_PROOF_WORKER_URL: $" + "{{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}",
+        );
+        expect(workflow).toContain("AffectedProofRegistrarUrl=$AFFECTED_PROOF_WORKER_URL");
+    });
+
+    it("takes the Sui network from the shared variable and keeps other earthquake relayer wiring unchanged", async () => {
+        const workflow = await readWorkflow();
+
+        // Sui network は単一情報源（SONARI_SUI_NETWORK）から取り、relayer / source archiver に共有する。
+        expect(workflow).toContain("RELAYER_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}");
+        // earthquake relayer の他の RELAYER_* は移行ラグのため dev-prefixed のまま据置。
         expect(workflow).toContain(
             "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
-        );
-        expect(workflow).toContain(
-            "RELAYER_NETWORK: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_NETWORK }}",
         );
         expect(workflow).toContain("RelayerMode=$RELAYER_MODE");
         expect(workflow).toContain("RelayerNetwork=$RELAYER_NETWORK");
