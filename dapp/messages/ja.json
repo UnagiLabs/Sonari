@@ -1,0 +1,180 @@
+{
+    "register": {
+        "topbar": {
+            "home": "ホーム",
+            "donate": "寄付",
+            "dashboard": "ダッシュボード",
+            "register": "新規登録",
+            "claim": "申請",
+            "brandHomeAria": "Sonari ホーム"
+        },
+        "wizard": {
+            "progress": {
+                "aria": "登録の進行状況",
+                "stepCount": "ステップ {current} / {total}",
+                "optionalTag": "任意",
+                "steps": {
+                    "welcome": "ようこそ",
+                    "membership": "メンバーシップ",
+                    "residence": "居住エリア",
+                    "identity": "本人確認",
+                    "done": "完了"
+                }
+            },
+            "common": {
+                "next": "次へ",
+                "back": "戻る",
+                "comingSoon": "近日対応"
+            },
+            "welcome": {
+                "eyebrow": "新規登録",
+                "title": "Sonari のメンバーになる",
+                "lead": "手順は3つだけ。譲渡不可のメンバーシップ SBT を発行し、居住エリアを選び、本人確認は準備ができたときに行えます。",
+                "walletHint": "Sui ウォレットを接続してはじめましょう。",
+                "privacySummary": "Sonari が保存する情報",
+                "privacy": {
+                    "walletAddress": { "label": "ウォレットアドレス", "value": "SBT の所有者のみ" },
+                    "nickname": { "label": "ニックネーム", "value": "あとから追加可能" },
+                    "addressSearch": { "label": "住所検索", "value": "Sonari は保存しない" },
+                    "phoneEmail": { "label": "電話番号・メール", "value": "収集しない" },
+                    "gpsHistory": { "label": "GPS 履歴", "value": "保存しない" },
+                    "deviceInfo": { "label": "端末情報", "value": "公開しない" },
+                    "h3Cell": { "label": "H3 セル", "value": "解像度 7 の出力のみ" }
+                },
+                "cta": "はじめる"
+            },
+            "membership": {
+                "eyebrow": "ステップ 1",
+                "title": "メンバーシップ SBT を発行",
+                "lead": "ウォレットごとに1つの譲渡不可メンバーシップ。譲渡はできず、保有しても支援の保証や優先順位にはなりません。",
+                "card": {
+                    "objectType": "オブジェクト種別",
+                    "objectTypeValue": "メンバーシップ SBT",
+                    "owner": "所有者",
+                    "ownerPlaceholder": "接続中のウォレット",
+                    "transfer": "譲渡",
+                    "transferValue": "不可",
+                    "status": "ステータス",
+                    "statusValue": "未発行"
+                },
+                "statementsLegend": "進む前の確認",
+                "statements": {
+                    "0": "このウォレットが有効な Sonari メンバーシップ SBT を1つ所有します。",
+                    "1": "メンバーシップ SBT はソウルバウンドで、譲渡できません。",
+                    "2": "メンバーシップ SBT の保有は支援の保証や支払いの優先順位にはなりません。"
+                },
+                "issueButton": "メンバーシップ SBT を発行",
+                "issueComingSoon": "オンチェーン発行は近日対応予定です。先に登録設定を完了しておけます。",
+                "nextHint": "上のすべての項目を確認すると次へ進めます。"
+            },
+            "residence": {
+                "eyebrow": "ステップ 2",
+                "title": "居住エリアを選ぶ",
+                "lead": "場所を検索するか地図をタップしてください。Sonari が保存するのは選択した H3 セルのみで、住所や GPS 履歴は保存しません。",
+                "statementsLegend": "居住地の確認",
+                "statements": {
+                    "0": "このセルは Sonari の資格確認に使う現在の居住エリアです。",
+                    "1": "災害の締切後に変更しても、その災害には適用されないことを理解しています。",
+                    "2": "Sonari は選択した H3 セルのみを保存し、住所や GPS 履歴は保存しません。"
+                },
+                "nextHint": "居住セルを選択し、すべての項目を確認すると次へ進めます。",
+                "picker": {
+                    "searchLabel": "都市・駅・住所を検索",
+                    "searchPlaceholder": "例: 渋谷駅",
+                    "searchHint": "検索テキストは地図プロバイダーに送信されることがあります。Sonari は選択した H3 セルのみ保存します。",
+                    "useCurrentLocation": "現在地を使う",
+                    "mapAria": "居住セルの地図",
+                    "unconfiguredTitle": "地図プレビューを利用できません。",
+                    "unconfiguredBody": "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を設定すると地図が有効になります。下の詳細入力から H3 セルを直接入力することもできます。",
+                    "loadingMap": "地図を読み込み中…",
+                    "mapError": "地図の読み込みに失敗しました。時間をおいて再試行するか、下の詳細入力をご利用ください。",
+                    "workerUnavailable": "陸海判定を利用できないため、現在はすべてのセルを選択できます。",
+                    "waterMessage": "海上などのセルは居住地として選択できません。",
+                    "geolocationUnavailable": "この端末では現在地を取得できません。",
+                    "geolocationDenied": "現在地の取得が許可されませんでした。",
+                    "invalidCellInput": "H3 セルIDが正しくありません（resolution 7 の16進セルID）。",
+                    "summaryResolution": "H3 解像度",
+                    "summaryCellId": "セル ID",
+                    "summaryAllowlist": "許可リスト",
+                    "advancedSummary": "詳細セル入力",
+                    "advancedLabel": "H3 解像度 7 セル（16進）",
+                    "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。"
+                }
+            },
+            "identity": {
+                "eyebrow": "任意",
+                "title": "本人確認は、今でもあとでも",
+                "lead": "初回登録に必要なのはメンバーシップ SBT と居住セルだけです。本人確認が必須になるのは支払いの直前のみで、メンバーエリアからいつでも完了できます。",
+                "routeLegend": "確認方法",
+                "options": {
+                    "kyc": {
+                        "label": "KYC",
+                        "description": "プロバイダー検証済みの重複防止キーを使います。KYC の生データや書類画像を Sonari が公開することはありません。"
+                    },
+                    "world_id": {
+                        "label": "World ID",
+                        "description": "Sonari の申請アクションに World ID の nullifier を使います。今すぐ、またはあとからメンバーエリアで設定できます。"
+                    }
+                },
+                "membershipLegend": "メンバーシップ",
+                "membership": {
+                    "connectTitle": "続行するにはウォレットを接続してください",
+                    "connectBody": "Sonari がメンバーシップ SBT とウォレットアドレスを自動で読み取ります。手入力は不要です。",
+                    "checkingTitle": "メンバーシップ SBT を確認中…",
+                    "checkingBody": "接続中のウォレットが所有するパスを照会しています。",
+                    "detectedTitle": "メンバーシップ SBT を検出",
+                    "detectedBody": "検証はこのパスと接続中のウォレットに紐づきます。",
+                    "none": "このウォレットのメンバーシップ SBT が見つかりません。先にステップ 1 を完了してください。",
+                    "multiple": "このウォレットに複数のメンバーシップ SBT が見つかりました。検証の前にサポートへご連絡ください。",
+                    "errorFallback": "メンバーシップ SBT を照会できませんでした。"
+                },
+                "statementsLegend": "重複アカウントの確認",
+                "statements": {
+                    "0": "他に有効な Sonari メンバーシップ SBT を保有していません。",
+                    "1": "同じ災害を複数のメンバーシップ SBT から申請しません。",
+                    "2": "本人確認は今スキップでき、Relief Cash の受け取り前に戻って完了できることを理解しています。"
+                },
+                "worldIdLegend": "World ID 証明",
+                "worldId": {
+                    "verifyButton": "World ID で検証",
+                    "preparing": "準備中…",
+                    "verifiedLabel": "World ID 検証済み",
+                    "notConfigured": "World ID が設定されていません。",
+                    "statementsFirst": "上の重複アカウントの確認をすべて承認すると検証できます。",
+                    "acceptStatementsError": "先に上の重複アカウントの確認を承認してください。",
+                    "bindingError": "所有者・メンバーシップ・確認事項を先にそろえてください。",
+                    "prepareError": "World ID 検証の準備に失敗しました。"
+                },
+                "submit": {
+                    "submitting": "検証リクエストを送信しています。",
+                    "queued": "検証ジョブを受け付けました。",
+                    "accepted": "検証リクエストが受理されました。",
+                    "failedFallback": "検証リクエストに失敗しました。",
+                    "notConfigured": "本人確認の送信先が設定されていません。",
+                    "jobLine": "ジョブ {jobId} は {jobStatus} です。",
+                    "kycButton": "本人確認を開始",
+                    "kycSubmitting": "送信中"
+                },
+                "skipCta": "今はスキップ",
+                "verifiedCta": "続ける"
+            },
+            "done": {
+                "eyebrow": "完了",
+                "title": "登録の準備ができました",
+                "lead": "このウォレットに登録される内容です。本人確認の設定はメンバーエリアからいつでも変更できます。",
+                "summary": {
+                    "membership": "メンバーシップ SBT",
+                    "membershipPending": "未発行",
+                    "residence": "居住セル",
+                    "residenceEmpty": "未選択",
+                    "identity": "本人確認",
+                    "identityVerified": "検証済み",
+                    "identitySkipped": "スキップ — いつでも追加可能"
+                },
+                "finalizeComingSoon": "オンチェーンでの本登録は近日対応予定です。選択内容はこのブラウザのセッションに保存されています。",
+                "dashboardCta": "ダッシュボードへ",
+                "homeCta": "ホームに戻る"
+            }
+        }
+    }
+}

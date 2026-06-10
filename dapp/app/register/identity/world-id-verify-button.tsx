@@ -24,6 +24,7 @@ import {
     proofOfHuman,
     type RpContext,
 } from "@worldcoin/idkit";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { WORLD_ID_ACTION } from "./world-id-action";
 import {
@@ -80,6 +81,7 @@ export function WorldIdVerifyButton({
     verified,
     onVerified,
 }: WorldIdVerifyButtonProps) {
+    const t = useTranslations("register.wizard.identity.worldId");
     const [status, setStatus] = useState<VerifyStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string>("");
     const [rpContext, setRpContext] = useState<RpContext | null>(null);
@@ -108,7 +110,7 @@ export function WorldIdVerifyButton({
         // button is disabled until then; this guards an unexpected programmatic call.
         if (!statementsAccepted) {
             setStatus("error");
-            setErrorMessage("Accept the duplicate-account statement above first.");
+            setErrorMessage(t("acceptStatementsError"));
             return;
         }
 
@@ -118,7 +120,7 @@ export function WorldIdVerifyButton({
             signalString = worldIdSignalString(owner, membershipId, signedStatementHash);
         } catch {
             setStatus("error");
-            setErrorMessage("Fill in owner, membership, and statement first.");
+            setErrorMessage(t("bindingError"));
             return;
         }
 
@@ -133,9 +135,7 @@ export function WorldIdVerifyButton({
             setStatus("open");
         } catch (err) {
             setStatus("error");
-            setErrorMessage(
-                err instanceof Error ? err.message : "Failed to prepare World ID verification.",
-            );
+            setErrorMessage(err instanceof Error ? err.message : t("prepareError"));
         }
     }
 
@@ -182,7 +182,7 @@ export function WorldIdVerifyButton({
         const fingerprint = nullifier.length > 0 ? shortNullifierFingerprint(nullifier) : null;
         return (
             <div className="world-id-verified" role="status">
-                <span className="world-id-verified-label">World ID Verified</span>
+                <span className="world-id-verified-label">{t("verifiedLabel")}</span>
                 {fingerprint !== null ? (
                     <span className="world-id-nullifier-hint">{fingerprint}</span>
                 ) : null}
@@ -194,7 +194,7 @@ export function WorldIdVerifyButton({
         <div className="world-id-verify-wrapper">
             {!isConfigured ? (
                 <p className="world-id-config-error" role="alert">
-                    World ID is not configured.
+                    {t("notConfigured")}
                 </p>
             ) : null}
 
@@ -209,12 +209,12 @@ export function WorldIdVerifyButton({
                 onClick={handleOpenClick}
                 type="button"
             >
-                {status === "preparing" ? "Preparing…" : "Verify with World ID"}
+                {status === "preparing" ? t("preparing") : t("verifyButton")}
             </button>
 
             {isConfigured && isBindingReady && !statementsAccepted ? (
                 <p className="world-id-hint" role="note">
-                    Affirm the duplicate-account statement above to enable verification.
+                    {t("statementsFirst")}
                 </p>
             ) : null}
 
