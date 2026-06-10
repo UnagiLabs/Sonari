@@ -7,6 +7,7 @@ import {
 } from "./wizard-storage";
 
 const fullState: WizardState = {
+    membershipIssued: true,
     membershipAccepted: [true, true, true],
     residenceAccepted: [true, false, true],
     selectedCellDecimal: "608533827635118079",
@@ -44,6 +45,7 @@ describe("保存対象の allowlist", () => {
         expect(Object.keys(parsed).sort()).toEqual(
             [
                 "version",
+                "membershipIssued",
                 "membershipAccepted",
                 "residenceAccepted",
                 "selectedCellDecimal",
@@ -91,6 +93,9 @@ describe("deserializeWizardState の fail-closed 検証", () => {
 
     it("承諾フラグ配列の型や長さが不正なら初期状態を返す", () => {
         const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
+        expect(
+            deserializeWizardState(JSON.stringify({ ...base, membershipIssued: "yes" })),
+        ).toEqual(initial);
         expect(
             deserializeWizardState(JSON.stringify({ ...base, membershipAccepted: [true, 1, true] })),
         ).toEqual(initial);

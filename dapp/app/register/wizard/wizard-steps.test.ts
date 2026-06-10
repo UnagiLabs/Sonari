@@ -20,6 +20,7 @@ function stateWith(overrides: Partial<WizardState>): WizardState {
 }
 
 const membershipDone = {
+    membershipIssued: true,
     membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => true),
 } as const;
 
@@ -33,8 +34,8 @@ const residenceDone = {
 // ---------------------------------------------------------------------------
 
 describe("WIZARD_STEPS", () => {
-    it("welcome → membership → residence → identity → done の順で5ステップ", () => {
-        expect(WIZARD_STEPS).toEqual(["welcome", "membership", "residence", "identity", "done"]);
+    it("welcome → residence → membership → identity → done の順で5ステップ", () => {
+        expect(WIZARD_STEPS).toEqual(["welcome", "residence", "membership", "identity", "done"]);
     });
 
     it("stepIndex はステップ順の位置を返す", () => {
@@ -76,7 +77,10 @@ describe("canProceed", () => {
 
     it("membership は全ステートメント承諾で前進できる", () => {
         expect(canProceed(createInitialWizardState(), "membership")).toBe(false);
-        expect(canProceed(stateWith({ ...membershipDone }), "membership")).toBe(true);
+        expect(canProceed(stateWith({ ...membershipDone }), "membership")).toBe(false);
+        expect(
+            canProceed(stateWith({ ...membershipDone, ...residenceDone }), "membership"),
+        ).toBe(true);
     });
 
     it("membership は1つでも未承諾なら前進できない", () => {
@@ -116,17 +120,18 @@ describe("canProceed", () => {
 // ---------------------------------------------------------------------------
 
 describe("clampStepForState", () => {
-    it("初期状態で done を要求しても membership までしか進めない", () => {
-        expect(clampStepForState(createInitialWizardState(), "done")).toBe("membership");
+    it("初期状態で done を要求しても residence までしか進めない", () => {
+        expect(clampStepForState(createInitialWizardState(), "done")).toBe("residence");
     });
 
-    it("membership 完了済みなら residence まで進める", () => {
-        const state = stateWith({ ...membershipDone });
-        expect(clampStepForState(state, "identity")).toBe("residence");
-        expect(clampStepForState(state, "residence")).toBe("residence");
+    it("residence 完了済みでも membership 未発行なら membership で止まる", () => {
+        const state = stateWith({ ...residenceDone });
+        expect(clampStepForState(state, "membership")).toBe("membership");
+        expect(clampStepForState(state, "identity")).toBe("membership");
+        expect(clampStepForState(state, "done")).toBe("membership");
     });
 
-    it("residence まで完了済みなら identity / done に到達できる", () => {
+    it("membership と residence が完了済みなら identity / done に到達できる", () => {
         const state = stateWith({ ...membershipDone, ...residenceDone });
         expect(clampStepForState(state, "identity")).toBe("identity");
         expect(clampStepForState(state, "done")).toBe("done");
@@ -145,13 +150,15 @@ describe("clampStepForState", () => {
 
 describe("nextStep / previousStep", () => {
     it("nextStep は次のステップを返し、終端では null", () => {
-        expect(nextStep("welcome")).toBe("membership");
+        expect(nextStep("welcome")).toBe("residence");
+        expect(nextStep("residence")).toBe("membership");
         expect(nextStep("identity")).toBe("done");
         expect(nextStep("done")).toBeNull();
     });
 
     it("previousStep は前のステップを返し、先頭では null", () => {
-        expect(previousStep("membership")).toBe("welcome");
+        expect(previousStep("membership")).toBe("residence");
+        expect(previousStep("residence")).toBe("welcome");
         expect(previousStep("welcome")).toBeNull();
     });
 });

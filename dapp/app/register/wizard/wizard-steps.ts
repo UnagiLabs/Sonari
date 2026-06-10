@@ -1,7 +1,7 @@
 // 登録ウィザードのステップ定義と進行ロジック。
 // UI から切り離した pure module として保ち、unit test で仕様を固定する。
 
-export const WIZARD_STEPS = ["welcome", "membership", "residence", "identity", "done"] as const;
+export const WIZARD_STEPS = ["welcome", "residence", "membership", "identity", "done"] as const;
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number];
 
@@ -13,6 +13,8 @@ export const MEMBERSHIP_STATEMENT_COUNT = 3;
 export const RESIDENCE_STATEMENT_COUNT = 3;
 
 export interface WizardState {
+    /** membership SBT の発行完了フラグ */
+    readonly membershipIssued: boolean;
     /** membership ステップの承諾フラグ（ステートメントごと） */
     readonly membershipAccepted: readonly boolean[];
     /** residence ステップの承諾フラグ（ステートメントごと） */
@@ -27,6 +29,7 @@ export interface WizardState {
 
 export function createInitialWizardState(): WizardState {
     return {
+        membershipIssued: false,
         membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => false),
         residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => false),
         selectedCellDecimal: null,
@@ -51,16 +54,18 @@ export function canProceed(state: WizardState, step: WizardStepId): boolean {
     switch (step) {
         case "welcome":
             return true;
-        case "membership":
-            return (
-                state.membershipAccepted.length === MEMBERSHIP_STATEMENT_COUNT &&
-                state.membershipAccepted.every((accepted) => accepted)
-            );
         case "residence":
             return (
-                state.selectedCellDecimal !== null &&
                 state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
-                state.residenceAccepted.every((accepted) => accepted)
+                state.residenceAccepted.every((accepted) => accepted) &&
+                state.selectedCellDecimal !== null
+            );
+        case "membership":
+            return (
+                state.membershipIssued &&
+                state.membershipAccepted.length === MEMBERSHIP_STATEMENT_COUNT &&
+                state.membershipAccepted.every((accepted) => accepted) &&
+                state.selectedCellDecimal !== null
             );
         case "identity":
             // 任意ステップ。検証してもスキップしても前進できる。

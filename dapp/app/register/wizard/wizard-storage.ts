@@ -23,6 +23,7 @@ const IDENTITY_PROVIDERS: readonly WizardIdentityProvider[] = ["kyc", "world_id"
 export function serializeWizardState(state: WizardState): string {
     return JSON.stringify({
         version: STORAGE_VERSION,
+        membershipIssued: state.membershipIssued,
         membershipAccepted: state.membershipAccepted,
         residenceAccepted: state.residenceAccepted,
         selectedCellDecimal: state.selectedCellDecimal,
@@ -47,6 +48,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
         return initial;
     }
 
+    const membershipIssued = parsed.membershipIssued;
     const membershipAccepted = readBooleanArray(
         parsed.membershipAccepted,
         MEMBERSHIP_STATEMENT_COUNT,
@@ -57,6 +59,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
     const identityVerified = parsed.identityVerified;
 
     if (
+        typeof membershipIssued !== "boolean" ||
         membershipAccepted === null ||
         residenceAccepted === null ||
         selectedCellDecimal === undefined ||
@@ -67,6 +70,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
     }
 
     return {
+        membershipIssued,
         membershipAccepted,
         residenceAccepted,
         selectedCellDecimal,
