@@ -101,10 +101,15 @@ jobs:
       # `pnpm deploy` は pnpm の予約コマンド（パッケージのバンドル）なので、必ず `run` を付けて
       # package.json の deploy script を呼ぶ（`run` を省くと別物が走り失敗する）。
       #
-      # NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる公開値。GitHub Environment
-      # （cloudflare-dapp-worker）の Variables に設定しておくと、ここで build に渡る。
+      # NEXT_PUBLIC_* はビルド時にバンドルへ焼き込まれる公開値。
       # 未設定なら空文字が焼き込まれ、地図・World ID・各 worker 連携が無効のまま表示だけされる。
       # 秘密ではないので secrets ではなく vars を使う（どのみちブラウザに出る）。
+      #
+      # vars の出所は 2 種類に分ける（単一情報源化）:
+      #   - repo-level Variables（SONARI_*）= dapp / Cloudflare worker / AWS runner で共有する値。
+      #     1 箇所更新すれば全デプロイ先へ反映される。ここでは NEXT_PUBLIC_* 名へ写し替えて渡す。
+      #   - environment-level Variables（cloudflare-dapp-worker）= dapp 固有の値
+      #     （Google Maps key / World ID app_id）。
       # NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID は next.config が Published.toml から自動注入するので渡さない。
       #
       # アプリ secret（WORLD_ID_RP_SIGNING_KEY）は CI に置かない。`wrangler secret put` で
@@ -113,14 +118,17 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          NEXT_PUBLIC_SUI_NETWORK: ${{ vars.NEXT_PUBLIC_SUI_NETWORK }}
+          # 共有の単一情報源（repo-level Variables）。
+          NEXT_PUBLIC_SUI_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
+          NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL: ${{ vars.SONARI_RESIDENCE_PROOF_WORKER_URL }}
+          NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
+          NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID: ${{ vars.SONARI_IDENTITY_REGISTRY_ID }}
+          NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
+          NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
+          # dapp 固有（environment-level Variables）。
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
-          NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL: ${{ vars.NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL }}
-          NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL: ${{ vars.NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL }}
-          NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL: ${{ vars.NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL }}
-          NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID: ${{ vars.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID }}
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}
-          NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_RP_ID }}
-          NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.NEXT_PUBLIC_WORLD_ID_ENVIRONMENT }}
+          # NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL は ingestion endpoint が未デプロイのため未配線。
+          # backend の identity submit endpoint 確定後に repo-level Variable として配線する。
         shell: bash
         run: pnpm --filter @sonari/dapp run deploy

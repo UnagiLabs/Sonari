@@ -7,5 +7,8 @@ binding = "RESIDENCE_PROOF_SHARDS"
 bucket_name = "sonari-residence-proofs-v1-res7"
 
 [vars]
+# ALLOWLIST_VERSION は residence worker 固有のため toml に据え置く。
 ALLOWLIST_VERSION = "1"
-GEO_RESOLUTION = "7"
+# GEO_RESOLUTION はここに置かない。repo-level GitHub Variable（SONARI_GEO_RESOLUTION）を単一情報源とし、
+# deploy workflow が `wrangler deploy --var GEO_RESOLUTION:<値>` で注入する（affected worker / AWS と共有）。
+# ローカル手動 deploy 時は `--var GEO_RESOLUTION:7` を付けること。

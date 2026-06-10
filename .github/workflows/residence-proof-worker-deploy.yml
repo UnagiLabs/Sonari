@@ -97,6 +97,10 @@ jobs:
       # residence worker はランタイムのアプリ secret を持たない（Env は R2 binding と vars のみ）。
       # 仮に将来 secret を足す場合も `wrangler secret put` で Cloudflare 側に別管理する。
       # CI に渡すのは Cloudflare API token（と必要なら account id）のみ。
+      #
+      # GEO_RESOLUTION は repo-level Variable（SONARI_GEO_RESOLUTION）を単一情報源とし、deploy 時に
+      # `--var` で注入する（affected worker / AWS と共有。wrangler.toml にはハードコードしない）。
+      # ALLOWLIST_VERSION は residence worker 固有のため wrangler.toml [vars] に据え置く。
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
@@ -105,7 +109,7 @@ jobs:
           wranglerVersion: "4.85.0"
           packageManager: pnpm
           workingDirectory: packages/residence-proof-worker
-          command: deploy
+          command: deploy --var GEO_RESOLUTION:${{ vars.SONARI_GEO_RESOLUTION }}
 
   record-residence-deployment:
     name: Record residence deployment
