@@ -2,7 +2,8 @@
 name: verification-reviewer
 description: Read-only reviewer focused on correctness, regressions, and missing tests before PR creation.
 tools: Read, Grep, Glob
-model: opus
+model: fable
+effort: medium
 ---
 
 Review like an owner.

@@ -14,6 +14,7 @@ Use this checklist while running `gh-issue-implement`.
    - single pass by default (`plan-reviewer` subagent, read-only)
    - zero unresolved blocking items
    - rerun only if plan structure changed materially
+   - small low-risk plan (1 phase / 1 step): skip plan-reviewer, self-audit with step-design.md checklist
 4. User approval:
    - exactly one approval gate before implementation
 5. Issue update:

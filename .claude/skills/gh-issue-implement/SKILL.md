@@ -170,6 +170,12 @@ issue 本文に `依存関係`、`前提issue`、`依存するissue`、`blocked 
 - phase 構成、step 分割、検証方針が大きく変わった場合のみ、例外として **1 回だけ** 再監査してよい
 - `advice` は必要なものだけ計画本文か実装メモへ反映する
 
+計画監査の fast path:
+
+- 計画が 1 phase / 1 step で、かつ高リスク surface（Phase 5 の一覧）に触れない場合は、`plan-reviewer` の起動をスキップしてよい
+- 代わりにオーケストレーターが `references/step-design.md` の「計画案の評価チェックリスト」で自己監査する
+- スキップした場合は、Phase 2 の承認文に「計画監査スキップ・自己監査済み」と 1 行明記する
+
 ## Phase 2: ユーザー承認
 
 オーケストレーターは計画監査結果を 2 から 4 行に圧縮して添え、ユーザーに **1 回だけ** 承認を求める。
@@ -226,8 +232,11 @@ git worktree add <path> -b feature/issue-<issue-number>-<slug> main
 - step 目標
 - step 完了条件
 - 所属フェーズ番号・タイトル
-- 計画全体
+- 所属フェーズの目標と、フェーズ内 step 一覧（タイトルのみ）
+- 直前 step の完了サマリー（1〜2 行）
 - `references_path`
+
+計画全体は渡さない。worker に必要なのは担当 step の文脈だけにする。
 
 各 step で行うこと:
 

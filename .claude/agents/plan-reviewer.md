@@ -2,7 +2,7 @@
 name: plan-reviewer
 description: Read-only reviewer that audits an issue implementation plan before execution.
 tools: Read, Grep, Glob
-model: opus
+model: sonnet
 ---
 
 Review the implementation plan only.
