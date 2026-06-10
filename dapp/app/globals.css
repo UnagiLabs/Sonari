@@ -1907,209 +1907,10 @@ h4 {
   border-top: 1px solid var(--line);
 }
 
-.register-page {
-  padding-top: 44px;
-}
-
-.register-hero {
-  display: grid;
-  align-items: end;
-  gap: 40px;
-  grid-template-columns: minmax(0, 1fr) 380px;
-  margin-bottom: 34px;
-}
-
-.register-hero h1 {
-  max-width: 760px;
-  margin-top: 10px;
-  font-size: 56px;
-}
-
-.register-sub {
-  max-width: 720px;
-  margin-top: 14px;
-  font-size: 16px;
-}
-
-.register-wallet-panel {
-  display: grid;
-  gap: 16px;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: oklch(1 0 0 / 0.68);
-}
-
-.register-wallet-panel p {
-  color: var(--ink-muted);
-  font-size: 14px;
-}
-
-.register-layout {
-  display: grid;
-  align-items: start;
-  gap: 24px;
-  grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
-}
-
-.register-form,
-.register-summary-panel,
-.privacy-panel,
 .member-route-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: oklch(1 0 0 / 0.68);
-}
-
-.register-form {
-  display: grid;
-  gap: 28px;
-  padding: 28px;
-}
-
-.register-flow {
-  display: grid;
-  gap: 18px;
-}
-
-.register-step-page {
-  min-height: 560px;
-}
-
-.register-progress {
-  display: grid;
-  gap: 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: oklch(1 0 0 / 0.58);
-}
-
-.progress-item {
-  display: grid;
-  gap: 6px;
-  padding: 16px 18px;
-  border-right: 1px solid var(--line);
-  color: var(--ink-muted);
-  text-decoration: none;
-}
-
-.progress-item:last-child {
-  border-right: 0;
-}
-
-.progress-item:hover {
-  background: var(--sage-50);
-}
-
-.progress-item span {
-  color: var(--ink-faint);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.progress-item strong {
-  color: var(--sage-900);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.progress-item.current {
-  background: var(--sage-100);
-  box-shadow: inset 0 3px 0 var(--sage-700);
-}
-
-.progress-item.done span,
-.progress-item.done strong {
-  color: var(--sage-700);
-}
-
-.progress-item.optional {
-  background: var(--cream-100);
-}
-
-.step-page-copy {
-  max-width: 720px;
-  color: var(--ink-muted);
-  font-size: 15px;
-}
-
-.register-stepper {
-  display: grid;
-  gap: 14px;
-}
-
-.register-stepper h3 {
-  font-size: 16px;
-}
-
-.register-stepper ol {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(3, 1fr);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.step-pill {
-  display: grid;
-  align-items: center;
-  gap: 12px;
-  grid-template-columns: auto 1fr;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-soft);
-}
-
-.step-pill > span {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--cream-200);
-  color: var(--ink-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.step-pill.ready > span {
-  background: var(--sage-700);
-  color: var(--cream-50);
-}
-
-.step-pill.current {
-  border-color: var(--sage-400);
-  background: var(--sage-100);
-}
-
-.step-pill.current > span {
-  background: var(--sage-200);
-  color: var(--sage-900);
-}
-
-.step-pill strong {
-  display: block;
-  color: var(--sage-900);
-  font-size: 13px;
-}
-
-.step-pill small {
-  display: block;
-  color: var(--ink-muted);
-  font-size: 11px;
-}
-
-.profile-fields,
-.residence-fields {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr) 220px;
 }
 
 .text-field {
@@ -2171,62 +1972,6 @@ h4 {
   color: var(--sage-800);
   font-family: var(--font-mono);
   font-size: 13px;
-}
-
-.single-step-fields {
-  display: grid;
-  align-items: center;
-  gap: 14px;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.sbt-preview-band,
-.claim-requirement-band {
-  display: grid;
-  gap: 0;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-.claim-requirement-band {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.sbt-preview-band div,
-.claim-requirement-band div {
-  min-width: 0;
-  padding: 18px 18px 18px 0;
-  border-right: 1px solid var(--line);
-}
-
-.sbt-preview-band div + div,
-.claim-requirement-band div + div {
-  padding-left: 18px;
-}
-
-.sbt-preview-band div:last-child,
-.claim-requirement-band div:last-child {
-  border-right: 0;
-}
-
-.sbt-preview-band span,
-.claim-requirement-band span {
-  display: block;
-  color: var(--ink-faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.sbt-preview-band strong,
-.claim-requirement-band strong {
-  display: block;
-  margin-top: 7px;
-  color: var(--sage-900);
-  font-size: 14px;
-  font-weight: 600;
 }
 
 .pass-preview-panel {
@@ -2354,11 +2099,6 @@ h4 {
   border-color: oklch(0.78 0.08 25);
   background: oklch(0.97 0.025 25);
   color: oklch(0.42 0.09 25);
-}
-
-.residence-fields .btn {
-  align-self: start;
-  margin-top: 27px;
 }
 
 .residence-selector {
@@ -2495,24 +2235,15 @@ h4 {
   margin-top: 14px;
 }
 
-.register-side {
-  display: grid;
-  gap: 18px;
-}
-
-.register-summary-panel,
-.privacy-panel,
 .member-route-panel {
   padding: 24px;
 }
 
-.register-summary-list,
 .privacy-list {
   display: grid;
   border-top: 1px solid var(--line);
 }
 
-.register-summary-row,
 .privacy-row {
   display: grid;
   gap: 6px;
@@ -2520,12 +2251,10 @@ h4 {
   border-bottom: 1px solid var(--line);
 }
 
-.register-summary-row:last-child,
 .privacy-row:last-child {
   border-bottom: 0;
 }
 
-.register-summary-row span,
 .privacy-row span {
   color: var(--ink-faint);
   font-size: 11px;
@@ -2534,20 +2263,12 @@ h4 {
   text-transform: uppercase;
 }
 
-.register-summary-row strong,
 .privacy-row strong {
   color: var(--sage-900);
   font-size: 14px;
   font-weight: 600;
 }
 
-.privacy-panel {
-  display: grid;
-  gap: 16px;
-  background: linear-gradient(135deg, var(--sage-50), var(--cream-100));
-}
-
-.privacy-panel h3,
 .member-route-panel h3 {
   font-size: 18px;
 }
@@ -2584,9 +2305,7 @@ h4 {
   .donate-hero,
   .donate-layout,
   .claim-hero,
-  .claim-layout,
-  .register-hero,
-  .register-layout {
+  .claim-layout {
     grid-template-columns: 1fr;
   }
 
@@ -2622,10 +2341,6 @@ h4 {
 
   .choice-grid {
     grid-template-columns: 1fr;
-  }
-
-  .register-stepper ol {
-    grid-template-columns: repeat(2, 1fr);
   }
 
   .selected-area-summary {
@@ -2776,10 +2491,6 @@ h4 {
     font-size: 42px;
   }
 
-  .register-hero h1 {
-    font-size: 42px;
-  }
-
   h2 {
     font-size: 32px;
   }
@@ -2796,8 +2507,7 @@ h4 {
   .form-actions .btn,
   .donate-wallet-panel .btn,
   .claim-wallet-panel .btn,
-  .claim-check-panel .btn,
-  .register-wallet-panel .btn {
+  .claim-check-panel .btn {
     width: 100%;
   }
 
@@ -2856,9 +2566,6 @@ h4 {
   .claim-summary-panel,
   .claim-note,
   .claim-result-panel,
-  .register-form,
-  .register-summary-panel,
-  .privacy-panel,
   .member-route-panel {
     padding: 20px;
   }
@@ -2912,47 +2619,15 @@ h4 {
     grid-column: auto;
   }
 
-  .register-progress,
-  .single-step-fields,
-  .sbt-preview-band,
-  .claim-requirement-band,
-  .register-stepper ol,
-  .profile-fields,
   .residence-search-row,
   .selected-area-summary,
-  .residence-fields,
   .identity-fields,
   .identity-proof-grid,
   .pass-preview-panel {
     grid-template-columns: 1fr;
   }
 
-  .progress-item,
-  .sbt-preview-band div,
-  .claim-requirement-band div,
-  .sbt-preview-band div + div,
-  .claim-requirement-band div + div {
-    padding: 14px 0;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .progress-item {
-    padding-right: 18px;
-    padding-left: 18px;
-  }
-
-  .progress-item:last-child,
-  .sbt-preview-band div:last-child,
-  .claim-requirement-band div:last-child {
-    border-bottom: 0;
-  }
-
   .residence-search-row .btn {
-    margin-top: 0;
-  }
-
-  .residence-fields .btn {
     margin-top: 0;
   }
 

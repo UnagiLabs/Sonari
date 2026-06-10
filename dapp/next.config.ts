@@ -65,6 +65,23 @@ const nextConfig: NextConfig = {
     images: {
         unoptimized: true,
     },
+    // 旧3ページ構成の URL を単一ページウィザードの該当ステップへ誘導する。
+    // ブックマーク・外部リンク互換のためで、ウィザード側は状態で到達可能な
+    // 最深ステップへ clamp するので深いステップへの直リンクでも安全。
+    async redirects() {
+        return [
+            {
+                source: "/register/residence",
+                destination: "/register?step=residence",
+                permanent: false,
+            },
+            {
+                source: "/register/identity",
+                destination: "/register?step=identity",
+                permanent: false,
+            },
+        ];
+    },
     turbopack: {
         root: repoRoot,
         resolveAlias: {
