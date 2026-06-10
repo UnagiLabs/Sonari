@@ -111,6 +111,11 @@ export async function buildAwsMembershipIdentityEif(
 function dockerfileFor(teeCommand: readonly string[]): string {
     return [
         "FROM public.ecr.aws/amazonlinux/amazonlinux:2023",
+        // ca-certificates: enclave 内 reqwest が developer.world.org への TLS 検証に使う。
+        // iproute: entrypoint の `ip link set lo up` が loopback を起こし bridge が
+        // 127.0.0.1:18080 に bind できるようにする。両方無いと proof_mode=real の
+        // World ID egress が WORLD_ID_API_UNAVAILABLE で失敗する（earthquake EIF と同一）。
+        "RUN dnf install -y ca-certificates iproute && dnf clean all",
         "COPY tee-artifact/ /opt/sonari/tee-artifact/",
         `ENTRYPOINT ${JSON.stringify(teeCommand)}`,
         "",
