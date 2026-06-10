@@ -78,6 +78,17 @@ describe("AWS membership identity EIF build script", () => {
         expect(script).not.toContain("walrus");
     });
 
+    it("installs ca-certificates and iproute in the EIF container for real World ID egress", async () => {
+        const script = await readFile(
+            path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
+            "utf8",
+        );
+
+        // ca-certificates は enclave 内 TLS 検証、iproute は loopback を起こして
+        // bridge が 127.0.0.1:18080 に bind するために必須（earthquake EIF と同一）。
+        expect(script).toContain("dnf install -y ca-certificates iproute");
+    });
+
     it("exposes pnpm scripts for artifact and EIF builds", async () => {
         const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
             scripts?: Record<string, string>;
