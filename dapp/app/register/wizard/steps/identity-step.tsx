@@ -18,6 +18,7 @@ import {
     buildIdentitySubmitRequest,
     type IdentityProvider,
 } from "../../identity/request";
+import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
 
 const WorldIdVerifyButton = dynamic(
     () => import("../../identity/world-id-verify-button").then((m) => m.WorldIdVerifyButton),
@@ -32,8 +33,9 @@ const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID
 // longer hand-entered; the dapp derives a deterministic signed_statement_hash
 // from this version (see computeIdentityStatementHash). The enclave only feeds
 // this value into the World ID signal_hash binding, so a fixed value is safe.
-const IDENTITY_TERMS_VERSION = 1;
-const signedStatementHash = computeIdentityStatementHash(IDENTITY_TERMS_VERSION);
+// The version must match the one the MembershipPass was minted with, so it is
+// shared with the membership step via terms-version.ts.
+const signedStatementHash = computeIdentityStatementHash(MEMBERSHIP_TERMS_VERSION);
 
 const IDENTITY_STATEMENT_COUNT = 3;
 const identityProviderIds: readonly IdentityProvider[] = ["kyc", "world_id"];
@@ -150,7 +152,7 @@ export function IdentityStep({
                     provider,
                     membershipId,
                     owner,
-                    termsVersion: IDENTITY_TERMS_VERSION,
+                    termsVersion: MEMBERSHIP_TERMS_VERSION,
                     signedStatementHash,
                 },
                 registryId,

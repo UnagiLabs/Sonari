@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
 import {
     buildRegisterMemberTransaction,
     fetchResidenceProof,
-    MEMBERSHIP_TERMS_VERSION,
     MembershipIssueError,
     type ResidenceProofResponse,
 } from "./membership-issue";

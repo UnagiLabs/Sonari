@@ -10,10 +10,10 @@ import {
 } from "../../../wallet/wallet-transaction-adapter";
 import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { h3DecimalToHex } from "../../residence/h3-geo";
+import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
 import {
     buildRegisterMemberTransaction,
     fetchResidenceProof,
-    MEMBERSHIP_TERMS_VERSION,
     MembershipIssueError,
 } from "./membership-issue";
 

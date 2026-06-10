@@ -12,8 +12,7 @@ import {
     expectString,
     computeIdentityStatementHash,
 } from "@sonari/proof-core";
-
-export const MEMBERSHIP_TERMS_VERSION = 1;
+import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
 
 export interface ResidenceProofResponse {
     readonly h3_index: string;
