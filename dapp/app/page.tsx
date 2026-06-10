@@ -180,6 +180,9 @@ export default function LandingPage() {
                             <a className="nav-item" href="/leaderboard">
                                 Leaderboard
                             </a>
+                            <a className="nav-item" href="/register">
+                                Register
+                            </a>
                             <a className="nav-item" href="/claim">
                                 Claim
                             </a>
@@ -216,9 +219,12 @@ export default function LandingPage() {
                                         <Icon name="heart" size={16} />
                                         Donate now
                                     </a>
-                                    <a className="btn btn-secondary btn-lg" href="/claim">
-                                        Claim relief
+                                    <a className="btn btn-secondary btn-lg" href="/register">
+                                        Become a member
                                         <Icon name="arrowRight" size={16} />
+                                    </a>
+                                    <a className="btn btn-ghost btn-lg" href="/claim">
+                                        Claim relief
                                     </a>
                                     <a className="btn btn-ghost btn-lg" href="/dashboard">
                                         View dashboard
