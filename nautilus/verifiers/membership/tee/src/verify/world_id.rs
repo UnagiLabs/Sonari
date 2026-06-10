@@ -784,7 +784,7 @@ mod tests {
             "rp_staging_123",
             WorldIdEnvironment::Staging,
             &proof,
-            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v1","nullifier":"123","environment":"staging"}"#,
+            r#"{"success":true,"results":[{"identifier":"proof_of_human","success":true,"nullifier":"123"}],"action":"sonari_membership_register_v2","nullifier":"123","environment":"staging"}"#,
         );
         assert_eq!(
             mismatched_nullifier,
