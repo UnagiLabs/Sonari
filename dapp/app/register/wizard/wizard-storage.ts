@@ -9,9 +9,19 @@ import {
     RESIDENCE_STATEMENT_COUNT,
     type WizardIdentityProvider,
     type WizardState,
+    type WizardStepId,
 } from "./wizard-steps";
 
 export const WIZARD_STORAGE_KEY = "sonari.register.wizard.v1";
+
+export function clearWizardStorage(storage: Storage): void {
+    storage.removeItem(WIZARD_STORAGE_KEY);
+}
+
+/** done ステップ到達時に登録が完了していれば storage をクリアすべきかを返す純粋関数。 */
+export function shouldClearStorage(activeStep: WizardStepId, state: WizardState): boolean {
+    return activeStep === "done" && state.membershipIssued && state.residenceSaved;
+}
 
 const STORAGE_VERSION = 1;
 

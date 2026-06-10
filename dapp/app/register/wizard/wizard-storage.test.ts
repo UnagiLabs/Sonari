@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createInitialWizardState, type WizardState } from "./wizard-steps";
+import { createInitialWizardState, MEMBERSHIP_STATEMENT_COUNT, RESIDENCE_STATEMENT_COUNT, type WizardState } from "./wizard-steps";
 import {
+    clearWizardStorage,
     deserializeWizardState,
     serializeWizardState,
+    shouldClearStorage,
     WIZARD_STORAGE_KEY,
 } from "./wizard-storage";
 
@@ -151,5 +153,66 @@ describe("residenceSaved の fail-soft", () => {
         expect(restored.membershipIssued).toBe(fullState.membershipIssued);
         expect(restored.selectedCellDecimal).toBe(fullState.selectedCellDecimal);
         expect(restored.identityVerified).toBe(fullState.identityVerified);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// clearWizardStorage
+// ---------------------------------------------------------------------------
+
+describe("clearWizardStorage", () => {
+    it("WIZARD_STORAGE_KEY を storage から削除する", () => {
+        const storage = new Map<string, string>();
+        storage.set(WIZARD_STORAGE_KEY, serializeWizardState(fullState));
+        const fakeStorage = {
+            removeItem: (key: string) => storage.delete(key),
+        } as unknown as Storage;
+
+        clearWizardStorage(fakeStorage);
+
+        expect(storage.has(WIZARD_STORAGE_KEY)).toBe(false);
+    });
+
+    it("キーが存在しない場合でもエラーにならない", () => {
+        const fakeStorage = {
+            removeItem: (_key: string) => {},
+        } as unknown as Storage;
+
+        expect(() => clearWizardStorage(fakeStorage)).not.toThrow();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// shouldClearStorage
+// ---------------------------------------------------------------------------
+
+const completedState: WizardState = {
+    membershipIssued: true,
+    membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => true),
+    residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => true),
+    selectedCellDecimal: "608533827635118079",
+    residenceSaved: true,
+    identityProvider: "world_id",
+    identityVerified: false,
+};
+
+describe("shouldClearStorage", () => {
+    it("done ステップかつ membershipIssued=true・residenceSaved=true なら true", () => {
+        expect(shouldClearStorage("done", completedState)).toBe(true);
+    });
+
+    it("done ステップでも membershipIssued=false なら false", () => {
+        expect(shouldClearStorage("done", { ...completedState, membershipIssued: false })).toBe(false);
+    });
+
+    it("done ステップでも residenceSaved=false なら false", () => {
+        expect(shouldClearStorage("done", { ...completedState, residenceSaved: false })).toBe(false);
+    });
+
+    it("登録完了状態でも done 以外のステップなら false", () => {
+        expect(shouldClearStorage("membership", completedState)).toBe(false);
+        expect(shouldClearStorage("identity", completedState)).toBe(false);
+        expect(shouldClearStorage("residence", completedState)).toBe(false);
+        expect(shouldClearStorage("welcome", completedState)).toBe(false);
     });
 });

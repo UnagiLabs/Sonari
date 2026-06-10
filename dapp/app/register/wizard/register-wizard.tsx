@@ -24,7 +24,13 @@ import {
     type WizardState,
     type WizardStepId,
 } from "./wizard-steps";
-import { deserializeWizardState, serializeWizardState, WIZARD_STORAGE_KEY } from "./wizard-storage";
+import {
+    clearWizardStorage,
+    deserializeWizardState,
+    serializeWizardState,
+    shouldClearStorage,
+    WIZARD_STORAGE_KEY,
+} from "./wizard-storage";
 
 // ステップ切替アニメーション。前進は右から、後退は左からスライドインする。
 const SLIDE_OFFSET_PX = 48;
@@ -45,13 +51,6 @@ export function RegisterWizard() {
         setState(deserializeWizardState(window.sessionStorage.getItem(WIZARD_STORAGE_KEY)));
         setHydrated(true);
     }, []);
-    useEffect(() => {
-        if (!hydrated) {
-            return;
-        }
-        window.sessionStorage.setItem(WIZARD_STORAGE_KEY, serializeWizardState(state));
-    }, [state, hydrated]);
-
     const previousWalletAddressRef = useRef<string | null>(null);
     useEffect(() => {
         const currentWalletAddress = account?.address ?? null;
@@ -74,6 +73,18 @@ export function RegisterWizard() {
             router.replace(`/register?step=${activeStep}`, { scroll: false });
         }
     }, [hydrated, activeStep, requestedStep, router]);
+
+    // done ステップで登録完了時は sessionStorage をクリアする。それ以外は状態を保存する。
+    useEffect(() => {
+        if (!hydrated) {
+            return;
+        }
+        if (shouldClearStorage(activeStep, state)) {
+            clearWizardStorage(window.sessionStorage);
+            return;
+        }
+        window.sessionStorage.setItem(WIZARD_STORAGE_KEY, serializeWizardState(state));
+    }, [state, hydrated, activeStep]);
 
     // 一度表示したステップはマウントしたまま保持する（keep-mounted）。
     // Google Maps などの重い初期化がステップ往復で繰り返されないようにする。
