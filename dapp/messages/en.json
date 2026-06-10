@@ -232,6 +232,8 @@
             "notRegisteredBody": "Complete registration to see your membership here.",
             "notRegisteredCta": "Go to registration",
             "errorTitle": "Could not load your membership",
+            "errorBody": "We could not read your membership. Please try again later.",
+            "errorMultiple": "Multiple memberships were found for this wallet. Please contact support.",
             "errorRetry": "Retry",
             "unconfiguredTitle": "Currently unavailable",
             "unconfiguredBody": "The membership source is not configured, so details cannot be shown."

@@ -232,6 +232,8 @@
             "notRegisteredBody": "登録を済ませると、ここに会員証の内容が表示されます。",
             "notRegisteredCta": "登録ページへ",
             "errorTitle": "読み取りに失敗しました",
+            "errorBody": "会員証を読み取れませんでした。時間をおいて再試行してください。",
+            "errorMultiple": "このウォレットに複数の会員証が見つかりました。サポートへ連絡してください。",
             "errorRetry": "再試行",
             "unconfiguredTitle": "現在ご利用いただけません",
             "unconfiguredBody": "会員証の参照先が設定されていないため、内容を表示できません。"

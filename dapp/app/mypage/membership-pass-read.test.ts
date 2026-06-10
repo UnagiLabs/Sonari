@@ -155,6 +155,9 @@ describe("readMembershipPass", () => {
         const result = await readMembershipPass(client, OWNER, PACKAGE_ID);
 
         expect(result.kind).toBe("error");
+        if (result.kind === "error") {
+            expect(result.code).toBe("multiple");
+        }
     });
 
     it("returns error when listOwnedObjects throws", async () => {
@@ -162,7 +165,7 @@ describe("readMembershipPass", () => {
 
         const result = await readMembershipPass(client, OWNER, PACKAGE_ID);
 
-        expect(result).toEqual({ kind: "error", message: "grpc down" });
+        expect(result).toEqual({ kind: "error", code: "read", message: "grpc down" });
     });
 
     it("returns error when getObjects throws", async () => {
@@ -173,7 +176,7 @@ describe("readMembershipPass", () => {
 
         const result = await readMembershipPass(client, OWNER, PACKAGE_ID);
 
-        expect(result).toEqual({ kind: "error", message: "fetch failed" });
+        expect(result).toEqual({ kind: "error", code: "read", message: "fetch failed" });
     });
 
     it("returns error when the fetched object carries an Error", async () => {

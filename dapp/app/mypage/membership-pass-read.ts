@@ -48,10 +48,20 @@ export interface MembershipPassData {
     readonly identityExpiresAtMs: number;
 }
 
+/**
+ * Error category so the UI can pick a localized message. `message` stays for
+ * logging/diagnostics; UI text must come from `code`, never the raw string.
+ */
+export type MembershipReadErrorCode = "read" | "multiple";
+
 export type MembershipPassReadResult =
     | { readonly kind: "ok"; readonly pass: MembershipPassData }
     | { readonly kind: "none" }
-    | { readonly kind: "error"; readonly message: string };
+    | {
+          readonly kind: "error";
+          readonly code: MembershipReadErrorCode;
+          readonly message: string;
+      };
 
 const GENERIC_READ_ERROR = "Could not read your Membership SBT.";
 
@@ -67,10 +77,14 @@ export async function readMembershipPass(
     if (lookup.kind === "multiple") {
         // The contract issues one pass per wallet; surface the anomaly instead
         // of guessing which one to show.
-        return { kind: "error", message: "Multiple Membership SBTs found for this wallet." };
+        return {
+            kind: "error",
+            code: "multiple",
+            message: "Multiple Membership SBTs found for this wallet.",
+        };
     }
     if (lookup.kind === "error") {
-        return { kind: "error", message: lookup.message };
+        return { kind: "error", code: "read", message: lookup.message };
     }
 
     let item: MembershipPassReadObject | Error | undefined;
@@ -81,19 +95,19 @@ export async function readMembershipPass(
         });
         item = response.objects[0];
     } catch (error) {
-        return { kind: "error", message: errorMessage(error) };
+        return { kind: "error", code: "read", message: errorMessage(error) };
     }
 
     if (item === undefined || item instanceof Error) {
-        return { kind: "error", message: GENERIC_READ_ERROR };
+        return { kind: "error", code: "read", message: GENERIC_READ_ERROR };
     }
     if (item.json === null) {
-        return { kind: "error", message: GENERIC_READ_ERROR };
+        return { kind: "error", code: "read", message: GENERIC_READ_ERROR };
     }
 
     const pass = parseMembershipPass(item.objectId, item.json);
     if (pass === null) {
-        return { kind: "error", message: GENERIC_READ_ERROR };
+        return { kind: "error", code: "read", message: GENERIC_READ_ERROR };
     }
     return { kind: "ok", pass };
 }

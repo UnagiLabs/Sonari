@@ -114,12 +114,16 @@ describe("deriveMypageView", () => {
         );
     });
 
-    it("returns error with message when result is error", () => {
-        const result: MembershipPassReadResult = { kind: "error", message: "boom" };
+    it("propagates the error code when result is error", () => {
+        const result: MembershipPassReadResult = {
+            kind: "error",
+            code: "multiple",
+            message: "boom",
+        };
         const view = deriveMypageView({ connected: true, owner: "0xabc", result });
         expect(view.kind).toBe("error");
         if (view.kind === "error") {
-            expect(view.message).toBe("boom");
+            expect(view.code).toBe("multiple");
         }
     });
 

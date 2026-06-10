@@ -3,7 +3,7 @@
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
 import { WalletConnect } from "../wallet/wallet-connect";
@@ -26,16 +26,25 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
     const connected = account !== null;
 
     const [result, setResult] = useState<MembershipPassReadResult | null>(null);
+    // Cancels the most recent in-flight read so a slower earlier request (e.g.
+    // from a rapid retry) can never overwrite a newer result.
+    const cancelRef = useRef<() => void>(() => {});
 
     // Single read routine reused by the initial effect and the retry button,
     // so the linter sees no spurious dependency and retry needs no token state.
     const load = useCallback((): (() => void) => {
+        cancelRef.current();
+
         if (!connected || owner.length === 0 || membershipPackageId.length === 0) {
             setResult(null);
             return () => {};
         }
 
         let cancelled = false;
+        const cancel = () => {
+            cancelled = true;
+        };
+        cancelRef.current = cancel;
         setResult(null);
 
         void readMembershipPass(client, owner, membershipPackageId).then((next) => {
@@ -44,9 +53,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
             }
         });
 
-        return () => {
-            cancelled = true;
-        };
+        return cancel;
     }, [client, connected, owner]);
 
     useEffect(() => load(), [load]);
@@ -135,7 +142,11 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
                 {view.kind === "error" && (
                     <div className="mypage-state" role="alert">
                         <h2>{t("states.errorTitle")}</h2>
-                        <p>{view.message}</p>
+                        <p>
+                            {view.code === "multiple"
+                                ? t("states.errorMultiple")
+                                : t("states.errorBody")}
+                        </p>
                         <button className="button" onClick={retry} type="button">
                             {t("states.errorRetry")}
                         </button>

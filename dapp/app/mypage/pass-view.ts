@@ -1,5 +1,9 @@
 import type { SonariLocale } from "../register/wizard/locale";
-import type { MembershipPassData, MembershipPassReadResult } from "./membership-pass-read";
+import type {
+    MembershipPassData,
+    MembershipPassReadResult,
+    MembershipReadErrorCode,
+} from "./membership-pass-read";
 
 /**
  * Pure presentation helpers for /mypage. These convert raw `MembershipPass`
@@ -66,7 +70,7 @@ export type MypageView =
     | { readonly kind: "unconfigured" }
     | { readonly kind: "loading" }
     | { readonly kind: "not_registered" }
-    | { readonly kind: "error"; readonly message: string }
+    | { readonly kind: "error"; readonly code: MembershipReadErrorCode }
     | { readonly kind: "ready"; readonly pass: MembershipPassData };
 
 export interface MypageViewInput {
@@ -107,7 +111,7 @@ export function deriveMypageView(input: MypageViewInput): MypageView {
         case "none":
             return { kind: "not_registered" };
         case "error":
-            return { kind: "error", message: input.result.message };
+            return { kind: "error", code: input.result.code };
         case "ok":
             return { kind: "ready", pass: input.result.pass };
     }
