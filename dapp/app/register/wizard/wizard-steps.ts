@@ -61,7 +61,8 @@ export function canProceed(state: WizardState, step: WizardStepId): boolean {
             return (
                 state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
                 state.residenceAccepted.every((accepted) => accepted) &&
-                state.selectedCellDecimal !== null
+                state.selectedCellDecimal !== null &&
+                state.residenceSaved
             );
         case "membership":
             return (

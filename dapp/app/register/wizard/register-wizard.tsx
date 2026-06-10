@@ -12,12 +12,12 @@ import { ResidenceStep } from "./steps/residence-step";
 import { WelcomeStep } from "./steps/welcome-step";
 import { WizardProgress } from "./wizard-progress";
 import {
-    canProceed,
     clampStepForState,
     createInitialWizardState,
     nextStep,
     parseStepParam,
     previousStep,
+    RESIDENCE_STATEMENT_COUNT,
     stepIndex,
     WIZARD_STEPS,
     type WizardIdentityProvider,
@@ -162,11 +162,18 @@ export function RegisterWizard() {
         switch (step) {
             case "welcome":
                 return <WelcomeStep onNext={goNext} />;
-            case "residence":
+            case "residence": {
+                // Next ボタンは「保存前の準備完了条件」で制御する。
+                // canProceed("residence") は residenceSaved も含むため、保存前のボタンが
+                // 永続 disabled になる鶏卵問題を避けるため別途計算する。
+                const residenceReadyToSave =
+                    state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
+                    state.residenceAccepted.every(Boolean) &&
+                    state.selectedCellDecimal !== null;
                 return (
                     <ResidenceStep
                         accepted={state.residenceAccepted}
-                        canContinue={canProceed(state, "residence")}
+                        canContinue={residenceReadyToSave}
                         saveError={residenceSaveError}
                         onBack={goBack}
                         onCellSelectionChange={handleCellSelectionChange}
@@ -174,6 +181,7 @@ export function RegisterWizard() {
                         onToggle={handleResidenceToggle}
                     />
                 );
+            }
             case "membership":
                 return (
                     <MembershipStep
