@@ -68,6 +68,27 @@ describe("deriveMembershipPresenceView", () => {
         expect(result).toEqual<MembershipPresenceView>({ kind: "disconnected" });
     });
 
+    it("returns unconfigured when lookup is disabled (package id missing)", () => {
+        // パッケージ ID 未設定環境では照会しないため、checking を出し続けない。
+        const result = deriveMembershipPresenceView({
+            connected: true,
+            owner: OWNER,
+            lookupResult: null,
+            lookupEnabled: false,
+        });
+        expect(result).toEqual<MembershipPresenceView>({ kind: "unconfigured" });
+    });
+
+    it("returns disconnected when lookup is disabled and wallet is not connected", () => {
+        const result = deriveMembershipPresenceView({
+            connected: false,
+            owner: "",
+            lookupResult: null,
+            lookupEnabled: false,
+        });
+        expect(result).toEqual<MembershipPresenceView>({ kind: "disconnected" });
+    });
+
     it("returns checking when connected but lookupResult is null", () => {
         const result = deriveMembershipPresenceView({
             connected: true,

@@ -62,6 +62,7 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
         connected,
         owner,
         lookupResult,
+        lookupEnabled: membershipPackageId.length > 0,
     });
 
     return (

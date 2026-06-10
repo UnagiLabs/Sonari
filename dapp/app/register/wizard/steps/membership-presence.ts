@@ -20,7 +20,8 @@ export type MembershipPresenceView =
           readonly count?: number;
       }
     | { readonly kind: "not_registered" }
-    | { readonly kind: "error"; readonly message: string };
+    | { readonly kind: "error"; readonly message: string }
+    | { readonly kind: "unconfigured" };
 
 export interface MembershipPresenceInput {
     /** ウォレットが接続済みか */
@@ -32,6 +33,12 @@ export interface MembershipPresenceInput {
      * null かつ connected=true のとき checking を返す。
      */
     readonly lookupResult: MembershipLookupResult | null;
+    /**
+     * 照会が実行可能か。package id 未設定環境では false を渡す。
+     * false のとき connected でも checking にせず unconfigured を返す。
+     * 省略時は true。
+     */
+    readonly lookupEnabled?: boolean;
 }
 
 /**
@@ -62,6 +69,10 @@ export function deriveMembershipPresenceView(
 ): MembershipPresenceView {
     if (!input.connected) {
         return { kind: "disconnected" };
+    }
+
+    if (input.lookupEnabled === false) {
+        return { kind: "unconfigured" };
     }
 
     if (input.lookupResult === null) {
