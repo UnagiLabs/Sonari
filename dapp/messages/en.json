@@ -61,6 +61,10 @@
                     "2": "Sonari stores the selected H3 cell, not my raw address or GPS history."
                 },
                 "nextHint": "Select your residence cell and affirm every statement to continue.",
+                "saveError": {
+                    "cellNotSelected": "No residence cell is selected. Please select a cell on the map.",
+                    "invalidCell": "The selected cell is not a valid H3 resolution 7 cell. Please select again."
+                },
                 "picker": {
                     "searchLabel": "Search city, station, or address",
                     "searchPlaceholder": "Shibuya, Tokyo",

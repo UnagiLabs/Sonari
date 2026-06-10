@@ -27,6 +27,7 @@ export function serializeWizardState(state: WizardState): string {
         membershipAccepted: state.membershipAccepted,
         residenceAccepted: state.residenceAccepted,
         selectedCellDecimal: state.selectedCellDecimal,
+        residenceSaved: state.residenceSaved,
         identityProvider: state.identityProvider,
         identityVerified: state.identityVerified,
     });
@@ -55,6 +56,9 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
     );
     const residenceAccepted = readBooleanArray(parsed.residenceAccepted, RESIDENCE_STATEMENT_COUNT);
     const selectedCellDecimal = readCellDecimal(parsed.selectedCellDecimal);
+    // residenceSaved は欠落時のみ false にフォールバック（既存セッションのデータを失わない）。
+    // フィールドが存在するが boolean 以外なら fail-closed で初期状態へ落とす。
+    const residenceSaved = parsed.residenceSaved === undefined ? false : parsed.residenceSaved;
     const identityProvider = readIdentityProvider(parsed.identityProvider);
     const identityVerified = parsed.identityVerified;
 
@@ -63,6 +67,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
         membershipAccepted === null ||
         residenceAccepted === null ||
         selectedCellDecimal === undefined ||
+        typeof residenceSaved !== "boolean" ||
         identityProvider === null ||
         typeof identityVerified !== "boolean"
     ) {
@@ -74,6 +79,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
         membershipAccepted,
         residenceAccepted,
         selectedCellDecimal,
+        residenceSaved,
         identityProvider,
         identityVerified,
     };

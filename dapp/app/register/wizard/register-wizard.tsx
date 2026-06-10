@@ -4,6 +4,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { domAnimation, LazyMotion, MotionConfig, m } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type ResidenceSaveErrorCode, saveResidenceSelection } from "./residence-save";
 import { DoneStep } from "./steps/done-step";
 import { IdentityStep } from "./steps/identity-step";
 import { MembershipStep } from "./steps/membership-step";
@@ -11,12 +12,12 @@ import { ResidenceStep } from "./steps/residence-step";
 import { WelcomeStep } from "./steps/welcome-step";
 import { WizardProgress } from "./wizard-progress";
 import {
-    canProceed,
     clampStepForState,
     createInitialWizardState,
     nextStep,
     parseStepParam,
     previousStep,
+    RESIDENCE_STATEMENT_COUNT,
     stepIndex,
     WIZARD_STEPS,
     type WizardIdentityProvider,
@@ -35,6 +36,9 @@ export function RegisterWizard() {
     const account = useCurrentAccount();
 
     const [state, setState] = useState<WizardState>(createInitialWizardState);
+    const [residenceSaveError, setResidenceSaveError] = useState<ResidenceSaveErrorCode | null>(
+        null,
+    );
     // sessionStorage の復元はマウント後に行い、初回描画をサーバーと一致させる。
     const [hydrated, setHydrated] = useState(false);
     useEffect(() => {
@@ -123,13 +127,30 @@ export function RegisterWizard() {
         );
     }, []);
     // ResidenceCellPicker から安定参照で呼ばれるため useCallback で固定する。
+    // セルが変わったら residenceSaved をリセットしてエラーをクリアする。
     const handleCellSelectionChange = useCallback((decimal: string | null) => {
-        setState((current) =>
-            current.selectedCellDecimal === decimal
-                ? current
-                : { ...current, selectedCellDecimal: decimal },
-        );
+        setState((current) => {
+            if (current.selectedCellDecimal === decimal) {
+                return current;
+            }
+            return { ...current, selectedCellDecimal: decimal, residenceSaved: false };
+        });
+        setResidenceSaveError(null);
     }, []);
+
+    const handleResidenceNext = useCallback(() => {
+        const result = saveResidenceSelection(state);
+        if (result.ok) {
+            setState(result.state);
+            setResidenceSaveError(null);
+            const next = nextStep("residence");
+            if (next !== null) {
+                goTo(next);
+            }
+        } else {
+            setResidenceSaveError(result.errorCode);
+        }
+    }, [state, goTo]);
     const handleProviderChange = useCallback((provider: WizardIdentityProvider) => {
         setState((current) => ({ ...current, identityProvider: provider }));
     }, []);
@@ -141,17 +162,26 @@ export function RegisterWizard() {
         switch (step) {
             case "welcome":
                 return <WelcomeStep onNext={goNext} />;
-            case "residence":
+            case "residence": {
+                // Next ボタンは「保存前の準備完了条件」で制御する。
+                // canProceed("residence") は residenceSaved も含むため、保存前のボタンが
+                // 永続 disabled になる鶏卵問題を避けるため別途計算する。
+                const residenceReadyToSave =
+                    state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
+                    state.residenceAccepted.every(Boolean) &&
+                    state.selectedCellDecimal !== null;
                 return (
                     <ResidenceStep
                         accepted={state.residenceAccepted}
-                        canContinue={canProceed(state, "residence")}
+                        canContinue={residenceReadyToSave}
+                        saveError={residenceSaveError}
                         onBack={goBack}
                         onCellSelectionChange={handleCellSelectionChange}
-                        onNext={goNext}
+                        onNext={handleResidenceNext}
                         onToggle={handleResidenceToggle}
                     />
                 );
+            }
             case "membership":
                 return (
                     <MembershipStep

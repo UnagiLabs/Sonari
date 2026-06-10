@@ -2,10 +2,12 @@
 
 import { useTranslations } from "next-intl";
 import { ResidenceCellPicker } from "../../residence/residence-cell-picker";
+import type { ResidenceSaveErrorCode } from "../residence-save";
 
 interface ResidenceStepProps {
     readonly accepted: readonly boolean[];
     readonly canContinue: boolean;
+    readonly saveError: ResidenceSaveErrorCode | null;
     readonly onToggle: (index: number, checked: boolean) => void;
     readonly onCellSelectionChange: (decimal: string | null) => void;
     readonly onBack: () => void;
@@ -15,6 +17,7 @@ interface ResidenceStepProps {
 export function ResidenceStep({
     accepted,
     canContinue,
+    saveError,
     onToggle,
     onCellSelectionChange,
     onBack,
@@ -22,6 +25,14 @@ export function ResidenceStep({
 }: ResidenceStepProps) {
     const t = useTranslations("register.wizard.residence");
     const tCommon = useTranslations("register.wizard.common");
+
+    function saveErrorMessage(): string | null {
+        if (saveError === "cell_not_selected") return t("saveError.cellNotSelected");
+        if (saveError === "invalid_cell") return t("saveError.invalidCell");
+        return null;
+    }
+
+    const errorMessage = saveErrorMessage();
 
     return (
         <section aria-labelledby="wizard-residence-title" className="wizard-step-content">
@@ -57,6 +68,12 @@ export function ResidenceStep({
                     ))}
                 </div>
             </fieldset>
+
+            {errorMessage !== null ? (
+                <div className="field-note" role="alert">
+                    <small>{errorMessage}</small>
+                </div>
+            ) : null}
 
             <div className="wizard-cta-bar">
                 <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
