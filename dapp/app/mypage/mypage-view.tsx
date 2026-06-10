@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
 import { WalletConnect } from "../wallet/wallet-connect";
+import { HomeCellMap } from "./home-cell-map";
 import {
     type MembershipPassData,
     type MembershipPassReadResult,
@@ -174,6 +175,7 @@ function PassDetails({
                     <dt>{t("residence.registeredAtLabel")}</dt>
                     <dd>{date(pass.homeCellRegisteredAtMs)}</dd>
                 </dl>
+                <HomeCellMap cell={pass.homeCell} />
             </section>
 
             <section className="mypage-group">
