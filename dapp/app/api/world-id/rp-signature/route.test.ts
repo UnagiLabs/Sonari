@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "./route";
 
 const DUMMY_KEY = `0x${"11".repeat(32)}`;
-const VALID_ACTION = "sonari_membership_register_v1";
+const VALID_ACTION = "sonari_membership_register_v2";
 
 function makeRequest(body: unknown): Request {
     return new Request("http://localhost/api/world-id/rp-signature", {
