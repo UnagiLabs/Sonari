@@ -1,10 +1,10 @@
 import { cookies } from "next/headers";
-import { NextIntlClientProvider } from "next-intl";
 import { Suspense } from "react";
 import enMessages from "../../messages/en.json";
 import jaMessages from "../../messages/ja.json";
 import { RegisterTopbar } from "./register-shared";
 import { parseLocale, SONARI_LOCALE_COOKIE, type SonariLocale } from "./wizard/locale";
+import { RegisterIntlProvider } from "./wizard/register-intl-provider";
 import { RegisterWizard } from "./wizard/register-wizard";
 
 // locale ごとの翻訳カタログ。cookie ベース切替のため /register だけが
@@ -19,11 +19,7 @@ export default async function RegisterPage() {
     const locale = parseLocale(cookieStore.get(SONARI_LOCALE_COOKIE)?.value);
 
     return (
-        <NextIntlClientProvider
-            locale={locale}
-            messages={messagesByLocale[locale]}
-            timeZone="Asia/Tokyo"
-        >
+        <RegisterIntlProvider locale={locale} messages={messagesByLocale[locale]}>
             <div className="watercolor-bg" />
             <div className="app">
                 <RegisterTopbar locale={locale} />
@@ -34,6 +30,6 @@ export default async function RegisterPage() {
                     </Suspense>
                 </main>
             </div>
-        </NextIntlClientProvider>
+        </RegisterIntlProvider>
     );
 }
