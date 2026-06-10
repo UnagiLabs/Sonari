@@ -210,11 +210,6 @@
                     "identitySkipped": "スキップ — いつでも追加可能"
                 },
                 "finalizeComingSoon": "本人確認はメンバーエリアからあとで完了できます。",
-                "incomplete": {
-                    "notice": "次のステップがまだ完了していません。",
-                    "goToResidence": "居住エリアの確認に戻る",
-                    "goToMembership": "メンバーシップ発行に戻る"
-                },
                 "dashboardCta": "ダッシュボードへ",
                 "homeCta": "ホームに戻る"
             }

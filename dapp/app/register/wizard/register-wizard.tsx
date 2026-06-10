@@ -28,6 +28,7 @@ import {
     clearWizardStorage,
     deserializeWizardState,
     serializeWizardState,
+    shouldClearStorage,
     WIZARD_STORAGE_KEY,
 } from "./wizard-storage";
 
@@ -78,7 +79,7 @@ export function RegisterWizard() {
         if (!hydrated) {
             return;
         }
-        if (activeStep === "done" && state.membershipIssued && state.residenceSaved) {
+        if (shouldClearStorage(activeStep, state)) {
             clearWizardStorage(window.sessionStorage);
             return;
         }
@@ -221,9 +222,6 @@ export function RegisterWizard() {
                         membershipIssued={state.membershipIssued}
                         identityVerified={state.identityVerified}
                         selectedCellDecimal={state.selectedCellDecimal}
-                        residenceSaved={state.residenceSaved}
-                        onGoToResidence={() => goTo("residence")}
-                        onGoToMembership={() => goTo("membership")}
                     />
                 );
         }

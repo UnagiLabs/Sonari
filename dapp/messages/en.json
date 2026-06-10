@@ -210,11 +210,6 @@
                     "identitySkipped": "Skipped — add anytime"
                 },
                 "finalizeComingSoon": "Identity verification can still be completed later from the member area.",
-                "incomplete": {
-                    "notice": "The following steps are not complete yet.",
-                    "goToResidence": "Back to residence",
-                    "goToMembership": "Back to membership"
-                },
                 "dashboardCta": "Go to dashboard",
                 "homeCta": "Back to home"
             }
