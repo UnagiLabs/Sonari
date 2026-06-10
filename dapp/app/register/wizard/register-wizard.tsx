@@ -4,6 +4,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { domAnimation, LazyMotion, MotionConfig, m } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type ResidenceSaveErrorCode, saveResidenceSelection } from "./residence-save";
 import { DoneStep } from "./steps/done-step";
 import { IdentityStep } from "./steps/identity-step";
 import { MembershipStep } from "./steps/membership-step";
@@ -23,7 +24,6 @@ import {
     type WizardState,
     type WizardStepId,
 } from "./wizard-steps";
-import { saveResidenceSelection, type ResidenceSaveErrorCode } from "./residence-save";
 import { deserializeWizardState, serializeWizardState, WIZARD_STORAGE_KEY } from "./wizard-storage";
 
 // ステップ切替アニメーション。前進は右から、後退は左からスライドインする。
