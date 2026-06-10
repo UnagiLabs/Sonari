@@ -21,6 +21,7 @@ function stateWith(overrides: Partial<WizardState>): WizardState {
 
 const membershipDone = {
     membershipIssued: true,
+    residenceSaved: true,
     membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => true),
 } as const;
 
@@ -81,6 +82,11 @@ describe("canProceed", () => {
         expect(
             canProceed(stateWith({ ...membershipDone, ...residenceDone }), "membership"),
         ).toBe(true);
+    });
+
+    it("membership は residenceSaved が false なら前進できない", () => {
+        const state = stateWith({ ...membershipDone, ...residenceDone, residenceSaved: false });
+        expect(canProceed(state, "membership")).toBe(false);
     });
 
     it("membership は1つでも未承諾なら前進できない", () => {

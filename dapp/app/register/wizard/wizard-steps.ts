@@ -21,6 +21,8 @@ export interface WizardState {
     readonly residenceAccepted: readonly boolean[];
     /** 選択中の H3 res7 セル（10進文字列）。未選択は null */
     readonly selectedCellDecimal: string | null;
+    /** residence ステップで選択セルの保存を完了したか */
+    readonly residenceSaved: boolean;
     /** identity ステップで選択中のプロバイダー */
     readonly identityProvider: WizardIdentityProvider;
     /** identity 検証が完了したか（スキップは false のまま done へ進める） */
@@ -33,6 +35,7 @@ export function createInitialWizardState(): WizardState {
         membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => false),
         residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => false),
         selectedCellDecimal: null,
+        residenceSaved: false,
         identityProvider: "world_id",
         identityVerified: false,
     };
@@ -63,6 +66,7 @@ export function canProceed(state: WizardState, step: WizardStepId): boolean {
         case "membership":
             return (
                 state.membershipIssued &&
+                state.residenceSaved &&
                 state.membershipAccepted.length === MEMBERSHIP_STATEMENT_COUNT &&
                 state.membershipAccepted.every((accepted) => accepted) &&
                 state.selectedCellDecimal !== null

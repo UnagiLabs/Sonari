@@ -11,6 +11,7 @@ const fullState: WizardState = {
     membershipAccepted: [true, true, true],
     residenceAccepted: [true, false, true],
     selectedCellDecimal: "608533827635118079",
+    residenceSaved: true,
     identityProvider: "kyc",
     identityVerified: true,
 };
@@ -49,6 +50,7 @@ describe("保存対象の allowlist", () => {
                 "membershipAccepted",
                 "residenceAccepted",
                 "selectedCellDecimal",
+                "residenceSaved",
                 "identityProvider",
                 "identityVerified",
             ].sort(),
@@ -126,5 +128,28 @@ describe("deserializeWizardState の fail-closed 検証", () => {
         expect(
             deserializeWizardState(JSON.stringify({ ...base, identityVerified: "yes" })),
         ).toEqual(initial);
+    });
+
+    it("residenceSaved が boolean でなければ初期状態を返す", () => {
+        const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
+        expect(
+            deserializeWizardState(JSON.stringify({ ...base, residenceSaved: "yes" })),
+        ).toEqual(initial);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// residenceSaved の fail-soft（フィールド欠落は false として復元）
+// ---------------------------------------------------------------------------
+
+describe("residenceSaved の fail-soft", () => {
+    it("residenceSaved フィールドが欠落していても他フィールドを保持して false で復元する", () => {
+        const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
+        const { residenceSaved: _removed, ...withoutResidenceSaved } = base;
+        const restored = deserializeWizardState(JSON.stringify(withoutResidenceSaved));
+        expect(restored.residenceSaved).toBe(false);
+        expect(restored.membershipIssued).toBe(fullState.membershipIssued);
+        expect(restored.selectedCellDecimal).toBe(fullState.selectedCellDecimal);
+        expect(restored.identityVerified).toBe(fullState.identityVerified);
     });
 });
