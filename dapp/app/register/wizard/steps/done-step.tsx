@@ -2,19 +2,27 @@
 
 import { useTranslations } from "next-intl";
 import { h3DecimalToHex } from "../../residence/h3-geo";
+import { deriveDoneCompletion } from "./done-completion";
 
 interface DoneStepProps {
     readonly selectedCellDecimal: string | null;
     readonly identityVerified: boolean;
     readonly membershipIssued: boolean;
+    readonly residenceSaved: boolean;
+    readonly onGoToResidence: () => void;
+    readonly onGoToMembership: () => void;
 }
 
 export function DoneStep({
     selectedCellDecimal,
     identityVerified,
     membershipIssued,
+    residenceSaved,
+    onGoToResidence,
+    onGoToMembership,
 }: DoneStepProps) {
     const t = useTranslations("register.wizard.done");
+    const completion = deriveDoneCompletion(membershipIssued, residenceSaved);
 
     return (
         <section aria-labelledby="wizard-done-title" className="wizard-step-content">
@@ -59,6 +67,32 @@ export function DoneStep({
                     </strong>
                 </div>
             </div>
+
+            {completion.kind === "incomplete" && (
+                <div className="field-note field-note-warn" role="alert">
+                    <small>{t("incomplete.notice")}</small>
+                    <div className="wizard-cta-bar wizard-cta-bar-sm">
+                        {completion.pendingSteps.includes("residence") && (
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={onGoToResidence}
+                                type="button"
+                            >
+                                {t("incomplete.goToResidence")}
+                            </button>
+                        )}
+                        {completion.pendingSteps.includes("membership") && (
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={onGoToMembership}
+                                type="button"
+                            >
+                                {t("incomplete.goToMembership")}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <div className="field-note" role="note">
                 <small>{t("finalizeComingSoon")}</small>

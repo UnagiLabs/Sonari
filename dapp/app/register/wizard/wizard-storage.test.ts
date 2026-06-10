@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialWizardState, type WizardState } from "./wizard-steps";
 import {
+    clearWizardStorage,
     deserializeWizardState,
     serializeWizardState,
     WIZARD_STORAGE_KEY,
@@ -151,5 +152,31 @@ describe("residenceSaved の fail-soft", () => {
         expect(restored.membershipIssued).toBe(fullState.membershipIssued);
         expect(restored.selectedCellDecimal).toBe(fullState.selectedCellDecimal);
         expect(restored.identityVerified).toBe(fullState.identityVerified);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// clearWizardStorage
+// ---------------------------------------------------------------------------
+
+describe("clearWizardStorage", () => {
+    it("WIZARD_STORAGE_KEY を storage から削除する", () => {
+        const storage = new Map<string, string>();
+        storage.set(WIZARD_STORAGE_KEY, serializeWizardState(fullState));
+        const fakeStorage = {
+            removeItem: (key: string) => storage.delete(key),
+        } as unknown as Storage;
+
+        clearWizardStorage(fakeStorage);
+
+        expect(storage.has(WIZARD_STORAGE_KEY)).toBe(false);
+    });
+
+    it("キーが存在しない場合でもエラーにならない", () => {
+        const fakeStorage = {
+            removeItem: (_key: string) => {},
+        } as unknown as Storage;
+
+        expect(() => clearWizardStorage(fakeStorage)).not.toThrow();
     });
 });

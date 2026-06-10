@@ -13,6 +13,10 @@ import {
 
 export const WIZARD_STORAGE_KEY = "sonari.register.wizard.v1";
 
+export function clearWizardStorage(storage: Storage): void {
+    storage.removeItem(WIZARD_STORAGE_KEY);
+}
+
 const STORAGE_VERSION = 1;
 
 // H3 セルは res7 の 10 進文字列としてのみ受け付ける。
