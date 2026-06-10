@@ -1,0 +1,180 @@
+{
+    "register": {
+        "topbar": {
+            "home": "Home",
+            "donate": "Donate",
+            "dashboard": "Dashboard",
+            "register": "Register",
+            "claim": "Claim",
+            "brandHomeAria": "Sonari home"
+        },
+        "wizard": {
+            "progress": {
+                "aria": "Registration progress",
+                "stepCount": "Step {current} of {total}",
+                "optionalTag": "Optional",
+                "steps": {
+                    "welcome": "Welcome",
+                    "membership": "Membership",
+                    "residence": "Residence",
+                    "identity": "Identity",
+                    "done": "Done"
+                }
+            },
+            "common": {
+                "next": "Next",
+                "back": "Back",
+                "comingSoon": "Coming soon"
+            },
+            "welcome": {
+                "eyebrow": "Register",
+                "title": "Become a Sonari member.",
+                "lead": "Three clear steps: issue one soulbound Membership SBT, choose your residence area, and verify your identity whenever you are ready.",
+                "walletHint": "Connect your Sui wallet to get started.",
+                "privacySummary": "What Sonari stores",
+                "privacy": {
+                    "walletAddress": { "label": "Wallet address", "value": "SBT owner only" },
+                    "nickname": { "label": "Nickname", "value": "Can be added later" },
+                    "addressSearch": { "label": "Address search", "value": "Not stored by Sonari" },
+                    "phoneEmail": { "label": "Phone / email", "value": "Not collected" },
+                    "gpsHistory": { "label": "GPS history", "value": "Not stored" },
+                    "deviceInfo": { "label": "Device info", "value": "Not published" },
+                    "h3Cell": { "label": "H3 cell", "value": "Resolution 7 output" }
+                },
+                "cta": "Get started"
+            },
+            "membership": {
+                "eyebrow": "Step 1",
+                "title": "Issue your Membership SBT.",
+                "lead": "One soulbound membership per wallet. It cannot be transferred, and holding it does not guarantee aid or payout priority.",
+                "card": {
+                    "objectType": "Object type",
+                    "objectTypeValue": "Membership SBT",
+                    "owner": "Owner",
+                    "ownerPlaceholder": "Your connected wallet",
+                    "transfer": "Transfer",
+                    "transferValue": "Disabled",
+                    "status": "Status",
+                    "statusValue": "Not issued yet"
+                },
+                "statementsLegend": "Before you continue",
+                "statements": {
+                    "0": "This wallet will own one active Sonari Membership SBT.",
+                    "1": "The Membership SBT is soulbound and cannot be transferred.",
+                    "2": "Holding a Membership SBT does not guarantee aid or create payout priority."
+                },
+                "issueButton": "Issue Membership SBT",
+                "issueComingSoon": "On-chain issuance is coming soon. You can continue and finish your registration setup now.",
+                "nextHint": "Affirm every statement above to continue."
+            },
+            "residence": {
+                "eyebrow": "Step 2",
+                "title": "Choose your residence area.",
+                "lead": "Search a place or tap the map. Sonari stores only the selected H3 cell — never your raw address or GPS history.",
+                "statementsLegend": "Residence statement",
+                "statements": {
+                    "0": "This cell is my active residence area for Sonari eligibility checks.",
+                    "1": "I understand changes after a disaster cutoff do not apply to that disaster.",
+                    "2": "Sonari stores the selected H3 cell, not my raw address or GPS history."
+                },
+                "nextHint": "Select your residence cell and affirm every statement to continue.",
+                "picker": {
+                    "searchLabel": "Search city, station, or address",
+                    "searchPlaceholder": "Shibuya, Tokyo",
+                    "searchHint": "Search text may be sent to a map provider. Sonari stores the selected H3 cell only.",
+                    "useCurrentLocation": "Use current location",
+                    "mapAria": "Residence cell map",
+                    "unconfiguredTitle": "Map preview is unavailable.",
+                    "unconfiguredBody": "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable the map. You can still enter an H3 cell manually from Advanced cell input below.",
+                    "loadingMap": "Loading map…",
+                    "mapError": "The map failed to load. Try again later, or use Advanced cell input below.",
+                    "workerUnavailable": "Land/sea check is unavailable, so all cells are selectable for now.",
+                    "waterMessage": "Cells over water cannot be selected as a residence.",
+                    "geolocationUnavailable": "Current location is not available on this device.",
+                    "geolocationDenied": "Permission to read your current location was denied.",
+                    "invalidCellInput": "The H3 cell ID is not valid (expected a resolution 7 hex cell ID).",
+                    "summaryResolution": "H3 resolution",
+                    "summaryCellId": "Cell ID",
+                    "summaryAllowlist": "Allowlist",
+                    "advancedSummary": "Advanced cell input",
+                    "advancedLabel": "H3 resolution 7 cell (hex)",
+                    "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID."
+                }
+            },
+            "identity": {
+                "eyebrow": "Optional",
+                "title": "Verify it's you. Now or later.",
+                "lead": "Initial registration only needs the Membership SBT and residence cell. Identity verification becomes required only before payout, and you can finish it from the member area anytime.",
+                "routeLegend": "Verification route",
+                "options": {
+                    "kyc": {
+                        "label": "KYC",
+                        "description": "Use a provider-verified duplicate key. Raw KYC data and document images are not published by Sonari."
+                    },
+                    "world_id": {
+                        "label": "World ID",
+                        "description": "Use a World ID nullifier for the Sonari claim action. You can set this up now or from the member area later."
+                    }
+                },
+                "membershipLegend": "Membership",
+                "membership": {
+                    "connectTitle": "Connect a wallet to continue",
+                    "connectBody": "Sonari reads your Membership SBT and wallet address automatically — no manual entry.",
+                    "checkingTitle": "Checking your Membership SBT…",
+                    "checkingBody": "Looking up the pass owned by your connected wallet.",
+                    "detectedTitle": "Membership SBT detected",
+                    "detectedBody": "Verification binds to this pass and your connected wallet.",
+                    "none": "No Membership SBT found for this wallet. Complete Step 1 first.",
+                    "multiple": "Multiple Membership SBTs found for this wallet. Please contact support before verifying.",
+                    "errorFallback": "Could not look up your Membership SBT."
+                },
+                "statementsLegend": "Duplicate-account statement",
+                "statements": {
+                    "0": "I do not hold another active Sonari Membership SBT.",
+                    "1": "I will not claim the same disaster from multiple Membership SBTs.",
+                    "2": "I understand I can skip identity setup now and return before receiving Relief Cash."
+                },
+                "worldIdLegend": "World ID proof",
+                "worldId": {
+                    "verifyButton": "Verify with World ID",
+                    "preparing": "Preparing…",
+                    "verifiedLabel": "World ID Verified",
+                    "notConfigured": "World ID is not configured.",
+                    "statementsFirst": "Affirm the duplicate-account statement above to enable verification.",
+                    "acceptStatementsError": "Accept the duplicate-account statement above first.",
+                    "bindingError": "Fill in owner, membership, and statement first.",
+                    "prepareError": "Failed to prepare World ID verification."
+                },
+                "submit": {
+                    "submitting": "Submitting verification request.",
+                    "queued": "Verification job queued.",
+                    "accepted": "Verification request accepted.",
+                    "failedFallback": "Verification request failed.",
+                    "notConfigured": "Identity submit endpoint is not configured.",
+                    "jobLine": "Job {jobId} is {jobStatus}.",
+                    "kycButton": "Start identity check",
+                    "kycSubmitting": "Submitting"
+                },
+                "skipCta": "Skip for now",
+                "verifiedCta": "Continue"
+            },
+            "done": {
+                "eyebrow": "All set",
+                "title": "Your registration is ready.",
+                "lead": "Here is what Sonari will register for this wallet. You can change identity settings anytime from the member area.",
+                "summary": {
+                    "membership": "Membership SBT",
+                    "membershipPending": "Not issued yet",
+                    "residence": "Residence cell",
+                    "residenceEmpty": "Not selected",
+                    "identity": "Identity",
+                    "identityVerified": "Verified",
+                    "identitySkipped": "Skipped — add anytime"
+                },
+                "finalizeComingSoon": "Final on-chain registration is coming soon. Your selections are saved in this browser session.",
+                "dashboardCta": "Go to dashboard",
+                "homeCta": "Back to home"
+            }
+        }
+    }
+}
