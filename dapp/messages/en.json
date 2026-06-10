@@ -187,6 +187,7 @@
                     "failedFallback": "Verification request failed.",
                     "notConfigured": "Identity submit endpoint is not configured.",
                     "jobLine": "Job {jobId} is {jobStatus}.",
+                    "processingNotice": "Processing can take a few minutes to about one hour. You can check the status on mypage.",
                     "kycButton": "Start identity check",
                     "kycSubmitting": "Submitting"
                 },
