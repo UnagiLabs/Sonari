@@ -17,25 +17,31 @@ const tempDirs: string[] = [];
 describe("AWS membership identity TEE artifact build script", () => {
     afterEach(async () => {
         delete process.env.SONARI_MEMBERSHIP_IDENTITY_TEE_BINARY;
+        delete process.env.SONARI_MEMBERSHIP_IDENTITY_VSOCK_TCP_BRIDGE_BINARY;
         await Promise.all(
             tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
         );
     });
 
-    it("packages only bin/membership-tee and writes a sha256sum-compatible checksum", async () => {
+    it("packages bin/membership-tee plus the vsock bridge and writes a sha256sum-compatible checksum", async () => {
         const tempDir = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-tee-artifact-"));
         tempDirs.push(tempDir);
         const fakeBinary = path.join(tempDir, "membership-tee");
+        const fakeBridgeBinary = path.join(tempDir, "vsock-tcp-bridge");
         const outPath = path.join(tempDir, "membership-identity-tee-artifact.tar.gz");
         await writeFile(fakeBinary, "#!/bin/sh\nexec echo membership-tee\n", { mode: 0o700 });
+        await writeFile(fakeBridgeBinary, "#!/bin/sh\nexec echo vsock-tcp-bridge\n", {
+            mode: 0o700,
+        });
         process.env.SONARI_MEMBERSHIP_IDENTITY_TEE_BINARY = fakeBinary;
+        process.env.SONARI_MEMBERSHIP_IDENTITY_VSOCK_TCP_BRIDGE_BINARY = fakeBridgeBinary;
 
         const result = await buildAwsMembershipIdentityTeeArtifact({ outPath });
 
         expect(result.artifactPath).toBe(outPath);
         expect(result.checksumPath).toBe(`${outPath}.sha256`);
         const { stdout: tarList } = await execFileAsync("tar", ["-tzf", outPath]);
-        expect(tarList.trim().split("\n")).toEqual(["bin/membership-tee"]);
+        expect(tarList.trim().split("\n")).toEqual(["bin/membership-tee", "bin/vsock-tcp-bridge"]);
         expect(tarList).not.toContain("walrus");
 
         const checksum = await readFile(result.checksumPath, "utf8");
@@ -53,7 +59,9 @@ describe("AWS membership identity TEE artifact build script", () => {
         expect(script).toContain('const DEFAULT_CARGO_TARGET = "x86_64-unknown-linux-musl"');
         expect(script).toContain("SONARI_MEMBERSHIP_IDENTITY_TEE_CARGO_TARGET");
         expect(script).toContain("SONARI_MEMBERSHIP_IDENTITY_TEE_BINARY");
+        expect(script).toContain("SONARI_MEMBERSHIP_IDENTITY_VSOCK_TCP_BRIDGE_BINARY");
         expect(script).toContain('"bin/membership-tee"');
+        expect(script).toContain('"bin/vsock-tcp-bridge"');
         expect(script).not.toContain("SONARI_WALRUS_CLI");
         expect(script).not.toContain('"bin/walrus"');
         expect(script).not.toContain("nautilus/verifiers/earthquake/tee/Cargo.toml");
