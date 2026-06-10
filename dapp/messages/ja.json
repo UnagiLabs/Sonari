@@ -41,7 +41,14 @@
                     "deviceInfo": { "label": "端末情報", "value": "公開しない" },
                     "h3Cell": { "label": "H3 セル", "value": "解像度 7 の出力のみ" }
                 },
-                "cta": "はじめる"
+                "cta": "はじめる",
+                "membership": {
+                    "checking": "メンバーシップ SBT を確認中…",
+                    "registeredTitle": "すでにメンバーシップ SBT をお持ちです。",
+                    "registeredBody": "このウォレット（{ownerShort}）にはメンバーシップ SBT があります。ダッシュボードへ移動するか、下の「はじめる」から登録を更新できます。",
+                    "dashboardCta": "ダッシュボードへ",
+                    "errorNote": "メンバーシップ SBT を確認できませんでした。「はじめる」で続行できます。"
+                }
             },
             "residence": {
                 "eyebrow": "ステップ 1",

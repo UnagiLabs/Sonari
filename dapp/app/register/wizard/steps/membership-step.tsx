@@ -16,6 +16,7 @@ import {
     fetchResidenceProof,
     MembershipIssueError,
 } from "./membership-issue";
+import { shortAddress } from "./membership-presence";
 
 interface MembershipStepProps {
     readonly accepted: readonly boolean[];
@@ -295,7 +296,9 @@ export function MembershipStep({
                 </div>
                 <div className="wizard-sbt-row">
                     <span>{t("card.owner")}</span>
-                    <strong>{owner.length > 0 ? owner : t("card.ownerPlaceholder")}</strong>
+                    <strong>
+                        {owner.length > 0 ? shortAddress(owner) : t("card.ownerPlaceholder")}
+                    </strong>
                 </div>
                 <div className="wizard-sbt-row">
                     <span>{t("card.residence")}</span>
