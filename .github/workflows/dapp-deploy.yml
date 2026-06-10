@@ -122,13 +122,12 @@ jobs:
           NEXT_PUBLIC_SUI_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
           NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL: ${{ vars.SONARI_RESIDENCE_PROOF_WORKER_URL }}
           NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
+          NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL: ${{ vars.SONARI_IDENTITY_SUBMIT_URL }}
           NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID: ${{ vars.SONARI_IDENTITY_REGISTRY_ID }}
           NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
           # dapp 固有（environment-level Variables）。
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}
-          # NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL は ingestion endpoint が未デプロイのため未配線。
-          # backend の identity submit endpoint 確定後に repo-level Variable として配線する。
         shell: bash
         run: pnpm --filter @sonari/dapp run deploy
