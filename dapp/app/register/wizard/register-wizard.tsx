@@ -23,6 +23,7 @@ import {
     type WizardState,
     type WizardStepId,
 } from "./wizard-steps";
+import { saveResidenceSelection, type ResidenceSaveErrorCode } from "./residence-save";
 import { deserializeWizardState, serializeWizardState, WIZARD_STORAGE_KEY } from "./wizard-storage";
 
 // ステップ切替アニメーション。前進は右から、後退は左からスライドインする。
@@ -35,6 +36,9 @@ export function RegisterWizard() {
     const account = useCurrentAccount();
 
     const [state, setState] = useState<WizardState>(createInitialWizardState);
+    const [residenceSaveError, setResidenceSaveError] = useState<ResidenceSaveErrorCode | null>(
+        null,
+    );
     // sessionStorage の復元はマウント後に行い、初回描画をサーバーと一致させる。
     const [hydrated, setHydrated] = useState(false);
     useEffect(() => {
@@ -123,13 +127,30 @@ export function RegisterWizard() {
         );
     }, []);
     // ResidenceCellPicker から安定参照で呼ばれるため useCallback で固定する。
+    // セルが変わったら residenceSaved をリセットしてエラーをクリアする。
     const handleCellSelectionChange = useCallback((decimal: string | null) => {
-        setState((current) =>
-            current.selectedCellDecimal === decimal
-                ? current
-                : { ...current, selectedCellDecimal: decimal },
-        );
+        setState((current) => {
+            if (current.selectedCellDecimal === decimal) {
+                return current;
+            }
+            return { ...current, selectedCellDecimal: decimal, residenceSaved: false };
+        });
+        setResidenceSaveError(null);
     }, []);
+
+    const handleResidenceNext = useCallback(() => {
+        const result = saveResidenceSelection(state);
+        if (result.ok) {
+            setState(result.state);
+            setResidenceSaveError(null);
+            const next = nextStep("residence");
+            if (next !== null) {
+                goTo(next);
+            }
+        } else {
+            setResidenceSaveError(result.errorCode);
+        }
+    }, [state, goTo]);
     const handleProviderChange = useCallback((provider: WizardIdentityProvider) => {
         setState((current) => ({ ...current, identityProvider: provider }));
     }, []);
@@ -146,9 +167,10 @@ export function RegisterWizard() {
                     <ResidenceStep
                         accepted={state.residenceAccepted}
                         canContinue={canProceed(state, "residence")}
+                        saveError={residenceSaveError}
                         onBack={goBack}
                         onCellSelectionChange={handleCellSelectionChange}
-                        onNext={goNext}
+                        onNext={handleResidenceNext}
                         onToggle={handleResidenceToggle}
                     />
                 );
