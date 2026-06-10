@@ -11,7 +11,15 @@ const DEFAULT_CPU_COUNT = 2;
 const DEFAULT_MEMORY_MIB = 1024;
 const DEFAULT_ENCLAVE_CID = 16;
 const MEMBERSHIP_TEE_BIN = "/opt/sonari/tee-artifact/bin/membership-tee";
-const MEMBERSHIP_TEE_COMMAND = [MEMBERSHIP_TEE_BIN, "server"] as const;
+const MEMBERSHIP_VSOCK_TCP_BRIDGE_BIN = "/opt/sonari/tee-artifact/bin/vsock-tcp-bridge";
+const MEMBERSHIP_EGRESS_PROXY_PORT = "18080";
+// enclave 内 127.0.0.1:18080 を親(host CID 3)の vsock 18080 へ橋渡しする。
+// これがないと proof_mode=real の World ID egress が enclave 内で接続先を失う。
+const MEMBERSHIP_TEE_COMMAND = [
+    "/bin/sh",
+    "-c",
+    `set -e; ip link set lo up || true; ${MEMBERSHIP_VSOCK_TCP_BRIDGE_BIN} --listen-host 127.0.0.1 --listen-port ${MEMBERSHIP_EGRESS_PROXY_PORT} --parent-cid 3 --vsock-port ${MEMBERSHIP_EGRESS_PROXY_PORT} & exec ${MEMBERSHIP_TEE_BIN} server`,
+] as const;
 
 export interface BuildAwsMembershipIdentityEifOptions {
     artifactPath?: string;

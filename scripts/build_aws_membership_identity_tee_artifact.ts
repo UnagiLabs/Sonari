@@ -29,7 +29,12 @@ export async function buildAwsMembershipIdentityTeeArtifact(
         process.env.SONARI_MEMBERSHIP_IDENTITY_TEE_BINARY ??
             path.join(CARGO_TARGET_DIR, cargoTarget, "release/membership-tee"),
     );
+    const targetBridgeBinary = path.resolve(
+        process.env.SONARI_MEMBERSHIP_IDENTITY_VSOCK_TCP_BRIDGE_BINARY ??
+            path.join(CARGO_TARGET_DIR, cargoTarget, "release/vsock-tcp-bridge"),
+    );
     const artifactBinary = path.join(workDir, "bin/membership-tee");
+    const artifactBridgeBinary = path.join(workDir, "bin/vsock-tcp-bridge");
 
     await rm(workDir, { recursive: true, force: true });
     await mkdir(path.dirname(outPath), { recursive: true });
@@ -49,6 +54,8 @@ export async function buildAwsMembershipIdentityTeeArtifact(
     }
     await copyFile(targetBinary, artifactBinary);
     await chmod(artifactBinary, 0o500);
+    await copyFile(targetBridgeBinary, artifactBridgeBinary);
+    await chmod(artifactBridgeBinary, 0o500);
     await run("tar", [
         "-C",
         workDir,
@@ -60,6 +67,7 @@ export async function buildAwsMembershipIdentityTeeArtifact(
         "-czf",
         outPath,
         "bin/membership-tee",
+        "bin/vsock-tcp-bridge",
     ]);
 
     const digest = createHash("sha256")

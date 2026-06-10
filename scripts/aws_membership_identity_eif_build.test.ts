@@ -19,7 +19,11 @@ describe("AWS membership identity EIF build script", () => {
         expect(plan.eifPath).toBe(path.resolve("dist/aws/membership-identity-tee.eif"));
         expect(plan.dockerContextDir).toBe(path.resolve(".build/aws-membership-identity-eif"));
         expect(plan.dockerUri).toBe("sonari/membership-identity-tee:local");
-        expect(plan.teeCommand).toEqual(["/opt/sonari/tee-artifact/bin/membership-tee", "server"]);
+        expect(plan.teeCommand).toEqual([
+            "/bin/sh",
+            "-c",
+            "set -e; ip link set lo up || true; /opt/sonari/tee-artifact/bin/vsock-tcp-bridge --listen-host 127.0.0.1 --listen-port 18080 --parent-cid 3 --vsock-port 18080 & exec /opt/sonari/tee-artifact/bin/membership-tee server",
+        ]);
         expect(plan.buildEnclaveCommand).toEqual([
             "nitro-cli",
             "build-enclave",
@@ -57,14 +61,17 @@ describe("AWS membership identity EIF build script", () => {
         expect(script).not.toContain('"fixture"');
     });
 
-    it("documents that the EIF container runs membership-tee server without Walrus", async () => {
+    it("documents that the EIF container runs the vsock bridge and membership-tee server without Walrus", async () => {
         const script = await readFile(
             path.join(process.cwd(), "scripts/build_aws_membership_identity_eif.ts"),
             "utf8",
         );
 
-        expect(script).toContain('"/opt/sonari/tee-artifact/bin/membership-tee"');
-        expect(script).toContain('"server"');
+        expect(script).toContain("/opt/sonari/tee-artifact/bin/membership-tee");
+        expect(script).toContain("/opt/sonari/tee-artifact/bin/vsock-tcp-bridge");
+        expect(script).toContain("--listen-port");
+        expect(script).toContain('"18080"');
+        expect(script).toContain("server");
         expect(script).toContain("nitro-cli");
         expect(script).toContain("build-enclave");
         expect(script).toContain("run-enclave");
