@@ -415,6 +415,7 @@ function SubmitStatus({
             <div className="submit-status submit-status-success" role="status">
                 <strong>{state.message}</strong>
                 <span>{t("jobLine", { jobId: state.jobId, jobStatus: state.jobStatus })}</span>
+                <span>{t("processingNotice")}</span>
             </div>
         );
     }
