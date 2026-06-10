@@ -432,19 +432,20 @@ DonorPass records contribution history only. It does not provide claim rights, p
 
 ### 目的
 
-受取者が初期登録として MembershipPass SBT を発行し、居住セルを登録する。
+受取者が初期登録として、居住セルを先に選び、そのあと MembershipPass SBT を発行する。
 KYC / World ID は複数アカウント対策として payout 前に必要だが、初期登録ではスキップ可能にする。
 本人確認は会員ホームや Claim 導線からいつでも追加できる任意設定として扱う。
 
 ### 画面フロー
 
-初期登録は 1 ステップ 1 ページで進める。
+初期登録は 1 ページのウィザードで進める。居住セルが必要なため、居住地選択を先に置く。
 
 | Step | Route | 必須 | 内容 |
 |---|---|---|---|
-| 1 | `/register` | 必須 | 1 wallet に対して 1 つの soulbound Membership SBT を発行する |
-| 2 | `/register/residence` | 必須 | Google Maps 風の地図 UI、住所・地域検索、現在地から H3 resolution 7 cell を選択する |
-| 3 | `/register/identity` | 任意 | KYC または World ID を登録する。いつでも登録でき、初期登録ではスキップ可能。Relief Cash を受け取る前に完了すればよい |
+| 1 | `/register` | 必須 | ウォレットを接続し、登録フローの概要を確認する |
+| 2 | `/register?step=residence` | 必須 | Google Maps 風の地図 UI、住所・地域検索、現在地から H3 resolution 7 cell を選択する |
+| 3 | `/register?step=membership` | 必須 | 選択した居住セルを前提に 1 wallet に対して 1 つの soulbound Membership SBT を発行する |
+| 4 | `/register?step=identity` | 任意 | KYC または World ID を登録する。いつでも登録でき、初期登録ではスキップ可能。Relief Cash を受け取る前に完了すればよい |
 
 ### 表示項目
 

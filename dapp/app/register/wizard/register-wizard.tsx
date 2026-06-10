@@ -1,5 +1,6 @@
 "use client";
 
+import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { domAnimation, LazyMotion, MotionConfig, m } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,6 +32,7 @@ const stepTransition = { duration: 0.4, ease: [0.32, 0.72, 0, 1] } as const;
 export function RegisterWizard() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const account = useCurrentAccount();
 
     const [state, setState] = useState<WizardState>(createInitialWizardState);
     // sessionStorage の復元はマウント後に行い、初回描画をサーバーと一致させる。
@@ -45,6 +47,18 @@ export function RegisterWizard() {
         }
         window.sessionStorage.setItem(WIZARD_STORAGE_KEY, serializeWizardState(state));
     }, [state, hydrated]);
+
+    const previousWalletAddressRef = useRef<string | null>(null);
+    useEffect(() => {
+        const currentWalletAddress = account?.address ?? null;
+        if (previousWalletAddressRef.current === currentWalletAddress) {
+            return;
+        }
+        previousWalletAddressRef.current = currentWalletAddress;
+        setState((current) =>
+            current.membershipIssued ? { ...current, membershipIssued: false } : current,
+        );
+    }, [account?.address]);
 
     // URL の ?step= が信頼できる現在地。状態で到達できない深さは clamp する。
     const requestedStep = parseStepParam(searchParams.get("step"));
@@ -103,6 +117,11 @@ export function RegisterWizard() {
             ),
         }));
     }, []);
+    const handleMembershipIssued = useCallback(() => {
+        setState((current) =>
+            current.membershipIssued ? current : { ...current, membershipIssued: true },
+        );
+    }, []);
     // ResidenceCellPicker から安定参照で呼ばれるため useCallback で固定する。
     const handleCellSelectionChange = useCallback((decimal: string | null) => {
         setState((current) =>
@@ -122,16 +141,6 @@ export function RegisterWizard() {
         switch (step) {
             case "welcome":
                 return <WelcomeStep onNext={goNext} />;
-            case "membership":
-                return (
-                    <MembershipStep
-                        accepted={state.membershipAccepted}
-                        canContinue={canProceed(state, "membership")}
-                        onBack={goBack}
-                        onNext={goNext}
-                        onToggle={handleMembershipToggle}
-                    />
-                );
             case "residence":
                 return (
                     <ResidenceStep
@@ -141,6 +150,18 @@ export function RegisterWizard() {
                         onCellSelectionChange={handleCellSelectionChange}
                         onNext={goNext}
                         onToggle={handleResidenceToggle}
+                    />
+                );
+            case "membership":
+                return (
+                    <MembershipStep
+                        accepted={state.membershipAccepted}
+                        membershipIssued={state.membershipIssued}
+                        onBack={goBack}
+                        onIssued={handleMembershipIssued}
+                        onNext={goNext}
+                        onToggle={handleMembershipToggle}
+                        selectedCellDecimal={state.selectedCellDecimal}
                     />
                 );
             case "identity":
@@ -157,6 +178,7 @@ export function RegisterWizard() {
             case "done":
                 return (
                     <DoneStep
+                        membershipIssued={state.membershipIssued}
                         identityVerified={state.identityVerified}
                         selectedCellDecimal={state.selectedCellDecimal}
                     />

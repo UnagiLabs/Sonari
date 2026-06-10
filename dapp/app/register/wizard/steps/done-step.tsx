@@ -6,11 +6,15 @@ import { h3DecimalToHex } from "../../residence/h3-geo";
 interface DoneStepProps {
     readonly selectedCellDecimal: string | null;
     readonly identityVerified: boolean;
+    readonly membershipIssued: boolean;
 }
 
-export function DoneStep({ selectedCellDecimal, identityVerified }: DoneStepProps) {
+export function DoneStep({
+    selectedCellDecimal,
+    identityVerified,
+    membershipIssued,
+}: DoneStepProps) {
     const t = useTranslations("register.wizard.done");
-    const tCommon = useTranslations("register.wizard.common");
 
     return (
         <section aria-labelledby="wizard-done-title" className="wizard-step-content">
@@ -26,9 +30,15 @@ export function DoneStep({ selectedCellDecimal, identityVerified }: DoneStepProp
                 <div className="wizard-sbt-row">
                     <span>{t("summary.membership")}</span>
                     <strong>
-                        {t("summary.membershipPending")}
-                        <span className="tag tag-neutral wizard-summary-tag">
-                            {tCommon("comingSoon")}
+                        {membershipIssued
+                            ? t("summary.membershipIssued")
+                            : t("summary.membershipPending")}
+                        <span
+                            className={`tag ${membershipIssued ? "tag-ok" : "tag-neutral"} wizard-summary-tag`}
+                        >
+                            {membershipIssued
+                                ? t("summary.membershipStatusIssued")
+                                : t("summary.membershipStatusPending")}
                         </span>
                     </strong>
                 </div>

@@ -15,8 +15,8 @@
                 "optionalTag": "任意",
                 "steps": {
                     "welcome": "ようこそ",
-                    "membership": "メンバーシップ",
                     "residence": "居住エリア",
+                    "membership": "メンバーシップ",
                     "identity": "本人確認",
                     "done": "完了"
                 }
@@ -29,7 +29,7 @@
             "welcome": {
                 "eyebrow": "新規登録",
                 "title": "Sonari のメンバーになる",
-                "lead": "手順は3つだけ。譲渡不可のメンバーシップ SBT を発行し、居住エリアを選び、本人確認は準備ができたときに行えます。",
+                "lead": "手順は3つだけ。先に居住エリアを選び、譲渡不可のメンバーシップ SBT を発行し、本人確認は準備ができたときに行えます。",
                 "walletHint": "Sui ウォレットを接続してはじめましょう。",
                 "privacySummary": "Sonari が保存する情報",
                 "privacy": {
@@ -43,32 +43,8 @@
                 },
                 "cta": "はじめる"
             },
-            "membership": {
-                "eyebrow": "ステップ 1",
-                "title": "メンバーシップ SBT を発行",
-                "lead": "ウォレットごとに1つの譲渡不可メンバーシップ。譲渡はできず、保有しても支援の保証や優先順位にはなりません。",
-                "card": {
-                    "objectType": "オブジェクト種別",
-                    "objectTypeValue": "メンバーシップ SBT",
-                    "owner": "所有者",
-                    "ownerPlaceholder": "接続中のウォレット",
-                    "transfer": "譲渡",
-                    "transferValue": "不可",
-                    "status": "ステータス",
-                    "statusValue": "未発行"
-                },
-                "statementsLegend": "進む前の確認",
-                "statements": {
-                    "0": "このウォレットが有効な Sonari メンバーシップ SBT を1つ所有します。",
-                    "1": "メンバーシップ SBT はソウルバウンドで、譲渡できません。",
-                    "2": "メンバーシップ SBT の保有は支援の保証や支払いの優先順位にはなりません。"
-                },
-                "issueButton": "メンバーシップ SBT を発行",
-                "issueComingSoon": "オンチェーン発行は近日対応予定です。先に登録設定を完了しておけます。",
-                "nextHint": "上のすべての項目を確認すると次へ進めます。"
-            },
             "residence": {
-                "eyebrow": "ステップ 2",
+                "eyebrow": "ステップ 1",
                 "title": "居住エリアを選ぶ",
                 "lead": "場所を検索するか地図をタップしてください。Sonari が保存するのは選択した H3 セルのみで、住所や GPS 履歴は保存しません。",
                 "statementsLegend": "居住地の確認",
@@ -101,10 +77,58 @@
                     "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。"
                 }
             },
+            "membership": {
+                "eyebrow": "ステップ 2",
+                "title": "メンバーシップ SBT を発行",
+                "lead": "先に居住地を選び、そのセルに対してウォレットごとに1つの譲渡不可メンバーシップを発行します。譲渡はできず、保有しても支援の保証や優先順位にはなりません。",
+                "card": {
+                    "objectType": "オブジェクト種別",
+                    "objectTypeValue": "メンバーシップ SBT",
+                    "owner": "所有者",
+                    "ownerPlaceholder": "接続中のウォレット",
+                    "residence": "居住セル",
+                    "residencePlaceholder": "未選択",
+                    "transfer": "譲渡",
+                    "transferValue": "不可",
+                    "status": "ステータス",
+                    "statusValue": "未発行",
+                    "statusChecking": "確認中",
+                    "statusReady": "発行準備完了",
+                    "statusIssued": "発行済み",
+                    "statusSubmitting": "送信中",
+                    "statusMultiple": "複数検出"
+                },
+                "statementsLegend": "進む前の確認",
+                "statements": {
+                    "0": "このウォレットが有効な Sonari メンバーシップ SBT を1つ所有します。",
+                    "1": "メンバーシップ SBT はソウルバウンドで、譲渡できません。",
+                    "2": "メンバーシップ SBT の保有は支援の保証や支払いの優先順位にはなりません。"
+                },
+                "issue": {
+                    "button": "メンバーシップ SBT を発行",
+                    "buttonIssued": "続ける",
+                    "connectWallet": "メンバーシップ SBT を発行するにはウォレットを接続してください。",
+                    "residenceRequired": "発行する前に居住エリアを選択してください。",
+                    "ready": "この居住エリアに対するメンバーシップ SBT を発行できます。",
+                    "checking": "このウォレットにメンバーシップ SBT があるか確認中…",
+                    "alreadyIssued": "このウォレットにはすでにメンバーシップ SBT があります。次へ進んでください。",
+                    "submitting": "ウォレットでトランザクションを承認してください。",
+                    "issued": "メンバーシップ SBT を発行しました。",
+                    "notConfigured": "メンバーシップの発行設定がありません。",
+                    "lookupFailed": "メンバーシップ SBT を照会できませんでした。",
+                    "multiple": "このウォレットには複数のメンバーシップ SBT が見つかりました。次へ進む前にサポートへ連絡してください。",
+                    "proofWorkerMissing": "居住地証明ワーカーが設定されていません。",
+                    "proofFetchFailed": "居住地証明を取得できませんでした。",
+                    "invalidProofResponse": "居住地証明のレスポンスが不正です。",
+                    "residenceNotAllowed": "選択した居住セルは許可リストに含まれていません。",
+                    "transactionFailed": "メンバーシップの発行に失敗しました。"
+                },
+                "nextHint": "上のすべての項目を確認すると次へ進めます。"
+            },
             "identity": {
                 "eyebrow": "任意",
                 "title": "本人確認は、今でもあとでも",
-                "lead": "初回登録に必要なのはメンバーシップ SBT と居住セルだけです。本人確認が必須になるのは支払いの直前のみで、メンバーエリアからいつでも完了できます。",
+                "lead": "初回登録に必要なのは居住セルとメンバーシップ SBT だけです。本人確認が必須になるのは支払いの直前のみで、メンバーエリアからいつでも完了できます。",
                 "routeLegend": "確認方法",
                 "options": {
                     "kyc": {
@@ -124,7 +148,7 @@
                     "checkingBody": "接続中のウォレットが所有するパスを照会しています。",
                     "detectedTitle": "メンバーシップ SBT を検出",
                     "detectedBody": "検証はこのパスと接続中のウォレットに紐づきます。",
-                    "none": "このウォレットのメンバーシップ SBT が見つかりません。先にステップ 1 を完了してください。",
+                    "none": "このウォレットのメンバーシップ SBT が見つかりません。前のステップで発行してください。",
                     "multiple": "このウォレットに複数のメンバーシップ SBT が見つかりました。検証の前にサポートへご連絡ください。",
                     "errorFallback": "メンバーシップ SBT を照会できませんでした。"
                 },
@@ -161,17 +185,20 @@
             "done": {
                 "eyebrow": "完了",
                 "title": "登録の準備ができました",
-                "lead": "このウォレットに登録される内容です。本人確認の設定はメンバーエリアからいつでも変更できます。",
+                "lead": "このウォレットに記録された内容です。本人確認の設定はメンバーエリアからいつでも変更できます。",
                 "summary": {
                     "membership": "メンバーシップ SBT",
+                    "membershipIssued": "発行済み",
                     "membershipPending": "未発行",
+                    "membershipStatusIssued": "オンチェーン",
+                    "membershipStatusPending": "保留",
                     "residence": "居住セル",
                     "residenceEmpty": "未選択",
                     "identity": "本人確認",
                     "identityVerified": "検証済み",
                     "identitySkipped": "スキップ — いつでも追加可能"
                 },
-                "finalizeComingSoon": "オンチェーンでの本登録は近日対応予定です。選択内容はこのブラウザのセッションに保存されています。",
+                "finalizeComingSoon": "本人確認はメンバーエリアからあとで完了できます。",
                 "dashboardCta": "ダッシュボードへ",
                 "homeCta": "ホームに戻る"
             }

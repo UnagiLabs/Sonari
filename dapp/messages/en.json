@@ -15,8 +15,8 @@
                 "optionalTag": "Optional",
                 "steps": {
                     "welcome": "Welcome",
-                    "membership": "Membership",
                     "residence": "Residence",
+                    "membership": "Membership",
                     "identity": "Identity",
                     "done": "Done"
                 }
@@ -29,7 +29,7 @@
             "welcome": {
                 "eyebrow": "Register",
                 "title": "Become a Sonari member.",
-                "lead": "Three clear steps: issue one soulbound Membership SBT, choose your residence area, and verify your identity whenever you are ready.",
+                "lead": "Three clear steps: choose your residence area, issue one soulbound Membership SBT, and verify your identity whenever you are ready.",
                 "walletHint": "Connect your Sui wallet to get started.",
                 "privacySummary": "What Sonari stores",
                 "privacy": {
@@ -43,32 +43,8 @@
                 },
                 "cta": "Get started"
             },
-            "membership": {
-                "eyebrow": "Step 1",
-                "title": "Issue your Membership SBT.",
-                "lead": "One soulbound membership per wallet. It cannot be transferred, and holding it does not guarantee aid or payout priority.",
-                "card": {
-                    "objectType": "Object type",
-                    "objectTypeValue": "Membership SBT",
-                    "owner": "Owner",
-                    "ownerPlaceholder": "Your connected wallet",
-                    "transfer": "Transfer",
-                    "transferValue": "Disabled",
-                    "status": "Status",
-                    "statusValue": "Not issued yet"
-                },
-                "statementsLegend": "Before you continue",
-                "statements": {
-                    "0": "This wallet will own one active Sonari Membership SBT.",
-                    "1": "The Membership SBT is soulbound and cannot be transferred.",
-                    "2": "Holding a Membership SBT does not guarantee aid or create payout priority."
-                },
-                "issueButton": "Issue Membership SBT",
-                "issueComingSoon": "On-chain issuance is coming soon. You can continue and finish your registration setup now.",
-                "nextHint": "Affirm every statement above to continue."
-            },
             "residence": {
-                "eyebrow": "Step 2",
+                "eyebrow": "Step 1",
                 "title": "Choose your residence area.",
                 "lead": "Search a place or tap the map. Sonari stores only the selected H3 cell — never your raw address or GPS history.",
                 "statementsLegend": "Residence statement",
@@ -101,10 +77,58 @@
                     "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID."
                 }
             },
+            "membership": {
+                "eyebrow": "Step 2",
+                "title": "Issue your Membership SBT.",
+                "lead": "Choose your residence first, then issue one soulbound membership per wallet. It cannot be transferred, and holding it does not guarantee aid or payout priority.",
+                "card": {
+                    "objectType": "Object type",
+                    "objectTypeValue": "Membership SBT",
+                    "owner": "Owner",
+                    "ownerPlaceholder": "Your connected wallet",
+                    "residence": "Residence cell",
+                    "residencePlaceholder": "Not selected",
+                    "transfer": "Transfer",
+                    "transferValue": "Disabled",
+                    "status": "Status",
+                    "statusValue": "Not issued yet",
+                    "statusChecking": "Checking",
+                    "statusReady": "Ready to issue",
+                    "statusIssued": "Issued",
+                    "statusSubmitting": "Submitting",
+                    "statusMultiple": "Multiple detected"
+                },
+                "statementsLegend": "Before you continue",
+                "statements": {
+                    "0": "This wallet will own one active Sonari Membership SBT.",
+                    "1": "The Membership SBT is soulbound and cannot be transferred.",
+                    "2": "Holding a Membership SBT does not guarantee aid or create payout priority."
+                },
+                "issue": {
+                    "button": "Issue Membership SBT",
+                    "buttonIssued": "Continue",
+                    "connectWallet": "Connect a wallet to issue your Membership SBT.",
+                    "residenceRequired": "Select your residence area before issuing.",
+                    "ready": "Ready to issue the Membership SBT for this residence.",
+                    "checking": "Checking whether this wallet already has a Membership SBT…",
+                    "alreadyIssued": "This wallet already has a Membership SBT. Continue to the next step.",
+                    "submitting": "Approve the transaction in your wallet.",
+                    "issued": "Membership SBT issued.",
+                    "notConfigured": "Membership issuance is not configured.",
+                    "lookupFailed": "Could not look up your Membership SBT.",
+                    "multiple": "Multiple Membership SBTs were found for this wallet. Contact support before continuing.",
+                    "proofWorkerMissing": "Residence proof worker is not configured.",
+                    "proofFetchFailed": "Could not fetch the residence proof.",
+                    "invalidProofResponse": "The residence proof response is invalid.",
+                    "residenceNotAllowed": "The selected residence cell is not in the allowlist.",
+                    "transactionFailed": "Membership issuance failed."
+                },
+                "nextHint": "Affirm every statement above to continue."
+            },
             "identity": {
                 "eyebrow": "Optional",
                 "title": "Verify it's you. Now or later.",
-                "lead": "Initial registration only needs the Membership SBT and residence cell. Identity verification becomes required only before payout, and you can finish it from the member area anytime.",
+                "lead": "Initial registration only needs the residence cell and Membership SBT. Identity verification becomes required only before payout, and you can finish it from the member area anytime.",
                 "routeLegend": "Verification route",
                 "options": {
                     "kyc": {
@@ -124,7 +148,7 @@
                     "checkingBody": "Looking up the pass owned by your connected wallet.",
                     "detectedTitle": "Membership SBT detected",
                     "detectedBody": "Verification binds to this pass and your connected wallet.",
-                    "none": "No Membership SBT found for this wallet. Complete Step 1 first.",
+                    "none": "No Membership SBT found for this wallet. Issue it in the previous step first.",
                     "multiple": "Multiple Membership SBTs found for this wallet. Please contact support before verifying.",
                     "errorFallback": "Could not look up your Membership SBT."
                 },
@@ -161,17 +185,20 @@
             "done": {
                 "eyebrow": "All set",
                 "title": "Your registration is ready.",
-                "lead": "Here is what Sonari will register for this wallet. You can change identity settings anytime from the member area.",
+                "lead": "Here is what Sonari has recorded for this wallet. You can change identity settings anytime from the member area.",
                 "summary": {
                     "membership": "Membership SBT",
+                    "membershipIssued": "Issued",
                     "membershipPending": "Not issued yet",
+                    "membershipStatusIssued": "On chain",
+                    "membershipStatusPending": "Pending",
                     "residence": "Residence cell",
                     "residenceEmpty": "Not selected",
                     "identity": "Identity",
                     "identityVerified": "Verified",
                     "identitySkipped": "Skipped — add anytime"
                 },
-                "finalizeComingSoon": "Final on-chain registration is coming soon. Your selections are saved in this browser session.",
+                "finalizeComingSoon": "Identity verification can still be completed later from the member area.",
                 "dashboardCta": "Go to dashboard",
                 "homeCta": "Back to home"
             }
