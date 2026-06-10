@@ -19,6 +19,7 @@ import {
     type IdentityProvider,
 } from "../../identity/request";
 import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
+import { shortAddress } from "./membership-presence";
 
 const WorldIdVerifyButton = dynamic(
     () => import("../../identity/world-id-verify-button").then((m) => m.WorldIdVerifyButton),
@@ -361,7 +362,7 @@ function MembershipBindingStatus({
         return (
             <div className="field-note" role="status">
                 <strong>{t("detectedTitle")}</strong>
-                <span>{shortId(lookup.membershipId)}</span>
+                <span>{shortAddress(lookup.membershipId)}</span>
                 <small>{t("detectedBody")}</small>
             </div>
         );
@@ -388,10 +389,6 @@ function MembershipBindingStatus({
             {lookup.message.length > 0 ? lookup.message : t("errorFallback")}
         </div>
     );
-}
-
-function shortId(value: string): string {
-    return value.length > 14 ? `${value.slice(0, 10)}…${value.slice(-4)}` : value;
 }
 
 function SubmitStatus({
