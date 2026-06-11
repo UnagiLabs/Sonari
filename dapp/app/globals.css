@@ -24,6 +24,7 @@
   --line: oklch(0.92 0.012 130);
   --line-strong: oklch(0.85 0.018 130);
   --primary-ink: var(--sage-800);
+  --focus-ring: oklch(0.52 0.13 235);
   --radius-md: 14px;
   --radius-lg: 20px;
   --radius-xl: 28px;
@@ -75,6 +76,24 @@ input,
 select,
 textarea {
   font-family: inherit;
+}
+
+/*
+ * キーボードでフォーカスしたときだけ見えるリング（issue #282）。
+ * マウス操作の :focus では出さず、:focus-visible に限定して見た目を汚さない。
+ * 要素ベースのセレクタで、ボタン・リンク・summary・フォーム部品・言語切替など
+ * すべての操作できる要素を漏れなく覆う。outline なのでレイアウトは崩れない。
+ */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 img {
