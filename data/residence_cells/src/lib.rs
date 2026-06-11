@@ -32,6 +32,13 @@ const PROOF_SHARD_SCHEMA: &str = "sonari.residence.proof_shard.v1";
 const PROOF_SHARD_SCHEMA_VERSION: u64 = 1;
 const PROOF_SHARD_OBJECT_KEY_RULE: &str =
     "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz";
+const TILE_SCHEMA: &str = "sonari.residence.tile.v1";
+const TILE_SCHEMA_VERSION: u64 = 1;
+const TILE_MANIFEST_SCHEMA: &str = "sonari.residence.tile_manifest.v1";
+const TILE_MANIFEST_SCHEMA_VERSION: u64 = 1;
+const TILE_OBJECT_KEY_RULE: &str =
+    "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json";
+pub const TILE_PARENT_RESOLUTION: u8 = 4;
 const S3_BUCKET_ENV: &str = "SONARI_RESIDENCE_CELLS_BUCKET";
 const PI: f64 = std::f64::consts::PI;
 const FRAC_PI_2: f64 = std::f64::consts::FRAC_PI_2;
@@ -321,6 +328,15 @@ pub struct VerifyLocalOutput {
 }
 
 #[derive(Debug, Serialize)]
+pub struct VerifyTilesOutput {
+    pub status: String,
+    pub tile_count: usize,
+    pub total_cell_count: usize,
+    pub verified_tiles: usize,
+    pub merkle_root: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct VerifyProofShardsOutput {
     pub status: String,
     pub shard_count: usize,
@@ -335,6 +351,50 @@ pub struct VerifyProofShardsOutput {
 pub struct GeneratedProofShards {
     pub manifest: ProofShardManifest,
     pub shards: Vec<ProofShard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedTiles {
+    pub manifest: ResidenceTileManifest,
+    pub tiles: Vec<ResidenceTile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidenceTile {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub tile_parent_resolution: u8,
+    pub merkle_root: String,
+    pub parent_h3_index: String,
+    pub cells: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidenceTileManifest {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub tile_parent_resolution: u8,
+    pub merkle_root: String,
+    pub object_key_rule: String,
+    pub tile_count: usize,
+    pub total_cell_count: usize,
+    pub tiles: Vec<ResidenceTileInventoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidenceTileInventoryEntry {
+    pub parent_h3_index: String,
+    pub object_key: String,
+    pub cell_count: usize,
+    pub sha256: String,
+    pub byte_size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -1786,8 +1846,8 @@ fn validate_proof_shard_manifest(
         parse_prefixed_hex_32("proof manifest shard sha256", &inventory.sha256)?;
     }
 
-    for shard_id in 0..manifest.shard_count {
-        if !seen[shard_id] {
+    for (shard_id, present) in seen.iter().enumerate() {
+        if !present {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
                 "missing shard inventory entry for shard_id {shard_id}"
             )));
@@ -2134,7 +2194,7 @@ fn proof_steps_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> Vec<P
         if level.len() <= 1 {
             break;
         }
-        let sibling_index = if current_index % 2 == 0 {
+        let sibling_index = if current_index.is_multiple_of(2) {
             current_index + 1
         } else {
             current_index - 1
@@ -2260,6 +2320,461 @@ fn proof_shard_object_key(allowlist_version: u64, geo_resolution: u8, shard_id: 
     format!(
         "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz"
     )
+}
+
+pub fn tile_object_key(allowlist_version: u64, geo_resolution: u8, parent_hex: &str) -> String {
+    format!("residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json")
+}
+
+pub fn generate_tiles(
+    leaves: &[ResidenceCellLeaf],
+) -> Result<GeneratedTiles, ResidenceAllowlistError> {
+    let Some(first_leaf) = leaves.first().copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "tiles require at least one residence leaf".to_owned(),
+        ));
+    };
+    validate_proof_shard_leaf_metadata(leaves, first_leaf)?;
+
+    let allowlist_version = first_leaf.allowlist_version;
+    let geo_resolution = first_leaf.geo_resolution;
+    let parent_resolution = resolution_from_u8(TILE_PARENT_RESOLUTION)?;
+
+    let merkle_root = {
+        let Some(root) = merkle_root_from_leaves(leaves)? else {
+            return Err(ResidenceAllowlistError::InvalidArtifact(
+                "tiles require at least one residence leaf".to_owned(),
+            ));
+        };
+        prefixed_hex(&root)
+    };
+
+    // Group cells by res4 parent
+    use std::collections::BTreeMap;
+    let mut parent_to_cells: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for leaf in leaves {
+        let cell = CellIndex::try_from(leaf.h3_index).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {} is not a valid H3 cell index: {error}",
+                leaf.h3_index
+            ))
+        })?;
+        let parent = cell.parent(parent_resolution).ok_or_else(|| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "could not compute res{TILE_PARENT_RESOLUTION} parent for h3_index {}",
+                leaf.h3_index
+            ))
+        })?;
+        let parent_u64 = u64::from(parent);
+        parent_to_cells
+            .entry(parent_u64)
+            .or_default()
+            .push(leaf.h3_index);
+    }
+
+    // Build tiles, sorted by parent ascending (BTreeMap ensures key order)
+    let mut tiles = Vec::with_capacity(parent_to_cells.len());
+    let mut inventory = Vec::with_capacity(parent_to_cells.len());
+
+    for (parent_u64, mut cells) in parent_to_cells {
+        if cells.is_empty() {
+            continue;
+        }
+        cells.sort_unstable();
+        cells.dedup();
+
+        let parent_cell = CellIndex::try_from(parent_u64).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "parent h3_index {parent_u64} is not a valid H3 cell index: {error}"
+            ))
+        })?;
+        let parent_hex = parent_cell.to_string();
+
+        let tile = ResidenceTile {
+            schema: TILE_SCHEMA.to_owned(),
+            schema_version: TILE_SCHEMA_VERSION,
+            allowlist_version,
+            geo_resolution,
+            tile_parent_resolution: TILE_PARENT_RESOLUTION,
+            merkle_root: merkle_root.clone(),
+            parent_h3_index: parent_u64.to_string(),
+            cells: cells.iter().map(|c| c.to_string()).collect(),
+        };
+
+        let tile_bytes = tile_json_bytes(&tile)?;
+        let sha256 = prefixed_hex(&Sha256::digest(&tile_bytes));
+        let byte_size = tile_bytes.len() as u64;
+        let object_key = tile_object_key(allowlist_version, geo_resolution, &parent_hex);
+
+        inventory.push(ResidenceTileInventoryEntry {
+            parent_h3_index: parent_u64.to_string(),
+            object_key,
+            cell_count: tile.cells.len(),
+            sha256,
+            byte_size,
+        });
+
+        tiles.push(tile);
+    }
+
+    let total_cell_count = tiles.iter().map(|t| t.cells.len()).sum();
+    let tile_count = tiles.len();
+
+    let manifest = ResidenceTileManifest {
+        schema: TILE_MANIFEST_SCHEMA.to_owned(),
+        schema_version: TILE_MANIFEST_SCHEMA_VERSION,
+        allowlist_version,
+        geo_resolution,
+        tile_parent_resolution: TILE_PARENT_RESOLUTION,
+        merkle_root,
+        object_key_rule: TILE_OBJECT_KEY_RULE.to_owned(),
+        tile_count,
+        total_cell_count,
+        tiles: inventory,
+    };
+
+    Ok(GeneratedTiles { manifest, tiles })
+}
+
+pub fn tile_json_bytes(tile: &ResidenceTile) -> Result<Vec<u8>, ResidenceAllowlistError> {
+    Ok(serde_json::to_vec_pretty(tile)?)
+}
+
+pub fn write_tiles_from_leaves_atomic(
+    output_dir: &Path,
+    leaves: &[ResidenceCellLeaf],
+) -> Result<ResidenceTileManifest, ResidenceAllowlistError> {
+    let generated = generate_tiles(leaves)?;
+    let tiles_dir = output_dir.join("res4");
+    fs::create_dir_all(&tiles_dir)?;
+
+    for (tile, inventory) in generated.tiles.iter().zip(generated.manifest.tiles.iter()) {
+        let parent_cell =
+            CellIndex::try_from(tile.parent_h3_index.parse::<u64>().map_err(|_| {
+                ResidenceAllowlistError::InvalidArtifact(format!(
+                    "parent_h3_index is not a valid u64: {}",
+                    tile.parent_h3_index
+                ))
+            })?)
+            .map_err(|error| {
+                ResidenceAllowlistError::InvalidArtifact(format!(
+                    "parent_h3_index {} is not a valid H3 cell: {error}",
+                    tile.parent_h3_index
+                ))
+            })?;
+        let parent_hex = parent_cell.to_string();
+        let file_name = format!("{parent_hex}.json");
+        let tile_path = tiles_dir.join(&file_name);
+
+        let tile_bytes = tile_json_bytes(tile)?;
+        write_bytes_atomic(&tile_path, &tile_bytes)?;
+
+        // Verify sha256/byte_size matches inventory
+        let _ = inventory;
+    }
+
+    write_tile_manifest_atomic(output_dir, &generated.manifest)?;
+    Ok(generated.manifest)
+}
+
+fn write_tile_manifest_atomic(
+    output_dir: &Path,
+    manifest: &ResidenceTileManifest,
+) -> Result<(), ResidenceAllowlistError> {
+    let manifest_path = output_dir.join("tile_manifest.json");
+    let manifest_json = format!("{}\n", serde_json::to_string_pretty(manifest)?);
+    write_bytes_atomic(&manifest_path, manifest_json.as_bytes())
+}
+
+pub fn generate_and_write_tiles_atomic(
+    allowlist_path: &Path,
+    source_path: &Path,
+    output_dir: &Path,
+    options: GenerateOptions,
+) -> Result<ResidenceTileManifest, ResidenceAllowlistError> {
+    let allowlist = load_verified_allowlist(allowlist_path, source_path, options)?;
+    write_tiles_from_leaves_atomic(output_dir, &allowlist.leaves)
+}
+
+/// tile artifact が proof artifact と同じ allowlist 由来であることを、
+/// ローカルのファイルだけで検証する。R2/AWS は読まないので CI で実行できる。
+/// 検証は fail-closed で、1 つでも不一致なら Err を返す。
+pub fn verify_tiles(
+    tile_manifest_path: &Path,
+    tiles_dir: &Path,
+    proof_manifest_path: &Path,
+) -> Result<VerifyTilesOutput, ResidenceAllowlistError> {
+    let manifest: ResidenceTileManifest = serde_json::from_slice(&fs::read(tile_manifest_path)?)?;
+    validate_tile_manifest(&manifest)?;
+
+    let parent_resolution = resolution_from_u8(manifest.tile_parent_resolution)?;
+
+    reject_unexpected_tile_files(tiles_dir, &manifest)?;
+
+    let mut verified_tiles = 0usize;
+    let mut seen_cells = std::collections::BTreeSet::new();
+    let mut seen_parents = std::collections::BTreeSet::new();
+    let mut previous_parent: Option<u64> = None;
+
+    for inventory in &manifest.tiles {
+        let parent_u64 = inventory.parent_h3_index.parse::<u64>().map_err(|_| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile inventory parent_h3_index {} is not a valid u64",
+                inventory.parent_h3_index
+            ))
+        })?;
+        if let Some(prev) = previous_parent
+            && parent_u64 <= prev
+        {
+            return Err(ResidenceAllowlistError::InvalidArtifact(
+                "tile inventory parent_h3_index must be strictly ascending".to_owned(),
+            ));
+        }
+        previous_parent = Some(parent_u64);
+        if !seen_parents.insert(parent_u64) {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "duplicate tile inventory entry for parent_h3_index {parent_u64}"
+            )));
+        }
+
+        let parent_cell = CellIndex::try_from(parent_u64).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile parent_h3_index {parent_u64} is not a valid H3 cell index: {error}"
+            ))
+        })?;
+        let parent_hex = parent_cell.to_string();
+
+        let expected_object_key = tile_object_key(
+            manifest.allowlist_version,
+            manifest.geo_resolution,
+            &parent_hex,
+        );
+        if inventory.object_key != expected_object_key {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile object_key {} does not match expected {expected_object_key}",
+                inventory.object_key
+            )));
+        }
+
+        let tile_path = tiles_dir.join(format!("{parent_hex}.json"));
+        if !tile_path.is_file() {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "missing tile file {}",
+                tile_path.display()
+            )));
+        }
+
+        let tile_bytes = fs::read(&tile_path)?;
+        if tile_bytes.len() as u64 != inventory.byte_size {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile {parent_hex} byte_size {} does not match manifest {}",
+                tile_bytes.len(),
+                inventory.byte_size
+            )));
+        }
+        let actual_sha256 = prefixed_hex(&Sha256::digest(&tile_bytes));
+        if actual_sha256 != inventory.sha256 {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile {parent_hex} sha256 {actual_sha256} does not match manifest {}",
+                inventory.sha256
+            )));
+        }
+
+        let tile: ResidenceTile = serde_json::from_slice(&tile_bytes)?;
+        verify_tile_contents(&manifest, inventory, parent_u64, parent_resolution, &tile)?;
+
+        for cell in &tile.cells {
+            let cell_u64 = parse_h3_index(cell, manifest.geo_resolution)?;
+            if !seen_cells.insert(cell_u64) {
+                return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                    "h3_index {cell_u64} appears in more than one tile"
+                )));
+            }
+        }
+        verified_tiles += 1;
+    }
+
+    if verified_tiles != manifest.tile_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "verified tile count {verified_tiles} does not match manifest tile_count {}",
+            manifest.tile_count
+        )));
+    }
+    if seen_cells.len() != manifest.total_cell_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "unique cell count {} does not match manifest total_cell_count {}",
+            seen_cells.len(),
+            manifest.total_cell_count
+        )));
+    }
+
+    // 同一 allowlist 由来チェックの核心: tile manifest と proof manifest の root 一致。
+    let proof_manifest: ProofShardManifest =
+        serde_json::from_slice(&fs::read(proof_manifest_path)?)?;
+    if manifest.merkle_root != proof_manifest.merkle_root {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile merkle_root {} does not match proof merkle_root {}",
+            manifest.merkle_root, proof_manifest.merkle_root
+        )));
+    }
+    if manifest.allowlist_version != proof_manifest.allowlist_version {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile allowlist_version {} does not match proof allowlist_version {}",
+            manifest.allowlist_version, proof_manifest.allowlist_version
+        )));
+    }
+    if manifest.geo_resolution != proof_manifest.geo_resolution {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile geo_resolution {} does not match proof geo_resolution {}",
+            manifest.geo_resolution, proof_manifest.geo_resolution
+        )));
+    }
+    if manifest.total_cell_count != proof_manifest.total_proof_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile total_cell_count {} does not match proof total_proof_count {}",
+            manifest.total_cell_count, proof_manifest.total_proof_count
+        )));
+    }
+
+    Ok(VerifyTilesOutput {
+        status: "verified".to_owned(),
+        tile_count: manifest.tile_count,
+        total_cell_count: manifest.total_cell_count,
+        verified_tiles,
+        merkle_root: manifest.merkle_root,
+    })
+}
+
+fn validate_tile_manifest(manifest: &ResidenceTileManifest) -> Result<(), ResidenceAllowlistError> {
+    if manifest.schema != TILE_MANIFEST_SCHEMA {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile manifest schema {} is not {TILE_MANIFEST_SCHEMA}",
+            manifest.schema
+        )));
+    }
+    if manifest.schema_version != TILE_MANIFEST_SCHEMA_VERSION {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile manifest schema_version {} is not {TILE_MANIFEST_SCHEMA_VERSION}",
+            manifest.schema_version
+        )));
+    }
+    if manifest.tile_parent_resolution != TILE_PARENT_RESOLUTION {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile manifest tile_parent_resolution {} is not {TILE_PARENT_RESOLUTION}",
+            manifest.tile_parent_resolution
+        )));
+    }
+    if manifest.object_key_rule != TILE_OBJECT_KEY_RULE {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "tile manifest object_key_rule does not match the expected rule".to_owned(),
+        ));
+    }
+    if manifest.tiles.len() != manifest.tile_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile manifest inventory length {} does not match tile_count {}",
+            manifest.tiles.len(),
+            manifest.tile_count
+        )));
+    }
+    Ok(())
+}
+
+fn verify_tile_contents(
+    manifest: &ResidenceTileManifest,
+    inventory: &ResidenceTileInventoryEntry,
+    parent_u64: u64,
+    parent_resolution: Resolution,
+    tile: &ResidenceTile,
+) -> Result<(), ResidenceAllowlistError> {
+    if tile.schema != TILE_SCHEMA || tile.schema_version != TILE_SCHEMA_VERSION {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "tile schema or schema_version is invalid".to_owned(),
+        ));
+    }
+    if tile.allowlist_version != manifest.allowlist_version
+        || tile.geo_resolution != manifest.geo_resolution
+        || tile.tile_parent_resolution != manifest.tile_parent_resolution
+        || tile.merkle_root != manifest.merkle_root
+        || tile.parent_h3_index != inventory.parent_h3_index
+    {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile {} metadata does not match manifest",
+            inventory.parent_h3_index
+        )));
+    }
+    if tile.cells.len() != inventory.cell_count {
+        return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+            "tile {} cell_count {} does not match manifest {}",
+            inventory.parent_h3_index,
+            tile.cells.len(),
+            inventory.cell_count
+        )));
+    }
+
+    let mut previous: Option<u64> = None;
+    for cell in &tile.cells {
+        let cell_u64 = parse_h3_index(cell, manifest.geo_resolution)?;
+        if let Some(prev) = previous
+            && cell_u64 <= prev
+        {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile {} cells must be strictly ascending",
+                inventory.parent_h3_index
+            )));
+        }
+        previous = Some(cell_u64);
+
+        let cell_index = CellIndex::try_from(cell_u64).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {cell_u64} is not a valid H3 cell index: {error}"
+            ))
+        })?;
+        let parent = cell_index.parent(parent_resolution).ok_or_else(|| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "could not compute parent for h3_index {cell_u64}"
+            ))
+        })?;
+        if u64::from(parent) != parent_u64 {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {cell_u64} does not belong to tile parent {parent_u64}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn reject_unexpected_tile_files(
+    tiles_dir: &Path,
+    manifest: &ResidenceTileManifest,
+) -> Result<(), ResidenceAllowlistError> {
+    let expected: std::collections::BTreeSet<String> = manifest
+        .tiles
+        .iter()
+        .map(|entry| entry.object_key.rsplit('/').next().unwrap_or("").to_owned())
+        .collect();
+    let read_dir = match fs::read_dir(tiles_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "tiles directory {} does not exist",
+                tiles_dir.display()
+            )));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    for entry in read_dir {
+        let entry = entry?;
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        if !file_name.ends_with(".json") {
+            continue;
+        }
+        if !expected.contains(&file_name) {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "unexpected tile file {file_name} is not in the manifest inventory"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn parse_prefixed_hex_32(field: &str, value: &str) -> Result<[u8; 32], ResidenceAllowlistError> {
@@ -2434,7 +2949,7 @@ fn format_count(value: usize) -> String {
     for (index, byte) in digits.bytes().enumerate() {
         if index > 0
             && (index == first_group_len
-                || (index > first_group_len && (index - first_group_len) % 3 == 0))
+                || (index > first_group_len && (index - first_group_len).is_multiple_of(3)))
         {
             output.push(',');
         }

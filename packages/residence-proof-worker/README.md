@@ -58,6 +58,57 @@ GET /api/residence-proof?h3_index=608819013681676287
 - `method_not_allowed`
 - `not_found`
 
+## 地図表示用 tile API
+
+地図の land/water 表示は、重い `/api/residence-proof` をセルごとに呼ぶ代わりに、
+軽い static tile を読みます。proof API は MembershipPass 発行直前の 1 回だけに限定します。
+tile は proof shard と同じ R2 binding `RESIDENCE_PROOF_SHARDS` から読みます。新 binding は不要です。
+
+### meta
+
+```text
+GET /api/residence-tiles/meta
+```
+
+設定中の version / resolution / merkle_root を返します。inventory（tile 一覧）は返しません。
+`Cache-Control: public, max-age=300` を付けます。
+
+```json
+{
+  "schema": "sonari.residence.tile_manifest.v1",
+  "schema_version": 1,
+  "allowlist_version": 1,
+  "geo_resolution": 7,
+  "tile_parent_resolution": 4,
+  "merkle_root": "0x...",
+  "object_key_rule": "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json",
+  "tile_count": 81234,
+  "total_cell_count": 28175220
+}
+```
+
+### tile
+
+```text
+GET /api/residence-tiles/v{allowlist_version}/res{geo_resolution}/{parent_hex}.json
+```
+
+`parent_hex` は res7 セルの res4 親セルの小文字 hex です。成功時はその親に属する
+許可 res7 セルの昇順リストを返し、`Cache-Control: public, max-age=31536000, immutable`
+を付けます。version 入り URL なので Cloudflare の edge cache（`caches.default`）が吸収します。
+
+許可セルが 0 個の親（R2 に tile が無い）は `404 tile_not_found` を返します。
+dapp はこれを「all water（すべて陸地でない）」と読みます。
+path の version が Worker 設定と不一致なら `409 tile_version_mismatch` で fail-closed します。
+
+tile の error code は次です。
+
+- `tile_not_found`
+- `tile_version_mismatch`
+- `tile_invalid`
+- `tile_manifest_missing`
+- `tile_manifest_invalid`
+
 ## R2 binding と vars
 
 Worker は `wrangler.toml` の値を source of truth とします。
@@ -88,6 +139,13 @@ shard key は manifest inventory の `object_key` を使います。
 
 ```text
 residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz
+```
+
+tile の manifest と tile key は次です。
+
+```text
+residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/tile_manifest.json
+residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json
 ```
 
 Worker は shard を返す前に次を検証します。

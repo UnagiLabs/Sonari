@@ -12,6 +12,11 @@ import {
     validateProofEntry,
 } from "./proof_shards.js";
 import { loadProofManifest, loadProofShard } from "./r2.js";
+import {
+    handleResidenceTileRequest,
+    isResidenceTilePath,
+    type TileExecutionContext,
+} from "./tiles.js";
 
 export interface Env {
     RESIDENCE_PROOF_SHARDS: ResidenceProofR2Bucket;
@@ -27,16 +32,27 @@ export interface ResidenceProofR2Object {
     arrayBuffer(): Promise<ArrayBuffer>;
 }
 
-export async function handleResidenceProofRequest(request: Request, env: Env): Promise<Response> {
+export async function handleResidenceProofRequest(
+    request: Request,
+    env: Env,
+    ctx?: TileExecutionContext,
+): Promise<Response> {
     try {
-        return await handleResidenceProofRequestUnchecked(request, env);
+        return await handleResidenceProofRequestUnchecked(request, env, ctx);
     } catch (error) {
         return errorResponse(toResidenceProofError(error));
     }
 }
 
-async function handleResidenceProofRequestUnchecked(request: Request, env: Env): Promise<Response> {
+async function handleResidenceProofRequestUnchecked(
+    request: Request,
+    env: Env,
+    ctx?: TileExecutionContext,
+): Promise<Response> {
     const url = new URL(request.url);
+    if (isResidenceTilePath(url.pathname)) {
+        return handleResidenceTileRequest(request, env, readConfig(env), ctx);
+    }
     if (url.pathname !== "/api/residence-proof") {
         throw new ResidenceProofError("not_found", "Not found", 404);
     }

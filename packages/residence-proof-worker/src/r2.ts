@@ -1,3 +1,4 @@
+import { parseResidenceTileManifest, type ResidenceTileManifest } from "@sonari/proof-core";
 import { ResidenceProofError } from "./errors.js";
 import type { ResidenceProofR2Bucket } from "./http.js";
 import {
@@ -86,6 +87,87 @@ export function proofManifestObjectKey(config: {
     geoResolution: number;
 }): string {
     return `residence-cells/v${config.allowlistVersion}/res${config.geoResolution}/proofs/proof_manifest.json`;
+}
+
+const tileManifestCache = new WeakMap<
+    ResidenceProofR2Bucket,
+    Map<string, Promise<ResidenceTileManifest>>
+>();
+
+export function tileManifestObjectKey(config: {
+    allowlistVersion: number;
+    geoResolution: number;
+}): string {
+    return `residence-cells/v${config.allowlistVersion}/res${config.geoResolution}/tiles/tile_manifest.json`;
+}
+
+export function tileObjectKey(
+    allowlistVersion: number,
+    geoResolution: number,
+    parentHex: string,
+): string {
+    return `residence-cells/v${allowlistVersion}/res${geoResolution}/tiles/res4/${parentHex}.json`;
+}
+
+export async function loadTileManifest(
+    bucket: ResidenceProofR2Bucket,
+    config: { allowlistVersion: number; geoResolution: number },
+): Promise<ResidenceTileManifest> {
+    const cacheKey = `${config.allowlistVersion}:${config.geoResolution}`;
+    let bucketCache = tileManifestCache.get(bucket);
+    if (bucketCache === undefined) {
+        bucketCache = new Map();
+        tileManifestCache.set(bucket, bucketCache);
+    }
+
+    const cached = bucketCache.get(cacheKey);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const promise = readTileManifest(bucket, config).catch((error: unknown) => {
+        bucketCache.delete(cacheKey);
+        throw error;
+    });
+    bucketCache.set(cacheKey, promise);
+    return promise;
+}
+
+export async function loadTileBytes(
+    bucket: ResidenceProofR2Bucket,
+    key: string,
+): Promise<Uint8Array | null> {
+    const object = await bucket.get(key);
+    if (object === null) {
+        return null;
+    }
+    return new Uint8Array(await object.arrayBuffer());
+}
+
+async function readTileManifest(
+    bucket: ResidenceProofR2Bucket,
+    config: { allowlistVersion: number; geoResolution: number },
+): Promise<ResidenceTileManifest> {
+    const key = tileManifestObjectKey(config);
+    const object = await bucket.get(key);
+    if (object === null) {
+        throw new ResidenceProofError(
+            "tile_manifest_missing",
+            `Tile manifest is missing: ${key}`,
+            500,
+        );
+    }
+
+    let manifest: ResidenceTileManifest;
+    try {
+        manifest = parseResidenceTileManifest(JSON.parse(await arrayBufferToText(object)), {
+            allowlistVersion: config.allowlistVersion,
+            geoResolution: config.geoResolution,
+        });
+    } catch {
+        throw new ResidenceProofError("tile_manifest_invalid", "Tile manifest is invalid", 500);
+    }
+    return manifest;
 }
 
 async function readManifest(
