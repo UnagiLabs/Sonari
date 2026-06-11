@@ -1186,6 +1186,158 @@ fun identity_enclave_registration_rejects_pcr_mismatch() {
     scenario.end();
 }
 
+#[test]
+fun creates_census_verifier_config_with_pcrs() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+
+        admin::create_census_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+
+        let (family, verifier_version, config_version, pcr0, pcr1, pcr2, enabled) =
+            metadata_verifier::census_verifier_config_fields_for_testing(&registry);
+        assert!(family == reader::verifier_family_census());
+        assert!(verifier_version == reader::verifier_version_v1());
+        assert!(config_version == 1);
+        assert!(pcr0 == valid_pcr0());
+        assert!(pcr1 == valid_pcr1());
+        assert!(pcr2 == valid_pcr2());
+        assert!(enabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    let events = event::events_by_type<metadata_verifier::VerifierConfigCreated>();
+    assert!(events.length() == 1);
+    let (registry_id, family, verifier_version, config_version, pcr0, pcr1, pcr2, enabled, actor) =
+        metadata_verifier::verifier_config_created_event_fields(*events.borrow(0));
+    assert!(registry_id != object::id_from_address(@0x0));
+    assert!(family == reader::verifier_family_census());
+    assert!(verifier_version == reader::verifier_version_v1());
+    assert!(config_version == 1);
+    assert!(pcr0 == valid_pcr0());
+    assert!(pcr1 == valid_pcr1());
+    assert!(pcr2 == valid_pcr2());
+    assert!(enabled);
+    assert!(actor == ADMIN);
+
+    scenario.end();
+}
+
+#[test, expected_failure(abort_code = metadata_verifier::EInvalidPcrValue)]
+fun create_census_verifier_config_rejects_all_zero_pcrs_through_admin() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::create_census_verifier_config(
+            &cap,
+            &mut registry,
+            zero_pcr(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun update_census_verifier_config_pcrs_updates_values() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::create_census_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+        admin::update_census_verifier_config_pcrs(
+            &cap,
+            &mut registry,
+            updated_pcr0(),
+            updated_pcr1(),
+            updated_pcr2(),
+            scenario.ctx(),
+        );
+
+        let (_, _, config_version, pcr0, pcr1, pcr2, enabled) =
+            metadata_verifier::census_verifier_config_fields_for_testing(&registry);
+        assert!(config_version == 2);
+        assert!(pcr0 == updated_pcr0());
+        assert!(pcr1 == updated_pcr1());
+        assert!(pcr2 == updated_pcr2());
+        assert!(enabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun disable_census_verifier_config_disables_it() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(ADMIN);
+    {
+        let cap = scenario.take_from_sender<admin::AdminCap>();
+        let mut registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
+        admin::create_census_verifier_config(
+            &cap,
+            &mut registry,
+            valid_pcr0(),
+            valid_pcr1(),
+            valid_pcr2(),
+            scenario.ctx(),
+        );
+        admin::disable_census_verifier_config(&cap, &mut registry, scenario.ctx());
+
+        let (_, _, config_version, _, _, _, enabled) =
+            metadata_verifier::census_verifier_config_fields_for_testing(&registry);
+        assert!(config_version == 1);
+        assert!(!enabled);
+
+        scenario.return_to_sender(cap);
+        test_scenario::return_shared(registry);
+    };
+
+    let events = event::events_by_type<metadata_verifier::VerifierConfigDisabled>();
+    assert!(events.length() == 1);
+    let (_, family, verifier_version, config_version, actor) =
+        metadata_verifier::verifier_config_disabled_event_fields(*events.borrow(0));
+    assert!(family == reader::verifier_family_census());
+    assert!(verifier_version == reader::verifier_version_v1());
+    assert!(config_version == 1);
+    assert!(actor == ADMIN);
+
+    scenario.end();
+}
+
 fun identity_signed_public_key(): vector<u8> {
     x"49ce814297f828600eecb2af2973467c3123ccaa014880131403f6591578d25e"
 }

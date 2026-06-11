@@ -1,6 +1,8 @@
 module contracts::donation;
 
-use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
+use contracts::campaign::{Self, Campaign};
+use contracts::category_pool::{Self, CategoryPool};
+use contracts::pools::{Self, MainPool, OperationsPool};
 use std::string::{Self, String};
 use sui::coin::{Self, Coin};
 use sui::dynamic_field;
@@ -9,7 +11,6 @@ use sui::event;
 use usdc::usdc::USDC;
 
 const DONATION_TYPE_GENERAL: u8 = 1;
-const DONATION_TYPE_DESIGNATED: u8 = 2;
 const DONATION_TYPE_OPERATIONS: u8 = 3;
 
 const TIER_NONE: u8 = 0;
@@ -29,6 +30,32 @@ const EDonorPassOwnerMismatch: u64 = 1;
 const EDonorPassAlreadyIssued: u64 = 2;
 const EDonorPassNotIssued: u64 = 3;
 const EDonorPassMismatch: u64 = 4;
+const ECampaignClosed: u64 = 5;
+
+// V2 split targets
+const DONATION_TARGET_CAMPAIGN: u8 = 1;
+const DONATION_TARGET_CATEGORY: u8 = 2;
+const DONATION_TARGET_NONE: u8 = 3;
+
+// V2 split BPS for category / general (campaign uses Campaign snapshot)
+const SPLIT_CATEGORY_PRIMARY_BPS: u64 = 9_000;
+const SPLIT_CATEGORY_OPS_BPS: u64 = 500;
+const SPLIT_GENERAL_OPS_BPS: u64 = 500;
+const BPS_DENOMINATOR: u64 = 10_000;
+
+public struct DonationSplit has copy, drop {
+    donation_target: u8,
+    primary_pool_id: Option<ID>,
+    main_pool_id: ID,
+    ops_pool_id: ID,
+    total_amount: u64,
+    primary_amount: u64,
+    main_amount: u64,
+    ops_amount: u64,
+    ops_cap_overflow_usdc: u64,
+    after_donation_end: bool,
+    donor: address,
+}
 
 public struct DonorRegistry has key {
     id: UID,
@@ -69,15 +96,6 @@ public struct DonationRecord has key, store {
 public struct GeneralDonationReceived has copy, drop {
     pool_id: ID,
     amount: u64,
-    actor: address,
-}
-
-public struct DesignatedDonationReceived has copy, drop {
-    main_pool_id: ID,
-    designated_pool_id: ID,
-    amount: u64,
-    main_amount: u64,
-    designated_amount: u64,
     actor: address,
 }
 
@@ -165,45 +183,6 @@ public(package) fun donate_general_usdc_with_pass(
     );
 }
 
-public(package) fun donate_designated_usdc(
-    registry: &mut DonorRegistry,
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let (designated_pool_id, amount) =
-        deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
-    process_first_donation(
-        registry,
-        DONATION_TYPE_DESIGNATED,
-        designated_pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_designated_usdc_with_pass(
-    registry: &DonorRegistry,
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
-
-    let (designated_pool_id, amount) =
-        deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
-    process_with_pass_donation(
-        pass,
-        DONATION_TYPE_DESIGNATED,
-        designated_pool_id,
-        amount,
-        ctx,
-    );
-}
-
 public(package) fun donate_operations_usdc(
     registry: &mut DonorRegistry,
     operations_pool: &mut OperationsPool,
@@ -256,47 +235,6 @@ fun deposit_general_usdc_and_emit(
     });
 
     (pool_id, amount)
-}
-
-fun deposit_designated_usdc_and_emit(
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-): (ID, u64) {
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let (main_coin, designated_coin, main_amount, designated_amount) =
-        split_designated_usdc(coin, amount, ctx);
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let designated_pool_id = pools::designated_pool_id(designated_pool);
-
-    pools::deposit_main_usdc(main_pool, main_coin);
-    pools::deposit_designated_usdc(designated_pool, designated_coin);
-    event::emit(DesignatedDonationReceived {
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor: ctx.sender(),
-    });
-
-    (designated_pool_id, amount)
-}
-
-fun split_designated_usdc(
-    coin: Coin<USDC>,
-    amount: u64,
-    ctx: &mut TxContext,
-): (Coin<USDC>, Coin<USDC>, u64, u64) {
-    let main_amount = amount / 2;
-    let designated_amount = amount - main_amount;
-    let mut main_coin = coin;
-    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
-
-    (main_coin, designated_coin, main_amount, designated_amount)
 }
 
 fun deposit_operations_usdc_and_emit(
@@ -526,10 +464,6 @@ public(package) fun donation_type_general(): u8 {
     DONATION_TYPE_GENERAL
 }
 
-public(package) fun donation_type_designated(): u8 {
-    DONATION_TYPE_DESIGNATED
-}
-
 public(package) fun donation_type_operations(): u8 {
     DONATION_TYPE_OPERATIONS
 }
@@ -574,34 +508,193 @@ public(package) fun registry_kind_donor(): u8 {
     REGISTRY_KIND_DONOR
 }
 
+// ---------------------------------------------------------------
+// V2: split donation functions
+// ---------------------------------------------------------------
+
+public(package) fun donate_to_campaign(
+    camp: &mut Campaign,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    let total = coin::value(&coin);
+    assert!(total > 0, EZeroDonation);
+    assert!(!campaign::campaign_closed(camp), ECampaignClosed);
+
+    let primary_bps = campaign::campaign_split_campaign_bps(camp);
+    let ops_bps = campaign::campaign_split_ops_bps(camp);
+
+    let primary_calc = ((total as u128) * (primary_bps as u128) / (BPS_DENOMINATOR as u128)) as u64;
+    let ops_calc = ((total as u128) * (ops_bps as u128) / (BPS_DENOMINATOR as u128)) as u64;
+
+    // ops_cap check
+    let ops_cap = campaign::campaign_ops_cap_usdc(camp);
+    let ops_withheld = campaign::campaign_ops_withheld_usdc(camp);
+    let ops_cap_remaining = if (ops_cap > ops_withheld) { ops_cap - ops_withheld } else { 0 };
+    let (ops_actual, overflow) = if (ops_cap_remaining < ops_calc) {
+        (ops_cap_remaining, ops_calc - ops_cap_remaining)
+    } else {
+        (ops_calc, 0)
+    };
+
+    // after donation end: campaign portion goes to main
+    let donation_end = campaign::campaign_donation_end_ms(camp);
+    let after_donation_end = now_ms >= donation_end;
+    let (primary_to_campaign, main_total) = if (after_donation_end) {
+        (0u64, total - ops_actual)
+    } else {
+        let mt = total - primary_calc - ops_actual;
+        (primary_calc, mt)
+    };
+
+    // split coin
+    let mut remaining = coin;
+    let ops_coin = coin::split(&mut remaining, ops_actual, ctx);
+    let campaign_coin = if (primary_to_campaign > 0) {
+        let c = coin::split(&mut remaining, primary_to_campaign, ctx);
+        option::some(c)
+    } else {
+        option::none()
+    };
+
+    // deposit
+    pools::deposit_main_usdc(main_pool, remaining);
+    pools::deposit_operations_usdc(ops_pool, ops_coin);
+    if (campaign_coin.is_some()) {
+        let c = campaign_coin.destroy_some();
+        campaign::deposit_campaign_usdc(camp, c);
+        campaign::update_total_donated(camp, primary_to_campaign);
+    } else {
+        campaign_coin.destroy_none();
+    };
+    campaign::update_ops_withheld(camp, ops_actual);
+
+    let primary_pool_id = option::some(campaign::campaign_id(camp));
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let ops_pool_id = pools::operations_pool_id(ops_pool);
+
+    // reported primary_amount is the calculated portion (before after_end redirect)
+    let reported_primary = primary_calc;
+    let reported_main = if (after_donation_end) {
+        total - ops_actual
+    } else {
+        main_total
+    };
+
+    event::emit(DonationSplit {
+        donation_target: DONATION_TARGET_CAMPAIGN,
+        primary_pool_id,
+        main_pool_id,
+        ops_pool_id,
+        total_amount: total,
+        primary_amount: reported_primary,
+        main_amount: reported_main,
+        ops_amount: ops_actual,
+        ops_cap_overflow_usdc: overflow,
+        after_donation_end,
+        donor: ctx.sender(),
+    });
+}
+
+public(package) fun donate_to_category(
+    cat_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    let total = coin::value(&coin);
+    assert!(total > 0, EZeroDonation);
+
+    let primary_calc = ((total as u128) * (SPLIT_CATEGORY_PRIMARY_BPS as u128) / (BPS_DENOMINATOR as u128)) as u64;
+    let ops_calc = ((total as u128) * (SPLIT_CATEGORY_OPS_BPS as u128) / (BPS_DENOMINATOR as u128)) as u64;
+    let main_calc = total - primary_calc - ops_calc;
+
+    let mut remaining = coin;
+    let ops_coin = coin::split(&mut remaining, ops_calc, ctx);
+    let category_coin = coin::split(&mut remaining, primary_calc, ctx);
+    // remaining is main
+
+    let primary_pool_id = option::some(category_pool::category_pool_id(cat_pool));
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let ops_pool_id = pools::operations_pool_id(ops_pool);
+
+    category_pool::deposit_category_usdc(cat_pool, category_coin);
+    pools::deposit_main_usdc(main_pool, remaining);
+    pools::deposit_operations_usdc(ops_pool, ops_coin);
+
+    event::emit(DonationSplit {
+        donation_target: DONATION_TARGET_CATEGORY,
+        primary_pool_id,
+        main_pool_id,
+        ops_pool_id,
+        total_amount: total,
+        primary_amount: primary_calc,
+        main_amount: main_calc,
+        ops_amount: ops_calc,
+        ops_cap_overflow_usdc: 0,
+        after_donation_end: false,
+        donor: ctx.sender(),
+    });
+}
+
+public(package) fun donate_general_split(
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    let total = coin::value(&coin);
+    assert!(total > 0, EZeroDonation);
+
+    let ops_calc = ((total as u128) * (SPLIT_GENERAL_OPS_BPS as u128) / (BPS_DENOMINATOR as u128)) as u64;
+    let main_calc = total - ops_calc;
+
+    let mut remaining = coin;
+    let ops_coin = coin::split(&mut remaining, ops_calc, ctx);
+
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let ops_pool_id = pools::operations_pool_id(ops_pool);
+
+    pools::deposit_main_usdc(main_pool, remaining);
+    pools::deposit_operations_usdc(ops_pool, ops_coin);
+
+    event::emit(DonationSplit {
+        donation_target: DONATION_TARGET_NONE,
+        primary_pool_id: option::none(),
+        main_pool_id,
+        ops_pool_id,
+        total_amount: total,
+        primary_amount: 0,
+        main_amount: main_calc,
+        ops_amount: ops_calc,
+        ops_cap_overflow_usdc: 0,
+        after_donation_end: false,
+        donor: ctx.sender(),
+    });
+}
+
+public(package) fun donation_target_campaign(): u8 {
+    DONATION_TARGET_CAMPAIGN
+}
+
+public(package) fun donation_target_category(): u8 {
+    DONATION_TARGET_CATEGORY
+}
+
+public(package) fun donation_target_none(): u8 {
+    DONATION_TARGET_NONE
+}
+
 #[test_only]
 public fun general_donation_received_event_fields(
     event: GeneralDonationReceived,
 ): (ID, u64, address) {
     let GeneralDonationReceived { pool_id, amount, actor } = event;
     (pool_id, amount, actor)
-}
-
-#[test_only]
-public fun designated_donation_received_event_fields(
-    event: DesignatedDonationReceived,
-): (ID, ID, u64, u64, u64, address) {
-    let DesignatedDonationReceived {
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor,
-    } = event;
-    (
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor,
-    )
 }
 
 #[test_only]
@@ -661,6 +754,36 @@ public fun registry_created_event_fields(
         actor,
     } = event;
     (registry_id, registry_kind, created_at_ms, actor)
+}
+
+#[test_only]
+public fun donation_split_event_fields(
+    event: DonationSplit,
+): (u8, Option<ID>, u64, u64, u64, u64, u64, bool, address) {
+    let DonationSplit {
+        donation_target,
+        primary_pool_id,
+        main_pool_id: _,
+        ops_pool_id: _,
+        total_amount,
+        primary_amount,
+        main_amount,
+        ops_amount,
+        ops_cap_overflow_usdc,
+        after_donation_end,
+        donor,
+    } = event;
+    (
+        donation_target,
+        primary_pool_id,
+        total_amount,
+        primary_amount,
+        main_amount,
+        ops_amount,
+        ops_cap_overflow_usdc,
+        after_donation_end,
+        donor,
+    )
 }
 
 #[test_only]

@@ -1,11 +1,11 @@
 module contracts::reader;
 
+use contracts::category_pool;
 use contracts::donation::{Self, DonorPass};
 use contracts::identity_registry;
 use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::pools;
-use contracts::program;
 
 public fun donation_record_summary(
     pass: &DonorPass,
@@ -20,14 +20,6 @@ public fun identity_provider_kyc(): u8 {
 
 public fun identity_provider_world_id(): u8 {
     identity_registry::provider_world_id()
-}
-
-public fun target_kind_program(): u8 {
-    program::target_kind_program()
-}
-
-public fun target_kind_campaign(): u8 {
-    program::target_kind_campaign()
 }
 
 public fun target_kind_membership_registry(): u8 {
@@ -46,10 +38,6 @@ public fun target_kind_main_pool(): u8 {
     pools::target_kind_main_pool()
 }
 
-public fun target_kind_designated_pool(): u8 {
-    pools::target_kind_designated_pool()
-}
-
 public fun target_kind_operations_pool(): u8 {
     pools::target_kind_operations_pool()
 }
@@ -62,6 +50,14 @@ public fun verifier_family_identity(): u8 {
     metadata_verifier::verifier_family_identity()
 }
 
+public fun verifier_family_census(): u8 {
+    metadata_verifier::verifier_family_census()
+}
+
 public fun verifier_version_v1(): u64 {
     metadata_verifier::verifier_version_v1()
+}
+
+public fun target_kind_category_pool(): u8 {
+    category_pool::target_kind_category_pool()
 }

@@ -63,6 +63,12 @@ public struct RegistryCreated has copy, drop {
     actor: address,
 }
 
+public struct HomeCellRegistered has copy, drop {
+    lineage: ID,
+    home_cell: u64,
+    registered_at: u64,
+}
+
 public(package) fun register_member(
     registry: &mut MembershipRegistry,
     home_cell: u64,
@@ -137,6 +143,11 @@ fun set_home_cell(
 ) {
     pass.home_cell = home_cell;
     pass.home_cell_registered_at_ms = registered_at_ms;
+    event::emit(HomeCellRegistered {
+        lineage: pass.pass_lineage_id,
+        home_cell,
+        registered_at: registered_at_ms,
+    });
 }
 
 public(package) fun create_membership_registry(ctx: &mut TxContext): ID {
@@ -450,6 +461,14 @@ public fun destroy_pass_for_testing(pass: MembershipPass) {
         signed_statement_hash: _,
     } = pass;
     id.delete();
+}
+
+#[test_only]
+public fun home_cell_registered_event_fields(
+    event: HomeCellRegistered,
+): (ID, u64, u64) {
+    let HomeCellRegistered { lineage, home_cell, registered_at } = event;
+    (lineage, home_cell, registered_at)
 }
 
 #[test_only]

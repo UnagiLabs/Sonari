@@ -1,15 +1,14 @@
 module contracts::admin;
 
-use contracts::claim;
+use contracts::campaign as campaign_v2;
+use contracts::category_pool;
 use contracts::allowed_residence_cell;
 use contracts::disaster_event;
 use contracts::donation;
 use contracts::identity_registry;
 use contracts::membership;
 use contracts::metadata_verifier;
-use contracts::payout_policy;
 use contracts::pools;
-use contracts::program;
 use std::string::{Self, String};
 use sui::display;
 use sui::event;
@@ -26,8 +25,9 @@ const GENESIS_KIND_OPERATIONS_POOL: u8 = 4;
 const GENESIS_KIND_DONOR_REGISTRY: u8 = 5;
 const GENESIS_KIND_MEMBERSHIP_REGISTRY: u8 = 6;
 const GENESIS_KIND_VERIFIER_REGISTRY: u8 = 7;
-const GENESIS_KIND_CLAIM_INDEX: u8 = 8;
 const GENESIS_KIND_IDENTITY_REGISTRY: u8 = 9;
+const GENESIS_KIND_CATEGORY_REGISTRY: u8 = 10;
+const GENESIS_KIND_EARTHQUAKE_POOL: u8 = 11;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
@@ -103,11 +103,19 @@ fun initialize(ctx: &mut TxContext) {
     let verifier_registry_id = metadata_verifier::create_verifier_registry(ctx);
     emit_genesis_object(verifier_registry_id, GENESIS_KIND_VERIFIER_REGISTRY, true, ctx);
 
-    let claim_index_id = claim::create_claim_index(ctx);
-    emit_genesis_object(claim_index_id, GENESIS_KIND_CLAIM_INDEX, true, ctx);
+    // CategoryRegistry は ClaimIndex と同じ counter 位置に置き、IdentityRegistry の ID を保持する
+    let mut category_registry = category_pool::new_category_registry(ctx);
+    let category_registry_id = object::id(&category_registry);
+    emit_genesis_object(category_registry_id, GENESIS_KIND_CATEGORY_REGISTRY, true, ctx);
 
     let identity_registry_id = identity_registry::create_identity_registry(ctx);
     emit_genesis_object(identity_registry_id, GENESIS_KIND_IDENTITY_REGISTRY, true, ctx);
+
+    let earthquake_pool_id =
+        category_pool::create_category_pool(&mut category_registry, category_pool::category_earthquake(), ctx);
+    emit_genesis_object(earthquake_pool_id, GENESIS_KIND_EARTHQUAKE_POOL, true, ctx);
+
+    category_pool::share_category_registry(category_registry);
 }
 
 #[allow(lint(self_transfer))]
@@ -146,20 +154,6 @@ fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
     display::update_version(&mut donor_display);
     transfer::public_freeze_object(donor_display);
 
-    let mut claim_display = display::new_with_fields<claim::ClaimReceipt>(
-        publisher,
-        display_field_keys(),
-        vector[
-            b"Sonari Relief Claim Receipt".to_string(),
-            b"Relief claim: {amount_usdc} USDC units. Tier: {tier_label}.".to_string(),
-            b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/claim-receipt.svg".to_string(),
-            b"https://app.sonari.xyz/claim/{id}".to_string(),
-        ],
-        ctx,
-    );
-    display::update_version(&mut claim_display);
-    transfer::public_freeze_object(claim_display);
-
     let mut disaster_display = display::new_with_fields<disaster_event::DisasterEvent>(
         publisher,
         display_field_keys(),
@@ -184,57 +178,29 @@ fun display_field_keys(): vector<String> {
     ]
 }
 
-public fun create_designated_pool(
+public fun create_category_pool(
     _: &AdminCap,
-    related_id: Option<ID>,
+    registry: &mut category_pool::CategoryRegistry,
+    category: u8,
     ctx: &mut TxContext,
-) {
-    pools::create_designated_pool(related_id, ctx);
+): ID {
+    category_pool::create_category_pool(registry, category, ctx)
 }
 
-public fun create_program(
+public fun exclude_recipient(
     _: &AdminCap,
-    program_type: u8,
-    required_pass_metadata: u64,
-    required_verifier_family: u8,
-    payout_policy_id: Option<ID>,
-    default_pool_id: Option<ID>,
-    ctx: &mut TxContext,
+    campaign: &mut campaign_v2::Campaign,
+    pass_lineage_id: ID,
+    reason_code: u8,
+    _ctx: &mut TxContext,
 ) {
-    program::create_program(
-        program_type,
-        required_pass_metadata,
-        required_verifier_family,
-        payout_policy_id,
-        default_pool_id,
-        ctx,
+    campaign_v2::exclude_recipient_internal(
+        campaign,
+        pass_lineage_id,
+        reason_code,
+        0,
+        _ctx,
     );
-}
-
-public fun create_campaign(
-    _: &AdminCap,
-    program: &program::Program,
-    campaign_type: u8,
-    metadata_hash: vector<u8>,
-    pool_id: Option<ID>,
-    claim_start_ms: u64,
-    claim_end_ms: u64,
-    ctx: &mut TxContext,
-) {
-    program::create_campaign(
-        program,
-        campaign_type,
-        metadata_hash,
-        pool_id,
-        claim_start_ms,
-        claim_end_ms,
-        ctx,
-    );
-}
-
-public fun create_default_disaster_policy(cap: &AdminCap, ctx: &mut TxContext): ID {
-    let _ = cap;
-    payout_policy::create_default_disaster_policy(ctx)
 }
 
 public fun create_disaster_registry(cap: &AdminCap, ctx: &mut TxContext): ID {
@@ -242,55 +208,36 @@ public fun create_disaster_registry(cap: &AdminCap, ctx: &mut TxContext): ID {
     disaster_event::create_disaster_registry(ctx)
 }
 
-public fun bind_disaster_campaign(
-    cap: &AdminCap,
-    registry: &mut disaster_event::DisasterRegistry,
-    campaign: &program::Campaign,
-    disaster_event: &disaster_event::DisasterEvent,
+public fun spend_operations(
+    _: &AdminCap,
+    ops_pool: &mut pools::OperationsPool,
+    amount: u64,
+    recipient: address,
+    reason_code: u8,
     ctx: &mut TxContext,
 ) {
-    let _ = cap;
-    disaster_event::bind_campaign(registry, campaign, disaster_event, ctx);
+    let coin = pools::spend_from_operations(ops_pool, amount, recipient, reason_code, ctx);
+    transfer::public_transfer(coin, recipient);
 }
 
-public fun open_campaign_budget_from_main(
-    cap: &AdminCap,
-    program: &program::Program,
-    campaign: &mut program::Campaign,
-    main_pool: &pools::MainPool,
+public fun migrate_main_pool(
+    _: &AdminCap,
+    pool: &mut pools::MainPool,
+    new_version: u64,
     ctx: &mut TxContext,
 ) {
-    let _ = cap;
-    payout_policy::open_campaign_budget_from_main(program, campaign, main_pool, ctx);
+    let _ = ctx;
+    pools::migrate_main_pool_to_version(pool, new_version);
 }
 
-public fun open_campaign_budget_from_designated_and_main(
-    cap: &AdminCap,
-    program: &program::Program,
-    campaign: &mut program::Campaign,
-    designated_pool: &pools::DesignatedPool,
-    main_pool: &pools::MainPool,
+public fun migrate_operations_pool(
+    _: &AdminCap,
+    pool: &mut pools::OperationsPool,
+    new_version: u64,
     ctx: &mut TxContext,
 ) {
-    let _ = cap;
-    payout_policy::open_campaign_budget_from_designated_and_main(
-        program,
-        campaign,
-        designated_pool,
-        main_pool,
-        ctx,
-    );
-}
-
-public(package) fun assert_claim_precheck(
-    pause_state: &PauseState,
-    program: &program::Program,
-    campaign: &program::Campaign,
-) {
-    assert_not_globally_paused(pause_state);
-    assert_target_not_paused(pause_state, program::id(program));
-    assert_target_not_paused(pause_state, program::campaign_id(campaign));
-    program::assert_claim_precheck(program, campaign);
+    let _ = ctx;
+    pools::migrate_operations_pool_to_version(pool, new_version);
 }
 
 public fun add_verifier_key(
@@ -389,6 +336,42 @@ public fun disable_identity_verifier_config(
     ctx: &mut TxContext,
 ) {
     metadata_verifier::disable_identity_verifier_config(registry, ctx);
+}
+
+public fun create_census_verifier_config(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::create_census_verifier_config(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+public fun update_census_verifier_config_pcrs(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::update_census_verifier_config_pcrs(
+        registry,
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
+}
+
+public fun disable_census_verifier_config(
+    _: &AdminCap,
+    registry: &mut metadata_verifier::VerifierRegistry,
+    ctx: &mut TxContext,
+) {
+    metadata_verifier::disable_census_verifier_config(registry, ctx);
 }
 
 public fun create_allowed_residence_cell_registry(
@@ -557,12 +540,16 @@ public(package) fun genesis_kind_verifier_registry(): u8 {
     GENESIS_KIND_VERIFIER_REGISTRY
 }
 
-public(package) fun genesis_kind_claim_index(): u8 {
-    GENESIS_KIND_CLAIM_INDEX
-}
-
 public(package) fun genesis_kind_identity_registry(): u8 {
     GENESIS_KIND_IDENTITY_REGISTRY
+}
+
+public(package) fun genesis_kind_category_registry(): u8 {
+    GENESIS_KIND_CATEGORY_REGISTRY
+}
+
+public(package) fun genesis_kind_earthquake_pool(): u8 {
+    GENESIS_KIND_EARTHQUAKE_POOL
 }
 
 fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxContext) {
