@@ -26,6 +26,7 @@ import {
     DEFAULT_WORLD_APP_ID,
     defaultWorldIdInput,
     EXPECTED_OBJECT_TYPES,
+    FIXTURE_NONCE,
     GENESIS_KIND_IDENTITY_REGISTRY,
     GENESIS_KIND_MEMBERSHIP_REGISTRY,
     GENESIS_KIND_PAUSE_STATE,
@@ -89,17 +90,26 @@ describe("membership identity testnet fixture files", () => {
             terms_version: DEFAULT_TERMS_VERSION,
             signed_statement_hash: DEFAULT_SIGNED_STATEMENT_HASH,
             world_id: {
-                world_app_id: "app_staging_123",
-                nullifier_hash: "12345678901234567890",
-                merkle_root: "987654321",
-                proof: "0xproof",
-                verification_level: "orb",
-                action: WORLD_ID_ACTION,
-                signal_hash: computeWorldIdSignalHash(
-                    objectId("77"),
-                    objectId("66"),
-                    DEFAULT_SIGNED_STATEMENT_HASH,
-                ),
+                idkit_response: {
+                    protocol_version: "4.0",
+                    nonce: FIXTURE_NONCE,
+                    action: WORLD_ID_ACTION,
+                    environment: "staging",
+                    responses: [
+                        {
+                            identifier: "proof_of_human",
+                            issuer_schema_id: 1,
+                            signal_hash: computeWorldIdSignalHash(
+                                objectId("77"),
+                                objectId("66"),
+                                DEFAULT_SIGNED_STATEMENT_HASH,
+                            ),
+                            proof: "0xproof",
+                            merkle_root: "987654321",
+                            nullifier: "12345678901234567890",
+                        },
+                    ],
+                },
             },
         });
         expect(files.manifestJson).not.toMatch(/private|secret|keystore|suiprivkey/i);
@@ -122,7 +132,7 @@ describe("membership identity testnet fixture files", () => {
     it("binds the dummy request signal hash to the smoke owner, membership, and statement", () => {
         const manifest = buildMembershipIdentityFixtureManifest(fixtureInput());
 
-        expect(manifest.smoke.world_id.signal_hash).toBe(
+        expect(manifest.smoke.world_id.idkit_response.responses[0]?.signal_hash).toBe(
             computeWorldIdSignalHash(objectId("77"), objectId("66"), DEFAULT_SIGNED_STATEMENT_HASH),
         );
     });
@@ -158,6 +168,27 @@ describe("membership identity default World ID input", () => {
 
     it("uses the provided world_app_id when given one", () => {
         expect(defaultWorldIdInput("app_staging_dummy").worldAppId).toBe("app_staging_dummy");
+    });
+
+    it("includes the fixed nonce in defaultWorldIdInput", () => {
+        expect(defaultWorldIdInput().nonce).toBe(FIXTURE_NONCE);
+    });
+
+    it("does not include verificationLevel in defaultWorldIdInput", () => {
+        const input = defaultWorldIdInput();
+        expect((input as unknown as Record<string, unknown>)["verificationLevel"]).toBeUndefined();
+    });
+
+    it("rejects empty nonce in validateSmokeInput via buildMembershipIdentityFixtureManifest", () => {
+        expect(() =>
+            buildMembershipIdentityFixtureManifest({
+                ...fixtureInput(),
+                smoke: {
+                    ...fixtureInput().smoke,
+                    worldId: { ...fixtureInput().smoke.worldId, nonce: "" },
+                },
+            }),
+        ).toThrow("worldId.nonce must be non-empty");
     });
 });
 
@@ -716,40 +747,59 @@ describe("membership identity fixture runner", () => {
                 readonly smoke: {
                     readonly owner: string;
                     readonly terms_version: number;
-                    readonly world_id: { readonly world_app_id: string };
+                    readonly world_id: {
+                        readonly idkit_response: {
+                            readonly protocol_version: string;
+                            readonly nonce: string;
+                            readonly action: string;
+                            readonly environment: string;
+                            readonly responses: ReadonlyArray<{
+                                readonly identifier: string;
+                                readonly issuer_schema_id: number;
+                                readonly signal_hash: string;
+                            }>;
+                        };
+                    };
                 };
             };
             expect(manifest.smoke).toMatchObject({
                 owner: objectId("77"),
                 terms_version: DEFAULT_TERMS_VERSION,
             });
-            expect(manifest.smoke.world_id.world_app_id).toBe(DEFAULT_WORLD_APP_ID);
+            expect(manifest.smoke.world_id.idkit_response.protocol_version).toBe("4.0");
+            expect(manifest.smoke.world_id.idkit_response.environment).toBe("staging");
+            expect(manifest.smoke.world_id.idkit_response.responses[0]?.identifier).toBe(
+                "proof_of_human",
+            );
+            expect(manifest.smoke.world_id.idkit_response.responses[0]?.issuer_schema_id).toBe(1);
         } finally {
             await rm(outputDir, { recursive: true, force: true });
         }
     });
 
-    it("uses the SONARI_WORLD_ID_APP_ID env var for the request world_app_id", async () => {
-        const request = await runWorldIdFixtureRequest({
-            processEnv: { SONARI_WORLD_ID_APP_ID: "app_staging_dummy" },
-        });
+    // NOTE: world_app_id resolution tests (env var / CLI flag) are removed here because
+    // the new idkit_response format no longer emits world_app_id in the world_id output.
+    // The worldAppId resolution mechanism (resolveWorldAppId, CLI --world-app-id, etc.)
+    // will be fully removed in STEP 2.
 
-        expect(request.world_id.world_app_id).toBe("app_staging_dummy");
-    });
-
-    it("prefers the worldAppId option over the env var", async () => {
-        const request = await runWorldIdFixtureRequest({
-            worldAppId: "app_explicit",
-            processEnv: { SONARI_WORLD_ID_APP_ID: "app_env" },
-        });
-
-        expect(request.world_id.world_app_id).toBe("app_explicit");
-    });
-
-    it("falls back to the default world_app_id when no override is given", async () => {
+    it("emits idkit_response format in world_id output", async () => {
         const request = await runWorldIdFixtureRequest({ processEnv: {} });
 
-        expect(request.world_id.world_app_id).toBe(DEFAULT_WORLD_APP_ID);
+        expect(request.world_id.idkit_response.protocol_version).toBe("4.0");
+        expect(request.world_id.idkit_response.environment).toBe("staging");
+        expect(request.world_id.idkit_response.action).toBe(WORLD_ID_ACTION);
+        expect(request.world_id.idkit_response.nonce).toBe(FIXTURE_NONCE);
+        expect(request.world_id.idkit_response.responses).toHaveLength(1);
+        expect(request.world_id.idkit_response.responses[0]?.identifier).toBe("proof_of_human");
+        expect(request.world_id.idkit_response.responses[0]?.issuer_schema_id).toBe(1);
+    });
+
+    it("world_id output does not contain world_app_id at top level of world_id", async () => {
+        const request = await runWorldIdFixtureRequest({ processEnv: {} });
+
+        // world_id 直下は idkit_response のみ（worldAppId は idkit_response に含まれない）
+        const worldIdKeys = Object.keys(request.world_id);
+        expect(worldIdKeys).toEqual(["idkit_response"]);
     });
 });
 
@@ -807,7 +857,7 @@ function fixtureInput(): MembershipIdentityFixtureManifestInput {
                 nullifierHash: "12345678901234567890",
                 merkleRoot: "987654321",
                 proof: "0xproof",
-                verificationLevel: "orb",
+                nonce: FIXTURE_NONCE,
                 action: WORLD_ID_ACTION,
             },
         },
@@ -941,7 +991,25 @@ function fullFixtureExecutor(): SuiCommandExecutor & { plans: SuiCommandPlan[] }
 async function runWorldIdFixtureRequest(overrides: {
     readonly worldAppId?: string;
     readonly processEnv?: Record<string, string | undefined>;
-}): Promise<{ readonly world_id: { readonly world_app_id: string } }> {
+}): Promise<{
+    readonly world_id: {
+        readonly world_app_id: string;
+        readonly idkit_response: {
+            readonly protocol_version: string;
+            readonly nonce: string;
+            readonly action: string;
+            readonly environment: string;
+            readonly responses: ReadonlyArray<{
+                readonly identifier: string;
+                readonly issuer_schema_id: number;
+                readonly signal_hash: string;
+                readonly proof: string;
+                readonly merkle_root: string;
+                readonly nullifier: string;
+            }>;
+        };
+    };
+}> {
     const outputDir = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-fixture-"));
     try {
         const result = await runMembershipIdentityTestnetFixture({
@@ -955,7 +1023,23 @@ async function runWorldIdFixtureRequest(overrides: {
             ...(overrides.worldAppId === undefined ? {} : { worldAppId: overrides.worldAppId }),
         });
         return JSON.parse(await readFile(result.dummyWorldIdRequestPath, "utf8")) as {
-            readonly world_id: { readonly world_app_id: string };
+            readonly world_id: {
+                readonly world_app_id: string;
+                readonly idkit_response: {
+                    readonly protocol_version: string;
+                    readonly nonce: string;
+                    readonly action: string;
+                    readonly environment: string;
+                    readonly responses: ReadonlyArray<{
+                        readonly identifier: string;
+                        readonly issuer_schema_id: number;
+                        readonly signal_hash: string;
+                        readonly proof: string;
+                        readonly merkle_root: string;
+                        readonly nullifier: string;
+                    }>;
+                };
+            };
         };
     } finally {
         await rm(outputDir, { recursive: true, force: true });

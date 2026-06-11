@@ -30,6 +30,8 @@ export const DEFAULT_RESIDENCE_PROOF_LEFT =
 export const DEFAULT_RESIDENCE_PROOF_RIGHT =
     "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7";
 export const WORLD_ID_ACTION = "sonari_membership_register_v1";
+// Deterministic nonce for the dummy smoke fixture (no randomness, so it is reproducible).
+export const FIXTURE_NONCE = "sonari-fixture-nonce";
 // Fallback World ID app id for the dummy smoke fixture. Real smoke runs override
 // this with the target stack's `WORLD_ID_APP_ID` (CloudFormation `WorldIdAppId`),
 // because the enclave's trusted-boundary check rejects any request whose
@@ -78,7 +80,7 @@ export interface MembershipIdentityFixtureWorldIdInput {
     readonly nullifierHash: string;
     readonly merkleRoot: string;
     readonly proof: string;
-    readonly verificationLevel: string;
+    readonly nonce: string;
     readonly action: string;
 }
 
@@ -114,13 +116,22 @@ export interface MembershipIdentityFixtureManifest {
         readonly terms_version: number;
         readonly signed_statement_hash: string;
         readonly world_id: {
-            readonly world_app_id: string;
-            readonly nullifier_hash: string;
-            readonly merkle_root: string;
-            readonly proof: string;
-            readonly verification_level: string;
-            readonly action: string;
-            readonly signal_hash: string;
+            readonly idkit_response: {
+                readonly protocol_version: "4.0";
+                readonly nonce: string;
+                readonly action: string;
+                readonly environment: "staging";
+                readonly responses: readonly [
+                    {
+                        readonly identifier: "proof_of_human";
+                        readonly issuer_schema_id: 1;
+                        readonly signal_hash: string;
+                        readonly proof: string;
+                        readonly merkle_root: string;
+                        readonly nullifier: string;
+                    },
+                ];
+            };
         };
     };
 }
@@ -334,17 +345,26 @@ export function buildMembershipIdentityFixtureManifest(
             terms_version: input.smoke.termsVersion,
             signed_statement_hash: input.smoke.signedStatementHash,
             world_id: {
-                world_app_id: input.smoke.worldId.worldAppId,
-                nullifier_hash: input.smoke.worldId.nullifierHash,
-                merkle_root: input.smoke.worldId.merkleRoot,
-                proof: input.smoke.worldId.proof,
-                verification_level: input.smoke.worldId.verificationLevel,
-                action: input.smoke.worldId.action,
-                signal_hash: computeWorldIdSignalHash(
-                    input.smoke.owner,
-                    input.smoke.membershipId,
-                    input.smoke.signedStatementHash,
-                ),
+                idkit_response: {
+                    protocol_version: "4.0" as const,
+                    nonce: input.smoke.worldId.nonce,
+                    action: input.smoke.worldId.action,
+                    environment: "staging" as const,
+                    responses: [
+                        {
+                            identifier: "proof_of_human" as const,
+                            issuer_schema_id: 1 as const,
+                            signal_hash: computeWorldIdSignalHash(
+                                input.smoke.owner,
+                                input.smoke.membershipId,
+                                input.smoke.signedStatementHash,
+                            ),
+                            proof: input.smoke.worldId.proof,
+                            merkle_root: input.smoke.worldId.merkleRoot,
+                            nullifier: input.smoke.worldId.nullifierHash,
+                        },
+                    ],
+                },
             },
         },
     };
@@ -393,7 +413,7 @@ export function validateSmokeInput(input: MembershipIdentityFixtureSmokeInput): 
     assertNonEmpty(input.worldId.nullifierHash, "worldId.nullifierHash");
     assertNonEmpty(input.worldId.merkleRoot, "worldId.merkleRoot");
     assertNonEmpty(input.worldId.proof, "worldId.proof");
-    assertNonEmpty(input.worldId.verificationLevel, "worldId.verificationLevel");
+    assertNonEmpty(input.worldId.nonce, "worldId.nonce");
     if (input.worldId.action !== WORLD_ID_ACTION) {
         throw new Error(`worldId.action must be ${WORLD_ID_ACTION}`);
     }
@@ -1018,7 +1038,7 @@ export function defaultWorldIdInput(
         nullifierHash: "12345678901234567890",
         merkleRoot: "987654321",
         proof: "0xproof",
-        verificationLevel: "orb",
+        nonce: FIXTURE_NONCE,
         action: WORLD_ID_ACTION,
     };
 }
