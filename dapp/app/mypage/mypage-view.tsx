@@ -4,6 +4,7 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LoadingIndicator } from "../components/loading-indicator";
 import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
 import { WalletConnect } from "../wallet/wallet-connect";
@@ -127,8 +128,8 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
                 )}
 
                 {view.kind === "loading" && (
-                    <div className="mypage-state" role="status">
-                        <p>{t("states.loadingBody")}</p>
+                    <div className="mypage-state">
+                        <LoadingIndicator label={t("states.loadingBody")} />
                     </div>
                 )}
 
