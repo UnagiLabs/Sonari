@@ -1,3 +1,4 @@
+import { formatDate } from "../i18n/format";
 import type { SonariLocale } from "../register/wizard/locale";
 import type {
     MembershipPassData,
@@ -43,25 +44,16 @@ export function providerLabelKeys(mask: number): ProviderLabelKey[] {
     return PROVIDER_BITS.filter(({ bit }) => (mask & bit) !== 0).map(({ key }) => key);
 }
 
-const LOCALE_TAGS: Record<SonariLocale, string> = {
-    en: "en-US",
-    ja: "ja-JP",
-};
-
 /**
  * Format a millisecond timestamp as a locale-aware date string.
  * Non-positive values (0 = unset on-chain, or negative) return null so the UI
  * can show an "unset" fallback instead of an epoch date.
+ *
+ * Thin wrapper over the shared {@link formatDate} so /mypage keeps its existing
+ * call sites while date/amount formatting lives in one place (`app/i18n/format`).
  */
 export function formatTimestamp(ms: number, locale: SonariLocale): string | null {
-    if (ms <= 0) {
-        return null;
-    }
-    return new Intl.DateTimeFormat(LOCALE_TAGS[locale], {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-    }).format(new Date(ms));
+    return formatDate(ms, locale);
 }
 
 /** Display state of the /mypage screen, derived from connection + read result. */

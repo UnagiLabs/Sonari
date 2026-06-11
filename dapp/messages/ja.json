@@ -1,13 +1,5 @@
 {
     "register": {
-        "topbar": {
-            "home": "ホーム",
-            "donate": "寄付",
-            "dashboard": "ダッシュボード",
-            "register": "新規登録",
-            "claim": "申請",
-            "brandHomeAria": "Sonari ホーム"
-        },
         "wizard": {
             "progress": {
                 "aria": "登録の進行状況",
@@ -239,12 +231,6 @@
         }
     },
     "mypage": {
-        "topbar": {
-            "label": "マイページ",
-            "brandHomeAria": "Sonari ホーム",
-            "home": "ホーム",
-            "register": "新規登録"
-        },
         "title": "マイページ",
         "subtitle": "あなたの会員証（MembershipPass）の内容を確認できます。",
         "states": {
@@ -306,7 +292,8 @@
             "dashboard": "ダッシュボード",
             "leaderboard": "リーダーボード",
             "register": "登録",
-            "claim": "申請"
+            "claim": "申請",
+            "mypage": "マイページ"
         },
         "donateCta": "今すぐ寄付"
     },
