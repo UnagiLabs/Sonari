@@ -97,7 +97,7 @@ vsock-proxy World ID real API smoke:
 VerifierRegistry registration:
 TEE process_data:
 Sui dry-run:
-Sui submit / MembershipPass readback:
+Sui submit / IdentityRegistry readback:
 AWS idle cleanup (DesiredCapacity / InService / running EC2 / schedule):
 
 ## VerifierRegistry registration metadata
@@ -118,11 +118,11 @@ sui_dry_run_completed_at_ms:
 sui_dry_run_result_json contains signed_payload / request / transaction_bytes / effects:
 job tx_digest (TEE-only digest, not registration proof):
 
-## Sui submit / MembershipPass readback
+## Sui submit / IdentityRegistry readback
 
 tx_digest:
 readback_status:
-membership_pass_object_id:
+identity_record_object_id:
 identity_verified:
 identity_provider_mask:
 identity_verified_at_ms:
