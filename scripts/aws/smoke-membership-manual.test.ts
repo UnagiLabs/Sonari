@@ -11,6 +11,7 @@ const STATE_MACHINE_ARN = "arn:aws:states:ap-northeast-1:595103996064:stateMachi
 const MATCHED_EXECUTION_ARN =
     "arn:aws:states:ap-northeast-1:595103996064:execution:membership:membership-job-abc-1";
 const FIXED_NOW_MS = 1_800_000_000_000;
+const TEMPLATE_NULLIFIER = "12345678901234567890";
 const REQUEST_TEMPLATE = {
     registry_id: `0x${"22".repeat(32)}`,
     membership_id: `0x${"66".repeat(32)}`,
@@ -19,13 +20,22 @@ const REQUEST_TEMPLATE = {
     terms_version: 2,
     signed_statement_hash: `0x${"44".repeat(32)}`,
     world_id: {
-        world_app_id: "app_staging_123",
-        nullifier_hash: "12345678901234567890",
-        merkle_root: "987654321",
-        proof: "0xproof",
-        verification_level: "orb",
-        action: "sonari_membership_register_v1",
-        signal_hash: `0x${"55".repeat(32)}`,
+        idkit_response: {
+            protocol_version: "4.0",
+            nonce: "sonari-fixture-nonce",
+            action: "sonari_membership_register_v1",
+            environment: "staging",
+            responses: [
+                {
+                    identifier: "proof_of_human",
+                    issuer_schema_id: 1,
+                    signal_hash: `0x${"55".repeat(32)}`,
+                    proof: "0xproof",
+                    merkle_root: "987654321",
+                    nullifier: TEMPLATE_NULLIFIER,
+                },
+            ],
+        },
     },
 } as const;
 
@@ -121,18 +131,32 @@ describe("AWS membership manual batch smoke script", () => {
         expect(cli.submitBodies).toHaveLength(1);
         expect(cli.submitBodies[0]).toMatchObject({
             world_id: {
-                nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}${FIXED_NOW_MS}`,
+                idkit_response: {
+                    responses: [
+                        {
+                            nullifier: `${TEMPLATE_NULLIFIER}${FIXED_NOW_MS}`,
+                        },
+                    ],
+                },
             },
         });
+        const uniqueizedTemplate = {
+            ...REQUEST_TEMPLATE,
+            world_id: {
+                idkit_response: {
+                    ...REQUEST_TEMPLATE.world_id.idkit_response,
+                    responses: [
+                        {
+                            ...REQUEST_TEMPLATE.world_id.idkit_response.responses[0],
+                            nullifier: `${TEMPLATE_NULLIFIER}${FIXED_NOW_MS}`,
+                        },
+                    ],
+                },
+            },
+        };
         expect(cli.lambdaPayloads).toEqual([
             {
-                body: JSON.stringify({
-                    ...REQUEST_TEMPLATE,
-                    world_id: {
-                        ...REQUEST_TEMPLATE.world_id,
-                        nullifier_hash: `${REQUEST_TEMPLATE.world_id.nullifier_hash}${FIXED_NOW_MS}`,
-                    },
-                }),
+                body: JSON.stringify(uniqueizedTemplate),
             },
             { verifier_kind: "membership_identity" },
         ]);
@@ -374,6 +398,84 @@ describe("AWS membership manual batch smoke script", () => {
                 now: () => FIXED_NOW_MS,
             }),
         ).rejects.toThrow("CloudFormation output SubmitVerificationLambdaName is required");
+    });
+
+    it("preserves all responses[0] fields when uniqueizing idkit_response nullifier", async () => {
+        const cli = new RecordingAwsCli();
+        const requestFile = await createRequestFile();
+
+        await runSmokeMembershipManual({
+            aws: cli,
+            stack: STACK,
+            expectedAccount: EXPECTED_ACCOUNT,
+            requestFile,
+            now: () => FIXED_NOW_MS,
+        });
+
+        expect(cli.submitBodies).toHaveLength(1);
+        const submitted = cli.submitBodies[0] as {
+            world_id: {
+                idkit_response: {
+                    protocol_version: string;
+                    nonce: string;
+                    action: string;
+                    environment: string;
+                    responses: Array<{
+                        identifier: string;
+                        issuer_schema_id: number;
+                        signal_hash: string;
+                        proof: string;
+                        merkle_root: string;
+                        nullifier: string;
+                    }>;
+                };
+            };
+        };
+        const idkit = submitted.world_id.idkit_response;
+        // idkit_response top-level fields are preserved unchanged
+        expect(idkit.protocol_version).toBe("4.0");
+        expect(idkit.nonce).toBe("sonari-fixture-nonce");
+        expect(idkit.action).toBe("sonari_membership_register_v1");
+        expect(idkit.environment).toBe("staging");
+        // responses[0] non-nullifier fields are preserved unchanged
+        const r0 = idkit.responses[0];
+        expect(r0).toBeDefined();
+        if (r0 === undefined) throw new Error("responses[0] must be defined");
+        expect(r0.identifier).toBe("proof_of_human");
+        expect(r0.issuer_schema_id).toBe(1);
+        expect(r0.signal_hash).toBe(`0x${"55".repeat(32)}`);
+        expect(r0.proof).toBe("0xproof");
+        expect(r0.merkle_root).toBe("987654321");
+        // nullifier is suffixed with nowMs
+        expect(r0.nullifier).toBe(`${TEMPLATE_NULLIFIER}${FIXED_NOW_MS}`);
+    });
+
+    it("rejects when idkit_response.responses is empty", async () => {
+        const requestWithEmptyResponses = {
+            ...REQUEST_TEMPLATE,
+            world_id: {
+                idkit_response: {
+                    ...REQUEST_TEMPLATE.world_id.idkit_response,
+                    responses: [],
+                },
+            },
+        };
+        const directory = await mkdtemp(path.join(os.tmpdir(), "sonari-membership-smoke-"));
+        tempDirs.push(directory);
+        const requestFile = path.join(directory, "empty-responses-request.json");
+        await writeFile(requestFile, `${JSON.stringify(requestWithEmptyResponses, null, 2)}\n`);
+
+        await expect(
+            runSmokeMembershipManual({
+                aws: new RecordingAwsCli(),
+                stack: STACK,
+                expectedAccount: EXPECTED_ACCOUNT,
+                requestFile,
+                now: () => FIXED_NOW_MS,
+            }),
+        ).rejects.toThrow(
+            "must include world_id.nullifier_hash or world_id.idkit_response.responses[0].nullifier",
+        );
     });
 });
 

@@ -166,12 +166,12 @@ describe("membership identity default World ID input", () => {
 
     it("does not include worldAppId in defaultWorldIdInput", () => {
         const input = defaultWorldIdInput();
-        expect((input as unknown as Record<string, unknown>)["worldAppId"]).toBeUndefined();
+        expect((input as unknown as Record<string, unknown>).worldAppId).toBeUndefined();
     });
 
     it("does not include verificationLevel in defaultWorldIdInput", () => {
         const input = defaultWorldIdInput();
-        expect((input as unknown as Record<string, unknown>)["verificationLevel"]).toBeUndefined();
+        expect((input as unknown as Record<string, unknown>).verificationLevel).toBeUndefined();
     });
 
     it("rejects empty nonce in validateSmokeInput via buildMembershipIdentityFixtureManifest", () => {
