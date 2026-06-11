@@ -25,12 +25,13 @@ export const rootMetadata: Metadata = {
     metadataBase: new URL(SITE_URL),
     title: TITLE,
     description: DESCRIPTION,
+    // og:url は固定値にするとページ別 canonical と食い違うため設定しない。
+    // 正規 URL は各ページの canonical（alternates）が担う。
     openGraph: {
         type: "website",
         siteName: "Sonari",
         title: TITLE,
         description: DESCRIPTION,
-        url: SITE_URL,
         images: [{ url: OG_IMAGE, alt: "Sonari" }],
     },
     twitter: {
