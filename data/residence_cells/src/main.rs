@@ -185,8 +185,7 @@ fn main() -> Result<(), ResidenceAllowlistError> {
         }
         Command::Tiles(args) => tiles(args),
         Command::VerifyTiles(args) => {
-            let output =
-                verify_tiles(&args.tile_manifest, &args.tiles_dir, &args.proof_manifest)?;
+            let output = verify_tiles(&args.tile_manifest, &args.tiles_dir, &args.proof_manifest)?;
             println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }

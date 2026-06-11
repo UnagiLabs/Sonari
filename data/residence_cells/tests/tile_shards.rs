@@ -92,7 +92,11 @@ fn generates_correct_tile_count_and_cell_count() {
     let leaves = fixture_leaves_two_parents();
     let generated = generate_tiles(&leaves).expect("generate tiles");
 
-    assert_eq!(generated.tiles.len(), 2, "two distinct res4 parents => two tiles");
+    assert_eq!(
+        generated.tiles.len(),
+        2,
+        "two distinct res4 parents => two tiles"
+    );
     assert_eq!(
         generated.manifest.total_cell_count,
         leaves.len(),
@@ -168,8 +172,7 @@ fn tile_manifest_merkle_root_matches_proof_shard_merkle_root() {
     let generated_proofs = generate_proof_shards(&leaves, 5).expect("proof shards");
 
     assert_eq!(
-        generated_tiles.manifest.merkle_root,
-        generated_proofs.manifest.merkle_root,
+        generated_tiles.manifest.merkle_root, generated_proofs.manifest.merkle_root,
         "tile manifest merkle_root must match proof shard manifest merkle_root"
     );
 }
@@ -293,7 +296,11 @@ fn write_tiles_creates_tile_files_and_manifest() {
             .unwrap()
             .to_owned();
         let tile_path = tiles_dir.join(&file_name);
-        assert!(tile_path.is_file(), "tile file not found: {}", tile_path.display());
+        assert!(
+            tile_path.is_file(),
+            "tile file not found: {}",
+            tile_path.display()
+        );
 
         let bytes = fs::read(&tile_path).expect("read tile");
         assert_eq!(bytes.len() as u64, entry.byte_size);
@@ -355,7 +362,10 @@ fn verify_tiles_fails_when_a_tile_file_is_missing() {
 
     let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
         .expect_err("missing tile must fail");
-    assert!(format!("{error:?}").contains("missing tile") || format!("{error:?}").contains("unexpected"));
+    assert!(
+        format!("{error:?}").contains("missing tile")
+            || format!("{error:?}").contains("unexpected")
+    );
 }
 
 #[test]
@@ -411,7 +421,11 @@ fn verify_tiles_fails_when_tile_root_differs_from_proof_root() {
         entry.sha256 = format!("0x{}", hex_bytes(&Sha256::digest(&bytes)));
         entry.byte_size = bytes.len() as u64;
     }
-    fs::write(&tile_manifest, serde_json::to_vec_pretty(&manifest).unwrap()).expect("write");
+    fs::write(
+        &tile_manifest,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .expect("write");
 
     let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
         .expect_err("root mismatch must fail");
@@ -429,7 +443,11 @@ fn verify_tiles_fails_when_sha256_is_tampered() {
         serde_json::from_slice(&fs::read(&tile_manifest).expect("read")).expect("parse");
     manifest.tiles[0].sha256 =
         "0x1111111111111111111111111111111111111111111111111111111111111111".to_owned();
-    fs::write(&tile_manifest, serde_json::to_vec_pretty(&manifest).unwrap()).expect("write");
+    fs::write(
+        &tile_manifest,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .expect("write");
 
     let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
         .expect_err("sha256 tamper must fail");
