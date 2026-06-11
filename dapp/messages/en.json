@@ -109,7 +109,8 @@
                     "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID.",
                     "legend.selected": "Selected",
                     "legend.selectable": "Selectable",
-                    "legend.disabled": "Unavailable"
+                    "legend.disabled": "Unavailable",
+                    "retryMapLoad": "Retry"
                 }
             },
             "membership": {

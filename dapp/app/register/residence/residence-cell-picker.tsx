@@ -25,6 +25,7 @@ import {
     selectResidenceCell,
 } from "./residence-overlay";
 import { polygonStyleForKind } from "./residence-cell-style";
+import { canRetryMapLoad, nextRetryNonce } from "./map-load-retry";
 
 // NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
 const mapsApiKey = readGoogleMapsApiKey();
@@ -65,6 +66,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     // 初回描画はサーバー・クライアントで必ず一致させるため env に依存させない。
     // 実際の状態（unconfigured/ready/error）はマウント後の useEffect で決める。
     const [status, setStatus] = useState<MapsLoaderStatus>("loading");
+    const [retryNonce, setRetryNonce] = useState<number>(0);
     const [selectedDecimal, setSelectedDecimal] = useState<string | null>(null);
     const [selectedClass, setSelectedClass] = useState<ResidenceCellClass | undefined>(undefined);
     const [advancedInput, setAdvancedInput] = useState<string>("");
@@ -393,8 +395,10 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
                 autocompleteElRef.current.remove();
                 autocompleteElRef.current = null;
             }
+            // 再試行時に古いインスタンスが残らないよう null に戻す。
+            mapRef.current = null;
         };
-    }, [applySelection, focusLatLng, scheduleRebuild]);
+    }, [applySelection, focusLatLng, scheduleRebuild, retryNonce]);
 
     // 現在地ボタン。座標は一時利用のみで保存しない。
     const handleUseCurrentLocation = useCallback(() => {
@@ -475,6 +479,17 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
                     {status === "error" ? (
                         <div className="residence-map-overlay-note" role="status">
                             {t("mapError")}
+                            {canRetryMapLoad(status) ? (
+                                <button
+                                    className="btn btn-secondary"
+                                    onClick={() => {
+                                        setRetryNonce(nextRetryNonce);
+                                    }}
+                                    type="button"
+                                >
+                                    {t("retryMapLoad")}
+                                </button>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>
