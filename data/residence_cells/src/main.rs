@@ -3,6 +3,7 @@ use residence_allowlist::{
     GenerateOptions, GenerationStrategy, ResidenceAllowlistError,
     generate_and_write_allowlist_artifact_atomic, generate_and_write_proof_shards_atomic,
     generate_and_write_tiles_atomic, proof_output, root_output, verify_local, verify_proof_shards,
+    verify_tiles,
 };
 use std::{fs, path::PathBuf, time::Duration};
 
@@ -23,6 +24,7 @@ enum Command {
     VerifyProofShards(VerifyProofShardsArgs),
     VerifyLocal(VerifyLocalArgs),
     Tiles(TilesArgs),
+    VerifyTiles(VerifyTilesArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -120,6 +122,16 @@ struct VerifyLocalArgs {
 }
 
 #[derive(Debug, Parser)]
+struct VerifyTilesArgs {
+    #[arg(long)]
+    tile_manifest: PathBuf,
+    #[arg(long)]
+    tiles_dir: PathBuf,
+    #[arg(long)]
+    proof_manifest: PathBuf,
+}
+
+#[derive(Debug, Parser)]
 struct TilesArgs {
     #[arg(long)]
     allowlist: PathBuf,
@@ -172,6 +184,12 @@ fn main() -> Result<(), ResidenceAllowlistError> {
             Ok(())
         }
         Command::Tiles(args) => tiles(args),
+        Command::VerifyTiles(args) => {
+            let output =
+                verify_tiles(&args.tile_manifest, &args.tiles_dir, &args.proof_manifest)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            Ok(())
+        }
     }
 }
 

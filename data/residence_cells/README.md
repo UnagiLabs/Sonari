@@ -239,6 +239,109 @@ dryrun の対象が意図通りで、R2 から download した artifact の
 `verify-proof-shards` が成功していることを確認してから、`--dryrun` を外します。
 allowlist 本体など、proof/tree 以外の S3 artifact はこの手順では削除しません。
 
+## 地図表示用 tile
+
+地図の居住セル分類は、本来は発行直前用の重い proof API（`GET /api/residence-proof`）を
+セル 1 個ずつ呼んでいました。pan/zoom のたびに数十〜数百の request が出ます。
+これを「地図表示用の軽い static tile」配信に置き換えます。
+proof API は MembershipPass 発行直前の 1 回だけに限定します。
+
+tile は proof shard と同じ allowlist から作るので、両者のデータが食い違いません。
+tile の単位は res7 セルの「res4 親セル」ごとに 1 個です。res4 は res7 を最大 343 個含みます。
+許可セルが 0 個の親には tile を作りません。配信側の 404 を「all water（すべて陸地でない）」と
+読みます。
+
+### 9. tile を生成する
+
+`tiles` は、allowlist 全件を res4 親セルごとに分配し、map display 用の tile JSON と
+`tile_manifest.json` を出力します。CLI は R2 や AWS 認証情報を扱いません。
+
+```bash
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- tiles \
+  --allowlist .build/residence-cells/allowed_residence_cells.v1.res7.json \
+  --source .build/residence-cells/ne_10m_land.geojson \
+  --output-dir .build/residence-cells/tiles/v1/res7
+```
+
+manifest は tile inventory を持ちます。`total_cell_count` は allowlist の
+H3 件数と一致します。`tiles` 配列は親セルの `parent_h3_index` 昇順で並びます。
+
+```json
+{
+  "schema": "sonari.residence.tile_manifest.v1",
+  "schema_version": 1,
+  "allowlist_version": 1,
+  "geo_resolution": 7,
+  "tile_parent_resolution": 4,
+  "merkle_root": "0x...",
+  "object_key_rule": "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json",
+  "tile_count": 81234,
+  "total_cell_count": 28175220,
+  "tiles": [
+    {
+      "parent_h3_index": "842f5abffffffff",
+      "object_key": "residence-cells/v1/res7/tiles/res4/842f5abffffffff.json",
+      "cell_count": 343,
+      "sha256": "0x...",
+      "byte_size": 12345
+    }
+  ]
+}
+```
+
+tile 本体は、その親に属する許可 res7 セルの昇順リストです。
+`object_key` は manifest の `object_key_rule` から決まり、R2 上でも同じ key に置きます。
+proof shard と違い tile は gzip 圧縮しません（version 入り path で immutable cache されるため）。
+
+```json
+{
+  "schema": "sonari.residence.tile.v1",
+  "schema_version": 1,
+  "allowlist_version": 1,
+  "geo_resolution": 7,
+  "tile_parent_resolution": 4,
+  "merkle_root": "0x...",
+  "parent_h3_index": "842f5abffffffff",
+  "cells": [
+    "608819013513904127",
+    "608819013597790207"
+  ]
+}
+```
+
+### 10. tile と proof の整合を検証する
+
+`verify-tiles` は、tile manifest・tiles ディレクトリ・proof manifest をローカルで突き合わせます。
+R2 に依存しないので CI でも実行できます。tile の全セル和集合と総数が proof と一致すること、
+tile manifest の `merkle_root` が proof manifest と一致することを確認します。
+
+```bash
+cargo run --release --manifest-path data/residence_cells/Cargo.toml -- verify-tiles \
+  --tile-manifest .build/residence-cells/tiles/v1/res7/tile_manifest.json \
+  --tiles-dir .build/residence-cells/tiles/v1/res7/res4 \
+  --proof-manifest .build/residence-cells/proof-shards/v1/res7/proof_manifest.json
+```
+
+`verify-tiles` は各 tile の `object_key`・`sha256`・`byte_size`・セル昇順・親一致を照合します。
+tile のセル欠落・余剰、root 不一致、sha256 改ざんを検出すると FAIL します。
+
+### 11. tile を R2 にアップロードする
+
+proof shard と同じ R2 bucket に、別 prefix で同期します。
+secret は repo に保存せず、運用端末や CI の secret store から渡します。
+
+```bash
+aws s3 sync \
+  .build/residence-cells/tiles/v1/res7/ \
+  "s3://${SONARI_R2_BUCKET}/residence-cells/v1/res7/tiles/" \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+```
+
+tile の object key は `residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json`
+です。version 入り path なので、Worker は tile を
+`Cache-Control: public, max-age=31536000, immutable` で配信します。
+Cloudflare の edge cache が吸収するため、同じ Worker でも proof 発行への負荷流入は実質ゼロです。
+
 ## 運用前提
 
 - R2 Standard storage を使います。

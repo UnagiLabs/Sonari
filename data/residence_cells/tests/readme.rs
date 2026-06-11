@@ -56,6 +56,34 @@ fn readme_documents_r2_proof_shard_operations() {
     ]);
 }
 
+#[test]
+fn readme_documents_tile_operations() {
+    assert_required_terms([
+        "sonari.residence.tile.v1",
+        "sonari.residence.tile_manifest.v1",
+        "tile_manifest.json",
+        "tile_parent_resolution",
+        "parent_h3_index",
+        "total_cell_count",
+        "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json",
+    ]);
+
+    assert_required_terms([
+        "tiles",
+        "verify-tiles",
+        "--tiles-dir",
+        "--tile-manifest",
+        "--proof-manifest",
+    ]);
+
+    assert_required_terms([
+        "Cache-Control: public, max-age=31536000, immutable",
+        "404",
+        "all water",
+        "map display",
+    ]);
+}
+
 fn assert_required_terms<const N: usize>(terms: [&str; N]) {
     for term in terms {
         assert!(README.contains(term), "README must contain {term:?}");

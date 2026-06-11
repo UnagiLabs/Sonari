@@ -1,10 +1,36 @@
 use residence_allowlist::{
-    ResidenceCellLeaf, generate_proof_shards, generate_tiles, tile_object_key,
+    ResidenceCellLeaf, ResidenceTile, ResidenceTileManifest, generate_proof_shards, generate_tiles,
+    tile_object_key, verify_tiles, write_generated_proof_shards_atomic,
     write_tiles_from_leaves_atomic,
 };
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::path::{Path, PathBuf};
 use tempfile::tempdir;
+
+const SHARD_COUNT: usize = 16;
+
+/// tiles と proof shards を temp ディレクトリに書き出し、
+/// (tile_manifest_path, tiles_dir, proof_manifest_path) を返す。
+fn write_tile_and_proof_artifacts(
+    base: &Path,
+    leaves: &[ResidenceCellLeaf],
+) -> (PathBuf, PathBuf, PathBuf) {
+    let tile_dir = base.join("tiles");
+    fs::create_dir_all(&tile_dir).expect("create tile dir");
+    write_tiles_from_leaves_atomic(&tile_dir, leaves).expect("write tiles");
+
+    let proof_dir = base.join("proofs");
+    fs::create_dir_all(&proof_dir).expect("create proof dir");
+    let generated = generate_proof_shards(leaves, SHARD_COUNT).expect("proof shards");
+    write_generated_proof_shards_atomic(&proof_dir, &generated).expect("write proof shards");
+
+    (
+        tile_dir.join("tile_manifest.json"),
+        tile_dir.join("res4"),
+        proof_dir.join("proof_manifest.json"),
+    )
+}
 
 // Fixture: 3 cells in parent4=842f5abffffffff, 2 cells in parent4=842f5a9ffffffff
 // parent4_hex for first group: 842f5abffffffff (u64: 595308219849506815)
@@ -297,4 +323,115 @@ fn manifest_schema_fields_are_correct() {
 
 fn hex_bytes(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn verify_tiles_passes_for_consistent_artifacts() {
+    let dir = tempdir().expect("tempdir");
+    let leaves = fixture_leaves_two_parents();
+    let (tile_manifest, tiles_dir, proof_manifest) =
+        write_tile_and_proof_artifacts(dir.path(), &leaves);
+
+    let output = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest).expect("verify tiles");
+    assert_eq!(output.status, "verified");
+    assert_eq!(output.tile_count, 2);
+    assert_eq!(output.total_cell_count, leaves.len());
+    assert_eq!(output.verified_tiles, 2);
+}
+
+#[test]
+fn verify_tiles_fails_when_a_tile_file_is_missing() {
+    let dir = tempdir().expect("tempdir");
+    let leaves = fixture_leaves_two_parents();
+    let (tile_manifest, tiles_dir, proof_manifest) =
+        write_tile_and_proof_artifacts(dir.path(), &leaves);
+
+    // 1 件の tile ファイルを削除する。
+    let manifest: ResidenceTileManifest =
+        serde_json::from_slice(&fs::read(&tile_manifest).expect("read")).expect("parse");
+    let first = &manifest.tiles[0];
+    let file_name = first.object_key.rsplit('/').next().unwrap();
+    fs::remove_file(tiles_dir.join(file_name)).expect("remove tile");
+
+    let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
+        .expect_err("missing tile must fail");
+    assert!(format!("{error:?}").contains("missing tile") || format!("{error:?}").contains("unexpected"));
+}
+
+#[test]
+fn verify_tiles_fails_when_a_tile_has_an_extra_cell() {
+    let dir = tempdir().expect("tempdir");
+    let leaves = fixture_leaves_two_parents();
+    let (tile_manifest, tiles_dir, proof_manifest) =
+        write_tile_and_proof_artifacts(dir.path(), &leaves);
+
+    let manifest: ResidenceTileManifest =
+        serde_json::from_slice(&fs::read(&tile_manifest).expect("read")).expect("parse");
+    let entry = &manifest.tiles[0];
+    let file_name = entry.object_key.rsplit('/').next().unwrap();
+    let tile_path = tiles_dir.join(file_name);
+    let mut tile: ResidenceTile =
+        serde_json::from_slice(&fs::read(&tile_path).expect("read")).expect("parse tile");
+    // 別 fixture のセルを混入させる（この親に属さない余剰セル）。
+    tile.cells.push("608819001568526335".to_owned());
+    fs::write(&tile_path, serde_json::to_vec_pretty(&tile).unwrap()).expect("write tile");
+
+    let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
+        .expect_err("extra cell must fail");
+    let _ = error;
+}
+
+#[test]
+fn verify_tiles_fails_when_tile_root_differs_from_proof_root() {
+    let dir = tempdir().expect("tempdir");
+    let leaves = fixture_leaves_two_parents();
+    let (tile_manifest, tiles_dir, proof_manifest) =
+        write_tile_and_proof_artifacts(dir.path(), &leaves);
+
+    // tile manifest の merkle_root を別の値に書き換える（同一 allowlist 由来でない状態）。
+    let mut manifest: ResidenceTileManifest =
+        serde_json::from_slice(&fs::read(&tile_manifest).expect("read")).expect("parse");
+    manifest.merkle_root =
+        "0x0000000000000000000000000000000000000000000000000000000000000000".to_owned();
+    // tile 本体側の merkle_root も合わせて書き換え、tile 内整合は壊さない。
+    for entry in &manifest.tiles {
+        let file_name = entry.object_key.rsplit('/').next().unwrap();
+        let tile_path = tiles_dir.join(file_name);
+        let mut tile: ResidenceTile =
+            serde_json::from_slice(&fs::read(&tile_path).expect("read")).expect("parse tile");
+        tile.merkle_root = manifest.merkle_root.clone();
+        let bytes = serde_json::to_vec_pretty(&tile).unwrap();
+        // inventory の sha256/byte_size も再計算して整合させ、root 不一致だけを残す。
+        fs::write(&tile_path, &bytes).expect("write tile");
+    }
+    for entry in &mut manifest.tiles {
+        let file_name = entry.object_key.rsplit('/').next().unwrap().to_owned();
+        let tile_path = tiles_dir.join(&file_name);
+        let bytes = fs::read(&tile_path).expect("read");
+        entry.sha256 = format!("0x{}", hex_bytes(&Sha256::digest(&bytes)));
+        entry.byte_size = bytes.len() as u64;
+    }
+    fs::write(&tile_manifest, serde_json::to_vec_pretty(&manifest).unwrap()).expect("write");
+
+    let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
+        .expect_err("root mismatch must fail");
+    assert!(format!("{error:?}").contains("merkle_root"));
+}
+
+#[test]
+fn verify_tiles_fails_when_sha256_is_tampered() {
+    let dir = tempdir().expect("tempdir");
+    let leaves = fixture_leaves_two_parents();
+    let (tile_manifest, tiles_dir, proof_manifest) =
+        write_tile_and_proof_artifacts(dir.path(), &leaves);
+
+    let mut manifest: ResidenceTileManifest =
+        serde_json::from_slice(&fs::read(&tile_manifest).expect("read")).expect("parse");
+    manifest.tiles[0].sha256 =
+        "0x1111111111111111111111111111111111111111111111111111111111111111".to_owned();
+    fs::write(&tile_manifest, serde_json::to_vec_pretty(&manifest).unwrap()).expect("write");
+
+    let error = verify_tiles(&tile_manifest, &tiles_dir, &proof_manifest)
+        .expect_err("sha256 tamper must fail");
+    assert!(format!("{error:?}").contains("sha256"));
 }
