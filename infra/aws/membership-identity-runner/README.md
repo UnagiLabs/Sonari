@@ -186,7 +186,7 @@ mainnet live smoke では real World ID proof input を使います。
 - `world_id.merkle_root`
 - `world_id.proof`
 - `world_id.verification_level`
-- `world_id.action`: 期待値は `sonari_membership_register_v1`
+- `world_id.action`: `sonari_membership_register_v<N>` 形式の action
 - `world_id.signal_hash`
 
 request には `registry_id`、`membership_id`、`owner`、`terms_version`、`signed_statement_hash` も含める必要があります。

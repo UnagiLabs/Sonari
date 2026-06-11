@@ -86,6 +86,44 @@ describe("membership identity live gate", () => {
         );
     });
 
+    it("allows versioned World ID actions and rejects invalid action names", async () => {
+        const custom = await validateMembershipIdentityLiveGate({
+            env: {
+                ...completeEnv(),
+                SONARI_WORLD_ID_ACTION: "sonari_membership_register_v3",
+                SONARI_WORLD_ID_PROOF_MODE: "real",
+            },
+        });
+        expect(custom.ok).toBe(true);
+        expect(custom.checks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    name: "SONARI_WORLD_ID_ACTION",
+                    status: "ok",
+                    message: "sonari_membership_register_v3",
+                }),
+            ]),
+        );
+
+        const invalid = await validateMembershipIdentityLiveGate({
+            env: {
+                ...completeEnv(),
+                SONARI_WORLD_ID_ACTION: "attacker_action",
+                SONARI_WORLD_ID_PROOF_MODE: "real",
+            },
+        });
+        expect(invalid.ok).toBe(false);
+        expect(invalid.checks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    name: "SONARI_WORLD_ID_ACTION",
+                    status: "fail",
+                    message: "SONARI_WORLD_ID_ACTION must match sonari_membership_register_v<N>",
+                }),
+            ]),
+        );
+    });
+
     it("rejects dummy World ID proof mode on mainnet", async () => {
         const result = await validateMembershipIdentityLiveGate({
             env: {
