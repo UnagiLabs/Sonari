@@ -4,6 +4,14 @@ import {
     toWalletStatusView,
     walletActionDisabledReason,
 } from "./wallet-view-model";
+import type { WalletStatusLabels } from "./wallet-view-model";
+
+const LABELS: WalletStatusLabels = {
+    disconnected: "Connect wallet",
+    connecting: "Connecting…",
+    reconnecting: "Reconnecting…",
+    connectedFallback: "Connected",
+} as const;
 
 describe("formatAddress", () => {
     it("通常の長い hex を先頭6文字 + ... + 末尾4文字に短縮する", () => {
@@ -39,34 +47,43 @@ describe("formatAddress", () => {
 describe("toWalletStatusView", () => {
     describe("status=disconnected", () => {
         it("label が 'Connect wallet' になる", () => {
-            const view = toWalletStatusView({ status: "disconnected" });
+            const view = toWalletStatusView({ status: "disconnected" }, LABELS);
             expect(view.label).toBe("Connect wallet");
         });
 
         it("canAct が false になる", () => {
-            const view = toWalletStatusView({ status: "disconnected" });
+            const view = toWalletStatusView({ status: "disconnected" }, LABELS);
             expect(view.canAct).toBe(false);
         });
 
         it("shortAddress が null になる", () => {
-            const view = toWalletStatusView({ status: "disconnected" });
+            const view = toWalletStatusView({ status: "disconnected" }, LABELS);
             expect(view.shortAddress).toBeNull();
         });
 
         it("status をそのまま通す", () => {
-            const view = toWalletStatusView({ status: "disconnected" });
+            const view = toWalletStatusView({ status: "disconnected" }, LABELS);
             expect(view.status).toBe("disconnected");
+        });
+
+        it("渡したラベルが使われる（引数化の確認）", () => {
+            const customLabels: WalletStatusLabels = {
+                ...LABELS,
+                disconnected: "財布を接続",
+            };
+            const view = toWalletStatusView({ status: "disconnected" }, customLabels);
+            expect(view.label).toBe("財布を接続");
         });
     });
 
     describe("status=connecting", () => {
         it("label が 'Connecting…' になる（U+2026）", () => {
-            const view = toWalletStatusView({ status: "connecting" });
+            const view = toWalletStatusView({ status: "connecting" }, LABELS);
             expect(view.label).toBe("Connecting…");
         });
 
         it("canAct が false になる", () => {
-            const view = toWalletStatusView({ status: "connecting" });
+            const view = toWalletStatusView({ status: "connecting" }, LABELS);
             expect(view.canAct).toBe(false);
         });
 
@@ -74,25 +91,43 @@ describe("toWalletStatusView", () => {
             const view = toWalletStatusView({
                 status: "connecting",
                 address: "0x1234abcd5678ef901234abcd5678ef901234abcd5678ef901234abcd5678cdef",
-            });
+            }, LABELS);
             expect(view.canAct).toBe(false);
         });
 
         it("shortAddress が null になる（address なし）", () => {
-            const view = toWalletStatusView({ status: "connecting" });
+            const view = toWalletStatusView({ status: "connecting" }, LABELS);
             expect(view.shortAddress).toBeNull();
+        });
+
+        it("渡したラベルが使われる（引数化の確認）", () => {
+            const customLabels: WalletStatusLabels = {
+                ...LABELS,
+                connecting: "接続中…",
+            };
+            const view = toWalletStatusView({ status: "connecting" }, customLabels);
+            expect(view.label).toBe("接続中…");
         });
     });
 
     describe("status=reconnecting", () => {
         it("label が 'Reconnecting…' になる（U+2026）", () => {
-            const view = toWalletStatusView({ status: "reconnecting" });
+            const view = toWalletStatusView({ status: "reconnecting" }, LABELS);
             expect(view.label).toBe("Reconnecting…");
         });
 
         it("canAct が false になる", () => {
-            const view = toWalletStatusView({ status: "reconnecting" });
+            const view = toWalletStatusView({ status: "reconnecting" }, LABELS);
             expect(view.canAct).toBe(false);
+        });
+
+        it("渡したラベルが使われる（引数化の確認）", () => {
+            const customLabels: WalletStatusLabels = {
+                ...LABELS,
+                reconnecting: "再接続中…",
+            };
+            const view = toWalletStatusView({ status: "reconnecting" }, customLabels);
+            expect(view.label).toBe("再接続中…");
         });
     });
 
@@ -105,7 +140,7 @@ describe("toWalletStatusView", () => {
                 address: fullAddr,
                 network: "testnet",
                 walletName: "Slush",
-            });
+            }, LABELS);
             expect(view.label).toBe("0x1234...cdef · testnet · Slush");
         });
 
@@ -114,7 +149,7 @@ describe("toWalletStatusView", () => {
                 status: "connected",
                 address: fullAddr,
                 walletName: "Slush",
-            });
+            }, LABELS);
             expect(view.label).toBe("0x1234...cdef · Slush");
         });
 
@@ -123,7 +158,7 @@ describe("toWalletStatusView", () => {
                 status: "connected",
                 address: fullAddr,
                 network: "testnet",
-            });
+            }, LABELS);
             expect(view.label).toBe("0x1234...cdef · testnet");
         });
 
@@ -131,33 +166,45 @@ describe("toWalletStatusView", () => {
             const view = toWalletStatusView({
                 status: "connected",
                 address: fullAddr,
-            });
+            }, LABELS);
             expect(view.label).toBe("0x1234...cdef");
         });
 
-        it("address が無い connected は 'Connected' にフォールバック", () => {
+        it("address が無い connected は connectedFallback にフォールバック", () => {
             const view = toWalletStatusView({
                 status: "connected",
                 network: "testnet",
-            });
+            }, LABELS);
             expect(view.label).toBe("Connected");
+        });
+
+        it("connectedFallback に別ラベルを渡すと反映される", () => {
+            const customLabels: WalletStatusLabels = {
+                ...LABELS,
+                connectedFallback: "接続済",
+            };
+            const view = toWalletStatusView({
+                status: "connected",
+                network: "testnet",
+            }, customLabels);
+            expect(view.label).toBe("接続済");
         });
 
         it("canAct が true になる（address あり）", () => {
             const view = toWalletStatusView({
                 status: "connected",
                 address: fullAddr,
-            });
+            }, LABELS);
             expect(view.canAct).toBe(true);
         });
 
         it("canAct が false になる（address 欠落）", () => {
-            const view = toWalletStatusView({ status: "connected" });
+            const view = toWalletStatusView({ status: "connected" }, LABELS);
             expect(view.canAct).toBe(false);
         });
 
         it("canAct が false になる（address が null）", () => {
-            const view = toWalletStatusView({ status: "connected", address: null });
+            const view = toWalletStatusView({ status: "connected", address: null }, LABELS);
             expect(view.canAct).toBe(false);
         });
 
@@ -165,12 +212,12 @@ describe("toWalletStatusView", () => {
             const view = toWalletStatusView({
                 status: "connected",
                 address: fullAddr,
-            });
+            }, LABELS);
             expect(view.shortAddress).toBe("0x1234...cdef");
         });
 
         it("address が無いとき shortAddress は null", () => {
-            const view = toWalletStatusView({ status: "connected" });
+            const view = toWalletStatusView({ status: "connected" }, LABELS);
             expect(view.shortAddress).toBeNull();
         });
     });

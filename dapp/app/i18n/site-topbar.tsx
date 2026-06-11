@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
+import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { type NavKey, resolveNavItems } from "./topbar-nav";
 
@@ -29,41 +30,44 @@ export function SiteTopbar({
     const navItems = resolveNavItems(items);
 
     return (
-        <header className="topbar">
-            <div className="topbar-inner">
-                <a aria-label={t("brandHomeAria")} className="brand" href="/">
-                    <span className="brand-mark">
-                        <Image
-                            alt="Sonari"
-                            height={36}
-                            priority
-                            src="/assets/sonari_logo.png"
-                            width={36}
-                        />
-                    </span>
-                    <span className="brand-name">Sonari</span>
-                </a>
-                <nav aria-label="Primary" className="nav">
-                    {navItems.map((item) => (
-                        <a
-                            className={`nav-item${item.key === active ? " active" : ""}`}
-                            href={item.href}
-                            key={item.key}
-                        >
-                            {t(`nav.${item.key}`)}
-                        </a>
-                    ))}
-                </nav>
-                <div className="topbar-spacer" />
-                {showDonateCta ? (
-                    <a className="wallet-btn" href="/donate">
-                        <span className="wallet-dot" />
-                        {t("donateCta")}
+        <>
+            <header className="topbar">
+                <div className="topbar-inner">
+                    <a aria-label={t("brandHomeAria")} className="brand" href="/">
+                        <span className="brand-mark">
+                            <Image
+                                alt="Sonari"
+                                height={36}
+                                priority
+                                src="/assets/sonari_logo.png"
+                                width={36}
+                            />
+                        </span>
+                        <span className="brand-name">Sonari</span>
                     </a>
-                ) : null}
-                <LocaleSwitcher current={locale} />
-                {showWallet ? <WalletConnect /> : null}
-            </div>
-        </header>
+                    <nav aria-label="Primary" className="nav">
+                        {navItems.map((item) => (
+                            <a
+                                className={`nav-item${item.key === active ? " active" : ""}`}
+                                href={item.href}
+                                key={item.key}
+                            >
+                                {t(`nav.${item.key}`)}
+                            </a>
+                        ))}
+                    </nav>
+                    <div className="topbar-spacer" />
+                    {showDonateCta ? (
+                        <a className="wallet-btn" href="/donate">
+                            <span className="wallet-dot" />
+                            {t("donateCta")}
+                        </a>
+                    ) : null}
+                    <LocaleSwitcher current={locale} />
+                    {showWallet ? <WalletConnect /> : null}
+                </div>
+            </header>
+            {showWallet ? <NetworkMismatchBanner /> : null}
+        </>
     );
 }
