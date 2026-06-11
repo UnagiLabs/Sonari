@@ -3,7 +3,8 @@ module contracts::accessor;
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::allowed_residence_cell;
-use contracts::category_pool::{CategoryPool, CategoryRegistry};
+use contracts::campaign as campaign_v2;
+use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
 use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{Self, DisasterCampaignBinding, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
@@ -307,6 +308,45 @@ public fun new_affected_cell_proof_step_left(sibling_hash: vector<u8>): ProofSte
 
 public fun new_affected_cell_proof_step_right(sibling_hash: vector<u8>): ProofStep {
     affected_cell::new_proof_step_right(sibling_hash)
+}
+
+public fun donate_to_campaign_usdc(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    donation::donate_to_campaign(campaign, main_pool, ops_pool, coin, clock::timestamp_ms(clock), ctx);
+}
+
+public fun donate_to_category_usdc(
+    pause_state: &PauseState,
+    category_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, category_pool::category_pool_id(category_pool));
+    donation::donate_to_category(category_pool, main_pool, ops_pool, coin, ctx);
+}
+
+public fun donate_general_split_usdc(
+    pause_state: &PauseState,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    donation::donate_general_split(main_pool, ops_pool, coin, ctx);
 }
 
 public fun claim_disaster_usdc(

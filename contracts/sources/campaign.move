@@ -4,6 +4,7 @@ module contracts::campaign;
 use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
 use sui::balance::{Self, Balance};
 use sui::clock::{Self, Clock};
+use sui::coin::{Self, Coin};
 use sui::event;
 use usdc::usdc::USDC;
 
@@ -307,6 +308,46 @@ public(package) fun campaign_paused(c: &Campaign): bool {
     c.paused
 }
 
+public(package) fun campaign_closed(c: &Campaign): bool {
+    c.closed
+}
+
+public(package) fun campaign_split_campaign_bps(c: &Campaign): u64 {
+    c.split_campaign_bps
+}
+
+public(package) fun campaign_split_main_bps(c: &Campaign): u64 {
+    c.split_main_bps
+}
+
+public(package) fun campaign_split_ops_bps(c: &Campaign): u64 {
+    c.split_ops_bps
+}
+
+public(package) fun campaign_ops_cap_usdc(c: &Campaign): u64 {
+    c.campaign_ops_cap_usdc
+}
+
+public(package) fun campaign_ops_withheld_usdc(c: &Campaign): u64 {
+    c.ops_withheld_usdc
+}
+
+public(package) fun campaign_total_donated_usdc(c: &Campaign): u64 {
+    c.total_donated_usdc
+}
+
+public(package) fun deposit_campaign_usdc(c: &mut Campaign, coin: Coin<USDC>) {
+    balance::join(&mut c.balance, coin::into_balance(coin));
+}
+
+public(package) fun update_ops_withheld(c: &mut Campaign, delta: u64) {
+    c.ops_withheld_usdc = c.ops_withheld_usdc + delta;
+}
+
+public(package) fun update_total_donated(c: &mut Campaign, delta: u64) {
+    c.total_donated_usdc = c.total_donated_usdc + delta;
+}
+
 public(package) fun assert_campaign_version(c: &Campaign) {
     assert!(c.version == VERSION, EVersionMismatch);
 }
@@ -366,4 +407,9 @@ public fun campaign_snapshot_fields_for_testing(
 #[test_only]
 public fun hazard_type_earthquake_for_testing(): u8 {
     HAZARD_TYPE_EARTHQUAKE
+}
+
+#[test_only]
+public fun set_ops_withheld_for_testing(c: &mut Campaign, value: u64) {
+    c.ops_withheld_usdc = value;
 }
