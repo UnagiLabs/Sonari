@@ -97,7 +97,7 @@ SourceArchiver 単体は `pnpm aws:verify:source-archiver` で先に確認しま
 
 Membership dummy proof smoke は devnet または testnet 専用です。`pnpm identity:smoke` と同じ request shape の dummy proof payload を使い、submit Lambda を invoke して membership workflow が成功することを確認します。
 
-いまの推奨入口は `pnpm aws:smoke:membership-manual` です。script は fixture の `dummy-world-id-request.json` を読み、`world_id.nullifier_hash` を毎回ユニーク化して `SubmitVerificationLambda` へ送ります。返却 `job_id` を基準に `BatchVerifierLambda` を起動し、DynamoDB job の `workflow_execution_name` と一致する execution だけを追います。
+いまの推奨入口は `pnpm aws:smoke:membership-manual` です。script は fixture の `dummy-world-id-request.json` を読み、`world_id.idkit_response.responses[0].nullifier` を毎回ユニーク化して `SubmitVerificationLambda` へ送ります。返却 `job_id` を基準に `BatchVerifierLambda` を起動し、DynamoDB job の `workflow_execution_name` と一致する execution だけを追います。
 
 実行前の fail-closed 条件:
 
@@ -110,27 +110,12 @@ Membership dummy proof smoke は devnet または testnet 専用です。`pnpm i
 先に Sui testnet 上の fixture を用意します。
 この fixture は未認証の `MembershipPass` から始まります。
 
-fixture が出す `world_app_id` は、対象スタックの `WORLD_ID_APP_ID` と一致させます。enclave は本人確認の前に、リクエストの `world_app_id` が自分の設定値と一致するか確認するからです。値がずれると `WORLD_ID_VERIFICATION_FAILED` で必ず落ちます。
-
-`WORLD_ID_APP_ID` は CloudFormation の `WorldIdAppId` Parameter です。`describe-stacks` の `Stacks[0].Parameters` から読み、`SONARI_WORLD_ID_APP_ID` として export してから fixture を実行します。fixture は `--world-app-id`、env `SONARI_WORLD_ID_APP_ID`、既定値の順で `world_app_id` を解決します。
-
 ```bash
 SUI_CLIENT_CONFIG="${SUI_CLIENT_CONFIG:?set admin Sui config path}"
 
-# stack_output と同じ要領で Parameter を読むヘルパー。
-stack_parameter() {
-  aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue | [0]" \
-    --output text
-}
-
-export SONARI_WORLD_ID_APP_ID="$(stack_parameter WorldIdAppId)"
-
 pnpm identity:testnet-fixture \
   --sui-config "$SUI_CLIENT_CONFIG" \
-  --sui-env testnet \
-  --world-app-id "$SONARI_WORLD_ID_APP_ID"
+  --sui-env testnet
 
 set -a
 . .local/sonari-dev/membership-identity-fixture/fixture.env
@@ -188,7 +173,6 @@ pnpm aws:smoke:membership-manual \
 - **毎回 fresh な未認証 MembershipPass が必要**。成功 smoke は owner の本人確認を確定させるため、同じ owner / 同じ provider（World ID）で再 submit すると `identity_registry::record_identity_verification` が `EIdentityProviderReplay`（abort 6）で落ちる。再実行時は新しい鍵で member を登録し直す。
   - 新 owner 鍵を作成し gas を送金 → `active-address` を新 owner に切替 → `pnpm identity:testnet-fixture`（現スタックの `SONARI_IDENTITY_PACKAGE_ID` 等を env で渡す。`SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID` は既存値を渡し AdminCap の二重作成 `EAllowedResidenceCellRegistryAlreadyCreated`(abort 2) を避ける）で fresh pass を mint。
   - register 直後の object 読み戻しは fullnode のレプリカ遅延で `not found` になることがある。その場合は mint 済み pass id を `SONARI_MEMBERSHIP_PASS_ID` に渡して reuse モードで fixture を書き直す。
-  - fixture の `world_id.world_app_id` は対象スタックの `WorldIdAppId` Parameter と一致させる（不一致は `WORLD_ID_VERIFICATION_FAILED`）。
 - **PCR drift（identity config key=2）**。EIF は再ビルドのたびに measurement がドリフトする。runner registration が `metadata_verifier::assert_attestation_pcr_matches`（abort 21 = `EEnclavePcrMismatch`）で落ちたら、現 EIF を `nitro-cli describe-eif` で計測し `admin::update_identity_verifier_config_pcrs`（または `scripts/register-verifier-configs.sh`）で `VerifierRegistry` の identity config を再登録する。
 - smoke スクリプトは cold boot を許容する（terminal 待ちと idle 復帰待ちを polling する）。ASG の termination lag で即時 idle 判定に失敗しない。
 
