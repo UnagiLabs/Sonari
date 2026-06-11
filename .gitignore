@@ -26,3 +26,6 @@ target/
 
 # Legacy local AWS/Sonari dev secrets path. Keep ignored during migration.
 infra/aws/earthquake-runner/.local/
+
+# gh-issue-implement の worktree は transient なので追跡しない。
+.claude/worktrees/
