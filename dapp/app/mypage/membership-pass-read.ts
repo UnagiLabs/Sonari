@@ -2,6 +2,7 @@ import {
     lookupMembershipPass,
     type OwnedObjectsClient,
 } from "../register/identity/membership-lookup";
+import type { IdentityJobStatusResult } from "./identity-job-status";
 import { readIdentityRecord } from "./identity-record-read";
 
 /**
@@ -49,6 +50,7 @@ export interface MembershipPassData {
     readonly identityProviderMask: number;
     readonly identityVerifiedAtMs: number;
     readonly identityExpiresAtMs: number;
+    readonly identityJobStatus?: IdentityJobStatusResult;
 }
 
 /**

@@ -271,6 +271,16 @@
             "verifiedAtLabel": "確認日",
             "expiresAtLabel": "有効期限"
         },
+        "identityStatusLabels": {
+            "verified": "確認済み",
+            "unverified": "未確認",
+            "queued": "処理待ち",
+            "processing": "処理中",
+            "completed": "反映待ち",
+            "rejected": "却下",
+            "failed": "失敗",
+            "unavailable": "状態取得不可"
+        },
         "status": {
             "heading": "会員証のステータス",
             "stateLabel": "状態",

@@ -3,6 +3,7 @@ import type { MembershipPassData, MembershipPassReadResult } from "./membership-
 import {
     deriveMypageView,
     formatTimestamp,
+    identityStatusLabelKey,
     providerLabelKeys,
     statusLabelKey,
 } from "./pass-view";
@@ -59,6 +60,42 @@ describe("providerLabelKeys", () => {
         expect(providerLabelKeys(5)).toEqual(["kyc"]);
         // 0b100 = 4 → only unknown bit
         expect(providerLabelKeys(4)).toEqual([]);
+    });
+});
+
+describe("identityStatusLabelKey", () => {
+    it("prioritizes on-chain verified identity over AWS job status", () => {
+        expect(
+            identityStatusLabelKey(
+                pass({ identityVerified: true, identityJobStatus: { status: "failed" } }),
+            ),
+        ).toBe("verified");
+    });
+
+    it.each([
+        ["none", "unverified"],
+        ["queued", "queued"],
+        ["processing", "processing"],
+        ["completed", "completed"],
+        ["rejected", "rejected"],
+        ["failed", "failed"],
+        ["unavailable", "unavailable"],
+    ] as const)("maps AWS %s to identity label %s", (jobStatus, label) => {
+        expect(
+            identityStatusLabelKey(
+                pass({
+                    identityVerified: false,
+                    identityProviderMask: 0,
+                    identityVerifiedAtMs: 0,
+                    identityExpiresAtMs: 0,
+                    identityJobStatus: { status: jobStatus },
+                }),
+            ),
+        ).toBe(label);
+    });
+
+    it("defaults missing AWS status to unverified", () => {
+        expect(identityStatusLabelKey(pass({ identityVerified: false }))).toBe("unverified");
     });
 });
 
