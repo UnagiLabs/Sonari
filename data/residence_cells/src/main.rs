@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use residence_allowlist::{
     GenerateOptions, GenerationStrategy, ResidenceAllowlistError,
     generate_and_write_allowlist_artifact_atomic, generate_and_write_proof_shards_atomic,
-    proof_output, root_output, verify_local, verify_proof_shards,
+    generate_and_write_tiles_atomic, proof_output, root_output, verify_local, verify_proof_shards,
 };
 use std::{fs, path::PathBuf, time::Duration};
 
@@ -22,6 +22,7 @@ enum Command {
     ProofShards(ProofShardsArgs),
     VerifyProofShards(VerifyProofShardsArgs),
     VerifyLocal(VerifyLocalArgs),
+    Tiles(TilesArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -118,6 +119,18 @@ struct VerifyLocalArgs {
     jobs: Option<usize>,
 }
 
+#[derive(Debug, Parser)]
+struct TilesArgs {
+    #[arg(long)]
+    allowlist: PathBuf,
+    #[arg(long)]
+    source: PathBuf,
+    #[arg(long)]
+    output_dir: PathBuf,
+    #[arg(long)]
+    jobs: Option<usize>,
+}
+
 fn main() -> Result<(), ResidenceAllowlistError> {
     let cli = Cli::parse();
 
@@ -158,6 +171,7 @@ fn main() -> Result<(), ResidenceAllowlistError> {
             println!("{}", serde_json::to_string_pretty(&output)?);
             Ok(())
         }
+        Command::Tiles(args) => tiles(args),
     }
 }
 
@@ -192,6 +206,17 @@ fn proof_shards(args: ProofShardsArgs) -> Result<(), ResidenceAllowlistError> {
         args.shard_count,
         options,
     )?;
+    println!("{}", serde_json::to_string_pretty(&manifest)?);
+    Ok(())
+}
+
+fn tiles(args: TilesArgs) -> Result<(), ResidenceAllowlistError> {
+    let options = GenerateOptions {
+        jobs: args.jobs,
+        ..GenerateOptions::default()
+    };
+    let manifest =
+        generate_and_write_tiles_atomic(&args.allowlist, &args.source, &args.output_dir, options)?;
     println!("{}", serde_json::to_string_pretty(&manifest)?);
     Ok(())
 }

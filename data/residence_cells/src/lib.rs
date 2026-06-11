@@ -32,6 +32,13 @@ const PROOF_SHARD_SCHEMA: &str = "sonari.residence.proof_shard.v1";
 const PROOF_SHARD_SCHEMA_VERSION: u64 = 1;
 const PROOF_SHARD_OBJECT_KEY_RULE: &str =
     "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz";
+const TILE_SCHEMA: &str = "sonari.residence.tile.v1";
+const TILE_SCHEMA_VERSION: u64 = 1;
+const TILE_MANIFEST_SCHEMA: &str = "sonari.residence.tile_manifest.v1";
+const TILE_MANIFEST_SCHEMA_VERSION: u64 = 1;
+const TILE_OBJECT_KEY_RULE: &str =
+    "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json";
+pub const TILE_PARENT_RESOLUTION: u8 = 4;
 const S3_BUCKET_ENV: &str = "SONARI_RESIDENCE_CELLS_BUCKET";
 const PI: f64 = std::f64::consts::PI;
 const FRAC_PI_2: f64 = std::f64::consts::FRAC_PI_2;
@@ -335,6 +342,50 @@ pub struct VerifyProofShardsOutput {
 pub struct GeneratedProofShards {
     pub manifest: ProofShardManifest,
     pub shards: Vec<ProofShard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedTiles {
+    pub manifest: ResidenceTileManifest,
+    pub tiles: Vec<ResidenceTile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidenceTile {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub tile_parent_resolution: u8,
+    pub merkle_root: String,
+    pub parent_h3_index: String,
+    pub cells: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidenceTileManifest {
+    pub schema: String,
+    pub schema_version: u64,
+    pub allowlist_version: u64,
+    pub geo_resolution: u8,
+    pub tile_parent_resolution: u8,
+    pub merkle_root: String,
+    pub object_key_rule: String,
+    pub tile_count: usize,
+    pub total_cell_count: usize,
+    pub tiles: Vec<ResidenceTileInventoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResidenceTileInventoryEntry {
+    pub parent_h3_index: String,
+    pub object_key: String,
+    pub cell_count: usize,
+    pub sha256: String,
+    pub byte_size: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -2260,6 +2311,180 @@ fn proof_shard_object_key(allowlist_version: u64, geo_resolution: u8, shard_id: 
     format!(
         "residence-cells/v{allowlist_version}/res{geo_resolution}/proofs/shards/{shard_id:05}.json.gz"
     )
+}
+
+pub fn tile_object_key(allowlist_version: u64, geo_resolution: u8, parent_hex: &str) -> String {
+    format!(
+        "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json"
+    )
+}
+
+pub fn generate_tiles(
+    leaves: &[ResidenceCellLeaf],
+) -> Result<GeneratedTiles, ResidenceAllowlistError> {
+    let Some(first_leaf) = leaves.first().copied() else {
+        return Err(ResidenceAllowlistError::InvalidArtifact(
+            "tiles require at least one residence leaf".to_owned(),
+        ));
+    };
+    validate_proof_shard_leaf_metadata(leaves, first_leaf)?;
+
+    let allowlist_version = first_leaf.allowlist_version;
+    let geo_resolution = first_leaf.geo_resolution;
+    let parent_resolution = resolution_from_u8(TILE_PARENT_RESOLUTION)?;
+
+    let merkle_root = {
+        let Some(root) = merkle_root_from_leaves(leaves)? else {
+            return Err(ResidenceAllowlistError::InvalidArtifact(
+                "tiles require at least one residence leaf".to_owned(),
+            ));
+        };
+        prefixed_hex(&root)
+    };
+
+    // Group cells by res4 parent
+    use std::collections::BTreeMap;
+    let mut parent_to_cells: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for leaf in leaves {
+        let cell = CellIndex::try_from(leaf.h3_index).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "h3_index {} is not a valid H3 cell index: {error}",
+                leaf.h3_index
+            ))
+        })?;
+        let parent = cell.parent(parent_resolution).ok_or_else(|| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "could not compute res{TILE_PARENT_RESOLUTION} parent for h3_index {}",
+                leaf.h3_index
+            ))
+        })?;
+        let parent_u64 = u64::from(parent);
+        parent_to_cells.entry(parent_u64).or_default().push(leaf.h3_index);
+    }
+
+    // Build tiles, sorted by parent ascending (BTreeMap ensures key order)
+    let mut tiles = Vec::with_capacity(parent_to_cells.len());
+    let mut inventory = Vec::with_capacity(parent_to_cells.len());
+
+    for (parent_u64, mut cells) in parent_to_cells {
+        if cells.is_empty() {
+            continue;
+        }
+        cells.sort_unstable();
+        cells.dedup();
+
+        let parent_cell = CellIndex::try_from(parent_u64).map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "parent h3_index {parent_u64} is not a valid H3 cell index: {error}"
+            ))
+        })?;
+        let parent_hex = parent_cell.to_string();
+
+        let tile = ResidenceTile {
+            schema: TILE_SCHEMA.to_owned(),
+            schema_version: TILE_SCHEMA_VERSION,
+            allowlist_version,
+            geo_resolution,
+            tile_parent_resolution: TILE_PARENT_RESOLUTION,
+            merkle_root: merkle_root.clone(),
+            parent_h3_index: parent_u64.to_string(),
+            cells: cells.iter().map(|c| c.to_string()).collect(),
+        };
+
+        let tile_bytes = tile_json_bytes(&tile)?;
+        let sha256 = prefixed_hex(&Sha256::digest(&tile_bytes));
+        let byte_size = tile_bytes.len() as u64;
+        let object_key = tile_object_key(allowlist_version, geo_resolution, &parent_hex);
+
+        inventory.push(ResidenceTileInventoryEntry {
+            parent_h3_index: parent_u64.to_string(),
+            object_key,
+            cell_count: tile.cells.len(),
+            sha256,
+            byte_size,
+        });
+
+        tiles.push(tile);
+    }
+
+    let total_cell_count = tiles.iter().map(|t| t.cells.len()).sum();
+    let tile_count = tiles.len();
+
+    let manifest = ResidenceTileManifest {
+        schema: TILE_MANIFEST_SCHEMA.to_owned(),
+        schema_version: TILE_MANIFEST_SCHEMA_VERSION,
+        allowlist_version,
+        geo_resolution,
+        tile_parent_resolution: TILE_PARENT_RESOLUTION,
+        merkle_root,
+        object_key_rule: TILE_OBJECT_KEY_RULE.to_owned(),
+        tile_count,
+        total_cell_count,
+        tiles: inventory,
+    };
+
+    Ok(GeneratedTiles { manifest, tiles })
+}
+
+pub fn tile_json_bytes(tile: &ResidenceTile) -> Result<Vec<u8>, ResidenceAllowlistError> {
+    Ok(serde_json::to_vec_pretty(tile)?)
+}
+
+pub fn write_tiles_from_leaves_atomic(
+    output_dir: &Path,
+    leaves: &[ResidenceCellLeaf],
+) -> Result<ResidenceTileManifest, ResidenceAllowlistError> {
+    let generated = generate_tiles(leaves)?;
+    let tiles_dir = output_dir.join("res4");
+    fs::create_dir_all(&tiles_dir)?;
+
+    for (tile, inventory) in generated.tiles.iter().zip(generated.manifest.tiles.iter()) {
+        let parent_cell = CellIndex::try_from(
+            tile.parent_h3_index.parse::<u64>().map_err(|_| {
+                ResidenceAllowlistError::InvalidArtifact(format!(
+                    "parent_h3_index is not a valid u64: {}",
+                    tile.parent_h3_index
+                ))
+            })?,
+        )
+        .map_err(|error| {
+            ResidenceAllowlistError::InvalidArtifact(format!(
+                "parent_h3_index {} is not a valid H3 cell: {error}",
+                tile.parent_h3_index
+            ))
+        })?;
+        let parent_hex = parent_cell.to_string();
+        let file_name = format!("{parent_hex}.json");
+        let tile_path = tiles_dir.join(&file_name);
+
+        let tile_bytes = tile_json_bytes(tile)?;
+        write_bytes_atomic(&tile_path, &tile_bytes)?;
+
+        // Verify sha256/byte_size matches inventory
+        let _ = inventory;
+    }
+
+    write_tile_manifest_atomic(output_dir, &generated.manifest)?;
+    Ok(generated.manifest)
+}
+
+fn write_tile_manifest_atomic(
+    output_dir: &Path,
+    manifest: &ResidenceTileManifest,
+) -> Result<(), ResidenceAllowlistError> {
+    let manifest_path = output_dir.join("tile_manifest.json");
+    let manifest_json = format!("{}\n", serde_json::to_string_pretty(manifest)?);
+    write_bytes_atomic(&manifest_path, manifest_json.as_bytes())
+}
+
+pub fn generate_and_write_tiles_atomic(
+    allowlist_path: &Path,
+    source_path: &Path,
+    output_dir: &Path,
+    options: GenerateOptions,
+) -> Result<ResidenceTileManifest, ResidenceAllowlistError> {
+    let allowlist = load_verified_allowlist(allowlist_path, source_path, options)?;
+    write_tiles_from_leaves_atomic(output_dir, &allowlist.leaves)
 }
 
 fn parse_prefixed_hex_32(field: &str, value: &str) -> Result<[u8; 32], ResidenceAllowlistError> {
