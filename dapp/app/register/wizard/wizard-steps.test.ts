@@ -7,7 +7,6 @@ import {
     nextStep,
     parseStepParam,
     previousStep,
-    residenceStepClassName,
     RESIDENCE_STATEMENT_COUNT,
     slideDirection,
     stepIndex,
@@ -193,22 +192,5 @@ describe("slideDirection", () => {
         expect(slideDirection("welcome", "membership")).toBe(1);
         expect(slideDirection("identity", "residence")).toBe(-1);
         expect(slideDirection("residence", "residence")).toBe(0);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// residenceStepClassName
-// ---------------------------------------------------------------------------
-
-describe("residenceStepClassName", () => {
-    it("activeStep が residence のとき is-fullbleed を含む文字列を返す", () => {
-        expect(residenceStepClassName("residence")).toContain("is-fullbleed");
-    });
-
-    it("activeStep が residence 以外のとき is-fullbleed を含まない", () => {
-        expect(residenceStepClassName("welcome")).not.toContain("is-fullbleed");
-        expect(residenceStepClassName("membership")).not.toContain("is-fullbleed");
-        expect(residenceStepClassName("identity")).not.toContain("is-fullbleed");
-        expect(residenceStepClassName("done")).not.toContain("is-fullbleed");
     });
 });

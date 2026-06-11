@@ -105,14 +105,6 @@ export function previousStep(step: WizardStepId): WizardStepId | null {
     return WIZARD_STEPS[stepIndex(step) - 1] ?? null;
 }
 
-/**
- * residence ステップがアクティブなときだけ `is-fullbleed` modifier を含む className を返す。
- * 他ステップでは空文字を返す。
- */
-export function residenceStepClassName(activeStep: WizardStepId): string {
-    return activeStep === "residence" ? "is-fullbleed" : "";
-}
-
 /** ステップ遷移のスライド方向。前進 1 / 後退 -1 / 同一 0。 */
 export function slideDirection(from: WizardStepId, to: WizardStepId): -1 | 0 | 1 {
     return Math.sign(stepIndex(to) - stepIndex(from)) as -1 | 0 | 1;
