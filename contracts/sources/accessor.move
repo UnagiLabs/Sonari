@@ -490,3 +490,61 @@ public fun return_floor_budget(
         ctx,
     );
 }
+
+public fun submit_claim_v2(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    disaster_event: &DisasterEvent,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    leaf: AffectedCellLeaf,
+    proof: vector<ProofStep>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    campaign_v2::submit_claim(
+        campaign,
+        object::id(disaster_event),
+        disaster_event::event_uid(disaster_event),
+        disaster_event::event_revision(disaster_event),
+        disaster_event::affected_cells_root(disaster_event),
+        disaster_event::occurred_at_ms(disaster_event),
+        membership_registry,
+        pass,
+        leaf,
+        proof,
+        clock::timestamp_ms(clock),
+        ctx,
+    );
+}
+
+public fun verify_claim_v2(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    identity_registry: &IdentityRegistry,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    admin::assert_target_not_paused(
+        pause_state,
+        identity_registry::registry_id(identity_registry),
+    );
+    campaign_v2::verify_claim(
+        campaign,
+        identity_registry,
+        membership_registry,
+        pass,
+        identity_provider,
+        duplicate_key_hash,
+        clock::timestamp_ms(clock),
+        ctx,
+    );
+}

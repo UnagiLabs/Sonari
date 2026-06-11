@@ -1,6 +1,7 @@
 #[allow(unused_const, unused_field)]
 module contracts::campaign;
 
+use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
 use contracts::census_result::{Self, FloorCensusResult};
 use contracts::identity_registry::{Self, IdentityRegistry};
@@ -41,17 +42,28 @@ const BPS_DENOMINATOR: u64 = 10_000;
 const EVersionMismatch: u64 = 0;
 const ECampaignPaused: u64 = 1;
 const EInvalidBandCount: u64 = 2;
-const EFloorCensusAlreadySet: u64 = 3;
-const EFloorCensusNotSet: u64 = 4;
-const EFloorBudgetAlreadyReturned: u64 = 5;
-const EDonationPeriodNotOver: u64 = 6;
-const ECampaignCategoryPoolMismatch: u64 = 7;
-const EFloorCensusBindingMismatch: u64 = 8;
-const EClaimApplicationNotFound: u64 = 9;
-const EClaimNotVerified: u64 = 10;
-const EFloorAlreadyClaimed: u64 = 11;
-const EClaimExcluded: u64 = 12;
-const EFloorCensusAfterDonationEnd: u64 = 13;
+const EClaimWindowClosed: u64 = 3;
+const EDisasterEventMismatch: u64 = 4;
+const EInvalidAffectedCellProof: u64 = 5;
+const EClaimBandTooLow: u64 = 6;
+const EAccountCreatedAfterCutoff: u64 = 7;
+const EHomeCellRegisteredAfterCutoff: u64 = 8;
+const EResidenceCellMismatch: u64 = 9;
+const EDuplicateApplication: u64 = 10;
+const EClaimAlreadyVerified: u64 = 11;
+const EClaimAlreadyExcluded: u64 = 12;
+const ECampaignClosed: u64 = 13;
+const EFloorCensusAlreadySet: u64 = 14;
+const EFloorCensusNotSet: u64 = 15;
+const EFloorBudgetAlreadyReturned: u64 = 16;
+const EDonationPeriodNotOver: u64 = 17;
+const ECampaignCategoryPoolMismatch: u64 = 18;
+const EFloorCensusBindingMismatch: u64 = 19;
+const EClaimApplicationNotFound: u64 = 20;
+const EClaimNotVerified: u64 = 21;
+const EFloorAlreadyClaimed: u64 = 22;
+const EClaimExcluded: u64 = 23;
+const EFloorCensusAfterDonationEnd: u64 = 24;
 
 // ---------------------------------------------------------------
 // structs
@@ -162,6 +174,22 @@ public struct FloorBudgetReturned has copy, drop {
     campaign_id: ID,
     returned_to_category_usdc: u64,
     returned_to_main_usdc: u64,
+}
+
+public struct ClaimSubmitted has copy, drop {
+    campaign_id: ID,
+    pass_lineage_id: ID,
+    band: u8,
+    applied_at_ms: u64,
+    applicant: address,
+}
+
+public struct ClaimVerified has copy, drop {
+    campaign_id: ID,
+    pass_lineage_id: ID,
+    band: u8,
+    verified_at_ms: u64,
+    verifier: address,
 }
 
 public struct CampaignCreated has copy, drop {
@@ -690,6 +718,130 @@ public(package) fun return_floor_budget(
 // ---------------------------------------------------------------
 
 // ---------------------------------------------------------------
+// submit_claim / verify_claim
+// ---------------------------------------------------------------
+
+public(package) fun submit_claim(
+    campaign: &mut Campaign,
+    disaster_event_id: ID,
+    disaster_event_uid: vector<u8>,
+    disaster_event_revision: u32,
+    disaster_event_affected_cells_root: vector<u8>,
+    disaster_event_occurred_at_ms: u64,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    leaf: AffectedCellLeaf,
+    proof: vector<ProofStep>,
+    now_ms: u64,
+    ctx: &TxContext,
+) {
+    assert!(!campaign.closed, ECampaignClosed);
+    assert!(now_ms < campaign.claim_end_ms, EClaimWindowClosed);
+
+    // Disaster event binding
+    assert!(campaign.disaster_event_id == disaster_event_id, EDisasterEventMismatch);
+    assert!(affected_cell::event_uid(&leaf) == disaster_event_uid, EDisasterEventMismatch);
+    assert!(
+        affected_cell::event_revision(&leaf) == disaster_event_revision,
+        EDisasterEventMismatch,
+    );
+
+    // Merkle proof
+    assert!(
+        affected_cell::verify_proof(&leaf, proof, disaster_event_affected_cells_root),
+        EInvalidAffectedCellProof,
+    );
+
+    // Band check
+    let cell_band = affected_cell::cell_band(&leaf);
+    assert!(cell_band >= campaign.min_claim_band, EClaimBandTooLow);
+
+    // SBT precheck
+    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
+
+    // Time cutoff
+    let (account_created_at_ms, home_cell, home_cell_registered_at_ms, _, _) =
+        membership::membership_pass_mvp_summary(pass);
+    assert!(account_created_at_ms < disaster_event_occurred_at_ms, EAccountCreatedAfterCutoff);
+    assert!(
+        home_cell_registered_at_ms < disaster_event_occurred_at_ms,
+        EHomeCellRegisteredAfterCutoff,
+    );
+
+    // Area check
+    assert!(home_cell == affected_cell::h3_index(&leaf), EResidenceCellMismatch);
+
+    // Duplicate check
+    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
+    assert!(
+        !dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
+        EDuplicateApplication,
+    );
+
+    // Register application
+    add_claim_application(campaign, pass_lineage_id, cell_band, now_ms);
+
+    let campaign_id = object::id(campaign);
+    event::emit(ClaimSubmitted {
+        campaign_id,
+        pass_lineage_id,
+        band: cell_band,
+        applied_at_ms: now_ms,
+        applicant: ctx.sender(),
+    });
+}
+
+public(package) fun verify_claim(
+    campaign: &mut Campaign,
+    identity_registry: &IdentityRegistry,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
+    now_ms: u64,
+    ctx: &TxContext,
+) {
+    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
+
+    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
+    identity_registry::assert_identity_verified(
+        identity_registry,
+        pass_lineage_id,
+        ctx.sender(),
+        identity_provider,
+        now_ms,
+    );
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        identity_registry,
+        pass_lineage_id,
+        identity_provider,
+        duplicate_key_hash,
+    );
+
+    assert!(
+        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
+        EClaimApplicationNotFound,
+    );
+    let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+    assert!(!app.verified, EClaimAlreadyVerified);
+    assert!(!app.excluded, EClaimAlreadyExcluded);
+
+    let band = app.band;
+    // read current_round before mutable borrow in set_claim_verified
+    let current_round = campaign.current_round;
+    set_claim_verified(campaign, pass_lineage_id, current_round);
+
+    let campaign_id = object::id(campaign);
+    event::emit(ClaimVerified {
+        campaign_id,
+        pass_lineage_id,
+        band,
+        verified_at_ms: now_ms,
+        verifier: ctx.sender(),
+    });
+}
+
+// ---------------------------------------------------------------
 // floor census / floor pay error code exports (for test expected_failure)
 // ---------------------------------------------------------------
 
@@ -703,6 +855,16 @@ public(package) fun e_claim_application_not_found(): u64 { EClaimApplicationNotF
 public(package) fun e_claim_not_verified(): u64 { EClaimNotVerified }
 public(package) fun e_floor_already_claimed(): u64 { EFloorAlreadyClaimed }
 public(package) fun e_floor_census_after_donation_end(): u64 { EFloorCensusAfterDonationEnd }
+public(package) fun e_claim_window_closed(): u64 { EClaimWindowClosed }
+public(package) fun e_disaster_event_mismatch(): u64 { EDisasterEventMismatch }
+public(package) fun e_invalid_affected_cell_proof(): u64 { EInvalidAffectedCellProof }
+public(package) fun e_claim_band_too_low(): u64 { EClaimBandTooLow }
+public(package) fun e_account_created_after_cutoff(): u64 { EAccountCreatedAfterCutoff }
+public(package) fun e_home_cell_registered_after_cutoff(): u64 { EHomeCellRegisteredAfterCutoff }
+public(package) fun e_residence_cell_mismatch(): u64 { EResidenceCellMismatch }
+public(package) fun e_duplicate_application(): u64 { EDuplicateApplication }
+public(package) fun e_claim_already_verified(): u64 { EClaimAlreadyVerified }
+public(package) fun e_claim_already_excluded(): u64 { EClaimAlreadyExcluded }
 
 // ---------------------------------------------------------------
 // accessor read-only helpers for tests
@@ -861,4 +1023,39 @@ public fun floor_receipt_fields(
 #[test_only]
 public fun set_donation_end_ms_for_testing(c: &mut Campaign, donation_end_ms: u64) {
     c.donation_end_ms = donation_end_ms;
+}
+
+#[test_only]
+public fun set_claim_end_ms_for_testing(c: &mut Campaign, claim_end_ms: u64) {
+    c.claim_end_ms = claim_end_ms;
+}
+
+#[test_only]
+public fun campaign_has_claim_application(c: &Campaign, pass_lineage_id: ID): bool {
+    dynamic_field::exists_with_type<ID, ClaimApplication>(&c.id, pass_lineage_id)
+}
+
+#[test_only]
+public fun campaign_claim_application_fields(
+    c: &Campaign,
+    pass_lineage_id: ID,
+): (u8, u64, bool, bool, bool) {
+    let app = dynamic_field::borrow<ID, ClaimApplication>(&c.id, pass_lineage_id);
+    (app.band, app.applied_at_ms, app.verified, app.floor_claimed, app.excluded)
+}
+
+#[test_only]
+public fun claim_submitted_event_fields(
+    event: ClaimSubmitted,
+): (ID, ID, u8, u64, address) {
+    let ClaimSubmitted { campaign_id, pass_lineage_id, band, applied_at_ms, applicant } = event;
+    (campaign_id, pass_lineage_id, band, applied_at_ms, applicant)
+}
+
+#[test_only]
+public fun claim_verified_event_fields(
+    event: ClaimVerified,
+): (ID, ID, u8, u64, address) {
+    let ClaimVerified { campaign_id, pass_lineage_id, band, verified_at_ms, verifier } = event;
+    (campaign_id, pass_lineage_id, band, verified_at_ms, verifier)
 }
