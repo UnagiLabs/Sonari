@@ -275,10 +275,6 @@ fun assert_valid_disaster_eligibility(
         account_created_at_ms,
         home_cell,
         home_cell_registered_at_ms,
-        _identity_verified,
-        _identity_provider_mask,
-        _identity_verified_at_ms,
-        _identity_expires_at_ms,
         _terms_version,
         _signed_statement_hash,
     ) = membership::membership_pass_mvp_summary(pass);

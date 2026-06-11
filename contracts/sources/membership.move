@@ -289,15 +289,11 @@ public(package) fun membership_pass_display_labels(pass: &MembershipPass): (Stri
 
 public(package) fun membership_pass_mvp_summary(
     pass: &MembershipPass,
-): (u64, u64, u64, bool, u8, u64, u64, u64, vector<u8>) {
+): (u64, u64, u64, u64, vector<u8>) {
     (
         pass.account_created_at_ms,
         pass.home_cell,
         pass.home_cell_registered_at_ms,
-        pass.identity_verified,
-        pass.identity_provider_mask,
-        pass.identity_verified_at_ms,
-        pass.identity_expires_at_ms,
         pass.terms_version,
         pass.signed_statement_hash,
     )

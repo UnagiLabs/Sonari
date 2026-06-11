@@ -82,20 +82,12 @@ fun member_registration_issues_active_pass_to_sender_and_records_metadata() {
             account_created_at_ms,
             home_cell,
             home_cell_registered_at_ms,
-            identity_verified,
-            identity_provider_mask,
-            identity_verified_at_ms,
-            identity_expires_at_ms,
             terms_version,
             signed_statement_hash,
         ) = membership::membership_pass_mvp_summary(&pass);
         assert!(account_created_at_ms == 0u64);
         assert!(home_cell == HOME_CELL);
         assert!(home_cell_registered_at_ms == 0u64);
-        assert!(!identity_verified);
-        assert!(identity_provider_mask == 0u8);
-        assert!(identity_verified_at_ms == 0u64);
-        assert!(identity_expires_at_ms == 0u64);
         assert!(terms_version == TERMS_VERSION);
         assert!(signed_statement_hash == SIGNED_STATEMENT_HASH);
         scenario.return_to_sender(pass);
@@ -199,10 +191,6 @@ fun valid_residence_proof_updates_member_home_cell_at_clock_time() {
             _account_created_at_ms,
             home_cell,
             home_cell_registered_at_ms,
-            _identity_verified,
-            _identity_provider_mask,
-            _identity_verified_at_ms,
-            _identity_expires_at_ms,
             _terms_version,
             _signed_statement_hash,
         ) = membership::membership_pass_mvp_summary(&pass);
