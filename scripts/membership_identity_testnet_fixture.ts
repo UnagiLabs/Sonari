@@ -30,12 +30,8 @@ export const DEFAULT_RESIDENCE_PROOF_LEFT =
 export const DEFAULT_RESIDENCE_PROOF_RIGHT =
     "0x8f8a501ba455071229e715f5eccb4322190440fa2ecb6b72d123378648b60ec7";
 export const WORLD_ID_ACTION = "sonari_membership_register_v1";
-// Fallback World ID app id for the dummy smoke fixture. Real smoke runs override
-// this with the target stack's `WORLD_ID_APP_ID` (CloudFormation `WorldIdAppId`),
-// because the enclave's trusted-boundary check rejects any request whose
-// `world_app_id` differs from the stack's configured value. Kept as the default so
-// the golden fixture tests stay stable when no override is supplied.
-export const DEFAULT_WORLD_APP_ID = "app_staging_123";
+// Deterministic nonce for the dummy smoke fixture (no randomness, so it is reproducible).
+export const FIXTURE_NONCE = "sonari-fixture-nonce";
 export const GENESIS_KIND_PAUSE_STATE = 2;
 export const GENESIS_KIND_MEMBERSHIP_REGISTRY = 6;
 export const GENESIS_KIND_VERIFIER_REGISTRY = 7;
@@ -74,11 +70,10 @@ export interface MembershipIdentityFixtureSmokeInput {
 }
 
 export interface MembershipIdentityFixtureWorldIdInput {
-    readonly worldAppId: string;
     readonly nullifierHash: string;
     readonly merkleRoot: string;
     readonly proof: string;
-    readonly verificationLevel: string;
+    readonly nonce: string;
     readonly action: string;
 }
 
@@ -114,13 +109,22 @@ export interface MembershipIdentityFixtureManifest {
         readonly terms_version: number;
         readonly signed_statement_hash: string;
         readonly world_id: {
-            readonly world_app_id: string;
-            readonly nullifier_hash: string;
-            readonly merkle_root: string;
-            readonly proof: string;
-            readonly verification_level: string;
-            readonly action: string;
-            readonly signal_hash: string;
+            readonly idkit_response: {
+                readonly protocol_version: "4.0";
+                readonly nonce: string;
+                readonly action: string;
+                readonly environment: "staging";
+                readonly responses: readonly [
+                    {
+                        readonly identifier: "proof_of_human";
+                        readonly issuer_schema_id: 1;
+                        readonly signal_hash: string;
+                        readonly proof: string;
+                        readonly merkle_root: string;
+                        readonly nullifier: string;
+                    },
+                ];
+            };
         };
     };
 }
@@ -227,7 +231,6 @@ export interface RunMembershipIdentityTestnetFixtureOptions {
     readonly executor?: SuiCommandExecutor;
     readonly processEnv?: Record<string, string | undefined>;
     readonly now?: () => Date;
-    readonly worldAppId?: string;
 }
 
 export interface ResidenceFixtureInput {
@@ -334,17 +337,26 @@ export function buildMembershipIdentityFixtureManifest(
             terms_version: input.smoke.termsVersion,
             signed_statement_hash: input.smoke.signedStatementHash,
             world_id: {
-                world_app_id: input.smoke.worldId.worldAppId,
-                nullifier_hash: input.smoke.worldId.nullifierHash,
-                merkle_root: input.smoke.worldId.merkleRoot,
-                proof: input.smoke.worldId.proof,
-                verification_level: input.smoke.worldId.verificationLevel,
-                action: input.smoke.worldId.action,
-                signal_hash: computeWorldIdSignalHash(
-                    input.smoke.owner,
-                    input.smoke.membershipId,
-                    input.smoke.signedStatementHash,
-                ),
+                idkit_response: {
+                    protocol_version: "4.0" as const,
+                    nonce: input.smoke.worldId.nonce,
+                    action: input.smoke.worldId.action,
+                    environment: "staging" as const,
+                    responses: [
+                        {
+                            identifier: "proof_of_human" as const,
+                            issuer_schema_id: 1 as const,
+                            signal_hash: computeWorldIdSignalHash(
+                                input.smoke.owner,
+                                input.smoke.membershipId,
+                                input.smoke.signedStatementHash,
+                            ),
+                            proof: input.smoke.worldId.proof,
+                            merkle_root: input.smoke.worldId.merkleRoot,
+                            nullifier: input.smoke.worldId.nullifierHash,
+                        },
+                    ],
+                },
             },
         },
     };
@@ -389,11 +401,10 @@ export function validateSmokeInput(input: MembershipIdentityFixtureSmokeInput): 
     if (!Number.isSafeInteger(input.termsVersion) || input.termsVersion < 0) {
         throw new Error("termsVersion must be a non-negative safe integer");
     }
-    assertNonEmpty(input.worldId.worldAppId, "worldId.worldAppId");
     assertNonEmpty(input.worldId.nullifierHash, "worldId.nullifierHash");
     assertNonEmpty(input.worldId.merkleRoot, "worldId.merkleRoot");
     assertNonEmpty(input.worldId.proof, "worldId.proof");
-    assertNonEmpty(input.worldId.verificationLevel, "worldId.verificationLevel");
+    assertNonEmpty(input.worldId.nonce, "worldId.nonce");
     if (input.worldId.action !== WORLD_ID_ACTION) {
         throw new Error(`worldId.action must be ${WORLD_ID_ACTION}`);
     }
@@ -951,9 +962,7 @@ export async function runMembershipIdentityTestnetFixture(
             owner: passReadback.owner,
             termsVersion: DEFAULT_TERMS_VERSION,
             signedStatementHash: DEFAULT_SIGNED_STATEMENT_HASH,
-            worldId: defaultWorldIdInput(
-                resolveWorldAppId(options.worldAppId, runtimeEnv.SONARI_WORLD_ID_APP_ID),
-            ),
+            worldId: defaultWorldIdInput(),
         },
     });
     await writeFixtureFiles(
@@ -1010,36 +1019,14 @@ function buildMembershipIdentityFixtureFilesFromManifest(
     };
 }
 
-export function defaultWorldIdInput(
-    worldAppId: string = DEFAULT_WORLD_APP_ID,
-): MembershipIdentityFixtureWorldIdInput {
+export function defaultWorldIdInput(): MembershipIdentityFixtureWorldIdInput {
     return {
-        worldAppId,
         nullifierHash: "12345678901234567890",
         merkleRoot: "987654321",
         proof: "0xproof",
-        verificationLevel: "orb",
+        nonce: FIXTURE_NONCE,
         action: WORLD_ID_ACTION,
     };
-}
-
-/**
- * Resolves the World ID `world_app_id` for the dummy smoke request. The explicit
- * option wins, then the `SONARI_WORLD_ID_APP_ID` env var, then `DEFAULT_WORLD_APP_ID`.
- * Real smoke runs pass the target stack's `WORLD_ID_APP_ID` so the request matches
- * the enclave's trusted-boundary check; tests omit it and keep the stable default.
- */
-export function resolveWorldAppId(
-    optionValue: string | undefined,
-    envValue: string | undefined,
-): string {
-    if (optionValue !== undefined && optionValue.length > 0) {
-        return optionValue;
-    }
-    if (envValue !== undefined && envValue.length > 0) {
-        return envValue;
-    }
-    return DEFAULT_WORLD_APP_ID;
 }
 
 async function resolveAllowedResidenceCellRegistryId(input: {
@@ -1551,7 +1538,6 @@ export function parseCliArgs(
         env.SUI_CLIENT_CONFIG ?? ".local/sonari-dev/sui_wallets/admin/sui_config.yaml";
     let outputDir = DEFAULT_FIXTURE_OUTPUT_DIR;
     let publishIfMissing = false;
-    let worldAppId = env.SONARI_WORLD_ID_APP_ID;
 
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
@@ -1567,11 +1553,6 @@ export function parseCliArgs(
         }
         if (arg === "--output-dir") {
             outputDir = requiredArg(argv, index, "--output-dir");
-            index += 1;
-            continue;
-        }
-        if (arg === "--world-app-id") {
-            worldAppId = requiredArg(argv, index, "--world-app-id");
             index += 1;
             continue;
         }
@@ -1594,7 +1575,6 @@ export function parseCliArgs(
         clientConfig,
         outputDir,
         publishIfMissing,
-        ...(worldAppId === undefined || worldAppId.length === 0 ? {} : { worldAppId }),
     };
 }
 
@@ -1609,10 +1589,8 @@ function requiredArg(argv: readonly string[], index: number, flag: string): stri
 function cliUsage(): string {
     return [
         "Usage:",
-        "  pnpm identity:testnet-fixture [--sui-env testnet] [--sui-config <path>] [--output-dir <path>] [--world-app-id <id>] [--publish-if-missing]",
+        "  pnpm identity:testnet-fixture [--sui-env testnet] [--sui-config <path>] [--output-dir <path>] [--publish-if-missing]",
         "",
-        "  --world-app-id overrides the dummy request world_app_id (default reads SONARI_WORLD_ID_APP_ID, else app_staging_123).",
-        "  Pass the target stack's WORLD_ID_APP_ID so the enclave trusted-boundary check accepts the request.",
         "Outputs:",
         `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_MANIFEST_FILE)}`,
         `  ${path.join(DEFAULT_FIXTURE_OUTPUT_DIR, FIXTURE_ENV_FILE)}`,
