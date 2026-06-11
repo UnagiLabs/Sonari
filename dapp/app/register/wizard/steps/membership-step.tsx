@@ -13,16 +13,16 @@ import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { h3DecimalToHex } from "../../residence/h3-geo";
 import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
 import {
+    deriveIssuanceStatus,
+    deriveMembershipActionState,
+    disabledReasonMessageKey,
+    type MembershipLookupViewState,
+} from "./membership-gate";
+import {
     buildRegisterMemberTransaction,
     fetchResidenceProof,
     MembershipIssueError,
 } from "./membership-issue";
-import {
-    deriveMembershipActionState,
-    deriveIssuanceStatus,
-    disabledReasonMessageKey,
-    type MembershipLookupViewState,
-} from "./membership-gate";
 import { shortAddress } from "./membership-presence";
 
 interface MembershipStepProps {

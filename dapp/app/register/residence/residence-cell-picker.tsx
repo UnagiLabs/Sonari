@@ -2,13 +2,13 @@
 
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { shouldShowAdvancedCellInput } from "./advanced-cell-input";
 import {
     isGoogleMapsConfigured,
     loadGoogleMapsLibraries,
     type MapsLoaderStatus,
     readGoogleMapsApiKey,
 } from "./google-maps-loader";
-import { shouldShowAdvancedCellInput } from "./advanced-cell-input";
 import { classifyResidenceCell, type ResidenceCellClass } from "./h3-cell-classifier";
 import {
     h3DecimalToHex,
