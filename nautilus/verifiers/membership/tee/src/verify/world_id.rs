@@ -1,6 +1,7 @@
 use crate::{IdentityError, WorldIdProofRequest, canonical_world_id_nullifier};
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
+use std::env::VarError;
 use std::time::Duration;
 
 pub const WORLD_ID_API_BASE_ENV: &str = "SONARI_WORLD_ID_API_BASE";
@@ -357,7 +358,8 @@ pub fn world_id_action_from_env() -> Result<String, IdentityError> {
 fn action_from_env() -> Result<String, IdentityError> {
     match std::env::var(WORLD_ID_ACTION_ENV) {
         Ok(value) => normalize_world_id_action_or_default(value),
-        Err(_) => Ok(WORLD_ID_ACTION.to_owned()),
+        Err(VarError::NotPresent) => Ok(WORLD_ID_ACTION.to_owned()),
+        Err(VarError::NotUnicode(_)) => Err(invalid_world_id_action()),
     }
 }
 
@@ -596,9 +598,13 @@ mod tests {
         WORLD_ID_VERIFICATION_FAILED, WorldIdEnvironment, WorldIdVerificationStatus,
         WorldIdVerifier, classify_bad_request, classify_http_status, classify_success_response,
         normalize_base_url, normalize_world_id_action, normalize_world_id_action_or_default,
+        world_id_action_from_env,
     };
     use crate::WorldIdProofRequest;
     use reqwest::StatusCode;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     // ---- DummyWorldIdVerifier tests ----
 
@@ -676,6 +682,25 @@ mod tests {
         ] {
             let error = normalize_world_id_action(value).unwrap_err();
             assert!(error.to_string().contains(WORLD_ID_ACTION_ENV));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn world_id_action_from_env_rejects_non_unicode_values() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        unsafe {
+            std::env::set_var(WORLD_ID_ACTION_ENV, OsString::from_vec(vec![0xff]));
+        }
+
+        let error = world_id_action_from_env().unwrap_err();
+
+        assert!(error.to_string().contains(WORLD_ID_ACTION_ENV));
+        unsafe {
+            std::env::remove_var(WORLD_ID_ACTION_ENV);
         }
     }
 

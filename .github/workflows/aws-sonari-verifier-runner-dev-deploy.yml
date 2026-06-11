@@ -106,6 +106,7 @@ jobs:
             NITRO_ENCLAVE_IMAGE_SHA384
             NITRO_ENCLAVE_PCR3
             WORLD_ID_APP_ID
+            WORLD_ID_ACTION
           )
           for name in "${required_names[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -143,6 +144,11 @@ jobs:
 
           if [[ ! "$NITRO_ENCLAVE_PCR3" =~ ^[0-9a-fA-F]{96}$ ]]; then
             echo "NITRO_ENCLAVE_PCR3 must be a SHA-384 digest" >&2
+            exit 1
+          fi
+
+          if [[ ! "$WORLD_ID_ACTION" =~ ^sonari_membership_register_v[0-9]+$ ]]; then
+            echo "WORLD_ID_ACTION must match sonari_membership_register_v<N>" >&2
             exit 1
           fi
 
