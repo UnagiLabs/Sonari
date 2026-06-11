@@ -33,13 +33,34 @@
                 "walletHint": "Connect your Sui wallet to get started.",
                 "privacySummary": "What Sonari stores",
                 "privacy": {
-                    "walletAddress": { "label": "Wallet address", "value": "SBT owner only" },
-                    "nickname": { "label": "Nickname", "value": "Can be added later" },
-                    "addressSearch": { "label": "Address search", "value": "Not stored by Sonari" },
-                    "phoneEmail": { "label": "Phone / email", "value": "Not collected" },
-                    "gpsHistory": { "label": "GPS history", "value": "Not stored" },
-                    "deviceInfo": { "label": "Device info", "value": "Not published" },
-                    "h3Cell": { "label": "H3 cell", "value": "Resolution 7 output" }
+                    "walletAddress": {
+                        "label": "Wallet address",
+                        "value": "SBT owner only"
+                    },
+                    "nickname": {
+                        "label": "Nickname",
+                        "value": "Can be added later"
+                    },
+                    "addressSearch": {
+                        "label": "Address search",
+                        "value": "Not stored by Sonari"
+                    },
+                    "phoneEmail": {
+                        "label": "Phone / email",
+                        "value": "Not collected"
+                    },
+                    "gpsHistory": {
+                        "label": "GPS history",
+                        "value": "Not stored"
+                    },
+                    "deviceInfo": {
+                        "label": "Device info",
+                        "value": "Not published"
+                    },
+                    "h3Cell": {
+                        "label": "H3 cell",
+                        "value": "Resolution 7 output"
+                    }
                 },
                 "cta": "Get started",
                 "membership": {
@@ -274,6 +295,110 @@
         "map": {
             "unavailableTitle": "Map unavailable",
             "unavailableBody": "Residence cell value: {cell}"
+        }
+    },
+    "topbar": {
+        "brandHomeAria": "Sonari home",
+        "nav": {
+            "home": "Home",
+            "donate": "Donate",
+            "dashboard": "Dashboard",
+            "leaderboard": "Leaderboard",
+            "register": "Register",
+            "claim": "Claim"
+        },
+        "donateCta": "Donate now"
+    },
+    "donate": {
+        "hero": {
+            "eyebrow": "Donate",
+            "title": "Send support with a clear trail.",
+            "sub": "A front-end donation flow for USDC support, pool selection, public display preferences, and receipt previews.",
+            "walletTag": "Wallet",
+            "walletBody": "Connect a wallet to prepare a donation transaction."
+        },
+        "form": {
+            "eyebrow": "Contribution",
+            "title": "Donation setup",
+            "typeLegend": "Donation type",
+            "poolLegend": "Pool",
+            "amountLabel": "Amount",
+            "displayLegend": "Display preferences",
+            "donatePreview": "Donate preview",
+            "saveDraft": "Save draft"
+        },
+        "types": {
+            "general": {
+                "label": "General Donation",
+                "description": "Supports the main relief pool for future verified aid.",
+                "destination": "100% Main Pool"
+            },
+            "earthquake": {
+                "label": "Earthquake Relief",
+                "description": "Directs most funds to the selected disaster relief pool.",
+                "destination": "80% Relief Pool / 20% Main Pool"
+            }
+        },
+        "pools": {
+            "main": {
+                "label": "Main Pool",
+                "detail": "Default public support pool"
+            },
+            "earthquake": {
+                "label": "Earthquake Relief Pool",
+                "detail": "Finalized disaster support"
+            }
+        },
+        "display": {
+            "publicName": {
+                "title": "Public display name",
+                "description": "Show a name on receipts and leaderboard previews."
+            },
+            "anonymous": {
+                "title": "Anonymous mode",
+                "description": "Use Anonymous Donor in public lists."
+            },
+            "corporate": {
+                "title": "Corporate sponsor mode",
+                "description": "Prepare sponsor logo and profile fields later."
+            }
+        },
+        "split": {
+            "eyebrow": "Split preview",
+            "title": "Estimated allocation",
+            "main": {
+                "label": "Main Pool",
+                "detail": "Transparent reserve for verified aid"
+            },
+            "relief": {
+                "label": "Relief Pool",
+                "detail": "Selected earthquake relief campaign"
+            }
+        },
+        "result": {
+            "eyebrow": "After donation",
+            "title": "Result preview",
+            "donationRecord": {
+                "label": "DonationRecord",
+                "value": "Created after transaction confirmation"
+            },
+            "donorPass": {
+                "label": "DonorPass",
+                "value": "Issued or updated for this wallet"
+            },
+            "receipt": {
+                "label": "Receipt",
+                "value": "Public impact receipt, recipient data anonymized"
+            },
+            "leaderboard": {
+                "label": "Leaderboard",
+                "value": "Rank updates without claim rights or payout priority"
+            }
+        },
+        "note": {
+            "title": "DonorPass note",
+            "body": "DonorPass records contribution history only. It does not provide claim rights, payout priority, or promised aid.",
+            "link": "View dashboard"
         }
     }
 }

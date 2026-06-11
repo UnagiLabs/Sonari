@@ -33,13 +33,34 @@
                 "walletHint": "Sui ウォレットを接続してはじめましょう。",
                 "privacySummary": "Sonari が保存する情報",
                 "privacy": {
-                    "walletAddress": { "label": "ウォレットアドレス", "value": "SBT の所有者のみ" },
-                    "nickname": { "label": "ニックネーム", "value": "あとから追加可能" },
-                    "addressSearch": { "label": "住所検索", "value": "Sonari は保存しない" },
-                    "phoneEmail": { "label": "電話番号・メール", "value": "収集しない" },
-                    "gpsHistory": { "label": "GPS 履歴", "value": "保存しない" },
-                    "deviceInfo": { "label": "端末情報", "value": "公開しない" },
-                    "h3Cell": { "label": "H3 セル", "value": "解像度 7 の出力のみ" }
+                    "walletAddress": {
+                        "label": "ウォレットアドレス",
+                        "value": "SBT の所有者のみ"
+                    },
+                    "nickname": {
+                        "label": "ニックネーム",
+                        "value": "あとから追加可能"
+                    },
+                    "addressSearch": {
+                        "label": "住所検索",
+                        "value": "Sonari は保存しない"
+                    },
+                    "phoneEmail": {
+                        "label": "電話番号・メール",
+                        "value": "収集しない"
+                    },
+                    "gpsHistory": {
+                        "label": "GPS 履歴",
+                        "value": "保存しない"
+                    },
+                    "deviceInfo": {
+                        "label": "端末情報",
+                        "value": "公開しない"
+                    },
+                    "h3Cell": {
+                        "label": "H3 セル",
+                        "value": "解像度 7 の出力のみ"
+                    }
                 },
                 "cta": "はじめる",
                 "membership": {
@@ -274,6 +295,110 @@
         "map": {
             "unavailableTitle": "地図を表示できません",
             "unavailableBody": "居住地セルの値: {cell}"
+        }
+    },
+    "topbar": {
+        "brandHomeAria": "Sonari ホーム",
+        "nav": {
+            "home": "ホーム",
+            "donate": "寄付",
+            "dashboard": "ダッシュボード",
+            "leaderboard": "リーダーボード",
+            "register": "登録",
+            "claim": "申請"
+        },
+        "donateCta": "今すぐ寄付"
+    },
+    "donate": {
+        "hero": {
+            "eyebrow": "寄付",
+            "title": "たどれる道筋とともに支援を届ける。",
+            "sub": "USDC での支援、プールの選択、公開表示の設定、レシートのプレビューを行うフロントエンドの寄付フローです。",
+            "walletTag": "ウォレット",
+            "walletBody": "ウォレットを接続して寄付トランザクションを準備します。"
+        },
+        "form": {
+            "eyebrow": "貢献",
+            "title": "寄付の設定",
+            "typeLegend": "寄付の種類",
+            "poolLegend": "プール",
+            "amountLabel": "金額",
+            "displayLegend": "表示設定",
+            "donatePreview": "寄付をプレビュー",
+            "saveDraft": "下書きを保存"
+        },
+        "types": {
+            "general": {
+                "label": "一般寄付",
+                "description": "今後の検証済み支援に向けてメインの救援プールを支えます。",
+                "destination": "メインプールへ 100%"
+            },
+            "earthquake": {
+                "label": "地震救援",
+                "description": "資金の大半を選んだ災害救援プールへ振り向けます。",
+                "destination": "救援プールへ 80% / メインプールへ 20%"
+            }
+        },
+        "pools": {
+            "main": {
+                "label": "メインプール",
+                "detail": "既定の公開支援プール"
+            },
+            "earthquake": {
+                "label": "地震救援プール",
+                "detail": "確定した災害への支援"
+            }
+        },
+        "display": {
+            "publicName": {
+                "title": "公開表示名",
+                "description": "レシートやリーダーボードのプレビューに名前を表示します。"
+            },
+            "anonymous": {
+                "title": "匿名モード",
+                "description": "公開リストでは「匿名の寄付者」と表示します。"
+            },
+            "corporate": {
+                "title": "企業スポンサーモード",
+                "description": "スポンサーのロゴやプロフィール欄を後で用意します。"
+            }
+        },
+        "split": {
+            "eyebrow": "配分プレビュー",
+            "title": "配分の見積もり",
+            "main": {
+                "label": "メインプール",
+                "detail": "検証済み支援のための透明な準備金"
+            },
+            "relief": {
+                "label": "救援プール",
+                "detail": "選択した地震救援キャンペーン"
+            }
+        },
+        "result": {
+            "eyebrow": "寄付のあとに",
+            "title": "結果のプレビュー",
+            "donationRecord": {
+                "label": "DonationRecord",
+                "value": "トランザクション確定後に作成されます"
+            },
+            "donorPass": {
+                "label": "DonorPass",
+                "value": "このウォレット向けに発行または更新されます"
+            },
+            "receipt": {
+                "label": "Receipt",
+                "value": "公開のインパクトレシート。受領者の情報は匿名化されます"
+            },
+            "leaderboard": {
+                "label": "Leaderboard",
+                "value": "申請権や支払いの優先度なしで順位が更新されます"
+            }
+        },
+        "note": {
+            "title": "DonorPass について",
+            "body": "DonorPass は貢献の履歴だけを記録します。申請権や支払いの優先度、支援の約束を与えるものではありません。",
+            "link": "ダッシュボードを見る"
         }
     }
 }
