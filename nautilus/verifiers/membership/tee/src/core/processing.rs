@@ -1,7 +1,7 @@
 use crate::verify::kyc::{KYC_UNSUPPORTED, verify_kyc_unsupported};
 use crate::verify::world_id::{
-    WORLD_ID_ACTION, WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus,
-    WorldIdVerifiedEvidence, WorldIdVerifier,
+    WORLD_ID_VERIFICATION_FAILED, WorldIdVerificationStatus, WorldIdVerifiedEvidence,
+    WorldIdVerifier,
 };
 use crate::{
     INTENT, IdentityError, IdentityProvider, IdentityTeeResult, IdentityVerifyRequest,
@@ -179,7 +179,7 @@ fn world_id_request_matches_trusted_boundary(
         Err(IdentityError::Request(_)) => return Ok(false),
         Err(error) => return Err(error),
     };
-    if claims.action != WORLD_ID_ACTION {
+    if claims.action != verifier.expected_action() {
         return Ok(false);
     }
     if claims.environment != verifier.expected_environment() {

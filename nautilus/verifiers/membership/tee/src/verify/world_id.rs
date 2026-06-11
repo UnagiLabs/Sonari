@@ -22,6 +22,7 @@ pub const WORLD_ID_ENVIRONMENT_ENV: &str = "SONARI_WORLD_ID_ENVIRONMENT";
 /// where the TCP connection is forwarded so the host-side proxy enforces the
 /// egress allowlist (mirrors the earthquake egress proxy approach).
 pub const WORLD_ID_EGRESS_PROXY_URL_ENV: &str = "SONARI_WORLD_ID_EGRESS_PROXY_URL";
+pub const WORLD_ID_ACTION_ENV: &str = "SONARI_WORLD_ID_ACTION";
 pub const WORLD_ID_ACTION: &str = "sonari_membership_register_v2";
 pub const WORLD_ID_MAX_AGE_SECONDS: u64 = 604_800;
 pub const WORLD_ID_USER_AGENT: &str = "sonari-membership-tee/0.1";
@@ -50,6 +51,10 @@ pub struct WorldIdVerifiedEvidence {
 
 pub trait WorldIdVerifier {
     fn expected_rp_id(&self) -> &str;
+
+    fn expected_action(&self) -> &str {
+        WORLD_ID_ACTION
+    }
 
     fn expected_environment(&self) -> &str {
         "staging"
@@ -94,6 +99,7 @@ impl WorldIdEnvironment {
 pub struct CloudWorldIdVerifier {
     base_url: Url,
     rp_id: String,
+    expected_action: String,
     expected_environment: WorldIdEnvironment,
     client: reqwest::blocking::Client,
 }
@@ -108,8 +114,9 @@ impl CloudWorldIdVerifier {
             Err(_) => WorldIdEnvironment::Production,
         };
         let proxy = std::env::var(WORLD_ID_EGRESS_PROXY_URL_ENV).ok();
+        let expected_action = action_from_env()?;
 
-        Self::with_proxy(environment, rp_id, proxy.as_deref())
+        Self::with_action_and_proxy(environment, rp_id, expected_action, proxy.as_deref())
     }
 
     pub fn new(
@@ -117,6 +124,14 @@ impl CloudWorldIdVerifier {
         rp_id: impl Into<String>,
     ) -> Result<Self, IdentityError> {
         Self::with_proxy(environment, rp_id, None)
+    }
+
+    pub fn with_action(
+        environment: WorldIdEnvironment,
+        rp_id: impl Into<String>,
+        expected_action: impl Into<String>,
+    ) -> Result<Self, IdentityError> {
+        Self::with_action_and_proxy(environment, rp_id, expected_action, None)
     }
 
     /// Builds a verifier that routes its HTTPS traffic through an optional egress
@@ -130,8 +145,23 @@ impl CloudWorldIdVerifier {
         rp_id: impl Into<String>,
         egress_proxy_url: Option<&str>,
     ) -> Result<Self, IdentityError> {
+        Self::with_action_and_proxy(environment, rp_id, WORLD_ID_ACTION, egress_proxy_url)
+    }
+
+    pub fn with_action_and_proxy(
+        environment: WorldIdEnvironment,
+        rp_id: impl Into<String>,
+        expected_action: impl Into<String>,
+        egress_proxy_url: Option<&str>,
+    ) -> Result<Self, IdentityError> {
         let base_url = normalize_base_url(environment.api_base_url().to_owned())?;
-        Self::with_base_url_for_test(base_url, environment, rp_id, egress_proxy_url)
+        Self::with_action_base_url_for_test(
+            base_url,
+            environment,
+            rp_id,
+            expected_action,
+            egress_proxy_url,
+        )
     }
 
     fn with_base_url_for_test(
@@ -140,7 +170,24 @@ impl CloudWorldIdVerifier {
         rp_id: impl Into<String>,
         egress_proxy_url: Option<&str>,
     ) -> Result<Self, IdentityError> {
+        Self::with_action_base_url_for_test(
+            base_url,
+            expected_environment,
+            rp_id,
+            WORLD_ID_ACTION,
+            egress_proxy_url,
+        )
+    }
+
+    fn with_action_base_url_for_test(
+        base_url: Url,
+        expected_environment: WorldIdEnvironment,
+        rp_id: impl Into<String>,
+        expected_action: impl Into<String>,
+        egress_proxy_url: Option<&str>,
+    ) -> Result<Self, IdentityError> {
         let rp_id = normalize_rp_id(rp_id.into())?;
+        let expected_action = normalize_world_id_action(expected_action.into())?;
         let mut builder = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(10))
             .user_agent(WORLD_ID_USER_AGENT)
@@ -160,6 +207,7 @@ impl CloudWorldIdVerifier {
         Ok(Self {
             base_url,
             rp_id,
+            expected_action,
             expected_environment,
             client,
         })
@@ -182,6 +230,10 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
         &self.rp_id
     }
 
+    fn expected_action(&self) -> &str {
+        &self.expected_action
+    }
+
     fn expected_environment(&self) -> &str {
         self.expected_environment.as_str()
     }
@@ -191,7 +243,7 @@ impl WorldIdVerifier for CloudWorldIdVerifier {
             Ok(claims) => claims,
             Err(_) => return rejected(),
         };
-        if claims.action != WORLD_ID_ACTION {
+        if claims.action != self.expected_action {
             return rejected();
         }
         if claims.environment != self.expected_environment.as_str() {
@@ -295,6 +347,44 @@ fn normalize_rp_id(rp_id: String) -> Result<String, IdentityError> {
         )));
     }
     Ok(trimmed)
+}
+
+pub fn world_id_action_from_env() -> Result<String, IdentityError> {
+    action_from_env()
+}
+
+fn action_from_env() -> Result<String, IdentityError> {
+    match std::env::var(WORLD_ID_ACTION_ENV) {
+        Ok(value) => normalize_world_id_action_or_default(value),
+        Err(_) => Ok(WORLD_ID_ACTION.to_owned()),
+    }
+}
+
+pub fn normalize_world_id_action_or_default(
+    action: impl Into<String>,
+) -> Result<String, IdentityError> {
+    let action = action.into();
+    if action.trim().is_empty() {
+        return Ok(WORLD_ID_ACTION.to_owned());
+    }
+    normalize_world_id_action(action)
+}
+
+pub fn normalize_world_id_action(action: impl Into<String>) -> Result<String, IdentityError> {
+    let trimmed = action.into().trim().to_owned();
+    let Some(version) = trimmed.strip_prefix("sonari_membership_register_v") else {
+        return Err(invalid_world_id_action());
+    };
+    if version.is_empty() || !version.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid_world_id_action());
+    }
+    Ok(trimmed)
+}
+
+fn invalid_world_id_action() -> IdentityError {
+    IdentityError::Request(format!(
+        "{WORLD_ID_ACTION_ENV} must match ^sonari_membership_register_v\\d+$"
+    ))
 }
 
 fn classify_bad_request(
@@ -416,6 +506,7 @@ fn pending_source() -> WorldIdVerificationStatus {
 #[derive(Debug, Clone)]
 pub struct DummyWorldIdVerifier {
     rp_id: String,
+    expected_action: String,
     expected_environment: WorldIdEnvironment,
 }
 
@@ -428,9 +519,26 @@ impl DummyWorldIdVerifier {
         rp_id: impl Into<String>,
         expected_environment: WorldIdEnvironment,
     ) -> Result<Self, IdentityError> {
+        Self::with_action_and_environment(rp_id, WORLD_ID_ACTION, expected_environment)
+    }
+
+    pub fn with_action(
+        rp_id: impl Into<String>,
+        expected_action: impl Into<String>,
+    ) -> Result<Self, IdentityError> {
+        Self::with_action_and_environment(rp_id, expected_action, WorldIdEnvironment::Staging)
+    }
+
+    pub fn with_action_and_environment(
+        rp_id: impl Into<String>,
+        expected_action: impl Into<String>,
+        expected_environment: WorldIdEnvironment,
+    ) -> Result<Self, IdentityError> {
         let rp_id = normalize_rp_id(rp_id.into())?;
+        let expected_action = normalize_world_id_action(expected_action.into())?;
         Ok(Self {
             rp_id,
+            expected_action,
             expected_environment,
         })
     }
@@ -439,6 +547,10 @@ impl DummyWorldIdVerifier {
 impl WorldIdVerifier for DummyWorldIdVerifier {
     fn expected_rp_id(&self) -> &str {
         &self.rp_id
+    }
+
+    fn expected_action(&self) -> &str {
+        &self.expected_action
     }
 
     fn expected_environment(&self) -> &str {
@@ -450,7 +562,7 @@ impl WorldIdVerifier for DummyWorldIdVerifier {
             Ok(claims) => claims,
             Err(_) => return rejected(),
         };
-        if claims.action != WORLD_ID_ACTION {
+        if claims.action != self.expected_action {
             return rejected();
         }
         if claims.environment != self.expected_environment.as_str() {
@@ -478,10 +590,11 @@ impl WorldIdVerifier for DummyWorldIdVerifier {
 #[cfg(test)]
 mod tests {
     use super::{
-        CloudWorldIdVerifier, DummyWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_API_UNAVAILABLE,
-        WORLD_ID_RP_ID_ENV, WORLD_ID_USER_AGENT, WORLD_ID_VERIFICATION_FAILED, WorldIdEnvironment,
-        WorldIdVerificationStatus, WorldIdVerifier, classify_bad_request, classify_http_status,
-        classify_success_response, normalize_base_url,
+        CloudWorldIdVerifier, DummyWorldIdVerifier, WORLD_ID_ACTION, WORLD_ID_ACTION_ENV,
+        WORLD_ID_API_UNAVAILABLE, WORLD_ID_RP_ID_ENV, WORLD_ID_USER_AGENT,
+        WORLD_ID_VERIFICATION_FAILED, WorldIdEnvironment, WorldIdVerificationStatus,
+        WorldIdVerifier, classify_bad_request, classify_http_status, classify_success_response,
+        normalize_base_url, normalize_world_id_action, normalize_world_id_action_or_default,
     };
     use crate::WorldIdProofRequest;
     use reqwest::StatusCode;
@@ -515,6 +628,54 @@ mod tests {
                 error_code: WORLD_ID_VERIFICATION_FAILED.to_owned()
             }
         );
+    }
+
+    #[test]
+    fn dummy_world_id_verifier_accepts_configured_action_only() {
+        let verifier =
+            DummyWorldIdVerifier::with_action("rp_staging_123", "sonari_membership_register_v3")
+                .unwrap();
+        let mut proof = world_id_proof();
+        proof.idkit_response["action"] = serde_json::json!("sonari_membership_register_v3");
+
+        let WorldIdVerificationStatus::Verified { evidence } = verifier.verify_world_id(&proof)
+        else {
+            panic!("configured action should be accepted");
+        };
+        assert_eq!(evidence.action, "sonari_membership_register_v3");
+
+        let proof = world_id_proof();
+        assert_eq!(
+            verifier.verify_world_id(&proof),
+            WorldIdVerificationStatus::Rejected {
+                error_code: WORLD_ID_VERIFICATION_FAILED.to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn world_id_action_normalization_defaults_blank_and_rejects_invalid_values() {
+        assert_eq!(
+            normalize_world_id_action_or_default("").unwrap(),
+            WORLD_ID_ACTION
+        );
+        assert_eq!(
+            normalize_world_id_action_or_default("   ").unwrap(),
+            WORLD_ID_ACTION
+        );
+        assert_eq!(
+            normalize_world_id_action("sonari_membership_register_v3").unwrap(),
+            "sonari_membership_register_v3"
+        );
+
+        for value in [
+            "sonari_membership_register_v",
+            "sonari_membership_register_v3_extra",
+            "attacker_action",
+        ] {
+            let error = normalize_world_id_action(value).unwrap_err();
+            assert!(error.to_string().contains(WORLD_ID_ACTION_ENV));
+        }
     }
 
     #[test]
@@ -841,6 +1002,18 @@ mod tests {
                 error_code: WORLD_ID_API_UNAVAILABLE.to_owned()
             }
         );
+    }
+
+    #[test]
+    fn cloud_world_id_verifier_rejects_invalid_configured_action_before_http() {
+        let error = CloudWorldIdVerifier::with_action(
+            WorldIdEnvironment::Staging,
+            "rp_staging_123",
+            "attacker_action",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(WORLD_ID_ACTION_ENV));
     }
 
     fn world_id_proof() -> WorldIdProofRequest {
