@@ -678,7 +678,52 @@ fun return_floor_budget_proportional_split() {
 }
 
 // ---------------------------------------------------------------
-// 12. return_floor_budget twice aborts EFloorBudgetAlreadyReturned
+// 12. floor census から別 DisasterEvent の census を適用しようとすると拒否される
+// ---------------------------------------------------------------
+
+#[test, expected_failure(abort_code = campaign::EFloorCensusBindingMismatch)]
+fun floor_census_from_different_disaster_event_is_rejected() {
+    let mut scenario = setup();
+    // キャンペーンは EVENT_UID で作成
+    create_campaign_in_scenario(&mut scenario, EVENT_UID);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut c = scenario.take_shared<campaign::Campaign>();
+
+        // 別の災害の uid/revision を持つ census を生成
+        let other_uid = x"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let result = census_result::new_for_testing(
+            other_uid,
+            EVENT_REVISION,
+            CELLS_ROOT,
+            vector[10, 0, 0],
+            NOW_MS,
+        );
+        // other_uid で呼び出す → campaign.event_uid != other_uid で abort
+        campaign::apply_floor_census(
+            &mut c,
+            &result,
+            other_uid,
+            EVENT_REVISION,
+            CELLS_ROOT,
+            &mut cat_pool,
+            &mut main_pool,
+            NOW_MS,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(c);
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 13. return_floor_budget twice aborts EFloorBudgetAlreadyReturned
 // ---------------------------------------------------------------
 
 #[test, expected_failure(abort_code = campaign::EFloorBudgetAlreadyReturned)]

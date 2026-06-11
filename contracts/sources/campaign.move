@@ -512,6 +512,9 @@ public(package) fun apply_floor_census(
         category_pool::category_pool_id(category_pool) == campaign.category_pool_id,
         ECampaignCategoryPoolMismatch,
     );
+    // census が campaign 自身の DisasterEvent に紐付いていることを検証する
+    assert!(campaign.event_uid == disaster_event_uid, EFloorCensusBindingMismatch);
+    assert!(campaign.event_revision == disaster_event_revision, EFloorCensusBindingMismatch);
     assert!(census_result::event_uid(result) == disaster_event_uid, EFloorCensusBindingMismatch);
     assert!(
         census_result::event_revision(result) == disaster_event_revision,
@@ -952,6 +955,8 @@ public(package) fun finalize_round_v2(
     // Compute per-band payouts
     let mut band_payout = vector[0u64, 0u64, 0u64];
     if (liability128 > 0) {
+        // 適格受給者が存在するため sweep フラグを必ずリセットする
+        campaign.sweep_eligible = false;
         let cap128 = liability128 * (campaign.round_cap_multiplier as u128);
         let effective_av128 = if ((campaign_av as u128) > cap128) { cap128 } else { campaign_av as u128 };
         let mut b2 = 0u64;

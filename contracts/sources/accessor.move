@@ -18,6 +18,8 @@ use sui::coin::Coin;
 use usdc::usdc::USDC;
 
 const EInvalidResidenceCellProof: u64 = 0;
+// campaign::EDisasterEventMismatch のミラー定数（lint 要件: assert には named constant が必要）
+const EDisasterEventMismatch: u64 = 4;
 
 public fun donate_general_usdc(
     pause_state: &PauseState,
@@ -320,6 +322,10 @@ public fun set_floor_census(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    assert!(
+        object::id(disaster_event) == campaign_v2::campaign_disaster_event_id(campaign),
+        EDisasterEventMismatch,
+    );
 
     let now_ms = clock::timestamp_ms(clock);
     let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(

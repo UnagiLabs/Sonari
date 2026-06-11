@@ -666,7 +666,105 @@ fun finalize_round_2_redistributes_remaining_balance() {
 }
 
 // ---------------------------------------------------------------
-// 15. reject: finalize_round Round 2 too early
+// 15. sweep_eligible は liability>0 の finalize でリセットされる
+//     (Round1 で eligible=0 → sweep_eligible=true, Round2 で eligible>0 → false)
+// ---------------------------------------------------------------
+
+#[test]
+fun finalize_round_resets_sweep_eligible_when_liability_gt_0() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        // Round 1: 適格メンバーなし → sweep_eligible = true
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+
+        let (_, _, _, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
+        assert!(sweep_eligible);
+
+        // Round 2: メンバーを追加して liability > 0 にする
+        // 残高を積んで termination check を回避する (MIN_PAYOUT_PER_RECIPIENT = 1_000_000)
+        campaign::fund_campaign_for_testing(&mut c, 10_000_000, scenario.ctx());
+        let pass_lineage = object::id_from_address(@0x0001);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage, 1u8, false, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage, 0);
+
+        let round2_time = DONATION_END_MS + ROUND_INTERVAL_MS;
+        campaign::finalize_round_v2(&mut c, round2_time);
+
+        let (round, _, _, _, eligible, _, sweep_after) = campaign::campaign_payout_round_fields(&c);
+        assert!(round == 2);
+        assert!(eligible == 1);
+        // sweep_eligible がリセットされていることを確認
+        assert!(!sweep_after);
+
+        test_scenario::return_shared(c);
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 16. sweep_residual は liability>0 finalize 後に拒否される (ESweepNotEligible)
+// ---------------------------------------------------------------
+
+#[test, expected_failure(abort_code = campaign::ESweepNotEligible)]
+fun sweep_residual_rejects_when_sweep_eligible_reset() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+
+        // Round 1: eligible=0 → sweep_eligible=true
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+
+        // Round 2: eligible>0 → sweep_eligible=false (リセット)
+        // termination check 回避のため残高を積む
+        campaign::fund_campaign_for_testing(&mut c, 10_000_000, scenario.ctx());
+        let pass_lineage = object::id_from_address(@0x0001);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage, 1u8, false, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage, 0);
+        let round2_time = DONATION_END_MS + ROUND_INTERVAL_MS;
+        campaign::finalize_round_v2(&mut c, round2_time);
+
+        // floor budget を返還（sweep の前提条件）
+        let census = census_result::new_for_testing(
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            vector[0, 0, 0],
+            DONATION_END_MS - 1,
+        );
+        campaign::apply_floor_census(
+            &mut c,
+            &census,
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            &mut cat_pool,
+            &mut main_pool,
+            DONATION_END_MS - 1,
+            scenario.ctx(),
+        );
+        campaign::return_floor_budget(&mut c, &mut cat_pool, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        // sweep_eligible=false のため ESweepNotEligible で abort すること
+        campaign::sweep_residual_v2(&mut c, &mut main_pool, round2_time, scenario.ctx());
+
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 17. reject: finalize_round Round 2 too early
 // ---------------------------------------------------------------
 
 #[test, expected_failure(abort_code = campaign::ERoundTooEarly)]
