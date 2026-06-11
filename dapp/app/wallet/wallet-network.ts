@@ -24,6 +24,20 @@ export function resolveGrpcBaseUrl(network: WalletNetwork): string {
     }
 }
 
+export function shouldWarnNetworkMismatch(
+    status: string,
+    network: string | null | undefined,
+): boolean {
+    if (status !== "connected") {
+        return false;
+    }
+    const trimmed = (network ?? "").trim();
+    if (trimmed.length === 0) {
+        return false;
+    }
+    return !isAllowedNetwork(trimmed);
+}
+
 export function readWalletNetwork(
     raw: string | undefined = process.env.NEXT_PUBLIC_SUI_NETWORK,
 ): WalletNetwork {

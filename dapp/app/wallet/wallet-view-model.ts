@@ -18,6 +18,13 @@ export interface WalletStatusView {
     readonly canAct: boolean;
 }
 
+export interface WalletStatusLabels {
+    readonly disconnected: string;
+    readonly connecting: string;
+    readonly reconnecting: string;
+    readonly connectedFallback: string;
+}
+
 const SHORT_ADDRESS_THRESHOLD = 11;
 const SHORT_ADDRESS_PREFIX_LEN = 6;
 const SHORT_ADDRESS_SUFFIX_LEN = 4;
@@ -39,9 +46,10 @@ function buildConnectedLabel(
     shortAddress: string | null,
     network: string | null | undefined,
     walletName: string | null | undefined,
+    fallback: string,
 ): string {
     if (shortAddress === null) {
-        return "Connected";
+        return fallback;
     }
     const parts: string[] = [shortAddress];
     if (network != null && network.length > 0) {
@@ -53,7 +61,7 @@ function buildConnectedLabel(
     return parts.join(" · ");
 }
 
-export function toWalletStatusView(input: WalletStatusInput): WalletStatusView {
+export function toWalletStatusView(input: WalletStatusInput, labels: WalletStatusLabels): WalletStatusView {
     const { status, address, network, walletName } = input;
 
     const hasAddress = address != null && address.length > 0;
@@ -63,16 +71,16 @@ export function toWalletStatusView(input: WalletStatusInput): WalletStatusView {
     let label: string;
     switch (status) {
         case "disconnected":
-            label = "Connect wallet";
+            label = labels.disconnected;
             break;
         case "connecting":
-            label = "Connecting…";
+            label = labels.connecting;
             break;
         case "reconnecting":
-            label = "Reconnecting…";
+            label = labels.reconnecting;
             break;
         case "connected":
-            label = buildConnectedLabel(shortAddress, network, walletName);
+            label = buildConnectedLabel(shortAddress, network, walletName, labels.connectedFallback);
             break;
     }
 

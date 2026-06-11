@@ -729,5 +729,14 @@
                 "detail": "The claim transaction was not completed."
             }
         }
+    },
+    "wallet": {
+        "connect": "Connect wallet",
+        "connecting": "Connecting…",
+        "reconnecting": "Reconnecting…",
+        "connected": "Connected",
+        "copyAddressAria": "Copy full wallet address",
+        "copied": "Copied",
+        "networkWarning": "Connected to an unsupported network ({network}). Switch to testnet or localnet."
     }
 }
