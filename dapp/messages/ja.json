@@ -618,5 +618,112 @@
             "corporateSponsors": "企業スポンサー",
             "rankLabel": "順位 #{rank}"
         }
+    },
+    "claim": {
+        "hero": {
+            "eyebrow": "支援を申請",
+            "title": "個人情報を出さずに受給資格を確認する。",
+            "sub": "MembershipPass の状態、確定した災害イベント、受給資格チェック、救援金トランザクションのプレビューを行うフロントエンドの申請フローです。",
+            "walletTag": "ウォレット",
+            "walletBody": "ウォレットを接続して MembershipPass と申請履歴を読み込みます。"
+        },
+        "pass": {
+            "eyebrow": "MembershipPass",
+            "title": "受給者の状態",
+            "statusActive": "有効",
+            "passId": "パス ID",
+            "residenceCell": "居住セル",
+            "verification": "検証",
+            "verificationValid": "署名済みの居住メタデータは有効です"
+        },
+        "event": {
+            "eyebrow": "DisasterEvent",
+            "title": "申請できるイベント",
+            "viewEvents": "イベントを見る",
+            "selectLegend": "イベントを選択"
+        },
+        "eligibility": {
+            "eyebrow": "受給資格",
+            "title": "検証チェック",
+            "checkButton": "受給資格を確認"
+        },
+        "checks": {
+            "finalized": {
+                "label": "DisasterEvent が確定済み",
+                "detail": "署名済みのペイロードがプログラムに受理されています。"
+            },
+            "membership": {
+                "label": "MembershipPass が有効",
+                "detail": "接続中のウォレットは現在有効な MembershipPass を持っています。"
+            },
+            "residence": {
+                "label": "居住セルが含まれる",
+                "detail": "登録した H3 セルが affected_cells に含まれています。"
+            },
+            "noPreviousClaim": {
+                "label": "過去の申請なし",
+                "detail": "このイベントはこのパスでまだ申請されていません。"
+            },
+            "poolBudget": {
+                "label": "プールの予算に余裕あり",
+                "detail": "救援プールには見積もりに足る利用可能額があります。"
+            }
+        },
+        "checkStatus": {
+            "ready": "準備完了",
+            "pending": "保留中"
+        },
+        "proof": {
+            "idle": "受給資格はまだ確認されていません。",
+            "checking": "被災セルの証明を確認しています。",
+            "ready": "被災セルの証明を検証しました。"
+        },
+        "errors": {
+            "workerMissing": "被災証明のワーカーが設定されていません。",
+            "outsideArea": "居住セルはこのイベントの範囲外です。",
+            "fetchFailed": "被災証明を取得できませんでした。",
+            "verifyFailed": "被災証明を検証できませんでした。",
+            "generic": "受給資格の確認に失敗しました。"
+        },
+        "preview": {
+            "eyebrow": "プレビュー",
+            "title": "申請の見積もり",
+            "estimatedRelief": "見積もり救援金",
+            "poolSource": "プールの出所",
+            "campaign": "キャンペーン",
+            "receipt": "レシート",
+            "receiptValue": "公開・受給者の参照は匿名化されます"
+        },
+        "claimButton": "支援を申請",
+        "note": {
+            "title": "プライバシーの境界",
+            "body": "公開画面には H3 セル・パスの状態・検証の状態・匿名化された受給者の参照だけを表示します。"
+        },
+        "result": {
+            "eyebrow": "トランザクション結果"
+        },
+        "tx": {
+            "idle": {
+                "message": "申請操作を待っています。",
+                "detail": "署名後に、トランザクションのダイジェスト・レシートのリンク・状態をここに表示できます。"
+            },
+            "building": {
+                "message": "申請トランザクションを作成しています。",
+                "detail": "署名に向けて申請トランザクションを準備しています。"
+            },
+            "submitting": {
+                "message": "ウォレットでトランザクションを承認してください。",
+                "detail": "接続中のウォレットで申請トランザクションを承認してください。"
+            },
+            "submitted": {
+                "message": "申請トランザクションを送信しました。",
+                "detail": "トランザクションダイジェスト: {digest}"
+            },
+            "failed": {
+                "walletRequired": "申請の前にウォレットを接続してください。",
+                "generic": "申請トランザクションに失敗しました。",
+                "detail": "申請トランザクションは完了しませんでした。"
+            }
+        }
     }
 }

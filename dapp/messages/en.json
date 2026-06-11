@@ -618,5 +618,112 @@
             "corporateSponsors": "Corporate sponsors",
             "rankLabel": "rank #{rank}"
         }
+    },
+    "claim": {
+        "hero": {
+            "eyebrow": "Claim relief",
+            "title": "Check eligibility without exposing private details.",
+            "sub": "A front-end claim flow for MembershipPass status, finalized disaster events, eligibility checks, and Relief Cash transaction previews.",
+            "walletTag": "Wallet",
+            "walletBody": "Connect a wallet to load MembershipPass and claim history."
+        },
+        "pass": {
+            "eyebrow": "MembershipPass",
+            "title": "Recipient status",
+            "statusActive": "Active",
+            "passId": "Pass ID",
+            "residenceCell": "Residence cell",
+            "verification": "Verification",
+            "verificationValid": "Signed residence metadata valid"
+        },
+        "event": {
+            "eyebrow": "DisasterEvent",
+            "title": "Claimable events",
+            "viewEvents": "View events",
+            "selectLegend": "Select event"
+        },
+        "eligibility": {
+            "eyebrow": "Eligibility",
+            "title": "Verification checks",
+            "checkButton": "Check eligibility"
+        },
+        "checks": {
+            "finalized": {
+                "label": "DisasterEvent finalized",
+                "detail": "Signed payload has been accepted by the program."
+            },
+            "membership": {
+                "label": "MembershipPass active",
+                "detail": "Connected wallet has a current MembershipPass."
+            },
+            "residence": {
+                "label": "Residence cell included",
+                "detail": "Registered H3 cell appears in affected_cells."
+            },
+            "noPreviousClaim": {
+                "label": "No previous claim",
+                "detail": "This event has not been claimed by this pass."
+            },
+            "poolBudget": {
+                "label": "Pool budget available",
+                "detail": "Relief pool has enough available amount for the estimate."
+            }
+        },
+        "checkStatus": {
+            "ready": "ready",
+            "pending": "pending"
+        },
+        "proof": {
+            "idle": "Eligibility has not been checked.",
+            "checking": "Checking affected cells proof.",
+            "ready": "Affected cells proof verified."
+        },
+        "errors": {
+            "workerMissing": "Affected proof worker is not configured.",
+            "outsideArea": "Residence cell is outside this event.",
+            "fetchFailed": "Affected proof could not be fetched.",
+            "verifyFailed": "Affected proof could not be verified.",
+            "generic": "Eligibility check failed."
+        },
+        "preview": {
+            "eyebrow": "Preview",
+            "title": "Estimated claim",
+            "estimatedRelief": "Estimated Relief Cash",
+            "poolSource": "Pool source",
+            "campaign": "Campaign",
+            "receipt": "Receipt",
+            "receiptValue": "Public, recipient reference anonymized"
+        },
+        "claimButton": "Claim relief",
+        "note": {
+            "title": "Privacy boundary",
+            "body": "Public screens should show H3 cell, pass status, verification status, and anonymized recipient references only."
+        },
+        "result": {
+            "eyebrow": "Transaction result"
+        },
+        "tx": {
+            "idle": {
+                "message": "Waiting for claim action.",
+                "detail": "The transaction digest, receipt link, and status can render here after signing."
+            },
+            "building": {
+                "message": "Building claim transaction.",
+                "detail": "Preparing the claim transaction for signing."
+            },
+            "submitting": {
+                "message": "Approve the transaction in your wallet.",
+                "detail": "Approve the claim transaction in your connected wallet."
+            },
+            "submitted": {
+                "message": "Claim transaction submitted.",
+                "detail": "Transaction digest: {digest}"
+            },
+            "failed": {
+                "walletRequired": "Connect a wallet before claiming.",
+                "generic": "Claim transaction failed.",
+                "detail": "The claim transaction was not completed."
+            }
+        }
     }
 }
