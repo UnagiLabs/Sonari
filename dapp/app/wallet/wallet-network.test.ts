@@ -3,6 +3,7 @@ import {
     isAllowedNetwork,
     resolveGrpcBaseUrl,
     resolveNetwork,
+    shouldWarnNetworkMismatch,
 } from "./wallet-network";
 
 describe("isAllowedNetwork", () => {
@@ -58,6 +59,48 @@ describe("resolveNetwork", () => {
 
     it("trims surrounding whitespace for localnet", () => {
         expect(resolveNetwork("  localnet  ")).toBe("localnet");
+    });
+});
+
+describe("shouldWarnNetworkMismatch", () => {
+    it("returns true when connected to mainnet", () => {
+        expect(shouldWarnNetworkMismatch("connected", "mainnet")).toBe(true);
+    });
+
+    it("returns false when connected to testnet", () => {
+        expect(shouldWarnNetworkMismatch("connected", "testnet")).toBe(false);
+    });
+
+    it("returns false when connected to localnet", () => {
+        expect(shouldWarnNetworkMismatch("connected", "localnet")).toBe(false);
+    });
+
+    it("returns false when connected but network is empty string", () => {
+        expect(shouldWarnNetworkMismatch("connected", "")).toBe(false);
+    });
+
+    it("returns false when connected but network is null", () => {
+        expect(shouldWarnNetworkMismatch("connected", null)).toBe(false);
+    });
+
+    it("returns false when connected but network is undefined", () => {
+        expect(shouldWarnNetworkMismatch("connected", undefined)).toBe(false);
+    });
+
+    it("returns true when connected to mainnet with surrounding whitespace", () => {
+        expect(shouldWarnNetworkMismatch("connected", " mainnet ")).toBe(true);
+    });
+
+    it("returns false when disconnected even if network is mainnet", () => {
+        expect(shouldWarnNetworkMismatch("disconnected", "mainnet")).toBe(false);
+    });
+
+    it("returns false when connecting even if network is mainnet", () => {
+        expect(shouldWarnNetworkMismatch("connecting", "mainnet")).toBe(false);
+    });
+
+    it("returns false when reconnecting even if network is mainnet", () => {
+        expect(shouldWarnNetworkMismatch("reconnecting", "mainnet")).toBe(false);
     });
 });
 
