@@ -150,7 +150,7 @@ fun init_creates_display_objects_for_explorer() {
             &membership_display,
             1,
             b"Sonari Passport".to_string(),
-            b"Status: {status_label}. Verified via {provider_label}.".to_string(),
+            b"Status: {status_label}.".to_string(),
             b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/membership-pass.svg".to_string(),
             b"https://app.sonari.xyz/passport/{id}".to_string(),
         );

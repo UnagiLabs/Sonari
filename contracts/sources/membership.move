@@ -10,8 +10,6 @@ const STATUS_REVOKED: u8 = 3;
 const STATUS_MIGRATED: u8 = 4;
 const REGISTRY_KIND_MEMBERSHIP: u8 = 2;
 const TARGET_KIND_MEMBERSHIP_REGISTRY: u8 = 7;
-const IDENTITY_PROVIDER_KYC: u8 = 1;
-const IDENTITY_PROVIDER_WORLD_ID: u8 = 2;
 
 const EMembershipPassNotActive: u64 = 2;
 const EClaimantNotAuthorized: u64 = 3;
@@ -45,11 +43,6 @@ public struct MembershipPass has key {
     account_created_at_ms: u64,
     home_cell: u64,
     home_cell_registered_at_ms: u64,
-    identity_verified: bool,
-    identity_provider_mask: u8,
-    provider_label: String,
-    identity_verified_at_ms: u64,
-    identity_expires_at_ms: u64,
     terms_version: u64,
     signed_statement_hash: vector<u8>,
 }
@@ -95,11 +88,6 @@ public(package) fun register_member(
         account_created_at_ms: issued_at_ms,
         home_cell: 0,
         home_cell_registered_at_ms: 0,
-        identity_verified: false,
-        identity_provider_mask: 0,
-        provider_label: provider_label(0),
-        identity_verified_at_ms: 0,
-        identity_expires_at_ms: 0,
         terms_version,
         signed_statement_hash,
     };
@@ -253,20 +241,6 @@ fun status_label(status: u8): String {
     }
 }
 
-fun provider_label(provider_mask: u8): String {
-    if (provider_mask == 0) {
-        string::utf8(b"Unverified")
-    } else if (provider_mask == IDENTITY_PROVIDER_KYC) {
-        string::utf8(b"KYC")
-    } else if (provider_mask == IDENTITY_PROVIDER_WORLD_ID) {
-        string::utf8(b"World ID")
-    } else if (provider_mask == IDENTITY_PROVIDER_KYC + IDENTITY_PROVIDER_WORLD_ID) {
-        string::utf8(b"KYC + World ID")
-    } else {
-        string::utf8(b"Unknown")
-    }
-}
-
 public(package) fun membership_pass_owner(pass: &MembershipPass): address {
     pass.owner
 }
@@ -281,10 +255,6 @@ public(package) fun membership_pass_status(pass: &MembershipPass): u8 {
 
 public(package) fun membership_pass_issued_at_ms(pass: &MembershipPass): u64 {
     pass.issued_at_ms
-}
-
-public(package) fun membership_pass_display_labels(pass: &MembershipPass): (String, String) {
-    (pass.status_label, pass.provider_label)
 }
 
 public(package) fun membership_pass_mvp_summary(
@@ -402,11 +372,6 @@ public fun create_pass_for_testing(
         account_created_at_ms: issued_at_ms,
         home_cell: 0,
         home_cell_registered_at_ms: issued_at_ms,
-        identity_verified: false,
-        identity_provider_mask: 0,
-        provider_label: provider_label(0),
-        identity_verified_at_ms: 0,
-        identity_expires_at_ms: 0,
         terms_version: 0,
         signed_statement_hash: vector[],
     }
@@ -436,11 +401,6 @@ public fun create_registry_and_pass_for_testing(
         account_created_at_ms: issued_at_ms,
         home_cell: 0,
         home_cell_registered_at_ms: issued_at_ms,
-        identity_verified: false,
-        identity_provider_mask: 0,
-        provider_label: provider_label(0),
-        identity_verified_at_ms: 0,
-        identity_expires_at_ms: 0,
         terms_version,
         signed_statement_hash,
     };
@@ -486,11 +446,6 @@ public fun destroy_pass_for_testing(pass: MembershipPass) {
         account_created_at_ms: _,
         home_cell: _,
         home_cell_registered_at_ms: _,
-        identity_verified: _,
-        identity_provider_mask: _,
-        provider_label: _,
-        identity_verified_at_ms: _,
-        identity_expires_at_ms: _,
         terms_version: _,
         signed_statement_hash: _,
     } = pass;
