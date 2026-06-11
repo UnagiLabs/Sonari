@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { shouldShowAdvancedCellInput } from "./advanced-cell-input";
 import {
     isGoogleMapsConfigured,
     loadGoogleMapsLibraries,
@@ -569,31 +570,33 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
 
                     <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
 
-                    <details className="advanced-cell-input">
-                        <summary>{t("advancedSummary")}</summary>
-                        <label className="text-field" htmlFor="home-cell-advanced">
-                            <span>{t("advancedLabel")}</span>
-                            <input
-                                id="home-cell-advanced"
-                                onBlur={(event) => {
-                                    handleAdvancedCommit(event.target.value);
-                                }}
-                                onChange={(event) => {
-                                    setAdvancedInput(event.target.value);
-                                }}
-                                onKeyDown={(event) => {
-                                    if (event.key === "Enter") {
-                                        event.preventDefault();
-                                        handleAdvancedCommit(event.currentTarget.value);
-                                    }
-                                }}
-                                placeholder="872f5aa8effffff"
-                                type="text"
-                                value={advancedInput}
-                            />
-                            <small>{t("advancedHelp")}</small>
-                        </label>
-                    </details>
+                    {shouldShowAdvancedCellInput(status) ? (
+                        <details className="advanced-cell-input">
+                            <summary>{t("advancedSummary")}</summary>
+                            <label className="text-field" htmlFor="home-cell-advanced">
+                                <span>{t("advancedLabel")}</span>
+                                <input
+                                    id="home-cell-advanced"
+                                    onBlur={(event) => {
+                                        handleAdvancedCommit(event.target.value);
+                                    }}
+                                    onChange={(event) => {
+                                        setAdvancedInput(event.target.value);
+                                    }}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                            event.preventDefault();
+                                            handleAdvancedCommit(event.currentTarget.value);
+                                        }
+                                    }}
+                                    placeholder="872f5aa8effffff"
+                                    type="text"
+                                    value={advancedInput}
+                                />
+                                <small>{t("advancedHelp")}</small>
+                            </label>
+                        </details>
+                    ) : null}
                 </div>
             </div>
         </div>
