@@ -134,6 +134,7 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `GitCommitSha=${validCommitSha}`,
                 "ScheduleState=DISABLED",
                 "WorldIdProofMode=dummy",
+                "WorldIdAction=sonari_membership_register_v2",
                 `SourceArchiverTokenSecretArn=${validInput.sourceArchiverTokenSecretArn}`,
                 `SourceArchiverPrivateKeySecretArn=${validInput.sourceArchiverPrivateKeySecretArn}`,
                 "SourceArchiverSuiNetwork=testnet",
@@ -214,6 +215,22 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         const plan = buildAwsSonariVerifierRunnerDeployPlan(inputWithoutProofMode);
 
         expect(plan.parameterOverrideArgs).toContain("WorldIdProofMode=real");
+    });
+
+    it("validates and includes the World ID action parameter override", () => {
+        const plan = buildAwsSonariVerifierRunnerDeployPlan({
+            ...validInput,
+            worldIdAction: "sonari_membership_register_v3",
+        });
+
+        expect(plan.parameterOverrides.WorldIdAction).toBe("sonari_membership_register_v3");
+        expect(plan.parameterOverrideArgs).toContain("WorldIdAction=sonari_membership_register_v3");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                worldIdAction: "attacker_action",
+            }),
+        ).toThrow("Invalid World ID action");
     });
 
     it("exposes CLI flags for the mainnet dummy World ID proof mode gate", async () => {

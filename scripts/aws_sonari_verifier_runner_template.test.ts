@@ -483,6 +483,8 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         const template = await readTemplate();
 
         expect(template).toContain("WorldIdAppId:");
+        expect(template).toContain("WorldIdAction:");
+        expect(template).toContain('AllowedPattern: "^sonari_membership_register_v[0-9]+$"');
         expect(template).toContain("WorldIdApiBase:");
         expect(template).toContain("Default: https://developer.world.org");
         expect(template).toContain("TeeEifS3Bucket:");
@@ -500,6 +502,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("kms:RecipientAttestation:ImageSha384");
         expect(template).toContain("kms:RecipientAttestation:PCR3");
         expect(template).toContain("SONARI_WORLD_ID_APP_ID");
+        expect(template).toContain("SONARI_WORLD_ID_ACTION");
         expect(template).toContain("SONARI_SIGNING_MATERIAL_CIPHERTEXT_FILE");
         expect(template).toContain("SONARI_SIGNING_MATERIAL_KMS_KEY_ID");
         expect(template).toContain("printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q");
@@ -519,7 +522,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
 
         expect(membershipWrapper).toContain("/opt/sonari/runner.env");
         expect(membershipWrapper).toContain(
-            ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID"',
+            ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID" "$SONARI_WORLD_ID_ACTION"',
         );
         expect(membershipWrapper).toContain("m=/tmp/sm");
         expect(membershipWrapper).toContain("nitro-cli terminate-enclave --all");
@@ -737,8 +740,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // sources runner.env first so bare $VAR references are safe here.
         expect(template).toContain('--arg network "$RELAYER_NETWORK"');
         expect(template).toContain('--arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE"');
+        expect(template).toContain('--arg world_id_action "$SONARI_WORLD_ID_ACTION"');
         // shorthand keys must appear in the jq output object
-        expect(template).toContain(",$network,$proof_mode}");
+        expect(template).toContain(",$network,$proof_mode,$world_id_action}");
     });
 
     it("escapes bash parameter expansions so every Fn::Sub variable name stays valid", async () => {
@@ -805,6 +809,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             TeeEifS3Key: 91,
             TeeEifSha256: 64,
             WorldIdAppId: 17,
+            WorldIdAction: 29,
             WorldIdProofMode: 5,
         };
 
