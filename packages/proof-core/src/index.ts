@@ -66,6 +66,19 @@ export {
     replayProof,
 } from "./merkle.js";
 export {
+    parseResidenceTile,
+    parseResidenceTileManifest,
+    RESIDENCE_TILE_MANIFEST_SCHEMA,
+    RESIDENCE_TILE_MANIFEST_SCHEMA_VERSION,
+    RESIDENCE_TILE_PARENT_RESOLUTION,
+    RESIDENCE_TILE_SCHEMA,
+    RESIDENCE_TILE_SCHEMA_VERSION,
+    type ResidenceTile,
+    type ResidenceTileExpectation,
+    type ResidenceTileInventoryEntry,
+    type ResidenceTileManifest,
+} from "./residence-tiles.js";
+export {
     assertMatches,
     assertNonNegativeSafeInteger,
     expectArray,

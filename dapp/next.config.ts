@@ -94,6 +94,7 @@ const nextConfig: NextConfig = {
             "./leaf-hash.js": `${proofCoreSrc}/leaf-hash.ts`,
             "./manifest.js": `${proofCoreSrc}/manifest.ts`,
             "./merkle.js": `${proofCoreSrc}/merkle.ts`,
+            "./residence-tiles.js": `${proofCoreSrc}/residence-tiles.ts`,
             "./schema.js": `${proofCoreSrc}/schema.ts`,
             "./shard.js": `${proofCoreSrc}/shard.ts`,
             "./world-id-signal.js": `${proofCoreSrc}/world-id-signal.ts`,
