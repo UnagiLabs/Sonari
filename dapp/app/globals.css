@@ -2322,6 +2322,34 @@ h4 {
   gap: 12px;
 }
 
+/* ボトムシート ハンドル（モバイル時に表示・デスクトップでは非表示） */
+.residence-sheet-handle {
+  display: none;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.residence-sheet-handle-bar {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong, #ccc);
+  margin: 0 auto 6px;
+}
+
+.residence-sheet-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 /* step-stage: picker と action-panel を縦に並べる土台 */
 .residence-step-stage {
   display: grid;
@@ -2972,6 +3000,102 @@ h4 {
   margin: 0 auto;
   width: 100%;
   padding: 16px 28px 0;
+}
+
+/* フルブリード時: オーバーレイコンテナは pointer-events: none で地図のタッチを通す。
+   内部の操作要素（ボタン・入力・パネル本体）は pointer-events: auto で操作可能にする。 */
+.wizard-step-content--fullbleed .residence-overlay-top,
+.wizard-step-content--fullbleed .residence-overlay-bottom {
+  pointer-events: none;
+}
+
+.wizard-step-content--fullbleed .residence-overlay-top > *,
+.wizard-step-content--fullbleed .residence-overlay-bottom > * {
+  pointer-events: auto;
+}
+
+/* フルブリード かつ モバイル（≤620px）: 確定パネルをボトムシートとして画面下部に固定 */
+@media (max-width: 620px) {
+  .wizard-step-content--fullbleed .residence-action-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    max-width: 100%;
+    margin: 0;
+    padding: 0 0 env(safe-area-inset-bottom, 0px);
+    background: var(--cream-50, #fafaf7);
+    border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 16px oklch(0.35 0.04 145 / 0.12);
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    /* is-collapsed / is-expanded で高さを切り替える */
+  }
+
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed {
+    max-height: 68px;
+    overflow: hidden;
+  }
+
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded {
+    max-height: 80dvh;
+    overflow-y: auto;
+  }
+
+  /* 折りたたみ時はハンドルだけ見えるようにする */
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .control-group,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .field-note,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .wizard-cta-bar,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .selected-area-summary,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .hint-text {
+    display: none;
+  }
+
+  /* 展開時のパネル内コンテンツに padding を確保 */
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .control-group,
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .wizard-cta-bar {
+    padding: 0 16px;
+  }
+
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .selected-area-summary {
+    margin: 0 16px;
+  }
+
+  /* ハンドルを表示（モバイルのみ） */
+  .wizard-step-content--fullbleed .residence-sheet-handle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 16px 4px;
+  }
+
+  /* 折りたたみ時のシートが地図に重ならないよう canvas 下部に余白を確保 */
+  .wizard-step-content--fullbleed .residence-map-stage .residence-map-canvas {
+    height: calc(100dvh - 208px - 68px);
+    min-height: 240px;
+  }
+
+  /* 検索オーバーレイをモバイルでコンパクト化 */
+  .wizard-step-content--fullbleed .residence-search-overlay {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  /* 情報パネルをモバイルで最小化（1行コンパクト表示） */
+  .wizard-step-content--fullbleed .residence-info-panel {
+    padding: 6px 10px;
+    gap: 4px;
+  }
+
+  /* 凡例をモバイルで横スクロール可能に（折り返しを減らす） */
+  .wizard-step-content--fullbleed .residence-legend {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px 12px;
+    padding-bottom: 2px;
+  }
 }
 
 .wizard-heading {

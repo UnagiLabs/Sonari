@@ -17,6 +17,8 @@ import {
     residenceCellsInViewport,
     type ViewportBounds,
 } from "./h3-geo";
+import { canRetryMapLoad, nextRetryNonce } from "./map-load-retry";
+import { buildCellLegendEntries, polygonStyleForKind } from "./residence-cell-style";
 import {
     buildOverlayCells,
     buildResidenceSummary,
@@ -24,8 +26,6 @@ import {
     type OverlayCellKind,
     selectResidenceCell,
 } from "./residence-overlay";
-import { buildCellLegendEntries, polygonStyleForKind } from "./residence-cell-style";
-import { canRetryMapLoad, nextRetryNonce } from "./map-load-retry";
 
 // NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
 const mapsApiKey = readGoogleMapsApiKey();
@@ -300,6 +300,9 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     }, [rebuildOverlay]);
 
     // 地図の初期化（マウント時に一度だけ）。
+    // retryNonce は本文では参照しないが、再試行ボタンで地図初期化をやり直すための
+    // 意図的なトリガー依存。error 状態でのみ nonce が増えるため ready 後は再実行されない。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce は再初期化トリガーとして意図的に依存へ含める
     useEffect(() => {
         if (!isGoogleMapsConfigured(mapsApiKey)) {
             setStatus("unconfigured");

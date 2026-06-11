@@ -2,12 +2,12 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { ResidenceCellPicker } from "../../residence/residence-cell-picker";
 import {
     initialSheetState,
     sheetStateAfterSelection,
     toggleSheet,
 } from "../../residence/residence-sheet";
-import { ResidenceCellPicker } from "../../residence/residence-cell-picker";
 import type { ResidenceSaveErrorCode } from "../residence-save";
 
 interface ResidenceStepProps {
