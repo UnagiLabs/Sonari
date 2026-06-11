@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 // して漏れるのを防ぐ。
 
 const messagesDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../../messages");
+const doneStepSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "steps/done-step.tsx"),
+    "utf8",
+);
 
 function loadCatalog(locale: string): Record<string, unknown> {
     return JSON.parse(readFileSync(resolve(messagesDir, `${locale}.json`), "utf8")) as Record<
@@ -57,5 +61,13 @@ describe("messages catalog parity", () => {
         expect(ja.get("register.wizard.identity.submit.processingNotice")).toBe(
             "処理に数分〜1時間程度かかります。処理状況はmypageで確認できます。",
         );
+    });
+
+    it("登録完了画面の主要 CTA はマイページへ遷移する", () => {
+        expect(doneStepSource).toContain('href="/mypage"');
+        expect(doneStepSource).toContain('t("mypageCta")');
+        expect(doneStepSource).not.toContain('href="/dashboard"');
+        expect(ja.get("register.wizard.done.mypageCta")).toBe("マイページで確認");
+        expect(en.get("register.wizard.done.mypageCta")).toBe("Check My Page");
     });
 });

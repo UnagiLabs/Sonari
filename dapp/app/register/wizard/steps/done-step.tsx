@@ -68,8 +68,8 @@ export function DoneStep({
                 <a className="btn btn-ghost btn-lg" href="/">
                     {t("homeCta")}
                 </a>
-                <a className="btn btn-primary btn-lg wizard-cta" href="/dashboard">
-                    {t("dashboardCta")}
+                <a className="btn btn-primary btn-lg wizard-cta" href="/mypage">
+                    {t("mypageCta")}
                 </a>
             </div>
         </section>
