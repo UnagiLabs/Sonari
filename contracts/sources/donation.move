@@ -2,7 +2,7 @@ module contracts::donation;
 
 use contracts::campaign::{Self, Campaign};
 use contracts::category_pool::{Self, CategoryPool};
-use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
+use contracts::pools::{Self, MainPool, OperationsPool};
 use std::string::{Self, String};
 use sui::coin::{Self, Coin};
 use sui::dynamic_field;
@@ -11,7 +11,6 @@ use sui::event;
 use usdc::usdc::USDC;
 
 const DONATION_TYPE_GENERAL: u8 = 1;
-const DONATION_TYPE_DESIGNATED: u8 = 2;
 const DONATION_TYPE_OPERATIONS: u8 = 3;
 
 const TIER_NONE: u8 = 0;
@@ -100,15 +99,6 @@ public struct GeneralDonationReceived has copy, drop {
     actor: address,
 }
 
-public struct DesignatedDonationReceived has copy, drop {
-    main_pool_id: ID,
-    designated_pool_id: ID,
-    amount: u64,
-    main_amount: u64,
-    designated_amount: u64,
-    actor: address,
-}
-
 public struct OperationsDonationReceived has copy, drop {
     pool_id: ID,
     amount: u64,
@@ -193,45 +183,6 @@ public(package) fun donate_general_usdc_with_pass(
     );
 }
 
-public(package) fun donate_designated_usdc(
-    registry: &mut DonorRegistry,
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let (designated_pool_id, amount) =
-        deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
-    process_first_donation(
-        registry,
-        DONATION_TYPE_DESIGNATED,
-        designated_pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_designated_usdc_with_pass(
-    registry: &DonorRegistry,
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
-
-    let (designated_pool_id, amount) =
-        deposit_designated_usdc_and_emit(main_pool, designated_pool, coin, ctx);
-    process_with_pass_donation(
-        pass,
-        DONATION_TYPE_DESIGNATED,
-        designated_pool_id,
-        amount,
-        ctx,
-    );
-}
-
 public(package) fun donate_operations_usdc(
     registry: &mut DonorRegistry,
     operations_pool: &mut OperationsPool,
@@ -284,47 +235,6 @@ fun deposit_general_usdc_and_emit(
     });
 
     (pool_id, amount)
-}
-
-fun deposit_designated_usdc_and_emit(
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-): (ID, u64) {
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let (main_coin, designated_coin, main_amount, designated_amount) =
-        split_designated_usdc(coin, amount, ctx);
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let designated_pool_id = pools::designated_pool_id(designated_pool);
-
-    pools::deposit_main_usdc(main_pool, main_coin);
-    pools::deposit_designated_usdc(designated_pool, designated_coin);
-    event::emit(DesignatedDonationReceived {
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor: ctx.sender(),
-    });
-
-    (designated_pool_id, amount)
-}
-
-fun split_designated_usdc(
-    coin: Coin<USDC>,
-    amount: u64,
-    ctx: &mut TxContext,
-): (Coin<USDC>, Coin<USDC>, u64, u64) {
-    let main_amount = amount / 2;
-    let designated_amount = amount - main_amount;
-    let mut main_coin = coin;
-    let designated_coin = coin::split(&mut main_coin, designated_amount, ctx);
-
-    (main_coin, designated_coin, main_amount, designated_amount)
 }
 
 fun deposit_operations_usdc_and_emit(
@@ -552,10 +462,6 @@ public(package) fun donor_pass_tier_label(pass: &DonorPass): String {
 
 public(package) fun donation_type_general(): u8 {
     DONATION_TYPE_GENERAL
-}
-
-public(package) fun donation_type_designated(): u8 {
-    DONATION_TYPE_DESIGNATED
 }
 
 public(package) fun donation_type_operations(): u8 {
@@ -789,28 +695,6 @@ public fun general_donation_received_event_fields(
 ): (ID, u64, address) {
     let GeneralDonationReceived { pool_id, amount, actor } = event;
     (pool_id, amount, actor)
-}
-
-#[test_only]
-public fun designated_donation_received_event_fields(
-    event: DesignatedDonationReceived,
-): (ID, ID, u64, u64, u64, address) {
-    let DesignatedDonationReceived {
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor,
-    } = event;
-    (
-        main_pool_id,
-        designated_pool_id,
-        amount,
-        main_amount,
-        designated_amount,
-        actor,
-    )
 }
 
 #[test_only]

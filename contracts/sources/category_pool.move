@@ -50,6 +50,27 @@ public(package) fun create_category_registry(ctx: &mut TxContext): ID {
     registry_id
 }
 
+// genesis専用: share前のCategoryRegistryを返す。呼び出し元がpoolを追加後にshareする。
+public(package) fun new_category_registry(ctx: &mut TxContext): CategoryRegistry {
+    CategoryRegistry { id: object::new(ctx) }
+}
+
+public(package) fun share_category_registry(registry: CategoryRegistry) {
+    transfer::share_object(registry);
+}
+
+public(package) fun create_category_registry_with_earthquake_pool(
+    ctx: &mut TxContext,
+): (ID, ID) {
+    let mut registry = CategoryRegistry {
+        id: object::new(ctx),
+    };
+    let registry_id = object::id(&registry);
+    let pool_id = create_category_pool(&mut registry, CATEGORY_EARTHQUAKE, ctx);
+    transfer::share_object(registry);
+    (registry_id, pool_id)
+}
+
 public(package) fun create_category_pool(
     registry: &mut CategoryRegistry,
     category: u8,

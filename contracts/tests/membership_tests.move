@@ -101,7 +101,6 @@ fun member_registration_does_not_deposit_to_operations_pool() {
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let main_pool = scenario.take_shared<pools::MainPool>();
-        let designated_pool = scenario.take_shared<pools::DesignatedPool>();
         let mut registry = scenario.take_shared<membership::MembershipRegistry>();
         let residence_registry =
             scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
@@ -120,14 +119,11 @@ fun member_registration_does_not_deposit_to_operations_pool() {
 
         assert!(pools::main_pool_balance_usdc(&main_pool) == 0);
         assert!(pools::main_pool_total_received_usdc(&main_pool) == 0);
-        assert!(pools::designated_pool_balance_usdc(&designated_pool) == 0);
-        assert!(pools::designated_pool_total_received_usdc(&designated_pool) == 0);
         assert!(pools::operations_pool_balance_usdc(&operations_pool) == 0);
         assert!(pools::operations_pool_total_received_usdc(&operations_pool) == 0);
 
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(main_pool);
-        test_scenario::return_shared(designated_pool);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(residence_registry);
         test_scenario::return_shared(operations_pool);
@@ -704,7 +700,6 @@ fun initialized_with_pools(): test_scenario::Scenario {
 
     scenario.next_tx(ADMIN);
     let mut cap = scenario.take_from_sender<admin::AdminCap>();
-    admin::create_designated_pool(&cap, option::none(), scenario.ctx());
     admin::create_allowed_residence_cell_registry(
         &mut cap,
         residence_root(),

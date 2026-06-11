@@ -6,7 +6,6 @@ use contracts::identity_registry;
 use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::pools;
-use contracts::program;
 
 public fun donation_record_summary(
     pass: &DonorPass,
@@ -23,14 +22,6 @@ public fun identity_provider_world_id(): u8 {
     identity_registry::provider_world_id()
 }
 
-public fun target_kind_program(): u8 {
-    program::target_kind_program()
-}
-
-public fun target_kind_campaign(): u8 {
-    program::target_kind_campaign()
-}
-
 public fun target_kind_membership_registry(): u8 {
     membership::target_kind_membership_registry()
 }
@@ -45,10 +36,6 @@ public fun target_kind_verifier_registry(): u8 {
 
 public fun target_kind_main_pool(): u8 {
     pools::target_kind_main_pool()
-}
-
-public fun target_kind_designated_pool(): u8 {
-    pools::target_kind_designated_pool()
 }
 
 public fun target_kind_operations_pool(): u8 {

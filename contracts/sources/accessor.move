@@ -6,16 +6,13 @@ use contracts::allowed_residence_cell;
 use contracts::campaign as campaign_v2;
 use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
 use contracts::census_result;
-use contracts::claim::{Self, ClaimIndex};
-use contracts::disaster_event::{Self, DisasterCampaignBinding, DisasterEvent, DisasterRegistry};
+use contracts::disaster_event::{Self, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::identity_registry::{Self, IdentityRegistry};
 use contracts::identity_result_v1;
 use contracts::membership::{Self, MembershipRegistry, MembershipPass};
 use contracts::metadata_verifier;
-use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
-use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
-use contracts::program::{Self, Campaign, Program};
+use contracts::pools::{Self, MainPool, OperationsPool};
 use sui::clock::{Self, Clock};
 use sui::coin::Coin;
 use usdc::usdc::USDC;
@@ -47,48 +44,6 @@ public fun donate_general_usdc_with_pass(
     donation::donate_general_usdc_with_pass(
         registry,
         main_pool,
-        pass,
-        coin,
-        ctx,
-    );
-}
-
-public fun donate_designated_usdc(
-    pause_state: &PauseState,
-    registry: &mut DonorRegistry,
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
-    donation::donate_designated_usdc(
-        registry,
-        main_pool,
-        designated_pool,
-        coin,
-        ctx,
-    );
-}
-
-public fun donate_designated_usdc_with_pass(
-    pause_state: &PauseState,
-    registry: &DonorRegistry,
-    main_pool: &mut MainPool,
-    designated_pool: &mut DesignatedPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
-    donation::donate_designated_usdc_with_pass(
-        registry,
-        main_pool,
-        designated_pool,
         pass,
         coin,
         ctx,
@@ -348,60 +303,6 @@ public fun donate_general_split_usdc(
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
     donation::donate_general_split(main_pool, ops_pool, coin, ctx);
-}
-
-public fun claim_disaster_usdc(
-    pause_state: &PauseState,
-    index: &mut ClaimIndex,
-    registry: &membership::MembershipRegistry,
-    program: &Program,
-    campaign: &Campaign,
-    policy: &PayoutPolicy,
-    budget: &mut CampaignBudget,
-    binding: &DisasterCampaignBinding,
-    disaster_event: &DisasterEvent,
-    identity_registry: &IdentityRegistry,
-    pass: &membership::MembershipPass,
-    clock: &Clock,
-    leaf: AffectedCellLeaf,
-    proof: vector<ProofStep>,
-    identity_provider: u8,
-    duplicate_key_hash: vector<u8>,
-    designated_pool: &mut DesignatedPool,
-    main_pool: &mut MainPool,
-    user_max_amount_usdc: u64,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, program::id(program));
-    admin::assert_target_not_paused(pause_state, program::campaign_id(campaign));
-    admin::assert_target_not_paused(
-        pause_state,
-        identity_registry::registry_id(identity_registry),
-    );
-    admin::assert_target_not_paused(pause_state, pools::designated_pool_id(designated_pool));
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    claim::claim_disaster_usdc(
-        index,
-        registry,
-        program,
-        campaign,
-        policy,
-        budget,
-        binding,
-        disaster_event,
-        identity_registry,
-        pass,
-        clock,
-        leaf,
-        proof,
-        identity_provider,
-        duplicate_key_hash,
-        designated_pool,
-        main_pool,
-        user_max_amount_usdc,
-        ctx,
-    );
 }
 
 public fun set_floor_census(

@@ -4,7 +4,6 @@ use contracts::campaign;
 use contracts::category_pool::{CategoryPool, CategoryRegistry};
 use contracts::metadata_verifier::{Self, VerifierRegistry};
 use contracts::payload::{Self, Payload};
-use contracts::program::{Self, Campaign};
 use std::hash;
 use std::string::{Self, String};
 use sui::clock::{Self, Clock};
@@ -12,8 +11,6 @@ use sui::dynamic_field;
 use sui::event;
 
 const EDuplicateDisasterEvent: u64 = 0;
-const EDisasterCampaignBindingMismatch: u64 = 1;
-const EDuplicateDisasterCampaignBinding: u64 = 2;
 const EStaleDisasterEventRevision: u64 = 3;
 const EPayloadTooLarge: u64 = 4;
 const MAX_PAYLOAD_BCS_BYTES: u64 = 4096;
@@ -54,15 +51,6 @@ public struct DisasterEvent has key {
     created_at_ms: u64,
 }
 
-public struct DisasterCampaignBinding has key {
-    id: UID,
-    campaign_id: ID,
-    disaster_event_id: ID,
-    event_uid: vector<u8>,
-    event_revision: u32,
-    created_at_ms: u64,
-}
-
 public struct DisasterEventKey has copy, drop, store {
     event_uid: vector<u8>,
     event_revision: u32,
@@ -70,10 +58,6 @@ public struct DisasterEventKey has copy, drop, store {
 
 public struct LatestDisasterEventRevisionKey has copy, drop, store {
     event_uid: vector<u8>,
-}
-
-public struct DisasterCampaignBindingKey has copy, drop, store {
-    campaign_id: ID,
 }
 
 public struct DisasterRegistryCreated has copy, drop {
@@ -97,16 +81,6 @@ public struct DisasterEventCreated has copy, drop {
     affected_cell_count: u64,
     evidence_manifest_uri: String,
     evidence_manifest_hash: vector<u8>,
-    created_at_ms: u64,
-    actor: address,
-}
-
-public struct DisasterCampaignBound has copy, drop {
-    binding_id: ID,
-    campaign_id: ID,
-    disaster_event_id: ID,
-    event_uid: vector<u8>,
-    event_revision: u32,
     created_at_ms: u64,
     actor: address,
 }
@@ -217,52 +191,6 @@ public(package) fun create_from_signed_payload_and_campaign(
         clock,
         ctx,
     )
-}
-
-public(package) fun bind_campaign(
-    registry: &mut DisasterRegistry,
-    campaign: &Campaign,
-    disaster_event: &DisasterEvent,
-    ctx: &mut TxContext,
-) {
-    let campaign_id = program::campaign_id(campaign);
-    let key = DisasterCampaignBindingKey { campaign_id };
-    assert!(
-        !dynamic_field::exists_with_type<DisasterCampaignBindingKey, bool>(&registry.id, key),
-        EDuplicateDisasterCampaignBinding,
-    );
-    dynamic_field::add(&mut registry.id, key, true);
-
-    let binding = DisasterCampaignBinding {
-        id: object::new(ctx),
-        campaign_id,
-        disaster_event_id: object::id(disaster_event),
-        event_uid: disaster_event.event_uid,
-        event_revision: disaster_event.event_revision,
-        created_at_ms: ctx.epoch_timestamp_ms(),
-    };
-    let binding_id = object::id(&binding);
-    event::emit(DisasterCampaignBound {
-        binding_id,
-        campaign_id: binding.campaign_id,
-        disaster_event_id: binding.disaster_event_id,
-        event_uid: binding.event_uid,
-        event_revision: binding.event_revision,
-        created_at_ms: binding.created_at_ms,
-        actor: ctx.sender(),
-    });
-    transfer::share_object(binding);
-}
-
-public(package) fun assert_campaign_binding(
-    binding: &DisasterCampaignBinding,
-    campaign: &Campaign,
-    disaster_event: &DisasterEvent,
-) {
-    assert!(binding.campaign_id == program::campaign_id(campaign), EDisasterCampaignBindingMismatch);
-    assert!(binding.disaster_event_id == object::id(disaster_event), EDisasterCampaignBindingMismatch);
-    assert!(binding.event_uid == disaster_event.event_uid, EDisasterCampaignBindingMismatch);
-    assert!(binding.event_revision == disaster_event.event_revision, EDisasterCampaignBindingMismatch);
 }
 
 fun create_from_verified_payload(
