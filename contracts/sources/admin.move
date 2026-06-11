@@ -1,5 +1,6 @@
 module contracts::admin;
 
+use contracts::category_pool;
 use contracts::claim;
 use contracts::allowed_residence_cell;
 use contracts::disaster_event;
@@ -182,6 +183,15 @@ fun display_field_keys(): vector<String> {
         b"image_url".to_string(),
         b"link".to_string(),
     ]
+}
+
+public fun create_category_pool(
+    _: &AdminCap,
+    registry: &mut category_pool::CategoryRegistry,
+    category: u8,
+    ctx: &mut TxContext,
+): ID {
+    category_pool::create_category_pool(registry, category, ctx)
 }
 
 public fun create_designated_pool(

@@ -1,5 +1,6 @@
 module contracts::reader;
 
+use contracts::category_pool;
 use contracts::donation::{Self, DonorPass};
 use contracts::identity_registry;
 use contracts::membership;
@@ -68,4 +69,8 @@ public fun verifier_family_census(): u8 {
 
 public fun verifier_version_v1(): u64 {
     metadata_verifier::verifier_version_v1()
+}
+
+public fun target_kind_category_pool(): u8 {
+    category_pool::target_kind_category_pool()
 }
