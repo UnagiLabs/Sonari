@@ -138,7 +138,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
                     <div className="mypage-state">
                         <h2>{t("states.notRegisteredTitle")}</h2>
                         <p>{t("states.notRegisteredBody")}</p>
-                        <a className="button" href="/register">
+                        <a className="btn btn-primary" href="/register">
                             {t("states.notRegisteredCta")}
                         </a>
                     </div>
@@ -152,7 +152,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
                                 ? t("states.errorMultiple")
                                 : t("states.errorBody")}
                         </p>
-                        <button className="button" onClick={retry} type="button">
+                        <button className="btn btn-primary" onClick={retry} type="button">
                             {t("states.errorRetry")}
                         </button>
                     </div>
