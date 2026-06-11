@@ -253,6 +253,38 @@ public fun bind_disaster_campaign(
     disaster_event::bind_campaign(registry, campaign, disaster_event, ctx);
 }
 
+public fun spend_operations(
+    _: &AdminCap,
+    ops_pool: &mut pools::OperationsPool,
+    amount: u64,
+    recipient: address,
+    reason_code: u8,
+    ctx: &mut TxContext,
+) {
+    let coin = pools::spend_from_operations(ops_pool, amount, recipient, reason_code, ctx);
+    transfer::public_transfer(coin, recipient);
+}
+
+public fun migrate_main_pool(
+    _: &AdminCap,
+    pool: &mut pools::MainPool,
+    new_version: u64,
+    ctx: &mut TxContext,
+) {
+    let _ = ctx;
+    pools::migrate_main_pool_to_version(pool, new_version);
+}
+
+public fun migrate_operations_pool(
+    _: &AdminCap,
+    pool: &mut pools::OperationsPool,
+    new_version: u64,
+    ctx: &mut TxContext,
+) {
+    let _ = ctx;
+    pools::migrate_operations_pool_to_version(pool, new_version);
+}
+
 public fun open_campaign_budget_from_main(
     cap: &AdminCap,
     program: &program::Program,
