@@ -400,5 +400,132 @@
             "body": "DonorPass は貢献の履歴だけを記録します。申請権や支払いの優先度、支援の約束を与えるものではありません。",
             "link": "ダッシュボードを見る"
         }
+    },
+    "home": {
+        "hero": {
+            "eyebrow": "透明な寄付のインフラ",
+            "titleBefore": "支援を、",
+            "titleHighlight": "必要な場所",
+            "titleAfter": "へ確実に届ける。",
+            "sub": "Sonari は災害後、公開された情報源・プライバシーを守る居住証明・透明なレシートを使って、支援を受け取るべき人を検証します。",
+            "ctaDonate": "今すぐ寄付",
+            "ctaMember": "メンバーになる",
+            "ctaClaim": "支援を申請",
+            "ctaDashboard": "ダッシュボードを見る",
+            "notePrivate": "居住データは非公開のまま",
+            "noteVerified": "検証済みの災害イベント"
+        },
+        "stats": {
+            "totalDonated": {
+                "label": "寄付総額",
+                "meta": "直近24時間で + $48,200"
+            },
+            "reliefDelivered": {
+                "label": "届けた支援",
+                "meta": "検証済み申請 1,291 件"
+            },
+            "activePools": {
+                "label": "稼働中のプール",
+                "meta": "メインと地震"
+            },
+            "verifiedEvents": {
+                "label": "検証済みイベント",
+                "meta": "USGS の情報源データ"
+            }
+        },
+        "sponsors": {
+            "title": "透明なパートナーに支えられて"
+        },
+        "how": {
+            "eyebrow": "Sonari の仕組み",
+            "title": "寄付から支援までの4ステップ。",
+            "sub": "隠れた裁量も、支払いの約束もありません。誰でも検証できる手順だけです。",
+            "step1": {
+                "title": "USDC で寄付",
+                "body": "プールを選びます。寄付は DonorPass の貢献履歴とともにオンチェーンに記録されます。"
+            },
+            "step2": {
+                "title": "災害を検証",
+                "body": "USGS のレポートを取り直し、情報源データが一致したときだけ署名します。"
+            },
+            "step3": {
+                "title": "受給資格を確認",
+                "body": "受給者には有効なパスと、被災した H3 セル内の居住証明が必要です。"
+            },
+            "step4": {
+                "title": "レシート付きの支援",
+                "body": "支払いごとに、個人情報を出さない匿名のインパクトレシートを作成します。"
+            }
+        },
+        "pools": {
+            "eyebrow": "注目のプール",
+            "title": "それぞれの資金の行き先を確かめる。",
+            "allPools": "すべてのプール",
+            "received": "{amount} 受領",
+            "delivered": "{amount} 送付",
+            "available": "利用可能な残高",
+            "statusActive": "稼働中",
+            "main": {
+                "name": "メインプール",
+                "description": "稼働中の各プログラムを横断する一般救援の準備金。",
+                "imageAlt": "洪水後のコミュニティ復興支援"
+            },
+            "earthquake": {
+                "name": "地震救援プール",
+                "description": "確定した地震イベント向けに確保。",
+                "imageAlt": "地震救援物資"
+            }
+        },
+        "supporters": {
+            "eyebrow": "トップ支援者",
+            "title": "準備金を満たし続ける人々とパートナー。",
+            "fullLeaderboard": "リーダーボード全体",
+            "individuals": "個人",
+            "corporate": "企業スポンサー"
+        },
+        "why": {
+            "eyebrow": "なぜ Sonari か",
+            "title": "支払いの約束ではなく、寄付のインフラ。",
+            "witnessable": {
+                "title": "端から端まで見届けられる",
+                "body": "寄付・受給資格・支払いの動きは公開レシートを通して見えます。"
+            },
+            "private": {
+                "title": "設計から受給者のプライバシーを守る",
+                "body": "生のアドレス・電話番号・個人を特定する情報はオフチェーンのままです。"
+            },
+            "checked": {
+                "title": "支援が動く前に確認",
+                "body": "確定したイベント・有効なパス・正しい居住証明が必要です。"
+            }
+        },
+        "trust": {
+            "eyebrow": "知っておきたいこと",
+            "title": "Sonari は透明な寄付のための支援インフラです。",
+            "copy": "DonorPass は貢献の履歴だけを記録します。支援の受け取りは、確定した災害イベントに対する検証済みの受給資格にもとづきます。",
+            "item1": "寄付しても申請権は生まれません。",
+            "item2": "上位の寄付者には評価が贈られますが、支払いの優先度ではありません。",
+            "item3": "支援は検証済みの Membership SBT の保有者へ支払われます。",
+            "item4": "KYC と World ID は同じフルサポートの経路をたどります。",
+            "item5": "一時停止・オラクル・スポンサーの管理は見える形になっています。",
+            "item6": "スポンサーのロゴには検証と承認が必要です。"
+        },
+        "footer": {
+            "brandDesc": "検証済みの支援のための、透明な寄付のインフラ。",
+            "publicTitle": "公開",
+            "recipientTitle": "受給者",
+            "transparencyTitle": "透明性",
+            "linkDonate": "寄付",
+            "linkDashboard": "ダッシュボード",
+            "linkLeaderboard": "リーダーボード",
+            "linkClaim": "申請",
+            "linkRegister": "登録",
+            "linkReceipts": "レシート",
+            "linkPools": "プール",
+            "linkEvents": "イベント",
+            "linkSponsors": "スポンサー",
+            "year": "2026 Sonari",
+            "tagline": "寄付、支援、サポート、インパクト。"
+        }
     }
 }

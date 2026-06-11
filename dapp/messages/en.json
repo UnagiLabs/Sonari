@@ -400,5 +400,132 @@
             "body": "DonorPass records contribution history only. It does not provide claim rights, payout priority, or promised aid.",
             "link": "View dashboard"
         }
+    },
+    "home": {
+        "hero": {
+            "eyebrow": "Transparent donation infrastructure",
+            "titleBefore": "Donations that ",
+            "titleHighlight": "arrive",
+            "titleAfter": "where they're needed.",
+            "sub": "Sonari verifies who should receive aid after a disaster using public source data, privacy-preserving residence proofs, and transparent receipts.",
+            "ctaDonate": "Donate now",
+            "ctaMember": "Become a member",
+            "ctaClaim": "Claim relief",
+            "ctaDashboard": "View dashboard",
+            "notePrivate": "Residence data stays private",
+            "noteVerified": "Verified disaster events"
+        },
+        "stats": {
+            "totalDonated": {
+                "label": "Total donated",
+                "meta": "+ $48,200 in 24h"
+            },
+            "reliefDelivered": {
+                "label": "Relief delivered",
+                "meta": "1,291 verified claims"
+            },
+            "activePools": {
+                "label": "Active pools",
+                "meta": "Main and earthquake"
+            },
+            "verifiedEvents": {
+                "label": "Verified events",
+                "meta": "USGS source data"
+            }
+        },
+        "sponsors": {
+            "title": "Supported by transparent partners"
+        },
+        "how": {
+            "eyebrow": "How Sonari works",
+            "title": "Four steps from donation to relief.",
+            "sub": "No hidden discretion. No payout promises. Just verifiable steps anyone can audit.",
+            "step1": {
+                "title": "Donate in USDC",
+                "body": "Choose a pool. Donations are recorded on-chain with a DonorPass contribution history."
+            },
+            "step2": {
+                "title": "Disaster verified",
+                "body": "USGS reports are re-fetched and signed only after the source data matches."
+            },
+            "step3": {
+                "title": "Eligibility checked",
+                "body": "Recipients need an active pass and a residence proof inside the affected H3 cells."
+            },
+            "step4": {
+                "title": "Relief, with a receipt",
+                "body": "Each payout creates an anonymized Impact Receipt without exposing personal details."
+            }
+        },
+        "pools": {
+            "eyebrow": "Featured pools",
+            "title": "See where each dollar lives.",
+            "allPools": "All pools",
+            "received": "{amount} received",
+            "delivered": "{amount} delivered",
+            "available": "available balance",
+            "statusActive": "active",
+            "main": {
+                "name": "Main Pool",
+                "description": "General relief reserves across active programs.",
+                "imageAlt": "Community recovery aid after flooding"
+            },
+            "earthquake": {
+                "name": "Earthquake Relief Pool",
+                "description": "Reserved for finalized earthquake events.",
+                "imageAlt": "Earthquake relief supplies"
+            }
+        },
+        "supporters": {
+            "eyebrow": "Top supporters",
+            "title": "People and partners keeping the reserve full.",
+            "fullLeaderboard": "Full leaderboard",
+            "individuals": "Individuals",
+            "corporate": "Corporate sponsors"
+        },
+        "why": {
+            "eyebrow": "Why Sonari",
+            "title": "Donation infrastructure, not a payout promise.",
+            "witnessable": {
+                "title": "Witnessable end to end",
+                "body": "Donation, eligibility, and payout activity is visible through public receipts."
+            },
+            "private": {
+                "title": "Recipient-private by design",
+                "body": "Raw addresses, phone numbers, and personal identifiers stay off-chain."
+            },
+            "checked": {
+                "title": "Checked before aid moves",
+                "body": "A finalized event, active pass, and valid residence proof are required."
+            }
+        },
+        "trust": {
+            "eyebrow": "Important to know",
+            "title": "Sonari is aid infrastructure for transparent donations.",
+            "copy": "DonorPass records contribution history only. Receiving relief depends on verified eligibility for a finalized disaster event.",
+            "item1": "Donating does not create claim rights.",
+            "item2": "Top donors get recognition, not payout priority.",
+            "item3": "Relief is paid to the verified Membership SBT owner.",
+            "item4": "KYC and World ID follow the same full-support route.",
+            "item5": "Pause, oracle, and sponsor controls are visible.",
+            "item6": "Sponsor logos require verification and approval."
+        },
+        "footer": {
+            "brandDesc": "Transparent donation infrastructure for verified aid.",
+            "publicTitle": "Public",
+            "recipientTitle": "Recipient",
+            "transparencyTitle": "Transparency",
+            "linkDonate": "Donate",
+            "linkDashboard": "Dashboard",
+            "linkLeaderboard": "Leaderboard",
+            "linkClaim": "Claim",
+            "linkRegister": "Register",
+            "linkReceipts": "Receipts",
+            "linkPools": "Pools",
+            "linkEvents": "Events",
+            "linkSponsors": "Sponsors",
+            "year": "2026 Sonari",
+            "tagline": "Donation, aid, support, impact."
+        }
     }
 }
