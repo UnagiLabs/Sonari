@@ -20,10 +20,11 @@
   --surface-soft: var(--cream-50);
   --ink: oklch(0.25 0.02 145);
   --ink-muted: oklch(0.50 0.015 145);
-  --ink-faint: oklch(0.65 0.012 145);
+  --ink-faint: oklch(0.53 0.012 145);
   --line: oklch(0.92 0.012 130);
   --line-strong: oklch(0.85 0.018 130);
   --primary-ink: var(--sage-800);
+  --focus-ring: oklch(0.52 0.13 235);
   --radius-md: 14px;
   --radius-lg: 20px;
   --radius-xl: 28px;
@@ -75,6 +76,23 @@ input,
 select,
 textarea {
   font-family: inherit;
+}
+
+/*
+ * キーボードでフォーカスしたときだけ見えるリング（issue #282）。
+ * マウス操作の :focus では出さず、:focus-visible に限定して見た目を汚さない。
+ * 要素ベースのセレクタで、ボタン・リンク・summary・フォーム部品・言語切替など
+ * すべての操作できる要素を漏れなく覆う。outline なのでレイアウトは崩れない。
+ */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 img {
@@ -223,6 +241,82 @@ h4 {
 
 .topbar-spacer {
   flex: 1;
+}
+
+/*
+ * 狭い画面用ハンバーガーメニュー（issue #282）。広い画面では隠し、820px 以下で
+ * 横並びナビ（.nav）の代わりに表示する。<details> の開閉に乗せるだけなので JS は不要。
+ */
+.nav-menu {
+  display: none;
+  position: relative;
+}
+
+.nav-menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+  list-style: none;
+}
+
+.nav-menu-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.nav-menu-icon,
+.nav-menu-icon::before,
+.nav-menu-icon::after {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+
+.nav-menu-icon {
+  position: relative;
+}
+
+.nav-menu-icon::before,
+.nav-menu-icon::after {
+  position: absolute;
+  left: 0;
+  content: "";
+}
+
+.nav-menu-icon::before {
+  top: -6px;
+}
+
+.nav-menu-icon::after {
+  top: 6px;
+}
+
+.nav-menu[open] .nav-menu-toggle {
+  border-color: var(--sage-400);
+  background: var(--sage-50);
+}
+
+.nav-menu-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
 }
 
 .wallet-btn {
@@ -2612,11 +2706,11 @@ h4 {
   }
 
   .nav {
-    order: 3;
-    width: 100%;
-    margin-left: 0;
-    overflow-x: auto;
-    padding-bottom: 2px;
+    display: none;
+  }
+
+  .nav-menu {
+    display: block;
   }
 
   .page {
@@ -2682,9 +2776,12 @@ h4 {
     font-size: 32px;
   }
 
-  .wallet-btn,
-  .topbar .wallet-connect,
-  .topbar .wallet-connect-fallback {
+  /*
+   * 寄付 CTA はメニュー内「寄付」リンクで代替できるため隠す。
+   * 一方でウォレット接続ボタンは隠さず、狭い画面でも接続できるようにする
+   * （issue #282 完了条件 4）。
+   */
+  .wallet-btn {
     display: none;
   }
 

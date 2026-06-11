@@ -6,7 +6,8 @@ import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
 import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 import { WalletConnect } from "../wallet/wallet-connect";
-import { type NavKey, resolveNavItems } from "./topbar-nav";
+import { SiteMobileMenu } from "./site-mobile-menu";
+import { NAV_DEFS, type NavKey, resolveNavItems } from "./topbar-nav";
 
 // 全ページ共通の topbar。ナビ・言語切替・wallet 接続をまとめ、各ページは
 // active なナビ項目と右側アクション（寄付 CTA / wallet）の有無を props で渡す。
@@ -28,6 +29,10 @@ export function SiteTopbar({
 }) {
     const t = useTranslations("topbar");
     const navItems = resolveNavItems(items);
+    // ハンバーガーメニューは翻訳に依存しないため、ここで全 nav キーの文言を解決して渡す。
+    const navLabels = Object.fromEntries(
+        (Object.keys(NAV_DEFS) as NavKey[]).map((key) => [key, t(`nav.${key}`)]),
+    ) as Record<NavKey, string>;
 
     return (
         <>
@@ -65,6 +70,12 @@ export function SiteTopbar({
                     ) : null}
                     <LocaleSwitcher current={locale} />
                     {showWallet ? <WalletConnect /> : null}
+                    <SiteMobileMenu
+                        active={active}
+                        items={navItems}
+                        menuLabel={t("menuOpenAria")}
+                        navLabels={navLabels}
+                    />
                 </div>
             </header>
             {showWallet ? <NetworkMismatchBanner /> : null}

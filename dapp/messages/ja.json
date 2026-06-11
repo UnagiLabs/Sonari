@@ -305,7 +305,8 @@
             "claim": "申請",
             "mypage": "マイページ"
         },
-        "donateCta": "今すぐ寄付"
+        "donateCta": "今すぐ寄付",
+        "menuOpenAria": "メニューを開く"
     },
     "donate": {
         "hero": {

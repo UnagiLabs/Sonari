@@ -17,6 +17,9 @@ export function LocaleSwitcher({ current }: { readonly current: SonariLocale }) 
         if (next === current) {
             return;
         }
+        // cookieStore API は Safari / Firefox の対応が不十分で言語切替が壊れる恐れがあるため、
+        // 全ブラウザで確実に動く document.cookie を使う。
+        // biome-ignore lint/suspicious/noDocumentCookie: 上記の互換性理由により document.cookie を使う
         document.cookie = `${SONARI_LOCALE_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
         document.documentElement.lang = next;
         router.refresh();
