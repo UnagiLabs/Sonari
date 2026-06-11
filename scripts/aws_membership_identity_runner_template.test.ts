@@ -17,7 +17,9 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("AttributeName: updated_at_ms");
         expect(template).toContain("KeyType: HASH");
         expect(template).toContain("OwnerMembershipUpdatedAtIndex");
-        expect(template).toContain("Resource: !Sub ${VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex");
+        expect(template).toContain(
+            "Resource: !Sub $" + "{VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex",
+        );
         expect(template).toContain("SubmitVerificationLambda:");
         expect(template).toContain("Handler: dist/src/lambda.submitVerificationHandler");
         expect(template).toContain("IdentityStatusLambda:");

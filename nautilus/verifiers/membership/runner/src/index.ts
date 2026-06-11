@@ -9,9 +9,9 @@ import {
     ScanCommand,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 import type { IdentityProvider } from "@sonari/membership-verifier-shared";
 import { MEMBERSHIP_IDENTITY_VERIFIER_KIND } from "@sonari/verifier-contracts";
-import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 
 export type { IdentityProvider } from "@sonari/membership-verifier-shared";
 
@@ -1002,9 +1002,13 @@ async function verifySuiPersonalMessage(input: {
     signature: string;
 }): Promise<boolean> {
     try {
-        await verifyPersonalMessageSignature(new TextEncoder().encode(input.message), input.signature, {
-            address: input.owner,
-        });
+        await verifyPersonalMessageSignature(
+            new TextEncoder().encode(input.message),
+            input.signature,
+            {
+                address: input.owner,
+            },
+        );
         return true;
     } catch {
         return false;

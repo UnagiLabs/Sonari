@@ -66,8 +66,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
                     endpointUrl: identityStatusUrl,
                     owner,
                     membershipId: next.pass.objectId,
-                    signPersonalMessage: ({ message }) =>
-                        dAppKit.signPersonalMessage({ message }),
+                    signPersonalMessage: ({ message }) => dAppKit.signPersonalMessage({ message }),
                 });
                 return { kind: "ok", pass: { ...next.pass, identityJobStatus } };
             })

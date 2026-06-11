@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
     createIdentityStatusHandler,
     createSubmitVerificationHandler,
-    identityStatusMessage,
     InMemoryVerificationJobRepository,
-    verificationJobStatusResponse,
+    identityStatusMessage,
     type VerificationJobRow,
+    verificationJobStatusResponse,
 } from "../src/index.js";
 import { validRequest } from "./fixtures.js";
 
