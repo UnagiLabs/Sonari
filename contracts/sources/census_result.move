@@ -97,3 +97,23 @@ public(package) fun registered_members_by_band(result: &FloorCensusResult): vect
 public(package) fun issued_at_ms(result: &FloorCensusResult): u64 {
     result.issued_at_ms
 }
+
+#[test_only]
+public fun new_for_testing(
+    event_uid: vector<u8>,
+    event_revision: u32,
+    affected_cells_root: vector<u8>,
+    registered_members_by_band: vector<u64>,
+    issued_at_ms: u64,
+): FloorCensusResult {
+    FloorCensusResult {
+        intent: INTENT_FLOOR_CENSUS_V1,
+        verifier_family: VERIFIER_FAMILY_CENSUS,
+        verifier_version: VERIFIER_VERSION_V1,
+        event_uid,
+        event_revision,
+        affected_cells_root,
+        registered_members_by_band,
+        issued_at_ms,
+    }
+}

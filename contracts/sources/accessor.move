@@ -5,12 +5,13 @@ use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::allowed_residence_cell;
 use contracts::campaign as campaign_v2;
 use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
+use contracts::census_result;
 use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{Self, DisasterCampaignBinding, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
 use contracts::identity_registry::{Self, IdentityRegistry};
 use contracts::identity_result_v1;
-use contracts::membership;
+use contracts::membership::{Self, MembershipRegistry, MembershipPass};
 use contracts::metadata_verifier;
 use contracts::pools::{Self, DesignatedPool, MainPool, OperationsPool};
 use contracts::payout_policy::{CampaignBudget, PayoutPolicy};
@@ -399,6 +400,93 @@ public fun claim_disaster_usdc(
         designated_pool,
         main_pool,
         user_max_amount_usdc,
+        ctx,
+    );
+}
+
+public fun set_floor_census(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    disaster_event: &DisasterEvent,
+    verifier_registry: &metadata_verifier::VerifierRegistry,
+    category_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    census_bcs: vector<u8>,
+    signature: vector<u8>,
+    public_key: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+
+    let now_ms = clock::timestamp_ms(clock);
+    let (_, _, _) = metadata_verifier::assert_enclave_signed_bytes(
+        verifier_registry,
+        metadata_verifier::verifier_family_census(),
+        metadata_verifier::census_v1_config_key(),
+        &census_bcs,
+        &signature,
+        &public_key,
+        now_ms,
+    );
+    let result = census_result::decode_verified(census_bcs, now_ms);
+    campaign_v2::apply_floor_census(
+        campaign,
+        &result,
+        disaster_event::event_uid(disaster_event),
+        disaster_event::event_revision(disaster_event),
+        disaster_event::affected_cells_root(disaster_event),
+        category_pool,
+        main_pool,
+        now_ms,
+        ctx,
+    );
+}
+
+public fun claim_floor(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    identity_registry: &IdentityRegistry,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    admin::assert_target_not_paused(
+        pause_state,
+        identity_registry::registry_id(identity_registry),
+    );
+    campaign_v2::claim_floor_payment(
+        campaign,
+        identity_registry,
+        membership_registry,
+        pass,
+        identity_provider,
+        duplicate_key_hash,
+        clock::timestamp_ms(clock),
+        ctx,
+    );
+}
+
+public fun return_floor_budget(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    category_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    campaign_v2::return_floor_budget(
+        campaign,
+        category_pool,
+        main_pool,
+        clock::timestamp_ms(clock),
         ctx,
     );
 }

@@ -2,9 +2,14 @@
 module contracts::campaign;
 
 use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
+use contracts::census_result::{Self, FloorCensusResult};
+use contracts::identity_registry::{Self, IdentityRegistry};
+use contracts::membership::{Self, MembershipRegistry, MembershipPass};
+use contracts::pools::{Self, MainPool};
 use sui::balance::{Self, Balance};
 use sui::clock::{Self, Clock};
 use sui::coin::{Self, Coin};
+use sui::dynamic_field;
 use sui::event;
 use usdc::usdc::USDC;
 
@@ -36,6 +41,17 @@ const BPS_DENOMINATOR: u64 = 10_000;
 const EVersionMismatch: u64 = 0;
 const ECampaignPaused: u64 = 1;
 const EInvalidBandCount: u64 = 2;
+const EFloorCensusAlreadySet: u64 = 3;
+const EFloorCensusNotSet: u64 = 4;
+const EFloorBudgetAlreadyReturned: u64 = 5;
+const EDonationPeriodNotOver: u64 = 6;
+const ECampaignCategoryPoolMismatch: u64 = 7;
+const EFloorCensusBindingMismatch: u64 = 8;
+const EClaimApplicationNotFound: u64 = 9;
+const EClaimNotVerified: u64 = 10;
+const EFloorAlreadyClaimed: u64 = 11;
+const EClaimExcluded: u64 = 12;
+const EFloorCensusAfterDonationEnd: u64 = 13;
 
 // ---------------------------------------------------------------
 // structs
@@ -112,6 +128,40 @@ public struct ClaimApplication has copy, drop, store {
 public struct PayoutKey has copy, drop, store {
     pass_lineage_id: ID,
     round: u64,
+}
+
+public struct FloorReceipt has key {
+    id: UID,
+    campaign_id: ID,
+    pass_lineage_id: ID,
+    band: u8,
+    amount_usdc: u64,
+    claimed_at_ms: u64,
+}
+
+public struct FloorCensusSet has copy, drop {
+    campaign_id: ID,
+    registered_members_by_band: vector<u64>,
+    max_liability_usdc: u64,
+    floor_ratio_bps: u64,
+    floor_amount_by_band: vector<u64>,
+    draw_category_usdc: u64,
+    draw_main_usdc: u64,
+}
+
+public struct FloorPaid has copy, drop {
+    campaign_id: ID,
+    pass_lineage_id: ID,
+    band: u8,
+    amount_usdc: u64,
+    recipient: address,
+    paid_at_ms: u64,
+}
+
+public struct FloorBudgetReturned has copy, drop {
+    campaign_id: ID,
+    returned_to_category_usdc: u64,
+    returned_to_main_usdc: u64,
 }
 
 public struct CampaignCreated has copy, drop {
@@ -361,6 +411,327 @@ public(package) fun min_claim_band(): u8 {
 }
 
 // ---------------------------------------------------------------
+// floor census
+// ---------------------------------------------------------------
+
+public(package) fun apply_floor_census(
+    campaign: &mut Campaign,
+    result: &FloorCensusResult,
+    disaster_event_uid: vector<u8>,
+    disaster_event_revision: u32,
+    disaster_event_affected_cells_root: vector<u8>,
+    category_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(!campaign.census_set, EFloorCensusAlreadySet);
+    assert!(now_ms < campaign.donation_end_ms, EFloorCensusAfterDonationEnd);
+    assert!(
+        category_pool::category_pool_id(category_pool) == campaign.category_pool_id,
+        ECampaignCategoryPoolMismatch,
+    );
+    assert!(census_result::event_uid(result) == disaster_event_uid, EFloorCensusBindingMismatch);
+    assert!(
+        census_result::event_revision(result) == disaster_event_revision,
+        EFloorCensusBindingMismatch,
+    );
+    assert!(
+        census_result::affected_cells_root(result) == disaster_event_affected_cells_root,
+        EFloorCensusBindingMismatch,
+    );
+
+    let registered = census_result::registered_members_by_band(result);
+    let band_targets = campaign.band_target_usdc;
+
+    let mut max_liability: u128 = 0;
+    let mut i = 0;
+    while (i < BAND_COUNT) {
+        max_liability = max_liability
+            + (*registered.borrow(i) as u128) * (*band_targets.borrow(i) as u128);
+        i = i + 1;
+    };
+
+    let campaign_id = object::id(campaign);
+
+    if (max_liability == 0) {
+        campaign.census_set = true;
+        campaign.registered_members_by_band = registered;
+        event::emit(FloorCensusSet {
+            campaign_id,
+            registered_members_by_band: registered,
+            max_liability_usdc: 0,
+            floor_ratio_bps: 0,
+            floor_amount_by_band: vector[0, 0, 0],
+            draw_category_usdc: 0,
+            draw_main_usdc: 0,
+        });
+        return
+    };
+
+    let floor_target = ((max_liability * (FLOOR_TARGET_RATIO_BPS as u128)) / (BPS_DENOMINATOR as u128)) as u64;
+
+    let cat_balance = category_pool::category_pool_balance_usdc(category_pool);
+    let cat_available = cat_balance / campaign.category_annual_event_divisor;
+    let draw_category = if (floor_target <= cat_available) { floor_target } else { cat_available };
+
+    let rem = floor_target - draw_category;
+    let main_disposable = pools::main_pool_disposable_floor_usdc(main_pool);
+    let main_share = ((main_disposable as u128 * (campaign.floor_main_share_bps as u128)) / (BPS_DENOMINATOR as u128)) as u64;
+    let draw_main = if (rem <= main_share) { rem } else { main_share };
+
+    let floor_budget = draw_category + draw_main;
+    let ratio = ((floor_budget as u128) * (BPS_DENOMINATOR as u128) / max_liability) as u64;
+    let floor_ratio_bps = if (ratio <= FLOOR_TARGET_RATIO_BPS) { ratio } else { FLOOR_TARGET_RATIO_BPS };
+
+    let floor_amount_by_band = vector::tabulate!(BAND_COUNT, |b| {
+        *band_targets.borrow(b) * floor_ratio_bps / BPS_DENOMINATOR
+    });
+
+    if (draw_category > 0) {
+        let cat_coin = category_pool::fund_floor_from_category(category_pool, draw_category, ctx);
+        balance::join(&mut campaign.floor_balance, coin::into_balance(cat_coin));
+    };
+    if (draw_main > 0) {
+        let main_coin = pools::fund_floor_from_main(main_pool, draw_main, ctx);
+        balance::join(&mut campaign.floor_balance, coin::into_balance(main_coin));
+    };
+
+    campaign.census_set = true;
+    campaign.registered_members_by_band = registered;
+    campaign.max_liability_usdc = max_liability as u64;
+    campaign.floor_ratio_bps = floor_ratio_bps;
+    campaign.floor_amount_by_band = floor_amount_by_band;
+    campaign.floor_from_category_usdc = draw_category;
+    campaign.floor_from_main_usdc = draw_main;
+
+    event::emit(FloorCensusSet {
+        campaign_id,
+        registered_members_by_band: registered,
+        max_liability_usdc: max_liability as u64,
+        floor_ratio_bps,
+        floor_amount_by_band: campaign.floor_amount_by_band,
+        draw_category_usdc: draw_category,
+        draw_main_usdc: draw_main,
+    });
+}
+
+// ---------------------------------------------------------------
+// claim floor
+// ---------------------------------------------------------------
+
+public(package) fun add_claim_application(
+    campaign: &mut Campaign,
+    pass_lineage_id: ID,
+    band: u8,
+    now_ms: u64,
+) {
+    dynamic_field::add(
+        &mut campaign.id,
+        pass_lineage_id,
+        ClaimApplication {
+            band,
+            applied_at_ms: now_ms,
+            verified: false,
+            verified_in_round: 0,
+            floor_claimed: false,
+            excluded: false,
+        },
+    );
+    let band_idx = (band as u64) - 1;
+    let count = campaign.applied_count_by_band.borrow_mut(band_idx);
+    *count = *count + 1;
+}
+
+public(package) fun set_claim_verified(
+    campaign: &mut Campaign,
+    pass_lineage_id: ID,
+    round: u64,
+) {
+    let app = dynamic_field::borrow_mut<ID, ClaimApplication>(&mut campaign.id, pass_lineage_id);
+    app.verified = true;
+    app.verified_in_round = round;
+    let band_idx = (app.band as u64) - 1;
+    let count = campaign.verified_count_by_band.borrow_mut(band_idx);
+    *count = *count + 1;
+}
+
+public(package) fun claim_floor_payment(
+    campaign: &mut Campaign,
+    identity_registry: &IdentityRegistry,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(campaign.census_set, EFloorCensusNotSet);
+    assert!(!campaign.floor_budget_returned, EFloorBudgetAlreadyReturned);
+
+    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
+
+    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
+    identity_registry::assert_identity_verified(
+        identity_registry,
+        pass_lineage_id,
+        ctx.sender(),
+        identity_provider,
+        now_ms,
+    );
+    identity_registry::assert_duplicate_key_bound_to_pass(
+        identity_registry,
+        pass_lineage_id,
+        identity_provider,
+        duplicate_key_hash,
+    );
+
+    assert!(
+        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
+        EClaimApplicationNotFound,
+    );
+    let app = dynamic_field::borrow_mut<ID, ClaimApplication>(&mut campaign.id, pass_lineage_id);
+    assert!(app.verified, EClaimNotVerified);
+    assert!(!app.excluded, EClaimExcluded);
+    assert!(!app.floor_claimed, EFloorAlreadyClaimed);
+
+    let band = app.band;
+    app.floor_claimed = true;
+
+    let band_idx = (band as u64) - 1;
+    let amount = *campaign.floor_amount_by_band.borrow(band_idx);
+
+    campaign.floor_paid_count = campaign.floor_paid_count + 1;
+    campaign.floor_total_paid_usdc = campaign.floor_total_paid_usdc + amount;
+    campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
+
+    let recipient = membership::membership_pass_owner(pass);
+    let campaign_id = object::id(campaign);
+
+    let floor_coin = coin::from_balance(campaign.floor_balance.split(amount), ctx);
+    transfer::public_transfer(floor_coin, recipient);
+
+    let receipt = FloorReceipt {
+        id: object::new(ctx),
+        campaign_id,
+        pass_lineage_id,
+        band,
+        amount_usdc: amount,
+        claimed_at_ms: now_ms,
+    };
+    transfer::transfer(receipt, recipient);
+
+    event::emit(FloorPaid {
+        campaign_id,
+        pass_lineage_id,
+        band,
+        amount_usdc: amount,
+        recipient,
+        paid_at_ms: now_ms,
+    });
+}
+
+// ---------------------------------------------------------------
+// return floor budget
+// ---------------------------------------------------------------
+
+public(package) fun return_floor_budget(
+    campaign: &mut Campaign,
+    category_pool: &mut CategoryPool,
+    main_pool: &mut MainPool,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(now_ms >= campaign.donation_end_ms, EDonationPeriodNotOver);
+    assert!(campaign.census_set, EFloorCensusNotSet);
+    assert!(!campaign.floor_budget_returned, EFloorBudgetAlreadyReturned);
+    assert!(
+        category_pool::category_pool_id(category_pool) == campaign.category_pool_id,
+        ECampaignCategoryPoolMismatch,
+    );
+
+    campaign.floor_budget_returned = true;
+
+    let remaining = campaign.floor_balance.value();
+    let campaign_id = object::id(campaign);
+
+    let (returned_to_category, returned_to_main) = if (remaining == 0) {
+        (0u64, 0u64)
+    } else {
+        let total_funded = campaign.floor_from_category_usdc + campaign.floor_from_main_usdc;
+        if (total_funded == 0) {
+            (remaining, 0u64)
+        } else {
+            let return_to_main = ((remaining as u128)
+                * (campaign.floor_from_main_usdc as u128)
+                / (total_funded as u128)) as u64;
+            (remaining - return_to_main, return_to_main)
+        }
+    };
+
+    if (returned_to_category > 0) {
+        let cat_coin = coin::from_balance(campaign.floor_balance.split(returned_to_category), ctx);
+        category_pool::receive_returned_floor(category_pool, cat_coin);
+    };
+    if (returned_to_main > 0) {
+        let main_coin = coin::from_balance(campaign.floor_balance.split(returned_to_main), ctx);
+        pools::receive_swept_to_main(main_pool, main_coin);
+    };
+
+    event::emit(FloorBudgetReturned {
+        campaign_id,
+        returned_to_category_usdc: returned_to_category,
+        returned_to_main_usdc: returned_to_main,
+    });
+}
+
+// ---------------------------------------------------------------
+// test-only helpers
+// ---------------------------------------------------------------
+
+// ---------------------------------------------------------------
+// floor census / floor pay error code exports (for test expected_failure)
+// ---------------------------------------------------------------
+
+public(package) fun e_floor_census_already_set(): u64 { EFloorCensusAlreadySet }
+public(package) fun e_floor_census_not_set(): u64 { EFloorCensusNotSet }
+public(package) fun e_floor_budget_already_returned(): u64 { EFloorBudgetAlreadyReturned }
+public(package) fun e_donation_period_not_over(): u64 { EDonationPeriodNotOver }
+public(package) fun e_campaign_category_pool_mismatch(): u64 { ECampaignCategoryPoolMismatch }
+public(package) fun e_floor_census_binding_mismatch(): u64 { EFloorCensusBindingMismatch }
+public(package) fun e_claim_application_not_found(): u64 { EClaimApplicationNotFound }
+public(package) fun e_claim_not_verified(): u64 { EClaimNotVerified }
+public(package) fun e_floor_already_claimed(): u64 { EFloorAlreadyClaimed }
+public(package) fun e_floor_census_after_donation_end(): u64 { EFloorCensusAfterDonationEnd }
+
+// ---------------------------------------------------------------
+// accessor read-only helpers for tests
+// ---------------------------------------------------------------
+
+public(package) fun campaign_floor_census_fields(
+    c: &Campaign,
+): (bool, u64, u64, vector<u64>, u64, u64, u64, bool) {
+    (
+        c.census_set,
+        c.max_liability_usdc,
+        c.floor_ratio_bps,
+        c.floor_amount_by_band,
+        c.floor_from_category_usdc,
+        c.floor_from_main_usdc,
+        c.floor_balance.value(),
+        c.floor_budget_returned,
+    )
+}
+
+public(package) fun campaign_floor_paid_fields(c: &Campaign): (u64, u64, u64) {
+    (c.floor_paid_count, c.floor_total_paid_usdc, c.total_paid_usdc)
+}
+
+public(package) fun campaign_registered_members_by_band(c: &Campaign): vector<u64> {
+    c.registered_members_by_band
+}
+
+// ---------------------------------------------------------------
 // test-only helpers
 // ---------------------------------------------------------------
 
@@ -412,4 +783,82 @@ public fun hazard_type_earthquake_for_testing(): u8 {
 #[test_only]
 public fun set_ops_withheld_for_testing(c: &mut Campaign, value: u64) {
     c.ops_withheld_usdc = value;
+}
+
+#[test_only]
+public fun add_claim_application_for_testing(
+    campaign: &mut Campaign,
+    pass_lineage_id: ID,
+    band: u8,
+    verified: bool,
+    floor_claimed: bool,
+    excluded: bool,
+    now_ms: u64,
+) {
+    dynamic_field::add(
+        &mut campaign.id,
+        pass_lineage_id,
+        ClaimApplication {
+            band,
+            applied_at_ms: now_ms,
+            verified,
+            verified_in_round: 0,
+            floor_claimed,
+            excluded,
+        },
+    );
+}
+
+#[test_only]
+public fun floor_census_set_event_fields(
+    event: FloorCensusSet,
+): (ID, vector<u64>, u64, u64, vector<u64>, u64, u64) {
+    let FloorCensusSet {
+        campaign_id,
+        registered_members_by_band,
+        max_liability_usdc,
+        floor_ratio_bps,
+        floor_amount_by_band,
+        draw_category_usdc,
+        draw_main_usdc,
+    } = event;
+    (
+        campaign_id,
+        registered_members_by_band,
+        max_liability_usdc,
+        floor_ratio_bps,
+        floor_amount_by_band,
+        draw_category_usdc,
+        draw_main_usdc,
+    )
+}
+
+#[test_only]
+public fun floor_paid_event_fields(
+    event: FloorPaid,
+): (ID, ID, u8, u64, address, u64) {
+    let FloorPaid { campaign_id, pass_lineage_id, band, amount_usdc, recipient, paid_at_ms } = event;
+    (campaign_id, pass_lineage_id, band, amount_usdc, recipient, paid_at_ms)
+}
+
+#[test_only]
+public fun floor_budget_returned_event_fields(
+    event: FloorBudgetReturned,
+): (ID, u64, u64) {
+    let FloorBudgetReturned { campaign_id, returned_to_category_usdc, returned_to_main_usdc } = event;
+    (campaign_id, returned_to_category_usdc, returned_to_main_usdc)
+}
+
+#[test_only]
+public fun floor_receipt_fields(
+    receipt: FloorReceipt,
+): (ID, ID, u8, u64, u64) {
+    let FloorReceipt { id, campaign_id, pass_lineage_id, band, amount_usdc, claimed_at_ms } = receipt;
+    id.delete();
+    (campaign_id, pass_lineage_id, band, amount_usdc, claimed_at_ms)
+}
+
+#[test_only]
+public fun set_donation_end_ms_for_testing(c: &mut Campaign, donation_end_ms: u64) {
+    c.donation_end_ms = donation_end_ms;
 }
