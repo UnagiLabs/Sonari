@@ -44,55 +44,59 @@ export function ResidenceStep({
                 <p className="wizard-lead">{t("lead")}</p>
             </header>
 
-            <div className="wizard-card wizard-map-card">
+            <div className="residence-step-stage">
+                {/* 地図＋オーバーレイ（背景層） */}
                 <ResidenceCellPicker onSelectionChange={onCellSelectionChange} />
-            </div>
 
-            <fieldset className="control-group">
-                <legend>{t("statementsLegend")}</legend>
-                <div className="terms-list">
-                    {accepted.map((checked, index) => (
-                        <label
-                            className="terms-row"
-                            // biome-ignore lint/suspicious/noArrayIndexKey: 配列は固定長・並べ替えなし
-                            key={index}
+                {/* 確定パネル（前景層）: チェックボックス・エラー・CTA */}
+                <div className="residence-action-panel">
+                    <fieldset className="control-group">
+                        <legend>{t("statementsLegend")}</legend>
+                        <div className="terms-list">
+                            {accepted.map((checked, index) => (
+                                <label
+                                    className="terms-row"
+                                    // biome-ignore lint/suspicious/noArrayIndexKey: 配列は固定長・並べ替えなし
+                                    key={index}
+                                >
+                                    <input
+                                        checked={checked}
+                                        name="residenceTerms"
+                                        onChange={(event) => onToggle(index, event.target.checked)}
+                                        type="checkbox"
+                                    />
+                                    <span>{t(`statements.${index}`)}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </fieldset>
+
+                    {errorMessage !== null ? (
+                        <div className="field-note" role="alert">
+                            <small>{errorMessage}</small>
+                        </div>
+                    ) : null}
+
+                    <div className="wizard-cta-bar">
+                        <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
+                            {tCommon("back")}
+                        </button>
+                        <button
+                            className="btn btn-primary btn-lg wizard-cta"
+                            disabled={!canContinue}
+                            onClick={onNext}
+                            type="button"
                         >
-                            <input
-                                checked={checked}
-                                name="residenceTerms"
-                                onChange={(event) => onToggle(index, event.target.checked)}
-                                type="checkbox"
-                            />
-                            <span>{t(`statements.${index}`)}</span>
-                        </label>
-                    ))}
+                            {tCommon("next")}
+                        </button>
+                    </div>
+                    {!canContinue ? (
+                        <p className="wizard-cta-hint" role="note">
+                            {t("nextHint")}
+                        </p>
+                    ) : null}
                 </div>
-            </fieldset>
-
-            {errorMessage !== null ? (
-                <div className="field-note" role="alert">
-                    <small>{errorMessage}</small>
-                </div>
-            ) : null}
-
-            <div className="wizard-cta-bar">
-                <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
-                    {tCommon("back")}
-                </button>
-                <button
-                    className="btn btn-primary btn-lg wizard-cta"
-                    disabled={!canContinue}
-                    onClick={onNext}
-                    type="button"
-                >
-                    {tCommon("next")}
-                </button>
             </div>
-            {!canContinue ? (
-                <p className="wizard-cta-hint" role="note">
-                    {t("nextHint")}
-                </p>
-            ) : null}
         </section>
     );
 }

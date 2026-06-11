@@ -24,7 +24,7 @@ import {
     type OverlayCellKind,
     selectResidenceCell,
 } from "./residence-overlay";
-import { polygonStyleForKind } from "./residence-cell-style";
+import { buildCellLegendEntries, polygonStyleForKind } from "./residence-cell-style";
 import { canRetryMapLoad, nextRetryNonce } from "./map-load-retry";
 
 // NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
@@ -438,116 +438,136 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     const summary = buildResidenceSummary({ selectedDecimal, classification: selectedClass });
     const isReady = status === "ready";
     const workerUnavailable = residenceWorkerUrl.trim().length === 0;
+    const legendEntries = buildCellLegendEntries();
 
     return (
-        <div className="residence-selector">
-            <div className="residence-search-row">
-                <div className="text-field">
-                    <span>{t("searchLabel")}</span>
-                    <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
-                    <small>{t("searchHint")}</small>
-                </div>
-                <button
-                    className="btn btn-secondary"
-                    disabled={!isReady}
-                    onClick={handleUseCurrentLocation}
-                    type="button"
-                >
-                    {t("useCurrentLocation")}
-                </button>
-            </div>
-
+        <div className="residence-map-stage">
+            {/* 地図 canvas: unconfigured 時は描画しないが DOM 構造は維持する */}
             {status === "unconfigured" ? (
                 <div className="residence-map-fallback" role="status">
                     <strong>{t("unconfiguredTitle")}</strong>
                     <p>{t("unconfiguredBody")}</p>
                 </div>
             ) : (
-                <div className="residence-map-picker">
-                    <div
-                        aria-label={t("mapAria")}
-                        className="residence-map-canvas"
-                        ref={mapElRef}
-                        role="application"
-                        style={{ minHeight: 320 }}
-                    />
-                    {status === "loading" ? (
-                        <div className="residence-map-overlay-note" role="status">
-                            {t("loadingMap")}
-                        </div>
-                    ) : null}
-                    {status === "error" ? (
-                        <div className="residence-map-overlay-note" role="status">
-                            {t("mapError")}
-                            {canRetryMapLoad(status) ? (
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={() => {
-                                        setRetryNonce(nextRetryNonce);
-                                    }}
-                                    type="button"
-                                >
-                                    {t("retryMapLoad")}
-                                </button>
-                            ) : null}
-                        </div>
-                    ) : null}
-                </div>
+                <div
+                    aria-label={t("mapAria")}
+                    className="residence-map-canvas"
+                    ref={mapElRef}
+                    role="application"
+                />
             )}
 
-            {workerUnavailable ? (
-                <p className="residence-notice" role="status">
-                    {t("workerUnavailable")}
-                </p>
-            ) : null}
-            {notice !== null ? (
-                <p className="residence-notice" role="status">
-                    {notice}
-                </p>
-            ) : null}
+            {/* 地図上部オーバーレイ: 検索ボックス + 現在地ボタン */}
+            <div className="residence-overlay-top">
+                <div className="residence-search-overlay">
+                    <div className="text-field">
+                        <span>{t("searchLabel")}</span>
+                        <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
+                        <small>{t("searchHint")}</small>
+                    </div>
+                    <button
+                        className="btn btn-secondary"
+                        disabled={!isReady}
+                        onClick={handleUseCurrentLocation}
+                        type="button"
+                    >
+                        {t("useCurrentLocation")}
+                    </button>
+                </div>
 
-            <div className="selected-area-summary">
-                <div>
-                    <span>{t("summaryResolution")}</span>
-                    <strong>{summary.resolution}</strong>
-                </div>
-                <div>
-                    <span>{t("summaryCellId")}</span>
-                    <strong className="mono-value">{summary.cellHex ?? "—"}</strong>
-                </div>
-                <div>
-                    <span>{t("summaryAllowlist")}</span>
-                    <strong>{summary.allowlistStatus}</strong>
-                </div>
+                {/* ロード中/エラー通知 */}
+                {status === "loading" ? (
+                    <div className="residence-map-overlay-note" role="status">
+                        {t("loadingMap")}
+                    </div>
+                ) : null}
+                {status === "error" ? (
+                    <div className="residence-map-overlay-note" role="status">
+                        {t("mapError")}
+                        {canRetryMapLoad(status) ? (
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                    setRetryNonce(nextRetryNonce);
+                                }}
+                                type="button"
+                            >
+                                {t("retryMapLoad")}
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
             </div>
 
-            <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
+            {/* 地図下部オーバーレイ: サマリ・凡例・通知 */}
+            <div className="residence-overlay-bottom">
+                <div className="residence-info-panel">
+                    <div className="selected-area-summary">
+                        <div>
+                            <span>{t("summaryResolution")}</span>
+                            <strong>{summary.resolution}</strong>
+                        </div>
+                        <div>
+                            <span>{t("summaryCellId")}</span>
+                            <strong className="mono-value">{summary.cellHex ?? "—"}</strong>
+                        </div>
+                        <div>
+                            <span>{t("summaryAllowlist")}</span>
+                            <strong>{summary.allowlistStatus}</strong>
+                        </div>
+                    </div>
 
-            <details className="advanced-cell-input">
-                <summary>{t("advancedSummary")}</summary>
-                <label className="text-field" htmlFor="home-cell-advanced">
-                    <span>{t("advancedLabel")}</span>
-                    <input
-                        id="home-cell-advanced"
-                        onBlur={(event) => {
-                            handleAdvancedCommit(event.target.value);
-                        }}
-                        onChange={(event) => {
-                            setAdvancedInput(event.target.value);
-                        }}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                                event.preventDefault();
-                                handleAdvancedCommit(event.currentTarget.value);
-                            }
-                        }}
-                        placeholder="872f5aa8effffff"
-                        type="text"
-                        value={advancedInput}
-                    />
-                    <small>{t("advancedHelp")}</small>
-                </label>
-            </details>
+                    <ul className="residence-legend">
+                        {legendEntries.map((entry) => (
+                            <li className="residence-legend-item" key={entry.kind}>
+                                <span
+                                    className={`residence-legend-swatch swatch-${entry.swatch}`}
+                                />
+                                <span>{t(entry.labelKey as Parameters<typeof t>[0])}</span>
+                            </li>
+                        ))}
+                    </ul>
+
+                    {workerUnavailable ? (
+                        <p className="residence-notice" role="status">
+                            {t("workerUnavailable")}
+                        </p>
+                    ) : null}
+                    {notice !== null ? (
+                        <p className="residence-notice" role="status">
+                            {notice}
+                        </p>
+                    ) : null}
+
+                    <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
+
+                    <details className="advanced-cell-input">
+                        <summary>{t("advancedSummary")}</summary>
+                        <label className="text-field" htmlFor="home-cell-advanced">
+                            <span>{t("advancedLabel")}</span>
+                            <input
+                                id="home-cell-advanced"
+                                onBlur={(event) => {
+                                    handleAdvancedCommit(event.target.value);
+                                }}
+                                onChange={(event) => {
+                                    setAdvancedInput(event.target.value);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        handleAdvancedCommit(event.currentTarget.value);
+                                    }
+                                }}
+                                placeholder="872f5aa8effffff"
+                                type="text"
+                                value={advancedInput}
+                            />
+                            <small>{t("advancedHelp")}</small>
+                        </label>
+                    </details>
+                </div>
+            </div>
         </div>
     );
 }

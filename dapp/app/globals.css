@@ -2210,6 +2210,124 @@ h4 {
   font-size: 13px;
 }
 
+/* -------------------------------------------------------------------------
+ * Residence map stage – オーバーレイ構造（STEP 3）
+ * 仕上げは STEP 5/6 で行う。ここでは重なりの土台のみ。
+ * ---------------------------------------------------------------------- */
+
+.residence-map-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+
+.residence-map-stage .residence-map-canvas {
+  display: block;
+  width: 100%;
+  height: 360px;
+}
+
+.residence-overlay-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 8px;
+  pointer-events: none;
+}
+
+.residence-overlay-top > * {
+  pointer-events: auto;
+}
+
+.residence-search-overlay {
+  display: grid;
+  align-items: start;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  background: var(--cream-50, #fafaf7);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  box-shadow: 0 2px 8px oklch(0.35 0.04 145 / 0.1);
+}
+
+.residence-overlay-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.residence-overlay-bottom > * {
+  pointer-events: auto;
+}
+
+.residence-info-panel {
+  background: var(--cream-50, #fafaf7);
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+/* 凡例 */
+.residence-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.residence-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.residence-legend-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* swatch 種別: 枠線スタイルで色覚によらず判別可能にする */
+.swatch-solid-bold {
+  border: 3.5px solid #2f5d3a;
+  background: oklch(0.62 0.08 145 / 0.45);
+}
+
+.swatch-solid {
+  border: 1.5px solid #4f7d5a;
+  background: oklch(0.72 0.06 145 / 0.18);
+}
+
+.swatch-dashed {
+  border: 1.5px dashed #9aa0a6;
+  background: oklch(0.78 0.01 220 / 0.25);
+}
+
+/* 確定パネル */
+.residence-action-panel {
+  padding: 16px 0 0;
+  display: grid;
+  gap: 12px;
+}
+
+/* step-stage: picker と action-panel を縦に並べる土台 */
+.residence-step-stage {
+  display: grid;
+  gap: 0;
+}
+
 .selected-area-summary {
   display: grid;
   gap: 0;
