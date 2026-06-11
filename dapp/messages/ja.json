@@ -106,7 +106,10 @@
                     "summaryAllowlist": "許可リスト",
                     "advancedSummary": "詳細セル入力",
                     "advancedLabel": "H3 解像度 7 セル（16進）",
-                    "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。"
+                    "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。",
+                    "legend.selected": "選択中",
+                    "legend.selectable": "選択可",
+                    "legend.disabled": "選択不可"
                 }
             },
             "membership": {

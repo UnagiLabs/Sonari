@@ -24,6 +24,7 @@ import {
     type OverlayCellKind,
     selectResidenceCell,
 } from "./residence-overlay";
+import { polygonStyleForKind } from "./residence-cell-style";
 
 // NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
 const mapsApiKey = readGoogleMapsApiKey();
@@ -46,46 +47,6 @@ const REBUILD_DEBOUNCE_MS = 150;
 function classToKind(cls: ResidenceCellClass): OverlayCellKind {
     return cls === "water" ? "disabled" : "selectable";
 }
-
-const polygonStyleByKind: Record<OverlayCellKind, google.maps.PolygonOptions> = {
-    selectable: {
-        strokeColor: "#4f7d5a",
-        strokeOpacity: 0.85,
-        strokeWeight: 1,
-        fillColor: "#7fae87",
-        fillOpacity: 0.18,
-        clickable: true,
-        zIndex: 1,
-    },
-    disabled: {
-        strokeColor: "#9aa0a6",
-        strokeOpacity: 0.5,
-        strokeWeight: 1,
-        fillColor: "#9aa0a6",
-        fillOpacity: 0.4,
-        // 海セルもクリックは受け付け、理由メッセージを出すために clickable にする。
-        clickable: true,
-        zIndex: 1,
-    },
-    selected: {
-        strokeColor: "#2f5d3a",
-        strokeOpacity: 1,
-        strokeWeight: 2.5,
-        fillColor: "#5b9268",
-        fillOpacity: 0.45,
-        clickable: true,
-        zIndex: 10,
-    },
-    pending: {
-        strokeColor: "#c7ccd1",
-        strokeOpacity: 0.4,
-        strokeWeight: 1,
-        fillColor: "#c7ccd1",
-        fillOpacity: 0.08,
-        clickable: true,
-        zIndex: 1,
-    },
-};
 
 export interface ResidenceCellPickerProps {
     /** 選択セル（10進）が変わるたびに呼ばれる。安定参照（useCallback）で渡すこと。 */
@@ -144,7 +105,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
         }
         const poly = polygonsRef.current.get(decimal);
         if (poly !== undefined) {
-            poly.setOptions(polygonStyleByKind[classToKind(cls)]);
+            poly.setOptions(polygonStyleForKind(classToKind(cls)));
         }
     }, []);
 
@@ -212,9 +173,9 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
             if (previousPoly !== undefined) {
                 const previousClass = classCacheRef.current.get(previous);
                 previousPoly.setOptions(
-                    polygonStyleByKind[
-                        previousClass === undefined ? "pending" : classToKind(previousClass)
-                    ],
+                    polygonStyleForKind(
+                        previousClass === undefined ? "pending" : classToKind(previousClass),
+                    ),
                 );
             }
         }
@@ -222,7 +183,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
         // 選択セルを強調し、その中心へ地図を寄せる。
         const selectedPoly = polygonsRef.current.get(decimal);
         if (selectedPoly !== undefined) {
-            selectedPoly.setOptions(polygonStyleByKind.selected);
+            selectedPoly.setOptions(polygonStyleForKind("selected"));
         }
         const map = mapRef.current;
         if (map !== null) {
@@ -260,7 +221,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
             }
 
             for (const cell of overlay) {
-                const style = polygonStyleByKind[cell.kind];
+                const style = polygonStyleForKind(cell.kind);
                 const existing = polygonsRef.current.get(cell.decimal);
                 if (existing === undefined) {
                     const poly = new google.maps.Polygon({ paths: cell.boundary, ...style });
