@@ -1177,7 +1177,6 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
     if (
         typeof input.job_id !== "string" ||
         typeof input.request_hash !== "string" ||
-        typeof input.owner_membership_key !== "string" ||
         typeof input.request_json !== "string" ||
         !isVerificationJobStatus(input.status) ||
         typeof input.retry_count !== "number" ||
@@ -1186,10 +1185,17 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
     ) {
         return null;
     }
+    const ownerMembershipKey =
+        typeof input.owner_membership_key === "string"
+            ? input.owner_membership_key
+            : ownerMembershipLookupKeyFromRequestJson(input.request_json);
+    if (ownerMembershipKey === null) {
+        return null;
+    }
     return {
         job_id: input.job_id,
         request_hash: input.request_hash,
-        owner_membership_key: input.owner_membership_key,
+        owner_membership_key: ownerMembershipKey,
         request_json: input.request_json,
         status: input.status,
         retry_count: input.retry_count,
@@ -1205,6 +1211,26 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
         updated_at_ms: input.updated_at_ms,
         completed_at_ms: nullableNumber(input.completed_at_ms),
     };
+}
+
+function ownerMembershipLookupKeyFromRequestJson(requestJson: string): string | null {
+    try {
+        const parsed = JSON.parse(requestJson) as unknown;
+        if (!isRecord(parsed)) {
+            return null;
+        }
+        const owner = parseHex32(parsed.owner, "owner");
+        if (!owner.ok) {
+            return null;
+        }
+        const membershipId = parseHex32(parsed.membership_id, "membership_id");
+        if (!membershipId.ok) {
+            return null;
+        }
+        return ownerMembershipLookupKey(owner.value, membershipId.value);
+    } catch {
+        return null;
+    }
 }
 
 function isConditionalCheckFailed(error: unknown): boolean {
