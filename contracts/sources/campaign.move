@@ -64,6 +64,14 @@ const EClaimNotVerified: u64 = 21;
 const EFloorAlreadyClaimed: u64 = 22;
 const EClaimExcluded: u64 = 23;
 const EFloorCensusAfterDonationEnd: u64 = 24;
+const EAlreadyClosed: u64 = 25;
+const ERoundNotStarted: u64 = 26;
+const ERoundTooEarly: u64 = 27;
+const ERoundNotEligible: u64 = 28;
+const EDuplicatePayout: u64 = 29;
+const ESweepNotEligible: u64 = 30;
+const EFloorBudgetNotReturned: u64 = 31;
+const EApplicationNotVerified: u64 = 32;
 
 // ---------------------------------------------------------------
 // structs
@@ -124,6 +132,7 @@ public struct Campaign has key {
     round_paid_count: u64,
     round_eligible_count: u64,
     closed: bool,
+    sweep_eligible: bool,
     // 運用
     paused: bool,
 }
@@ -190,6 +199,49 @@ public struct ClaimVerified has copy, drop {
     band: u8,
     verified_at_ms: u64,
     verifier: address,
+}
+
+public struct PayoutReceipt has key {
+    id: UID,
+    campaign_id: ID,
+    pass_lineage_id: ID,
+    round: u64,
+    band: u8,
+    amount_usdc: u64,
+    claimed_at_ms: u64,
+}
+
+public struct RoundFinalized has copy, drop {
+    campaign_id: ID,
+    round: u64,
+    liability: u64,
+    campaign_available: u64,
+    band_payout: vector<u64>,
+    eligible_count: u64,
+    finalized_at_ms: u64,
+}
+
+public struct PayoutClaimed has copy, drop {
+    campaign_id: ID,
+    round: u64,
+    pass_lineage_id: ID,
+    band: u8,
+    amount_usdc: u64,
+    recipient: address,
+}
+
+public struct ResidualSweep has copy, drop {
+    campaign_id: ID,
+    amount_usdc: u64,
+    final_round: u64,
+}
+
+public struct RecipientExcluded has copy, drop {
+    campaign_id: ID,
+    pass_lineage_id: ID,
+    reason_code: u8,
+    round: u64,
+    actor: address,
 }
 
 public struct CampaignCreated has copy, drop {
@@ -292,6 +344,7 @@ public(package) fun create_campaign(
         round_paid_count: 0,
         round_eligible_count: 0,
         closed: false,
+        sweep_eligible: false,
         paused: false,
     };
 
@@ -842,6 +895,232 @@ public(package) fun verify_claim(
 }
 
 // ---------------------------------------------------------------
+// finalize_round / claim_payout / sweep_residual / exclude_recipient
+// ---------------------------------------------------------------
+
+fun sum_vec(v: &vector<u64>): u64 {
+    let mut total = 0u64;
+    let mut i = 0u64;
+    while (i < v.length()) {
+        total = total + *v.borrow(i);
+        i = i + 1;
+    };
+    total
+}
+
+public(package) fun finalize_round_v2(
+    campaign: &mut Campaign,
+    now_ms: u64,
+) {
+    assert!(campaign.version == VERSION, EVersionMismatch);
+    assert!(!campaign.paused, ECampaignPaused);
+    assert!(!campaign.closed, EAlreadyClosed);
+
+    // Time guard: Round 1 waits for donation period; Round N waits for round interval
+    if (campaign.current_round == 0) {
+        assert!(now_ms >= campaign.donation_end_ms, ERoundTooEarly);
+    } else {
+        assert!(
+            now_ms >= campaign.round_finalized_at_ms + campaign.round_interval_ms,
+            ERoundTooEarly,
+        );
+    };
+
+    let eligible_count_by_band = campaign.verified_count_by_band;
+    let total_eligible = sum_vec(&eligible_count_by_band);
+
+    // Compute liability (u128 for overflow safety)
+    let mut liability128: u128 = 0;
+    let mut b = 0u64;
+    while (b < BAND_COUNT) {
+        let members = (*eligible_count_by_band.borrow(b) as u128);
+        let target = (*campaign.band_target_usdc.borrow(b) as u128);
+        liability128 = liability128 + members * target;
+        b = b + 1;
+    };
+
+    let campaign_av = campaign.balance.value();
+
+    // Termination check: balance per recipient too small
+    if (total_eligible > 0
+        && (campaign_av as u128)
+            < (campaign.min_payout_per_recipient_usdc as u128) * (total_eligible as u128)) {
+        campaign.sweep_eligible = true;
+        return
+    };
+
+    // Compute per-band payouts
+    let mut band_payout = vector[0u64, 0u64, 0u64];
+    if (liability128 > 0) {
+        let cap128 = liability128 * (campaign.round_cap_multiplier as u128);
+        let effective_av128 = if ((campaign_av as u128) > cap128) { cap128 } else { campaign_av as u128 };
+        let mut b2 = 0u64;
+        while (b2 < BAND_COUNT) {
+            let target128 = (*campaign.band_target_usdc.borrow(b2) as u128);
+            let payout = target128 * effective_av128 / liability128;
+            *band_payout.borrow_mut(b2) = payout as u64;
+            b2 = b2 + 1;
+        };
+    } else {
+        // liability == 0: no eligible recipients → sweep is possible
+        campaign.sweep_eligible = true;
+    };
+
+    let round = campaign.current_round + 1;
+    campaign.current_round = round;
+    campaign.round_finalized_at_ms = now_ms;
+    campaign.round_payout_by_band = band_payout;
+    campaign.round_eligible_count = total_eligible;
+    campaign.round_paid_count = 0;
+
+    let campaign_id = object::id(campaign);
+    let liability = (liability128 as u64);
+    event::emit(RoundFinalized {
+        campaign_id,
+        round,
+        liability,
+        campaign_available: campaign_av,
+        band_payout,
+        eligible_count: total_eligible,
+        finalized_at_ms: now_ms,
+    });
+}
+
+public(package) fun claim_payout_v2(
+    campaign: &mut Campaign,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(campaign.version == VERSION, EVersionMismatch);
+    assert!(!campaign.paused, ECampaignPaused);
+    assert!(!campaign.closed, EAlreadyClosed);
+    assert!(campaign.current_round >= 1, ERoundNotStarted);
+
+    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
+
+    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
+    assert!(
+        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
+        EClaimApplicationNotFound,
+    );
+    let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+    assert!(app.verified, EClaimNotVerified);
+    assert!(!app.excluded, EClaimExcluded);
+    assert!(app.verified_in_round < campaign.current_round, ERoundNotEligible);
+
+    let payout_key = PayoutKey { pass_lineage_id, round: campaign.current_round };
+    assert!(
+        !dynamic_field::exists_with_type<PayoutKey, bool>(&campaign.id, payout_key),
+        EDuplicatePayout,
+    );
+
+    let band = app.band;
+    let band_idx = (band as u64) - 1;
+    let amount = *campaign.round_payout_by_band.borrow(band_idx);
+
+    dynamic_field::add(&mut campaign.id, payout_key, true);
+    campaign.round_paid_count = campaign.round_paid_count + 1;
+    campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
+
+    let recipient = membership::membership_pass_owner(pass);
+    let campaign_id = object::id(campaign);
+
+    let payout_coin = coin::from_balance(campaign.balance.split(amount), ctx);
+    transfer::public_transfer(payout_coin, recipient);
+
+    let receipt = PayoutReceipt {
+        id: object::new(ctx),
+        campaign_id,
+        pass_lineage_id,
+        round: campaign.current_round,
+        band,
+        amount_usdc: amount,
+        claimed_at_ms: now_ms,
+    };
+    transfer::transfer(receipt, recipient);
+
+    event::emit(PayoutClaimed {
+        campaign_id,
+        round: campaign.current_round,
+        pass_lineage_id,
+        band,
+        amount_usdc: amount,
+        recipient,
+    });
+}
+
+public(package) fun sweep_residual_v2(
+    campaign: &mut Campaign,
+    main_pool: &mut MainPool,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(campaign.version == VERSION, EVersionMismatch);
+    assert!(!campaign.closed, EAlreadyClosed);
+    assert!(campaign.floor_budget_returned, EFloorBudgetNotReturned);
+
+    // Sweep is allowed when: sweep_eligible flag set by finalize, OR no finalize ever run but time passed
+    let initial_timeout = campaign.current_round == 0
+        && now_ms >= campaign.donation_end_ms + campaign.round_interval_ms;
+    assert!(campaign.sweep_eligible || initial_timeout, ESweepNotEligible);
+
+    let amount = campaign.balance.value();
+    let final_round = campaign.current_round;
+    let campaign_id = object::id(campaign);
+
+    campaign.closed = true;
+
+    if (amount > 0) {
+        let sweep_coin = coin::from_balance(campaign.balance.split(amount), ctx);
+        pools::receive_swept_to_main(main_pool, sweep_coin);
+    };
+
+    event::emit(ResidualSweep {
+        campaign_id,
+        amount_usdc: amount,
+        final_round,
+    });
+    let _ = now_ms;
+}
+
+public(package) fun exclude_recipient_internal(
+    campaign: &mut Campaign,
+    pass_lineage_id: ID,
+    reason_code: u8,
+    now_ms: u64,
+    ctx: &TxContext,
+) {
+    assert!(campaign.version == VERSION, EVersionMismatch);
+    assert!(!campaign.closed, EAlreadyClosed);
+    assert!(
+        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
+        EClaimApplicationNotFound,
+    );
+    let app = dynamic_field::borrow_mut<ID, ClaimApplication>(&mut campaign.id, pass_lineage_id);
+    assert!(!app.excluded, EClaimAlreadyExcluded);
+
+    app.excluded = true;
+    // Decrement verified count so next finalize_round reflects the exclusion
+    if (app.verified && app.band >= 1) {
+        let band_idx = (app.band as u64) - 1;
+        let count = campaign.verified_count_by_band.borrow_mut(band_idx);
+        *count = *count - 1;
+    };
+
+    let campaign_id = object::id(campaign);
+    event::emit(RecipientExcluded {
+        campaign_id,
+        pass_lineage_id,
+        reason_code,
+        round: campaign.current_round,
+        actor: ctx.sender(),
+    });
+    let _ = now_ms;
+}
+
+// ---------------------------------------------------------------
 // floor census / floor pay error code exports (for test expected_failure)
 // ---------------------------------------------------------------
 
@@ -865,6 +1144,14 @@ public(package) fun e_residence_cell_mismatch(): u64 { EResidenceCellMismatch }
 public(package) fun e_duplicate_application(): u64 { EDuplicateApplication }
 public(package) fun e_claim_already_verified(): u64 { EClaimAlreadyVerified }
 public(package) fun e_claim_already_excluded(): u64 { EClaimAlreadyExcluded }
+public(package) fun e_already_closed(): u64 { EAlreadyClosed }
+public(package) fun e_round_not_started(): u64 { ERoundNotStarted }
+public(package) fun e_round_too_early(): u64 { ERoundTooEarly }
+public(package) fun e_round_not_eligible(): u64 { ERoundNotEligible }
+public(package) fun e_duplicate_payout(): u64 { EDuplicatePayout }
+public(package) fun e_sweep_not_eligible(): u64 { ESweepNotEligible }
+public(package) fun e_floor_budget_not_returned(): u64 { EFloorBudgetNotReturned }
+public(package) fun e_application_not_verified(): u64 { EApplicationNotVerified }
 
 // ---------------------------------------------------------------
 // accessor read-only helpers for tests
@@ -1058,4 +1345,84 @@ public fun claim_verified_event_fields(
 ): (ID, ID, u8, u64, address) {
     let ClaimVerified { campaign_id, pass_lineage_id, band, verified_at_ms, verifier } = event;
     (campaign_id, pass_lineage_id, band, verified_at_ms, verifier)
+}
+
+#[test_only]
+public fun payout_receipt_fields(
+    receipt: PayoutReceipt,
+): (ID, ID, u64, u8, u64, u64) {
+    let PayoutReceipt { id, campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms } = receipt;
+    id.delete();
+    (campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms)
+}
+
+#[test_only]
+public fun round_finalized_event_fields(
+    event: RoundFinalized,
+): (ID, u64, u64, u64, vector<u64>, u64, u64) {
+    let RoundFinalized {
+        campaign_id,
+        round,
+        liability,
+        campaign_available,
+        band_payout,
+        eligible_count,
+        finalized_at_ms,
+    } = event;
+    (campaign_id, round, liability, campaign_available, band_payout, eligible_count, finalized_at_ms)
+}
+
+#[test_only]
+public fun payout_claimed_event_fields(
+    event: PayoutClaimed,
+): (ID, u64, ID, u8, u64, address) {
+    let PayoutClaimed { campaign_id, round, pass_lineage_id, band, amount_usdc, recipient } = event;
+    (campaign_id, round, pass_lineage_id, band, amount_usdc, recipient)
+}
+
+#[test_only]
+public fun residual_sweep_event_fields(
+    event: ResidualSweep,
+): (ID, u64, u64) {
+    let ResidualSweep { campaign_id, amount_usdc, final_round } = event;
+    (campaign_id, amount_usdc, final_round)
+}
+
+#[test_only]
+public fun recipient_excluded_event_fields(
+    event: RecipientExcluded,
+): (ID, ID, u8, u64, address) {
+    let RecipientExcluded { campaign_id, pass_lineage_id, reason_code, round, actor } = event;
+    (campaign_id, pass_lineage_id, reason_code, round, actor)
+}
+
+#[test_only]
+public fun campaign_payout_round_fields(
+    c: &Campaign,
+): (u64, u64, vector<u64>, u64, u64, bool, bool) {
+    (
+        c.current_round,
+        c.round_finalized_at_ms,
+        c.round_payout_by_band,
+        c.round_paid_count,
+        c.round_eligible_count,
+        c.closed,
+        c.sweep_eligible,
+    )
+}
+
+#[test_only]
+public fun campaign_verified_count_by_band(c: &Campaign): vector<u64> {
+    c.verified_count_by_band
+}
+
+#[test_only]
+public fun fund_campaign_for_testing(c: &mut Campaign, amount: u64, ctx: &mut TxContext) {
+    let coin = sui::coin::mint_for_testing<usdc::usdc::USDC>(amount, ctx);
+    c.balance.join(coin.into_balance());
+}
+
+#[test_only]
+public fun campaign_balance_value(c: &Campaign): u64 {
+    c.balance.value()
 }

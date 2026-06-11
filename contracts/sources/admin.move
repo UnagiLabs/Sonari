@@ -1,5 +1,6 @@
 module contracts::admin;
 
+use contracts::campaign as campaign_v2;
 use contracts::category_pool;
 use contracts::claim;
 use contracts::allowed_residence_cell;
@@ -200,6 +201,22 @@ public fun create_designated_pool(
     ctx: &mut TxContext,
 ) {
     pools::create_designated_pool(related_id, ctx);
+}
+
+public fun exclude_recipient(
+    _: &AdminCap,
+    campaign: &mut campaign_v2::Campaign,
+    pass_lineage_id: ID,
+    reason_code: u8,
+    _ctx: &mut TxContext,
+) {
+    campaign_v2::exclude_recipient_internal(
+        campaign,
+        pass_lineage_id,
+        reason_code,
+        0,
+        _ctx,
+    );
 }
 
 public fun create_program(

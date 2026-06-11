@@ -548,3 +548,45 @@ public fun verify_claim_v2(
         ctx,
     );
 }
+
+public fun finalize_round(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    clock: &Clock,
+    _ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    campaign_v2::finalize_round_v2(campaign, clock::timestamp_ms(clock));
+}
+
+public fun claim_payout(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    campaign_v2::claim_payout_v2(
+        campaign,
+        membership_registry,
+        pass,
+        clock::timestamp_ms(clock),
+        ctx,
+    );
+}
+
+public fun sweep_residual(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    main_pool: &mut MainPool,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    campaign_v2::sweep_residual_v2(campaign, main_pool, clock::timestamp_ms(clock), ctx);
+}
