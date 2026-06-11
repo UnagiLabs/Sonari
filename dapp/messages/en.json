@@ -193,6 +193,7 @@
                 "worldIdLegend": "World ID proof",
                 "worldId": {
                     "verifyButton": "Verify with World ID",
+                    "retryButton": "Retry verification",
                     "preparing": "Preparing…",
                     "verifiedLabel": "World ID Verified",
                     "notConfigured": "World ID is not configured.",

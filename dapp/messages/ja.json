@@ -193,6 +193,7 @@
                 "worldIdLegend": "World ID 証明",
                 "worldId": {
                     "verifyButton": "World ID で検証",
+                    "retryButton": "もう一度試す",
                     "preparing": "準備中…",
                     "verifiedLabel": "World ID 検証済み",
                     "notConfigured": "World ID が設定されていません。",
