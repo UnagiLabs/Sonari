@@ -13,6 +13,8 @@ import type { ResidenceSaveErrorCode } from "../residence-save";
 interface ResidenceStepProps {
     readonly accepted: readonly boolean[];
     readonly canContinue: boolean;
+    /** true のとき residence ステップがアクティブ。フルブリード CSS modifier を付与する。 */
+    readonly fullbleed?: boolean;
     readonly saveError: ResidenceSaveErrorCode | null;
     readonly selectedCellDecimal: string | null;
     readonly onToggle: (index: number, checked: boolean) => void;
@@ -24,6 +26,7 @@ interface ResidenceStepProps {
 export function ResidenceStep({
     accepted,
     canContinue,
+    fullbleed = false,
     saveError,
     selectedCellDecimal,
     onToggle,
@@ -52,8 +55,12 @@ export function ResidenceStep({
     const errorMessage = saveErrorMessage();
     const isExpanded = sheetState === "expanded";
 
+    const sectionClassName = fullbleed
+        ? "wizard-step-content wizard-step-content--fullbleed"
+        : "wizard-step-content";
+
     return (
-        <section aria-labelledby="wizard-residence-title" className="wizard-step-content">
+        <section aria-labelledby="wizard-residence-title" className={sectionClassName}>
             <header className="wizard-heading">
                 <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-residence-title">

@@ -83,6 +83,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     const inflightRef = useRef<Set<string>>(new Set());
     const activeCountRef = useRef<number>(0);
     const rebuildTimerRef = useRef<number | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
     // 選択 decimal を click ハンドラから参照するため ref に同期する。
     useEffect(() => {
@@ -370,6 +371,25 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
 
                 setStatus("ready");
                 scheduleRebuild();
+
+                // コンテナサイズ変更時に地図中心を保持する。
+                // keep-mounted でフルブリード CSS が変わっても中心がずれないよう
+                // ResizeObserver で canvas サイズを監視し、resize 後に中心を復元する。
+                if (typeof ResizeObserver !== "undefined" && element !== null) {
+                    const observer = new ResizeObserver(() => {
+                        const currentMap = mapRef.current;
+                        if (currentMap === null) {
+                            return;
+                        }
+                        const savedCenter = currentMap.getCenter();
+                        google.maps.event.trigger(currentMap, "resize");
+                        if (savedCenter !== undefined && savedCenter !== null) {
+                            currentMap.setCenter(savedCenter);
+                        }
+                    });
+                    observer.observe(element);
+                    resizeObserverRef.current = observer;
+                }
             })
             .catch(() => {
                 if (!cancelled) {
@@ -379,6 +399,10 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
 
         return () => {
             cancelled = true;
+            if (resizeObserverRef.current !== null) {
+                resizeObserverRef.current.disconnect();
+                resizeObserverRef.current = null;
+            }
             if (rebuildTimerRef.current !== null) {
                 window.clearTimeout(rebuildTimerRef.current);
             }
