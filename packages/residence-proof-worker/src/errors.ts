@@ -8,7 +8,12 @@ export type ResidenceProofErrorCode =
     | "proof_shard_integrity_mismatch"
     | "proof_shard_invalid"
     | "proof_shard_missing"
-    | "residence_cell_not_allowed";
+    | "residence_cell_not_allowed"
+    | "tile_invalid"
+    | "tile_manifest_invalid"
+    | "tile_manifest_missing"
+    | "tile_not_found"
+    | "tile_version_mismatch";
 
 export class ResidenceProofError extends Error {
     constructor(
