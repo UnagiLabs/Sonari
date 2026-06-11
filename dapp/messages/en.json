@@ -193,6 +193,7 @@
                 "worldIdLegend": "World ID proof",
                 "worldId": {
                     "verifyButton": "Verify with World ID",
+                    "retryButton": "Retry verification",
                     "preparing": "Preparing…",
                     "verifiedLabel": "World ID Verified",
                     "notConfigured": "World ID is not configured.",
@@ -695,6 +696,7 @@
             "receiptValue": "Public, recipient reference anonymized"
         },
         "claimButton": "Claim relief",
+        "claimButtonInFlight": "Processing…",
         "note": {
             "title": "Privacy boundary",
             "body": "Public screens should show H3 cell, pass status, verification status, and anonymized recipient references only."
@@ -717,7 +719,9 @@
             },
             "submitted": {
                 "message": "Claim transaction submitted.",
-                "detail": "Transaction digest: {digest}"
+                "detail": "Transaction digest: {digest}",
+                "explorerLink": "View transaction on explorer",
+                "cta": "Go to My Page"
             },
             "failed": {
                 "walletRequired": "Connect a wallet before claiming.",

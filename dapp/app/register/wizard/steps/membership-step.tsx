@@ -3,6 +3,7 @@
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
 import {
     executeWalletTransaction,
@@ -243,12 +244,16 @@ export function MembershipStep({
         return t("card.statusValue");
     }
 
-    function membershipNotice(): { readonly message: string; readonly tone: "note" | "alert" } {
+    function membershipNotice(): {
+        readonly message: string;
+        readonly tone: "note" | "alert";
+        readonly loading?: boolean;
+    } {
         if (issueState.kind === "failed") {
             return { message: issueState.message, tone: "alert" };
         }
         if (issueState.kind === "submitting") {
-            return { message: t("issue.submitting"), tone: "note" };
+            return { message: t("issue.submitting"), tone: "note", loading: true };
         }
         if (owner.length === 0) {
             return { message: t("issue.connectWallet"), tone: "note" };
@@ -263,7 +268,7 @@ export function MembershipStep({
             return { message: t("issue.alreadyIssued"), tone: "note" };
         }
         if (lookup.kind === "loading") {
-            return { message: t("issue.checking"), tone: "note" };
+            return { message: t("issue.checking"), tone: "note", loading: true };
         }
         if (lookup.kind === "multiple") {
             return { message: t("issue.multiple"), tone: "alert" };
@@ -351,7 +356,11 @@ export function MembershipStep({
                 className="field-note"
                 role={membershipNoticeState.tone === "alert" ? "alert" : "note"}
             >
-                <small>{membershipNoticeState.message}</small>
+                {membershipNoticeState.loading ? (
+                    <LoadingIndicator label={membershipNoticeState.message} />
+                ) : (
+                    <small>{membershipNoticeState.message}</small>
+                )}
             </div>
 
             <div className="wizard-cta-bar">

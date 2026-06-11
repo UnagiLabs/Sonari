@@ -3,10 +3,12 @@
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingIndicator } from "../components/loading-indicator";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
 import { dAppKit } from "../wallet/dapp-kit";
 import { WalletConnect } from "../wallet/wallet-connect";
+import { readWalletNetwork } from "../wallet/wallet-network";
 import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import {
     type AffectedCellsProof,
@@ -16,6 +18,7 @@ import {
     fetchAffectedCellsProof,
 } from "./affected-cells-proof";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "./claim-messages";
+import { buildClaimResultView, type TxState } from "./claim-result";
 
 type ClaimableEvent = {
     id: string;
@@ -110,19 +113,14 @@ type ProofState =
     | { readonly status: "ready"; readonly proof: AffectedCellsProof }
     | { readonly status: "blocked"; readonly message: ClaimMessage };
 
-type TxState =
-    | { readonly status: "idle" }
-    | { readonly status: "building" }
-    | { readonly status: "submitting" }
-    | { readonly status: "submitted"; readonly digest: string }
-    | { readonly status: "failed"; readonly message: ClaimMessage };
-
 export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("claim");
     const defaultEvent = defaultClaimableEvent();
     const [selectedEventId, setSelectedEventId] = useState(defaultEvent.id);
     const [proofState, setProofState] = useState<ProofState>({ status: "idle" });
     const [txState, setTxState] = useState<TxState>({ status: "idle" });
+    const network = readWalletNetwork();
+    const resultView = buildClaimResultView(txState, network);
     const account = useCurrentAccount();
     const selectedEvent =
         claimableEvents.find((event) => event.id === selectedEventId) ?? defaultEvent;
@@ -418,7 +416,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                     onClick={handleBuildClaim}
                                     type="button"
                                 >
-                                    {t("claimButton")}
+                                    {isClaimInFlight ? t("claimButtonInFlight") : t("claimButton")}
                                 </button>
                             </section>
 
@@ -430,8 +428,27 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                             <section className="claim-result-panel">
                                 <div className="eyebrow">{t("result.eyebrow")}</div>
                                 <div className="result-placeholder">
-                                    <strong>{txMessage()}</strong>
+                                    {resultView.loading ? (
+                                        <LoadingIndicator label={txMessage()} />
+                                    ) : (
+                                        <strong>{txMessage()}</strong>
+                                    )}
                                     <small>{txDetail()}</small>
+                                    {resultView.explorerUrl !== null ? (
+                                        <a
+                                            className="text-action"
+                                            href={resultView.explorerUrl}
+                                            rel="noopener noreferrer"
+                                            target="_blank"
+                                        >
+                                            {t("tx.submitted.explorerLink")}
+                                        </a>
+                                    ) : null}
+                                    {resultView.showDashboardCta ? (
+                                        <a className="btn btn-secondary" href="/mypage">
+                                            {t("tx.submitted.cta")}
+                                        </a>
+                                    ) : null}
                                 </div>
                             </section>
                         </aside>

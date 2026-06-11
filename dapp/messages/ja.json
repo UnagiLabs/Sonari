@@ -193,6 +193,7 @@
                 "worldIdLegend": "World ID 証明",
                 "worldId": {
                     "verifyButton": "World ID で検証",
+                    "retryButton": "もう一度試す",
                     "preparing": "準備中…",
                     "verifiedLabel": "World ID 検証済み",
                     "notConfigured": "World ID が設定されていません。",
@@ -695,6 +696,7 @@
             "receiptValue": "公開・受給者の参照は匿名化されます"
         },
         "claimButton": "支援を申請",
+        "claimButtonInFlight": "処理中…",
         "note": {
             "title": "プライバシーの境界",
             "body": "公開画面には H3 セル・パスの状態・検証の状態・匿名化された受給者の参照だけを表示します。"
@@ -717,7 +719,9 @@
             },
             "submitted": {
                 "message": "申請トランザクションを送信しました。",
-                "detail": "トランザクションダイジェスト: {digest}"
+                "detail": "トランザクションダイジェスト: {digest}",
+                "explorerLink": "エクスプローラーで取引を確認",
+                "cta": "マイページへ進む"
             },
             "failed": {
                 "walletRequired": "申請の前にウォレットを接続してください。",

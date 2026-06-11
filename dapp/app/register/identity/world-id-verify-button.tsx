@@ -26,6 +26,7 @@ import {
 } from "@worldcoin/idkit";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { LoadingIndicator } from "../../components/loading-indicator";
 import { WORLD_ID_ACTION } from "./world-id-action";
 import {
     buildRpContext,
@@ -212,6 +213,8 @@ export function WorldIdVerifyButton({
                 {status === "preparing" ? t("preparing") : t("verifyButton")}
             </button>
 
+            {status === "preparing" ? <LoadingIndicator label={t("preparing")} /> : null}
+
             {isConfigured && isBindingReady && !statementsAccepted ? (
                 <p className="world-id-hint" role="note">
                     {t("statementsFirst")}
@@ -219,9 +222,19 @@ export function WorldIdVerifyButton({
             ) : null}
 
             {status === "error" && errorMessage.length > 0 ? (
-                <p className="world-id-error-message" role="alert">
-                    {errorMessage}
-                </p>
+                <div className="world-id-error">
+                    <p className="world-id-error-message" role="alert">
+                        {errorMessage}
+                    </p>
+                    <button
+                        className="btn btn-secondary"
+                        disabled={!isConfigured || !isBindingReady || !statementsAccepted}
+                        onClick={handleOpenClick}
+                        type="button"
+                    >
+                        {t("retryButton")}
+                    </button>
+                </div>
             ) : null}
 
             {rpContext !== null ? (
