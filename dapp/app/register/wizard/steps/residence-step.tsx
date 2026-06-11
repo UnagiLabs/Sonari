@@ -1,13 +1,22 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 import { ResidenceCellPicker } from "../../residence/residence-cell-picker";
+import {
+    initialSheetState,
+    sheetStateAfterSelection,
+    toggleSheet,
+} from "../../residence/residence-sheet";
 import type { ResidenceSaveErrorCode } from "../residence-save";
 
 interface ResidenceStepProps {
     readonly accepted: readonly boolean[];
     readonly canContinue: boolean;
+    /** true のとき residence ステップがアクティブ。フルブリード CSS modifier を付与する。 */
+    readonly fullbleed?: boolean;
     readonly saveError: ResidenceSaveErrorCode | null;
+    readonly selectedCellDecimal: string | null;
     readonly onToggle: (index: number, checked: boolean) => void;
     readonly onCellSelectionChange: (decimal: string | null) => void;
     readonly onBack: () => void;
@@ -17,7 +26,9 @@ interface ResidenceStepProps {
 export function ResidenceStep({
     accepted,
     canContinue,
+    fullbleed = false,
     saveError,
+    selectedCellDecimal,
     onToggle,
     onCellSelectionChange,
     onBack,
@@ -26,6 +37,15 @@ export function ResidenceStep({
     const t = useTranslations("register.wizard.residence");
     const tCommon = useTranslations("register.wizard.common");
 
+    const [sheetState, setSheetState] = useState(initialSheetState);
+
+    // セル選択が null→非null に変わったとき自動展開する。
+    useEffect(() => {
+        if (selectedCellDecimal !== null) {
+            setSheetState((prev) => sheetStateAfterSelection(prev));
+        }
+    }, [selectedCellDecimal]);
+
     function saveErrorMessage(): string | null {
         if (saveError === "cell_not_selected") return t("saveError.cellNotSelected");
         if (saveError === "invalid_cell") return t("saveError.invalidCell");
@@ -33,9 +53,14 @@ export function ResidenceStep({
     }
 
     const errorMessage = saveErrorMessage();
+    const isExpanded = sheetState === "expanded";
+
+    const sectionClassName = fullbleed
+        ? "wizard-step-content wizard-step-content--fullbleed"
+        : "wizard-step-content";
 
     return (
-        <section aria-labelledby="wizard-residence-title" className="wizard-step-content">
+        <section aria-labelledby="wizard-residence-title" className={sectionClassName}>
             <header className="wizard-heading">
                 <div className="eyebrow">{t("eyebrow")}</div>
                 <h1 className="wizard-title" id="wizard-residence-title">
@@ -44,55 +69,75 @@ export function ResidenceStep({
                 <p className="wizard-lead">{t("lead")}</p>
             </header>
 
-            <div className="wizard-card wizard-map-card">
+            <div className="residence-step-stage">
+                {/* 地図＋オーバーレイ（背景層） */}
                 <ResidenceCellPicker onSelectionChange={onCellSelectionChange} />
-            </div>
 
-            <fieldset className="control-group">
-                <legend>{t("statementsLegend")}</legend>
-                <div className="terms-list">
-                    {accepted.map((checked, index) => (
-                        <label
-                            className="terms-row"
-                            // biome-ignore lint/suspicious/noArrayIndexKey: 配列は固定長・並べ替えなし
-                            key={index}
-                        >
-                            <input
-                                checked={checked}
-                                name="residenceTerms"
-                                onChange={(event) => onToggle(index, event.target.checked)}
-                                type="checkbox"
-                            />
-                            <span>{t(`statements.${index}`)}</span>
-                        </label>
-                    ))}
-                </div>
-            </fieldset>
-
-            {errorMessage !== null ? (
-                <div className="field-note" role="alert">
-                    <small>{errorMessage}</small>
-                </div>
-            ) : null}
-
-            <div className="wizard-cta-bar">
-                <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
-                    {tCommon("back")}
-                </button>
-                <button
-                    className="btn btn-primary btn-lg wizard-cta"
-                    disabled={!canContinue}
-                    onClick={onNext}
-                    type="button"
+                {/* 確定パネル（前景層）: チェックボックス・エラー・CTA */}
+                <div
+                    className={`residence-action-panel ${isExpanded ? "is-expanded" : "is-collapsed"}`}
                 >
-                    {tCommon("next")}
-                </button>
+                    {/* ボトムシート ハンドル */}
+                    <button
+                        aria-expanded={isExpanded}
+                        className="residence-sheet-handle"
+                        onClick={() => setSheetState(toggleSheet)}
+                        type="button"
+                    >
+                        <span className="residence-sheet-handle-bar" />
+                        <span className="residence-sheet-title">{t("sheet.title")}</span>
+                        <span className="sr-only">
+                            {isExpanded ? t("sheet.collapse") : t("sheet.expand")}
+                        </span>
+                    </button>
+
+                    <fieldset className="control-group">
+                        <legend>{t("statementsLegend")}</legend>
+                        <div className="terms-list">
+                            {accepted.map((checked, index) => (
+                                <label
+                                    className="terms-row"
+                                    // biome-ignore lint/suspicious/noArrayIndexKey: 配列は固定長・並べ替えなし
+                                    key={index}
+                                >
+                                    <input
+                                        checked={checked}
+                                        name="residenceTerms"
+                                        onChange={(event) => onToggle(index, event.target.checked)}
+                                        type="checkbox"
+                                    />
+                                    <span>{t(`statements.${index}`)}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </fieldset>
+
+                    {errorMessage !== null ? (
+                        <div className="field-note" role="alert">
+                            <small>{errorMessage}</small>
+                        </div>
+                    ) : null}
+
+                    <div className="wizard-cta-bar">
+                        <button className="btn btn-ghost btn-lg" onClick={onBack} type="button">
+                            {tCommon("back")}
+                        </button>
+                        <button
+                            className="btn btn-primary btn-lg wizard-cta"
+                            disabled={!canContinue}
+                            onClick={onNext}
+                            type="button"
+                        >
+                            {tCommon("next")}
+                        </button>
+                    </div>
+                    {!canContinue ? (
+                        <p className="wizard-cta-hint" role="note">
+                            {t("nextHint")}
+                        </p>
+                    ) : null}
+                </div>
             </div>
-            {!canContinue ? (
-                <p className="wizard-cta-hint" role="note">
-                    {t("nextHint")}
-                </p>
-            ) : null}
         </section>
     );
 }

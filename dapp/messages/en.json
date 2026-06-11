@@ -74,6 +74,11 @@
                     "2": "Sonari stores the selected H3 cell, not my raw address or GPS history."
                 },
                 "nextHint": "Select your residence cell and affirm every statement to continue.",
+                "sheet": {
+                    "title": "Confirm Residence Area",
+                    "expand": "Open confirmation panel",
+                    "collapse": "Close confirmation panel"
+                },
                 "saveError": {
                     "cellNotSelected": "No residence cell is selected. Please select a cell on the map.",
                     "invalidCell": "The selected cell is not a valid H3 resolution 7 cell. Please select again."
@@ -98,7 +103,11 @@
                     "summaryAllowlist": "Allowlist",
                     "advancedSummary": "Advanced cell input",
                     "advancedLabel": "H3 resolution 7 cell (hex)",
-                    "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID."
+                    "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID.",
+                    "legend.selected": "Selected",
+                    "legend.selectable": "Selectable",
+                    "legend.disabled": "Unavailable",
+                    "retryMapLoad": "Retry"
                 }
             },
             "membership": {

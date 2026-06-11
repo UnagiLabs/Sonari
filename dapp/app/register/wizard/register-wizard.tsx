@@ -185,7 +185,9 @@ export function RegisterWizard() {
                     <ResidenceStep
                         accepted={state.residenceAccepted}
                         canContinue={residenceReadyToSave}
+                        fullbleed={activeStep === "residence"}
                         saveError={residenceSaveError}
+                        selectedCellDecimal={state.selectedCellDecimal}
                         onBack={goBack}
                         onCellSelectionChange={handleCellSelectionChange}
                         onNext={handleResidenceNext}

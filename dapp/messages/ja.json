@@ -74,6 +74,11 @@
                     "2": "Sonari は選択した H3 セルのみを保存し、住所や GPS 履歴は保存しません。"
                 },
                 "nextHint": "居住セルを選択し、すべての項目を確認すると次へ進めます。",
+                "sheet": {
+                    "title": "居住エリアの確定",
+                    "expand": "確定パネルを開く",
+                    "collapse": "確定パネルを閉じる"
+                },
                 "saveError": {
                     "cellNotSelected": "居住セルが選択されていません。地図でセルを選んでください。",
                     "invalidCell": "選択されたセルは有効な H3 解像度 7 のセルではありません。もう一度選び直してください。"
@@ -98,7 +103,11 @@
                     "summaryAllowlist": "許可リスト",
                     "advancedSummary": "詳細セル入力",
                     "advancedLabel": "H3 解像度 7 セル（16進）",
-                    "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。"
+                    "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。",
+                    "legend.selected": "選択中",
+                    "legend.selectable": "選択可",
+                    "legend.disabled": "選択不可",
+                    "retryMapLoad": "再試行"
                 }
             },
             "membership": {

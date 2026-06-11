@@ -17,6 +17,8 @@ import {
     residenceCellsInViewport,
     type ViewportBounds,
 } from "./h3-geo";
+import { canRetryMapLoad, nextRetryNonce } from "./map-load-retry";
+import { buildCellLegendEntries, polygonStyleForKind } from "./residence-cell-style";
 import {
     buildOverlayCells,
     buildResidenceSummary,
@@ -47,46 +49,6 @@ function classToKind(cls: ResidenceCellClass): OverlayCellKind {
     return cls === "water" ? "disabled" : "selectable";
 }
 
-const polygonStyleByKind: Record<OverlayCellKind, google.maps.PolygonOptions> = {
-    selectable: {
-        strokeColor: "#4f7d5a",
-        strokeOpacity: 0.85,
-        strokeWeight: 1,
-        fillColor: "#7fae87",
-        fillOpacity: 0.18,
-        clickable: true,
-        zIndex: 1,
-    },
-    disabled: {
-        strokeColor: "#9aa0a6",
-        strokeOpacity: 0.5,
-        strokeWeight: 1,
-        fillColor: "#9aa0a6",
-        fillOpacity: 0.4,
-        // 海セルもクリックは受け付け、理由メッセージを出すために clickable にする。
-        clickable: true,
-        zIndex: 1,
-    },
-    selected: {
-        strokeColor: "#2f5d3a",
-        strokeOpacity: 1,
-        strokeWeight: 2.5,
-        fillColor: "#5b9268",
-        fillOpacity: 0.45,
-        clickable: true,
-        zIndex: 10,
-    },
-    pending: {
-        strokeColor: "#c7ccd1",
-        strokeOpacity: 0.4,
-        strokeWeight: 1,
-        fillColor: "#c7ccd1",
-        fillOpacity: 0.08,
-        clickable: true,
-        zIndex: 1,
-    },
-};
-
 export interface ResidenceCellPickerProps {
     /** 選択セル（10進）が変わるたびに呼ばれる。安定参照（useCallback）で渡すこと。 */
     readonly onSelectionChange?: (decimal: string | null) => void;
@@ -104,6 +66,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     // 初回描画はサーバー・クライアントで必ず一致させるため env に依存させない。
     // 実際の状態（unconfigured/ready/error）はマウント後の useEffect で決める。
     const [status, setStatus] = useState<MapsLoaderStatus>("loading");
+    const [retryNonce, setRetryNonce] = useState<number>(0);
     const [selectedDecimal, setSelectedDecimal] = useState<string | null>(null);
     const [selectedClass, setSelectedClass] = useState<ResidenceCellClass | undefined>(undefined);
     const [advancedInput, setAdvancedInput] = useState<string>("");
@@ -120,6 +83,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     const inflightRef = useRef<Set<string>>(new Set());
     const activeCountRef = useRef<number>(0);
     const rebuildTimerRef = useRef<number | null>(null);
+    const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
     // 選択 decimal を click ハンドラから参照するため ref に同期する。
     useEffect(() => {
@@ -144,7 +108,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
         }
         const poly = polygonsRef.current.get(decimal);
         if (poly !== undefined) {
-            poly.setOptions(polygonStyleByKind[classToKind(cls)]);
+            poly.setOptions(polygonStyleForKind(classToKind(cls)));
         }
     }, []);
 
@@ -212,9 +176,9 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
             if (previousPoly !== undefined) {
                 const previousClass = classCacheRef.current.get(previous);
                 previousPoly.setOptions(
-                    polygonStyleByKind[
-                        previousClass === undefined ? "pending" : classToKind(previousClass)
-                    ],
+                    polygonStyleForKind(
+                        previousClass === undefined ? "pending" : classToKind(previousClass),
+                    ),
                 );
             }
         }
@@ -222,7 +186,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
         // 選択セルを強調し、その中心へ地図を寄せる。
         const selectedPoly = polygonsRef.current.get(decimal);
         if (selectedPoly !== undefined) {
-            selectedPoly.setOptions(polygonStyleByKind.selected);
+            selectedPoly.setOptions(polygonStyleForKind("selected"));
         }
         const map = mapRef.current;
         if (map !== null) {
@@ -260,7 +224,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
             }
 
             for (const cell of overlay) {
-                const style = polygonStyleByKind[cell.kind];
+                const style = polygonStyleForKind(cell.kind);
                 const existing = polygonsRef.current.get(cell.decimal);
                 if (existing === undefined) {
                     const poly = new google.maps.Polygon({ paths: cell.boundary, ...style });
@@ -336,6 +300,9 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     }, [rebuildOverlay]);
 
     // 地図の初期化（マウント時に一度だけ）。
+    // retryNonce は本文では参照しないが、再試行ボタンで地図初期化をやり直すための
+    // 意図的なトリガー依存。error 状態でのみ nonce が増えるため ready 後は再実行されない。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce は再初期化トリガーとして意図的に依存へ含める
     useEffect(() => {
         if (!isGoogleMapsConfigured(mapsApiKey)) {
             setStatus("unconfigured");
@@ -366,6 +333,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
                     fullscreenControl: false,
                 });
                 mapRef.current = map;
+                map.setOptions({ gestureHandling: "greedy" });
 
                 map.addListener("click", (event: google.maps.MapMouseEvent) => {
                     const latLng = event.latLng;
@@ -406,6 +374,25 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
 
                 setStatus("ready");
                 scheduleRebuild();
+
+                // コンテナサイズ変更時に地図中心を保持する。
+                // keep-mounted でフルブリード CSS が変わっても中心がずれないよう
+                // ResizeObserver で canvas サイズを監視し、resize 後に中心を復元する。
+                if (typeof ResizeObserver !== "undefined" && element !== null) {
+                    const observer = new ResizeObserver(() => {
+                        const currentMap = mapRef.current;
+                        if (currentMap === null) {
+                            return;
+                        }
+                        const savedCenter = currentMap.getCenter();
+                        google.maps.event.trigger(currentMap, "resize");
+                        if (savedCenter !== undefined && savedCenter !== null) {
+                            currentMap.setCenter(savedCenter);
+                        }
+                    });
+                    observer.observe(element);
+                    resizeObserverRef.current = observer;
+                }
             })
             .catch(() => {
                 if (!cancelled) {
@@ -415,6 +402,10 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
 
         return () => {
             cancelled = true;
+            if (resizeObserverRef.current !== null) {
+                resizeObserverRef.current.disconnect();
+                resizeObserverRef.current = null;
+            }
             if (rebuildTimerRef.current !== null) {
                 window.clearTimeout(rebuildTimerRef.current);
             }
@@ -432,8 +423,10 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
                 autocompleteElRef.current.remove();
                 autocompleteElRef.current = null;
             }
+            // 再試行時に古いインスタンスが残らないよう null に戻す。
+            mapRef.current = null;
         };
-    }, [applySelection, focusLatLng, scheduleRebuild]);
+    }, [applySelection, focusLatLng, scheduleRebuild, retryNonce]);
 
     // 現在地ボタン。座標は一時利用のみで保存しない。
     const handleUseCurrentLocation = useCallback(() => {
@@ -473,105 +466,136 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     const summary = buildResidenceSummary({ selectedDecimal, classification: selectedClass });
     const isReady = status === "ready";
     const workerUnavailable = residenceWorkerUrl.trim().length === 0;
+    const legendEntries = buildCellLegendEntries();
 
     return (
-        <div className="residence-selector">
-            <div className="residence-search-row">
-                <div className="text-field">
-                    <span>{t("searchLabel")}</span>
-                    <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
-                    <small>{t("searchHint")}</small>
-                </div>
-                <button
-                    className="btn btn-secondary"
-                    disabled={!isReady}
-                    onClick={handleUseCurrentLocation}
-                    type="button"
-                >
-                    {t("useCurrentLocation")}
-                </button>
-            </div>
-
+        <div className="residence-map-stage">
+            {/* 地図 canvas: unconfigured 時は描画しないが DOM 構造は維持する */}
             {status === "unconfigured" ? (
                 <div className="residence-map-fallback" role="status">
                     <strong>{t("unconfiguredTitle")}</strong>
                     <p>{t("unconfiguredBody")}</p>
                 </div>
             ) : (
-                <div className="residence-map-picker">
-                    <div
-                        aria-label={t("mapAria")}
-                        className="residence-map-canvas"
-                        ref={mapElRef}
-                        role="application"
-                        style={{ minHeight: 320 }}
-                    />
-                    {status === "loading" ? (
-                        <div className="residence-map-overlay-note" role="status">
-                            {t("loadingMap")}
-                        </div>
-                    ) : null}
-                    {status === "error" ? (
-                        <div className="residence-map-overlay-note" role="status">
-                            {t("mapError")}
-                        </div>
-                    ) : null}
-                </div>
+                <div
+                    aria-label={t("mapAria")}
+                    className="residence-map-canvas"
+                    ref={mapElRef}
+                    role="application"
+                />
             )}
 
-            {workerUnavailable ? (
-                <p className="residence-notice" role="status">
-                    {t("workerUnavailable")}
-                </p>
-            ) : null}
-            {notice !== null ? (
-                <p className="residence-notice" role="status">
-                    {notice}
-                </p>
-            ) : null}
+            {/* 地図上部オーバーレイ: 検索ボックス + 現在地ボタン */}
+            <div className="residence-overlay-top">
+                <div className="residence-search-overlay">
+                    <div className="text-field">
+                        <span>{t("searchLabel")}</span>
+                        <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
+                        <small>{t("searchHint")}</small>
+                    </div>
+                    <button
+                        className="btn btn-secondary"
+                        disabled={!isReady}
+                        onClick={handleUseCurrentLocation}
+                        type="button"
+                    >
+                        {t("useCurrentLocation")}
+                    </button>
+                </div>
 
-            <div className="selected-area-summary">
-                <div>
-                    <span>{t("summaryResolution")}</span>
-                    <strong>{summary.resolution}</strong>
-                </div>
-                <div>
-                    <span>{t("summaryCellId")}</span>
-                    <strong className="mono-value">{summary.cellHex ?? "—"}</strong>
-                </div>
-                <div>
-                    <span>{t("summaryAllowlist")}</span>
-                    <strong>{summary.allowlistStatus}</strong>
-                </div>
+                {/* ロード中/エラー通知 */}
+                {status === "loading" ? (
+                    <div className="residence-map-overlay-note" role="status">
+                        {t("loadingMap")}
+                    </div>
+                ) : null}
+                {status === "error" ? (
+                    <div className="residence-map-overlay-note" role="status">
+                        {t("mapError")}
+                        {canRetryMapLoad(status) ? (
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                    setRetryNonce(nextRetryNonce);
+                                }}
+                                type="button"
+                            >
+                                {t("retryMapLoad")}
+                            </button>
+                        ) : null}
+                    </div>
+                ) : null}
             </div>
 
-            <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
+            {/* 地図下部オーバーレイ: サマリ・凡例・通知 */}
+            <div className="residence-overlay-bottom">
+                <div className="residence-info-panel">
+                    <div className="selected-area-summary">
+                        <div>
+                            <span>{t("summaryResolution")}</span>
+                            <strong>{summary.resolution}</strong>
+                        </div>
+                        <div>
+                            <span>{t("summaryCellId")}</span>
+                            <strong className="mono-value">{summary.cellHex ?? "—"}</strong>
+                        </div>
+                        <div>
+                            <span>{t("summaryAllowlist")}</span>
+                            <strong>{summary.allowlistStatus}</strong>
+                        </div>
+                    </div>
 
-            <details className="advanced-cell-input">
-                <summary>{t("advancedSummary")}</summary>
-                <label className="text-field" htmlFor="home-cell-advanced">
-                    <span>{t("advancedLabel")}</span>
-                    <input
-                        id="home-cell-advanced"
-                        onBlur={(event) => {
-                            handleAdvancedCommit(event.target.value);
-                        }}
-                        onChange={(event) => {
-                            setAdvancedInput(event.target.value);
-                        }}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                                event.preventDefault();
-                                handleAdvancedCommit(event.currentTarget.value);
-                            }
-                        }}
-                        placeholder="872f5aa8effffff"
-                        type="text"
-                        value={advancedInput}
-                    />
-                    <small>{t("advancedHelp")}</small>
-                </label>
-            </details>
+                    <ul className="residence-legend">
+                        {legendEntries.map((entry) => (
+                            <li className="residence-legend-item" key={entry.kind}>
+                                <span
+                                    className={`residence-legend-swatch swatch-${entry.swatch}`}
+                                />
+                                <span>{t(entry.labelKey as Parameters<typeof t>[0])}</span>
+                            </li>
+                        ))}
+                    </ul>
+
+                    {workerUnavailable ? (
+                        <p className="residence-notice" role="status">
+                            {t("workerUnavailable")}
+                        </p>
+                    ) : null}
+                    {notice !== null ? (
+                        <p className="residence-notice" role="status">
+                            {notice}
+                        </p>
+                    ) : null}
+
+                    <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
+
+                    <details className="advanced-cell-input">
+                        <summary>{t("advancedSummary")}</summary>
+                        <label className="text-field" htmlFor="home-cell-advanced">
+                            <span>{t("advancedLabel")}</span>
+                            <input
+                                id="home-cell-advanced"
+                                onBlur={(event) => {
+                                    handleAdvancedCommit(event.target.value);
+                                }}
+                                onChange={(event) => {
+                                    setAdvancedInput(event.target.value);
+                                }}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        handleAdvancedCommit(event.currentTarget.value);
+                                    }
+                                }}
+                                placeholder="872f5aa8effffff"
+                                type="text"
+                                value={advancedInput}
+                            />
+                            <small>{t("advancedHelp")}</small>
+                        </label>
+                    </details>
+                </div>
+            </div>
         </div>
     );
 }

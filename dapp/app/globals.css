@@ -2215,6 +2215,152 @@ h4 {
   font-size: 13px;
 }
 
+/* -------------------------------------------------------------------------
+ * Residence map stage – オーバーレイ構造（STEP 3）
+ * 仕上げは STEP 5/6 で行う。ここでは重なりの土台のみ。
+ * ---------------------------------------------------------------------- */
+
+.residence-map-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+
+.residence-map-stage .residence-map-canvas {
+  display: block;
+  width: 100%;
+  height: 360px;
+}
+
+.residence-overlay-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 8px;
+  pointer-events: none;
+}
+
+.residence-overlay-top > * {
+  pointer-events: auto;
+}
+
+.residence-search-overlay {
+  display: grid;
+  align-items: start;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  background: var(--cream-50, #fafaf7);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  box-shadow: 0 2px 8px oklch(0.35 0.04 145 / 0.1);
+}
+
+.residence-overlay-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.residence-overlay-bottom > * {
+  pointer-events: auto;
+}
+
+.residence-info-panel {
+  background: var(--cream-50, #fafaf7);
+  border-top: 1px solid var(--line);
+  padding: 10px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+/* 凡例 */
+.residence-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.residence-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.residence-legend-swatch {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* swatch 種別: 枠線スタイルで色覚によらず判別可能にする */
+.swatch-solid-bold {
+  border: 3.5px solid #2f5d3a;
+  background: oklch(0.62 0.08 145 / 0.45);
+}
+
+.swatch-solid {
+  border: 1.5px solid #4f7d5a;
+  background: oklch(0.72 0.06 145 / 0.18);
+}
+
+.swatch-dashed {
+  border: 1.5px dashed #9aa0a6;
+  background: oklch(0.78 0.01 220 / 0.25);
+}
+
+/* 確定パネル */
+.residence-action-panel {
+  padding: 16px 0 0;
+  display: grid;
+  gap: 12px;
+}
+
+/* ボトムシート ハンドル（モバイル時に表示・デスクトップでは非表示） */
+.residence-sheet-handle {
+  display: none;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.residence-sheet-handle-bar {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong, #ccc);
+  margin: 0 auto 6px;
+}
+
+.residence-sheet-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* step-stage: picker と action-panel を縦に並べる土台 */
+.residence-step-stage {
+  display: grid;
+  gap: 0;
+}
+
 .selected-area-summary {
   display: grid;
   gap: 0;
@@ -2816,6 +2962,145 @@ h4 {
   display: flex;
   flex-direction: column;
   gap: 24px;
+}
+
+/*
+ * residence ステップのフルブリード modifier。
+ * .wizard-shell / .page / .wizard-stage の本体ルールは変更せず、
+ * このセレクタ配下でのみ制約を打ち消す。
+ * アクティブな residence ステップに付与されるため、退避中（wizard-step-inactive）には
+ * 付かず、他ステップや遷移中レイアウトに影響しない。
+ */
+.wizard-step-content--fullbleed {
+  /* .wizard-shell (max-width: 720px) と .page (max-width: var(--container), padding) を視覚的に突破する。
+     width を 100dvw にし margin-left で中央から左端まで引き戻す breakout 手法。 */
+  width: 100dvw;
+  margin-left: calc(50% - 50dvw);
+  gap: 0;
+}
+
+/* フルブリード時: heading を地図の上部に収める（gap なし） */
+.wizard-step-content--fullbleed .wizard-heading {
+  padding: 16px 28px 12px;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* フルブリード時: 地図 stage を全幅に広げ、高さを dvh ベースへ変更する */
+.wizard-step-content--fullbleed .residence-step-stage {
+  width: 100%;
+}
+
+/* フルブリード時: 地図 canvas をビューポートの大部分へ拡張する。
+   ヘッダ(60px想定) + プログレス(68px想定) + heading(~80px) で計208pxを引く。 */
+.wizard-step-content--fullbleed .residence-map-stage .residence-map-canvas {
+  height: calc(100dvh - 208px);
+  min-height: 320px;
+}
+
+/* フルブリード時: 確定パネルは wizard-shell 幅に収める */
+.wizard-step-content--fullbleed .residence-action-panel {
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 16px 28px 0;
+}
+
+/* フルブリード時: オーバーレイコンテナは pointer-events: none で地図のタッチを通す。
+   内部の操作要素（ボタン・入力・パネル本体）は pointer-events: auto で操作可能にする。 */
+.wizard-step-content--fullbleed .residence-overlay-top,
+.wizard-step-content--fullbleed .residence-overlay-bottom {
+  pointer-events: none;
+}
+
+.wizard-step-content--fullbleed .residence-overlay-top > *,
+.wizard-step-content--fullbleed .residence-overlay-bottom > * {
+  pointer-events: auto;
+}
+
+/* フルブリード かつ モバイル（≤620px）: 確定パネルをボトムシートとして画面下部に固定 */
+@media (max-width: 620px) {
+  .wizard-step-content--fullbleed .residence-action-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    max-width: 100%;
+    margin: 0;
+    padding: 0 0 env(safe-area-inset-bottom, 0px);
+    background: var(--cream-50, #fafaf7);
+    border-top: 1px solid var(--line);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 16px oklch(0.35 0.04 145 / 0.12);
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    /* is-collapsed / is-expanded で高さを切り替える */
+  }
+
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed {
+    max-height: 68px;
+    overflow: hidden;
+  }
+
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded {
+    max-height: 80dvh;
+    overflow-y: auto;
+  }
+
+  /* 折りたたみ時はハンドルだけ見えるようにする */
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .control-group,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .field-note,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .wizard-cta-bar,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .selected-area-summary,
+  .wizard-step-content--fullbleed .residence-action-panel.is-collapsed .hint-text {
+    display: none;
+  }
+
+  /* 展開時のパネル内コンテンツに padding を確保 */
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .control-group,
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .wizard-cta-bar {
+    padding: 0 16px;
+  }
+
+  .wizard-step-content--fullbleed .residence-action-panel.is-expanded .selected-area-summary {
+    margin: 0 16px;
+  }
+
+  /* ハンドルを表示（モバイルのみ） */
+  .wizard-step-content--fullbleed .residence-sheet-handle {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 16px 4px;
+  }
+
+  /* 折りたたみ時のシートが地図に重ならないよう canvas 下部に余白を確保 */
+  .wizard-step-content--fullbleed .residence-map-stage .residence-map-canvas {
+    height: calc(100dvh - 208px - 68px);
+    min-height: 240px;
+  }
+
+  /* 検索オーバーレイをモバイルでコンパクト化 */
+  .wizard-step-content--fullbleed .residence-search-overlay {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  /* 情報パネルをモバイルで最小化（1行コンパクト表示） */
+  .wizard-step-content--fullbleed .residence-info-panel {
+    padding: 6px 10px;
+    gap: 4px;
+  }
+
+  /* 凡例をモバイルで横スクロール可能に（折り返しを減らす） */
+  .wizard-step-content--fullbleed .residence-legend {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px 12px;
+    padding-bottom: 2px;
+  }
 }
 
 .wizard-heading {
