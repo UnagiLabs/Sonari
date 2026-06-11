@@ -14,6 +14,7 @@ const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_TIP_MAX_MIST = "1000";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_EPOCHS = "1";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE = false;
 const DEFAULT_WORLD_ID_PROOF_MODE = "real";
+const DEFAULT_WORLD_ID_ACTION = "sonari_membership_register_v2";
 const DEFAULT_NITRO_ENCLAVE_MEMORY_MIB = 4096;
 const DEFAULT_SCHEDULE_EXPRESSION = "cron(0 0,12 * * ? *)";
 const DEPLOY_PARAMETER_KEYS = [
@@ -35,6 +36,7 @@ const DEPLOY_PARAMETER_KEYS = [
     "ScheduleState",
     "ScheduleExpression",
     "WorldIdProofMode",
+    "WorldIdAction",
     "SourceArchiverTokenSecretArn",
     "SourceArchiverPrivateKeySecretArn",
     "SourceArchiverSuiNetwork",
@@ -43,7 +45,6 @@ const DEPLOY_PARAMETER_KEYS = [
     "SourceArchiverWalrusUploadRelayTipMaxMist",
     "SourceArchiverWalrusEpochs",
     "SourceArchiverWalrusDeletable",
-    "WorldIdProofMode",
     "NitroEnclaveMemoryMiB",
 ] as const;
 
@@ -73,6 +74,7 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     sourceArchiverWalrusDeletable?: boolean;
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
+    worldIdAction?: string;
     nitroEnclaveMemoryMiB?: number;
     scheduleExpression?: string;
     prefix?: string;
@@ -156,6 +158,7 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
             input.sourceArchiverWalrusDeletable ?? DEFAULT_SOURCE_ARCHIVER_WALRUS_DELETABLE,
         ),
         WorldIdProofMode: input.worldIdProofMode ?? DEFAULT_WORLD_ID_PROOF_MODE,
+        WorldIdAction: validateWorldIdAction(input.worldIdAction ?? DEFAULT_WORLD_ID_ACTION),
         NitroEnclaveMemoryMiB: String(
             validatePositiveInteger(
                 input.nitroEnclaveMemoryMiB ?? DEFAULT_NITRO_ENCLAVE_MEMORY_MIB,
@@ -249,6 +252,14 @@ function validateWorldIdProofMode(
     }
 }
 
+function validateWorldIdAction(value: string): string {
+    const trimmed = value.trim();
+    if (!/^sonari_membership_register_v[0-9]+$/.test(trimmed)) {
+        throw new Error("Invalid World ID action: expected sonari_membership_register_v<N>");
+    }
+    return trimmed;
+}
+
 type CliOptions = {
     commitSha?: string;
     lambdaBucket?: string;
@@ -270,6 +281,7 @@ type CliOptions = {
     sourceArchiverWalrusDeletable?: boolean;
     relayerNetwork?: SuiNetwork;
     worldIdProofMode?: WorldIdProofMode;
+    worldIdAction?: string;
     nitroEnclaveMemoryMiB?: number;
     prefix?: string;
     out?: string;
@@ -314,6 +326,7 @@ async function main(): Promise<void> {
                 "[--source-archiver-walrus-deletable <true|false>]",
                 "[--relayer-network <mainnet|testnet|devnet>]",
                 "[--world-id-proof-mode <real|dummy>]",
+                "[--world-id-action <sonari_membership_register_vN>]",
                 "[--nitro-enclave-memory-mib <mib>]",
                 "[--prefix <prefix>]",
                 "[--out <path>]",
@@ -359,6 +372,7 @@ async function main(): Promise<void> {
         ...(options.worldIdProofMode === undefined
             ? {}
             : { worldIdProofMode: options.worldIdProofMode }),
+        ...(options.worldIdAction === undefined ? {} : { worldIdAction: options.worldIdAction }),
         ...(options.nitroEnclaveMemoryMiB === undefined
             ? {}
             : { nitroEnclaveMemoryMiB: options.nitroEnclaveMemoryMiB }),
@@ -446,6 +460,9 @@ function parseArgs(args: string[]): CliOptions {
                 break;
             case "--world-id-proof-mode":
                 options.worldIdProofMode = parseWorldIdProofMode(next);
+                break;
+            case "--world-id-action":
+                options.worldIdAction = validateWorldIdAction(next);
                 break;
             case "--nitro-enclave-memory-mib":
                 options.nitroEnclaveMemoryMiB = parseIntegerOption(arg, next);

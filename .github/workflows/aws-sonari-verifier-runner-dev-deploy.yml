@@ -73,6 +73,7 @@ jobs:
       NITRO_ENCLAVE_IMAGE_SHA384: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_IMAGE_SHA384 }}
       NITRO_ENCLAVE_PCR3: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_NITRO_ENCLAVE_PCR3 }}
       WORLD_ID_APP_ID: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_APP_ID }}
+      WORLD_ID_ACTION: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_ACTION }}
       WORLD_ID_API_BASE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_API_BASE }}
       WORLD_ID_PROOF_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_PROOF_MODE }}
       NITRO_CLI_TAG: v1.4.4
@@ -105,6 +106,7 @@ jobs:
             NITRO_ENCLAVE_IMAGE_SHA384
             NITRO_ENCLAVE_PCR3
             WORLD_ID_APP_ID
+            WORLD_ID_ACTION
           )
           for name in "${required_names[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -142,6 +144,11 @@ jobs:
 
           if [[ ! "$NITRO_ENCLAVE_PCR3" =~ ^[0-9a-fA-F]{96}$ ]]; then
             echo "NITRO_ENCLAVE_PCR3 must be a SHA-384 digest" >&2
+            exit 1
+          fi
+
+          if [[ ! "$WORLD_ID_ACTION" =~ ^sonari_membership_register_v[0-9]+$ ]]; then
+            echo "WORLD_ID_ACTION must match sonari_membership_register_v<N>" >&2
             exit 1
           fi
 
@@ -573,6 +580,9 @@ jobs:
           if [[ -n "${WORLD_ID_PROOF_MODE:-}" ]]; then
             deploy_plan_args+=(--world-id-proof-mode "$WORLD_ID_PROOF_MODE")
           fi
+          if [[ -n "${WORLD_ID_ACTION:-}" ]]; then
+            deploy_plan_args+=(--world-id-action "$WORLD_ID_ACTION")
+          fi
 
           pnpm tsx "${deploy_plan_args[@]}"
 
@@ -600,6 +610,7 @@ jobs:
             "GitCommitSha",
             "ScheduleState",
             "WorldIdProofMode",
+            "WorldIdAction",
             "SourceArchiverTokenSecretArn",
             "SourceArchiverPrivateKeySecretArn",
             "SourceArchiverSuiNetwork",
@@ -608,7 +619,6 @@ jobs:
             "SourceArchiverWalrusUploadRelayTipMaxMist",
             "SourceArchiverWalrusEpochs",
             "SourceArchiverWalrusDeletable",
-            "WorldIdProofMode",
           ];
           for (const key of requiredParameterKeys) {
             if (

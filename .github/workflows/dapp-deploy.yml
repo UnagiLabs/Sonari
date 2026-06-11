@@ -89,6 +89,19 @@ jobs:
             exit 1
           fi
 
+      - name: Validate World ID action
+        env:
+          NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${NEXT_PUBLIC_WORLD_ID_ACTION:-}" =~ ^sonari_membership_register_v[0-9]+$ ]]; then
+            echo "NEXT_PUBLIC_WORLD_ID_ACTION must match sonari_membership_register_v<N>"
+            echo "Set it in environment: cloudflare-dapp-worker"
+            exit 1
+          fi
+
       # deploy 前ゲート。テストが緑のときだけ deploy へ進む。
       - name: Test dapp
         shell: bash
@@ -129,6 +142,7 @@ jobs:
           NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID: ${{ vars.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID }}
           NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
+          NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
           # dapp 固有（environment-level Variables）。
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}

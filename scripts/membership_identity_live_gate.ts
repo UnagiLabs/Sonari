@@ -146,13 +146,13 @@ function checkSuiObjectId(name: string, value: string | undefined): LiveGateChec
 }
 
 function checkWorldIdAction(value: string | undefined): LiveGateCheck {
-    if (value === "sonari_membership_register_v2") {
+    if (typeof value === "string" && /^sonari_membership_register_v[0-9]+$/.test(value)) {
         return { name: "SONARI_WORLD_ID_ACTION", status: "ok", message: value };
     }
     return {
         name: "SONARI_WORLD_ID_ACTION",
         status: "fail",
-        message: "SONARI_WORLD_ID_ACTION must be sonari_membership_register_v2",
+        message: "SONARI_WORLD_ID_ACTION must match sonari_membership_register_v<N>",
     };
 }
 
