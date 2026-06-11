@@ -13,6 +13,7 @@ function row(overrides: Partial<VerificationJobRow> = {}): VerificationJobRow {
     return {
         job_id: "membership-identity-test",
         request_hash: "hash",
+        owner_membership_key: `${validRequest().owner}#${validRequest().membership_id}`,
         request_json: JSON.stringify(validRequest()),
         status: "queued",
         retry_count: 0,

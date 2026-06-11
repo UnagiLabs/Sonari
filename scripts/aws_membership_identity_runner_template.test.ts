@@ -13,7 +13,11 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("VerificationJobsTable:");
         expect(template).toContain(`TableName: !Sub $${"{AWS::StackName}"}-verification_jobs`);
         expect(template).toContain("AttributeName: job_id");
+        expect(template).toContain("AttributeName: owner_membership_key");
+        expect(template).toContain("AttributeName: updated_at_ms");
         expect(template).toContain("KeyType: HASH");
+        expect(template).toContain("OwnerMembershipUpdatedAtIndex");
+        expect(template).toContain("Resource: !Sub ${VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex");
         expect(template).toContain("SubmitVerificationLambda:");
         expect(template).toContain("Handler: dist/src/lambda.submitVerificationHandler");
         expect(template).toContain("BatchVerifierLambda:");

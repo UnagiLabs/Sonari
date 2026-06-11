@@ -5,6 +5,7 @@ import {
     DynamoDBDocumentClient,
     GetCommand,
     PutCommand,
+    QueryCommand,
     ScanCommand,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
@@ -50,6 +51,7 @@ export interface IdentityVerifyRequest {
 export interface VerificationJobRow {
     readonly job_id: string;
     readonly request_hash: string;
+    readonly owner_membership_key: string;
     readonly request_json: string;
     readonly status: VerificationJobStatus;
     readonly retry_count: number;
@@ -118,6 +120,7 @@ export interface VerificationJobRepository {
         nowMs: number,
     ): Promise<UpsertVerificationJobResult>;
     get(jobId: string): Promise<VerificationJobRow | null>;
+    getLatestForSubject(owner: string, membershipId: string): Promise<VerificationJobRow | null>;
     all(): Promise<VerificationJobRow[]>;
     claimNextDue(nowMs: number): Promise<DueVerificationJob | null>;
     claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null>;
@@ -284,9 +287,11 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
         }
 
         const jobId = membershipJobId(requestHash);
+        const ownerMembershipKey = ownerMembershipLookupKey(request.owner, request.membership_id);
         const row: VerificationJobRow = {
             job_id: jobId,
             request_hash: requestHash,
+            owner_membership_key: ownerMembershipKey,
             request_json: requestJson,
             status: "queued",
             retry_count: 0,
@@ -309,6 +314,17 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
 
     async get(jobId: string): Promise<VerificationJobRow | null> {
         const row = this.rowsByJobId.get(jobId);
+        return row === undefined ? null : cloneRow(row);
+    }
+
+    async getLatestForSubject(
+        owner: string,
+        membershipId: string,
+    ): Promise<VerificationJobRow | null> {
+        const lookupKey = ownerMembershipLookupKey(owner, membershipId);
+        const row = [...this.rowsByJobId.values()]
+            .filter((candidate) => candidate.owner_membership_key === lookupKey)
+            .sort((left, right) => right.updated_at_ms - left.updated_at_ms)[0];
         return row === undefined ? null : cloneRow(row);
     }
 
@@ -474,6 +490,7 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
         const requestJson = stableStringify(request);
         const requestHash = sha256Hex(requestJson);
         const jobId = membershipJobId(requestHash);
+        const ownerMembershipKey = ownerMembershipLookupKey(request.owner, request.membership_id);
         const existing = await this.get(jobId);
         if (existing !== null) {
             return { row: existing, duplicate: true };
@@ -482,6 +499,7 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
         const row: VerificationJobRow = {
             job_id: jobId,
             request_hash: requestHash,
+            owner_membership_key: ownerMembershipKey,
             request_json: requestJson,
             status: "queued",
             retry_count: 0,
@@ -536,6 +554,25 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
             }),
         )) as { Item?: unknown };
         return parseStoredRow(result.Item);
+    }
+
+    async getLatestForSubject(
+        owner: string,
+        membershipId: string,
+    ): Promise<VerificationJobRow | null> {
+        const result = (await this.documentClient.send(
+            new QueryCommand({
+                TableName: this.tableName,
+                IndexName: "OwnerMembershipUpdatedAtIndex",
+                KeyConditionExpression: "owner_membership_key = :owner_membership_key",
+                ExpressionAttributeValues: {
+                    ":owner_membership_key": ownerMembershipLookupKey(owner, membershipId),
+                },
+                ScanIndexForward: false,
+                Limit: 1,
+            }),
+        )) as { Items?: unknown[] };
+        return parseStoredRow(result.Items?.[0]);
     }
 
     async all(): Promise<VerificationJobRow[]> {
@@ -972,6 +1009,10 @@ function membershipJobId(requestHash: string): string {
     return requestHash.slice(0, 32);
 }
 
+function ownerMembershipLookupKey(owner: string, membershipId: string): string {
+    return `${owner.toLowerCase()}#${membershipId.toLowerCase()}`;
+}
+
 function sha256Hex(value: string): string {
     return createHash("sha256").update(value).digest("hex");
 }
@@ -1006,6 +1047,7 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
     if (
         typeof input.job_id !== "string" ||
         typeof input.request_hash !== "string" ||
+        typeof input.owner_membership_key !== "string" ||
         typeof input.request_json !== "string" ||
         !isVerificationJobStatus(input.status) ||
         typeof input.retry_count !== "number" ||
@@ -1017,6 +1059,7 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
     return {
         job_id: input.job_id,
         request_hash: input.request_hash,
+        owner_membership_key: input.owner_membership_key,
         request_json: input.request_json,
         status: input.status,
         retry_count: input.retry_count,

@@ -136,6 +136,7 @@ function makeStoredRow(overrides: Partial<Record<string, unknown>> = {}): Record
     return {
         job_id: "test-job-id-000000000000000",
         request_hash: "aabbcc",
+        owner_membership_key: `0x${"33".repeat(32)}#0x${"22".repeat(32)}`,
         request_json: "{}",
         status: "queued",
         retry_count: 0,
