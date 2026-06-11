@@ -22,15 +22,13 @@ GPS history、detailed address は on-chain に出さない。
 
 - SBT owner を受取先にする。
 - 災害前作成と災害前居住セル登録を保存する。
-- 本人確認済み状態を保存する。
+- 本人確認に必要な同意情報を保存する。
 
 実装:
 
 - `account_created_at_ms` を追加する。
 - `home_cell` を追加する。
 - `home_cell_registered_at_ms` を追加する。
-- `identity_verified` を追加する。
-- `identity_provider_mask` を追加する。
 - `terms_version` を追加する。
 - `signed_statement_hash` を追加する。
 
@@ -64,7 +62,7 @@ GPS history、detailed address は on-chain に出さない。
 
 目的:
 
-- KYC / World ID の署名済み result を SBT に反映する。
+- KYC / World ID の署名済み result を IdentityRegistry に反映する。
 
 実装:
 
@@ -76,8 +74,8 @@ GPS history、detailed address は on-chain に出さない。
 
 完了条件:
 
-- valid KYC result で SBT が verified になる。
-- valid World ID result で SBT が verified になる。
+- valid KYC result で IdentityRegistry に記録される。
+- valid World ID result で IdentityRegistry に記録される。
 - expired result は reject される。
 - disabled verifier key は reject される。
 
@@ -93,7 +91,7 @@ GPS history、detailed address は on-chain に出さない。
 - `account_created_at_ms` が cutoff より前か検証する。
 - `home_cell_registered_at_ms` が cutoff より前か検証する。
 - affected cell proof と `home_cell` を照合する。
-- `identity_verified == true` を要求する。
+- IdentityRegistry の有効な本人確認記録を要求する。
 - duplicate key がこの SBT に紐づくことを確認する。
 - SBT owner へ支払う。
 

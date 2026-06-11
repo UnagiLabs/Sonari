@@ -36,12 +36,12 @@ import {
     parseCliArgs,
     parseMembershipPassIssuedId,
     parseMembershipPassIssuedIdFromSdkResult,
+    parseMembershipPassReadback,
     parsePublishedTomlPackageId,
     parsePublishFixtureObjects,
     parseSuiClientConfigYaml,
     parseSuiJsonCommandResult,
     parseSuiObjectReadback,
-    parseUnverifiedMembershipPassReadback,
     registerMembershipPassWithSdk,
     resolveBaseFixtureObjects,
     runMembershipIdentityTestnetFixture,
@@ -671,27 +671,13 @@ describe("membership identity pass fixture planning", () => {
         ).toBe(objectId("55"));
     });
 
-    it("accepts only unverified MembershipPass readback", () => {
-        expect(
-            parseUnverifiedMembershipPassReadback(
-                passReadback(false),
-                objectId("66"),
-                objectId("aa"),
-            ),
-        ).toEqual({
-            passId: objectId("66"),
-            owner: objectId("77"),
-            identityVerified: false,
-            providerLabel: "Unverified",
-        });
-
-        expect(() =>
-            parseUnverifiedMembershipPassReadback(
-                passReadback(true),
-                objectId("66"),
-                objectId("aa"),
-            ),
-        ).toThrow("membership pass fixture must start with identity_verified=false");
+    it("reads MembershipPass owner from readback", () => {
+        expect(parseMembershipPassReadback(passReadback(), objectId("66"), objectId("aa"))).toEqual(
+            {
+                passId: objectId("66"),
+                owner: objectId("77"),
+            },
+        );
     });
 });
 
@@ -928,8 +914,6 @@ function fakeExecutor(typeByObjectId: Record<string, string>): SuiCommandExecuto
                             objectIdArg === objectId("66")
                                 ? {
                                       owner: objectId("77"),
-                                      identity_verified: false,
-                                      provider_label: "Unverified",
                                   }
                                 : {},
                     },
@@ -978,7 +962,7 @@ async function runWorldIdFixtureRequest(overrides: {
     }
 }
 
-function passReadback(identityVerified: boolean): unknown {
+function passReadback(): unknown {
     return {
         data: {
             objectId: objectId("66"),
@@ -986,8 +970,6 @@ function passReadback(identityVerified: boolean): unknown {
             content: {
                 fields: {
                     owner: objectId("77"),
-                    identity_verified: identityVerified,
-                    provider_label: "Unverified",
                 },
             },
         },

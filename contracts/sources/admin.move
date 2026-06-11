@@ -123,7 +123,7 @@ fun create_initial_displays(publisher: &Publisher, ctx: &mut TxContext) {
         display_field_keys(),
         vector[
             b"Sonari Passport".to_string(),
-            b"Status: {status_label}. Verified via {provider_label}.".to_string(),
+            b"Status: {status_label}.".to_string(),
             b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/membership-pass.svg".to_string(),
             b"https://app.sonari.xyz/passport/{id}".to_string(),
         ],

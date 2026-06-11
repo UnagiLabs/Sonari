@@ -42,17 +42,13 @@ MembershipSBT {
   home_cell: u64
   home_cell_registered_at_ms: u64
 
-  identity_verified: bool
-  identity_provider_mask: u8
-  identity_verified_at_ms: u64
-  identity_expires_at_ms: u64
-
   terms_version: u64
   signed_statement_hash: vector<u8>
 }
 ```
 
-`identity_provider_mask`:
+本人確認状態は Membership SBT ではなく `IdentityRegistry` が持つ。
+`IdentityVerificationRecord.provider_mask`:
 
 ```text
 KYC = 1
@@ -107,7 +103,7 @@ IdentityVerificationResult {
 ```
 
 provider は MVP では KYC または World ID のみである。
-`verified == true` の場合だけ、Membership SBT を本人確認済みにできる。
+`verified == true` の場合だけ、IdentityRegistry に本人確認記録を保存できる。
 
 provider 内 duplicate key が別 SBT に使用済みなら reject する。
 KYC と World ID をまたぐ完全な重複排除は MVP 外である。
@@ -124,7 +120,7 @@ Disaster Claim は、次の条件をすべて検証する。
 | Time | `account_created_at_ms < disaster_cutoff_time` |
 | Time | `home_cell_registered_at_ms < disaster_cutoff_time` |
 | Area | `home_cell` が affected cells に含まれる |
-| Identity | `identity_verified == true` |
+| Identity | IdentityRegistry に有効な本人確認記録がある |
 | Identity | duplicate key がこの Membership SBT に紐づく |
 | Recipient | 支払い先は Membership SBT owner の Sui address |
 | Duplicate Claim | 同じ campaign / event で未 Claim |
@@ -196,7 +192,7 @@ Disaster Claim は、DisasterEvent と Membership SBT を合成する。
 DisasterEvent affected_cells_root
   + AffectedCellLeaf proof
   + MembershipSBT.home_cell
-  + MembershipSBT.identity_verified
+  + IdentityRegistry.IdentityVerificationRecord
   -> Claim decision
 ```
 
@@ -238,7 +234,7 @@ target API:
 | must | Main Pool reserve を侵さない |
 | must | Operations Pool を Relief payout 原資にしない |
 | must | Nautilus 署名済み result だけを信頼する |
-| must | `identity_verified == true` を Claim に要求する |
+| must | IdentityRegistry の有効な本人確認記録を Claim に要求する |
 | must | provider 内 duplicate key を検証する |
 | must | Membership SBT owner にだけ支払う |
 | must | 同じ campaign / event の二重 Claim を拒否する |

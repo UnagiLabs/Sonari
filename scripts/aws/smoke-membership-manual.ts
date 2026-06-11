@@ -82,10 +82,10 @@ export type RegistrationMetadataSummary = {
 export type SuiSubmissionSummary = {
     status: string;
     txDigest: string | null;
-    readback: SuiMembershipPassReadbackSummary | null;
+    readback: SuiIdentityRecordReadbackSummary | null;
 };
 
-export type SuiMembershipPassReadbackSummary = {
+export type SuiIdentityRecordReadbackSummary = {
     objectId: string;
     identityVerified: boolean;
     identityProviderMask: number;
@@ -607,11 +607,11 @@ function readSuiSubmission(output: unknown): SuiSubmissionSummary | null {
     return {
         status,
         txDigest: readRecordString(output, "tx_digest"),
-        readback: readSuiMembershipPassReadback(output.readback),
+        readback: readSuiIdentityRecordReadback(output.readback),
     };
 }
 
-function readSuiMembershipPassReadback(input: unknown): SuiMembershipPassReadbackSummary | null {
+function readSuiIdentityRecordReadback(input: unknown): SuiIdentityRecordReadbackSummary | null {
     if (!isRecord(input)) {
         return null;
     }
