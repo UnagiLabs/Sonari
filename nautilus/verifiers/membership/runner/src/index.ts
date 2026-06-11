@@ -17,6 +17,20 @@ export const DEFAULT_RETRY_BACKOFF_MS = 15 * 60 * 1000;
 
 export type VerificationJobStatus = "queued" | "processing" | "retry" | "failed" | "completed";
 
+export type VerificationJobDisplayStatus =
+    | "queued"
+    | "processing"
+    | "completed"
+    | "rejected"
+    | "failed";
+
+export interface VerificationJobStatusResponse {
+    readonly status: VerificationJobDisplayStatus;
+    readonly updated_at_ms: number;
+    readonly completed_at_ms?: number;
+    readonly tx_digest?: string;
+}
+
 export interface WorldIdProofRequest {
     readonly idkit_response: Record<string, unknown>;
 }
@@ -50,6 +64,41 @@ export interface VerificationJobRow {
     readonly created_at_ms: number;
     readonly updated_at_ms: number;
     readonly completed_at_ms: number | null;
+}
+
+const REJECTED_ERROR_CODES = new Set([
+    "MEMBERSHIP_IDENTITY_TEE_REJECTED",
+    "MEMBERSHIP_IDENTITY_TEE_UNSUPPORTED",
+    "WORLD_ID_VERIFICATION_FAILED",
+    "KYC_VERIFICATION_FAILED",
+]);
+
+export function verificationJobStatusResponse(
+    row: VerificationJobRow,
+): VerificationJobStatusResponse {
+    const response: VerificationJobStatusResponse = {
+        status: displayStatus(row),
+        updated_at_ms: row.updated_at_ms,
+        ...(row.completed_at_ms === null ? {} : { completed_at_ms: row.completed_at_ms }),
+        ...(row.tx_digest === null ? {} : { tx_digest: row.tx_digest }),
+    };
+    return response;
+}
+
+function displayStatus(row: VerificationJobRow): VerificationJobDisplayStatus {
+    switch (row.status) {
+        case "queued":
+        case "retry":
+            return "queued";
+        case "processing":
+            return "processing";
+        case "completed":
+            return "completed";
+        case "failed":
+            return row.error_code !== null && REJECTED_ERROR_CODES.has(row.error_code)
+                ? "rejected"
+                : "failed";
+    }
 }
 
 export interface UpsertVerificationJobResult {

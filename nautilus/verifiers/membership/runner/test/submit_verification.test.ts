@@ -2,10 +2,83 @@ import { describe, expect, it } from "vitest";
 import {
     createSubmitVerificationHandler,
     InMemoryVerificationJobRepository,
+    verificationJobStatusResponse,
+    type VerificationJobRow,
 } from "../src/index.js";
 import { validRequest } from "./fixtures.js";
 
 const baseNowMs = 1_800_000_000_000;
+
+function row(overrides: Partial<VerificationJobRow> = {}): VerificationJobRow {
+    return {
+        job_id: "membership-identity-test",
+        request_hash: "hash",
+        request_json: JSON.stringify(validRequest()),
+        status: "queued",
+        retry_count: 0,
+        next_retry_at_ms: null,
+        error_code: null,
+        error_message: null,
+        workflow_execution_name: null,
+        workflow_started_at_ms: null,
+        tx_digest: null,
+        sui_dry_run_result_json: null,
+        sui_dry_run_completed_at_ms: null,
+        created_at_ms: baseNowMs,
+        updated_at_ms: baseNowMs + 1,
+        completed_at_ms: null,
+        ...overrides,
+    };
+}
+
+describe("verificationJobStatusResponse", () => {
+    it.each([
+        ["queued", "queued"],
+        ["retry", "queued"],
+        ["processing", "processing"],
+        ["completed", "completed"],
+    ] as const)("maps %s to display status %s", (stored, display) => {
+        expect(verificationJobStatusResponse(row({ status: stored })).status).toBe(display);
+    });
+
+    it("maps allowlisted failed error codes to rejected", () => {
+        expect(
+            verificationJobStatusResponse(
+                row({ status: "failed", error_code: "WORLD_ID_VERIFICATION_FAILED" }),
+            ).status,
+        ).toBe("rejected");
+    });
+
+    it("keeps unknown failed error codes as failed", () => {
+        expect(
+            verificationJobStatusResponse(
+                row({ status: "failed", error_code: "AWS_MEMBERSHIP_RUNNER_TIMEOUT" }),
+            ).status,
+        ).toBe("failed");
+    });
+
+    it("does not expose raw request_json or internal error fields", () => {
+        const response = verificationJobStatusResponse(
+            row({
+                status: "completed",
+                error_code: "SECRET",
+                error_message: "internal detail",
+                tx_digest: "A1B2C3",
+                completed_at_ms: baseNowMs + 100,
+            }),
+        ) as Record<string, unknown>;
+
+        expect(response).toEqual({
+            status: "completed",
+            updated_at_ms: baseNowMs + 1,
+            completed_at_ms: baseNowMs + 100,
+            tx_digest: "A1B2C3",
+        });
+        expect(response.request_json).toBeUndefined();
+        expect(response.error_code).toBeUndefined();
+        expect(response.error_message).toBeUndefined();
+    });
+});
 
 describe("SubmitVerification Lambda", () => {
     it("rejects malformed requests without storing a job", async () => {
