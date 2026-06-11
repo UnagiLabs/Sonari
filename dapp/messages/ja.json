@@ -275,5 +275,11 @@
             "unavailableTitle": "地図を表示できません",
             "unavailableBody": "居住地セルの値: {cell}"
         }
+    },
+    "wallet": {
+        "connect": "ウォレットを接続",
+        "connecting": "接続中…",
+        "reconnecting": "再接続中…",
+        "connected": "接続済み"
     }
 }

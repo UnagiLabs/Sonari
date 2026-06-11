@@ -275,5 +275,11 @@
             "unavailableTitle": "Map unavailable",
             "unavailableBody": "Residence cell value: {cell}"
         }
+    },
+    "wallet": {
+        "connect": "Connect wallet",
+        "connecting": "Connecting…",
+        "reconnecting": "Reconnecting…",
+        "connected": "Connected"
     }
 }
