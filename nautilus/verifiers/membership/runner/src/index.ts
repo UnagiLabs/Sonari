@@ -628,7 +628,16 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
                 Limit: 1,
             }),
         )) as { Items?: unknown[] };
-        return parseStoredRow(result.Items?.[0]);
+        const indexedRow = parseStoredRow(result.Items?.[0]);
+        if (indexedRow !== null) {
+            return indexedRow;
+        }
+
+        const lookupKey = ownerMembershipLookupKey(owner, membershipId);
+        const legacyRow = (await this.all())
+            .filter((row) => row.owner_membership_key === lookupKey)
+            .sort((left, right) => right.updated_at_ms - left.updated_at_ms)[0];
+        return legacyRow ?? null;
     }
 
     async all(): Promise<VerificationJobRow[]> {

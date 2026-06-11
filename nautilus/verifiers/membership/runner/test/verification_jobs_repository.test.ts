@@ -55,7 +55,15 @@ describe("DynamoDbVerificationJobRepository.upsertRequest", () => {
 
     it("queries the owner-membership index for the latest subject job without Scan", async () => {
         const captured: CapturedCommand[] = [];
-        const repo = new DynamoDbVerificationJobRepository("jobs", recordingClient(captured));
+        const repo = new DynamoDbVerificationJobRepository("jobs", {
+            send: async (command: unknown) => {
+                const typed = command as CapturedCommand;
+                captured.push(typed);
+                return {
+                    Items: [{ ...storedRowFromRequest(validRequest()), updated_at_ms: 2000 }],
+                };
+            },
+        });
 
         await repo.getLatestForSubject(validRequest().owner, validRequest().membership_id);
 
@@ -68,6 +76,34 @@ describe("DynamoDbVerificationJobRepository.upsertRequest", () => {
             Limit: 1,
         });
         expect(captured[0]?.input).not.toHaveProperty("FilterExpression");
+    });
+
+    it("falls back to legacy rows without owner_membership_key when the GSI has no match", async () => {
+        const captured: CapturedCommand[] = [];
+        const { owner_membership_key: _legacyMissingLookupKey, ...legacyRow } =
+            storedRowFromRequest(validRequest());
+        const repo = new DynamoDbVerificationJobRepository("jobs", {
+            send: async (command: unknown) => {
+                const typed = command as CapturedCommand;
+                captured.push(typed);
+                if ("IndexName" in typed.input) {
+                    return { Items: [] };
+                }
+                return { Items: [legacyRow] };
+            },
+        });
+
+        await expect(
+            repo.getLatestForSubject(validRequest().owner, validRequest().membership_id),
+        ).resolves.toMatchObject({
+            job_id: "legacy-job",
+            owner_membership_key: `${validRequest().owner}#${validRequest().membership_id}`,
+        });
+
+        expect(captured.map((command) => command.input)).toMatchObject([
+            { IndexName: "OwnerMembershipUpdatedAtIndex" },
+            { TableName: "jobs" },
+        ]);
     });
 });
 
@@ -97,3 +133,21 @@ describe("InMemoryVerificationJobRepository.getLatestForSubject", () => {
         ).resolves.toBeNull();
     });
 });
+
+function storedRowFromRequest(request: ReturnType<typeof validRequest>): Record<string, unknown> {
+    return {
+        job_id: "legacy-job",
+        request_hash: "aabbcc",
+        owner_membership_key: `${request.owner}#${request.membership_id}`,
+        request_json: JSON.stringify(request),
+        status: "queued",
+        retry_count: 0,
+        next_retry_at_ms: null,
+        error_code: null,
+        error_message: null,
+        workflow_execution_name: null,
+        workflow_started_at_ms: null,
+        created_at_ms: 1000,
+        updated_at_ms: 1000,
+    };
+}
