@@ -1,6 +1,7 @@
 import { SFNClient } from "@aws-sdk/client-sfn";
 import {
     createBatchVerifierHandler,
+    createIdentityStatusHandler,
     createJobStreamHandler,
     createSubmitVerificationHandler,
     type DynamoDbStreamEvent,
@@ -19,6 +20,16 @@ export async function submitVerificationHandler(
             requiredEnv("VERIFICATION_JOBS_TABLE_NAME"),
         ),
         expectedRegistryId: requiredEnv("SONARI_IDENTITY_REGISTRY_ID"),
+    })(event);
+}
+
+export async function identityStatusHandler(
+    event: SubmitVerificationLambdaEvent,
+): Promise<unknown> {
+    return createIdentityStatusHandler({
+        repository: new DynamoDbVerificationJobRepository(
+            requiredEnv("VERIFICATION_JOBS_TABLE_NAME"),
+        ),
     })(event);
 }
 

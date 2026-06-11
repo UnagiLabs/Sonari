@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import type { IdentityProvider } from "@sonari/membership-verifier-shared";
 import { MEMBERSHIP_IDENTITY_VERIFIER_KIND } from "@sonari/verifier-contracts";
+import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 
 export type { IdentityProvider } from "@sonari/membership-verifier-shared";
 
@@ -140,6 +141,13 @@ export interface SubmitVerificationLambdaEvent {
     readonly body?: string | null;
 }
 
+export interface IdentityStatusRequest {
+    readonly owner: string;
+    readonly membership_id: string;
+    readonly issued_at_ms: number;
+    readonly signature: string;
+}
+
 export interface LambdaHttpResponse {
     readonly statusCode: number;
     readonly headers?: Record<string, string>;
@@ -150,6 +158,17 @@ export interface SubmitVerificationHandlerOptions {
     readonly repository: VerificationJobRepository;
     readonly now?: () => number;
     readonly expectedRegistryId?: string;
+}
+
+export interface IdentityStatusHandlerOptions {
+    readonly repository: VerificationJobRepository;
+    readonly now?: () => number;
+    readonly maxAgeMs?: number;
+    readonly verifySignature?: (input: {
+        owner: string;
+        message: string;
+        signature: string;
+    }) => Promise<boolean>;
 }
 
 export function createSubmitVerificationHandler(options: SubmitVerificationHandlerOptions) {
@@ -184,6 +203,43 @@ export function createSubmitVerificationHandler(options: SubmitVerificationHandl
         }
 
         return jsonResponse(result.duplicate ? 200 : 202, body);
+    };
+}
+
+export function createIdentityStatusHandler(options: IdentityStatusHandlerOptions) {
+    return async function identityStatusHandler(
+        event: SubmitVerificationLambdaEvent,
+    ): Promise<LambdaHttpResponse> {
+        const parsed = parseJsonBody(event.body);
+        const request = parseIdentityStatusRequest(parsed);
+        if (!request.ok) {
+            return jsonResponse(400, { ok: false, message: request.message });
+        }
+
+        const nowMs = options.now?.() ?? Date.now();
+        const maxAgeMs = options.maxAgeMs ?? 5 * 60 * 1000;
+        if (request.value.issued_at_ms > nowMs || nowMs - request.value.issued_at_ms > maxAgeMs) {
+            return jsonResponse(401, { ok: false, message: "status signature is expired" });
+        }
+
+        const message = identityStatusMessage(request.value);
+        const verified = await (options.verifySignature ?? verifySuiPersonalMessage)({
+            owner: request.value.owner,
+            message,
+            signature: request.value.signature,
+        });
+        if (!verified) {
+            return jsonResponse(401, { ok: false, message: "status signature is invalid" });
+        }
+
+        const row = await options.repository.getLatestForSubject(
+            request.value.owner,
+            request.value.membership_id,
+        );
+        if (row === null) {
+            return jsonResponse(200, { ok: true, status: "none" });
+        }
+        return jsonResponse(200, { ok: true, ...verificationJobStatusResponse(row) });
     };
 }
 
@@ -892,6 +948,69 @@ export function parseIdentityVerifyRequest(input: unknown): ParseResult<Identity
     });
 }
 
+export function identityStatusMessage(request: IdentityStatusRequest): string {
+    return [
+        "Sonari identity verification status",
+        `owner:${request.owner}`,
+        `membership_id:${request.membership_id}`,
+        `issued_at_ms:${request.issued_at_ms}`,
+    ].join("\n");
+}
+
+function parseIdentityStatusRequest(input: unknown): ParseResult<IdentityStatusRequest> {
+    if (!isRecord(input)) {
+        return parseError("request body must be an object");
+    }
+    const unexpectedTopLevel = unexpectedKey(input, [
+        "owner",
+        "membership_id",
+        "issued_at_ms",
+        "signature",
+    ]);
+    if (unexpectedTopLevel !== undefined) {
+        return parseError(`unexpected request field: ${unexpectedTopLevel}`);
+    }
+
+    const owner = parseHex32(input.owner, "owner");
+    if (!owner.ok) {
+        return owner;
+    }
+    const membershipId = parseHex32(input.membership_id, "membership_id");
+    if (!membershipId.ok) {
+        return membershipId;
+    }
+    const issuedAtMs = parseU64(input.issued_at_ms, "issued_at_ms");
+    if (!issuedAtMs.ok) {
+        return issuedAtMs;
+    }
+    const signature = parseRequiredString(input.signature, "signature");
+    if (!signature.ok) {
+        return signature;
+    }
+
+    return parseOk({
+        owner: owner.value,
+        membership_id: membershipId.value,
+        issued_at_ms: issuedAtMs.value,
+        signature: signature.value,
+    });
+}
+
+async function verifySuiPersonalMessage(input: {
+    owner: string;
+    message: string;
+    signature: string;
+}): Promise<boolean> {
+    try {
+        await verifyPersonalMessageSignature(new TextEncoder().encode(input.message), input.signature, {
+            address: input.owner,
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function parseOptionalWorldId(input: unknown): ParseResult<WorldIdProofRequest | undefined> {
     if (input === undefined) {
         return parseOk(undefined);
@@ -977,6 +1096,13 @@ function parseOptionalU64(value: unknown, field: string): ParseResult<number | u
 function parseU64(value: unknown, field: string): ParseResult<number> {
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
         return parseError(`${field} must be a safe unsigned integer`);
+    }
+    return parseOk(value);
+}
+
+function parseRequiredString(value: unknown, field: string): ParseResult<string> {
+    if (typeof value !== "string" || value.length === 0) {
+        return parseError(`${field} must be a non-empty string`);
     }
     return parseOk(value);
 }

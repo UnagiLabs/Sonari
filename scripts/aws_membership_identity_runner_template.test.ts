@@ -20,22 +20,27 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("Resource: !Sub ${VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex");
         expect(template).toContain("SubmitVerificationLambda:");
         expect(template).toContain("Handler: dist/src/lambda.submitVerificationHandler");
+        expect(template).toContain("IdentityStatusLambda:");
+        expect(template).toContain("Handler: dist/src/lambda.identityStatusHandler");
+        expect(template).toContain("IdentityStatusLambdaUrl:");
         expect(template).toContain("BatchVerifierLambda:");
         expect(template).toContain("Handler: dist/src/lambda.batchVerifierHandler");
         expect(template).toContain("VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable");
         expect(template).toContain("RUNNER_STATE_MACHINE_ARN: !Ref RunnerStateMachine");
     });
 
-    it("does not expose a public HTTP runner surface", async () => {
+    it("only exposes the signed identity-status Lambda URL as a public HTTP surface", async () => {
         const template = await readFile(templatePath, "utf8");
 
         expect(template).not.toContain("AWS::ElasticLoadBalancingV2::LoadBalancer");
         expect(template).not.toContain("AWS::ElasticLoadBalancingV2::Listener");
         expect(template).not.toContain("AWS::ElasticLoadBalancingV2::TargetGroup");
-        expect(template).not.toContain("AWS::Lambda::Url");
         expect(template).not.toContain("AWS::ApiGateway");
         expect(template).not.toContain("AWS::ApiGatewayV2");
-        expect(template).not.toContain("FunctionUrlAuthType: NONE");
+        expect(template).toContain("IdentityStatusLambdaUrl:");
+        expect(template).toContain("Type: AWS::Lambda::Url");
+        expect(template).toContain("TargetFunctionArn: !Ref IdentityStatusLambda");
+        expect(template).toContain("FunctionUrlAuthType: NONE");
         expect(template).not.toContain("CidrIp: 0.0.0.0/0\n          FromPort");
     });
 
@@ -190,6 +195,8 @@ describe("AWS membership identity runner CloudFormation template", () => {
         expect(template).toContain("autoscaling:SetDesiredCapacity");
         expect(template).toContain("ssm:SendCommand");
         expect(template).toContain("SubmitVerificationLambdaName:");
+        expect(template).toContain("IdentityStatusLambdaName:");
+        expect(template).toContain("IdentityStatusLambdaUrlOutput:");
         expect(template).toContain("BatchVerifierLambdaName:");
         expect(template).toContain("RunnerAutoScalingGroupName:");
         expect(template).toContain("SigningMaterialKmsKeyId:");
