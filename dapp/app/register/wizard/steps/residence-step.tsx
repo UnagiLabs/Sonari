@@ -1,6 +1,12 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
+import {
+    initialSheetState,
+    sheetStateAfterSelection,
+    toggleSheet,
+} from "../../residence/residence-sheet";
 import { ResidenceCellPicker } from "../../residence/residence-cell-picker";
 import type { ResidenceSaveErrorCode } from "../residence-save";
 
@@ -8,6 +14,7 @@ interface ResidenceStepProps {
     readonly accepted: readonly boolean[];
     readonly canContinue: boolean;
     readonly saveError: ResidenceSaveErrorCode | null;
+    readonly selectedCellDecimal: string | null;
     readonly onToggle: (index: number, checked: boolean) => void;
     readonly onCellSelectionChange: (decimal: string | null) => void;
     readonly onBack: () => void;
@@ -18,6 +25,7 @@ export function ResidenceStep({
     accepted,
     canContinue,
     saveError,
+    selectedCellDecimal,
     onToggle,
     onCellSelectionChange,
     onBack,
@@ -26,6 +34,15 @@ export function ResidenceStep({
     const t = useTranslations("register.wizard.residence");
     const tCommon = useTranslations("register.wizard.common");
 
+    const [sheetState, setSheetState] = useState(initialSheetState);
+
+    // セル選択が null→非null に変わったとき自動展開する。
+    useEffect(() => {
+        if (selectedCellDecimal !== null) {
+            setSheetState((prev) => sheetStateAfterSelection(prev));
+        }
+    }, [selectedCellDecimal]);
+
     function saveErrorMessage(): string | null {
         if (saveError === "cell_not_selected") return t("saveError.cellNotSelected");
         if (saveError === "invalid_cell") return t("saveError.invalidCell");
@@ -33,6 +50,7 @@ export function ResidenceStep({
     }
 
     const errorMessage = saveErrorMessage();
+    const isExpanded = sheetState === "expanded";
 
     return (
         <section aria-labelledby="wizard-residence-title" className="wizard-step-content">
@@ -49,7 +67,23 @@ export function ResidenceStep({
                 <ResidenceCellPicker onSelectionChange={onCellSelectionChange} />
 
                 {/* 確定パネル（前景層）: チェックボックス・エラー・CTA */}
-                <div className="residence-action-panel">
+                <div
+                    className={`residence-action-panel ${isExpanded ? "is-expanded" : "is-collapsed"}`}
+                >
+                    {/* ボトムシート ハンドル */}
+                    <button
+                        aria-expanded={isExpanded}
+                        className="residence-sheet-handle"
+                        onClick={() => setSheetState(toggleSheet)}
+                        type="button"
+                    >
+                        <span className="residence-sheet-handle-bar" />
+                        <span className="residence-sheet-title">{t("sheet.title")}</span>
+                        <span className="sr-only">
+                            {isExpanded ? t("sheet.collapse") : t("sheet.expand")}
+                        </span>
+                    </button>
+
                     <fieldset className="control-group">
                         <legend>{t("statementsLegend")}</legend>
                         <div className="terms-list">

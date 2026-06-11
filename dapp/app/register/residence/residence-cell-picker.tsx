@@ -329,6 +329,7 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
                     fullscreenControl: false,
                 });
                 mapRef.current = map;
+                map.setOptions({ gestureHandling: "greedy" });
 
                 map.addListener("click", (event: google.maps.MapMouseEvent) => {
                     const latLng = event.latLng;
