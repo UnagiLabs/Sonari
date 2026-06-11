@@ -161,7 +161,7 @@
             "identity": {
                 "eyebrow": "Optional",
                 "title": "Verify it's you. Now or later.",
-                "lead": "Initial registration only needs the residence cell and Membership SBT. Identity verification becomes required only before payout, and you can finish it from the member area anytime.",
+                "lead": "Registration only needs a residence cell and Membership SBT. Come back before payout to complete identity verification.",
                 "routeLegend": "Verification route",
                 "options": {
                     "kyc": {
@@ -215,7 +215,8 @@
                     "kycSubmitting": "Submitting"
                 },
                 "skipCta": "Skip for now",
-                "verifiedCta": "Continue"
+                "verifiedCta": "Continue",
+                "optionalNotice": "This step is optional. You can finish registration now and verify your identity later."
             },
             "done": {
                 "eyebrow": "All set",

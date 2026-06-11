@@ -230,6 +230,10 @@ export function IdentityStep({
                 <p className="wizard-lead">{t("lead")}</p>
             </header>
 
+            <div className="field-note" role="note">
+                {t("optionalNotice")}
+            </div>
+
             <form className="wizard-identity-form" onSubmit={handleSubmit}>
                 <fieldset className="control-group">
                     <legend>{t("routeLegend")}</legend>
