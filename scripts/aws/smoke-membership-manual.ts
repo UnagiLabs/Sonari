@@ -487,17 +487,45 @@ function resolveRequestFile(inputPath: string): string {
 }
 
 function uniqueizeDummyWorldIdRequest(input: unknown, nowMs: number): unknown {
+    if (!isRecord(input) || !isRecord(input.world_id)) {
+        throw new Error("dummy World ID request must include world_id");
+    }
+    // The enclave duplicate-key check requires the nullifier to be a decimal or
+    // 0x-prefixed hex string, so keep the uniqueizing suffix numeric (no separator).
+
+    // idkit_response format (new): world_id.idkit_response.responses[0].nullifier
     if (
-        !isRecord(input) ||
-        !isRecord(input.world_id) ||
-        typeof input.world_id.nullifier_hash !== "string"
+        isRecord(input.world_id.idkit_response) &&
+        Array.isArray(input.world_id.idkit_response.responses) &&
+        input.world_id.idkit_response.responses.length > 0 &&
+        isRecord(input.world_id.idkit_response.responses[0]) &&
+        typeof input.world_id.idkit_response.responses[0].nullifier === "string"
     ) {
-        throw new Error("dummy World ID request must include world_id.nullifier_hash");
+        const responses = [...input.world_id.idkit_response.responses];
+        responses[0] = {
+            ...(responses[0] as Record<string, unknown>),
+            nullifier: `${input.world_id.idkit_response.responses[0].nullifier}${nowMs}`,
+        };
+        return {
+            ...input,
+            world_id: {
+                ...input.world_id,
+                idkit_response: {
+                    ...(input.world_id.idkit_response as Record<string, unknown>),
+                    responses,
+                },
+            },
+        };
+    }
+
+    // legacy format: world_id.nullifier_hash
+    if (typeof input.world_id.nullifier_hash !== "string") {
+        throw new Error(
+            "dummy World ID request must include world_id.nullifier_hash or world_id.idkit_response.responses[0].nullifier",
+        );
     }
     return {
         ...input,
-        // The enclave duplicate-key check requires the nullifier to be a decimal or
-        // 0x-prefixed hex string, so keep the uniqueizing suffix numeric (no separator).
         world_id: {
             ...input.world_id,
             nullifier_hash: `${input.world_id.nullifier_hash}${nowMs}`,
