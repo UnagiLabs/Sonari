@@ -1,5 +1,7 @@
 module contracts::disaster_event;
 
+use contracts::campaign;
+use contracts::category_pool::{CategoryPool, CategoryRegistry};
 use contracts::metadata_verifier::{Self, VerifierRegistry};
 use contracts::payload::{Self, Payload};
 use contracts::program::{Self, Campaign};
@@ -162,6 +164,61 @@ public(package) fun create_from_signed_payload(
     );
 }
 
+public(package) fun create_from_signed_payload_and_campaign(
+    registry: &mut DisasterRegistry,
+    verifier_registry: &VerifierRegistry,
+    category_registry: &CategoryRegistry,
+    category_pool: &CategoryPool,
+    clock: &Clock,
+    payload_bcs: vector<u8>,
+    signature: vector<u8>,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+): option::Option<ID> {
+    assert!(payload_bcs.length() <= MAX_PAYLOAD_BCS_BYTES, EPayloadTooLarge);
+    let verifier_registry_id = metadata_verifier::registry_id(verifier_registry);
+    let now_ms = clock::timestamp_ms(clock);
+    let (verifier_config_key, verifier_config_version, enclave_instance_public_key) =
+        metadata_verifier::assert_enclave_signed_bytes(
+            verifier_registry,
+            metadata_verifier::verifier_family_earthquake_oracle(),
+            metadata_verifier::earthquake_v1_config_key(),
+            &payload_bcs,
+            &signature,
+            &public_key,
+            now_ms,
+        );
+    let payload = payload::decode_finalized(payload_bcs, now_ms);
+    let event_uid = payload::event_uid(&payload);
+    let event_revision = payload::event_revision(&payload);
+    let hazard_type = payload::hazard_type(&payload);
+    let severity_band = payload::severity_band(&payload);
+    let disaster_event_id = create_from_verified_payload_with_id(
+        registry,
+        payload,
+        payload_bcs,
+        SIGNATURE_SCHEME_ED25519,
+        public_key,
+        signature,
+        verifier_registry_id,
+        verifier_config_key,
+        verifier_config_version,
+        enclave_instance_public_key,
+        ctx,
+    );
+    campaign::create_campaign(
+        category_registry,
+        category_pool,
+        disaster_event_id,
+        event_uid,
+        event_revision,
+        hazard_type,
+        severity_band,
+        clock,
+        ctx,
+    )
+}
+
 public(package) fun bind_campaign(
     registry: &mut DisasterRegistry,
     campaign: &Campaign,
@@ -221,6 +278,34 @@ fun create_from_verified_payload(
     enclave_instance_public_key: vector<u8>,
     ctx: &mut TxContext,
 ) {
+    create_from_verified_payload_with_id(
+        registry,
+        payload,
+        payload_bcs,
+        signature_scheme,
+        verifier_public_key,
+        signature,
+        verifier_registry_id,
+        verifier_config_key,
+        verifier_config_version,
+        enclave_instance_public_key,
+        ctx,
+    );
+}
+
+fun create_from_verified_payload_with_id(
+    registry: &mut DisasterRegistry,
+    payload: Payload,
+    payload_bcs: vector<u8>,
+    signature_scheme: u8,
+    verifier_public_key: vector<u8>,
+    signature: vector<u8>,
+    verifier_registry_id: ID,
+    verifier_config_key: u64,
+    verifier_config_version: u64,
+    enclave_instance_public_key: vector<u8>,
+    ctx: &mut TxContext,
+): ID {
     let event_uid = payload::event_uid(&payload);
     let event_revision = payload::event_revision(&payload);
     let key = DisasterEventKey {
@@ -302,6 +387,7 @@ fun create_from_verified_payload(
     });
 
     transfer::share_object(disaster_event);
+    disaster_event_id
 }
 
 #[test_only]
@@ -311,7 +397,7 @@ public fun create_from_payload_for_testing(
     ctx: &mut TxContext,
 ) {
     let verifier_registry_id = object::id(registry);
-    create_from_verified_payload(
+    create_from_verified_payload_with_id(
         registry,
         payload,
         vector[],
@@ -324,6 +410,48 @@ public fun create_from_payload_for_testing(
         vector[],
         ctx,
     );
+}
+
+#[test_only]
+public fun create_for_campaign_testing(
+    registry: &mut DisasterRegistry,
+    hazard_type: u8,
+    severity_band: u8,
+    ctx: &mut TxContext,
+): (vector<u8>, u32, ID) {
+    let event_uid = b"testcampaign00000000000000000000";
+    let event_revision = 1u32;
+    let p = payload::new_payload_for_testing(
+        event_uid,
+        event_revision,
+        b"test-campaign-source",
+        b"Test Campaign Event",
+        b"Test Region",
+        1_704_067_200_000u64,
+        hazard_type,
+        severity_band,
+        b"\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa",
+        5u64,
+        b"https://example.com/evidence",
+        b"\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb\xbb",
+        1_704_151_200_000u64,
+        1_704_172_800_000u64,
+    );
+    let verifier_registry_id = object::id(registry);
+    let de_id = create_from_verified_payload_with_id(
+        registry,
+        p,
+        vector[],
+        SIGNATURE_SCHEME_ED25519,
+        vector[],
+        vector[],
+        verifier_registry_id,
+        0,
+        0,
+        vector[],
+        ctx,
+    );
+    (event_uid, event_revision, de_id)
 }
 
 public(package) fun affected_cells_root(disaster_event: &DisasterEvent): vector<u8> {

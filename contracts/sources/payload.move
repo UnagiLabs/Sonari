@@ -231,3 +231,41 @@ public(package) fun hazard_type_earthquake(): u8 {
 public(package) fun status_finalized(): u8 {
     STATUS_FINALIZED
 }
+
+#[test_only]
+public fun new_payload_for_testing(
+    event_uid: vector<u8>,
+    event_revision: u32,
+    source_event_id: vector<u8>,
+    title: vector<u8>,
+    region: vector<u8>,
+    occurred_at_ms: u64,
+    hazard_type: u8,
+    severity_band: u8,
+    affected_cells_root: vector<u8>,
+    affected_cell_count: u64,
+    evidence_manifest_uri: vector<u8>,
+    evidence_manifest_hash: vector<u8>,
+    verified_at_ms: u64,
+    freshness_deadline_ms: u64,
+): Payload {
+    Payload {
+        intent: INTENT_EARTHQUAKE_ORACLE_PAYLOAD,
+        oracle_version: ORACLE_VERSION,
+        event_uid,
+        event_revision,
+        source_event_id,
+        title,
+        region,
+        occurred_at_ms,
+        hazard_type,
+        status: STATUS_FINALIZED,
+        severity_band,
+        affected_cells_root,
+        affected_cell_count,
+        evidence_manifest_uri,
+        evidence_manifest_hash,
+        verified_at_ms,
+        freshness_deadline_ms,
+    }
+}

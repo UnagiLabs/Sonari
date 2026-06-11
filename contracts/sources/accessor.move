@@ -3,6 +3,7 @@ module contracts::accessor;
 use contracts::admin::{Self, PauseState};
 use contracts::affected_cell::{Self, AffectedCellLeaf, ProofStep};
 use contracts::allowed_residence_cell;
+use contracts::category_pool::{CategoryPool, CategoryRegistry};
 use contracts::claim::{Self, ClaimIndex};
 use contracts::disaster_event::{Self, DisasterCampaignBinding, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
@@ -242,6 +243,30 @@ public fun create_disaster_event_from_signed_payload(
     disaster_event::create_from_signed_payload(
         registry,
         verifier_registry,
+        clock,
+        payload_bcs,
+        signature,
+        public_key,
+        ctx,
+    );
+}
+
+public fun create_disaster_event_and_campaign_from_signed_payload(
+    registry: &mut DisasterRegistry,
+    verifier_registry: &metadata_verifier::VerifierRegistry,
+    category_registry: &CategoryRegistry,
+    category_pool: &CategoryPool,
+    clock: &Clock,
+    payload_bcs: vector<u8>,
+    signature: vector<u8>,
+    public_key: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    disaster_event::create_from_signed_payload_and_campaign(
+        registry,
+        verifier_registry,
+        category_registry,
+        category_pool,
         clock,
         payload_bcs,
         signature,
