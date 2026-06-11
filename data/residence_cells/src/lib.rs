@@ -1846,8 +1846,8 @@ fn validate_proof_shard_manifest(
         parse_prefixed_hex_32("proof manifest shard sha256", &inventory.sha256)?;
     }
 
-    for shard_id in 0..manifest.shard_count {
-        if !seen[shard_id] {
+    for (shard_id, present) in seen.iter().enumerate() {
+        if !present {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
                 "missing shard inventory entry for shard_id {shard_id}"
             )));
@@ -2194,7 +2194,7 @@ fn proof_steps_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> Vec<P
         if level.len() <= 1 {
             break;
         }
-        let sibling_index = if current_index % 2 == 0 {
+        let sibling_index = if current_index.is_multiple_of(2) {
             current_index + 1
         } else {
             current_index - 1
@@ -2323,9 +2323,7 @@ fn proof_shard_object_key(allowlist_version: u64, geo_resolution: u8, shard_id: 
 }
 
 pub fn tile_object_key(allowlist_version: u64, geo_resolution: u8, parent_hex: &str) -> String {
-    format!(
-        "residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json"
-    )
+    format!("residence-cells/v{allowlist_version}/res{geo_resolution}/tiles/res4/{parent_hex}.json")
 }
 
 pub fn generate_tiles(
@@ -2368,7 +2366,10 @@ pub fn generate_tiles(
             ))
         })?;
         let parent_u64 = u64::from(parent);
-        parent_to_cells.entry(parent_u64).or_default().push(leaf.h3_index);
+        parent_to_cells
+            .entry(parent_u64)
+            .or_default()
+            .push(leaf.h3_index);
     }
 
     // Build tiles, sorted by parent ascending (BTreeMap ensures key order)
@@ -2448,20 +2449,19 @@ pub fn write_tiles_from_leaves_atomic(
     fs::create_dir_all(&tiles_dir)?;
 
     for (tile, inventory) in generated.tiles.iter().zip(generated.manifest.tiles.iter()) {
-        let parent_cell = CellIndex::try_from(
-            tile.parent_h3_index.parse::<u64>().map_err(|_| {
+        let parent_cell =
+            CellIndex::try_from(tile.parent_h3_index.parse::<u64>().map_err(|_| {
                 ResidenceAllowlistError::InvalidArtifact(format!(
                     "parent_h3_index is not a valid u64: {}",
                     tile.parent_h3_index
                 ))
-            })?,
-        )
-        .map_err(|error| {
-            ResidenceAllowlistError::InvalidArtifact(format!(
-                "parent_h3_index {} is not a valid H3 cell: {error}",
-                tile.parent_h3_index
-            ))
-        })?;
+            })?)
+            .map_err(|error| {
+                ResidenceAllowlistError::InvalidArtifact(format!(
+                    "parent_h3_index {} is not a valid H3 cell: {error}",
+                    tile.parent_h3_index
+                ))
+            })?;
         let parent_hex = parent_cell.to_string();
         let file_name = format!("{parent_hex}.json");
         let tile_path = tiles_dir.join(&file_name);
@@ -2504,8 +2504,7 @@ pub fn verify_tiles(
     tiles_dir: &Path,
     proof_manifest_path: &Path,
 ) -> Result<VerifyTilesOutput, ResidenceAllowlistError> {
-    let manifest: ResidenceTileManifest =
-        serde_json::from_slice(&fs::read(tile_manifest_path)?)?;
+    let manifest: ResidenceTileManifest = serde_json::from_slice(&fs::read(tile_manifest_path)?)?;
     validate_tile_manifest(&manifest)?;
 
     let parent_resolution = resolution_from_u8(manifest.tile_parent_resolution)?;
@@ -2524,12 +2523,12 @@ pub fn verify_tiles(
                 inventory.parent_h3_index
             ))
         })?;
-        if let Some(prev) = previous_parent {
-            if parent_u64 <= prev {
-                return Err(ResidenceAllowlistError::InvalidArtifact(
-                    "tile inventory parent_h3_index must be strictly ascending".to_owned(),
-                ));
-            }
+        if let Some(prev) = previous_parent
+            && parent_u64 <= prev
+        {
+            return Err(ResidenceAllowlistError::InvalidArtifact(
+                "tile inventory parent_h3_index must be strictly ascending".to_owned(),
+            ));
         }
         previous_parent = Some(parent_u64);
         if !seen_parents.insert(parent_u64) {
@@ -2545,8 +2544,11 @@ pub fn verify_tiles(
         })?;
         let parent_hex = parent_cell.to_string();
 
-        let expected_object_key =
-            tile_object_key(manifest.allowlist_version, manifest.geo_resolution, &parent_hex);
+        let expected_object_key = tile_object_key(
+            manifest.allowlist_version,
+            manifest.geo_resolution,
+            &parent_hex,
+        );
         if inventory.object_key != expected_object_key {
             return Err(ResidenceAllowlistError::InvalidArtifact(format!(
                 "tile object_key {} does not match expected {expected_object_key}",
@@ -2643,9 +2645,7 @@ pub fn verify_tiles(
     })
 }
 
-fn validate_tile_manifest(
-    manifest: &ResidenceTileManifest,
-) -> Result<(), ResidenceAllowlistError> {
+fn validate_tile_manifest(manifest: &ResidenceTileManifest) -> Result<(), ResidenceAllowlistError> {
     if manifest.schema != TILE_MANIFEST_SCHEMA {
         return Err(ResidenceAllowlistError::InvalidArtifact(format!(
             "tile manifest schema {} is not {TILE_MANIFEST_SCHEMA}",
@@ -2714,13 +2714,13 @@ fn verify_tile_contents(
     let mut previous: Option<u64> = None;
     for cell in &tile.cells {
         let cell_u64 = parse_h3_index(cell, manifest.geo_resolution)?;
-        if let Some(prev) = previous {
-            if cell_u64 <= prev {
-                return Err(ResidenceAllowlistError::InvalidArtifact(format!(
-                    "tile {} cells must be strictly ascending",
-                    inventory.parent_h3_index
-                )));
-            }
+        if let Some(prev) = previous
+            && cell_u64 <= prev
+        {
+            return Err(ResidenceAllowlistError::InvalidArtifact(format!(
+                "tile {} cells must be strictly ascending",
+                inventory.parent_h3_index
+            )));
         }
         previous = Some(cell_u64);
 
@@ -2750,14 +2750,7 @@ fn reject_unexpected_tile_files(
     let expected: std::collections::BTreeSet<String> = manifest
         .tiles
         .iter()
-        .map(|entry| {
-            entry
-                .object_key
-                .rsplit('/')
-                .next()
-                .unwrap_or("")
-                .to_owned()
-        })
+        .map(|entry| entry.object_key.rsplit('/').next().unwrap_or("").to_owned())
         .collect();
     let read_dir = match fs::read_dir(tiles_dir) {
         Ok(entries) => entries,
@@ -2956,7 +2949,7 @@ fn format_count(value: usize) -> String {
     for (index, byte) in digits.bytes().enumerate() {
         if index > 0
             && (index == first_group_len
-                || (index > first_group_len && (index - first_group_len) % 3 == 0))
+                || (index > first_group_len && (index - first_group_len).is_multiple_of(3)))
         {
             output.push(',');
         }
