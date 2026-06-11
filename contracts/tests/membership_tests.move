@@ -606,6 +606,98 @@ fun duplicate_claim_key_uses_pass_lineage_id_and_campaign_id() {
     scenario.end();
 }
 
+#[test]
+fun register_member_emits_home_cell_registered_event() {
+    let mut scenario = initialized_with_pools();
+
+    scenario.next_tx(MEMBER);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+
+        accessor::register_member(
+            &pause_state,
+            &mut registry,
+            &residence_registry,
+            HOME_CELL,
+            target_proof(),
+            TERMS_VERSION,
+            SIGNED_STATEMENT_HASH,
+            scenario.ctx(),
+        );
+
+        let home_cell_events =
+            event::events_by_type<membership::HomeCellRegistered>();
+        assert!(home_cell_events.length() == 1);
+        let (event_lineage, event_home_cell, event_registered_at) =
+            membership::home_cell_registered_event_fields(*home_cell_events.borrow(0));
+        assert!(event_home_cell == HOME_CELL);
+        assert!(event_registered_at == 0);
+
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(residence_registry);
+
+        scenario.next_tx(MEMBER);
+        let pass = scenario.take_from_sender<membership::MembershipPass>();
+        assert!(event_lineage == membership::membership_pass_lineage_id(&pass));
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun update_home_cell_emits_home_cell_registered_event() {
+    let mut clock = clock::create_for_testing(&mut tx_context::dummy());
+    clock.set_for_testing(HOME_CELL_UPDATED_AT_MS);
+    let mut scenario = initialized_with_pools();
+    register_member(&mut scenario);
+
+    // update トランザクション内でイベント確認まで行う
+    scenario.next_tx(MEMBER);
+    let pass_lineage_id_for_check = {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let registry = scenario.take_shared<membership::MembershipRegistry>();
+        let residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+        let mut pass = scenario.take_from_sender<membership::MembershipPass>();
+
+        accessor::update_member_home_cell(
+            &pause_state,
+            &registry,
+            &residence_registry,
+            &mut pass,
+            &clock,
+            PROMOTED_HOME_CELL,
+            promoted_proof(),
+            scenario.ctx(),
+        );
+
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        let home_cell_events =
+            event::events_by_type<membership::HomeCellRegistered>();
+        assert!(home_cell_events.length() == 1);
+        let (event_lineage, event_home_cell, event_registered_at) =
+            membership::home_cell_registered_event_fields(*home_cell_events.borrow(0));
+        assert!(event_lineage == pass_lineage_id);
+        assert!(event_home_cell == PROMOTED_HOME_CELL);
+        assert!(event_registered_at == HOME_CELL_UPDATED_AT_MS);
+
+        scenario.return_to_sender(pass);
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+        test_scenario::return_shared(residence_registry);
+        pass_lineage_id
+    };
+    let _ = pass_lineage_id_for_check;
+
+    scenario.end();
+    clock.destroy_for_testing();
+}
+
 fun initialized_with_pools(): test_scenario::Scenario {
     let mut scenario = test_scenario::begin(ADMIN);
     admin::init_for_testing(scenario.ctx());
