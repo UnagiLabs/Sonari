@@ -16,6 +16,7 @@ import {
 import { deriveMypageView, formatTimestamp, providerLabelKeys, statusLabelKey } from "./pass-view";
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
+const identityRegistryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
 
 export function MypageView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("mypage");
@@ -47,11 +48,13 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
         cancelRef.current = cancel;
         setResult(null);
 
-        void readMembershipPass(client, owner, membershipPackageId).then((next) => {
-            if (!cancelled) {
-                setResult(next);
-            }
-        });
+        void readMembershipPass(client, owner, membershipPackageId, identityRegistryId).then(
+            (next) => {
+                if (!cancelled) {
+                    setResult(next);
+                }
+            },
+        );
 
         return cancel;
     }, [client, connected, owner]);

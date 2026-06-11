@@ -2,6 +2,7 @@ import {
     lookupMembershipPass,
     type OwnedObjectsClient,
 } from "../register/identity/membership-lookup";
+import { readIdentityRecord } from "./identity-record-read";
 
 /**
  * Read-only fetch of the connected wallet's `MembershipPass` SBT *contents*
@@ -10,9 +11,9 @@ import {
  *
  * The id is located with the existing `lookupMembershipPass` (one pass per
  * wallet is enforced on-chain), then the object body is read via `getObjects`.
- * The client is injected so this stays unit-testable with a stub. The shape
- * mirrors the proven readback in
- * `nautilus/verifiers/membership/runner/src/identity_readback.ts`.
+ * Identity fields are derived from the IdentityRegistry dynamic field, not from
+ * the MembershipPass (which does not carry identity state after verification).
+ * The client is injected so this stays unit-testable with a stub.
  */
 
 /** Minimal fetched-object shape we depend on from `SuiGrpcClient.getObjects`. */
@@ -35,6 +36,8 @@ export interface MembershipPassReadClient extends OwnedObjectsClient {
  * `homeCell` stays a string: the H3 res7 decimal exceeds
  * `Number.MAX_SAFE_INTEGER`, so converting it to a JS number would corrupt the
  * lower digits. Timestamps fit safely in a number.
+ *
+ * Identity fields are sourced from `IdentityRegistry` (not the pass itself).
  */
 export interface MembershipPassData {
     readonly objectId: string;
@@ -69,6 +72,8 @@ export async function readMembershipPass(
     client: MembershipPassReadClient,
     owner: string,
     packageId: string,
+    registryId: string,
+    nowMs: number = Date.now(),
 ): Promise<MembershipPassReadResult> {
     const lookup = await lookupMembershipPass(client, owner, packageId);
     if (lookup.kind === "none") {
@@ -105,50 +110,56 @@ export async function readMembershipPass(
         return { kind: "error", code: "read", message: GENERIC_READ_ERROR };
     }
 
-    const pass = parseMembershipPass(item.objectId, item.json);
-    if (pass === null) {
+    const passBase = parseMembershipPassBase(item.objectId, item.json);
+    if (passBase === null) {
         return { kind: "error", code: "read", message: GENERIC_READ_ERROR };
     }
+
+    const identityRecord = await readIdentityRecord(
+        client,
+        registryId,
+        lookup.membershipId,
+        nowMs,
+    );
+
+    const pass: MembershipPassData = {
+        ...passBase,
+        identityVerified: identityRecord?.isVerified ?? false,
+        identityProviderMask: identityRecord?.providerMask ?? 0,
+        identityVerifiedAtMs: identityRecord?.verifiedAtMs ?? 0,
+        identityExpiresAtMs: identityRecord?.expiresAtMs ?? 0,
+    };
+
     return { kind: "ok", pass };
 }
 
-function parseMembershipPass(
+interface MembershipPassBase {
+    readonly objectId: string;
+    readonly status: number;
+    readonly issuedAtMs: number;
+    readonly homeCell: string;
+    readonly homeCellRegisteredAtMs: number;
+}
+
+function parseMembershipPassBase(
     objectId: string,
     json: Record<string, unknown>,
-): MembershipPassData | null {
+): MembershipPassBase | null {
     const status = parseU8(json.status);
     const issuedAtMs = parseU64Number(json.issued_at_ms);
     const homeCell = parseU64String(json.home_cell);
     const homeCellRegisteredAtMs = parseU64Number(json.home_cell_registered_at_ms);
-    const identityVerified = parseBool(json.identity_verified);
-    const identityProviderMask = parseU8(json.identity_provider_mask);
-    const identityVerifiedAtMs = parseU64Number(json.identity_verified_at_ms);
-    const identityExpiresAtMs = parseU64Number(json.identity_expires_at_ms);
 
     if (
         status === null ||
         issuedAtMs === null ||
         homeCell === null ||
-        homeCellRegisteredAtMs === null ||
-        identityVerified === null ||
-        identityProviderMask === null ||
-        identityVerifiedAtMs === null ||
-        identityExpiresAtMs === null
+        homeCellRegisteredAtMs === null
     ) {
         return null;
     }
 
-    return {
-        objectId,
-        status,
-        issuedAtMs,
-        homeCell,
-        homeCellRegisteredAtMs,
-        identityVerified,
-        identityProviderMask,
-        identityVerifiedAtMs,
-        identityExpiresAtMs,
-    };
+    return { objectId, status, issuedAtMs, homeCell, homeCellRegisteredAtMs };
 }
 
 function errorMessage(error: unknown): string {
@@ -184,19 +195,6 @@ function parseU8(raw: unknown): number | null {
         return null;
     }
     return n;
-}
-
-function parseBool(raw: unknown): boolean | null {
-    if (typeof raw === "boolean") {
-        return raw;
-    }
-    if (raw === "true") {
-        return true;
-    }
-    if (raw === "false") {
-        return false;
-    }
-    return null;
 }
 
 function toNumber(raw: unknown): number | null {
