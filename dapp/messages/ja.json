@@ -282,6 +282,7 @@
         "reconnecting": "再接続中…",
         "connected": "接続済み",
         "copyAddressAria": "ウォレットアドレスをコピー",
-        "copied": "コピーしました"
+        "copied": "コピーしました",
+        "networkWarning": "サポート外のネットワーク（{network}）に接続しています。testnet または localnet に切り替えてください。"
     }
 }

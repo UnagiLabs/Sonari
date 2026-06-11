@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 import { WalletConnect } from "../wallet/wallet-connect";
 
 type DonationType = {
@@ -74,6 +75,7 @@ export default function DonatePage() {
             <div className="watercolor-bg" />
             <div className="app">
                 <DonateTopbar />
+                <NetworkMismatchBanner />
 
                 <main className="page donate-page">
                     <header className="donate-hero">

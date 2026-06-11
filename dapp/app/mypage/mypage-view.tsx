@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SonariLocale } from "../register/wizard/locale";
 import { LocaleSwitcher } from "../register/wizard/locale-switcher";
+import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { HomeCellMap } from "./home-cell-map";
 import {
@@ -102,6 +103,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
                     <WalletConnect />
                 </div>
             </header>
+            <NetworkMismatchBanner />
 
             <section aria-labelledby="mypage-title" className="wizard-step-content">
                 <header className="wizard-heading">

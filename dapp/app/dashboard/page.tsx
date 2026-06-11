@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 
 type Metric = {
     label: string;
@@ -164,6 +165,7 @@ export default function DashboardPage() {
             <div className="watercolor-bg" />
             <div className="app">
                 <DashboardTopbar />
+                <NetworkMismatchBanner />
 
                 <main className="page dashboard-page">
                     <header className="dashboard-hero">

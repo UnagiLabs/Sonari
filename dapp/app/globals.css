@@ -2954,3 +2954,14 @@ h4 {
     width: 100%;
   }
 }
+
+.wallet-network-warning {
+  background: oklch(0.92 0.08 75);
+  color: oklch(0.35 0.08 55);
+  padding: 10px 20px;
+  text-align: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-bottom: 1px solid oklch(0.82 0.1 70);
+}
+

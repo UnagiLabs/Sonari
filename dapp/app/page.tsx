@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { ReactNode } from "react";
+import { NetworkMismatchBanner } from "./wallet/network-mismatch-banner";
 import { WalletConnect } from "./wallet/wallet-connect";
 
 type IconName =
@@ -195,6 +196,7 @@ export default function LandingPage() {
                         <WalletConnect />
                     </div>
                 </header>
+                <NetworkMismatchBanner />
 
                 <main className="page">
                     <section className="hero" aria-labelledby="hero-title">

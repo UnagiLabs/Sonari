@@ -4,6 +4,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import Image from "next/image";
 import { useState } from "react";
 import { dAppKit } from "../wallet/dapp-kit";
+import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import {
@@ -244,6 +245,7 @@ export default function ClaimPage() {
             <div className="watercolor-bg" />
             <div className="app">
                 <ClaimTopbar />
+                <NetworkMismatchBanner />
 
                 <main className="page claim-page">
                     <header className="claim-hero">

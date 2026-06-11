@@ -282,6 +282,7 @@
         "reconnecting": "Reconnecting…",
         "connected": "Connected",
         "copyAddressAria": "Copy full wallet address",
-        "copied": "Copied"
+        "copied": "Copied",
+        "networkWarning": "Connected to an unsupported network ({network}). Switch to testnet or localnet."
     }
 }
