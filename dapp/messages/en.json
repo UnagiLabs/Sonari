@@ -306,7 +306,8 @@
             "dashboard": "Dashboard",
             "leaderboard": "Leaderboard",
             "register": "Register",
-            "claim": "Claim"
+            "claim": "Claim",
+            "mypage": "My Page"
         },
         "donateCta": "Donate now"
     },

@@ -306,7 +306,8 @@
             "dashboard": "ダッシュボード",
             "leaderboard": "リーダーボード",
             "register": "登録",
-            "claim": "申請"
+            "claim": "申請",
+            "mypage": "マイページ"
         },
         "donateCta": "今すぐ寄付"
     },
