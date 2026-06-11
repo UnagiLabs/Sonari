@@ -11,7 +11,8 @@ use membership_tee::{
     WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV, WORLD_ID_VERIFICATION_FAILED,
     WorldIdModeObservation, WorldIdProofRequest, WorldIdVerificationStatus,
     WorldIdVerifiedEvidence, WorldIdVerifier, encoding::identity_bcs::payload_bcs_bytes,
-    process_identity_with_verifier, resolve_world_id_verifier_mode, world_id_mode_observation,
+    process_identity_with_verifier, resolve_world_id_verifier_mode, world_id_action_from_env,
+    world_id_mode_observation,
 };
 use serde::{Deserialize, Serialize};
 use sonari_tee_core::enclave::{
@@ -205,6 +206,7 @@ struct EnclaveState {
     ctx: TeeContext,
     world_id_base_url: String,
     world_id_rp_id: String,
+    world_id_action: String,
     /// Resolved once at startup by the fail-closed gate. Passed to the handler so
     /// it can select the dummy or cloud World ID verifier per request without
     /// re-reading the host-supplied bootstrap env.
@@ -258,6 +260,7 @@ fn enclave_state_from_env(
 ) -> Result<EnclaveState, Box<dyn std::error::Error>> {
     let world_id_rp_id = non_empty_env(WORLD_ID_RP_ID_ENV)
         .ok_or(format!("{WORLD_ID_RP_ID_ENV} is required for server mode"))?;
+    let world_id_action = world_id_action_from_env()?;
     let proof_mode = non_empty_env(WORLD_ID_PROOF_MODE_ENV);
     let network = non_empty_env(SUI_NETWORK_ENV);
     let world_id_environment = non_empty_env(WORLD_ID_ENVIRONMENT_ENV);
@@ -284,6 +287,7 @@ fn enclave_state_from_env(
         ctx: tee_context_from_env(),
         world_id_base_url: server_world_id_base_url(),
         world_id_rp_id,
+        world_id_action,
         world_id_verifier_mode,
         world_id_mode_observation,
     })
@@ -356,6 +360,7 @@ fn route_request(
             let handler = IdentityProcessHandler::new(
                 &state.world_id_base_url,
                 &state.world_id_rp_id,
+                &state.world_id_action,
                 state.world_id_verifier_mode,
             );
             let output = handler
@@ -499,6 +504,7 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     apply_network_env(config.network.as_deref());
     apply_proof_mode_env(config.proof_mode.as_deref());
     apply_environment_env(config.world_id_environment.as_deref());
+    apply_world_id_action_env(config.world_id_action.as_deref());
     Ok(())
 }
 
@@ -535,6 +541,18 @@ fn apply_environment_env(environment: Option<&str>) {
     }
 }
 
+/// Installs or clears the World ID action env from the bootstrap config.
+///
+/// `Some(action)` installs the host-supplied value; `None` explicitly clears the
+/// env so a stale action from a prior run can never influence proof checks. Blank
+/// values are also cleared so the server resolves to the audited default action.
+fn apply_world_id_action_env(action: Option<&str>) {
+    match action.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(action) => set_env_before_server(membership_tee::WORLD_ID_ACTION_ENV, action),
+        None => unset_env_before_server(membership_tee::WORLD_ID_ACTION_ENV),
+    }
+}
+
 /// Installs or clears the egress proxy env from the bootstrap config.
 ///
 /// `Some(proxy)` installs the host-supplied proxy; `None` explicitly clears the
@@ -567,6 +585,9 @@ struct BootstrapConfig {
     /// Optional for backward compatibility; absence is treated as unset, and the
     /// server path then pins the canonical production base.
     world_id_environment: Option<String>,
+    /// World ID action supplied by the host. Optional for backward compatibility;
+    /// absence or blank values fall back to the audited default action.
+    world_id_action: Option<String>,
 }
 
 fn set_env_before_server(name: &str, value: &str) {
@@ -1217,6 +1238,7 @@ mod tests {
                 ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]),
                 world_id_base_url: membership_tee::WORLD_ID_API_BASE_STAGING.to_owned(),
                 world_id_rp_id: "rp_staging_123".to_owned(),
+                world_id_action: WORLD_ID_ACTION.to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
                     None,
@@ -1248,6 +1270,7 @@ mod tests {
                 ctx: TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:18080")]),
                 world_id_base_url: "https://developer.world.org".to_owned(),
                 world_id_rp_id: "rp_staging_123".to_owned(),
+                world_id_action: WORLD_ID_ACTION.to_owned(),
                 world_id_verifier_mode: ResolvedWorldIdVerifierMode::Real,
                 world_id_mode_observation: membership_tee::world_id_mode_observation(
                     None,
@@ -1380,14 +1403,15 @@ mod tests {
     /// process environment is global state shared across the test binary.
     mod bootstrap_env {
         use super::super::{
-            EnclaveState, apply_egress_proxy_env, apply_environment_env, enclave_state_from_env,
-            server_world_id_base_url, set_env_before_server, tee_context_from_env,
-            unset_env_before_server,
+            EnclaveState, apply_egress_proxy_env, apply_environment_env, apply_world_id_action_env,
+            enclave_state_from_env, server_world_id_base_url, set_env_before_server,
+            tee_context_from_env, unset_env_before_server,
         };
         use membership_tee::server::EGRESS_PROXY_URL_KEY;
         use membership_tee::{
-            ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_API_BASE_CANONICAL,
-            WORLD_ID_ENVIRONMENT_ENV, WORLD_ID_PROOF_MODE_ENV, WORLD_ID_RP_ID_ENV,
+            ResolvedWorldIdVerifierMode, SUI_NETWORK_ENV, WORLD_ID_ACTION, WORLD_ID_ACTION_ENV,
+            WORLD_ID_API_BASE_CANONICAL, WORLD_ID_ENVIRONMENT_ENV, WORLD_ID_PROOF_MODE_ENV,
+            WORLD_ID_RP_ID_ENV,
         };
         use std::sync::Mutex;
 
@@ -1545,6 +1569,54 @@ mod tests {
 
             unset_env_before_server(membership_tee::WORLD_ID_API_BASE_ENV);
             unset_env_before_server(WORLD_ID_RP_ID_ENV);
+        }
+
+        #[test]
+        fn enclave_state_defaults_blank_world_id_action_to_const() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
+            set_env_before_server(WORLD_ID_ACTION_ENV, "   ");
+
+            let state = enclave_state_from_env(TEST_SEED).expect("blank action should use default");
+
+            assert_eq!(state.world_id_action, WORLD_ID_ACTION);
+
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
+            unset_env_before_server(WORLD_ID_ACTION_ENV);
+        }
+
+        #[test]
+        fn enclave_state_rejects_invalid_world_id_action() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            set_env_before_server(WORLD_ID_RP_ID_ENV, "rp_staging_123");
+            set_env_before_server(WORLD_ID_ACTION_ENV, "attacker_action");
+
+            let error = match enclave_state_from_env(TEST_SEED) {
+                Ok(_) => panic!("invalid action must be rejected at startup"),
+                Err(error) => error,
+            };
+
+            assert!(error.to_string().contains(WORLD_ID_ACTION_ENV));
+
+            unset_env_before_server(WORLD_ID_RP_ID_ENV);
+            unset_env_before_server(WORLD_ID_ACTION_ENV);
+        }
+
+        #[test]
+        fn bootstrap_action_env_installs_custom_action_and_clears_blank_values() {
+            let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            apply_world_id_action_env(Some("sonari_membership_register_v3"));
+            assert_eq!(
+                std::env::var(WORLD_ID_ACTION_ENV).as_deref(),
+                Ok("sonari_membership_register_v3")
+            );
+
+            apply_world_id_action_env(Some("  "));
+            assert!(std::env::var(WORLD_ID_ACTION_ENV).is_err());
+
+            apply_world_id_action_env(Some("sonari_membership_register_v4"));
+            apply_world_id_action_env(None);
+            assert!(std::env::var(WORLD_ID_ACTION_ENV).is_err());
         }
 
         #[test]

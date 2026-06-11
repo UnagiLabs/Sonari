@@ -87,6 +87,7 @@ pub enum TeeJsonResult {
 pub struct IdentityProcessHandler {
     world_id_base_url: String,
     world_id_rp_id: String,
+    world_id_action: String,
     world_id_verifier_mode: ResolvedWorldIdVerifierMode,
 }
 
@@ -100,11 +101,13 @@ impl IdentityProcessHandler {
     pub fn new(
         world_id_base_url: impl Into<String>,
         world_id_rp_id: impl Into<String>,
+        world_id_action: impl Into<String>,
         world_id_verifier_mode: ResolvedWorldIdVerifierMode,
     ) -> Self {
         Self {
             world_id_base_url: world_id_base_url.into(),
             world_id_rp_id: world_id_rp_id.into(),
+            world_id_action: world_id_action.into(),
             world_id_verifier_mode,
         }
     }
@@ -130,14 +133,18 @@ impl ProcessDataHandler for IdentityProcessHandler {
         // bytes stay identical between the two modes.
         match self.world_id_verifier_mode {
             ResolvedWorldIdVerifierMode::Dummy => {
-                let verifier = DummyWorldIdVerifier::new(self.world_id_rp_id.clone())
-                    .map_err(|error| process_failed(error.to_string()))?;
+                let verifier = DummyWorldIdVerifier::with_action(
+                    self.world_id_rp_id.clone(),
+                    self.world_id_action.clone(),
+                )
+                .map_err(|error| process_failed(error.to_string()))?;
                 process_with_verifier(request, &verifier, issued_at_ms)
             }
             ResolvedWorldIdVerifierMode::Real => {
-                let verifier = CloudWorldIdVerifier::with_proxy(
+                let verifier = CloudWorldIdVerifier::with_action_and_proxy(
                     environment_from_base_url(&self.world_id_base_url),
                     self.world_id_rp_id.clone(),
+                    self.world_id_action.clone(),
                     ctx.get(EGRESS_PROXY_URL_KEY),
                 )
                 .map_err(|error| process_failed(error.to_string()))?;
@@ -490,6 +497,7 @@ mod tests {
         let handler = IdentityProcessHandler::new(
             crate::WORLD_ID_API_BASE_STAGING,
             "rp_staging_123",
+            WORLD_ID_ACTION,
             ResolvedWorldIdVerifierMode::Real,
         );
         let error = handler
@@ -503,6 +511,7 @@ mod tests {
         let handler = IdentityProcessHandler::new(
             crate::WORLD_ID_API_BASE_STAGING,
             "rp_staging_123",
+            WORLD_ID_ACTION,
             ResolvedWorldIdVerifierMode::Real,
         );
         let mut body = request_json();
@@ -527,6 +536,7 @@ mod tests {
         let handler = IdentityProcessHandler::new(
             crate::WORLD_ID_API_BASE_STAGING,
             "rp_staging_123",
+            WORLD_ID_ACTION,
             ResolvedWorldIdVerifierMode::Real,
         );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);
@@ -613,6 +623,7 @@ mod tests {
         let handler = IdentityProcessHandler::new(
             "https://unreachable.invalid",
             "rp_staging_123",
+            WORLD_ID_ACTION,
             ResolvedWorldIdVerifierMode::Dummy,
         );
         let output = handler
@@ -629,6 +640,38 @@ mod tests {
         assert_eq!(output.result_json()["status"], "verified");
     }
 
+    #[test]
+    fn handler_dummy_mode_uses_configured_world_id_action() {
+        let handler = IdentityProcessHandler::new(
+            "https://unreachable.invalid",
+            "rp_staging_123",
+            "sonari_membership_register_v3",
+            ResolvedWorldIdVerifierMode::Dummy,
+        );
+        let mut request = request_json();
+        request["world_id"]["idkit_response"]["action"] =
+            serde_json::json!("sonari_membership_register_v3");
+
+        let output = handler
+            .process(&serde_json::to_vec(&request).unwrap(), &TeeContext::new())
+            .expect("dummy mode handler must accept the configured action");
+
+        assert!(matches!(output, ProcessOutput::Signable { .. }));
+        assert_eq!(output.result_json()["status"], "verified");
+
+        let rejected = handler
+            .process(
+                &serde_json::to_vec(&request_json()).unwrap(),
+                &TeeContext::new(),
+            )
+            .expect("mismatched action should be a rejected identity result");
+        assert_eq!(rejected.result_json()["status"], "rejected");
+        assert_eq!(
+            rejected.result_json()["error_code"],
+            WORLD_ID_VERIFICATION_FAILED
+        );
+    }
+
     /// Verifies that a handler constructed with Real mode (unreachable URL) still
     /// falls back to pending_source, preserving the pre-existing behaviour.
     #[test]
@@ -636,6 +679,7 @@ mod tests {
         let handler = IdentityProcessHandler::new(
             crate::WORLD_ID_API_BASE_STAGING,
             "rp_staging_123",
+            WORLD_ID_ACTION,
             ResolvedWorldIdVerifierMode::Real,
         );
         let ctx = TeeContext::with_env([(EGRESS_PROXY_URL_KEY, "http://127.0.0.1:9")]);

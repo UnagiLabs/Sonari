@@ -164,6 +164,7 @@ impl CloudWorldIdVerifier {
         )
     }
 
+    #[cfg(test)]
     fn with_base_url_for_test(
         base_url: Url,
         expected_environment: WorldIdEnvironment,
