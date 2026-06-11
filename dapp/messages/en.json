@@ -280,6 +280,8 @@
         "connect": "Connect wallet",
         "connecting": "Connecting…",
         "reconnecting": "Reconnecting…",
-        "connected": "Connected"
+        "connected": "Connected",
+        "copyAddressAria": "Copy full wallet address",
+        "copied": "Copied"
     }
 }

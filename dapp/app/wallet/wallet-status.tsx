@@ -2,6 +2,7 @@
 
 import { useCurrentNetwork, useWalletConnection } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
+import { useEffect, useRef, useState } from "react";
 import { toWalletStatusView } from "./wallet-view-model";
 
 // 接続中の wallet について short address / network / wallet name を表示する。
@@ -10,6 +11,16 @@ export function WalletStatus() {
     const connection = useWalletConnection();
     const network = useCurrentNetwork();
     const t = useTranslations("wallet");
+    const [copied, setCopied] = useState(false);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (timerRef.current !== null) {
+                clearTimeout(timerRef.current);
+            }
+        };
+    }, []);
 
     const view = toWalletStatusView(
         {
@@ -30,9 +41,34 @@ export function WalletStatus() {
         return null;
     }
 
+    const fullAddress = connection.account?.address ?? null;
+
+    async function handleClick() {
+        if (!fullAddress) return;
+        try {
+            await navigator.clipboard.writeText(fullAddress);
+            if (timerRef.current !== null) {
+                clearTimeout(timerRef.current);
+            }
+            setCopied(true);
+            timerRef.current = setTimeout(() => {
+                setCopied(false);
+                timerRef.current = null;
+            }, 2000);
+        } catch {
+            // clipboard 非対応 / 権限拒否の場合は何もしない
+        }
+    }
+
     return (
-        <span className="wallet-status" title={view.label}>
-            {view.label}
-        </span>
+        <button
+            type="button"
+            className="wallet-status"
+            title={view.label}
+            aria-label={t("copyAddressAria")}
+            onClick={handleClick}
+        >
+            {copied ? t("copied") : view.label}
+        </button>
     );
 }
