@@ -235,7 +235,7 @@
                     "identitySkipped": "Skipped — add anytime"
                 },
                 "finalizeComingSoon": "Identity verification can still be completed later from the member area.",
-                "dashboardCta": "Go to dashboard",
+                "mypageCta": "Check My Page",
                 "homeCta": "Back to home"
             }
         }
@@ -270,6 +270,16 @@
             "providerLabel": "Provider",
             "verifiedAtLabel": "Verified on",
             "expiresAtLabel": "Expires on"
+        },
+        "identityStatusLabels": {
+            "verified": "Verified",
+            "unverified": "Not verified",
+            "queued": "Waiting",
+            "processing": "Processing",
+            "completed": "Applying on chain",
+            "rejected": "Rejected",
+            "failed": "Failed",
+            "unavailable": "Status unavailable"
         },
         "status": {
             "heading": "Pass status",

@@ -5,9 +5,11 @@ import {
     DynamoDBDocumentClient,
     GetCommand,
     PutCommand,
+    QueryCommand,
     ScanCommand,
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 import type { IdentityProvider } from "@sonari/membership-verifier-shared";
 import { MEMBERSHIP_IDENTITY_VERIFIER_KIND } from "@sonari/verifier-contracts";
 
@@ -16,6 +18,20 @@ export type { IdentityProvider } from "@sonari/membership-verifier-shared";
 export const DEFAULT_RETRY_BACKOFF_MS = 15 * 60 * 1000;
 
 export type VerificationJobStatus = "queued" | "processing" | "retry" | "failed" | "completed";
+
+export type VerificationJobDisplayStatus =
+    | "queued"
+    | "processing"
+    | "completed"
+    | "rejected"
+    | "failed";
+
+export interface VerificationJobStatusResponse {
+    readonly status: VerificationJobDisplayStatus;
+    readonly updated_at_ms: number;
+    readonly completed_at_ms?: number;
+    readonly tx_digest?: string;
+}
 
 export interface WorldIdProofRequest {
     readonly idkit_response: Record<string, unknown>;
@@ -36,6 +52,7 @@ export interface IdentityVerifyRequest {
 export interface VerificationJobRow {
     readonly job_id: string;
     readonly request_hash: string;
+    readonly owner_membership_key: string;
     readonly request_json: string;
     readonly status: VerificationJobStatus;
     readonly retry_count: number;
@@ -50,6 +67,41 @@ export interface VerificationJobRow {
     readonly created_at_ms: number;
     readonly updated_at_ms: number;
     readonly completed_at_ms: number | null;
+}
+
+const REJECTED_ERROR_CODES = new Set([
+    "MEMBERSHIP_IDENTITY_TEE_REJECTED",
+    "MEMBERSHIP_IDENTITY_TEE_UNSUPPORTED",
+    "WORLD_ID_VERIFICATION_FAILED",
+    "KYC_VERIFICATION_FAILED",
+]);
+
+export function verificationJobStatusResponse(
+    row: VerificationJobRow,
+): VerificationJobStatusResponse {
+    const response: VerificationJobStatusResponse = {
+        status: displayStatus(row),
+        updated_at_ms: row.updated_at_ms,
+        ...(row.completed_at_ms === null ? {} : { completed_at_ms: row.completed_at_ms }),
+        ...(row.tx_digest === null ? {} : { tx_digest: row.tx_digest }),
+    };
+    return response;
+}
+
+function displayStatus(row: VerificationJobRow): VerificationJobDisplayStatus {
+    switch (row.status) {
+        case "queued":
+        case "retry":
+            return "queued";
+        case "processing":
+            return "processing";
+        case "completed":
+            return "completed";
+        case "failed":
+            return row.error_code !== null && REJECTED_ERROR_CODES.has(row.error_code)
+                ? "rejected"
+                : "failed";
+    }
 }
 
 export interface UpsertVerificationJobResult {
@@ -69,6 +121,7 @@ export interface VerificationJobRepository {
         nowMs: number,
     ): Promise<UpsertVerificationJobResult>;
     get(jobId: string): Promise<VerificationJobRow | null>;
+    getLatestForSubject(owner: string, membershipId: string): Promise<VerificationJobRow | null>;
     all(): Promise<VerificationJobRow[]>;
     claimNextDue(nowMs: number): Promise<DueVerificationJob | null>;
     claimJob(jobId: string, nowMs: number): Promise<DueVerificationJob | null>;
@@ -88,6 +141,13 @@ export interface SubmitVerificationLambdaEvent {
     readonly body?: string | null;
 }
 
+export interface IdentityStatusRequest {
+    readonly owner: string;
+    readonly membership_id: string;
+    readonly issued_at_ms: number;
+    readonly signature: string;
+}
+
 export interface LambdaHttpResponse {
     readonly statusCode: number;
     readonly headers?: Record<string, string>;
@@ -98,6 +158,17 @@ export interface SubmitVerificationHandlerOptions {
     readonly repository: VerificationJobRepository;
     readonly now?: () => number;
     readonly expectedRegistryId?: string;
+}
+
+export interface IdentityStatusHandlerOptions {
+    readonly repository: VerificationJobRepository;
+    readonly now?: () => number;
+    readonly maxAgeMs?: number;
+    readonly verifySignature?: (input: {
+        owner: string;
+        message: string;
+        signature: string;
+    }) => Promise<boolean>;
 }
 
 export function createSubmitVerificationHandler(options: SubmitVerificationHandlerOptions) {
@@ -132,6 +203,43 @@ export function createSubmitVerificationHandler(options: SubmitVerificationHandl
         }
 
         return jsonResponse(result.duplicate ? 200 : 202, body);
+    };
+}
+
+export function createIdentityStatusHandler(options: IdentityStatusHandlerOptions) {
+    return async function identityStatusHandler(
+        event: SubmitVerificationLambdaEvent,
+    ): Promise<LambdaHttpResponse> {
+        const parsed = parseJsonBody(event.body);
+        const request = parseIdentityStatusRequest(parsed);
+        if (!request.ok) {
+            return jsonResponse(400, { ok: false, message: request.message });
+        }
+
+        const nowMs = options.now?.() ?? Date.now();
+        const maxAgeMs = options.maxAgeMs ?? 5 * 60 * 1000;
+        if (request.value.issued_at_ms > nowMs || nowMs - request.value.issued_at_ms > maxAgeMs) {
+            return jsonResponse(401, { ok: false, message: "status signature is expired" });
+        }
+
+        const message = identityStatusMessage(request.value);
+        const verified = await (options.verifySignature ?? verifySuiPersonalMessage)({
+            owner: request.value.owner,
+            message,
+            signature: request.value.signature,
+        });
+        if (!verified) {
+            return jsonResponse(401, { ok: false, message: "status signature is invalid" });
+        }
+
+        const row = await options.repository.getLatestForSubject(
+            request.value.owner,
+            request.value.membership_id,
+        );
+        if (row === null) {
+            return jsonResponse(200, { ok: true, status: "none" });
+        }
+        return jsonResponse(200, { ok: true, ...verificationJobStatusResponse(row) });
     };
 }
 
@@ -235,9 +343,11 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
         }
 
         const jobId = membershipJobId(requestHash);
+        const ownerMembershipKey = ownerMembershipLookupKey(request.owner, request.membership_id);
         const row: VerificationJobRow = {
             job_id: jobId,
             request_hash: requestHash,
+            owner_membership_key: ownerMembershipKey,
             request_json: requestJson,
             status: "queued",
             retry_count: 0,
@@ -260,6 +370,17 @@ export class InMemoryVerificationJobRepository implements VerificationJobReposit
 
     async get(jobId: string): Promise<VerificationJobRow | null> {
         const row = this.rowsByJobId.get(jobId);
+        return row === undefined ? null : cloneRow(row);
+    }
+
+    async getLatestForSubject(
+        owner: string,
+        membershipId: string,
+    ): Promise<VerificationJobRow | null> {
+        const lookupKey = ownerMembershipLookupKey(owner, membershipId);
+        const row = [...this.rowsByJobId.values()]
+            .filter((candidate) => candidate.owner_membership_key === lookupKey)
+            .sort((left, right) => right.updated_at_ms - left.updated_at_ms)[0];
         return row === undefined ? null : cloneRow(row);
     }
 
@@ -425,6 +546,7 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
         const requestJson = stableStringify(request);
         const requestHash = sha256Hex(requestJson);
         const jobId = membershipJobId(requestHash);
+        const ownerMembershipKey = ownerMembershipLookupKey(request.owner, request.membership_id);
         const existing = await this.get(jobId);
         if (existing !== null) {
             return { row: existing, duplicate: true };
@@ -433,6 +555,7 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
         const row: VerificationJobRow = {
             job_id: jobId,
             request_hash: requestHash,
+            owner_membership_key: ownerMembershipKey,
             request_json: requestJson,
             status: "queued",
             retry_count: 0,
@@ -487,6 +610,34 @@ export class DynamoDbVerificationJobRepository implements VerificationJobReposit
             }),
         )) as { Item?: unknown };
         return parseStoredRow(result.Item);
+    }
+
+    async getLatestForSubject(
+        owner: string,
+        membershipId: string,
+    ): Promise<VerificationJobRow | null> {
+        const result = (await this.documentClient.send(
+            new QueryCommand({
+                TableName: this.tableName,
+                IndexName: "OwnerMembershipUpdatedAtIndex",
+                KeyConditionExpression: "owner_membership_key = :owner_membership_key",
+                ExpressionAttributeValues: {
+                    ":owner_membership_key": ownerMembershipLookupKey(owner, membershipId),
+                },
+                ScanIndexForward: false,
+                Limit: 1,
+            }),
+        )) as { Items?: unknown[] };
+        const indexedRow = parseStoredRow(result.Items?.[0]);
+        if (indexedRow !== null) {
+            return indexedRow;
+        }
+
+        const lookupKey = ownerMembershipLookupKey(owner, membershipId);
+        const legacyRow = (await this.all())
+            .filter((row) => row.owner_membership_key === lookupKey)
+            .sort((left, right) => right.updated_at_ms - left.updated_at_ms)[0];
+        return legacyRow ?? null;
     }
 
     async all(): Promise<VerificationJobRow[]> {
@@ -806,6 +957,73 @@ export function parseIdentityVerifyRequest(input: unknown): ParseResult<Identity
     });
 }
 
+export function identityStatusMessage(request: IdentityStatusRequest): string {
+    return [
+        "Sonari identity verification status",
+        `owner:${request.owner}`,
+        `membership_id:${request.membership_id}`,
+        `issued_at_ms:${request.issued_at_ms}`,
+    ].join("\n");
+}
+
+function parseIdentityStatusRequest(input: unknown): ParseResult<IdentityStatusRequest> {
+    if (!isRecord(input)) {
+        return parseError("request body must be an object");
+    }
+    const unexpectedTopLevel = unexpectedKey(input, [
+        "owner",
+        "membership_id",
+        "issued_at_ms",
+        "signature",
+    ]);
+    if (unexpectedTopLevel !== undefined) {
+        return parseError(`unexpected request field: ${unexpectedTopLevel}`);
+    }
+
+    const owner = parseHex32(input.owner, "owner");
+    if (!owner.ok) {
+        return owner;
+    }
+    const membershipId = parseHex32(input.membership_id, "membership_id");
+    if (!membershipId.ok) {
+        return membershipId;
+    }
+    const issuedAtMs = parseU64(input.issued_at_ms, "issued_at_ms");
+    if (!issuedAtMs.ok) {
+        return issuedAtMs;
+    }
+    const signature = parseRequiredString(input.signature, "signature");
+    if (!signature.ok) {
+        return signature;
+    }
+
+    return parseOk({
+        owner: owner.value,
+        membership_id: membershipId.value,
+        issued_at_ms: issuedAtMs.value,
+        signature: signature.value,
+    });
+}
+
+async function verifySuiPersonalMessage(input: {
+    owner: string;
+    message: string;
+    signature: string;
+}): Promise<boolean> {
+    try {
+        await verifyPersonalMessageSignature(
+            new TextEncoder().encode(input.message),
+            input.signature,
+            {
+                address: input.owner,
+            },
+        );
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function parseOptionalWorldId(input: unknown): ParseResult<WorldIdProofRequest | undefined> {
     if (input === undefined) {
         return parseOk(undefined);
@@ -895,6 +1113,13 @@ function parseU64(value: unknown, field: string): ParseResult<number> {
     return parseOk(value);
 }
 
+function parseRequiredString(value: unknown, field: string): ParseResult<string> {
+    if (typeof value !== "string" || value.length === 0) {
+        return parseError(`${field} must be a non-empty string`);
+    }
+    return parseOk(value);
+}
+
 function unexpectedKey(input: Record<string, unknown>, allowed: string[]): string | undefined {
     const allowedSet = new Set(allowed);
     return Object.keys(input).find((key) => !allowedSet.has(key));
@@ -921,6 +1146,10 @@ function workflowExecutionName(jobId: string, attempt: number): string {
 
 function membershipJobId(requestHash: string): string {
     return requestHash.slice(0, 32);
+}
+
+function ownerMembershipLookupKey(owner: string, membershipId: string): string {
+    return `${owner.toLowerCase()}#${membershipId.toLowerCase()}`;
 }
 
 function sha256Hex(value: string): string {
@@ -965,9 +1194,17 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
     ) {
         return null;
     }
+    const ownerMembershipKey =
+        typeof input.owner_membership_key === "string"
+            ? input.owner_membership_key
+            : ownerMembershipLookupKeyFromRequestJson(input.request_json);
+    if (ownerMembershipKey === null) {
+        return null;
+    }
     return {
         job_id: input.job_id,
         request_hash: input.request_hash,
+        owner_membership_key: ownerMembershipKey,
         request_json: input.request_json,
         status: input.status,
         retry_count: input.retry_count,
@@ -983,6 +1220,26 @@ function parseStoredRow(input: unknown): VerificationJobRow | null {
         updated_at_ms: input.updated_at_ms,
         completed_at_ms: nullableNumber(input.completed_at_ms),
     };
+}
+
+function ownerMembershipLookupKeyFromRequestJson(requestJson: string): string | null {
+    try {
+        const parsed = JSON.parse(requestJson) as unknown;
+        if (!isRecord(parsed)) {
+            return null;
+        }
+        const owner = parseHex32(parsed.owner, "owner");
+        if (!owner.ok) {
+            return null;
+        }
+        const membershipId = parseHex32(parsed.membership_id, "membership_id");
+        if (!membershipId.ok) {
+            return null;
+        }
+        return ownerMembershipLookupKey(owner.value, membershipId.value);
+    } catch {
+        return null;
+    }
 }
 
 function isConditionalCheckFailed(error: unknown): boolean {

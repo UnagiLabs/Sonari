@@ -136,6 +136,7 @@ function makeStoredRow(overrides: Partial<Record<string, unknown>> = {}): Record
     return {
         job_id: "test-job-id-000000000000000",
         request_hash: "aabbcc",
+        owner_membership_key: `0x${"33".repeat(32)}#0x${"22".repeat(32)}`,
         request_json: "{}",
         status: "queued",
         retry_count: 0,
@@ -172,6 +173,18 @@ describe("DynamoDbVerificationJobRepository.claimJob", () => {
         const gets = captured.filter((c) => "Key" in c.input && !("UpdateExpression" in c.input));
         expect(gets).toHaveLength(1);
         expect(gets[0]?.input.Key).toEqual({ job_id: "test-job-id-000000000000000" });
+    });
+
+    it("accepts legacy rows without owner_membership_key so existing jobs keep processing", async () => {
+        const captured: CapturedCommand[] = [];
+        const { owner_membership_key: _legacyMissingLookupKey, ...legacyRow } = makeStoredRow({
+            request_json: JSON.stringify(validRequest()),
+        });
+        const repo = new DynamoDbVerificationJobRepository("jobs", makeStub(captured, legacyRow));
+
+        const claimed = await repo.claimJob("test-job-id-000000000000000", baseNowMs + 1);
+
+        expect(claimed).toMatchObject({ jobId: "test-job-id-000000000000000", attempt: 1 });
     });
 
     it("sends UpdateCommand with correct ConditionExpression and Key for a queued row", async () => {

@@ -172,9 +172,22 @@ Resources:
       AttributeDefinitions:
         - AttributeName: job_id
           AttributeType: S
+        - AttributeName: owner_membership_key
+          AttributeType: S
+        - AttributeName: updated_at_ms
+          AttributeType: N
       KeySchema:
         - AttributeName: job_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerMembershipUpdatedAtIndex
+          KeySchema:
+            - AttributeName: owner_membership_key
+              KeyType: HASH
+            - AttributeName: updated_at_ms
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   RunnerResultBucket:
     Type: AWS::S3::Bucket
@@ -610,6 +623,9 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                 Resource: !GetAtt VerificationJobsTable.Arn
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub ${VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex
 
   BatchVerifierLambdaRole:
     Type: AWS::IAM::Role
@@ -636,6 +652,27 @@ Resources:
               - Effect: Allow
                 Action: states:StartExecution
                 Resource: !Ref RunnerStateMachine
+
+  IdentityStatusLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ReadVerificationJobStatus
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub ${VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex
 
   RunnerControlLambdaRole:
     Type: AWS::IAM::Role
@@ -755,6 +792,42 @@ Resources:
         Variables:
           VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
           RUNNER_STATE_MACHINE_ARN: !Ref RunnerStateMachine
+
+  IdentityStatusLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.identityStatusHandler
+      Role: !GetAtt IdentityStatusLambdaRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+
+  IdentityStatusLambdaUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref IdentityStatusLambda
+      AuthType: NONE
+      Cors:
+        AllowMethods:
+          - POST
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - content-type
+
+  IdentityStatusLambdaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref IdentityStatusLambda
+      Action: lambda:InvokeFunctionUrl
+      Principal: "*"
+      FunctionUrlAuthType: NONE
 
   RunnerControlLambda:
     Type: AWS::Lambda::Function
@@ -986,6 +1059,10 @@ Outputs:
     Value: !Ref SubmitVerificationLambda
   BatchVerifierLambdaName:
     Value: !Ref BatchVerifierLambda
+  IdentityStatusLambdaName:
+    Value: !Ref IdentityStatusLambda
+  IdentityStatusLambdaUrlOutput:
+    Value: !GetAtt IdentityStatusLambdaUrl.FunctionUrl
   RunnerControlLambdaName:
     Value: !Ref RunnerControlLambda
   BatchScheduleName:

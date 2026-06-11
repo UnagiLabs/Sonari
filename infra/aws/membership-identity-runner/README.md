@@ -197,10 +197,13 @@ request には `registry_id`、`membership_id`、`owner`、`terms_version`、`si
 
 AWS stack は `SubmitVerificationFunctionUrlOutput` に dapp 用の POST endpoint を出力します。この endpoint は public Function URL です。`AuthType: NONE` のため、Lambda 側の schema validation、unknown field 拒否、`registry_id` 照合を fail-closed の入口防御として扱います。
 
+AWS stack は `IdentityStatusLambdaUrlOutput` に dapp 用の status endpoint も出力します。この endpoint も public Function URL ですが、Lambda は wallet personal message 署名を検証してから status を返します。ブラウザに AWS credential、DynamoDB table 名、queue 名は渡しません。
+
 dapp には次の build-time env を設定します。
 
 ```text
 NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL=<SubmitVerificationFunctionUrlOutput>
+NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL=<IdentityStatusLambdaUrlOutput>
 NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID=<SonariIdentityRegistryId>
 ```
 

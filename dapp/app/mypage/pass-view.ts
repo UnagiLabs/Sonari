@@ -44,6 +44,39 @@ export function providerLabelKeys(mask: number): ProviderLabelKey[] {
     return PROVIDER_BITS.filter(({ bit }) => (mask & bit) !== 0).map(({ key }) => key);
 }
 
+export type IdentityStatusLabelKey =
+    | "verified"
+    | "unverified"
+    | "queued"
+    | "processing"
+    | "completed"
+    | "rejected"
+    | "failed"
+    | "unavailable";
+
+export function identityStatusLabelKey(pass: MembershipPassData): IdentityStatusLabelKey {
+    if (pass.identityVerified) {
+        return "verified";
+    }
+    switch (pass.identityJobStatus?.status) {
+        case "queued":
+            return "queued";
+        case "processing":
+            return "processing";
+        case "completed":
+            return "completed";
+        case "rejected":
+            return "rejected";
+        case "failed":
+            return "failed";
+        case "unavailable":
+            return "unavailable";
+        case "none":
+        case undefined:
+            return "unverified";
+    }
+}
+
 /**
  * Format a millisecond timestamp as a locale-aware date string.
  * Non-positive values (0 = unset on-chain, or negative) return null so the UI

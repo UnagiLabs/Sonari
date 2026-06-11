@@ -1,11 +1,192 @@
 import { describe, expect, it } from "vitest";
 import {
+    createIdentityStatusHandler,
     createSubmitVerificationHandler,
     InMemoryVerificationJobRepository,
+    identityStatusMessage,
+    type VerificationJobRow,
+    verificationJobStatusResponse,
 } from "../src/index.js";
 import { validRequest } from "./fixtures.js";
 
 const baseNowMs = 1_800_000_000_000;
+
+function row(overrides: Partial<VerificationJobRow> = {}): VerificationJobRow {
+    return {
+        job_id: "membership-identity-test",
+        request_hash: "hash",
+        owner_membership_key: `${validRequest().owner}#${validRequest().membership_id}`,
+        request_json: JSON.stringify(validRequest()),
+        status: "queued",
+        retry_count: 0,
+        next_retry_at_ms: null,
+        error_code: null,
+        error_message: null,
+        workflow_execution_name: null,
+        workflow_started_at_ms: null,
+        tx_digest: null,
+        sui_dry_run_result_json: null,
+        sui_dry_run_completed_at_ms: null,
+        created_at_ms: baseNowMs,
+        updated_at_ms: baseNowMs + 1,
+        completed_at_ms: null,
+        ...overrides,
+    };
+}
+
+describe("verificationJobStatusResponse", () => {
+    it.each([
+        ["queued", "queued"],
+        ["retry", "queued"],
+        ["processing", "processing"],
+        ["completed", "completed"],
+    ] as const)("maps %s to display status %s", (stored, display) => {
+        expect(verificationJobStatusResponse(row({ status: stored })).status).toBe(display);
+    });
+
+    it("maps allowlisted failed error codes to rejected", () => {
+        expect(
+            verificationJobStatusResponse(
+                row({ status: "failed", error_code: "WORLD_ID_VERIFICATION_FAILED" }),
+            ).status,
+        ).toBe("rejected");
+    });
+
+    it("keeps unknown failed error codes as failed", () => {
+        expect(
+            verificationJobStatusResponse(
+                row({ status: "failed", error_code: "AWS_MEMBERSHIP_RUNNER_TIMEOUT" }),
+            ).status,
+        ).toBe("failed");
+    });
+
+    it("does not expose raw request_json or internal error fields", () => {
+        const response = verificationJobStatusResponse(
+            row({
+                status: "completed",
+                error_code: "SECRET",
+                error_message: "internal detail",
+                tx_digest: "A1B2C3",
+                completed_at_ms: baseNowMs + 100,
+            }),
+        );
+
+        expect(response).toEqual({
+            status: "completed",
+            updated_at_ms: baseNowMs + 1,
+            completed_at_ms: baseNowMs + 100,
+            tx_digest: "A1B2C3",
+        });
+        expect("request_json" in response).toBe(false);
+        expect("error_code" in response).toBe(false);
+        expect("error_message" in response).toBe(false);
+    });
+});
+
+describe("IdentityStatus Lambda", () => {
+    function statusRequest(overrides: Record<string, unknown> = {}) {
+        const base = {
+            owner: validRequest().owner,
+            membership_id: validRequest().membership_id,
+            issued_at_ms: baseNowMs,
+            signature: "signed",
+        };
+        return { ...base, ...overrides };
+    }
+
+    it("rejects unsigned requests", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createIdentityStatusHandler({
+            repository,
+            now: () => baseNowMs,
+            verifySignature: async () => true,
+        });
+        const { signature: _signature, ...request } = statusRequest();
+
+        const response = await handler({ body: JSON.stringify(request) });
+
+        expect(response.statusCode).toBe(400);
+    });
+
+    it("rejects requests when the signature does not match the owner", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createIdentityStatusHandler({
+            repository,
+            now: () => baseNowMs,
+            verifySignature: async () => false,
+        });
+
+        const response = await handler({ body: JSON.stringify(statusRequest()) });
+
+        expect(response.statusCode).toBe(401);
+        expect(JSON.parse(response.body)).toEqual({
+            ok: false,
+            message: "status signature is invalid",
+        });
+    });
+
+    it("rejects expired status signatures", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createIdentityStatusHandler({
+            repository,
+            now: () => baseNowMs + 10_001,
+            maxAgeMs: 10_000,
+            verifySignature: async () => true,
+        });
+
+        const response = await handler({ body: JSON.stringify(statusRequest()) });
+
+        expect(response.statusCode).toBe(401);
+        expect(JSON.parse(response.body)).toEqual({
+            ok: false,
+            message: "status signature is expired",
+        });
+    });
+
+    it("returns none when no subject job exists", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const handler = createIdentityStatusHandler({
+            repository,
+            now: () => baseNowMs,
+            verifySignature: async () => true,
+        });
+
+        const response = await handler({ body: JSON.stringify(statusRequest()) });
+
+        expect(response.statusCode).toBe(200);
+        expect(JSON.parse(response.body)).toEqual({ ok: true, status: "none" });
+    });
+
+    it("returns only sanitized status for the latest subject job", async () => {
+        const repository = new InMemoryVerificationJobRepository();
+        const created = await repository.upsertRequest(validRequest(), baseNowMs);
+        await repository.markFailed(
+            created.row.job_id,
+            baseNowMs + 10,
+            "WORLD_ID_VERIFICATION_FAILED",
+            "internal detail",
+        );
+        const handler = createIdentityStatusHandler({
+            repository,
+            now: () => baseNowMs + 20,
+            verifySignature: async ({ message, owner }) =>
+                owner === validRequest().owner &&
+                message === identityStatusMessage(statusRequest()),
+        });
+
+        const response = await handler({ body: JSON.stringify(statusRequest()) });
+        const body = JSON.parse(response.body) as Record<string, unknown>;
+
+        expect(response.statusCode).toBe(200);
+        expect(body).toEqual({
+            ok: true,
+            status: "rejected",
+            updated_at_ms: baseNowMs + 10,
+        });
+        expect(body.request_json).toBeUndefined();
+        expect(body.error_message).toBeUndefined();
+    });
+});
 
 describe("SubmitVerification Lambda", () => {
     it("rejects malformed requests without storing a job", async () => {

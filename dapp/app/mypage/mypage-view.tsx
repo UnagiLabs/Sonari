@@ -1,6 +1,6 @@
 "use client";
 
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
@@ -8,21 +8,30 @@ import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { HomeCellMap } from "./home-cell-map";
+import { fetchIdentityJobStatus } from "./identity-job-status";
 import {
     type MembershipPassData,
     type MembershipPassReadResult,
     readMembershipPass,
 } from "./membership-pass-read";
-import { deriveMypageView, formatTimestamp, providerLabelKeys, statusLabelKey } from "./pass-view";
+import {
+    deriveMypageView,
+    formatTimestamp,
+    identityStatusLabelKey,
+    providerLabelKeys,
+    statusLabelKey,
+} from "./pass-view";
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 const identityRegistryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
+const identityStatusUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL ?? "";
 
 export function MypageView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("mypage");
 
     const account = useCurrentAccount();
     const client = useCurrentClient();
+    const dAppKit = useDAppKit();
     const owner = account?.address ?? "";
     const connected = account !== null;
 
@@ -48,16 +57,27 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
         cancelRef.current = cancel;
         setResult(null);
 
-        void readMembershipPass(client, owner, membershipPackageId, identityRegistryId).then(
-            (next) => {
+        void readMembershipPass(client, owner, membershipPackageId, identityRegistryId)
+            .then(async (next): Promise<MembershipPassReadResult> => {
+                if (next.kind !== "ok" || next.pass.identityVerified) {
+                    return next;
+                }
+                const identityJobStatus = await fetchIdentityJobStatus({
+                    endpointUrl: identityStatusUrl,
+                    owner,
+                    membershipId: next.pass.objectId,
+                    signPersonalMessage: ({ message }) => dAppKit.signPersonalMessage({ message }),
+                });
+                return { kind: "ok", pass: { ...next.pass, identityJobStatus } };
+            })
+            .then((next) => {
                 if (!cancelled) {
                     setResult(next);
                 }
-            },
-        );
+            });
 
         return cancel;
-    }, [client, connected, owner]);
+    }, [client, connected, dAppKit, owner]);
 
     useEffect(() => load(), [load]);
 
@@ -152,6 +172,7 @@ function PassDetails({
             : providerKeys.map((key) => t(`providerLabels.${key}`)).join(" + ");
 
     const date = (ms: number): string => formatTimestamp(ms, locale) ?? t("unset");
+    const identityLabelKey = identityStatusLabelKey(pass);
 
     return (
         <div className="mypage-groups">
@@ -170,11 +191,7 @@ function PassDetails({
                 <h2>{t("identity.heading")}</h2>
                 <dl>
                     <dt>{t("identity.verifiedLabel")}</dt>
-                    <dd>
-                        {pass.identityVerified
-                            ? t("identity.verifiedYes")
-                            : t("identity.verifiedNo")}
-                    </dd>
+                    <dd>{t(`identityStatusLabels.${identityLabelKey}`)}</dd>
                     <dt>{t("identity.providerLabel")}</dt>
                     <dd>{providerText}</dd>
                     <dt>{t("identity.verifiedAtLabel")}</dt>
