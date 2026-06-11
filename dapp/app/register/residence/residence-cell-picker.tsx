@@ -9,7 +9,7 @@ import {
     type MapsLoaderStatus,
     readGoogleMapsApiKey,
 } from "./google-maps-loader";
-import { classifyResidenceCell, type ResidenceCellClass } from "./h3-cell-classifier";
+import type { ResidenceCellClass } from "./h3-cell-classifier";
 import {
     h3DecimalToHex,
     latLngToResidenceCell,
@@ -27,6 +27,7 @@ import {
     type OverlayCellKind,
     selectResidenceCell,
 } from "./residence-overlay";
+import { createResidenceTileClient, type ResidenceTileClient } from "./residence-tile-client";
 
 // NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
 const mapsApiKey = readGoogleMapsApiKey();
@@ -85,6 +86,15 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     const activeCountRef = useRef<number>(0);
     const rebuildTimerRef = useRef<number | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    // 地図表示は重い proof API をセルごとに呼ばない。軽量 static tile を読む
+    // tile client を使い、親 tile を memory cache して同一親の fetch を共有する。
+    const tileClientRef = useRef<ResidenceTileClient | null>(null);
+    const getTileClient = useCallback((): ResidenceTileClient => {
+        if (tileClientRef.current === null) {
+            tileClientRef.current = createResidenceTileClient({ workerUrl: residenceWorkerUrl });
+        }
+        return tileClientRef.current;
+    }, []);
 
     // 選択 decimal を click ハンドラから参照するため ref に同期する。
     useEffect(() => {
@@ -128,9 +138,10 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
             }
             inflightRef.current.add(decimal);
             activeCountRef.current += 1;
-            classifyResidenceCell({ cellDecimal: decimal, workerUrl: residenceWorkerUrl })
-                .then((result) => {
-                    applyClassification(decimal, result.classification);
+            getTileClient()
+                .classifyCell(decimal)
+                .then((cls) => {
+                    applyClassification(decimal, cls);
                 })
                 .catch(() => {
                     applyClassification(decimal, "unknown");
@@ -141,59 +152,58 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
                     pumpClassifyQueue();
                 });
         }
-    }, [applyClassification]);
+    }, [applyClassification, getTileClient]);
 
     // クリックされたセルを分類のうえ選択する。海セルは選択せず理由を出す。
-    const applySelection = useCallback(async (decimal: string) => {
-        let cls = classCacheRef.current.get(decimal);
-        if (cls === undefined) {
-            try {
-                const result = await classifyResidenceCell({
-                    cellDecimal: decimal,
-                    workerUrl: residenceWorkerUrl,
-                });
-                cls = result.classification;
-            } catch {
-                cls = "unknown";
+    const applySelection = useCallback(
+        async (decimal: string) => {
+            let cls = classCacheRef.current.get(decimal);
+            if (cls === undefined) {
+                try {
+                    cls = await getTileClient().classifyCell(decimal);
+                } catch {
+                    cls = "unknown";
+                }
+                classCacheRef.current.set(decimal, cls);
             }
-            classCacheRef.current.set(decimal, cls);
-        }
 
-        const previous = selectedDecimalRef.current;
-        const outcome = selectResidenceCell({ selectedDecimal: previous }, decimal, cls);
-        if (outcome.rejected) {
-            // 拒否されるのは water セルのみ（selectResidenceCell の仕様）。
-            setNotice(tRef.current("waterMessage"));
-            return;
-        }
-
-        setNotice(null);
-        setSelectedDecimal(decimal);
-        setSelectedClass(cls);
-
-        // 直前の選択セルを通常の見た目へ戻す。
-        if (previous !== null && previous !== decimal) {
-            const previousPoly = polygonsRef.current.get(previous);
-            if (previousPoly !== undefined) {
-                const previousClass = classCacheRef.current.get(previous);
-                previousPoly.setOptions(
-                    polygonStyleForKind(
-                        previousClass === undefined ? "pending" : classToKind(previousClass),
-                    ),
-                );
+            const previous = selectedDecimalRef.current;
+            const outcome = selectResidenceCell({ selectedDecimal: previous }, decimal, cls);
+            if (outcome.rejected) {
+                // 拒否されるのは water セルのみ（selectResidenceCell の仕様）。
+                setNotice(tRef.current("waterMessage"));
+                return;
             }
-        }
 
-        // 選択セルを強調し、その中心へ地図を寄せる。
-        const selectedPoly = polygonsRef.current.get(decimal);
-        if (selectedPoly !== undefined) {
-            selectedPoly.setOptions(polygonStyleForKind("selected"));
-        }
-        const map = mapRef.current;
-        if (map !== null) {
-            map.panTo(residenceCellCenter(h3DecimalToHex(decimal)));
-        }
-    }, []);
+            setNotice(null);
+            setSelectedDecimal(decimal);
+            setSelectedClass(cls);
+
+            // 直前の選択セルを通常の見た目へ戻す。
+            if (previous !== null && previous !== decimal) {
+                const previousPoly = polygonsRef.current.get(previous);
+                if (previousPoly !== undefined) {
+                    const previousClass = classCacheRef.current.get(previous);
+                    previousPoly.setOptions(
+                        polygonStyleForKind(
+                            previousClass === undefined ? "pending" : classToKind(previousClass),
+                        ),
+                    );
+                }
+            }
+
+            // 選択セルを強調し、その中心へ地図を寄せる。
+            const selectedPoly = polygonsRef.current.get(decimal);
+            if (selectedPoly !== undefined) {
+                selectedPoly.setOptions(polygonStyleForKind("selected"));
+            }
+            const map = mapRef.current;
+            if (map !== null) {
+                map.panTo(residenceCellCenter(h3DecimalToHex(decimal)));
+            }
+        },
+        [getTileClient],
+    );
 
     // 緯度経度へ地図を寄せ、対応セルを選択する共通処理。
     // 検索候補の選択と現在地ボタンが同じ pan/zoom + セル選択を行うため共通化する。
