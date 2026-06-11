@@ -254,8 +254,6 @@ export interface MembershipPassFixtureInput {
 export interface MembershipPassReadback {
     readonly passId: string;
     readonly owner: string;
-    readonly identityVerified: false;
-    readonly providerLabel: "Unverified";
 }
 
 export function assertFixtureNetwork(input: string): FixtureNetwork {
@@ -847,7 +845,7 @@ export function parseAllowedResidenceCellRegistryId(input: unknown): string {
     throw new Error("transaction result did not include AllowedResidenceCellRootUpdated event");
 }
 
-export function parseUnverifiedMembershipPassReadback(
+export function parseMembershipPassReadback(
     input: unknown,
     expectedPassId: string,
     expectedPackageId: string,
@@ -865,19 +863,9 @@ export function parseUnverifiedMembershipPassReadback(
     );
     const owner = readStringField(object.fields, "owner");
     assertHexObjectId(owner, "membershipPass.owner");
-    const identityVerified = object.fields.identity_verified ?? object.fields.identityVerified;
-    if (identityVerified !== false) {
-        throw new Error("membership pass fixture must start with identity_verified=false");
-    }
-    const providerLabel = readStringField(object.fields, "provider_label");
-    if (providerLabel !== "Unverified") {
-        throw new Error("membership pass fixture must start with provider_label=Unverified");
-    }
     return {
         passId: object.objectId,
         owner,
-        identityVerified: false,
-        providerLabel: "Unverified",
     };
 }
 
@@ -1146,7 +1134,7 @@ async function readMembershipPass(
 ): Promise<MembershipPassReadback> {
     const output = await executor(buildSuiObjectCommand(passId, options));
     const parsed = parseSuiJsonCommandResult(output, "sui object membershipPassId");
-    return parseUnverifiedMembershipPassReadback(parsed, passId, packageId);
+    return parseMembershipPassReadback(parsed, passId, packageId);
 }
 
 function buildBaseObjectCandidates(

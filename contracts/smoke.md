@@ -20,7 +20,7 @@
 4. User が災害前に Membership SBT を作成済みである。
 5. User が許可居住セル proof 付きで home cell を登録済みである。
 6. Nautilus が KYC または World ID result を署名する。
-7. Membership SBT に `identity_verified == true` が反映される。
+7. IdentityRegistry に本人確認記録が反映される。
 8. IdentityRegistry が duplicate key とこの SBT の紐づきを持つ。
 9. User が affected cell proof を付けて Claim する。
 10. Move が cutoff、affected cell、本人確認を検証する。
@@ -40,7 +40,7 @@ KYC / World ID はどちらも満額 route である。
 - 許可居住セル proof が不正なら居住セル変更を reject する。
 - 他人の current pass は居住セル変更で reject する。
 - home cell が affected cells に含まれなければ reject する。
-- `identity_verified == true` でなければ reject する。
+- IdentityRegistry に有効な本人確認記録がなければ reject する。
 - provider 内 duplicate key が別 SBT に使用済みなら reject する。
 - Claim 時に duplicate key がこの SBT に紐づかなければ reject する。
 - 同じ campaign / event の二重 Claim は reject する。
