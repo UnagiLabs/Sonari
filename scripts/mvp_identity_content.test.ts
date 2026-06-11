@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+// home の文言は i18n 化で page.tsx から英語カタログ（messages/en.json）へ移動した。
+// dapp の文言ガードは、英語コピーの単一情報源であるカタログを参照する。
 const CONTENT_FILES = [
-    "dapp/app/page.tsx",
+    "dapp/messages/en.json",
     "dapp/public/sonari_overview.html",
     "contracts/smoke.md",
 ] as const;
@@ -14,10 +16,10 @@ function readRepoFile(filePath: string): string {
 
 describe("MVP identity gate content", () => {
     it("states the dapp recipient and provider payout route", () => {
-        const page = readRepoFile("dapp/app/page.tsx");
+        const messages = readRepoFile("dapp/messages/en.json");
 
-        expect(page).toMatch(/Membership\s+SBT\s+owner/);
-        expect(page).toContain("KYC and World ID follow the same full-support route");
+        expect(messages).toMatch(/Membership\s+SBT\s+owner/);
+        expect(messages).toContain("KYC and World ID follow the same full-support route");
     });
 
     it("keeps the overview and smoke plan aligned with SBT-owner payout", () => {

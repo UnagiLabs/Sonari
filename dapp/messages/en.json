@@ -33,13 +33,34 @@
                 "walletHint": "Connect your Sui wallet to get started.",
                 "privacySummary": "What Sonari stores",
                 "privacy": {
-                    "walletAddress": { "label": "Wallet address", "value": "SBT owner only" },
-                    "nickname": { "label": "Nickname", "value": "Can be added later" },
-                    "addressSearch": { "label": "Address search", "value": "Not stored by Sonari" },
-                    "phoneEmail": { "label": "Phone / email", "value": "Not collected" },
-                    "gpsHistory": { "label": "GPS history", "value": "Not stored" },
-                    "deviceInfo": { "label": "Device info", "value": "Not published" },
-                    "h3Cell": { "label": "H3 cell", "value": "Resolution 7 output" }
+                    "walletAddress": {
+                        "label": "Wallet address",
+                        "value": "SBT owner only"
+                    },
+                    "nickname": {
+                        "label": "Nickname",
+                        "value": "Can be added later"
+                    },
+                    "addressSearch": {
+                        "label": "Address search",
+                        "value": "Not stored by Sonari"
+                    },
+                    "phoneEmail": {
+                        "label": "Phone / email",
+                        "value": "Not collected"
+                    },
+                    "gpsHistory": {
+                        "label": "GPS history",
+                        "value": "Not stored"
+                    },
+                    "deviceInfo": {
+                        "label": "Device info",
+                        "value": "Not published"
+                    },
+                    "h3Cell": {
+                        "label": "H3 cell",
+                        "value": "Resolution 7 output"
+                    }
                 },
                 "cta": "Get started",
                 "membership": {
@@ -274,6 +295,435 @@
         "map": {
             "unavailableTitle": "Map unavailable",
             "unavailableBody": "Residence cell value: {cell}"
+        }
+    },
+    "topbar": {
+        "brandHomeAria": "Sonari home",
+        "nav": {
+            "home": "Home",
+            "donate": "Donate",
+            "dashboard": "Dashboard",
+            "leaderboard": "Leaderboard",
+            "register": "Register",
+            "claim": "Claim"
+        },
+        "donateCta": "Donate now"
+    },
+    "donate": {
+        "hero": {
+            "eyebrow": "Donate",
+            "title": "Send support with a clear trail.",
+            "sub": "A front-end donation flow for USDC support, pool selection, public display preferences, and receipt previews.",
+            "walletTag": "Wallet",
+            "walletBody": "Connect a wallet to prepare a donation transaction."
+        },
+        "form": {
+            "eyebrow": "Contribution",
+            "title": "Donation setup",
+            "typeLegend": "Donation type",
+            "poolLegend": "Pool",
+            "amountLabel": "Amount",
+            "displayLegend": "Display preferences",
+            "donatePreview": "Donate preview",
+            "saveDraft": "Save draft"
+        },
+        "types": {
+            "general": {
+                "label": "General Donation",
+                "description": "Supports the main relief pool for future verified aid.",
+                "destination": "100% Main Pool"
+            },
+            "earthquake": {
+                "label": "Earthquake Relief",
+                "description": "Directs most funds to the selected disaster relief pool.",
+                "destination": "80% Relief Pool / 20% Main Pool"
+            }
+        },
+        "pools": {
+            "main": {
+                "label": "Main Pool",
+                "detail": "Default public support pool"
+            },
+            "earthquake": {
+                "label": "Earthquake Relief Pool",
+                "detail": "Finalized disaster support"
+            }
+        },
+        "display": {
+            "publicName": {
+                "title": "Public display name",
+                "description": "Show a name on receipts and leaderboard previews."
+            },
+            "anonymous": {
+                "title": "Anonymous mode",
+                "description": "Use Anonymous Donor in public lists."
+            },
+            "corporate": {
+                "title": "Corporate sponsor mode",
+                "description": "Prepare sponsor logo and profile fields later."
+            }
+        },
+        "split": {
+            "eyebrow": "Split preview",
+            "title": "Estimated allocation",
+            "main": {
+                "label": "Main Pool",
+                "detail": "Transparent reserve for verified aid"
+            },
+            "relief": {
+                "label": "Relief Pool",
+                "detail": "Selected earthquake relief campaign"
+            }
+        },
+        "result": {
+            "eyebrow": "After donation",
+            "title": "Result preview",
+            "donationRecord": {
+                "label": "DonationRecord",
+                "value": "Created after transaction confirmation"
+            },
+            "donorPass": {
+                "label": "DonorPass",
+                "value": "Issued or updated for this wallet"
+            },
+            "receipt": {
+                "label": "Receipt",
+                "value": "Public impact receipt, recipient data anonymized"
+            },
+            "leaderboard": {
+                "label": "Leaderboard",
+                "value": "Rank updates without claim rights or payout priority"
+            }
+        },
+        "note": {
+            "title": "DonorPass note",
+            "body": "DonorPass records contribution history only. It does not provide claim rights, payout priority, or promised aid.",
+            "link": "View dashboard"
+        }
+    },
+    "home": {
+        "hero": {
+            "eyebrow": "Transparent donation infrastructure",
+            "titleBefore": "Donations that ",
+            "titleHighlight": "arrive",
+            "titleAfter": "where they're needed.",
+            "sub": "Sonari verifies who should receive aid after a disaster using public source data, privacy-preserving residence proofs, and transparent receipts.",
+            "ctaDonate": "Donate now",
+            "ctaMember": "Become a member",
+            "ctaClaim": "Claim relief",
+            "ctaDashboard": "View dashboard",
+            "notePrivate": "Residence data stays private",
+            "noteVerified": "Verified disaster events"
+        },
+        "stats": {
+            "totalDonated": {
+                "label": "Total donated",
+                "meta": "+ $48,200 in 24h"
+            },
+            "reliefDelivered": {
+                "label": "Relief delivered",
+                "meta": "1,291 verified claims"
+            },
+            "activePools": {
+                "label": "Active pools",
+                "meta": "Main and earthquake"
+            },
+            "verifiedEvents": {
+                "label": "Verified events",
+                "meta": "USGS source data"
+            }
+        },
+        "sponsors": {
+            "title": "Supported by transparent partners"
+        },
+        "how": {
+            "eyebrow": "How Sonari works",
+            "title": "Four steps from donation to relief.",
+            "sub": "No hidden discretion. No payout promises. Just verifiable steps anyone can audit.",
+            "step1": {
+                "title": "Donate in USDC",
+                "body": "Choose a pool. Donations are recorded on-chain with a DonorPass contribution history."
+            },
+            "step2": {
+                "title": "Disaster verified",
+                "body": "USGS reports are re-fetched and signed only after the source data matches."
+            },
+            "step3": {
+                "title": "Eligibility checked",
+                "body": "Recipients need an active pass and a residence proof inside the affected H3 cells."
+            },
+            "step4": {
+                "title": "Relief, with a receipt",
+                "body": "Each payout creates an anonymized Impact Receipt without exposing personal details."
+            }
+        },
+        "pools": {
+            "eyebrow": "Featured pools",
+            "title": "See where each dollar lives.",
+            "allPools": "All pools",
+            "received": "{amount} received",
+            "delivered": "{amount} delivered",
+            "available": "available balance",
+            "statusActive": "active",
+            "main": {
+                "name": "Main Pool",
+                "description": "General relief reserves across active programs.",
+                "imageAlt": "Community recovery aid after flooding"
+            },
+            "earthquake": {
+                "name": "Earthquake Relief Pool",
+                "description": "Reserved for finalized earthquake events.",
+                "imageAlt": "Earthquake relief supplies"
+            }
+        },
+        "supporters": {
+            "eyebrow": "Top supporters",
+            "title": "People and partners keeping the reserve full.",
+            "fullLeaderboard": "Full leaderboard",
+            "individuals": "Individuals",
+            "corporate": "Corporate sponsors"
+        },
+        "why": {
+            "eyebrow": "Why Sonari",
+            "title": "Donation infrastructure, not a payout promise.",
+            "witnessable": {
+                "title": "Witnessable end to end",
+                "body": "Donation, eligibility, and payout activity is visible through public receipts."
+            },
+            "private": {
+                "title": "Recipient-private by design",
+                "body": "Raw addresses, phone numbers, and personal identifiers stay off-chain."
+            },
+            "checked": {
+                "title": "Checked before aid moves",
+                "body": "A finalized event, active pass, and valid residence proof are required."
+            }
+        },
+        "trust": {
+            "eyebrow": "Important to know",
+            "title": "Sonari is aid infrastructure for transparent donations.",
+            "copy": "DonorPass records contribution history only. Receiving relief depends on verified eligibility for a finalized disaster event.",
+            "item1": "Donating does not create claim rights.",
+            "item2": "Top donors get recognition, not payout priority.",
+            "item3": "Relief is paid to the verified Membership SBT owner.",
+            "item4": "KYC and World ID follow the same full-support route.",
+            "item5": "Pause, oracle, and sponsor controls are visible.",
+            "item6": "Sponsor logos require verification and approval."
+        },
+        "footer": {
+            "brandDesc": "Transparent donation infrastructure for verified aid.",
+            "publicTitle": "Public",
+            "recipientTitle": "Recipient",
+            "transparencyTitle": "Transparency",
+            "linkDonate": "Donate",
+            "linkDashboard": "Dashboard",
+            "linkLeaderboard": "Leaderboard",
+            "linkClaim": "Claim",
+            "linkRegister": "Register",
+            "linkReceipts": "Receipts",
+            "linkPools": "Pools",
+            "linkEvents": "Events",
+            "linkSponsors": "Sponsors",
+            "year": "2026 Sonari",
+            "tagline": "Donation, aid, support, impact."
+        }
+    },
+    "dashboard": {
+        "hero": {
+            "eyebrow": "Dashboard",
+            "title": "Transparent activity, at a glance.",
+            "sub": "A public view of pool balances, finalized events, recent donations, verified claims, and anonymized impact receipts."
+        },
+        "actions": {
+            "donate": "Donate",
+            "claimRelief": "Claim relief",
+            "refresh": "Refresh data"
+        },
+        "statusBar": {
+            "previewData": "Preview data",
+            "lastRefreshed": "Last refreshed {time}",
+            "publicView": "Public transparency view"
+        },
+        "metrics": {
+            "totalDonated": {
+                "label": "Total donated",
+                "detail": "+ $48,200 in 24h"
+            },
+            "aidDelivered": {
+                "label": "Total aid delivered",
+                "detail": "1,291 verified claims"
+            },
+            "activePools": {
+                "label": "Active pools",
+                "detail": "Main and earthquake"
+            },
+            "receipts": {
+                "label": "Impact receipts",
+                "detail": "Public, anonymized records"
+            }
+        },
+        "status": {
+            "active": "active",
+            "paused": "paused",
+            "confirmed": "confirmed",
+            "pending": "pending",
+            "finalized": "finalized"
+        },
+        "poolsPanel": {
+            "eyebrow": "Pools",
+            "title": "Pool balances",
+            "action": "View pools"
+        },
+        "poolRow": {
+            "balance": "Balance",
+            "received": "Received",
+            "paidOut": "Paid out",
+            "reserved": "Reserved",
+            "available": "Available"
+        },
+        "pools": {
+            "main": {
+                "name": "Main Pool"
+            },
+            "earthquake": {
+                "name": "Earthquake Relief Pool"
+            }
+        },
+        "eventPanel": {
+            "eyebrow": "Latest DisasterEvent",
+            "title": "Finalized source data",
+            "action": "View events",
+            "statusLabel": "Status",
+            "intensityLabel": "Intensity",
+            "affectedCellsLabel": "Affected cells",
+            "claimWindowLabel": "Claim window"
+        },
+        "donations": {
+            "title": "Recent donations",
+            "action": "Donation history"
+        },
+        "claims": {
+            "title": "Recent claims",
+            "action": "Claim flow"
+        },
+        "receiptsPanel": {
+            "title": "Impact receipts",
+            "action": "All receipts"
+        },
+        "supportersPanel": {
+            "eyebrow": "Leaderboard",
+            "title": "Top supporters",
+            "action": "Full leaderboard",
+            "individualDonors": "Individual donors",
+            "corporateSponsors": "Corporate sponsors",
+            "rankLabel": "rank #{rank}"
+        }
+    },
+    "claim": {
+        "hero": {
+            "eyebrow": "Claim relief",
+            "title": "Check eligibility without exposing private details.",
+            "sub": "A front-end claim flow for MembershipPass status, finalized disaster events, eligibility checks, and Relief Cash transaction previews.",
+            "walletTag": "Wallet",
+            "walletBody": "Connect a wallet to load MembershipPass and claim history."
+        },
+        "pass": {
+            "eyebrow": "MembershipPass",
+            "title": "Recipient status",
+            "statusActive": "Active",
+            "passId": "Pass ID",
+            "residenceCell": "Residence cell",
+            "verification": "Verification",
+            "verificationValid": "Signed residence metadata valid"
+        },
+        "event": {
+            "eyebrow": "DisasterEvent",
+            "title": "Claimable events",
+            "viewEvents": "View events",
+            "selectLegend": "Select event"
+        },
+        "eligibility": {
+            "eyebrow": "Eligibility",
+            "title": "Verification checks",
+            "checkButton": "Check eligibility"
+        },
+        "checks": {
+            "finalized": {
+                "label": "DisasterEvent finalized",
+                "detail": "Signed payload has been accepted by the program."
+            },
+            "membership": {
+                "label": "MembershipPass active",
+                "detail": "Connected wallet has a current MembershipPass."
+            },
+            "residence": {
+                "label": "Residence cell included",
+                "detail": "Registered H3 cell appears in affected_cells."
+            },
+            "noPreviousClaim": {
+                "label": "No previous claim",
+                "detail": "This event has not been claimed by this pass."
+            },
+            "poolBudget": {
+                "label": "Pool budget available",
+                "detail": "Relief pool has enough available amount for the estimate."
+            }
+        },
+        "checkStatus": {
+            "ready": "ready",
+            "pending": "pending"
+        },
+        "proof": {
+            "idle": "Eligibility has not been checked.",
+            "checking": "Checking affected cells proof.",
+            "ready": "Affected cells proof verified."
+        },
+        "errors": {
+            "workerMissing": "Affected proof worker is not configured.",
+            "outsideArea": "Residence cell is outside this event.",
+            "fetchFailed": "Affected proof could not be fetched.",
+            "verifyFailed": "Affected proof could not be verified.",
+            "generic": "Eligibility check failed."
+        },
+        "preview": {
+            "eyebrow": "Preview",
+            "title": "Estimated claim",
+            "estimatedRelief": "Estimated Relief Cash",
+            "poolSource": "Pool source",
+            "campaign": "Campaign",
+            "receipt": "Receipt",
+            "receiptValue": "Public, recipient reference anonymized"
+        },
+        "claimButton": "Claim relief",
+        "note": {
+            "title": "Privacy boundary",
+            "body": "Public screens should show H3 cell, pass status, verification status, and anonymized recipient references only."
+        },
+        "result": {
+            "eyebrow": "Transaction result"
+        },
+        "tx": {
+            "idle": {
+                "message": "Waiting for claim action.",
+                "detail": "The transaction digest, receipt link, and status can render here after signing."
+            },
+            "building": {
+                "message": "Building claim transaction.",
+                "detail": "Preparing the claim transaction for signing."
+            },
+            "submitting": {
+                "message": "Approve the transaction in your wallet.",
+                "detail": "Approve the claim transaction in your connected wallet."
+            },
+            "submitted": {
+                "message": "Claim transaction submitted.",
+                "detail": "Transaction digest: {digest}"
+            },
+            "failed": {
+                "walletRequired": "Connect a wallet before claiming.",
+                "generic": "Claim transaction failed.",
+                "detail": "The claim transaction was not completed."
+            }
         }
     }
 }
