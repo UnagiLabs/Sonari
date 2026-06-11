@@ -62,6 +62,10 @@ public fun verifier_family_identity(): u8 {
     metadata_verifier::verifier_family_identity()
 }
 
+public fun verifier_family_census(): u8 {
+    metadata_verifier::verifier_family_census()
+}
+
 public fun verifier_version_v1(): u64 {
     metadata_verifier::verifier_version_v1()
 }

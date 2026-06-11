@@ -7,6 +7,7 @@ use sui::vec_map::{Self, VecMap};
 
 const VERIFIER_FAMILY_EARTHQUAKE_ORACLE: u8 = 3;
 const VERIFIER_FAMILY_IDENTITY: u8 = 4;
+const VERIFIER_FAMILY_CENSUS: u8 = 5;
 const VERIFIER_VERSION_V1: u64 = 1;
 const TARGET_KIND_VERIFIER_REGISTRY: u8 = 6;
 const REGISTRY_KIND_VERIFIER: u8 = 3;
@@ -16,6 +17,7 @@ const ED25519_SIGNATURE_LENGTH: u64 = 64;
 const PCR_LENGTH: u64 = 48;
 const EARTHQUAKE_V1_CONFIG_KEY: u64 = 1;
 const IDENTITY_V1_CONFIG_KEY: u64 = 2;
+const CENSUS_V1_CONFIG_KEY: u64 = 3;
 
 const EInvalidPublicKeyLength: u64 = 0;
 const EInvalidSignatureLength: u64 = 1;
@@ -262,6 +264,49 @@ public(package) fun disable_identity_verifier_config(
     disable_verifier_config_internal(registry, identity_v1_config_key(), ctx);
 }
 
+public(package) fun create_census_verifier_config(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    create_verifier_config_internal(
+        registry,
+        VERIFIER_FAMILY_CENSUS,
+        VERIFIER_VERSION_V1,
+        census_v1_config_key(),
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
+}
+
+public(package) fun update_census_verifier_config_pcrs(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    update_verifier_config_pcrs_internal(
+        registry,
+        census_v1_config_key(),
+        pcr0,
+        pcr1,
+        pcr2,
+        ctx,
+    );
+}
+
+public(package) fun disable_census_verifier_config(
+    registry: &mut VerifierRegistry,
+    ctx: &TxContext,
+) {
+    disable_verifier_config_internal(registry, census_v1_config_key(), ctx);
+}
+
 public fun register_enclave_instance(
     registry: &mut VerifierRegistry,
     document: NitroAttestationDocument,
@@ -321,11 +366,12 @@ public(package) fun assert_signed_bytes(
     assert_signature_length(signature);
     assert_allowed_verifier_family(expected_family);
     assert_allowed_verifier_version(expected_version);
-    // identity は enclave 署名ルート（assert_enclave_signed_bytes）へ移行済み。
-    // 旧 VerifierKey ルートは identity の enabled / expiry / config_version /
-    // config-family 整合チェックを通さないため、identity family がこのルートを
+    // identity および census は enclave 署名ルート（assert_enclave_signed_bytes）へ移行済み。
+    // 旧 VerifierKey ルートは enabled / expiry / config_version /
+    // config-family 整合チェックを通さないため、これらの family がこのルートを
     // 通ることを構造的に禁止し、将来の package 内誤用を fail-closed で防ぐ。
     assert!(expected_family != VERIFIER_FAMILY_IDENTITY, EVerifierFamilyMismatch);
+    assert!(expected_family != VERIFIER_FAMILY_CENSUS, EVerifierFamilyMismatch);
     assert!(registry.keys.contains(public_key), EVerifierKeyNotRegistered);
 
     let key = registry.keys.get(public_key);
@@ -701,7 +747,8 @@ fun assert_signature_length(signature: &vector<u8>) {
 fun assert_allowed_verifier_family(verifier_family: u8) {
     assert!(
         verifier_family == VERIFIER_FAMILY_EARTHQUAKE_ORACLE
-            || verifier_family == VERIFIER_FAMILY_IDENTITY,
+            || verifier_family == VERIFIER_FAMILY_IDENTITY
+            || verifier_family == VERIFIER_FAMILY_CENSUS,
         EVerifierFamilyMismatch,
     );
 }
@@ -733,6 +780,14 @@ public(package) fun earthquake_v1_config_key(): u64 {
 
 public(package) fun identity_v1_config_key(): u64 {
     IDENTITY_V1_CONFIG_KEY
+}
+
+public(package) fun census_v1_config_key(): u64 {
+    CENSUS_V1_CONFIG_KEY
+}
+
+public(package) fun verifier_family_census(): u8 {
+    VERIFIER_FAMILY_CENSUS
 }
 
 #[test_only]
@@ -939,6 +994,24 @@ public fun identity_verifier_config_fields_for_testing(
     registry: &VerifierRegistry,
 ): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
     verifier_config_fields_for_testing(registry, identity_v1_config_key())
+}
+
+#[test_only]
+public fun create_census_verifier_config_for_testing(
+    registry: &mut VerifierRegistry,
+    pcr0: vector<u8>,
+    pcr1: vector<u8>,
+    pcr2: vector<u8>,
+    ctx: &TxContext,
+) {
+    create_census_verifier_config(registry, pcr0, pcr1, pcr2, ctx);
+}
+
+#[test_only]
+public fun census_verifier_config_fields_for_testing(
+    registry: &VerifierRegistry,
+): (u8, u64, u64, vector<u8>, vector<u8>, vector<u8>, bool) {
+    verifier_config_fields_for_testing(registry, census_v1_config_key())
 }
 
 #[test_only]
