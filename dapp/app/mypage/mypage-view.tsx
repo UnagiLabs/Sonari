@@ -1,12 +1,11 @@
 "use client";
 
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
-import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
+import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
-import { LocaleSwitcher } from "../register/wizard/locale-switcher";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { HomeCellMap } from "./home-cell-map";
 import {
@@ -75,34 +74,8 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
 
     return (
         <div className="mypage">
-            <header className="topbar">
-                <div className="topbar-inner">
-                    <a aria-label={t("topbar.brandHomeAria")} className="brand" href="/">
-                        <span className="brand-mark">
-                            <Image
-                                alt="Sonari"
-                                height={36}
-                                priority
-                                src="/assets/sonari_logo.png"
-                                width={36}
-                            />
-                        </span>
-                        <span className="brand-name">Sonari</span>
-                    </a>
-                    <nav aria-label="Primary" className="nav">
-                        <a className="nav-item" href="/">
-                            {t("topbar.home")}
-                        </a>
-                        <a className="nav-item" href="/register">
-                            {t("topbar.register")}
-                        </a>
-                        <span className="nav-item active">{t("topbar.label")}</span>
-                    </nav>
-                    <div className="topbar-spacer" />
-                    <LocaleSwitcher current={locale} />
-                    <WalletConnect />
-                </div>
-            </header>
+            {/* mypage の nav は home / register / mypage の 3 項目（旧インライン実装と同一） */}
+            <SiteTopbar active="mypage" items={["home", "register", "mypage"]} locale={locale} />
 
             <section aria-labelledby="mypage-title" className="wizard-step-content">
                 <header className="wizard-heading">

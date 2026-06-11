@@ -1,13 +1,5 @@
 {
     "register": {
-        "topbar": {
-            "home": "Home",
-            "donate": "Donate",
-            "dashboard": "Dashboard",
-            "register": "Register",
-            "claim": "Claim",
-            "brandHomeAria": "Sonari home"
-        },
         "wizard": {
             "progress": {
                 "aria": "Registration progress",
@@ -239,12 +231,6 @@
         }
     },
     "mypage": {
-        "topbar": {
-            "label": "My Page",
-            "brandHomeAria": "Sonari home",
-            "home": "Home",
-            "register": "Register"
-        },
         "title": "My Page",
         "subtitle": "Review the contents of your MembershipPass.",
         "states": {
