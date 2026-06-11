@@ -527,5 +527,96 @@
             "year": "2026 Sonari",
             "tagline": "寄付、支援、サポート、インパクト。"
         }
+    },
+    "dashboard": {
+        "hero": {
+            "eyebrow": "ダッシュボード",
+            "title": "透明な活動を、ひと目で。",
+            "sub": "プールの残高、確定したイベント、最近の寄付、検証済みの申請、匿名化したインパクトレシートを公開で見られます。"
+        },
+        "actions": {
+            "donate": "寄付",
+            "claimRelief": "支援を申請",
+            "refresh": "データを更新"
+        },
+        "statusBar": {
+            "previewData": "プレビューデータ",
+            "lastRefreshed": "最終更新 {time}",
+            "publicView": "公開の透明性ビュー"
+        },
+        "metrics": {
+            "totalDonated": {
+                "label": "寄付総額",
+                "detail": "直近24時間で + $48,200"
+            },
+            "aidDelivered": {
+                "label": "届けた支援総額",
+                "detail": "検証済み申請 1,291 件"
+            },
+            "activePools": {
+                "label": "稼働中のプール",
+                "detail": "メインと地震"
+            },
+            "receipts": {
+                "label": "インパクトレシート",
+                "detail": "公開・匿名化された記録"
+            }
+        },
+        "status": {
+            "active": "稼働中",
+            "paused": "一時停止",
+            "confirmed": "確定",
+            "pending": "保留中",
+            "finalized": "確定済み"
+        },
+        "poolsPanel": {
+            "eyebrow": "プール",
+            "title": "プールの残高",
+            "action": "プールを見る"
+        },
+        "poolRow": {
+            "balance": "残高",
+            "received": "受領",
+            "paidOut": "支払い済み",
+            "reserved": "確保済み",
+            "available": "利用可能"
+        },
+        "pools": {
+            "main": {
+                "name": "メインプール"
+            },
+            "earthquake": {
+                "name": "地震救援プール"
+            }
+        },
+        "eventPanel": {
+            "eyebrow": "最新の DisasterEvent",
+            "title": "確定した情報源データ",
+            "action": "イベントを見る",
+            "statusLabel": "状態",
+            "intensityLabel": "規模",
+            "affectedCellsLabel": "被災セル",
+            "claimWindowLabel": "申請期間"
+        },
+        "donations": {
+            "title": "最近の寄付",
+            "action": "寄付履歴"
+        },
+        "claims": {
+            "title": "最近の申請",
+            "action": "申請フロー"
+        },
+        "receiptsPanel": {
+            "title": "インパクトレシート",
+            "action": "すべてのレシート"
+        },
+        "supportersPanel": {
+            "eyebrow": "リーダーボード",
+            "title": "トップ支援者",
+            "action": "リーダーボード全体",
+            "individualDonors": "個人の寄付者",
+            "corporateSponsors": "企業スポンサー",
+            "rankLabel": "順位 #{rank}"
+        }
     }
 }

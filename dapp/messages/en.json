@@ -527,5 +527,96 @@
             "year": "2026 Sonari",
             "tagline": "Donation, aid, support, impact."
         }
+    },
+    "dashboard": {
+        "hero": {
+            "eyebrow": "Dashboard",
+            "title": "Transparent activity, at a glance.",
+            "sub": "A public view of pool balances, finalized events, recent donations, verified claims, and anonymized impact receipts."
+        },
+        "actions": {
+            "donate": "Donate",
+            "claimRelief": "Claim relief",
+            "refresh": "Refresh data"
+        },
+        "statusBar": {
+            "previewData": "Preview data",
+            "lastRefreshed": "Last refreshed {time}",
+            "publicView": "Public transparency view"
+        },
+        "metrics": {
+            "totalDonated": {
+                "label": "Total donated",
+                "detail": "+ $48,200 in 24h"
+            },
+            "aidDelivered": {
+                "label": "Total aid delivered",
+                "detail": "1,291 verified claims"
+            },
+            "activePools": {
+                "label": "Active pools",
+                "detail": "Main and earthquake"
+            },
+            "receipts": {
+                "label": "Impact receipts",
+                "detail": "Public, anonymized records"
+            }
+        },
+        "status": {
+            "active": "active",
+            "paused": "paused",
+            "confirmed": "confirmed",
+            "pending": "pending",
+            "finalized": "finalized"
+        },
+        "poolsPanel": {
+            "eyebrow": "Pools",
+            "title": "Pool balances",
+            "action": "View pools"
+        },
+        "poolRow": {
+            "balance": "Balance",
+            "received": "Received",
+            "paidOut": "Paid out",
+            "reserved": "Reserved",
+            "available": "Available"
+        },
+        "pools": {
+            "main": {
+                "name": "Main Pool"
+            },
+            "earthquake": {
+                "name": "Earthquake Relief Pool"
+            }
+        },
+        "eventPanel": {
+            "eyebrow": "Latest DisasterEvent",
+            "title": "Finalized source data",
+            "action": "View events",
+            "statusLabel": "Status",
+            "intensityLabel": "Intensity",
+            "affectedCellsLabel": "Affected cells",
+            "claimWindowLabel": "Claim window"
+        },
+        "donations": {
+            "title": "Recent donations",
+            "action": "Donation history"
+        },
+        "claims": {
+            "title": "Recent claims",
+            "action": "Claim flow"
+        },
+        "receiptsPanel": {
+            "title": "Impact receipts",
+            "action": "All receipts"
+        },
+        "supportersPanel": {
+            "eyebrow": "Leaderboard",
+            "title": "Top supporters",
+            "action": "Full leaderboard",
+            "individualDonors": "Individual donors",
+            "corporateSponsors": "Corporate sponsors",
+            "rankLabel": "rank #{rank}"
+        }
     }
 }
