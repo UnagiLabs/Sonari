@@ -17,6 +17,12 @@ import {
     fetchResidenceProof,
     MembershipIssueError,
 } from "./membership-issue";
+import {
+    deriveMembershipActionState,
+    deriveIssuanceStatus,
+    disabledReasonMessageKey,
+    type MembershipLookupViewState,
+} from "./membership-gate";
 import { shortAddress } from "./membership-presence";
 
 interface MembershipStepProps {
@@ -28,14 +34,6 @@ interface MembershipStepProps {
     readonly onBack: () => void;
     readonly onNext: () => void;
 }
-
-type MembershipLookupViewState =
-    | { readonly kind: "idle" }
-    | { readonly kind: "loading" }
-    | { readonly kind: "ok"; readonly membershipId: string }
-    | { readonly kind: "none" }
-    | { readonly kind: "multiple"; readonly count: number }
-    | { readonly kind: "error"; readonly message: string };
 
 type MembershipIssueViewState =
     | { readonly kind: "idle" }
@@ -75,14 +73,22 @@ export function MembershipStep({
         pauseStateId.length > 0 &&
         membershipRegistryId.length > 0 &&
         allowedResidenceCellRegistryId.length > 0;
-    const isIssued = membershipIssued || lookup.kind === "ok";
+
+    const gateInput = {
+        owner,
+        selectedCellDecimal,
+        allStatementsAccepted,
+        isConfigured,
+        membershipIssued,
+        lookup,
+        isSubmitting: issueState.kind === "submitting",
+    } as const;
+
+    const issuance = deriveIssuanceStatus(gateInput);
+    const actionState = deriveMembershipActionState(gateInput);
+    const isIssued = issuance === "issued";
     const issueButtonLabel = isIssued ? t("issue.buttonIssued") : t("issue.button");
-    const isPrimaryActionDisabled =
-        !allStatementsAccepted ||
-        selectedCellDecimal === null ||
-        owner.length === 0 ||
-        issueState.kind === "submitting" ||
-        (!isIssued && (!isConfigured || lookup.kind !== "none"));
+    const isPrimaryActionDisabled = actionState.disabled;
 
     useEffect(() => {
         if (owner.length === 0) {
@@ -140,7 +146,7 @@ export function MembershipStep({
             setIssueState({ kind: "failed", message: t("issue.connectWallet") });
             return;
         }
-        if (isIssued) {
+        if (issuance === "issued") {
             onIssued();
             onNext();
             return;
@@ -220,13 +226,13 @@ export function MembershipStep({
     }
 
     function membershipStatusValue(): string {
-        if (isIssued) {
+        if (issuance === "issued") {
             return t("card.statusIssued");
         }
         if (issueState.kind === "submitting") {
             return t("card.statusSubmitting");
         }
-        if (lookup.kind === "loading") {
+        if (issuance === "checking") {
             return t("card.statusChecking");
         }
         if (lookup.kind === "multiple") {
@@ -264,7 +270,7 @@ export function MembershipStep({
         if (!allStatementsAccepted) {
             return { message: t("nextHint"), tone: "note" };
         }
-        if (isIssued) {
+        if (issuance === "issued") {
             return { message: t("issue.alreadyIssued"), tone: "note" };
         }
         if (lookup.kind === "loading") {
@@ -321,7 +327,7 @@ export function MembershipStep({
                     <span>{t("card.status")}</span>
                     <strong>
                         {membershipStatusValue()}
-                        {isIssued ? (
+                        {issuance === "issued" ? (
                             <span className="tag tag-ok wizard-summary-tag">
                                 {t("card.statusIssued")}
                             </span>
@@ -376,9 +382,9 @@ export function MembershipStep({
                     {issueButtonLabel}
                 </button>
             </div>
-            {!allStatementsAccepted ? (
+            {actionState.disabled ? (
                 <p className="wizard-cta-hint" role="note">
-                    {t("nextHint")}
+                    {t(disabledReasonMessageKey(actionState.reason))}
                 </p>
             ) : null}
         </section>

@@ -70,6 +70,36 @@ export type MembershipActionState =
     | { readonly disabled: true; readonly reason: MembershipDisabledReason };
 
 // ---------------------------------------------------------------------------
+// ヘルパー: 理由コード → i18n キー
+// ---------------------------------------------------------------------------
+
+/**
+ * MembershipDisabledReason を `register.wizard.membership` 名前空間内の
+ * i18n キーに変換する純粋関数。
+ * コンポーネントで `t(disabledReasonMessageKey(reason))` のように使う。
+ */
+export function disabledReasonMessageKey(reason: MembershipDisabledReason): string {
+    switch (reason) {
+        case "wallet_disconnected":
+            return "issue.connectWallet";
+        case "residence_unselected":
+            return "issue.residenceRequired";
+        case "statements_unaccepted":
+            return "nextHint";
+        case "submitting":
+            return "issue.submitting";
+        case "checking":
+            return "issue.checking";
+        case "multiple":
+            return "issue.multiple";
+        case "lookup_error":
+            return "issue.lookupFailed";
+        case "not_configured":
+            return "issue.notConfigured";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 純粋関数
 // ---------------------------------------------------------------------------
 

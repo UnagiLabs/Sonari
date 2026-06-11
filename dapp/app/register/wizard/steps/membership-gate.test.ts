@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     deriveIssuanceStatus,
     deriveMembershipActionState,
+    disabledReasonMessageKey,
     type MembershipGateInput,
     type MembershipIssuanceStatus,
     type MembershipDisabledReason,
@@ -338,5 +339,26 @@ describe("deriveMembershipActionState", () => {
             selectedCellDecimal: null,
         });
         expect(result).toEqual({ disabled: false });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// disabledReasonMessageKey
+// ---------------------------------------------------------------------------
+
+describe("disabledReasonMessageKey", () => {
+    const cases: [MembershipDisabledReason, string][] = [
+        ["wallet_disconnected", "issue.connectWallet"],
+        ["residence_unselected", "issue.residenceRequired"],
+        ["statements_unaccepted", "nextHint"],
+        ["submitting", "issue.submitting"],
+        ["checking", "issue.checking"],
+        ["multiple", "issue.multiple"],
+        ["lookup_error", "issue.lookupFailed"],
+        ["not_configured", "issue.notConfigured"],
+    ];
+
+    it.each(cases)("reason %s → key %s", (reason, expectedKey) => {
+        expect(disabledReasonMessageKey(reason)).toBe(expectedKey);
     });
 });
