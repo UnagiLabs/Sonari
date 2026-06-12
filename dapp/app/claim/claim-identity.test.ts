@@ -72,4 +72,14 @@ describe("resolveWorldIdClaimIdentity", () => {
             }),
         ).toEqual({ kind: "missing", reason: "world_id_nullifier" });
     });
+
+    it("fails closed when the IDKit nullifier is malformed", () => {
+        expect(
+            resolveWorldIdClaimIdentity({
+                rpId: "rp_staging_123",
+                action: "sonari_membership_register_v1",
+                idkitResponse: { responses: [{ nullifier: "not-a-nullifier" }] },
+            }),
+        ).toEqual({ kind: "missing", reason: "world_id_nullifier" });
+    });
 });

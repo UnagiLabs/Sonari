@@ -65,15 +65,19 @@ export function resolveWorldIdClaimIdentity(
         return { kind: "missing", reason: "world_id_nullifier" };
     }
 
-    return {
-        kind: "ok",
-        identityProvider: WORLD_IDENTITY_PROVIDER,
-        duplicateKeyHash: computeWorldIdDuplicateKeyHash({
-            rpId: input.rpId,
-            action: input.action,
-            nullifier,
-        }),
-    };
+    try {
+        return {
+            kind: "ok",
+            identityProvider: WORLD_IDENTITY_PROVIDER,
+            duplicateKeyHash: computeWorldIdDuplicateKeyHash({
+                rpId: input.rpId,
+                action: input.action,
+                nullifier,
+            }),
+        };
+    } catch {
+        return { kind: "missing", reason: "world_id_nullifier" };
+    }
 }
 
 function readWorldIdNullifier(response: Record<string, unknown> | null): string | null {
