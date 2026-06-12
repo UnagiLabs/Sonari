@@ -221,6 +221,7 @@ describe("readDashboardEvents", () => {
                 },
             ],
             aidDeliveredUsdc: 1000000n,
+            totalClaimsCount: 1,
             latestEvent: {
                 id: EVENT_ID,
                 sourceEventId: "usgs-1",
@@ -286,6 +287,42 @@ describe("readDashboardEvents", () => {
         }
         expect(result.donations).toHaveLength(1);
         expect(queryEvents.mock.calls.some((call) => call[0].cursor === nextCursor)).toBe(true);
+    });
+
+    it("keeps total claim count separate from the visible claim limit", async () => {
+        const queryEvents = vi.fn(async (input: { query: { MoveEventType: string } }) => {
+            if (!input.query.MoveEventType.endsWith("::campaign::PayoutClaimed")) {
+                return { data: [], hasNextPage: false };
+            }
+            return {
+                data: Array.from({ length: 12 }, (_, index) =>
+                    eventEnvelope(
+                        {
+                            campaign_id: CAMPAIGN_ID,
+                            round: 1,
+                            pass_lineage_id: EVENT_ID,
+                            band: 1,
+                            amount_usdc: "1000000",
+                            recipient: RECIPIENT,
+                        },
+                        {
+                            id: { txDigest: `claim-${index}`, eventSeq: "1" },
+                            timestampMs: String(1700000000000 - index),
+                        },
+                    ),
+                ),
+                hasNextPage: false,
+            };
+        });
+
+        const result = await readDashboardEvents({ queryEvents }, { packageId: PACKAGE_ID, limit: 10 });
+
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") {
+            return;
+        }
+        expect(result.claims).toHaveLength(10);
+        expect(result.totalClaimsCount).toBe(12);
     });
 
     it("returns error for missing package id or RPC failure", async () => {

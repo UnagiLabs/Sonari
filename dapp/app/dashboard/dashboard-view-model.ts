@@ -76,6 +76,7 @@ export function deriveDashboardViewModel(input: {
     readonly donations: readonly DashboardDonationEvent[];
     readonly claims: readonly DashboardClaimEvent[];
     readonly aidDeliveredUsdc: bigint;
+    readonly totalClaimsCount: number;
     readonly latestEvent: DashboardDisasterEvent | null;
 }): DashboardViewModel {
     const totalDonated =
@@ -95,13 +96,13 @@ export function deriveDashboardViewModel(input: {
             totalDonated: formatUsdc(totalDonated, input.locale),
             aidDelivered: formatUsdc(input.aidDeliveredUsdc, input.locale),
             activePools: formatAmount(activePools, input.locale),
-            receipts: formatAmount(input.claims.length, input.locale),
+            receipts: formatAmount(input.totalClaimsCount, input.locale),
         },
         metricDetails: {
             totalDonated: "Across all configured pools",
             aidDelivered: "Finalized floor and payout events",
             activePools: `${activePools} pools read from chain`,
-            receipts: `${input.claims.length} finalized claim event${input.claims.length === 1 ? "" : "s"}`,
+            receipts: `${input.totalClaimsCount} finalized claim event${input.totalClaimsCount === 1 ? "" : "s"}`,
         },
         pools: [
             deriveMainPool(input.pools.main, input.locale),

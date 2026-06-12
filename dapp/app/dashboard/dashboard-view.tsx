@@ -90,6 +90,7 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                     donations: eventResult.donations,
                     claims: eventResult.claims,
                     aidDeliveredUsdc: eventResult.aidDeliveredUsdc,
+                    totalClaimsCount: eventResult.totalClaimsCount,
                     latestEvent: eventResult.latestEvent,
                 }),
             });

@@ -65,6 +65,7 @@ export type DashboardEventReadResult =
           readonly donations: readonly DashboardDonationEvent[];
           readonly claims: readonly DashboardClaimEvent[];
           readonly aidDeliveredUsdc: bigint;
+          readonly totalClaimsCount: number;
           readonly latestEvent: DashboardDisasterEvent | null;
       }
     | { readonly kind: "error"; readonly message: string };
@@ -116,9 +117,10 @@ export async function readDashboardEvents(
         const allClaims = uniqueById([...floorClaims, ...payoutClaims]).sort(compareNewestFirst);
         const claims = allClaims.slice(0, limit);
         const aidDeliveredUsdc = allClaims.reduce((sum, item) => sum + item.amountUsdc, 0n);
+        const totalClaimsCount = allClaims.length;
         const latestEvent = uniqueDisasters(disasterEvents).sort(compareNewestFirst)[0] ?? null;
 
-        return { kind: "ok", donations, claims, aidDeliveredUsdc, latestEvent };
+        return { kind: "ok", donations, claims, aidDeliveredUsdc, totalClaimsCount, latestEvent };
     } catch (error) {
         return {
             kind: "error",
