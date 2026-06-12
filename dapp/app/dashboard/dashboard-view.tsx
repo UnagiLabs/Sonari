@@ -116,9 +116,7 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                 setState({
                     status: "error",
                     message:
-                        error instanceof Error
-                            ? error.message
-                            : "Failed to read dashboard data.",
+                        error instanceof Error ? error.message : "Failed to read dashboard data.",
                 });
             }
         });
