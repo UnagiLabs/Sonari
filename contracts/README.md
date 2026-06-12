@@ -184,7 +184,6 @@ public struct Campaign has key {
     disaster_event_id: ID,
     event_uid: vector<u8>,              // 32 bytes
     event_revision: u32,
-    category: u8,                       // hazard_type から導出
     category_pool_id: ID,               // 自動で1対1紐付け。裁量なし
 
     // ---- 本払い資金（Round 1 以降） ----
@@ -197,12 +196,7 @@ public struct Campaign has key {
 
     // ---- センサス確定値（set_floor_census で1度だけ確定。以後不変） ----
     census_set: bool,                   // floor_ratio 確定済みか
-    registered_members_by_band: vector<u64>, // [b1,b2,b3] 災害前登録メンバー数（センサス署名値）
-    max_liability_usdc: u64,            // Σ registered[b] × band_target[b]
-    floor_ratio_bps: u64,              // min(FLOOR_TARGET_RATIO_BPS, floor_budget×10000/max_liability)
     floor_amount_by_band: vector<u64>,  // band_target[b] × floor_ratio_bps / 10000（固定）
-    floor_paid_count: u64,
-    floor_total_paid_usdc: u64,
     floor_budget_returned: bool,        // Day 30 の未消化返還済みフラグ
 
     // ---- リアルタイム表示用 ----
@@ -211,6 +205,27 @@ public struct Campaign has key {
     ops_withheld_usdc: u64,             // この Campaign 起点で Ops へ送った累計（ops cap 判定）
 
     // ---- 作成時スナップショット（以後不変） ----
+    terms: CampaignTerms,
+
+    // ---- 締切（作成時に定数から導出。donation_end のみ admin 延長可） ----
+    donation_end_ms: u64,               // created + 30日（床予算返還・Round 1 の基準）
+    claim_end_ms: u64,                  // created + 21日（変更不可）
+
+    // ---- 申請状態（band 別検証済み数はリアルタイム表示にも使う） ----
+    verified_count_by_band: vector<u64>,
+
+    // ---- 本払いラウンド状態（最新ラウンドのみ。過去は RoundFinalized イベントで追跡） ----
+    current_round: u64,                 // 0 = 本払い未 finalize
+    round_finalized_at_ms: u64,
+    round_payout_by_band: vector<u64>,  // finalize で確定。claim_payout はこれを読むだけ
+    closed: bool,                       // residual sweep 済み
+    sweep_eligible: bool,
+
+    // ---- 運用 ----
+    paused: bool,
+}
+
+public struct CampaignTerms has store {
     band_target_usdc: vector<u64>,      // [band1, band2, band3]
     round_cap_multiplier: u64,          // 3
     floor_target_ratio_bps: u64,        // 5000 (= 0.5)
@@ -223,26 +238,6 @@ public struct Campaign has key {
     min_payout_per_recipient_usdc: u64,
     category_annual_event_divisor: u64, // 5（床第1層: Category 可処分 ÷ N）
     floor_main_share_bps: u64,          // 2000（床第2層: Main 可処分 × 20%）
-
-    // ---- 締切（作成時に定数から導出。donation_end のみ admin 延長可） ----
-    created_at_ms: u64,
-    donation_end_ms: u64,               // created + 30日（床予算返還・Round 1 の基準）
-    claim_end_ms: u64,                  // created + 21日（変更不可）
-
-    // ---- 申請状態（band 別検証済み数はリアルタイム表示にも使う） ----
-    applied_count_by_band: vector<u64>,
-    verified_count_by_band: vector<u64>,
-
-    // ---- 本払いラウンド状態（最新ラウンドのみ。過去は RoundFinalized イベントで追跡） ----
-    current_round: u64,                 // 0 = 本払い未 finalize
-    round_finalized_at_ms: u64,
-    round_payout_by_band: vector<u64>,  // finalize で確定。claim_payout はこれを読むだけ
-    round_paid_count: u64,
-    round_eligible_count: u64,
-    closed: bool,                       // residual sweep 済み
-
-    // ---- 運用 ----
-    paused: bool,
 }
 ```
 
@@ -266,12 +261,16 @@ public struct PayoutKey has copy, drop, store {
 }
 ```
 
-Sui の package upgrade では struct フィールド追加が不可のため、counter 類・締切・床予算・
-ラウンド状態は最初から struct に含める。将来の拡張データは dynamic field で持つ。
+`Campaign` は Sui protocol の 32 フィールド制限に収まるよう、保存が必要な状態だけを持つ。
+作成時固定の 12 個のルールは `CampaignTerms` にまとめ、進行中 Campaign の不変性を保つ。
+`category`、`created_at_ms`、センサス集計、床払い件数、申請件数、ラウンド支払い件数は
+`CampaignCreated` / `FloorCensusSet` / `ClaimSubmitted` / `FloorPaid` /
+`RoundFinalized` / `PayoutClaimed` イベントから取得する。
+将来の拡張データは dynamic field で持つ。
 
-dapp は `total_donated_usdc`・`verified_count_by_band`・`band_target_usdc`・
-`round_cap_multiplier`・`floor_ratio_bps`・`floor_total_paid_usdc`・`total_paid_usdc` の
-オンチェーン読み取りだけで「今いくら集まっているか」「床払い/本払いで1人あたりいくら届きそうか」を計算できる。
+dapp は `total_donated_usdc`・`verified_count_by_band`・`terms.band_target_usdc`・
+`terms.round_cap_multiplier`・`floor_amount_by_band`・`total_paid_usdc` とイベント集計で
+「今いくら集まっているか」「床払い/本払いで1人あたりいくら届きそうか」を計算できる。
 
 ### 5.3 MainPool（shared、プラットフォームに1つ）
 
@@ -463,7 +462,8 @@ floor_amount_by_band[b] = band_target[b] × floor_ratio_bps / 10_000            
   - `draw_category` / `draw_main` を各 Pool から**物理的に move**して `campaign.floor_balance` へ escrow し、
     `floor_from_category_usdc` / `floor_from_main_usdc` に記録。
     各 Pool の `total_floor_funded_usdc` を加算。
-  - `census_set = true`、上記確定値を保存。
+  - `census_set = true`、`floor_amount_by_band` と escrow 元金額を保存。
+    `registered_members_by_band`、`max_liability_usdc`、`floor_ratio_bps` はイベントで残す。
 - イベント: `FloorCensusSet { campaign_id, registered_members_by_band, max_liability_usdc,
   floor_ratio_bps, floor_amount_by_band, draw_category_usdc, draw_main_usdc }`。
 - 実行者: permissionless（誰でも可。署名検証が gate）。off-chain の census worker / relayer が submit する。
@@ -497,11 +497,12 @@ public fun claim_floor(
   - duplicate key がこの SBT に紐づくこと（`identity_registry::assert_duplicate_key_bound_to_pass`）。
 - 処理:
   1. `amount = campaign.floor_amount_by_band[band]` を読むだけ。再計算しない。
-  2. `floor_claimed = true`、`floor_paid_count += 1`、`floor_total_paid_usdc += amount`。
+  2. `floor_claimed = true`、`total_paid_usdc += amount`。
   3. `campaign.floor_balance` から `amount` を引いて `transfer::public_transfer(coin, pass.owner)`。
      （実申請者数 ≤ 登録メンバー数のため、床予算は構造上枯渇しない。）
   4. `FloorReceipt`（owned）を発行。
 - イベント: `FloorPaid { campaign_id, pass_lineage_id, band, amount_usdc, recipient, paid_at_ms }`。
+  支払い件数と床払い合計は `FloorPaid` イベントを集計して読む。
 - **金額は申請・検証のタイミングに依存しない**（変わるのは受取時期のみ）。
 
 ### 7.4 return_floor_budget（未消化床予算の返還、Day 30）
@@ -646,8 +647,8 @@ public fun submit_claim(
 | Area | `pass.home_cell == leaf.h3_index` | `EResidenceCellMismatch` |
 | Duplicate | 同一 `pass_lineage_id` の申請が未登録 | `EDuplicateApplication` |
 
-処理: `ClaimApplication { band, verified: false, floor_claimed: false, ... }` を登録し、
-`applied_count_by_band[band] += 1`。イベント `ClaimSubmitted`。
+処理: `ClaimApplication { band, verified: false, floor_claimed: false, ... }` を登録する。
+申請件数は `ClaimSubmitted` イベントを band 別に集計して読む。
 
 **本人確認はこの段階では要求しない**（検証遅延者を Day 21 で閉め出さないため）。
 
@@ -704,7 +705,8 @@ band_payout[b] = band_target[b] × ratio                                // u128 
   - `liability == 0` の場合は支払額ゼロでラウンドを進める（資金は次ラウンド / sweep へ）。
   - 終了判定: `campaign_av / total_eligible_count < min_payout_per_recipient_usdc`
     （または `campaign_av < 絶対額ガード`）の場合は finalize せず `sweep_residual` のみ可能な状態とする。
-  - `current_round += 1`、`round_payout_by_band` / `round_eligible_count` を保存、`round_paid_count = 0`。
+  - `current_round += 1`、`round_payout_by_band` を保存する。
+    `eligible_count` は `RoundFinalized` イベントで残す。
 - イベント: `RoundFinalized { campaign_id, round, liability, campaign_available, band_payout[],
   eligible_count, finalized_at_ms }`。
 
@@ -728,10 +730,11 @@ public fun claim_payout(
   `PayoutKey { pass_lineage_id, current_round }` 未登録（`EDuplicatePayout`）。
 - 処理:
   1. `amount = round_payout_by_band[band]` を読むだけ。再計算しない。
-  2. `PayoutKey` を登録、`round_paid_count += 1`、`total_paid_usdc += amount`。
+  2. `PayoutKey` を登録、`total_paid_usdc += amount`。
   3. `campaign.balance` から `amount` を引いて `transfer::public_transfer(coin, pass.owner)`。
   4. `PayoutReceipt`（round 付き owned）を発行。
 - イベント: `PayoutClaimed { campaign_id, round, pass_lineage_id, band, amount_usdc, recipient }`。
+  ラウンド内の支払い件数は `PayoutClaimed` イベントを集計して読む。
 
 ### 9.5 sweep_residual（最終スイープ、誰でも実行可）
 
@@ -851,8 +854,9 @@ assert!(obj.version == VERSION, EVersionMismatch);
   叩かれても version 不一致で abort させる。これが旧ロジック経由の資金移動を
   無効化する唯一の確実な手段であり、全 public 関数で必須とする。
 - migrate は AdminCap ゲートで提供する（`version < VERSION` の assert 付き引き上げのみ）。
-- struct フィールドの追加は upgrade では不可。Campaign / CategoryPool には counter・締切・
-  床予算・ラウンド状態を最初から含めた。将来の拡張は dynamic field で行う。
+- struct フィールドの追加は upgrade では不可。Campaign / CategoryPool には
+  contract が判断に使う締切・床予算・ラウンド状態だけを保存する。
+  表示用集計はイベントで残し、将来の拡張は dynamic field で行う。
 - 定数変更 = package upgrade。進行中の Campaign はスナップショット済みのため影響を受けない。
   `CampaignCreated` / `FloorCensusSet` イベントが適用値を自己記述するため、
   インデクサは定数のバージョン管理を必要としない。
@@ -930,7 +934,7 @@ assert!(obj.version == VERSION, EVersionMismatch);
 | ラウンド継続 | Round 2 で残高再分配、遅延 verify 者の参加、除外の次ラウンド反映 |
 | sweep | 終了閾値判定、床予算返還後のみ可、全額 Main 移送（Category へ流さない）、closed 後の操作 reject |
 | Ops | spend イベント記録、残高超過 reject、Main / Category / Campaign からの運営引き出し関数の不存在 |
-| 可視化 | total_donated / verified_count_by_band / floor_ratio_bps / floor_total_paid / total_paid / Category 流入・床拠出累計が正しく更新される |
+| 可視化 | total_donated / verified_count_by_band / floor_amount_by_band / total_paid / Category 流入・床拠出累計が正しく更新され、削除済み集計はイベントから復元できる |
 | Admin | unauthorized reject、期間短縮 reject、floor_ratio 手動設定不可、pause 中の各操作 reject |
 | Version | version 不一致 abort、migrate の単調増加 |
 

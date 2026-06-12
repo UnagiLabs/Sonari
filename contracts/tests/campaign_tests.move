@@ -147,6 +147,10 @@ fun campaign_version_is_1_after_create() {
     );
     assert!(result.is_some());
 
+    let emitted = event::events_by_type<campaign::CampaignCreated>();
+    let (_, _, _, _, _, created_at, _) = campaign::campaign_created_event_fields(*emitted.borrow(0));
+    assert!(created_at == NOW_MS);
+
     test_scenario::return_shared(category_registry);
     test_scenario::return_shared(category_pool);
     clock.destroy_for_testing();
@@ -196,27 +200,35 @@ fun campaign_snapshot_fields_match_constants() {
     let c = scenario.take_shared<campaign::Campaign>();
 
     let (
+        band_targets,
         round_cap_multiplier,
         floor_target_ratio_bps,
         min_claim_band,
+        split_campaign_bps,
+        split_main_bps,
+        split_ops_bps,
         campaign_ops_cap_usdc,
+        round_interval_ms,
+        min_payout_per_recipient_usdc,
         category_annual_event_divisor,
         floor_main_share_bps,
-    ) = campaign::campaign_snapshot_fields_for_testing(&c);
+    ) = campaign::campaign_terms_fields_for_testing(&c);
 
-    assert!(round_cap_multiplier == 3u64);
-    assert!(floor_target_ratio_bps == 5_000u64);
-    assert!(min_claim_band == 1u8);
-    assert!(campaign_ops_cap_usdc == 50_000_000_000u64);
-    assert!(category_annual_event_divisor == 5u64);
-    assert!(floor_main_share_bps == 2_000u64);
-
-    // band_target_usdc should be [50_000_000, 150_000_000, 300_000_000]
-    let band_targets = campaign::campaign_band_target_usdc(&c);
     assert!(band_targets.length() == 3);
     assert!(*band_targets.borrow(0) == 50_000_000u64);
     assert!(*band_targets.borrow(1) == 150_000_000u64);
     assert!(*band_targets.borrow(2) == 300_000_000u64);
+    assert!(round_cap_multiplier == 3u64);
+    assert!(floor_target_ratio_bps == 5_000u64);
+    assert!(min_claim_band == 1u8);
+    assert!(split_campaign_bps == 9_000u64);
+    assert!(split_main_bps == 500u64);
+    assert!(split_ops_bps == 500u64);
+    assert!(campaign_ops_cap_usdc == 50_000_000_000u64);
+    assert!(round_interval_ms == 7_776_000_000u64);
+    assert!(min_payout_per_recipient_usdc == 1_000_000u64);
+    assert!(category_annual_event_divisor == 5u64);
+    assert!(floor_main_share_bps == 2_000u64);
 
     test_scenario::return_shared(c);
     scenario.end();
@@ -256,14 +268,13 @@ fun campaign_donation_end_and_claim_end_are_set() {
     scenario.next_tx(ADMIN);
     let c = scenario.take_shared<campaign::Campaign>();
 
-    let created_at = campaign::campaign_created_at_ms(&c);
     let donation_end = campaign::campaign_donation_end_ms(&c);
     let claim_end = campaign::campaign_claim_end_ms(&c);
 
     // DONATION_PERIOD_MS = 2_592_000_000
-    assert!(donation_end == created_at + 2_592_000_000u64);
+    assert!(donation_end == NOW_MS + 2_592_000_000u64);
     // CLAIM_PERIOD_MS = 1_814_400_000
-    assert!(claim_end == created_at + 1_814_400_000u64);
+    assert!(claim_end == NOW_MS + 1_814_400_000u64);
 
     test_scenario::return_shared(c);
     scenario.end();
@@ -304,6 +315,10 @@ fun create_disaster_event_and_campaign_creates_both() {
     );
     assert!(result.is_some());
 
+    let emitted = event::events_by_type<campaign::CampaignCreated>();
+    let (_, _, category, _, _, _, _) = campaign::campaign_created_event_fields(*emitted.borrow(0));
+    assert!(category == category_pool::category_earthquake());
+
     test_scenario::return_shared(disaster_registry);
     test_scenario::return_shared(category_registry);
     test_scenario::return_shared(category_pool);
@@ -311,7 +326,6 @@ fun create_disaster_event_and_campaign_creates_both() {
 
     scenario.next_tx(ADMIN);
     let c = scenario.take_shared<campaign::Campaign>();
-    assert!(campaign::campaign_category(&c) == category_pool::category_earthquake());
     assert!(campaign::campaign_census_set(&c) == false);
     assert!(campaign::campaign_paused(&c) == false);
     assert!(campaign::campaign_min_claim_band(&c) == campaign::min_claim_band());

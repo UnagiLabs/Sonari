@@ -105,6 +105,8 @@ describe("CI workflow cache and Move checks", () => {
             "Move.toml",
             "Move.lock",
             "Install pinned Sui CLI",
+            "if: steps.changes.outputs.typescript == 'true' || steps.changes.outputs.move == 'true'",
+            "pnpm install --frozen-lockfile",
             "sui-cli-$" + "{{ runner.os }}-$" + "{{ env.SUI_CLI_SHA256 }}",
             "https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/sui-testnet-v1.71.1-ubuntu-x86_64.tgz",
             "ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5",
