@@ -50,10 +50,11 @@ function readPublishedTomlPackageId(network: SonariNetwork): string | undefined 
 const sonariNetwork = resolveSonariNetwork(process.env.NEXT_PUBLIC_SUI_NETWORK);
 // env に値があれば優先（localnet/dev 用＋将来 CI で明示注入したい場合の逃げ道）、
 // なければ Published.toml の published-at、それも無ければ空文字へ degrade する。
+const publishedPackageId = readPublishedTomlPackageId(sonariNetwork);
 const membershipPackageId =
-    (process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID?.trim() ||
-        readPublishedTomlPackageId(sonariNetwork)) ??
-    "";
+    process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID?.trim() || publishedPackageId || "";
+const fundingPackageId =
+    process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID?.trim() || publishedPackageId || "";
 
 const nextConfig: NextConfig = {
     transpilePackages: ["@sonari/proof-core"],
@@ -61,6 +62,7 @@ const nextConfig: NextConfig = {
     // ため、.env 側に同名値があっても override-wins で一貫する（NEXT_PUBLIC_* の二重定義は衝突扱いされない）。
     env: {
         NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID: membershipPackageId,
+        NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: fundingPackageId,
     },
     images: {
         unoptimized: true,

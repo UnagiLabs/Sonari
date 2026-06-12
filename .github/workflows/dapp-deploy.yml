@@ -123,7 +123,9 @@ jobs:
       #     1 箇所更新すれば全デプロイ先へ反映される。ここでは NEXT_PUBLIC_* 名へ写し替えて渡す。
       #   - environment-level Variables（cloudflare-dapp-worker）= dapp 固有の値
       #     （Google Maps key / World ID app_id）。
-      # NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID は next.config が Published.toml から自動注入するので渡さない。
+      # NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID は next.config が Published.toml から自動注入するので、env 変数としては渡さない。
+      # NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID は vars を優先し、未設定時は同じ
+      # next.config の Published.toml フォールバックを使う。
       #
       # アプリ secret（WORLD_ID_RP_SIGNING_KEY）は CI に置かない。`wrangler secret put` で
       # Cloudflare 側に別管理する。CI が扱うのは Cloudflare API token と account id、公開値のみ。
@@ -144,6 +146,12 @@ jobs:
           NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
           NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
+          NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: ${{ vars.SONARI_FUNDING_PACKAGE_ID }}
+          NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID: ${{ vars.SONARI_DONATION_PAUSE_STATE_ID }}
+          NEXT_PUBLIC_SONARI_MAIN_POOL_ID: ${{ vars.SONARI_MAIN_POOL_ID }}
+          NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID: ${{ vars.SONARI_OPERATIONS_POOL_ID }}
+          NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID: ${{ vars.SONARI_CATEGORY_REGISTRY_ID }}
+          NEXT_PUBLIC_SONARI_USDC_TYPE: ${{ vars.SONARI_USDC_TYPE }}
           # dapp 固有（environment-level Variables）。
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}
