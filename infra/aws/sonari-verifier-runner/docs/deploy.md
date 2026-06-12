@@ -112,7 +112,9 @@ printf '%s\n' "${deploy_plan_parameter_overrides[@]}" | grep '^ScheduleState=DIS
 # 地震 relayer を有効にする場合だけ、次のように追加します。
 # <PACKAGE_ID> は deploy 済み Move package id に置き換えます。
 extra_parameter_overrides=()
-# extra_parameter_overrides+=("RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload")
+# extra_parameter_overrides+=("RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_and_campaign_from_signed_payload")
+# extra_parameter_overrides+=("RelayerCategoryRegistry=$SONARI_CATEGORY_REGISTRY_ID")
+# extra_parameter_overrides+=("RelayerCategoryPool=$SONARI_EARTHQUAKE_CATEGORY_POOL_ID")
 
 aws cloudformation deploy \
   --template-file infra/aws/sonari-verifier-runner/template.yaml \
@@ -126,7 +128,7 @@ aws cloudformation deploy \
 
 初回作成、または environment-specific な stack parameter が必要な更新では、この stack 用に review 済みの account parameter source を使い、同じ command に追加します。artifact parameter は deploy plan の値を維持してください。`LambdaCodeS3Key`、TEE key、checksum 値、`GitCommitSha`、`ScheduleState` を手書きしてはいけません。
 
-GitHub Actions では、同じ値を environment variable の `AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET` に設定します。空の場合、CloudFormation の `RelayerTarget` は空文字のままです。
+GitHub Actions では、`RelayerTarget` を `contracts/Published.toml` の package id から導出します。`RelayerCategoryRegistry` と `RelayerCategoryPool` は repo-level Variables の `SONARI_CATEGORY_REGISTRY_ID` / `SONARI_EARTHQUAKE_CATEGORY_POOL_ID` から渡します。
 
 mainnet dummy proof guard が deploy 前に拒否することを確認します。
 

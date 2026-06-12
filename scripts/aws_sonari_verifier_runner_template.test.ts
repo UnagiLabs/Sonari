@@ -612,6 +612,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // Earthquake RELAYER_* namespace must remain unchanged
         expect(template).toContain("RELAYER_MODE: !Ref RelayerMode");
         expect(template).toContain("RELAYER_NETWORK: !Ref RelayerNetwork");
+        expect(template).toContain("RelayerCategoryRegistry:");
+        expect(template).toContain("RelayerCategoryPool:");
+        expect(template).toContain("RELAYER_CATEGORY_REGISTRY: !Ref RelayerCategoryRegistry");
+        expect(template).toContain("RELAYER_CATEGORY_POOL: !Ref RelayerCategoryPool");
         expect(template).toContain("RELAYER_GRPC_URL: !Ref RelayerGrpcUrl");
         expect(template).toContain("RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress");
         expect(template).toContain("RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn");

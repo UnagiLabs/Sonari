@@ -7,11 +7,11 @@ Earthquake verifier と membership identity verifier の PCR config は、既存
 - AdminCap を持つ管理者 wallet は AWS に置きません。
 - PCR config の登録、更新、停止は、デプロイ時に Codex が動く管理端末の project-local admin wallet から実行します。
 - AdminCap の秘密鍵や wallet config は AWS Runner、EC2、Lambda、SSM、AWS Secrets Manager に入れてはいけません。
-- Relayer wallet は AdminCap を持ちません。Relayer wallet は `accessor::create_disaster_event_from_signed_payload` の submit だけに使います。
+- Relayer wallet は AdminCap を持ちません。Relayer wallet は `accessor::create_disaster_event_and_campaign_from_signed_payload` の submit だけに使います。
 - SourceArchiver 用 hot wallet をローカルで扱う場合も admin wallet とは分離し、AWS Secrets Manager の `sonari/walrus-archiver/private-key` は raw `suiprivkey...` secret だけを保持します。
 - `metadata_verifier` 側の PCR config 関数は package 内部用です。外部運用では `admin` module だけを入口にします。
 
-AWS Runner は `metadata_verifier::register_enclave_instance` を呼びます。Relayer は `accessor::create_disaster_event_from_signed_payload` を呼びます。どちらも AdminCap を持たず、登録済み PCR と attestation、または登録済み enclave instance の署名で検証されます。
+AWS Runner は `metadata_verifier::register_enclave_instance` を呼びます。Relayer は `accessor::create_disaster_event_and_campaign_from_signed_payload` を呼びます。どちらも AdminCap を持たず、登録済み PCR と attestation、または登録済み enclave instance の署名で検証されます。
 
 PCR0 / PCR1 / PCR2 は 48 byte SHA-384 measurement です。Move の `vector<u8>` へ渡すときは、`0x` なしの hex を 2 桁ずつ byte に分けます。
 

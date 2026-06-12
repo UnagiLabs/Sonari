@@ -20,14 +20,18 @@ export interface RelayerRequestPreview {
     target: string;
     registry: string;
     verifierRegistry: string;
+    categoryRegistry: string;
+    categoryPool: string;
     clock: string;
-    arguments: [string, string, string, number[], number[], number[]];
+    arguments: [string, string, string, string, string, number[], number[], number[]];
     submitRequest: {
         target: string;
         registry: string;
         verifierRegistry: string;
+        categoryRegistry: string;
+        categoryPool: string;
         clock: string;
-        arguments: [string, string, string, number[], number[], number[]];
+        arguments: [string, string, string, string, string, number[], number[], number[]];
     };
 }
 
@@ -58,6 +62,8 @@ export interface HttpRelayerPreviewConfig {
     target: string;
     registry: string;
     verifierRegistry: string;
+    categoryRegistry: string;
+    categoryPool: string;
     mode?: RelayerMode;
     network?: SuiNetwork;
     grpcUrl?: string;
@@ -69,6 +75,8 @@ export interface DirectRelayerConfig {
     target: string;
     registry: string;
     verifierRegistry: string;
+    categoryRegistry: string;
+    categoryPool: string;
     network?: SuiNetwork;
     grpcUrl?: string;
     senderAddress?: string;
@@ -94,6 +102,8 @@ export class HttpRelayerAdapter implements RelayerAdapter {
         this.target = config.target;
         this.registry = config.registry;
         this.verifierRegistry = config.verifierRegistry;
+        this.categoryRegistry = config.categoryRegistry;
+        this.categoryPool = config.categoryPool;
         this.mode = config.mode ?? "preview";
         this.network = config.network;
         this.grpcUrl = config.grpcUrl;
@@ -104,6 +114,8 @@ export class HttpRelayerAdapter implements RelayerAdapter {
     private readonly target: string;
     private readonly registry: string;
     private readonly verifierRegistry: string;
+    private readonly categoryRegistry: string;
+    private readonly categoryPool: string;
     readonly mode: RelayerMode;
     private readonly network: SuiNetwork | undefined;
     private readonly grpcUrl: string | undefined;
@@ -133,6 +145,8 @@ export class HttpRelayerAdapter implements RelayerAdapter {
                     target: this.target,
                     registry: this.registry,
                     verifierRegistry: this.verifierRegistry,
+                    categoryRegistry: this.categoryRegistry,
+                    categoryPool: this.categoryPool,
                     network: this.network,
                     grpcUrl: this.grpcUrl,
                     senderAddress: this.senderAddress,
@@ -186,6 +200,8 @@ export class DirectRelayerAdapter implements RelayerAdapter {
             target: this.config.target,
             registry: this.config.registry,
             verifierRegistry: this.config.verifierRegistry,
+            categoryRegistry: this.config.categoryRegistry,
+            categoryPool: this.config.categoryPool,
         };
         if (this.config.configurationError !== undefined) {
             return relayerSubmitFailed(this.config.configurationError);
@@ -358,6 +374,8 @@ function normalizeDirectRelayerRequest(input: DirectRelayerRequestPreview): Rela
         target: input.target,
         registry: input.registry,
         verifierRegistry: input.verifierRegistry,
+        categoryRegistry: input.categoryRegistry,
+        categoryPool: input.categoryPool,
         clock: input.clock,
         arguments: input.arguments,
         submitRequest: input.submitRequest,

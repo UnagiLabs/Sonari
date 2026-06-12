@@ -665,19 +665,20 @@ jobs:
           )"
 
           printf 'SONARI_IDENTITY_PACKAGE_ID=%s\n' "$package_id" >> "$GITHUB_ENV"
+          printf 'RELAYER_TARGET=%s::accessor::create_disaster_event_and_campaign_from_signed_payload\n' "$package_id" >> "$GITHUB_ENV"
           echo "Resolved Sonari Move package id from Published.toml: $package_id"
 
       - name: Deploy CloudFormation stack
         shell: bash
         env:
-          # earthquake relayer は旧 package（移行ラグ）。これらは earthquake 固有のため
-          # environment-level Variables（AWS_..._）に据え置く。RELAYER_NETWORK だけは Sui ネットワークの
-          # 単一情報源（SONARI_SUI_NETWORK）から取る。
+          # earthquake relayer target は Published.toml 由来 package id から前段 step で導出する。
+          # object id は publish tx の GenesisObject 由来値を GH Variables で渡す。
           RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}
           RELAYER_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
-          RELAYER_TARGET: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}
           RELAYER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}
           RELAYER_VERIFIER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}
+          RELAYER_CATEGORY_REGISTRY: ${{ vars.SONARI_CATEGORY_REGISTRY_ID }}
+          RELAYER_CATEGORY_POOL: ${{ vars.SONARI_EARTHQUAKE_CATEGORY_POOL_ID }}
           RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}
           RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
           RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
@@ -744,6 +745,12 @@ jobs:
           fi
           if [[ -n "${RELAYER_VERIFIER_REGISTRY:-}" ]]; then
             extra_parameter_overrides+=("RelayerVerifierRegistry=$RELAYER_VERIFIER_REGISTRY")
+          fi
+          if [[ -n "${RELAYER_CATEGORY_REGISTRY:-}" ]]; then
+            extra_parameter_overrides+=("RelayerCategoryRegistry=$RELAYER_CATEGORY_REGISTRY")
+          fi
+          if [[ -n "${RELAYER_CATEGORY_POOL:-}" ]]; then
+            extra_parameter_overrides+=("RelayerCategoryPool=$RELAYER_CATEGORY_POOL")
           fi
           if [[ -n "${RELAYER_GRPC_URL:-}" ]]; then
             extra_parameter_overrides+=("RelayerGrpcUrl=$RELAYER_GRPC_URL")

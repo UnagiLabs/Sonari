@@ -10,6 +10,8 @@ export const relayerPackage = "@sonari/earthquake-relayer";
 
 export const RELAYER_SUBMIT_FAILED = "RELAYER_SUBMIT_FAILED";
 export const MOVE_REJECTED = "MOVE_REJECTED";
+export const CAMPAIGN_RELAYER_TARGET_SUFFIX =
+    "::accessor::create_disaster_event_and_campaign_from_signed_payload";
 
 export type RelayerErrorCode = typeof RELAYER_SUBMIT_FAILED | typeof MOVE_REJECTED;
 
@@ -21,6 +23,8 @@ export interface RelayerRequestConfig {
     target: string;
     registry: string;
     verifierRegistry: string;
+    categoryRegistry: string;
+    categoryPool: string;
 }
 
 export type SuiNetwork = "mainnet" | "testnet" | "devnet";
@@ -118,20 +122,24 @@ export interface RelayerRequestPreview {
     target: string;
     registry: string;
     verifierRegistry: string;
+    categoryRegistry: string;
+    categoryPool: string;
     clock: string;
     verifierConfigKey: number;
     verifierConfigVersion: number;
     enclaveInstancePublicKey: string;
-    arguments: [string, string, string, number[], number[], number[]];
+    arguments: [string, string, string, string, string, number[], number[], number[]];
     submitRequest: {
         target: string;
         registry: string;
         verifierRegistry: string;
+        categoryRegistry: string;
+        categoryPool: string;
         clock: string;
         verifierConfigKey: number;
         verifierConfigVersion: number;
         enclaveInstancePublicKey: string;
-        arguments: [string, string, string, number[], number[], number[]];
+        arguments: [string, string, string, string, string, number[], number[], number[]];
     };
 }
 
@@ -208,9 +216,11 @@ export function buildRelayerRequestPreview(
         return configResult;
     }
 
-    const moveArguments: [string, string, string, number[], number[], number[]] = [
+    const moveArguments: [string, string, string, string, string, number[], number[], number[]] = [
         config.registry,
         config.verifierRegistry,
+        config.categoryRegistry,
+        config.categoryPool,
         SUI_CLOCK_OBJECT_ID,
         [...parsed.value.payloadBcsBytes],
         [...parsed.value.signatureBytes],
@@ -220,6 +230,8 @@ export function buildRelayerRequestPreview(
         target: config.target,
         registry: config.registry,
         verifierRegistry: config.verifierRegistry,
+        categoryRegistry: config.categoryRegistry,
+        categoryPool: config.categoryPool,
         clock: SUI_CLOCK_OBJECT_ID,
         verifierConfigKey: parsed.value.verifierConfigKey,
         verifierConfigVersion: parsed.value.verifierConfigVersion,
@@ -233,6 +245,8 @@ export function buildRelayerRequestPreview(
             target: config.target,
             registry: config.registry,
             verifierRegistry: config.verifierRegistry,
+            categoryRegistry: config.categoryRegistry,
+            categoryPool: config.categoryPool,
             clock: SUI_CLOCK_OBJECT_ID,
             verifierConfigKey: parsed.value.verifierConfigKey,
             verifierConfigVersion: parsed.value.verifierConfigVersion,
@@ -362,10 +376,12 @@ export function createSuiSubmitTransaction(
         arguments: [
             tx.object(request.registry),
             tx.object(request.verifierRegistry),
+            tx.object(request.categoryRegistry),
+            tx.object(request.categoryPool),
             tx.object.clock(),
-            tx.pure.vector("u8", Array.from(request.arguments[3])),
-            tx.pure.vector("u8", Array.from(request.arguments[4])),
             tx.pure.vector("u8", Array.from(request.arguments[5])),
+            tx.pure.vector("u8", Array.from(request.arguments[6])),
+            tx.pure.vector("u8", Array.from(request.arguments[7])),
         ],
     });
     return tx;
@@ -431,10 +447,17 @@ function validateRequestConfig(config: RelayerRequestConfig): RelayerResult<Rela
     if (
         !isNonEmptyString(config.target) ||
         !isNonEmptyString(config.registry) ||
-        !isNonEmptyString(config.verifierRegistry)
+        !isNonEmptyString(config.verifierRegistry) ||
+        !isNonEmptyString(config.categoryRegistry) ||
+        !isNonEmptyString(config.categoryPool)
     ) {
         return relayerSubmitFailed(
-            "Relayer request requires target, registry, and verifierRegistry",
+            "Relayer request requires target, registry, verifierRegistry, categoryRegistry, and categoryPool",
+        );
+    }
+    if (!config.target.endsWith(CAMPAIGN_RELAYER_TARGET_SUFFIX)) {
+        return relayerSubmitFailed(
+            `Relayer target must end with ${CAMPAIGN_RELAYER_TARGET_SUFFIX}`,
         );
     }
 
@@ -444,6 +467,8 @@ function validateRequestConfig(config: RelayerRequestConfig): RelayerResult<Rela
             target: config.target,
             registry: config.registry,
             verifierRegistry: config.verifierRegistry,
+            categoryRegistry: config.categoryRegistry,
+            categoryPool: config.categoryPool,
         },
     };
 }
@@ -683,9 +708,9 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 function cloneMoveArguments(
-    args: [string, string, string, number[], number[], number[]],
-): [string, string, string, number[], number[], number[]] {
-    return [args[0], args[1], args[2], [...args[3]], [...args[4]], [...args[5]]];
+    args: [string, string, string, string, string, number[], number[], number[]],
+): [string, string, string, string, string, number[], number[], number[]] {
+    return [args[0], args[1], args[2], args[3], args[4], [...args[5]], [...args[6]], [...args[7]]];
 }
 
 function bytesEqual(left: readonly number[], right: readonly number[]): boolean {

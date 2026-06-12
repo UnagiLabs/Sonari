@@ -34,9 +34,11 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_CASE_ID = "usgs/finalized_minimal";
 const DEFAULT_FIXTURES_DIR = "nautilus/verifiers/earthquake/fixtures";
 const LEGACY_FIXTURES_URI_DIR = "nautilus/verifiers/earthquake/fixtures";
-const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_from_signed_payload";
+const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_and_campaign_from_signed_payload";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
+const DEFAULT_CATEGORY_REGISTRY = "0xabc";
+const DEFAULT_CATEGORY_POOL = "0xdef";
 
 export const E2E_FIXTURE_CASES = [
     "usgs/finalized_minimal",
@@ -56,6 +58,8 @@ export interface LocalOracleE2eOptions {
     target?: string;
     registry?: string;
     verifierRegistry?: string;
+    categoryRegistry?: string;
+    categoryPool?: string;
     nowMs?: number;
 }
 
@@ -119,6 +123,8 @@ export async function runLocalOracleE2e(
     const target = options.target ?? DEFAULT_TARGET;
     const registry = options.registry ?? DEFAULT_REGISTRY;
     const verifierRegistry = options.verifierRegistry ?? DEFAULT_VERIFIER_REGISTRY;
+    const categoryRegistry = options.categoryRegistry ?? DEFAULT_CATEGORY_REGISTRY;
+    const categoryPool = options.categoryPool ?? DEFAULT_CATEGORY_POOL;
     const candidate = await loadFixtureCandidateAsync(caseId, fixturesDir);
     const nowMs = options.nowMs ?? candidate.occurred_at_ms + 25 * HOUR_MS;
 
@@ -155,6 +161,8 @@ export async function runLocalOracleE2e(
             target,
             registry,
             verifierRegistry,
+            categoryRegistry,
+            categoryPool,
         });
         if (!relayerPreview.ok) {
             throw new Error(

@@ -39,6 +39,16 @@ export async function runOracleDoctor(
             env.RELAYER_MODE,
         ),
     );
+    checks.push(
+        checkRelayerCoreField(
+            "RELAYER_CATEGORY_REGISTRY",
+            env.RELAYER_CATEGORY_REGISTRY,
+            env.RELAYER_MODE,
+        ),
+    );
+    checks.push(
+        checkRelayerCoreField("RELAYER_CATEGORY_POOL", env.RELAYER_CATEGORY_POOL, env.RELAYER_MODE),
+    );
     checks.push(checkRelayerNetwork(env.RELAYER_NETWORK, env.RELAYER_MODE));
     checks.push(checkBooleanFlag("RELAYER_ALLOW_SUBMIT", env.RELAYER_ALLOW_SUBMIT));
     checks.push(checkRelayerGrpcUrl(env.RELAYER_GRPC_URL, env.RELAYER_NETWORK, env.RELAYER_MODE));

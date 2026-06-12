@@ -12,9 +12,11 @@ import {
     UsgsSourceClient,
 } from "./nautilus_local_e2e.js";
 
-const target = "0x123::accessor::create_disaster_event_from_signed_payload";
+const target = "0x123::accessor::create_disaster_event_and_campaign_from_signed_payload";
 const registry = "0x456";
 const verifierRegistry = "0x654";
+const categoryRegistry = "0xabc";
+const categoryPool = "0xdef";
 // CI runs this test with a cold Cargo binary build before the Rust TEE tests.
 const LOCAL_E2E_TEST_TIMEOUT_MS = 90_000;
 
@@ -27,6 +29,8 @@ describe("Nautilus local oracle E2E", () => {
                 target,
                 registry,
                 verifierRegistry,
+                categoryRegistry,
+                categoryPool,
             });
 
             expect(output.case_id).toBe("usgs/finalized_minimal");
@@ -73,6 +77,8 @@ describe("Nautilus local oracle E2E", () => {
                     arguments: [
                         registry,
                         verifierRegistry,
+                        categoryRegistry,
+                        categoryPool,
                         expect.any(String),
                         expect.any(Array),
                         expect.any(Array),
@@ -94,6 +100,8 @@ describe("Nautilus local oracle E2E", () => {
                     target: "",
                     registry,
                     verifierRegistry,
+                    categoryRegistry,
+                    categoryPool,
                 }),
             ).rejects.toThrow(/Local E2E relayer preview failed: .*target, registry/);
         },
@@ -142,6 +150,8 @@ describe("Nautilus local oracle E2E", () => {
                     target,
                     registry,
                     verifierRegistry,
+                    categoryRegistry,
+                    categoryPool,
                 });
 
                 expect(output.first_process_summary.processed).toBe(1);
@@ -394,6 +404,8 @@ describe("Nautilus local oracle E2E", () => {
                 target,
                 registry,
                 verifierRegistry,
+                categoryRegistry,
+                categoryPool,
             });
 
             expect(output.runner_invocation_count).toBe(1);
