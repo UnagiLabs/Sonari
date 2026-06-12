@@ -631,6 +631,9 @@
         },
         "statusBar": {
             "previewData": "Preview data",
+            "liveData": "Live chain data",
+            "loadingData": "Loading chain data",
+            "unavailable": "Chain data unavailable",
             "lastRefreshed": "Last refreshed {time}",
             "publicView": "Public transparency view"
         },
@@ -675,8 +678,11 @@
             "main": {
                 "name": "Main Pool"
             },
-            "earthquake": {
-                "name": "Earthquake Relief Pool"
+            "operations": {
+                "name": "Operations Pool"
+            },
+            "category": {
+                "name": "Category Pool"
             }
         },
         "eventPanel": {
@@ -706,7 +712,16 @@
             "action": "Full leaderboard",
             "individualDonors": "Individual donors",
             "corporateSponsors": "Corporate sponsors",
+            "noSupporters": "No supporter ranking is available from chain data yet.",
             "rankLabel": "rank #{rank}"
+        },
+        "states": {
+            "loadingTitle": "Reading chain data",
+            "loadingBody": "Pool balances and recent activity are being read from Sui RPC.",
+            "errorTitle": "Could not read dashboard data",
+            "errorBody": "The dashboard does not show fallback mock data. Check the configuration or retry the RPC request.",
+            "retry": "Retry",
+            "noItems": "No chain activity is available yet."
         }
     },
     "claim": {
