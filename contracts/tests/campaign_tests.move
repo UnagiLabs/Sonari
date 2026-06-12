@@ -147,6 +147,10 @@ fun campaign_version_is_1_after_create() {
     );
     assert!(result.is_some());
 
+    let emitted = event::events_by_type<campaign::CampaignCreated>();
+    let (_, _, _, _, _, created_at, _) = campaign::campaign_created_event_fields(*emitted.borrow(0));
+    assert!(created_at == NOW_MS);
+
     test_scenario::return_shared(category_registry);
     test_scenario::return_shared(category_pool);
     clock.destroy_for_testing();
@@ -264,14 +268,13 @@ fun campaign_donation_end_and_claim_end_are_set() {
     scenario.next_tx(ADMIN);
     let c = scenario.take_shared<campaign::Campaign>();
 
-    let created_at = campaign::campaign_created_at_ms(&c);
     let donation_end = campaign::campaign_donation_end_ms(&c);
     let claim_end = campaign::campaign_claim_end_ms(&c);
 
     // DONATION_PERIOD_MS = 2_592_000_000
-    assert!(donation_end == created_at + 2_592_000_000u64);
+    assert!(donation_end == NOW_MS + 2_592_000_000u64);
     // CLAIM_PERIOD_MS = 1_814_400_000
-    assert!(claim_end == created_at + 1_814_400_000u64);
+    assert!(claim_end == NOW_MS + 1_814_400_000u64);
 
     test_scenario::return_shared(c);
     scenario.end();
@@ -312,6 +315,10 @@ fun create_disaster_event_and_campaign_creates_both() {
     );
     assert!(result.is_some());
 
+    let emitted = event::events_by_type<campaign::CampaignCreated>();
+    let (_, _, category, _, _, _, _) = campaign::campaign_created_event_fields(*emitted.borrow(0));
+    assert!(category == category_pool::category_earthquake());
+
     test_scenario::return_shared(disaster_registry);
     test_scenario::return_shared(category_registry);
     test_scenario::return_shared(category_pool);
@@ -319,7 +326,6 @@ fun create_disaster_event_and_campaign_creates_both() {
 
     scenario.next_tx(ADMIN);
     let c = scenario.take_shared<campaign::Campaign>();
-    assert!(campaign::campaign_category(&c) == category_pool::category_earthquake());
     assert!(campaign::campaign_census_set(&c) == false);
     assert!(campaign::campaign_paused(&c) == false);
     assert!(campaign::campaign_min_claim_band(&c) == campaign::min_claim_band());

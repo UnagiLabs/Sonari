@@ -84,7 +84,6 @@ public struct Campaign has key {
     disaster_event_id: ID,
     event_uid: vector<u8>,
     event_revision: u32,
-    category: u8,
     category_pool_id: ID,
     // 本払い資金（Round 1 以降）
     balance: Balance<USDC>,
@@ -94,12 +93,7 @@ public struct Campaign has key {
     floor_from_main_usdc: u64,
     // センサス確定値
     census_set: bool,
-    registered_members_by_band: vector<u64>,
-    max_liability_usdc: u64,
-    floor_ratio_bps: u64,
     floor_amount_by_band: vector<u64>,
-    floor_paid_count: u64,
-    floor_total_paid_usdc: u64,
     floor_budget_returned: bool,
     // リアルタイム表示用
     total_donated_usdc: u64,
@@ -108,18 +102,14 @@ public struct Campaign has key {
     // 作成時スナップショット（以後不変）
     terms: CampaignTerms,
     // 締切
-    created_at_ms: u64,
     donation_end_ms: u64,
     claim_end_ms: u64,
     // 申請状態
-    applied_count_by_band: vector<u64>,
     verified_count_by_band: vector<u64>,
     // 本払いラウンド状態
     current_round: u64,
     round_finalized_at_ms: u64,
     round_payout_by_band: vector<u64>,
-    round_paid_count: u64,
-    round_eligible_count: u64,
     closed: bool,
     sweep_eligible: bool,
     // 運用
@@ -321,34 +311,24 @@ public(package) fun create_campaign(
         disaster_event_id,
         event_uid,
         event_revision,
-        category,
         category_pool_id: pool_id,
         balance: balance::zero(),
         floor_balance: balance::zero(),
         floor_from_category_usdc: 0,
         floor_from_main_usdc: 0,
         census_set: false,
-        registered_members_by_band: vector[0, 0, 0],
-        max_liability_usdc: 0,
-        floor_ratio_bps: 0,
         floor_amount_by_band: vector[0, 0, 0],
-        floor_paid_count: 0,
-        floor_total_paid_usdc: 0,
         floor_budget_returned: false,
         total_donated_usdc: 0,
         total_paid_usdc: 0,
         ops_withheld_usdc: 0,
         terms,
-        created_at_ms,
         donation_end_ms,
         claim_end_ms,
-        applied_count_by_band: vector[0, 0, 0],
         verified_count_by_band: vector[0, 0, 0],
         current_round: 0,
         round_finalized_at_ms: 0,
         round_payout_by_band: vector[0, 0, 0],
-        round_paid_count: 0,
-        round_eligible_count: 0,
         closed: false,
         sweep_eligible: false,
         paused: false,
@@ -361,7 +341,7 @@ public(package) fun create_campaign(
         disaster_event_id: campaign.disaster_event_id,
         event_uid: campaign.event_uid,
         event_revision: campaign.event_revision,
-        category: campaign.category,
+        category,
         category_pool_id: campaign.category_pool_id,
         band_target_usdc: campaign.terms.band_target_usdc,
         floor_target_ratio_bps: campaign.terms.floor_target_ratio_bps,
@@ -372,7 +352,7 @@ public(package) fun create_campaign(
         campaign_ops_cap_usdc: campaign.terms.campaign_ops_cap_usdc,
         donation_end_ms: campaign.donation_end_ms,
         claim_end_ms: campaign.claim_end_ms,
-        created_at_ms: campaign.created_at_ms,
+        created_at_ms,
         actor: ctx.sender(),
     });
 
@@ -405,10 +385,6 @@ public(package) fun campaign_event_revision(c: &Campaign): u32 {
     c.event_revision
 }
 
-public(package) fun campaign_category(c: &Campaign): u8 {
-    c.category
-}
-
 public(package) fun campaign_category_pool_id(c: &Campaign): ID {
     c.category_pool_id
 }
@@ -427,10 +403,6 @@ public(package) fun campaign_donation_end_ms(c: &Campaign): u64 {
 
 public(package) fun campaign_claim_end_ms(c: &Campaign): u64 {
     c.claim_end_ms
-}
-
-public(package) fun campaign_created_at_ms(c: &Campaign): u64 {
-    c.created_at_ms
 }
 
 public(package) fun campaign_min_claim_band(c: &Campaign): u8 {
@@ -471,6 +443,10 @@ public(package) fun campaign_ops_withheld_usdc(c: &Campaign): u64 {
 
 public(package) fun campaign_total_donated_usdc(c: &Campaign): u64 {
     c.total_donated_usdc
+}
+
+public(package) fun campaign_total_paid_usdc(c: &Campaign): u64 {
+    c.total_paid_usdc
 }
 
 public(package) fun deposit_campaign_usdc(c: &mut Campaign, coin: Coin<USDC>) {
@@ -546,7 +522,6 @@ public(package) fun apply_floor_census(
 
     if (max_liability == 0) {
         campaign.census_set = true;
-        campaign.registered_members_by_band = registered;
         event::emit(FloorCensusSet {
             campaign_id,
             registered_members_by_band: registered,
@@ -589,9 +564,6 @@ public(package) fun apply_floor_census(
     };
 
     campaign.census_set = true;
-    campaign.registered_members_by_band = registered;
-    campaign.max_liability_usdc = max_liability as u64;
-    campaign.floor_ratio_bps = floor_ratio_bps;
     campaign.floor_amount_by_band = floor_amount_by_band;
     campaign.floor_from_category_usdc = draw_category;
     campaign.floor_from_main_usdc = draw_main;
@@ -629,9 +601,6 @@ public(package) fun add_claim_application(
             excluded: false,
         },
     );
-    let band_idx = (band as u64) - 1;
-    let count = campaign.applied_count_by_band.borrow_mut(band_idx);
-    *count = *count + 1;
 }
 
 public(package) fun set_claim_verified(
@@ -692,8 +661,6 @@ public(package) fun claim_floor_payment(
     let band_idx = (band as u64) - 1;
     let amount = *campaign.floor_amount_by_band.borrow(band_idx);
 
-    campaign.floor_paid_count = campaign.floor_paid_count + 1;
-    campaign.floor_total_paid_usdc = campaign.floor_total_paid_usdc + amount;
     campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
 
     let recipient = membership::membership_pass_owner(pass);
@@ -982,8 +949,6 @@ public(package) fun finalize_round_v2(
     campaign.current_round = round;
     campaign.round_finalized_at_ms = now_ms;
     campaign.round_payout_by_band = band_payout;
-    campaign.round_eligible_count = total_eligible;
-    campaign.round_paid_count = 0;
 
     let campaign_id = object::id(campaign);
     let liability = (liability128 as u64);
@@ -1033,7 +998,6 @@ public(package) fun claim_payout_v2(
     let amount = *campaign.round_payout_by_band.borrow(band_idx);
 
     dynamic_field::add(&mut campaign.id, payout_key, true);
-    campaign.round_paid_count = campaign.round_paid_count + 1;
     campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
 
     let recipient = membership::membership_pass_owner(pass);
@@ -1171,25 +1135,15 @@ public(package) fun e_application_not_verified(): u64 { EApplicationNotVerified 
 
 public(package) fun campaign_floor_census_fields(
     c: &Campaign,
-): (bool, u64, u64, vector<u64>, u64, u64, u64, bool) {
+): (bool, vector<u64>, u64, u64, u64, bool) {
     (
         c.census_set,
-        c.max_liability_usdc,
-        c.floor_ratio_bps,
         c.floor_amount_by_band,
         c.floor_from_category_usdc,
         c.floor_from_main_usdc,
         c.floor_balance.value(),
         c.floor_budget_returned,
     )
-}
-
-public(package) fun campaign_floor_paid_fields(c: &Campaign): (u64, u64, u64) {
-    (c.floor_paid_count, c.floor_total_paid_usdc, c.total_paid_usdc)
-}
-
-public(package) fun campaign_registered_members_by_band(c: &Campaign): vector<u64> {
-    c.registered_members_by_band
 }
 
 // ---------------------------------------------------------------
@@ -1417,13 +1371,11 @@ public fun recipient_excluded_event_fields(
 #[test_only]
 public fun campaign_payout_round_fields(
     c: &Campaign,
-): (u64, u64, vector<u64>, u64, u64, bool, bool) {
+): (u64, u64, vector<u64>, bool, bool) {
     (
         c.current_round,
         c.round_finalized_at_ms,
         c.round_payout_by_band,
-        c.round_paid_count,
-        c.round_eligible_count,
         c.closed,
         c.sweep_eligible,
     )

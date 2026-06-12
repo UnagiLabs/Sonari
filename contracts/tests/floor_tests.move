@@ -169,12 +169,10 @@ fun floor_census_with_zero_members_sets_census_no_escrow() {
         scenario.ctx(),
     );
 
-    let (census_set, max_liability, floor_ratio, floor_amounts, draw_cat, draw_main, floor_bal, _) =
+    let (census_set, floor_amounts, draw_cat, draw_main, floor_bal, _) =
         campaign::campaign_floor_census_fields(&c);
 
     assert!(census_set == true);
-    assert!(max_liability == 0);
-    assert!(floor_ratio == 0);
     assert!(*floor_amounts.borrow(0) == 0);
     assert!(draw_cat == 0);
     assert!(draw_main == 0);
@@ -182,6 +180,14 @@ fun floor_census_with_zero_members_sets_census_no_escrow() {
 
     let emitted = event::events_by_type<campaign::FloorCensusSet>();
     assert!(emitted.length() == 1);
+    let (_, registered, max_liability, floor_ratio, event_floor_amounts, _, _) =
+        campaign::floor_census_set_event_fields(*emitted.borrow(0));
+    assert!(*registered.borrow(0) == 0);
+    assert!(*registered.borrow(1) == 0);
+    assert!(*registered.borrow(2) == 0);
+    assert!(max_liability == 0);
+    assert!(floor_ratio == 0);
+    assert!(*event_floor_amounts.borrow(0) == 0);
 
     test_scenario::return_shared(cat_pool);
     test_scenario::return_shared(main_pool);
@@ -231,12 +237,10 @@ fun floor_census_normal_calculates_correct_ratio_and_escrows() {
         scenario.ctx(),
     );
 
-    let (census_set, max_liability, floor_ratio, floor_amounts, draw_cat, draw_main, floor_bal, _) =
+    let (census_set, floor_amounts, draw_cat, draw_main, floor_bal, _) =
         campaign::campaign_floor_census_fields(&c);
 
     assert!(census_set == true);
-    assert!(max_liability == 12_500_000_000);
-    assert!(floor_ratio == 5_000);
     assert!(*floor_amounts.borrow(0) == 25_000_000);
     assert!(*floor_amounts.borrow(1) == 75_000_000);
     assert!(*floor_amounts.borrow(2) == 150_000_000);
@@ -246,10 +250,16 @@ fun floor_census_normal_calculates_correct_ratio_and_escrows() {
 
     let emitted = event::events_by_type<campaign::FloorCensusSet>();
     assert!(emitted.length() == 1);
-    let (_, _, event_max_liability, event_ratio, _, event_draw_cat, event_draw_main) =
+    let (_, registered, event_max_liability, event_ratio, event_floor_amounts, event_draw_cat, event_draw_main) =
         campaign::floor_census_set_event_fields(*emitted.borrow(0));
+    assert!(*registered.borrow(0) == 100);
+    assert!(*registered.borrow(1) == 50);
+    assert!(*registered.borrow(2) == 0);
     assert!(event_max_liability == 12_500_000_000);
     assert!(event_ratio == 5_000);
+    assert!(*event_floor_amounts.borrow(0) == 25_000_000);
+    assert!(*event_floor_amounts.borrow(1) == 75_000_000);
+    assert!(*event_floor_amounts.borrow(2) == 150_000_000);
     assert!(event_draw_cat == 2_000_000_000);
     assert!(event_draw_main == 4_250_000_000);
 
@@ -413,10 +423,7 @@ fun claim_floor_pays_correct_amount_and_emits_events() {
             scenario.ctx(),
         );
 
-        let (floor_paid_count, floor_total_paid, total_paid) = campaign::campaign_floor_paid_fields(&c);
-        assert!(floor_paid_count == 1);
-        // band 1 target = 50M, floor_ratio = 5000 → amount = 50M * 5000 / 10000 = 25M
-        assert!(floor_total_paid == 25_000_000);
+        let total_paid = campaign::campaign_total_paid_usdc(&c);
         assert!(total_paid == 25_000_000);
 
         let emitted_paid = event::events_by_type<campaign::FloorPaid>();
@@ -638,7 +645,7 @@ fun return_floor_budget_proportional_split() {
             &mut c, &result, EVENT_UID, EVENT_REVISION, CELLS_ROOT, &mut cat_pool, &mut main_pool, NOW_MS, scenario.ctx(),
         );
         // Verify escrow: draw_cat=250M, draw_main=0
-        let (_, _, _, _, draw_cat, draw_main, floor_bal, _) = campaign::campaign_floor_census_fields(&c);
+        let (_, _, draw_cat, draw_main, floor_bal, _) = campaign::campaign_floor_census_fields(&c);
         assert!(draw_cat == 250_000_000);
         assert!(draw_main == 0);
         assert!(floor_bal == 250_000_000);
@@ -656,7 +663,7 @@ fun return_floor_budget_proportional_split() {
         let cat_before = category_pool::category_pool_balance_usdc(&cat_pool);
         campaign::return_floor_budget(&mut c, &mut cat_pool, &mut main_pool, DONATION_END_MS, scenario.ctx());
 
-        let (_, _, _, _, _, _, floor_bal, budget_returned) = campaign::campaign_floor_census_fields(&c);
+        let (_, _, _, _, floor_bal, budget_returned) = campaign::campaign_floor_census_fields(&c);
         assert!(floor_bal == 0);
         assert!(budget_returned == true);
 

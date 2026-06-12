@@ -127,10 +127,9 @@ fun finalize_round_computes_band_payouts_for_round_1() {
         // Finalize at donation_end_ms
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        let (round, _, band_payout, _, eligible_count, closed, sweep_eligible) =
+        let (round, _, band_payout, closed, sweep_eligible) =
             campaign::campaign_payout_round_fields(&c);
         assert!(round == 1);
-        assert!(eligible_count == 2);
         assert!(!closed);
         assert!(!sweep_eligible);
 
@@ -189,12 +188,15 @@ fun finalize_round_with_zero_eligible_sets_sweep_eligible() {
         // No verified members → liability == 0
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        let (round, _, band_payout, _, eligible_count, _, sweep_eligible) =
+        let (round, _, band_payout, _, sweep_eligible) =
             campaign::campaign_payout_round_fields(&c);
         assert!(round == 1);
-        assert!(eligible_count == 0);
         assert!(sweep_eligible);
         assert!(*band_payout.borrow(0) == 0);
+
+        let events = event::events_by_type<campaign::RoundFinalized>();
+        let (_, _, _, _, _, ev_elig, _) = campaign::round_finalized_event_fields(*events.borrow(0));
+        assert!(ev_elig == 0);
 
         test_scenario::return_shared(c);
     };
@@ -223,7 +225,7 @@ fun finalize_round_termination_sets_sweep_eligible_no_round_advance() {
 
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        let (round, _, _, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
+        let (round, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
         // Round NOT advanced (termination path)
         assert!(round == 0);
         assert!(sweep_eligible);
@@ -492,7 +494,7 @@ fun sweep_residual_transfers_balance_to_main() {
             scenario.ctx(),
         );
 
-        let (_, _, _, _, _, closed, _) = campaign::campaign_payout_round_fields(&c);
+        let (_, _, _, closed, _) = campaign::campaign_payout_round_fields(&c);
         assert!(closed);
 
         // Main received the balance
@@ -646,7 +648,7 @@ fun finalize_round_2_redistributes_remaining_balance() {
         // Round 1 finalize
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        let (round_1, _, _, _, _, _, _) = campaign::campaign_payout_round_fields(&c);
+        let (round_1, _, _, _, _) = campaign::campaign_payout_round_fields(&c);
         assert!(round_1 == 1);
 
         // Round 2: too early
@@ -657,7 +659,7 @@ fun finalize_round_2_redistributes_remaining_balance() {
         let round_2_ms = DONATION_END_MS + ROUND_INTERVAL_MS;
         campaign::finalize_round_v2(&mut c, round_2_ms);
 
-        let (round_2, _, _, _, _, _, _) = campaign::campaign_payout_round_fields(&c);
+        let (round_2, _, _, _, _) = campaign::campaign_payout_round_fields(&c);
         assert!(round_2 == 2);
 
         test_scenario::return_shared(c);
@@ -681,7 +683,7 @@ fun finalize_round_resets_sweep_eligible_when_liability_gt_0() {
         // Round 1: 適格メンバーなし → sweep_eligible = true
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        let (_, _, _, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
+        let (_, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
         assert!(sweep_eligible);
 
         // Round 2: メンバーを追加して liability > 0 にする
@@ -694,11 +696,14 @@ fun finalize_round_resets_sweep_eligible_when_liability_gt_0() {
         let round2_time = DONATION_END_MS + ROUND_INTERVAL_MS;
         campaign::finalize_round_v2(&mut c, round2_time);
 
-        let (round, _, _, _, eligible, _, sweep_after) = campaign::campaign_payout_round_fields(&c);
+        let (round, _, _, _, sweep_after) = campaign::campaign_payout_round_fields(&c);
         assert!(round == 2);
-        assert!(eligible == 1);
         // sweep_eligible がリセットされていることを確認
         assert!(!sweep_after);
+
+        let events = event::events_by_type<campaign::RoundFinalized>();
+        let (_, _, _, _, _, eligible, _) = campaign::round_finalized_event_fields(*events.borrow(1));
+        assert!(eligible == 1);
 
         test_scenario::return_shared(c);
     };
