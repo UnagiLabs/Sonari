@@ -481,6 +481,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               relayer: "recorded";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
+              relayer_success: RelayerRecordSuccessInput;
           }
         | {
               source_event_id: string;
@@ -1063,6 +1064,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     relayer: "recorded",
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
+                    relayer_success: event.relayer_success,
                 });
             }
             case "run_floor_census": {

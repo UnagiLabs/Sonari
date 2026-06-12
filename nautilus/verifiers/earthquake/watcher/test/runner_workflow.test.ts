@@ -2370,7 +2370,10 @@ describe("AWS runner workflow helper", () => {
                 result,
                 relayer_success: relayerResult.relayer_success,
             } as never),
-        ).resolves.toMatchObject({ relayer: "recorded" });
+        ).resolves.toMatchObject({
+            relayer: "recorded",
+            relayer_success: relayerResult.relayer_success,
+        });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             status: "submitted",
             relayer_mode: "submit",
