@@ -8,9 +8,12 @@
  * - shard 直列化（serializeShardEntries）が **ちょうど 1 回**
  * であることを spy で確認する。
  *
- * 修正前はツリー 2 回（affectedCellsRoot + buildProofShardGroups 内）・
- * 直列化 2 回（manifest hash 用 + R2 保存用）だったため、このテストは
- * 単一パス化前の実装では失敗する（= 単一パス化の機械的な証拠）。
+ * ツリー構築は修正前 2 回（affectedCellsRoot + buildProofShardGroups 内）だったため、
+ * merkle spy の回数検証は単一パス化前の実装では失敗する（= 機械的な証拠）。
+ *
+ * 直列化については、spy 回数に加えて「manifest hash の元バイト列」と
+ * 「R2 に put された shard バイト列」が同一であること（= 1 つの直列化文字列を
+ * 両方に使い回していること）も確認し、単一直列化の意味を補強する。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -101,11 +104,18 @@ class FakeR2Bucket implements AffectedProofR2Bucket {
     async put(key: string, value: string): Promise<void> {
         this.objects.set(key, new TextEncoder().encode(value));
     }
+
+    getStoredKeys(): string[] {
+        return [...this.objects.keys()];
+    }
 }
 
-async function runBuild(): Promise<void> {
+async function runBuild(): Promise<{
+    result: Awaited<ReturnType<typeof buildAndSaveProofArtifacts>>;
+    bucket: FakeR2Bucket;
+}> {
     const bucket = new FakeR2Bucket();
-    await buildAndSaveProofArtifacts({
+    const result = await buildAndSaveProofArtifacts({
         bytes: new TextEncoder().encode(GOLDEN_AFFECTED_CELLS_JSON),
         eventUid: GOLDEN_EVENT_UID,
         eventRevision: 1,
@@ -116,6 +126,7 @@ async function runBuild(): Promise<void> {
         geoResolution: 7,
         bucket,
     });
+    return { result, bucket };
 }
 
 // ---------------------------------------------------------------------------
@@ -135,5 +146,23 @@ describe("buildAndSaveProofArtifacts single-pass", () => {
         serializeSpy.mockClear();
         await runBuild();
         expect(serializeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("R2 に put された shard バイト列が manifest hash の元バイト列と同一（直列化文字列を使い回している）", async () => {
+        const { result, bucket } = await runBuild();
+
+        // R2 に保存された shard 本体を取得
+        const shardKey = bucket.getStoredKeys().find((k) => k.includes("/shards/"));
+        expect(shardKey).toBeDefined();
+        const shardObj = await bucket.get(shardKey!);
+        expect(shardObj).not.toBeNull();
+        const storedBytes = new Uint8Array(await shardObj!.arrayBuffer());
+
+        // manifest の shard hash は R2 put と同じ文字列から計算されているはず。
+        // 保存バイト列の sha256 が manifest.shards[0].hash と一致することで、
+        // 1 つの直列化文字列が manifest hash 計算と R2 put の両方に使われたことを示す。
+        const actual = await import("@sonari/proof-core");
+        const digest = actual.sha256Hex(storedBytes);
+        expect(digest).toBe(result.manifest.shards[0]!.hash);
     });
 });

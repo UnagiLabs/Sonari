@@ -198,7 +198,16 @@ export async function buildAndSaveProofArtifacts(
         affected_cell_count: affectedCellCount,
         geo_resolution: geoResolution,
         shards: [...shardEntriesMap.entries()].map(([shardKey, shardEntries]) => {
-            const serialized = serializedShards.get(shardKey) ?? "";
+            // R2 put と同じ直列化済み文字列を使い回す。欠落は到達不能だが、
+            // fail-closed の方針に従い空文字列で握り潰さず internal エラーにする。
+            const serialized = serializedShards.get(shardKey);
+            if (serialized === undefined) {
+                throw new AffectedCellsProofError(
+                    "internal",
+                    `Serialized shard not found for shard key: ${shardKey}`,
+                    500,
+                );
+            }
             // R2 へ保存するバイト列と同じ正規バイト列から sha256 を計算し、
             // 保存形と検証形（loadProofShard）のハッシュを一致させる。
             const hash = sha256Hex(new TextEncoder().encode(serialized));
