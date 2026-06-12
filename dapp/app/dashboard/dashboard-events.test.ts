@@ -220,6 +220,7 @@ describe("readDashboardEvents", () => {
                     status: "finalized",
                 },
             ],
+            aidDeliveredUsdc: 1000000n,
             latestEvent: {
                 id: EVENT_ID,
                 sourceEventId: "usgs-1",

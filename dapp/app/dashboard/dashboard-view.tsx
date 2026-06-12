@@ -89,6 +89,7 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                     pools: poolResult.pools,
                     donations: eventResult.donations,
                     claims: eventResult.claims,
+                    aidDeliveredUsdc: eventResult.aidDeliveredUsdc,
                     latestEvent: eventResult.latestEvent,
                 }),
             });

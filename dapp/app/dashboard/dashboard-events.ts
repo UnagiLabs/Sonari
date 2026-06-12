@@ -21,7 +21,7 @@ export interface DashboardEventReadClient {
 }
 
 export type DonationEventSource = "split" | "general" | "operations";
-export type PayoutEventSource = "floor" | "payout" | "round";
+export type PayoutEventSource = "floor" | "payout";
 export type StatusKey = "active" | "paused" | "confirmed" | "pending" | "finalized";
 
 export interface DashboardDonationEvent {
@@ -64,6 +64,7 @@ export type DashboardEventReadResult =
           readonly kind: "ok";
           readonly donations: readonly DashboardDonationEvent[];
           readonly claims: readonly DashboardClaimEvent[];
+          readonly aidDeliveredUsdc: bigint;
           readonly latestEvent: DashboardDisasterEvent | null;
       }
     | { readonly kind: "error"; readonly message: string };
@@ -84,7 +85,6 @@ export async function readDashboardEvents(
             operationsDonations,
             floorClaims,
             payoutClaims,
-            roundClaims,
             disasterEvents,
         ] = await Promise.all([
             readTypedEvents(client, `${packageId}::donation::DonationSplit`, (event) =>
@@ -102,9 +102,6 @@ export async function readDashboardEvents(
             readTypedEvents(client, `${packageId}::campaign::PayoutClaimed`, (event) =>
                 parseDashboardPayoutEvent(event, "payout"),
             ),
-            readTypedEvents(client, `${packageId}::campaign::RoundFinalized`, (event) =>
-                parseDashboardPayoutEvent(event, "round"),
-            ),
             readTypedEvents(
                 client,
                 `${packageId}::disaster_event::DisasterEventCreated`,
@@ -116,12 +113,12 @@ export async function readDashboardEvents(
         const donations = uniqueById([...splitDonations, ...generalDonations, ...operationsDonations])
             .sort(compareNewestFirst)
             .slice(0, limit);
-        const claims = uniqueById([...floorClaims, ...payoutClaims, ...roundClaims])
-            .sort(compareNewestFirst)
-            .slice(0, limit);
+        const allClaims = uniqueById([...floorClaims, ...payoutClaims]).sort(compareNewestFirst);
+        const claims = allClaims.slice(0, limit);
+        const aidDeliveredUsdc = allClaims.reduce((sum, item) => sum + item.amountUsdc, 0n);
         const latestEvent = uniqueDisasters(disasterEvents).sort(compareNewestFirst)[0] ?? null;
 
-        return { kind: "ok", donations, claims, latestEvent };
+        return { kind: "ok", donations, claims, aidDeliveredUsdc, latestEvent };
     } catch (error) {
         return {
             kind: "error",
@@ -175,18 +172,12 @@ export function parseDashboardPayoutEvent(
     }
 
     const campaignId = parseObjectId(event.parsedJson.campaign_id);
-    const amountUsdc =
-        source === "round" ? parseRoundFinalizedAmount(event.parsedJson) : parseU64(event.parsedJson.amount_usdc);
-    const recipient =
-        source === "round"
-            ? parseObjectId(event.parsedJson.campaign_id)
-            : parseObjectId(event.parsedJson.recipient);
+    const amountUsdc = parseU64(event.parsedJson.amount_usdc);
+    const recipient = parseObjectId(event.parsedJson.recipient);
     const occurredAtMs =
         source === "floor"
             ? (parseU64Number(event.parsedJson.paid_at_ms) ?? event.timestampMs)
-            : source === "round"
-                ? (parseU64Number(event.parsedJson.finalized_at_ms) ?? event.timestampMs)
-                : event.timestampMs;
+            : event.timestampMs;
 
     if (campaignId === null || amountUsdc === null || recipient === null) {
         return null;
@@ -196,7 +187,7 @@ export function parseDashboardPayoutEvent(
         kind: "claim",
         id: event.id,
         source,
-        label: source === "round" ? `round · ${shortId(campaignId)}` : `recipient · ${shortId(recipient)}`,
+        label: `recipient · ${shortId(recipient)}`,
         amountUsdc,
         campaignId,
         recipient,
@@ -294,23 +285,6 @@ function parseEventId(raw: unknown): string | null {
     const txDigest = parseNonEmptyString(raw.txDigest);
     const eventSeq = parseNonEmptyString(raw.eventSeq);
     return txDigest === null || eventSeq === null ? null : `${txDigest}:${eventSeq}`;
-}
-
-function parseRoundFinalizedAmount(raw: Record<string, unknown>): bigint | null {
-    const liability = parseU64(raw.liability);
-    if (liability !== null) {
-        return liability;
-    }
-    if (!Array.isArray(raw.band_payout)) {
-        return null;
-    }
-    return raw.band_payout.reduce<bigint | null>((sum, item) => {
-        const value = parseU64(item);
-        if (sum === null || value === null) {
-            return null;
-        }
-        return sum + value;
-    }, 0n);
 }
 
 function uniqueById<T extends { readonly id: string }>(items: readonly T[]): T[] {

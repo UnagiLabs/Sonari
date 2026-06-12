@@ -76,18 +76,19 @@ describe("deriveDashboardViewModel", () => {
             pools,
             donations: [donation],
             claims: [claim],
+            aidDeliveredUsdc: 1000000n,
             latestEvent,
         });
 
         expect(view.metricValues).toEqual({
             totalDonated: "$44.00",
-            aidDelivered: "$9.00",
+            aidDelivered: "$1.00",
             activePools: "3",
             receipts: "1",
         });
         expect(view.metricDetails).toEqual({
             totalDonated: "Across all configured pools",
-            aidDelivered: "Funded floor and operations payouts",
+            aidDelivered: "Finalized floor and payout events",
             activePools: "3 pools read from chain",
             receipts: "1 finalized claim event",
         });
@@ -127,6 +128,7 @@ describe("deriveDashboardViewModel", () => {
             pools,
             donations: [],
             claims: [],
+            aidDeliveredUsdc: 0n,
             latestEvent: null,
         });
 

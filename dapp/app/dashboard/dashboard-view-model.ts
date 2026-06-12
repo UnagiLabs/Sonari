@@ -75,16 +75,13 @@ export function deriveDashboardViewModel(input: {
     readonly pools: DashboardPools;
     readonly donations: readonly DashboardDonationEvent[];
     readonly claims: readonly DashboardClaimEvent[];
+    readonly aidDeliveredUsdc: bigint;
     readonly latestEvent: DashboardDisasterEvent | null;
 }): DashboardViewModel {
     const totalDonated =
         input.pools.main.totalReceivedUsdc +
         input.pools.operations.totalReceivedUsdc +
         input.pools.category.totalReceivedUsdc;
-    const aidDelivered =
-        input.pools.main.totalFloorFundedUsdc +
-        input.pools.category.totalFloorFundedUsdc +
-        input.pools.operations.totalSpentUsdc;
     const activePools = [
         input.pools.main,
         input.pools.operations,
@@ -96,13 +93,13 @@ export function deriveDashboardViewModel(input: {
         metricKeys: METRIC_KEYS,
         metricValues: {
             totalDonated: formatUsdc(totalDonated, input.locale),
-            aidDelivered: formatUsdc(aidDelivered, input.locale),
+            aidDelivered: formatUsdc(input.aidDeliveredUsdc, input.locale),
             activePools: formatAmount(activePools, input.locale),
             receipts: formatAmount(input.claims.length, input.locale),
         },
         metricDetails: {
             totalDonated: "Across all configured pools",
-            aidDelivered: "Funded floor and operations payouts",
+            aidDelivered: "Finalized floor and payout events",
             activePools: `${activePools} pools read from chain`,
             receipts: `${input.claims.length} finalized claim event${input.claims.length === 1 ? "" : "s"}`,
         },
