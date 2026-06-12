@@ -23,11 +23,11 @@ composition and package tests, but those are not external entry points.
 - Membership and identity flows: `register_member`,
   `new_residence_proof_step_left`, `new_residence_proof_step_right`,
   `update_member_home_cell`, `update_identity_verification`.
-- Disaster relayer and claim flows: `create_disaster_event_from_signed_payload`,
+- Disaster relayer and claim flows: `create_disaster_event_and_campaign_from_signed_payload`,
   `new_affected_cell_leaf`, `new_affected_cell_proof_step_left`,
   `new_affected_cell_proof_step_right`, `claim_disaster_usdc`.
 
-`create_disaster_event_from_signed_payload` intentionally has no `PauseState`
+`create_disaster_event_and_campaign_from_signed_payload` intentionally has no `PauseState`
 argument and performs no pause checks; this preserves current relayer behavior.
 
 ## Admin public

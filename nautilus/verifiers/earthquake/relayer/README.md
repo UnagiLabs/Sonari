@@ -38,7 +38,7 @@ flowchart TD
 
   parse["ステップ 2: バイト列変換<br/>parseRelayerSubmitInput(input)<br/>payloadBcsBytes / signatureBytes / publicKeyBytes"]
 
-  preview["ステップ 3: Moveコール引数の構築<br/>buildRelayerRequestPreview(input, config)<br/>registry / verifierRegistry / clock / payload / signature / publicKey"]
+  preview["ステップ 3: Moveコール引数の構築<br/>buildRelayerRequestPreview(input, config)<br/>registry / verifierRegistry / categoryRegistry / categoryPool / clock / payload / signature / publicKey"]
 
   mode{Relayer mode}
 
@@ -77,7 +77,7 @@ flowchart TD
 ### 型
 
 ```
-RelayerRequestConfig     ← target, registry, verifierRegistry
+RelayerRequestConfig     ← target, registry, verifierRegistry, categoryRegistry, categoryPool
 RelayerDryRunConfig      ← + grpcUrl, senderAddress
 RelayerSubmitConfig      ← + grpcUrl, signer
 RelayerRequestPreview    ← Moveコール引数の確認結果
@@ -118,9 +118,11 @@ const input = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
 
 // プレビューを確認
 const result = buildRelayerRequestPreview(input, {
-  target: "0xpackage::accessor::create_disaster_event_from_signed_payload",
+  target: "0xpackage::accessor::create_disaster_event_and_campaign_from_signed_payload",
   registry: "0xregistry_object_id",
   verifierRegistry: "0xverifier_registry_id",
+  categoryRegistry: "0xcategory_registry_id",
+  categoryPool: "0xearthquake_category_pool_id",
 });
 
 if (result.ok) {

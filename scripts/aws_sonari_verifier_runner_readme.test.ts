@@ -76,8 +76,9 @@ describe("AWS Sonari verifier runner README", () => {
             "/process_data",
             "--relayer-network mainnet --world-id-proof-mode dummy",
             "parameterOverrideArgs",
-            "RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload",
-            "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET",
+            "RelayerTarget=<PACKAGE_ID>::accessor::create_disaster_event_and_campaign_from_signed_payload",
+            "SONARI_CATEGORY_REGISTRY_ID",
+            "SONARI_EARTHQUAKE_CATEGORY_POOL_ID",
             "AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_TOKEN_SECRET_ARN",
             "AWS_SONARI_VERIFIER_RUNNER_DEV_SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN",
             "suiprivkey",
@@ -169,7 +170,7 @@ describe("AWS Sonari verifier runner README", () => {
             "`&AdminCap`",
             "既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません",
             "metadata_verifier::register_enclave_instance",
-            "accessor::create_disaster_event_from_signed_payload",
+            "accessor::create_disaster_event_and_campaign_from_signed_payload",
         ]);
     });
 

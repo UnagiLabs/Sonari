@@ -238,6 +238,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_TARGET");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_REGISTRY");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_VERIFIER_REGISTRY");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_CATEGORY_REGISTRY");
+        expect(jobEnvMatch?.[1]).not.toContain("RELAYER_CATEGORY_POOL");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_GRPC_URL");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_SENDER_ADDRESS");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_SIGNER_SECRET_ARN");
@@ -251,10 +253,11 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         expectContainsAll(workflow, [
             "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
-            "RELAYER_TARGET: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
             "RELAYER_REGISTRY: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
             "RELAYER_VERIFIER_REGISTRY: $" +
                 "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
+            "RELAYER_CATEGORY_REGISTRY: $" + "{{ vars.SONARI_CATEGORY_REGISTRY_ID }}",
+            "RELAYER_CATEGORY_POOL: $" + "{{ vars.SONARI_EARTHQUAKE_CATEGORY_POOL_ID }}",
             "RELAYER_GRPC_URL: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
             "RELAYER_SENDER_ADDRESS: $" +
                 "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
@@ -460,6 +463,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(workflow).toContain("SonariIdentityRegistryId=$SONARI_IDENTITY_REGISTRY_ID");
         expect(workflow).toContain("SonariMembershipRegistryId=$SONARI_MEMBERSHIP_REGISTRY_ID");
         expect(workflow).toContain("SonariVerifierRegistryId=$SONARI_VERIFIER_REGISTRY_ID");
+        expect(workflow).toContain("RelayerCategoryRegistry=$RELAYER_CATEGORY_REGISTRY");
+        expect(workflow).toContain("RelayerCategoryPool=$RELAYER_CATEGORY_POOL");
     });
 
     it("derives the Sonari package id from Published.toml instead of a GitHub variable", async () => {
@@ -468,6 +473,12 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         // package id は GH 変数の手書きをやめ、contracts/Published.toml の published-at から導出する。
         expect(workflow).toContain("Resolve Sonari Move package id from Published.toml");
         expect(workflow).toContain("contracts/Published.toml");
+        expect(workflow).toContain(
+            "RELAYER_TARGET=%s::accessor::create_disaster_event_and_campaign_from_signed_payload",
+        );
+        expect(workflow).not.toContain(
+            "RELAYER_TARGET: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
+        );
         // deploy step の env では SONARI_IDENTITY_PACKAGE_ID を vars から再宣言しない
         // （前段 step が GITHUB_ENV に書いた toml 由来の値を使うため）。
         expect(workflow).not.toContain(

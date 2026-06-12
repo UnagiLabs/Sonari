@@ -9,9 +9,12 @@ import {
     submitRelayerPayload,
 } from "./index.js";
 
-const target = "0x123::accessor::create_disaster_event_from_signed_payload";
+const target = "0x123::accessor::create_disaster_event_and_campaign_from_signed_payload";
 const registry = "0x456";
 const verifierRegistry = "0x654";
+const categoryRegistry = "0xabc";
+const categoryPool = "0xdef";
+const requestConfig = { target, registry, verifierRegistry, categoryRegistry, categoryPool };
 const clock = "0x0000000000000000000000000000000000000000000000000000000000000006";
 const senderAddress = "0x789";
 const network = "testnet";
@@ -82,17 +85,13 @@ function failedTransactionResponse(effects = { status: { success: false, error: 
 describe("relayer request preview", () => {
     it("converts the finalized fixture into deterministic Move entry arguments", () => {
         const result = buildRelayerRequestPreview(fixtureInput, {
-            target,
-            registry,
-            verifierRegistry,
+            ...requestConfig,
         });
 
         expect(result).toEqual({
             ok: true,
             value: {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 clock,
                 verifierConfigKey: fixtureVerifierConfigKey,
                 verifierConfigVersion: fixtureVerifierConfigVersion,
@@ -100,15 +99,15 @@ describe("relayer request preview", () => {
                 arguments: [
                     registry,
                     verifierRegistry,
+                    categoryRegistry,
+                    categoryPool,
                     clock,
                     fixturePayloadBytes,
                     fixtureSignatureBytes,
                     fixturePublicKeyBytes,
                 ],
                 submitRequest: {
-                    target,
-                    registry,
-                    verifierRegistry,
+                    ...requestConfig,
                     clock,
                     verifierConfigKey: fixtureVerifierConfigKey,
                     verifierConfigVersion: fixtureVerifierConfigVersion,
@@ -116,6 +115,8 @@ describe("relayer request preview", () => {
                     arguments: [
                         registry,
                         verifierRegistry,
+                        categoryRegistry,
+                        categoryPool,
                         clock,
                         fixturePayloadBytes,
                         fixtureSignatureBytes,
@@ -133,9 +134,7 @@ describe("relayer request preview", () => {
             null,
             [],
         ]) {
-            expect(
-                buildRelayerRequestPreview(input, { target, registry, verifierRegistry }),
-            ).toMatchObject({
+            expect(buildRelayerRequestPreview(input, requestConfig)).toMatchObject({
                 ok: false,
                 error_code: "RELAYER_SUBMIT_FAILED",
             });
@@ -159,10 +158,7 @@ describe("relayer request preview", () => {
             { enclave_instance_public_key: `0x${"22".repeat(31)}` },
         ]) {
             expect(
-                buildRelayerRequestPreview(
-                    { ...fixtureInput, ...patch },
-                    { target, registry, verifierRegistry },
-                ),
+                buildRelayerRequestPreview({ ...fixtureInput, ...patch }, requestConfig),
             ).toMatchObject({
                 ok: false,
                 error_code: "RELAYER_SUBMIT_FAILED",
@@ -178,20 +174,44 @@ describe("relayer request preview", () => {
             public_key: fixtureInput.public_key.slice(2),
         };
 
-        expect(
-            buildRelayerRequestPreview(withoutPrefixes, { target, registry, verifierRegistry }),
-        ).toEqual(buildRelayerRequestPreview(fixtureInput, { target, registry, verifierRegistry }));
+        expect(buildRelayerRequestPreview(withoutPrefixes, requestConfig)).toEqual(
+            buildRelayerRequestPreview(fixtureInput, requestConfig),
+        );
     });
 
     it("does not mutate input and returns identical output for retry-safe previews", () => {
         const input = structuredClone(fixtureInput);
         const before = structuredClone(input);
 
-        const first = buildRelayerRequestPreview(input, { target, registry, verifierRegistry });
-        const second = buildRelayerRequestPreview(input, { target, registry, verifierRegistry });
+        const first = buildRelayerRequestPreview(input, requestConfig);
+        const second = buildRelayerRequestPreview(input, requestConfig);
 
         expect(input).toEqual(before);
         expect(second).toEqual(first);
+    });
+
+    it("fails closed unless the campaign entry and category objects are configured", () => {
+        expect(
+            buildRelayerRequestPreview(fixtureInput, {
+                ...requestConfig,
+                target: "0x123::accessor::create_disaster_event_from_signed_payload",
+            }),
+        ).toMatchObject({
+            ok: false,
+            message:
+                "Relayer target must end with ::accessor::create_disaster_event_and_campaign_from_signed_payload",
+        });
+
+        expect(
+            buildRelayerRequestPreview(fixtureInput, {
+                ...requestConfig,
+                categoryPool: "",
+            }),
+        ).toMatchObject({
+            ok: false,
+            message:
+                "Relayer request requires target, registry, verifierRegistry, categoryRegistry, and categoryPool",
+        });
     });
 });
 
@@ -215,9 +235,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             dryRunRelayerSubmit(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 senderAddress,
@@ -228,9 +246,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             submitRelayerPayload(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 signer,
@@ -243,9 +259,7 @@ describe("relayer submit execution", () => {
     it("normalizes config, build, gRPC, and network failures to RELAYER_SUBMIT_FAILED", async () => {
         await expect(
             dryRunRelayerSubmit(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 senderAddress: "",
@@ -258,9 +272,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             dryRunRelayerSubmit(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 senderAddress,
@@ -273,9 +285,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             dryRunRelayerSubmit(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 senderAddress,
@@ -290,9 +300,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             submitRelayerPayload(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 client: {
@@ -305,9 +313,7 @@ describe("relayer submit execution", () => {
 
     it("fails closed for missing, invalid, or mismatched Sui network configuration", async () => {
         const validDryRunConfig = {
-            target,
-            registry,
-            verifierRegistry,
+            ...requestConfig,
             grpcUrl,
             senderAddress,
             client: {
@@ -370,9 +376,7 @@ describe("relayer submit execution", () => {
         };
 
         const result = await dryRunRelayerSubmit(fixtureInput, {
-            target,
-            registry,
-            verifierRegistry,
+            ...requestConfig,
             network,
             grpcUrl,
             senderAddress,
@@ -408,9 +412,7 @@ describe("relayer submit execution", () => {
         const transaction = makeFakeTransaction();
 
         const result = await submitRelayerPayload(fixtureInput, {
-            target,
-            registry,
-            verifierRegistry,
+            ...requestConfig,
             network,
             grpcUrl,
             signer,
@@ -440,9 +442,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             submitRelayerPayload(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 signer,
@@ -484,9 +484,7 @@ describe("relayer submit execution", () => {
 
         await expect(
             submitRelayerPayload(fixtureInput, {
-                target,
-                registry,
-                verifierRegistry,
+                ...requestConfig,
                 network,
                 grpcUrl,
                 signer,
@@ -526,9 +524,7 @@ describe("relayer submit execution", () => {
         ]) {
             await expect(
                 dryRunRelayerSubmit(fixtureInput, {
-                    target,
-                    registry,
-                    verifierRegistry,
+                    ...requestConfig,
                     network,
                     grpcUrl,
                     senderAddress,

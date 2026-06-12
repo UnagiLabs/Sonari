@@ -44,9 +44,11 @@ import { InMemoryStateRepository } from "../src/state.js";
 
 const validEd25519SuiPrivateKey =
     "suiprivkey1qzhxm3kgv4atgnt2gwkeefddg8zngmje9tvm86ax0as33qs5tjxzktptcaf";
-const earthquakeRelayerTarget = "0x123::accessor::create_disaster_event_from_signed_payload";
+const earthquakeRelayerTarget = "0x123::accessor::create_disaster_event_and_campaign_from_signed_payload";
 const earthquakeRelayerRegistry = "0xregistry";
 const earthquakeRelayerVerifierRegistry = "0xverifier";
+const earthquakeRelayerCategoryRegistry = "0xcategoryregistry";
+const earthquakeRelayerCategoryPool = "0xcategorypool";
 const earthquakeRelayerClock = "0x6";
 const finalizedSignature = `0x${"11".repeat(64)}`;
 const finalizedPublicKey = `0x${"22".repeat(32)}`;
@@ -2011,6 +2013,8 @@ describe("AWS runner workflow helper", () => {
                     target: earthquakeRelayerTarget,
                     registry: earthquakeRelayerRegistry,
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryRegistry: earthquakeRelayerCategoryRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
                     grpcUrl: "https://fullnode.testnet.sui.io:443",
                     senderAddress: "0xsender",
                     configurationError: "RELAYER_NETWORK is required",
@@ -2045,6 +2049,8 @@ describe("AWS runner workflow helper", () => {
         process.env.RELAYER_TARGET = earthquakeRelayerTarget;
         process.env.RELAYER_REGISTRY = earthquakeRelayerRegistry;
         process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
+        process.env.RELAYER_CATEGORY_REGISTRY = earthquakeRelayerCategoryRegistry;
+        process.env.RELAYER_CATEGORY_POOL = earthquakeRelayerCategoryPool;
         process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
         process.env.RELAYER_ALLOW_SUBMIT = "false";
         process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
@@ -2066,6 +2072,8 @@ describe("AWS runner workflow helper", () => {
         process.env.RELAYER_TARGET = earthquakeRelayerTarget;
         process.env.RELAYER_REGISTRY = earthquakeRelayerRegistry;
         process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
+        process.env.RELAYER_CATEGORY_REGISTRY = earthquakeRelayerCategoryRegistry;
+        process.env.RELAYER_CATEGORY_POOL = earthquakeRelayerCategoryPool;
         process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
         process.env.RELAYER_ALLOW_SUBMIT = "true";
         process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
@@ -2088,6 +2096,8 @@ describe("AWS runner workflow helper", () => {
         process.env.RELAYER_NETWORK = "testnet";
         process.env.RELAYER_TARGET = earthquakeRelayerTarget;
         process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
+        process.env.RELAYER_CATEGORY_REGISTRY = earthquakeRelayerCategoryRegistry;
+        process.env.RELAYER_CATEGORY_POOL = earthquakeRelayerCategoryPool;
         process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
         process.env.ENCLAVE_REGISTRATION_ALLOW_SUBMIT = "true";
         process.env.ENCLAVE_INSTANCE_TTL_MS = "60000";
@@ -2201,7 +2211,7 @@ describe("AWS runner workflow helper", () => {
         expect(config).toMatchObject({
             mode: "dry_run",
             configurationError:
-                "RELAYER_TARGET, RELAYER_REGISTRY, RELAYER_VERIFIER_REGISTRY required for RELAYER_MODE=dry_run",
+                "RELAYER_TARGET, RELAYER_REGISTRY, RELAYER_VERIFIER_REGISTRY, RELAYER_CATEGORY_REGISTRY, RELAYER_CATEGORY_POOL required for RELAYER_MODE=dry_run",
         });
     });
 
@@ -2235,6 +2245,8 @@ describe("AWS runner workflow helper", () => {
                     target: earthquakeRelayerTarget,
                     registry: earthquakeRelayerRegistry,
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryRegistry: earthquakeRelayerCategoryRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
                     network: "testnet",
                     grpcUrl: "https://fullnode.testnet.sui.io:443",
                     allowSubmit: true,
@@ -2249,6 +2261,8 @@ describe("AWS runner workflow helper", () => {
                             target: config.target,
                             registry: config.registry,
                             verifierRegistry: config.verifierRegistry,
+                            categoryRegistry: config.categoryRegistry,
+                            categoryPool: config.categoryPool,
                             clock: "0x6",
                             verifierConfigKey: 1,
                             verifierConfigVersion: 1,
@@ -2256,15 +2270,28 @@ describe("AWS runner workflow helper", () => {
                             arguments: [
                                 config.registry,
                                 config.verifierRegistry,
+                                config.categoryRegistry,
+                                config.categoryPool,
                                 "0x6",
                                 [],
                                 [],
                                 [],
-                            ] as [string, string, string, number[], number[], number[]],
+                            ] as [
+                                string,
+                                string,
+                                string,
+                                string,
+                                string,
+                                number[],
+                                number[],
+                                number[],
+                            ],
                             submitRequest: {
                                 target: config.target,
                                 registry: config.registry,
                                 verifierRegistry: config.verifierRegistry,
+                                categoryRegistry: config.categoryRegistry,
+                                categoryPool: config.categoryPool,
                                 clock: "0x6",
                                 verifierConfigKey: 1,
                                 verifierConfigVersion: 1,
@@ -2272,11 +2299,22 @@ describe("AWS runner workflow helper", () => {
                                 arguments: [
                                     config.registry,
                                     config.verifierRegistry,
+                                    config.categoryRegistry,
+                                    config.categoryPool,
                                     "0x6",
                                     [],
                                     [],
                                     [],
-                                ] as [string, string, string, number[], number[], number[]],
+                                ] as [
+                                    string,
+                                    string,
+                                    string,
+                                    string,
+                                    string,
+                                    number[],
+                                    number[],
+                                    number[],
+                                ],
                             },
                         };
                         return {
@@ -2306,6 +2344,8 @@ describe("AWS runner workflow helper", () => {
                 target: earthquakeRelayerTarget,
                 registry: earthquakeRelayerRegistry,
                 verifierRegistry: earthquakeRelayerVerifierRegistry,
+                categoryRegistry: earthquakeRelayerCategoryRegistry,
+                categoryPool: earthquakeRelayerCategoryPool,
                 digest: "tx-digest",
                 objectId: "0xdisaster",
             },
@@ -2357,6 +2397,8 @@ describe("AWS runner workflow helper", () => {
                     target: earthquakeRelayerTarget,
                     registry: earthquakeRelayerRegistry,
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryRegistry: earthquakeRelayerCategoryRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
                     clock: earthquakeRelayerClock,
                     verifierConfigKey: 1,
                     verifierConfigVersion: 1,
@@ -2364,6 +2406,8 @@ describe("AWS runner workflow helper", () => {
                     arguments: [
                         earthquakeRelayerRegistry,
                         earthquakeRelayerVerifierRegistry,
+                        earthquakeRelayerCategoryRegistry,
+                        earthquakeRelayerCategoryPool,
                         earthquakeRelayerClock,
                         [],
                         [],
@@ -2373,6 +2417,8 @@ describe("AWS runner workflow helper", () => {
                         target: earthquakeRelayerTarget,
                         registry: earthquakeRelayerRegistry,
                         verifierRegistry: earthquakeRelayerVerifierRegistry,
+                        categoryRegistry: earthquakeRelayerCategoryRegistry,
+                        categoryPool: earthquakeRelayerCategoryPool,
                         clock: earthquakeRelayerClock,
                         verifierConfigKey: 1,
                         verifierConfigVersion: 1,
@@ -2380,6 +2426,8 @@ describe("AWS runner workflow helper", () => {
                         arguments: [
                             earthquakeRelayerRegistry,
                             earthquakeRelayerVerifierRegistry,
+                            earthquakeRelayerCategoryRegistry,
+                            earthquakeRelayerCategoryPool,
                             earthquakeRelayerClock,
                             [],
                             [],
@@ -2415,6 +2463,8 @@ describe("AWS runner workflow helper", () => {
                 target: earthquakeRelayerTarget,
                 registry: earthquakeRelayerRegistry,
                 verifierRegistry: earthquakeRelayerVerifierRegistry,
+                categoryRegistry: earthquakeRelayerCategoryRegistry,
+                categoryPool: earthquakeRelayerCategoryPool,
                 digest: "tx-digest",
                 objectId: "0xdisaster",
             },
@@ -2876,10 +2926,14 @@ class RecordingRelayerAdapter implements RelayerAdapter {
                     target: earthquakeRelayerTarget,
                     registry: earthquakeRelayerRegistry,
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryRegistry: earthquakeRelayerCategoryRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
                     clock: earthquakeRelayerClock,
                     arguments: [
                         earthquakeRelayerRegistry,
                         earthquakeRelayerVerifierRegistry,
+                        earthquakeRelayerCategoryRegistry,
+                        earthquakeRelayerCategoryPool,
                         earthquakeRelayerClock,
                         [],
                         [],
@@ -2889,10 +2943,14 @@ class RecordingRelayerAdapter implements RelayerAdapter {
                         target: earthquakeRelayerTarget,
                         registry: earthquakeRelayerRegistry,
                         verifierRegistry: earthquakeRelayerVerifierRegistry,
+                        categoryRegistry: earthquakeRelayerCategoryRegistry,
+                        categoryPool: earthquakeRelayerCategoryPool,
                         clock: earthquakeRelayerClock,
                         arguments: [
                             earthquakeRelayerRegistry,
                             earthquakeRelayerVerifierRegistry,
+                            earthquakeRelayerCategoryRegistry,
+                            earthquakeRelayerCategoryPool,
                             earthquakeRelayerClock,
                             [],
                             [],

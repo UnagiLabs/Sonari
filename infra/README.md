@@ -133,16 +133,19 @@ MEMBERSHIP_REGISTRY_ID="<MembershipRegistry object id>"
 VERIFIER_REGISTRY_ID="<VerifierRegistry object id>"
 PAUSE_STATE_ID="<PauseState object id>"
 IDENTITY_REGISTRY_ID="<IdentityRegistry object id>"
+CATEGORY_REGISTRY_ID="<CategoryRegistry object id>"
+EARTHQUAKE_CATEGORY_POOL_ID="<EarthquakePool object id>"
 ```
 
 3. GitHub Actions の Variables を更新
 
-以下3つは必須。`testnet` 運用では下記を dev env / repo 変数へ入れます。
+RELAYER_TARGET は deploy workflow が contracts/Published.toml から導出します。以下4つは必須。`testnet` 運用では下記を dev env / repo 変数へ入れます。
 
 ```text
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET=${PACKAGE_ID}::accessor::create_disaster_event_from_signed_payload
 AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY=$DISASTER_REGISTRY_ID
 AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY=$VERIFIER_REGISTRY_ID
+SONARI_CATEGORY_REGISTRY_ID=$CATEGORY_REGISTRY_ID
+SONARI_EARTHQUAKE_CATEGORY_POOL_ID=$EARTHQUAKE_CATEGORY_POOL_ID
 ```
 
 手元確認や smoke で使うもの:
@@ -237,6 +240,6 @@ publish 後は、次を確認してから AWS deploy や smoke test に進みま
 
 - admin wallet が新しい `AdminCap` を持っている
 - `PACKAGE_ID` が GitHub / AWS 側の値と一致している
-- `RelayerTarget` が新しい `PACKAGE_ID` を指している
+- `RelayerTarget` が deploy workflow で `contracts/Published.toml` 由来の `PACKAGE_ID` から導出されている
 - registry object ID が publish 結果と一致している
 - admin private key が GitHub / AWS に置かれていない

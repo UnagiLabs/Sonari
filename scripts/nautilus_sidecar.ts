@@ -114,6 +114,8 @@ async function handleRelayer(
             "target",
             "registry",
             "verifierRegistry",
+            "categoryRegistry",
+            "categoryPool",
             "network",
             "grpcUrl",
             "senderAddress",
@@ -123,7 +125,7 @@ async function handleRelayer(
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
             message:
-                "Relayer accepts only input, target, registry, verifierRegistry, network, grpcUrl, and senderAddress",
+                "Relayer accepts only input, target, registry, verifierRegistry, categoryRegistry, categoryPool, network, grpcUrl, and senderAddress",
         });
         return;
     }
@@ -142,6 +144,8 @@ async function handleRelayer(
         target: typeof body.target === "string" ? body.target : "",
         registry: typeof body.registry === "string" ? body.registry : "",
         verifierRegistry: typeof body.verifierRegistry === "string" ? body.verifierRegistry : "",
+        categoryRegistry: typeof body.categoryRegistry === "string" ? body.categoryRegistry : "",
+        categoryPool: typeof body.categoryPool === "string" ? body.categoryPool : "",
     };
 
     if (mode === "preview") {

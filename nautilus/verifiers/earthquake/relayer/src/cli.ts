@@ -18,6 +18,8 @@ interface CliOptions {
     target?: string;
     registry?: string;
     verifierRegistry?: string;
+    categoryRegistry?: string;
+    categoryPool?: string;
     signer?: string;
     sender?: string;
 }
@@ -40,6 +42,8 @@ async function main(argv: string[]): Promise<number> {
             target: options.target ?? "",
             registry: options.registry ?? "",
             verifierRegistry: options.verifierRegistry ?? "",
+            categoryRegistry: options.categoryRegistry ?? "",
+            categoryPool: options.categoryPool ?? "",
         });
         printJson(result);
         return result.ok ? 0 : 1;
@@ -50,6 +54,8 @@ async function main(argv: string[]): Promise<number> {
             target: options.target ?? "",
             registry: options.registry ?? "",
             verifierRegistry: options.verifierRegistry ?? "",
+            categoryRegistry: options.categoryRegistry ?? "",
+            categoryPool: options.categoryPool ?? "",
             network: options.network ?? "testnet",
             grpcUrl: options.grpcUrl ?? "",
             senderAddress: options.sender ?? "",
@@ -64,13 +70,15 @@ async function main(argv: string[]): Promise<number> {
         !options.target ||
         !options.registry ||
         !options.verifierRegistry ||
+        !options.categoryRegistry ||
+        !options.categoryPool ||
         !options.signer
     ) {
         printJson({
             ok: false,
             error_code: "RELAYER_SUBMIT_FAILED",
             message:
-                "submit requires --grpc-url, --target, --registry, --verifier-registry, and --signer",
+                "submit requires --grpc-url, --target, --registry, --verifier-registry, --category-registry, --category-pool, and --signer",
         });
         return 1;
     }
@@ -80,6 +88,8 @@ async function main(argv: string[]): Promise<number> {
         target: options.target,
         registry: options.registry,
         verifierRegistry: options.verifierRegistry,
+        categoryRegistry: options.categoryRegistry,
+        categoryPool: options.categoryPool,
         network: options.network,
         grpcUrl: options.grpcUrl,
         signer,
@@ -128,6 +138,12 @@ function parseArgs(argv: string[]): CliOptions | undefined {
             case "--verifier-registry":
                 options.verifierRegistry = value;
                 break;
+            case "--category-registry":
+                options.categoryRegistry = value;
+                break;
+            case "--category-pool":
+                options.categoryPool = value;
+                break;
             case "--signer":
                 options.signer = value;
                 break;
@@ -164,9 +180,9 @@ function printUsage(): void {
     process.stderr.write(
         [
             "Usage:",
-            "  pnpm relayer -- build-request --fixture-case usgs/finalized_minimal --target <target> --registry <registry> --verifier-registry <registry>",
-            "  pnpm relayer -- dry-run --input <payload.json> --network <mainnet|testnet|devnet> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --sender <address>",
-            "  pnpm relayer -- submit --input <payload.json> --network <mainnet|testnet|devnet> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --signer <sui-private-key>",
+            "  pnpm relayer -- build-request --fixture-case usgs/finalized_minimal --target <target> --registry <registry> --verifier-registry <registry> --category-registry <registry> --category-pool <pool>",
+            "  pnpm relayer -- dry-run --input <payload.json> --network <mainnet|testnet|devnet> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --category-registry <registry> --category-pool <pool> --sender <address>",
+            "  pnpm relayer -- submit --input <payload.json> --network <mainnet|testnet|devnet> --grpc-url <url> --target <target> --registry <registry> --verifier-registry <registry> --category-registry <registry> --category-pool <pool> --signer <sui-private-key>",
         ].join("\n"),
     );
 }

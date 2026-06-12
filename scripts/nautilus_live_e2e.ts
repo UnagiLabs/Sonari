@@ -35,9 +35,11 @@ interface LiveE2eOptions {
     nowMs?: number;
 }
 
-const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_from_signed_payload";
+const DEFAULT_TARGET = "0x123::accessor::create_disaster_event_and_campaign_from_signed_payload";
 const DEFAULT_REGISTRY = "0x456";
 const DEFAULT_VERIFIER_REGISTRY = "0x654";
+const DEFAULT_CATEGORY_REGISTRY = "0xabc";
+const DEFAULT_CATEGORY_POOL = "0xdef";
 
 export async function runLiveE2e(options: LiveE2eOptions): Promise<Record<string, unknown>> {
     const nowMs = options.nowMs ?? Date.now();
@@ -120,6 +122,8 @@ class LocalRelayerAdapter implements RelayerAdapter {
             target: process.env.RELAYER_TARGET ?? DEFAULT_TARGET,
             registry: process.env.RELAYER_REGISTRY ?? DEFAULT_REGISTRY,
             verifierRegistry: process.env.RELAYER_VERIFIER_REGISTRY ?? DEFAULT_VERIFIER_REGISTRY,
+            categoryRegistry: process.env.RELAYER_CATEGORY_REGISTRY ?? DEFAULT_CATEGORY_REGISTRY,
+            categoryPool: process.env.RELAYER_CATEGORY_POOL ?? DEFAULT_CATEGORY_POOL,
         };
         if (this.mode === "preview") {
             const result = buildRelayerRequestPreview(input, config);

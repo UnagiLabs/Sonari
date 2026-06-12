@@ -196,7 +196,7 @@ Parameters:
   RelayerTarget:
     Type: String
     Default: ""
-    Description: Move target for the earthquake relayer call. Use <PACKAGE_ID>::accessor::create_disaster_event_from_signed_payload.
+    Description: Move target for the earthquake relayer call. Use <PACKAGE_ID>::accessor::create_disaster_event_and_campaign_from_signed_payload.
   RelayerRegistry:
     Type: String
     Default: ""
@@ -205,6 +205,14 @@ Parameters:
     Type: String
     Default: ""
     Description: VerifierRegistry object ID used by the earthquake relayer call.
+  RelayerCategoryRegistry:
+    Type: String
+    Default: ""
+    Description: CategoryRegistry object ID used by the earthquake relayer call.
+  RelayerCategoryPool:
+    Type: String
+    Default: ""
+    Description: Earthquake CategoryPool object ID used by the earthquake relayer call.
   RelayerGrpcUrl:
     Type: String
     Default: ""
@@ -1215,6 +1223,8 @@ Resources:
           RELAYER_TARGET: !Ref RelayerTarget
           RELAYER_REGISTRY: !Ref RelayerRegistry
           RELAYER_VERIFIER_REGISTRY: !Ref RelayerVerifierRegistry
+          RELAYER_CATEGORY_REGISTRY: !Ref RelayerCategoryRegistry
+          RELAYER_CATEGORY_POOL: !Ref RelayerCategoryPool
           RELAYER_GRPC_URL: !Ref RelayerGrpcUrl
           RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
           RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn

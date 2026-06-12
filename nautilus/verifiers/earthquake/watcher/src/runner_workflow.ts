@@ -101,6 +101,8 @@ export interface RunnerWorkflowConfig {
         target: string;
         registry: string;
         verifierRegistry: string;
+        categoryRegistry: string;
+        categoryPool: string;
         network?: SuiNetwork;
         grpcUrl?: string;
         senderAddress?: string;
@@ -253,6 +255,8 @@ export interface RelayerRecordSuccessInput {
     target: string;
     registry: string;
     verifierRegistry: string;
+    categoryRegistry: string;
+    categoryPool: string;
     digest?: string;
     objectId?: string;
 }
@@ -2500,6 +2504,8 @@ function compactRelayerSuccess(success: RelayerSuccess): RelayerRecordSuccessInp
         target: success.request.target,
         registry: success.request.registry,
         verifierRegistry: success.request.verifierRegistry,
+        categoryRegistry: success.request.categoryRegistry,
+        categoryPool: success.request.categoryPool,
         ...(success.digest === undefined ? {} : { digest: success.digest }),
         ...(success.objectId === undefined ? {} : { objectId: success.objectId }),
     };
@@ -2517,6 +2523,8 @@ function buildRelayerSuccessForRecord(
         target: success.target,
         registry: success.registry,
         verifierRegistry: success.verifierRegistry,
+        categoryRegistry: success.categoryRegistry,
+        categoryPool: success.categoryPool,
     });
     if (!request.ok) {
         throw new Error(request.message);
@@ -2542,6 +2550,8 @@ export function readRelayerConfigFromEnv(
             target: "",
             registry: "",
             verifierRegistry: "",
+            categoryRegistry: "",
+            categoryPool: "",
             configurationError: `Unsupported RELAYER_MODE: ${mode}`,
         };
     }
@@ -2549,6 +2559,8 @@ export function readRelayerConfigFromEnv(
         ["RELAYER_TARGET", process.env.RELAYER_TARGET],
         ["RELAYER_REGISTRY", process.env.RELAYER_REGISTRY],
         ["RELAYER_VERIFIER_REGISTRY", process.env.RELAYER_VERIFIER_REGISTRY],
+        ["RELAYER_CATEGORY_REGISTRY", process.env.RELAYER_CATEGORY_REGISTRY],
+        ["RELAYER_CATEGORY_POOL", process.env.RELAYER_CATEGORY_POOL],
     ]
         .filter(([, value]) => value === undefined || value.length === 0)
         .map(([name]) => name);
@@ -2557,6 +2569,8 @@ export function readRelayerConfigFromEnv(
         target: process.env.RELAYER_TARGET ?? "",
         registry: process.env.RELAYER_REGISTRY ?? "",
         verifierRegistry: process.env.RELAYER_VERIFIER_REGISTRY ?? "",
+        categoryRegistry: process.env.RELAYER_CATEGORY_REGISTRY ?? "",
+        categoryPool: process.env.RELAYER_CATEGORY_POOL ?? "",
     };
     if (missingCoreFields.length > 0) {
         config.configurationError = `${missingCoreFields.join(", ")} required for RELAYER_MODE=${mode}`;

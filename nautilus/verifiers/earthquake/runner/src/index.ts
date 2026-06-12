@@ -329,6 +329,8 @@ async function handleRelayer(
             "target",
             "registry",
             "verifierRegistry",
+            "categoryRegistry",
+            "categoryPool",
             "network",
             "grpcUrl",
             "senderAddress",
@@ -356,6 +358,8 @@ async function handleRelayer(
         target: typeof body.target === "string" ? body.target : "",
         registry: typeof body.registry === "string" ? body.registry : "",
         verifierRegistry: typeof body.verifierRegistry === "string" ? body.verifierRegistry : "",
+        categoryRegistry: typeof body.categoryRegistry === "string" ? body.categoryRegistry : "",
+        categoryPool: typeof body.categoryPool === "string" ? body.categoryPool : "",
     };
     const result =
         mode === "preview"
