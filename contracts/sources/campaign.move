@@ -106,18 +106,7 @@ public struct Campaign has key {
     total_paid_usdc: u64,
     ops_withheld_usdc: u64,
     // 作成時スナップショット（以後不変）
-    band_target_usdc: vector<u64>,
-    round_cap_multiplier: u64,
-    floor_target_ratio_bps: u64,
-    min_claim_band: u8,
-    split_campaign_bps: u64,
-    split_main_bps: u64,
-    split_ops_bps: u64,
-    campaign_ops_cap_usdc: u64,
-    round_interval_ms: u64,
-    min_payout_per_recipient_usdc: u64,
-    category_annual_event_divisor: u64,
-    floor_main_share_bps: u64,
+    terms: CampaignTerms,
     // 締切
     created_at_ms: u64,
     donation_end_ms: u64,
@@ -135,6 +124,21 @@ public struct Campaign has key {
     sweep_eligible: bool,
     // 運用
     paused: bool,
+}
+
+public struct CampaignTerms has store {
+    band_target_usdc: vector<u64>,
+    round_cap_multiplier: u64,
+    floor_target_ratio_bps: u64,
+    min_claim_band: u8,
+    split_campaign_bps: u64,
+    split_main_bps: u64,
+    split_ops_bps: u64,
+    campaign_ops_cap_usdc: u64,
+    round_interval_ms: u64,
+    min_payout_per_recipient_usdc: u64,
+    category_annual_event_divisor: u64,
+    floor_main_share_bps: u64,
 }
 
 public struct ClaimApplication has copy, drop, store {
@@ -296,7 +300,20 @@ public(package) fun create_campaign(
     let donation_end_ms = created_at_ms + DONATION_PERIOD_MS;
     let claim_end_ms = created_at_ms + CLAIM_PERIOD_MS;
 
-    let band_target_usdc = vector[BAND_1_TARGET_USDC, BAND_2_TARGET_USDC, BAND_3_TARGET_USDC];
+    let terms = CampaignTerms {
+        band_target_usdc: vector[BAND_1_TARGET_USDC, BAND_2_TARGET_USDC, BAND_3_TARGET_USDC],
+        round_cap_multiplier: ROUND_CAP_MULTIPLIER,
+        floor_target_ratio_bps: FLOOR_TARGET_RATIO_BPS,
+        min_claim_band: MIN_CLAIM_BAND,
+        split_campaign_bps: SPLIT_CAMPAIGN_BPS,
+        split_main_bps: SPLIT_MAIN_BPS,
+        split_ops_bps: SPLIT_OPS_BPS,
+        campaign_ops_cap_usdc: CAMPAIGN_OPS_CAP_USDC,
+        round_interval_ms: ROUND_INTERVAL_MS,
+        min_payout_per_recipient_usdc: MIN_PAYOUT_PER_RECIPIENT_USDC,
+        category_annual_event_divisor: CATEGORY_ANNUAL_EVENT_DIVISOR,
+        floor_main_share_bps: FLOOR_MAIN_SHARE_BPS,
+    };
 
     let campaign = Campaign {
         id: object::new(ctx),
@@ -321,18 +338,7 @@ public(package) fun create_campaign(
         total_donated_usdc: 0,
         total_paid_usdc: 0,
         ops_withheld_usdc: 0,
-        band_target_usdc,
-        round_cap_multiplier: ROUND_CAP_MULTIPLIER,
-        floor_target_ratio_bps: FLOOR_TARGET_RATIO_BPS,
-        min_claim_band: MIN_CLAIM_BAND,
-        split_campaign_bps: SPLIT_CAMPAIGN_BPS,
-        split_main_bps: SPLIT_MAIN_BPS,
-        split_ops_bps: SPLIT_OPS_BPS,
-        campaign_ops_cap_usdc: CAMPAIGN_OPS_CAP_USDC,
-        round_interval_ms: ROUND_INTERVAL_MS,
-        min_payout_per_recipient_usdc: MIN_PAYOUT_PER_RECIPIENT_USDC,
-        category_annual_event_divisor: CATEGORY_ANNUAL_EVENT_DIVISOR,
-        floor_main_share_bps: FLOOR_MAIN_SHARE_BPS,
+        terms,
         created_at_ms,
         donation_end_ms,
         claim_end_ms,
@@ -357,13 +363,13 @@ public(package) fun create_campaign(
         event_revision: campaign.event_revision,
         category: campaign.category,
         category_pool_id: campaign.category_pool_id,
-        band_target_usdc: campaign.band_target_usdc,
-        floor_target_ratio_bps: campaign.floor_target_ratio_bps,
-        min_claim_band: campaign.min_claim_band,
-        split_campaign_bps: campaign.split_campaign_bps,
-        split_main_bps: campaign.split_main_bps,
-        split_ops_bps: campaign.split_ops_bps,
-        campaign_ops_cap_usdc: campaign.campaign_ops_cap_usdc,
+        band_target_usdc: campaign.terms.band_target_usdc,
+        floor_target_ratio_bps: campaign.terms.floor_target_ratio_bps,
+        min_claim_band: campaign.terms.min_claim_band,
+        split_campaign_bps: campaign.terms.split_campaign_bps,
+        split_main_bps: campaign.terms.split_main_bps,
+        split_ops_bps: campaign.terms.split_ops_bps,
+        campaign_ops_cap_usdc: campaign.terms.campaign_ops_cap_usdc,
         donation_end_ms: campaign.donation_end_ms,
         claim_end_ms: campaign.claim_end_ms,
         created_at_ms: campaign.created_at_ms,
@@ -412,7 +418,7 @@ public(package) fun campaign_census_set(c: &Campaign): bool {
 }
 
 public(package) fun campaign_floor_target_ratio_bps(c: &Campaign): u64 {
-    c.floor_target_ratio_bps
+    c.terms.floor_target_ratio_bps
 }
 
 public(package) fun campaign_donation_end_ms(c: &Campaign): u64 {
@@ -428,11 +434,11 @@ public(package) fun campaign_created_at_ms(c: &Campaign): u64 {
 }
 
 public(package) fun campaign_min_claim_band(c: &Campaign): u8 {
-    c.min_claim_band
+    c.terms.min_claim_band
 }
 
 public(package) fun campaign_band_target_usdc(c: &Campaign): vector<u64> {
-    c.band_target_usdc
+    c.terms.band_target_usdc
 }
 
 public(package) fun campaign_paused(c: &Campaign): bool {
@@ -444,19 +450,19 @@ public(package) fun campaign_closed(c: &Campaign): bool {
 }
 
 public(package) fun campaign_split_campaign_bps(c: &Campaign): u64 {
-    c.split_campaign_bps
+    c.terms.split_campaign_bps
 }
 
 public(package) fun campaign_split_main_bps(c: &Campaign): u64 {
-    c.split_main_bps
+    c.terms.split_main_bps
 }
 
 public(package) fun campaign_split_ops_bps(c: &Campaign): u64 {
-    c.split_ops_bps
+    c.terms.split_ops_bps
 }
 
 public(package) fun campaign_ops_cap_usdc(c: &Campaign): u64 {
-    c.campaign_ops_cap_usdc
+    c.terms.campaign_ops_cap_usdc
 }
 
 public(package) fun campaign_ops_withheld_usdc(c: &Campaign): u64 {
@@ -526,7 +532,7 @@ public(package) fun apply_floor_census(
     );
 
     let registered = census_result::registered_members_by_band(result);
-    let band_targets = campaign.band_target_usdc;
+    let band_targets = campaign.terms.band_target_usdc;
 
     let mut max_liability: u128 = 0;
     let mut i = 0;
@@ -556,12 +562,13 @@ public(package) fun apply_floor_census(
     let floor_target = ((max_liability * (FLOOR_TARGET_RATIO_BPS as u128)) / (BPS_DENOMINATOR as u128)) as u64;
 
     let cat_balance = category_pool::category_pool_balance_usdc(category_pool);
-    let cat_available = cat_balance / campaign.category_annual_event_divisor;
+    let cat_available = cat_balance / campaign.terms.category_annual_event_divisor;
     let draw_category = if (floor_target <= cat_available) { floor_target } else { cat_available };
 
     let rem = floor_target - draw_category;
     let main_disposable = pools::main_pool_disposable_floor_usdc(main_pool);
-    let main_share = ((main_disposable as u128 * (campaign.floor_main_share_bps as u128)) / (BPS_DENOMINATOR as u128)) as u64;
+    let main_share =
+        ((main_disposable as u128 * (campaign.terms.floor_main_share_bps as u128)) / (BPS_DENOMINATOR as u128)) as u64;
     let draw_main = if (rem <= main_share) { rem } else { main_share };
 
     let floor_budget = draw_category + draw_main;
@@ -810,7 +817,7 @@ public(package) fun submit_claim(
 
     // Band check
     let cell_band = affected_cell::cell_band(&leaf);
-    assert!(cell_band >= campaign.min_claim_band, EClaimBandTooLow);
+    assert!(cell_band >= campaign.terms.min_claim_band, EClaimBandTooLow);
 
     // SBT precheck
     membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
@@ -924,7 +931,7 @@ public(package) fun finalize_round_v2(
         assert!(now_ms >= campaign.donation_end_ms, ERoundTooEarly);
     } else {
         assert!(
-            now_ms >= campaign.round_finalized_at_ms + campaign.round_interval_ms,
+            now_ms >= campaign.round_finalized_at_ms + campaign.terms.round_interval_ms,
             ERoundTooEarly,
         );
     };
@@ -937,7 +944,7 @@ public(package) fun finalize_round_v2(
     let mut b = 0u64;
     while (b < BAND_COUNT) {
         let members = (*eligible_count_by_band.borrow(b) as u128);
-        let target = (*campaign.band_target_usdc.borrow(b) as u128);
+        let target = (*campaign.terms.band_target_usdc.borrow(b) as u128);
         liability128 = liability128 + members * target;
         b = b + 1;
     };
@@ -947,7 +954,7 @@ public(package) fun finalize_round_v2(
     // Termination check: balance per recipient too small
     if (total_eligible > 0
         && (campaign_av as u128)
-            < (campaign.min_payout_per_recipient_usdc as u128) * (total_eligible as u128)) {
+            < (campaign.terms.min_payout_per_recipient_usdc as u128) * (total_eligible as u128)) {
         campaign.sweep_eligible = true;
         return
     };
@@ -957,11 +964,11 @@ public(package) fun finalize_round_v2(
     if (liability128 > 0) {
         // 適格受給者が存在するため sweep フラグを必ずリセットする
         campaign.sweep_eligible = false;
-        let cap128 = liability128 * (campaign.round_cap_multiplier as u128);
+        let cap128 = liability128 * (campaign.terms.round_cap_multiplier as u128);
         let effective_av128 = if ((campaign_av as u128) > cap128) { cap128 } else { campaign_av as u128 };
         let mut b2 = 0u64;
         while (b2 < BAND_COUNT) {
-            let target128 = (*campaign.band_target_usdc.borrow(b2) as u128);
+            let target128 = (*campaign.terms.band_target_usdc.borrow(b2) as u128);
             let payout = target128 * effective_av128 / liability128;
             *band_payout.borrow_mut(b2) = payout as u64;
             b2 = b2 + 1;
@@ -1068,7 +1075,7 @@ public(package) fun sweep_residual_v2(
 
     // Sweep is allowed when: sweep_eligible flag set by finalize, OR no finalize ever run but time passed
     let initial_timeout = campaign.current_round == 0
-        && now_ms >= campaign.donation_end_ms + campaign.round_interval_ms;
+        && now_ms >= campaign.donation_end_ms + campaign.terms.round_interval_ms;
     assert!(campaign.sweep_eligible || initial_timeout, ESweepNotEligible);
 
     let amount = campaign.balance.value();
@@ -1216,16 +1223,22 @@ public fun campaign_created_event_fields(
 }
 
 #[test_only]
-public fun campaign_snapshot_fields_for_testing(
+public fun campaign_terms_fields_for_testing(
     c: &Campaign,
-): (u64, u64, u8, u64, u64, u64) {
+): (vector<u64>, u64, u64, u8, u64, u64, u64, u64, u64, u64, u64, u64) {
     (
-        c.round_cap_multiplier,
-        c.floor_target_ratio_bps,
-        c.min_claim_band,
-        c.campaign_ops_cap_usdc,
-        c.category_annual_event_divisor,
-        c.floor_main_share_bps,
+        c.terms.band_target_usdc,
+        c.terms.round_cap_multiplier,
+        c.terms.floor_target_ratio_bps,
+        c.terms.min_claim_band,
+        c.terms.split_campaign_bps,
+        c.terms.split_main_bps,
+        c.terms.split_ops_bps,
+        c.terms.campaign_ops_cap_usdc,
+        c.terms.round_interval_ms,
+        c.terms.min_payout_per_recipient_usdc,
+        c.terms.category_annual_event_divisor,
+        c.terms.floor_main_share_bps,
     )
 }
 

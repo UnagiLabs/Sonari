@@ -196,27 +196,35 @@ fun campaign_snapshot_fields_match_constants() {
     let c = scenario.take_shared<campaign::Campaign>();
 
     let (
+        band_targets,
         round_cap_multiplier,
         floor_target_ratio_bps,
         min_claim_band,
+        split_campaign_bps,
+        split_main_bps,
+        split_ops_bps,
         campaign_ops_cap_usdc,
+        round_interval_ms,
+        min_payout_per_recipient_usdc,
         category_annual_event_divisor,
         floor_main_share_bps,
-    ) = campaign::campaign_snapshot_fields_for_testing(&c);
+    ) = campaign::campaign_terms_fields_for_testing(&c);
 
-    assert!(round_cap_multiplier == 3u64);
-    assert!(floor_target_ratio_bps == 5_000u64);
-    assert!(min_claim_band == 1u8);
-    assert!(campaign_ops_cap_usdc == 50_000_000_000u64);
-    assert!(category_annual_event_divisor == 5u64);
-    assert!(floor_main_share_bps == 2_000u64);
-
-    // band_target_usdc should be [50_000_000, 150_000_000, 300_000_000]
-    let band_targets = campaign::campaign_band_target_usdc(&c);
     assert!(band_targets.length() == 3);
     assert!(*band_targets.borrow(0) == 50_000_000u64);
     assert!(*band_targets.borrow(1) == 150_000_000u64);
     assert!(*band_targets.borrow(2) == 300_000_000u64);
+    assert!(round_cap_multiplier == 3u64);
+    assert!(floor_target_ratio_bps == 5_000u64);
+    assert!(min_claim_band == 1u8);
+    assert!(split_campaign_bps == 9_000u64);
+    assert!(split_main_bps == 500u64);
+    assert!(split_ops_bps == 500u64);
+    assert!(campaign_ops_cap_usdc == 50_000_000_000u64);
+    assert!(round_interval_ms == 7_776_000_000u64);
+    assert!(min_payout_per_recipient_usdc == 1_000_000u64);
+    assert!(category_annual_event_divisor == 5u64);
+    assert!(floor_main_share_bps == 2_000u64);
 
     test_scenario::return_shared(c);
     scenario.end();
