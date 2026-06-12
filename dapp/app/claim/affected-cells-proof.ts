@@ -80,35 +80,51 @@ export interface AffectedCellProofMoveArg {
     readonly siblingHashBytes: number[];
 }
 
-export interface ClaimDisasterUsdcObjectConfig {
+export interface ClaimTransactionObjectConfig {
     readonly pauseState: string;
-    readonly claimIndex: string;
     readonly membershipRegistry: string;
-    readonly program: string;
     readonly campaign: string;
-    readonly policy: string;
-    readonly budget: string;
-    readonly binding: string;
     readonly disasterEvent: string;
     readonly identityRegistry: string;
     readonly pass: string;
-    readonly designatedPool: string;
-    readonly mainPool: string;
     readonly clock?: string | undefined;
 }
 
-export interface BuildClaimDisasterUsdcTransactionInput {
+export interface BuildClaimFloorTransactionInput {
+    readonly senderAddress?: string | undefined;
+    readonly packageId: string;
+    readonly objects: ClaimTransactionObjectConfig;
+    readonly identityProvider: number;
+    readonly duplicateKeyHash: string;
+}
+
+export interface BuildSubmitClaimV2TransactionInput {
     readonly senderAddress?: string | undefined;
     readonly packageId: string;
     readonly proof: AffectedCellsProof;
     readonly context: ClaimProofContext;
-    readonly objects: ClaimDisasterUsdcObjectConfig;
-    readonly identityProvider: number;
-    readonly duplicateKeyHash: string;
-    readonly userMaxAmountUsdc: string | bigint | number;
+    readonly objects: ClaimTransactionObjectConfig;
 }
 
-export interface ClaimDisasterUsdcTransactionResult {
+export interface BuildVerifyClaimV2TransactionInput {
+    readonly senderAddress?: string | undefined;
+    readonly packageId: string;
+    readonly objects: ClaimTransactionObjectConfig;
+    readonly identityProvider: number;
+    readonly duplicateKeyHash: string;
+}
+
+export interface BuildClaimPayoutTransactionInput {
+    readonly senderAddress?: string | undefined;
+    readonly packageId: string;
+    readonly objects: ClaimTransactionObjectConfig;
+}
+
+export interface ClaimTransactionResult {
+    readonly transaction: Transaction;
+}
+
+export interface SubmitClaimV2TransactionResult {
     readonly transaction: Transaction;
     readonly leafArgs: AffectedCellLeafMoveArgs;
     readonly proofArgs: AffectedCellProofMoveArg[];
@@ -239,19 +255,114 @@ export function buildAffectedCellProofMoveArgs(
     }));
 }
 
-export function buildClaimDisasterUsdcTransaction(
-    input: BuildClaimDisasterUsdcTransactionInput,
-): ClaimDisasterUsdcTransactionResult {
+export function buildClaimFloorTransaction(
+    input: BuildClaimFloorTransactionInput,
+): ClaimTransactionResult {
+    const tx = newClaimTransaction(input.senderAddress);
+
+    tx.moveCall({
+        target: `${input.packageId}::accessor::claim_floor`,
+        arguments: [
+            tx.object(input.objects.pauseState),
+            tx.object(input.objects.campaign),
+            tx.object(input.objects.identityRegistry),
+            tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.pass),
+            tx.pure.u8(input.identityProvider),
+            duplicateKeyHashArg(tx, input.duplicateKeyHash),
+            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
+        ],
+    });
+
+    return { transaction: tx };
+}
+
+export function buildSubmitClaimV2Transaction(
+    input: BuildSubmitClaimV2TransactionInput,
+): SubmitClaimV2TransactionResult {
     assertProofMatchesClaimContext(input.proof, input.context);
 
-    const tx = new Transaction();
-    if (input.senderAddress !== undefined) {
-        tx.setSender(input.senderAddress);
-    }
+    const tx = newClaimTransaction(input.senderAddress);
+    const { leaf, leafArgs, proof, proofArgs } = buildAffectedCellMoveInputs(
+        tx,
+        input.packageId,
+        input.proof,
+    );
 
-    const leafArgs = buildAffectedCellLeafMoveArgs(input.proof.leaf);
+    tx.moveCall({
+        target: `${input.packageId}::accessor::submit_claim_v2`,
+        arguments: [
+            tx.object(input.objects.pauseState),
+            tx.object(input.objects.campaign),
+            tx.object(input.objects.disasterEvent),
+            tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.pass),
+            leaf,
+            proof,
+            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
+        ],
+    });
+
+    return { transaction: tx, leafArgs, proofArgs };
+}
+
+export function buildVerifyClaimV2Transaction(
+    input: BuildVerifyClaimV2TransactionInput,
+): ClaimTransactionResult {
+    const tx = newClaimTransaction(input.senderAddress);
+
+    tx.moveCall({
+        target: `${input.packageId}::accessor::verify_claim_v2`,
+        arguments: [
+            tx.object(input.objects.pauseState),
+            tx.object(input.objects.campaign),
+            tx.object(input.objects.identityRegistry),
+            tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.pass),
+            tx.pure.u8(input.identityProvider),
+            duplicateKeyHashArg(tx, input.duplicateKeyHash),
+            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
+        ],
+    });
+
+    return { transaction: tx };
+}
+
+export function buildClaimPayoutTransaction(
+    input: BuildClaimPayoutTransactionInput,
+): ClaimTransactionResult {
+    const tx = newClaimTransaction(input.senderAddress);
+
+    tx.moveCall({
+        target: `${input.packageId}::accessor::claim_payout`,
+        arguments: [
+            tx.object(input.objects.pauseState),
+            tx.object(input.objects.campaign),
+            tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.pass),
+            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
+        ],
+    });
+
+    return { transaction: tx };
+}
+
+function newClaimTransaction(senderAddress: string | undefined): Transaction {
+    const tx = new Transaction();
+    if (senderAddress !== undefined) {
+        tx.setSender(senderAddress);
+    }
+    return tx;
+}
+
+function buildAffectedCellMoveInputs(
+    tx: Transaction,
+    packageId: string,
+    proof: AffectedCellsProof,
+) {
+    const leafArgs = buildAffectedCellLeafMoveArgs(proof.leaf);
     const leaf = tx.moveCall({
-        target: `${input.packageId}::accessor::new_affected_cell_leaf`,
+        target: `${packageId}::accessor::new_affected_cell_leaf`,
         arguments: [
             tx.pure.vector("u8", leafArgs.eventUidBytes),
             tx.pure.u32(leafArgs.eventRevision),
@@ -266,44 +377,26 @@ export function buildClaimDisasterUsdcTransaction(
         ],
     });
 
-    const proofArgs = buildAffectedCellProofMoveArgs(input.proof.proof);
+    const proofArgs = buildAffectedCellProofMoveArgs(proof.proof);
     const proofSteps = proofArgs.map((step) =>
         tx.moveCall({
-            target: `${input.packageId}::accessor::${step.constructor}`,
+            target: `${packageId}::accessor::${step.constructor}`,
             arguments: [tx.pure.vector("u8", step.siblingHashBytes)],
         }),
     );
-    const proof = tx.makeMoveVec({
-        type: `${input.packageId}::affected_cell::ProofStep`,
+    const proofVector = tx.makeMoveVec({
+        type: `${packageId}::affected_cell::ProofStep`,
         elements: proofSteps,
     });
 
-    tx.moveCall({
-        target: `${input.packageId}::accessor::claim_disaster_usdc`,
-        arguments: [
-            tx.object(input.objects.pauseState),
-            tx.object(input.objects.claimIndex),
-            tx.object(input.objects.membershipRegistry),
-            tx.object(input.objects.program),
-            tx.object(input.objects.campaign),
-            tx.object(input.objects.policy),
-            tx.object(input.objects.budget),
-            tx.object(input.objects.binding),
-            tx.object(input.objects.disasterEvent),
-            tx.object(input.objects.identityRegistry),
-            tx.object(input.objects.pass),
-            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
-            leaf,
-            proof,
-            tx.pure.u8(input.identityProvider),
-            tx.pure.vector("u8", hexToByteArray(expectPrefixedHex32("duplicate_key_hash", input.duplicateKeyHash))),
-            tx.object(input.objects.designatedPool),
-            tx.object(input.objects.mainPool),
-            tx.pure.u64(input.userMaxAmountUsdc),
-        ],
-    });
+    return { leaf, leafArgs, proof: proofVector, proofArgs };
+}
 
-    return { transaction: tx, leafArgs, proofArgs };
+function duplicateKeyHashArg(tx: Transaction, duplicateKeyHash: string) {
+    return tx.pure.vector(
+        "u8",
+        hexToByteArray(expectPrefixedHex32("duplicate_key_hash", duplicateKeyHash)),
+    );
 }
 
 export async function parseAffectedCellsProofResponse(

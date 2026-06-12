@@ -752,6 +752,9 @@
             "title": "検証チェック",
             "checkButton": "受給資格を確認"
         },
+        "worldId": {
+            "title": "World ID 証明"
+        },
         "checks": {
             "finalized": {
                 "label": "DisasterEvent が確定済み",
@@ -778,6 +781,20 @@
             "ready": "準備完了",
             "pending": "保留中"
         },
+        "status": {
+            "connectWallet": "ウォレットを接続して MembershipPass を読み込みます。",
+            "configMissing": "申請設定が不足しています。",
+            "configInvalid": "申請設定に不正な object ID が含まれています。",
+            "campaignsLoading": "申請できるキャンペーンを読み込んでいます。",
+            "campaignsFailed": "申請できるキャンペーンを読み込めませんでした。",
+            "noCampaigns": "申請できるキャンペーンはありません。",
+            "passLoading": "MembershipPass を読み込んでいます。",
+            "passMissing": "このウォレットは MembershipPass を所有していません。",
+            "passFailed": "MembershipPass を読み込めませんでした。",
+            "worldIdConfigMissing": "World ID 設定が不足しています。",
+            "worldIdRequired": "申請の検証前に World ID 検証を完了してください。",
+            "retry": "再試行"
+        },
         "proof": {
             "idle": "受給資格はまだ確認されていません。",
             "checking": "被災セルの証明を確認しています。",
@@ -801,6 +818,12 @@
         },
         "claimButton": "支援を申請",
         "claimButtonInFlight": "処理中…",
+        "actions": {
+            "submit": "被災セル証明を送信",
+            "verify": "申請を検証",
+            "floor": "床払いを受け取る",
+            "payout": "本払いを受け取る"
+        },
         "note": {
             "title": "プライバシーの境界",
             "body": "公開画面には H3 セル・パスの状態・検証の状態・匿名化された受給者の参照だけを表示します。"
