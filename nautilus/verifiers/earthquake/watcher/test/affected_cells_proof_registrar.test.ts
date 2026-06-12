@@ -125,6 +125,55 @@ describe("HttpAffectedCellsProofRegistrar", () => {
         );
     });
 
+    it("includes the failed response body in retryable error messages", async () => {
+        await expect(
+            registrarWithResponse(new Response("error code: 1102", { status: 503 })).register(
+                input,
+            ),
+        ).rejects.toMatchObject({
+            message:
+                'affected cells proof registration failed: HTTP 503 body="error code: 1102"',
+        });
+    });
+
+    it("truncates failed response bodies and removes control characters", async () => {
+        await expect(
+            registrarWithResponse(
+                new Response(`first "quoted"\n\t\0${"a".repeat(220)}`, { status: 503 }),
+            ).register(input),
+        ).rejects.toSatisfy((error: unknown) => {
+            expect(error).toBeInstanceOf(RetryableAffectedCellsProofRegistrationError);
+            expect(error).toBeInstanceOf(Error);
+            const message = (error as Error).message;
+            expect(message).toContain(' body="first \\"quoted\\"');
+            const bodyPrefix = ' body="';
+            const bodyStart = message.indexOf(bodyPrefix) + bodyPrefix.length;
+            const body = message.slice(bodyStart, -1);
+            expect(body).toHaveLength(200);
+            expect(body).not.toMatch(/[\u0000-\u001f\u007f]/u);
+            return true;
+        });
+    });
+
+    it("falls back to the status-only error message when response body reading fails", async () => {
+        const registrar = new HttpAffectedCellsProofRegistrar(
+            "https://proof-worker.test",
+            {
+                secretArn: "arn:aws:secretsmanager:affected-proof-token",
+                secretReader: new RecordingSecretReader("registrar-token"),
+            },
+            30_000,
+            (async () => unreadableResponse(503)) as typeof fetch,
+        );
+
+        await expect(registrar.register(input)).rejects.toMatchObject({
+            message: "affected cells proof registration failed: HTTP 503",
+        });
+        await expect(registrar.register(input)).rejects.toBeInstanceOf(
+            RetryableAffectedCellsProofRegistrationError,
+        );
+    });
+
     it("classifies 400 and 401 responses as configuration failures", async () => {
         for (const status of [400, 401]) {
             await expect(registrarWithResponse(new Response("bad request", { status })).register(
@@ -173,6 +222,21 @@ function registrarWithResponse(response: Response): HttpAffectedCellsProofRegist
         30_000,
         (async () => response.clone()) as typeof fetch,
     );
+}
+
+function unreadableResponse(status: number): Response {
+    return {
+        ok: false,
+        status,
+        clone: () => ({
+            json: async () => {
+                throw new Error("body read failed");
+            },
+            text: async () => {
+                throw new Error("body read failed");
+            },
+        }),
+    } as unknown as Response;
 }
 
 function normalizeHeaders(headers: RequestInit["headers"] | undefined): Record<string, string> {

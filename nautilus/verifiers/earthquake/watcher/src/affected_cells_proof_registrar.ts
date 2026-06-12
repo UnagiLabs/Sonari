@@ -100,6 +100,8 @@ export class HttpAffectedCellsProofRegistrar {
     }
 }
 
+const FAILED_RESPONSE_BODY_SNIPPET_MAX_LENGTH = 200;
+
 function registrationUrl(endpoint: string, input: AffectedCellsProofRegistrationInput): string {
     const base = endpoint.endsWith("/") ? endpoint.slice(0, -1) : endpoint;
     return `${base}/events/${encodeURIComponent(input.event_uid)}/revisions/${input.event_revision}/affected-cells`;
@@ -141,7 +143,7 @@ async function fetchWithTimeout(
 async function registrationErrorForResponse(
     response: Response,
 ): Promise<AffectedCellsProofRegistrationError> {
-    const message = `affected cells proof registration failed: HTTP ${response.status}`;
+    const message = await registrationErrorMessageForResponse(response);
     const errorKind = await readWorkerErrorKind(response);
     if (errorKind === "configuration") {
         return new ConfigurationAffectedCellsProofRegistrationError(message);
@@ -161,6 +163,37 @@ async function registrationErrorForResponse(
         return new IntegrityAffectedCellsProofRegistrationError(message);
     }
     return new ConfigurationAffectedCellsProofRegistrationError(message);
+}
+
+async function registrationErrorMessageForResponse(response: Response): Promise<string> {
+    const message = `affected cells proof registration failed: HTTP ${response.status}`;
+    const body = await readFailedResponseBodySnippet(response);
+    if (body === undefined) {
+        return message;
+    }
+    return `${message} body="${body}"`;
+}
+
+async function readFailedResponseBodySnippet(response: Response): Promise<string | undefined> {
+    try {
+        const body = sanitizeFailedResponseBody(await response.clone().text());
+        return body.length === 0 ? undefined : body;
+    } catch {
+        return undefined;
+    }
+}
+
+function sanitizeFailedResponseBody(body: string): string {
+    const snippet = Array.from(body)
+        .filter((character) => {
+            const codePoint = character.codePointAt(0);
+            return codePoint !== undefined && codePoint > 0x1f && codePoint !== 0x7f;
+        })
+        .join("")
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .slice(0, FAILED_RESPONSE_BODY_SNIPPET_MAX_LENGTH);
+    return snippet.endsWith("\\") ? snippet.slice(0, -1) : snippet;
 }
 
 async function readWorkerErrorKind(
