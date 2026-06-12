@@ -18,9 +18,9 @@
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git commit*)",
-            "command": "bash -lc 'd=$(git rev-parse --show-toplevel 2>/dev/null); [ -n \"$d\" ] && exec bash \"$d/.claude/hooks/precommit-quality-gate.sh\"; exit 0'",
-            "statusMessage": "Sonari pre-commit quality gate",
+            "if": "Bash(gh pr create*)",
+            "command": "bash -lc 'd=$(git rev-parse --show-toplevel 2>/dev/null); [ -n \"$d\" ] && exec bash \"$d/.claude/hooks/pre-pr-quality-gate.sh\"; exit 0'",
+            "statusMessage": "Sonari pre-PR quality gate",
             "timeout": 600
           }
         ]
