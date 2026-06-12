@@ -2,22 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
     type DashboardPoolReadClient,
     parseCategoryPoolObject,
-    parseCategoryPoolCreatedEvent,
-    parseDashboardPoolIds,
     parseMainPoolObject,
     parseOperationsPoolObject,
-    readEarthquakeCategoryPoolId,
     readDashboardPools,
 } from "./dashboard-chain";
 
 const MAIN_POOL_ID = `0x${"11".repeat(32)}`;
 const OPERATIONS_POOL_ID = `0x${"22".repeat(32)}`;
 const CATEGORY_POOL_ID = `0x${"33".repeat(32)}`;
-
-const poolIds = {
-    NEXT_PUBLIC_SONARI_MAIN_POOL_ID: MAIN_POOL_ID,
-    NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID: OPERATIONS_POOL_ID,
-};
 
 function balance(value: string): Record<string, unknown> {
     return { value };
@@ -51,74 +43,6 @@ function categoryPoolJson(overrides: Record<string, unknown> = {}): Record<strin
         ...overrides,
     };
 }
-
-describe("parseDashboardPoolIds", () => {
-    it("returns configured pool ids", () => {
-        expect(parseDashboardPoolIds(poolIds)).toEqual({
-            kind: "ok",
-            ids: {
-                mainPoolId: MAIN_POOL_ID,
-                operationsPoolId: OPERATIONS_POOL_ID,
-            },
-        });
-    });
-
-    it("fails closed when an id is missing or malformed", () => {
-        expect(
-            parseDashboardPoolIds({
-                ...poolIds,
-                NEXT_PUBLIC_SONARI_MAIN_POOL_ID: "not-an-id",
-            }),
-        ).toEqual({
-            kind: "error",
-            message: "NEXT_PUBLIC_SONARI_MAIN_POOL_ID must be a 32-byte Sui object id.",
-        });
-    });
-});
-
-describe("readEarthquakeCategoryPoolId", () => {
-    it("selects the category=1 pool from CategoryPoolCreated events", async () => {
-        const queryEvents = vi.fn(async () => ({
-            data: [
-                { parsedJson: { pool_id: `0x${"44".repeat(32)}`, category: 2 } },
-                { parsedJson: { pool_id: CATEGORY_POOL_ID, category: 1 } },
-            ],
-            hasNextPage: false,
-        }));
-
-        await expect(
-            readEarthquakeCategoryPoolId({ queryEvents }, { packageId: `0x${"ab".repeat(32)}` }),
-        ).resolves.toEqual({ kind: "ok", categoryPoolId: CATEGORY_POOL_ID });
-    });
-
-    it("fails closed when the earthquake category pool is not found", async () => {
-        const queryEvents = vi.fn(async () => ({
-            data: [{ parsedJson: { pool_id: `0x${"44".repeat(32)}`, category: 2 } }],
-            hasNextPage: false,
-        }));
-
-        await expect(
-            readEarthquakeCategoryPoolId({ queryEvents }, { packageId: `0x${"ab".repeat(32)}` }),
-        ).resolves.toEqual({
-            kind: "error",
-            message: "Earthquake category pool was not found on chain.",
-        });
-    });
-});
-
-describe("parseCategoryPoolCreatedEvent", () => {
-    it("parses category pool created events", () => {
-        expect(parseCategoryPoolCreatedEvent({ pool_id: CATEGORY_POOL_ID, category: 1 })).toEqual({
-            poolId: CATEGORY_POOL_ID,
-            category: 1,
-        });
-    });
-
-    it("returns null for malformed category pool created events", () => {
-        expect(parseCategoryPoolCreatedEvent({ pool_id: "bad", category: 1 })).toBeNull();
-        expect(parseCategoryPoolCreatedEvent({ pool_id: CATEGORY_POOL_ID, category: 999 })).toBeNull();
-    });
-});
 
 describe("pool object parsers", () => {
     it("parses MainPool fields and validates object type", () => {

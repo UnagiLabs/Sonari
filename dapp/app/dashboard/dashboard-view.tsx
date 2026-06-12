@@ -3,15 +3,16 @@
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    GENESIS_OBJECT_KIND,
+    readGenesisObjectIds,
+    selectGenesisObjectId,
+} from "../chain/genesis-objects";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
-import {
-    parseDashboardPoolIds,
-    readDashboardPools,
-    readEarthquakeCategoryPoolId,
-} from "./dashboard-chain";
+import { readDashboardPools } from "./dashboard-chain";
 import { readDashboardEvents } from "./dashboard-events";
 import {
     type DashboardActivityItem,
@@ -24,7 +25,7 @@ import {
 type DashboardReadState =
     | { readonly status: "loading" }
     | { readonly status: "ready"; readonly view: DashboardViewModel }
-    | { readonly status: "error"; readonly message: string };
+    | { readonly status: "error" };
 
 const fundingPackageId = process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID ?? "";
 
@@ -32,30 +33,20 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("dashboard");
     const client = useCurrentClient();
     const network = readWalletNetwork();
-    const poolIdsResult = useMemo(
-        () =>
-            parseDashboardPoolIds({
-                NEXT_PUBLIC_SONARI_MAIN_POOL_ID: process.env.NEXT_PUBLIC_SONARI_MAIN_POOL_ID,
-                NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID:
-                    process.env.NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID,
-            }),
-        [],
-    );
     const [state, setState] = useState<DashboardReadState>({ status: "loading" });
     const cancelRef = useRef<() => void>(() => {});
 
     const load = useCallback((): (() => void) => {
         cancelRef.current();
 
-        if (poolIdsResult.kind === "error") {
-            setState({ status: "error", message: poolIdsResult.message });
-            return () => {};
-        }
+        // 詳細な原因は開発者向けに console へ出し、画面には内部名を出さない。
+        const failClosed = (detail: string) => {
+            console.error(`dashboard load failed: ${detail}`);
+            setState({ status: "error" });
+        };
+
         if (fundingPackageId.trim().length === 0) {
-            setState({
-                status: "error",
-                message: "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.",
-            });
+            failClosed("NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.");
             return () => {};
         }
 
@@ -69,33 +60,48 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
         const eventClient = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
 
         void (async () => {
-            const categoryPoolResult = await readEarthquakeCategoryPoolId(eventClient, {
+            // pool ID は環境変数ではなく packageID 起点の genesis イベントから導出する。
+            const genesisResult = await readGenesisObjectIds(eventClient, {
                 packageId: fundingPackageId,
             });
             if (cancelled) {
                 return;
             }
-            if (categoryPoolResult.kind === "error") {
-                setState({ status: "error", message: categoryPoolResult.message });
+            if (genesisResult.kind === "error") {
+                failClosed(genesisResult.message);
+                return;
+            }
+
+            const mainPoolId = selectGenesisObjectId(
+                genesisResult.ids,
+                GENESIS_OBJECT_KIND.mainPool,
+            );
+            const operationsPoolId = selectGenesisObjectId(
+                genesisResult.ids,
+                GENESIS_OBJECT_KIND.operationsPool,
+            );
+            const categoryPoolId = selectGenesisObjectId(
+                genesisResult.ids,
+                GENESIS_OBJECT_KIND.earthquakePool,
+            );
+            if (mainPoolId === null || operationsPoolId === null || categoryPoolId === null) {
+                failClosed("genesis objects for main/operations/earthquake pool were not found.");
                 return;
             }
 
             const [poolResult, eventResult] = await Promise.all([
-                readDashboardPools(client, {
-                    ...poolIdsResult.ids,
-                    categoryPoolId: categoryPoolResult.categoryPoolId,
-                }),
+                readDashboardPools(client, { mainPoolId, operationsPoolId, categoryPoolId }),
                 readDashboardEvents(eventClient, { packageId: fundingPackageId }),
             ]);
             if (cancelled) {
                 return;
             }
             if (poolResult.kind === "error") {
-                setState({ status: "error", message: poolResult.message });
+                failClosed(poolResult.message);
                 return;
             }
             if (eventResult.kind === "error") {
-                setState({ status: "error", message: eventResult.message });
+                failClosed(eventResult.message);
                 return;
             }
             setState({
@@ -113,16 +119,14 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
             });
         })().catch((error: unknown) => {
             if (!cancelled) {
-                setState({
-                    status: "error",
-                    message:
-                        error instanceof Error ? error.message : "Failed to read dashboard data.",
-                });
+                failClosed(
+                    error instanceof Error ? error.message : "Failed to read dashboard data.",
+                );
             }
         });
 
         return cancel;
-    }, [client, locale, network, poolIdsResult]);
+    }, [client, locale, network]);
 
     useEffect(() => load(), [load]);
 
@@ -190,7 +194,6 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                         <section className="dash-panel" role="alert">
                             <h2>{t("states.errorTitle")}</h2>
                             <p className="muted">{t("states.errorBody")}</p>
-                            <p className="muted">{state.message}</p>
                             <button className="btn btn-primary" onClick={retry} type="button">
                                 {t("states.retry")}
                             </button>
