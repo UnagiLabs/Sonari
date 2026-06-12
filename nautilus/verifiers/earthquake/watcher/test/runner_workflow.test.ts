@@ -36,6 +36,7 @@ import {
     RetryableSourceArchiveError,
     type S3ClientLike,
     type AffectedCellsProofRegistrarAdapter,
+    type RunnerFloorCensusAdapter,
     type SourceArchiveAdapter,
     type SsmClientLike,
 } from "../src/runner_workflow.js";
@@ -2339,6 +2340,99 @@ describe("AWS runner workflow helper", () => {
             relayer_submitted_at_ms: 1_800_000_002_000,
         });
     });
+
+    it("runs floor census once after recorded relayer success", async () => {
+        const repository = new InMemoryStateRepository();
+        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }));
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000, {
+            requestedSourceEventId: "us7000sonari",
+        });
+        await repository.markWorkflowStarted("us7000sonari", "exec", 1_800_000_001_000);
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_002_000, undefined, 1);
+        await repository.markRelayerSucceeded(
+            "us7000sonari",
+            ({
+                mode: "submit",
+                request: {
+                    target: earthquakeRelayerTarget,
+                    registry: earthquakeRelayerRegistry,
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    clock: earthquakeRelayerClock,
+                    verifierConfigKey: 1,
+                    verifierConfigVersion: 1,
+                    enclaveInstancePublicKey: finalizedPublicKey,
+                    arguments: [
+                        earthquakeRelayerRegistry,
+                        earthquakeRelayerVerifierRegistry,
+                        earthquakeRelayerClock,
+                        [],
+                        [],
+                        [],
+                    ],
+                    submitRequest: {
+                        target: earthquakeRelayerTarget,
+                        registry: earthquakeRelayerRegistry,
+                        verifierRegistry: earthquakeRelayerVerifierRegistry,
+                        clock: earthquakeRelayerClock,
+                        verifierConfigKey: 1,
+                        verifierConfigVersion: 1,
+                        enclaveInstancePublicKey: finalizedPublicKey,
+                        arguments: [
+                            earthquakeRelayerRegistry,
+                            earthquakeRelayerVerifierRegistry,
+                            earthquakeRelayerClock,
+                            [],
+                            [],
+                            [],
+                        ],
+                    },
+                },
+                digest: "tx-digest",
+                objectId: "0xdisaster",
+            } as RelayerSuccess),
+            1_800_000_003_000,
+            1,
+        );
+        const floorCensus = new RecordingFloorCensusAdapter();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            floorCensus,
+            now: () => 1_800_000_004_000,
+            config: baseConfig(),
+        });
+        const event = {
+            action: "run_floor_census",
+            source_event_id: "us7000sonari",
+            attempt: 1,
+            result_s3_key: "results/us7000sonari/finalized.json",
+            result,
+            relayer_success: {
+                mode: "submit",
+                target: earthquakeRelayerTarget,
+                registry: earthquakeRelayerRegistry,
+                verifierRegistry: earthquakeRelayerVerifierRegistry,
+                digest: "tx-digest",
+                objectId: "0xdisaster",
+            },
+        } as const;
+
+        await expect(handler(event as never)).resolves.toMatchObject({
+            floor_census: "succeeded",
+        });
+        await expect(handler(event as never)).resolves.toMatchObject({
+            floor_census: "skipped",
+        });
+        expect(floorCensus.inputs).toHaveLength(1);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            floor_census_status: "succeeded",
+            floor_census_digest: "census-digest",
+            floor_census_counts_json: JSON.stringify(["1", "2", "3"]),
+        });
+    });
 });
 
 function baseConfig() {
@@ -2807,6 +2901,24 @@ class RecordingRelayerAdapter implements RelayerAdapter {
                     },
                 },
             },
+        };
+    }
+}
+
+class RecordingFloorCensusAdapter implements RunnerFloorCensusAdapter {
+    readonly inputs: unknown[] = [];
+
+    async run(input: unknown) {
+        this.inputs.push(input);
+        return {
+            status: "succeeded" as const,
+            digest: "census-digest",
+            campaignId: "0xcampaign",
+            disasterEventId: "0xdisaster",
+            counts: [1n, 2n, 3n] as const,
+            censusBcsHex: `0x${"aa".repeat(32)}`,
+            signatureHex: `0x${"11".repeat(64)}`,
+            publicKeyHex: `0x${"22".repeat(32)}`,
         };
     }
 }

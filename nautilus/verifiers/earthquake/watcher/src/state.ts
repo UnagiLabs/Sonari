@@ -61,6 +61,13 @@ export interface EarthquakeEventRow {
     affected_cells_proof_registration_next_retry_at_ms: number | null;
     affected_cells_proof_registration_error_message: string | null;
     affected_cells_proof_registration_updated_at_ms: number | null;
+    floor_census_status: FloorCensusStatus | null;
+    floor_census_attempt: number | null;
+    floor_census_retry_count: number;
+    floor_census_digest: string | null;
+    floor_census_counts_json: string | null;
+    floor_census_error_message: string | null;
+    floor_census_updated_at_ms: number | null;
     runner_job_id: string | null;
     runner_queued_at_ms: number | null;
     runner_attempt: number | null;
@@ -121,6 +128,14 @@ export type AffectedCellsProofRegistrationErrorCode =
     | "AFFECTED_CELLS_PROOF_REGISTRATION_CONFIGURATION_FAILED"
     | "AFFECTED_CELLS_PROOF_REGISTRATION_RETRYABLE_FAILED"
     | "AFFECTED_CELLS_PROOF_REGISTRATION_INTEGRITY_FAILED";
+export type FloorCensusStatus = "skipped" | "processing" | "succeeded" | "failed";
+
+export interface FloorCensusStateUpdate {
+    status: Exclude<FloorCensusStatus, "processing">;
+    digest?: string | undefined;
+    counts?: readonly [bigint, bigint, bigint] | undefined;
+    message?: string | undefined;
+}
 
 export interface RunnerQueueJob {
     runner_job_id: string;
@@ -239,6 +254,17 @@ export interface StateRepository {
     markAffectedCellsProofRegistrationResult(
         sourceEventId: string,
         input: AffectedCellsProofRegistrationStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean>;
+    markFloorCensusProcessing(
+        sourceEventId: string,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean>;
+    markFloorCensusResult(
+        sourceEventId: string,
+        input: FloorCensusStateUpdate,
         nowMs: number,
         expectedAttempt?: number,
     ): Promise<boolean>;
@@ -667,6 +693,42 @@ export class InMemoryStateRepository implements StateRepository {
             return false;
         }
         applyAffectedCellsProofRegistrationResultToRow(row, input, nowMs, expectedAttempt);
+        return true;
+    }
+
+    async markFloorCensusProcessing(
+        sourceEventId: string,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = this.rows.get(sourceEventId);
+        if (row === undefined || row.floor_census_status === "succeeded") {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        row.floor_census_status = "processing";
+        row.floor_census_attempt = expectedAttempt ?? row.runner_attempt;
+        row.floor_census_updated_at_ms = nowMs;
+        row.updated_at_ms = nowMs;
+        return true;
+    }
+
+    async markFloorCensusResult(
+        sourceEventId: string,
+        input: FloorCensusStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = this.rows.get(sourceEventId);
+        if (row === undefined) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applyFloorCensusResultToRow(row, input, nowMs, expectedAttempt);
         return true;
     }
 
@@ -1365,6 +1427,42 @@ export class DynamoDbStateRepository implements StateRepository {
         return this.put(row, expectedAttempt, true);
     }
 
+    async markFloorCensusProcessing(
+        sourceEventId: string,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = await this.get(sourceEventId);
+        if (row === null || row.floor_census_status === "succeeded") {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        row.floor_census_status = "processing";
+        row.floor_census_attempt = expectedAttempt ?? row.runner_attempt;
+        row.floor_census_updated_at_ms = nowMs;
+        row.updated_at_ms = nowMs;
+        return this.put(row, expectedAttempt, true);
+    }
+
+    async markFloorCensusResult(
+        sourceEventId: string,
+        input: FloorCensusStateUpdate,
+        nowMs: number,
+        expectedAttempt?: number,
+    ): Promise<boolean> {
+        const row = await this.get(sourceEventId);
+        if (row === null) {
+            return false;
+        }
+        if (expectedAttempt !== undefined && row.runner_attempt !== expectedAttempt) {
+            return false;
+        }
+        applyFloorCensusResultToRow(row, input, nowMs, expectedAttempt);
+        return this.put(row, expectedAttempt, true);
+    }
+
     async enqueueRunnerJob(
         sourceEventId: string,
         attempt: number,
@@ -1764,6 +1862,13 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#affected_cells_proof_registration_next_retry_at_ms = :affected_cells_proof_registration_next_retry_at_ms",
                     "#affected_cells_proof_registration_error_message = :affected_cells_proof_registration_error_message",
                     "#affected_cells_proof_registration_updated_at_ms = :affected_cells_proof_registration_updated_at_ms",
+                    "#floor_census_status = :floor_census_status",
+                    "#floor_census_attempt = :floor_census_attempt",
+                    "#floor_census_retry_count = :floor_census_retry_count",
+                    "#floor_census_digest = :floor_census_digest",
+                    "#floor_census_counts_json = :floor_census_counts_json",
+                    "#floor_census_error_message = :floor_census_error_message",
+                    "#floor_census_updated_at_ms = :floor_census_updated_at_ms",
                     "#runner_job_id = :runner_job_id",
                     "#runner_queued_at_ms = :runner_queued_at_ms",
                     "#runner_attempt = :runner_attempt",
@@ -2085,6 +2190,13 @@ function baseRow(
         affected_cells_proof_registration_next_retry_at_ms: null,
         affected_cells_proof_registration_error_message: null,
         affected_cells_proof_registration_updated_at_ms: null,
+        floor_census_status: null,
+        floor_census_attempt: null,
+        floor_census_retry_count: 0,
+        floor_census_digest: null,
+        floor_census_counts_json: null,
+        floor_census_error_message: null,
+        floor_census_updated_at_ms: null,
         runner_job_id: null,
         runner_queued_at_ms: null,
         runner_attempt: null,
@@ -2209,6 +2321,13 @@ async function applyResultToRow(
         row.affected_cells_proof_registration_next_retry_at_ms = null;
         row.affected_cells_proof_registration_error_message = null;
         row.affected_cells_proof_registration_updated_at_ms = null;
+        row.floor_census_status = null;
+        row.floor_census_attempt = null;
+        row.floor_census_retry_count = 0;
+        row.floor_census_digest = null;
+        row.floor_census_counts_json = null;
+        row.floor_census_error_message = null;
+        row.floor_census_updated_at_ms = null;
         return;
     }
     row.tee_result_json = JSON.stringify(compactTeeResultForState(result));
@@ -2305,6 +2424,27 @@ function applyAffectedCellsProofRegistrationResultToRow(
     }
     row.affected_cells_proof_registration_next_retry_at_ms = null;
     row.affected_cells_proof_registration_error_message = input.message ?? null;
+}
+
+function applyFloorCensusResultToRow(
+    row: EarthquakeEventRow,
+    input: FloorCensusStateUpdate,
+    nowMs: number,
+    expectedAttempt?: number,
+): void {
+    row.floor_census_status = input.status;
+    row.floor_census_attempt = expectedAttempt ?? row.runner_attempt;
+    row.floor_census_digest = input.digest ?? null;
+    row.floor_census_counts_json =
+        input.counts === undefined
+            ? null
+            : JSON.stringify(input.counts.map((count) => count.toString()));
+    row.floor_census_error_message = input.message ?? null;
+    row.floor_census_updated_at_ms = nowMs;
+    if (input.status === "failed") {
+        row.floor_census_retry_count += 1;
+    }
+    row.updated_at_ms = nowMs;
 }
 
 function applyRunnerWorkflowProgress(

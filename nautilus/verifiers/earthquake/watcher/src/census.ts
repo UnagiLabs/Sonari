@@ -1,0 +1,688 @@
+import { Transaction } from "@mysten/sui/transactions";
+import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
+import type { RelayerSigner, SuiNetwork } from "@sonari/earthquake-relayer";
+import {
+    type AffectedCellsArtifact,
+    computeAffectedCellsRootHex,
+    type EarthquakeOraclePayload,
+    type RelayerSubmitInput,
+    type TeeCoreResult,
+    validateRelayerSubmitInput,
+} from "@sonari/earthquake-shared";
+
+const CENSUS_INTENT = "SONARI_FLOOR_CENSUS_V1";
+const CENSUS_VERIFIER_FAMILY = "census";
+const CENSUS_VERIFIER_VERSION = 1n;
+const BAND_COUNT = 3;
+const ED25519_SIGNATURE_BYTES = 64;
+const ED25519_PUBLIC_KEY_BYTES = 32;
+const U32_MAX = 0xffff_ffff;
+const U64_MAX = 0xffff_ffff_ffff_ffffn;
+
+export interface HomeCellRegisteredEvent {
+    lineage: string;
+    homeCell: string;
+    registeredAtMs: number;
+}
+
+export interface FloorCensusCountsInput {
+    affectedCells: AffectedCellsArtifact;
+    homeCellEvents: readonly HomeCellRegisteredEvent[];
+    activeLineages: ReadonlySet<string>;
+    cutoffMs: number;
+    expectedAffectedCellsRoot: string;
+    eventUid: string;
+    eventRevision: number;
+}
+
+export interface FloorCensusResultFields {
+    eventUid: string;
+    eventRevision: number;
+    affectedCellsRoot: string;
+    registeredMembersByBand: readonly [bigint, bigint, bigint];
+    issuedAtMs: number;
+}
+
+export interface SignedFloorCensusResult {
+    censusBcs: Uint8Array;
+    censusBcsHex: string;
+    signature: Uint8Array;
+    signatureHex: string;
+    publicKey: Uint8Array;
+    publicKeyHex: string;
+}
+
+export interface FloorCensusRunInput {
+    sourceEventId: string;
+    result: TeeCoreResult;
+    relayerDigest?: string | undefined;
+    disasterEventId?: string | undefined;
+}
+
+export type FloorCensusRunResult =
+    | {
+          status: "skipped";
+          reason: string;
+      }
+    | {
+          status: "succeeded";
+          digest?: string | undefined;
+          campaignId: string;
+          disasterEventId: string;
+          counts: readonly [bigint, bigint, bigint];
+          censusBcsHex: string;
+          signatureHex: string;
+          publicKeyHex: string;
+      };
+
+export interface FloorCensusAdapter {
+    run(input: FloorCensusRunInput): Promise<FloorCensusRunResult>;
+}
+
+export interface FloorCensusOnchainReader {
+    listHomeCellRegisteredEvents(input: { packageId: string }): Promise<HomeCellRegisteredEvent[]>;
+    listActiveLineages(input: {
+        membershipRegistryId: string;
+        lineages: readonly string[];
+    }): Promise<ReadonlySet<string>>;
+    findCampaignId(input: {
+        digest: string;
+        eventUid: string;
+        eventRevision: number;
+    }): Promise<string | undefined>;
+}
+
+export interface FloorCensusSubmitClient {
+    signAndExecuteTransaction(input: {
+        transaction: Transaction;
+        signer: RelayerSigner;
+        include: { effects: true; events: true };
+    }): Promise<FloorCensusExecutionResponse>;
+}
+
+export interface FloorCensusExecutionResponse {
+    $kind?: string;
+    Transaction?: {
+        digest?: string;
+        status?: { success: boolean; error?: { message?: string } | string | null };
+        effects?: Record<string, unknown>;
+        events?: unknown[];
+    };
+    FailedTransaction?: {
+        digest?: string;
+        status?: { success: boolean; error?: { message?: string } | string | null };
+        effects?: Record<string, unknown>;
+        events?: unknown[];
+    };
+}
+
+export interface FloorCensusSubmitConfig {
+    target: string;
+    pauseState: string;
+    verifierRegistry: string;
+    categoryPool: string;
+    mainPool: string;
+    membershipRegistry: string;
+    network?: SuiNetwork | undefined;
+    grpcUrl?: string | undefined;
+    signer?: RelayerSigner | undefined;
+    loadSigner?: (() => Promise<RelayerSigner>) | undefined;
+    client?: FloorCensusSubmitClient | undefined;
+    reader?: FloorCensusOnchainReader | undefined;
+    now?: (() => number) | undefined;
+    configurationError?: string | undefined;
+}
+
+export function computeFloorCensusCounts(input: FloorCensusCountsInput): [bigint, bigint, bigint] {
+    validateCensusBinding(input);
+    const actualRoot = computeAffectedCellsRootHex(input.affectedCells);
+    if (
+        actualRoot === null ||
+        normalizeHex(actualRoot) !== normalizeHex(input.expectedAffectedCellsRoot)
+    ) {
+        throw new Error("affected_cells artifact leaves do not match signed Merkle root");
+    }
+
+    const cellsByH3 = new Map<string, number>();
+    for (const cell of input.affectedCells.affected_cells) {
+        if (
+            !Number.isSafeInteger(cell.cell_band) ||
+            cell.cell_band < 1 ||
+            cell.cell_band > BAND_COUNT
+        ) {
+            throw new Error(`affected cell band must be in range 1..${BAND_COUNT}`);
+        }
+        cellsByH3.set(canonicalU64Decimal(cell.h3_index), cell.cell_band);
+    }
+
+    const latestBeforeCutoff = new Map<string, HomeCellRegisteredEvent>();
+    for (const event of input.homeCellEvents) {
+        if (!Number.isSafeInteger(event.registeredAtMs) || event.registeredAtMs < 0) {
+            throw new Error(
+                `registered_at must be a non-negative safe integer: ${event.registeredAtMs}`,
+            );
+        }
+        if (event.registeredAtMs >= input.cutoffMs) {
+            continue;
+        }
+        const previous = latestBeforeCutoff.get(event.lineage);
+        if (previous === undefined || previous.registeredAtMs <= event.registeredAtMs) {
+            latestBeforeCutoff.set(event.lineage, event);
+        }
+    }
+
+    const counts: [bigint, bigint, bigint] = [0n, 0n, 0n];
+    for (const [lineage, event] of latestBeforeCutoff) {
+        if (!input.activeLineages.has(lineage)) {
+            continue;
+        }
+        const band = cellsByH3.get(canonicalU64Decimal(event.homeCell));
+        if (band === undefined) {
+            continue;
+        }
+        const index = band - 1;
+        const current = counts[index];
+        if (current === undefined) {
+            throw new Error(`affected cell band must be in range 1..${BAND_COUNT}`);
+        }
+        counts[index] = current + 1n;
+    }
+    return counts;
+}
+
+export function encodeFloorCensusResultBcs(input: FloorCensusResultFields): Uint8Array {
+    if (input.registeredMembersByBand.length !== BAND_COUNT) {
+        throw new Error(`registered_members_by_band must contain ${BAND_COUNT} values`);
+    }
+    return concatBytes([
+        utf8Vector(CENSUS_INTENT),
+        utf8Vector(CENSUS_VERIFIER_FAMILY),
+        u64(CENSUS_VERIFIER_VERSION),
+        hexBytes32(input.eventUid),
+        u32(input.eventRevision),
+        hexBytes32(input.affectedCellsRoot),
+        u64Vector(input.registeredMembersByBand),
+        u64(BigInt(input.issuedAtMs)),
+    ]);
+}
+
+export async function signFloorCensusResult(
+    signer: RelayerSigner,
+    input: FloorCensusResultFields,
+): Promise<SignedFloorCensusResult> {
+    const censusBcs = encodeFloorCensusResultBcs(input);
+    const signature = await signer.sign(censusBcs);
+    if (signature.byteLength !== ED25519_SIGNATURE_BYTES) {
+        throw new Error(`census signature must be ${ED25519_SIGNATURE_BYTES} bytes`);
+    }
+    const publicKey = signer.getPublicKey().toRawBytes();
+    if (publicKey.byteLength !== ED25519_PUBLIC_KEY_BYTES) {
+        throw new Error(`census public key must be ${ED25519_PUBLIC_KEY_BYTES} bytes`);
+    }
+    return {
+        censusBcs,
+        censusBcsHex: bytesToHex(censusBcs),
+        signature,
+        signatureHex: bytesToHex(signature),
+        publicKey,
+        publicKeyHex: bytesToHex(publicKey),
+    };
+}
+
+export function createSetFloorCensusTransaction(input: {
+    target: string;
+    senderAddress: string;
+    pauseState: string;
+    campaignId: string;
+    disasterEventId: string;
+    verifierRegistry: string;
+    categoryPool: string;
+    mainPool: string;
+    censusBcs: Uint8Array;
+    signature: Uint8Array;
+    publicKey: Uint8Array;
+}): Transaction {
+    const tx = new Transaction();
+    tx.setSender(input.senderAddress);
+    tx.moveCall({
+        target: input.target,
+        arguments: [
+            tx.object(input.pauseState),
+            tx.object(input.campaignId),
+            tx.object(input.disasterEventId),
+            tx.object(input.verifierRegistry),
+            tx.object(input.categoryPool),
+            tx.object(input.mainPool),
+            tx.pure.vector("u8", Array.from(input.censusBcs)),
+            tx.pure.vector("u8", Array.from(input.signature)),
+            tx.pure.vector("u8", Array.from(input.publicKey)),
+            tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
+    });
+    return tx;
+}
+
+export class DirectFloorCensusAdapter implements FloorCensusAdapter {
+    constructor(private readonly config: FloorCensusSubmitConfig) {}
+
+    async run(input: FloorCensusRunInput): Promise<FloorCensusRunResult> {
+        if (this.config.configurationError !== undefined) {
+            throw new Error(this.config.configurationError);
+        }
+        const validation = validateRelayerSubmitInput(input.result);
+        if (!validation.ok) {
+            return { status: "skipped", reason: validation.message };
+        }
+        if (input.relayerDigest === undefined || input.disasterEventId === undefined) {
+            return {
+                status: "skipped",
+                reason: "relayer submit digest and disaster event id are required",
+            };
+        }
+        const signer = this.config.signer ?? (await this.config.loadSigner?.());
+        if (signer === undefined) {
+            throw new Error("Floor census submit requires a signer");
+        }
+        const reader = this.config.reader;
+        if (reader === undefined) {
+            throw new Error("Floor census submit requires an on-chain reader");
+        }
+        const client = this.config.client;
+        if (client === undefined) {
+            throw new Error("Floor census submit requires a Sui client");
+        }
+
+        const parsed = validation.value;
+        const payload = parsed.payload as EarthquakeOraclePayload;
+        const affectedCells = requireAffectedCells(parsed);
+        const packageId = packageIdFromTarget(this.config.target);
+        const homeCellEvents = await reader.listHomeCellRegisteredEvents({ packageId });
+        const activeLineages = await reader.listActiveLineages({
+            membershipRegistryId: this.config.membershipRegistry,
+            lineages: unique(homeCellEvents.map((event) => event.lineage)),
+        });
+        const counts = computeFloorCensusCounts({
+            affectedCells,
+            homeCellEvents,
+            activeLineages,
+            cutoffMs: payload.occurred_at_ms,
+            expectedAffectedCellsRoot: payload.affected_cells_root,
+            eventUid: payload.event_uid,
+            eventRevision: payload.event_revision,
+        });
+        const campaignId = await reader.findCampaignId({
+            digest: input.relayerDigest,
+            eventUid: payload.event_uid,
+            eventRevision: payload.event_revision,
+        });
+        if (campaignId === undefined) {
+            throw new Error("relayer transaction did not include CampaignCreated for census");
+        }
+        const signed = await signFloorCensusResult(signer, {
+            eventUid: payload.event_uid,
+            eventRevision: payload.event_revision,
+            affectedCellsRoot: payload.affected_cells_root,
+            registeredMembersByBand: counts,
+            issuedAtMs: this.config.now?.() ?? Date.now(),
+        });
+        const response = await client.signAndExecuteTransaction({
+            transaction: createSetFloorCensusTransaction({
+                target: this.config.target,
+                senderAddress: signer.toSuiAddress(),
+                pauseState: this.config.pauseState,
+                campaignId,
+                disasterEventId: input.disasterEventId,
+                verifierRegistry: this.config.verifierRegistry,
+                categoryPool: this.config.categoryPool,
+                mainPool: this.config.mainPool,
+                censusBcs: signed.censusBcs,
+                signature: signed.signature,
+                publicKey: signed.publicKey,
+            }),
+            signer,
+            include: { effects: true, events: true },
+        });
+        const digest = readSuccessfulDigest(response);
+        return {
+            status: "succeeded",
+            digest,
+            campaignId,
+            disasterEventId: input.disasterEventId,
+            counts,
+            censusBcsHex: signed.censusBcsHex,
+            signatureHex: signed.signatureHex,
+            publicKeyHex: signed.publicKeyHex,
+        };
+    }
+}
+
+export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
+    constructor(private readonly endpoint: string) {}
+
+    async listHomeCellRegisteredEvents(input: {
+        packageId: string;
+    }): Promise<HomeCellRegisteredEvent[]> {
+        const eventType = `${input.packageId}::membership::HomeCellRegistered`;
+        const events: HomeCellRegisteredEvent[] = [];
+        let cursor: unknown = null;
+        while (true) {
+            const page = await this.call("suix_queryEvents", [
+                { MoveEventType: eventType },
+                cursor,
+                1_000,
+                false,
+            ]);
+            const records = readArrayField(page, "data");
+            for (const record of records) {
+                const parsedJson = readRecordField(record, "parsedJson");
+                const lineage = readObjectId(parsedJson?.lineage);
+                const homeCell = readU64Decimal(parsedJson?.home_cell);
+                const registeredAtMs = readSafeInteger(parsedJson?.registered_at);
+                if (
+                    lineage === undefined ||
+                    homeCell === undefined ||
+                    registeredAtMs === undefined
+                ) {
+                    throw new Error("HomeCellRegistered event is malformed");
+                }
+                events.push({ lineage, homeCell, registeredAtMs });
+            }
+            cursor = readUnknownField(page, "nextCursor");
+            if (!readBooleanField(page, "hasNextPage") || cursor === null) {
+                break;
+            }
+        }
+        return events;
+    }
+
+    async listActiveLineages(input: {
+        membershipRegistryId: string;
+        lineages: readonly string[];
+    }): Promise<ReadonlySet<string>> {
+        const active = new Set<string>();
+        for (const lineage of input.lineages) {
+            const response = await this.call("suix_getDynamicFieldObject", [
+                input.membershipRegistryId,
+                { type: "0x2::object::ID", value: lineage },
+            ]);
+            const content = readRecordField(readRecordField(response, "data"), "content");
+            const fields = readRecordField(content, "fields");
+            const valueFields =
+                readRecordField(readRecordField(fields, "value"), "fields") ?? fields;
+            if (readSafeInteger(valueFields?.status) === 1) {
+                active.add(lineage);
+            }
+        }
+        return active;
+    }
+
+    async findCampaignId(input: {
+        digest: string;
+        eventUid: string;
+        eventRevision: number;
+    }): Promise<string | undefined> {
+        const response = await this.call("sui_getTransactionBlock", [
+            input.digest,
+            { showEvents: true, showObjectChanges: true },
+        ]);
+        for (const event of readArrayField(response, "events")) {
+            const type = readStringField(event, "type");
+            if (type?.endsWith("::campaign::CampaignCreated") !== true) {
+                continue;
+            }
+            const parsedJson = readRecordField(event, "parsedJson");
+            const eventRevision = readSafeInteger(parsedJson?.event_revision);
+            const eventUid = readBytesHex(parsedJson?.event_uid);
+            if (
+                eventRevision === input.eventRevision &&
+                (eventUid === undefined || normalizeHex(eventUid) === normalizeHex(input.eventUid))
+            ) {
+                return readObjectId(parsedJson?.campaign_id);
+            }
+        }
+        for (const change of readArrayField(response, "objectChanges")) {
+            const type = readStringField(change, "objectType");
+            if (type?.endsWith("::campaign::Campaign") === true) {
+                return readObjectId(readUnknownField(change, "objectId"));
+            }
+        }
+        return undefined;
+    }
+
+    private async call(method: string, params: unknown[]): Promise<unknown> {
+        const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method,
+                params,
+            }),
+        });
+        if (!response.ok) {
+            throw new Error(`Sui RPC ${method} failed with HTTP ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        const error = readRecordField(body, "error");
+        if (error !== undefined) {
+            const message = readStringField(error, "message") ?? JSON.stringify(error);
+            throw new Error(`Sui RPC ${method} failed: ${message}`);
+        }
+        return readUnknownField(body, "result");
+    }
+}
+
+function validateCensusBinding(input: FloorCensusCountsInput): void {
+    if (normalizeHex(input.affectedCells.event_uid) !== normalizeHex(input.eventUid)) {
+        throw new Error("affected_cells event_uid does not match census event_uid");
+    }
+    if (input.affectedCells.event_revision !== input.eventRevision) {
+        throw new Error("affected_cells event_revision does not match census event_revision");
+    }
+}
+
+function requireAffectedCells(input: RelayerSubmitInput): AffectedCellsArtifact {
+    if (input.affected_cells === undefined) {
+        throw new Error("finalized TEE result is missing affected_cells artifact");
+    }
+    return input.affected_cells;
+}
+
+function packageIdFromTarget(target: string): string {
+    const [packageId, moduleName, functionName] = target.split("::");
+    if (
+        packageId === undefined ||
+        packageId.length === 0 ||
+        moduleName !== "accessor" ||
+        functionName !== "set_floor_census"
+    ) {
+        throw new Error("FLOOR_CENSUS_TARGET must be <PACKAGE_ID>::accessor::set_floor_census");
+    }
+    return packageId;
+}
+
+function readSuccessfulDigest(response: FloorCensusExecutionResponse): string | undefined {
+    if (response.$kind === "FailedTransaction") {
+        throw new Error(
+            readExecutionError(response.FailedTransaction?.status) ??
+                "floor census transaction failed",
+        );
+    }
+    const status = response.Transaction?.status;
+    if (status !== undefined && !status.success) {
+        throw new Error(readExecutionError(status) ?? "floor census transaction failed");
+    }
+    return response.Transaction?.digest;
+}
+
+function readExecutionError(
+    status: { error?: { message?: string } | string | null } | undefined,
+): string | undefined {
+    const error = status?.error;
+    if (typeof error === "string" && error.length > 0) {
+        return error;
+    }
+    if (error !== null && typeof error === "object" && typeof error.message === "string") {
+        return error.message;
+    }
+    return undefined;
+}
+
+function readRecordField(input: unknown, field: string): Record<string, unknown> | undefined {
+    const value = readUnknownField(input, field);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : undefined;
+}
+
+function readArrayField(input: unknown, field: string): unknown[] {
+    const value = readUnknownField(input, field);
+    return Array.isArray(value) ? value : [];
+}
+
+function readUnknownField(input: unknown, field: string): unknown {
+    return typeof input === "object" && input !== null && !Array.isArray(input)
+        ? (input as Record<string, unknown>)[field]
+        : undefined;
+}
+
+function readStringField(input: unknown, field: string): string | undefined {
+    const value = readUnknownField(input, field);
+    return typeof value === "string" ? value : undefined;
+}
+
+function readBooleanField(input: unknown, field: string): boolean {
+    return readUnknownField(input, field) === true;
+}
+
+function readObjectId(input: unknown): string | undefined {
+    if (typeof input === "string" && input.length > 0) {
+        return input;
+    }
+    if (typeof input === "object" && input !== null && !Array.isArray(input)) {
+        const id = (input as Record<string, unknown>).id;
+        return typeof id === "string" && id.length > 0 ? id : undefined;
+    }
+    return undefined;
+}
+
+function readU64Decimal(input: unknown): string | undefined {
+    if (typeof input === "string") {
+        return canonicalU64Decimal(input);
+    }
+    if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
+        return input.toString(10);
+    }
+    return undefined;
+}
+
+function readSafeInteger(input: unknown): number | undefined {
+    if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
+        return input;
+    }
+    if (typeof input === "string" && /^(0|[1-9][0-9]*)$/.test(input)) {
+        const value = Number(input);
+        return Number.isSafeInteger(value) ? value : undefined;
+    }
+    return undefined;
+}
+
+function readBytesHex(input: unknown): string | undefined {
+    if (typeof input === "string") {
+        return input;
+    }
+    if (
+        Array.isArray(input) &&
+        input.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+    ) {
+        return bytesToHex(Uint8Array.from(input as number[]));
+    }
+    return undefined;
+}
+
+function unique(values: readonly string[]): string[] {
+    return [...new Set(values)];
+}
+
+function canonicalU64Decimal(value: string): string {
+    if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+        throw new Error(`u64 decimal is not canonical: ${value}`);
+    }
+    const parsed = BigInt(value);
+    if (parsed > U64_MAX) {
+        throw new Error(`u64 decimal is out of range: ${value}`);
+    }
+    return parsed.toString(10);
+}
+
+function utf8Vector(value: string): Uint8Array {
+    const bytes = new TextEncoder().encode(value);
+    return concatBytes([uleb128(bytes.byteLength), bytes]);
+}
+
+function u64Vector(values: readonly bigint[]): Uint8Array {
+    return concatBytes([uleb128(values.length), ...values.map(u64)]);
+}
+
+function u32(value: number): Uint8Array {
+    if (!Number.isSafeInteger(value) || value < 0 || value > U32_MAX) {
+        throw new Error(`u32 out of range: ${value}`);
+    }
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setUint32(0, value, true);
+    return bytes;
+}
+
+function u64(value: bigint): Uint8Array {
+    if (value < 0n || value > U64_MAX) {
+        throw new Error(`u64 out of range: ${value.toString()}`);
+    }
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, value, true);
+    return bytes;
+}
+
+function uleb128(value: number): Uint8Array {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`ULEB128 value must be a non-negative safe integer: ${value}`);
+    }
+    const bytes: number[] = [];
+    let remaining = value;
+    do {
+        let byte = remaining & 0x7f;
+        remaining = Math.floor(remaining / 128);
+        if (remaining > 0) {
+            byte |= 0x80;
+        }
+        bytes.push(byte);
+    } while (remaining > 0);
+    return Uint8Array.from(bytes);
+}
+
+function hexBytes32(value: string): Uint8Array {
+    const normalized = normalizeHex(value);
+    if (normalized.length !== 64 || !/^[0-9a-f]+$/.test(normalized)) {
+        throw new Error("expected 32-byte hex string");
+    }
+    return Uint8Array.from(Buffer.from(normalized, "hex"));
+}
+
+function normalizeHex(value: string): string {
+    return value.startsWith("0x") ? value.slice(2).toLowerCase() : value.toLowerCase();
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+    return `0x${Buffer.from(bytes).toString("hex")}`;
+}
+
+function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
+    const length = parts.reduce((sum, part) => sum + part.byteLength, 0);
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const part of parts) {
+        result.set(part, offset);
+        offset += part.byteLength;
+    }
+    return result;
+}
