@@ -12,11 +12,7 @@ disable-model-invocation: true
 effort: high
 allowed-tools:
   - AskUserQuestion
-  - Bash(gh issue view *)
-  - Bash(git status *)
-  - Bash(git branch *)
-  - Bash(rg *)
-  - Bash(mkdir -p .codex/prompts)
+  - Bash
   - Read
   - Glob
   - Grep
