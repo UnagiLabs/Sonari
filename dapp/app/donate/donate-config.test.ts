@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readDonateConfig } from "./donate-config";
+import { readDonateConfigFromEnv } from "./donate-config";
 
 describe("readDonateConfig", () => {
     it("returns ok when all required values are present", () => {
-        const result = readDonateConfig({
+        const result = readDonateConfigFromEnv({
             NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: "0xfunding",
             NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID: " 0xpause ",
             NEXT_PUBLIC_SONARI_MAIN_POOL_ID: "0xmain",
@@ -26,7 +26,7 @@ describe("readDonateConfig", () => {
     });
 
     it("returns missing_keys when one or more required keys are missing", () => {
-        const result = readDonateConfig({
+        const result = readDonateConfigFromEnv({
             NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: "",
             NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID: undefined,
             NEXT_PUBLIC_SONARI_MAIN_POOL_ID: "0xmain",

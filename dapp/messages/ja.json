@@ -391,11 +391,32 @@
             "title": "配分の見積もり",
             "main": {
                 "label": "メインプール",
-                "detail": "検証済み支援のための透明な準備金"
+                "detail": "検証済み支援のための透明な準備金",
+                "campaignDetail": "キャンペーンの残額、または寄付終了後のキャンペーン配分を受け取ります"
+            },
+            "operations": {
+                "label": "運用プール",
+                "detail": "プロトコル運用のための準備金",
+                "campaignDetail": "キャンペーン条件に基づく上限付きの配分"
+            },
+            "campaign": {
+                "detail": "寄付受付期間中の選択済みキャンペーンプール"
+            },
+            "category": {
+                "detail": "選択済みカテゴリプール"
             },
             "relief": {
                 "label": "救援プール",
                 "detail": "選択した地震救援キャンペーン"
+            },
+            "value": {
+                "generalMainShare": "95%",
+                "categoryMainShare": "5%",
+                "operationsShare": "5%",
+                "categoryShare": "90%",
+                "campaignTerms": "キャンペーン条件",
+                "campaignRemainder": "残額",
+                "campaignOperations": "上限付き配分"
             }
         },
         "result": {

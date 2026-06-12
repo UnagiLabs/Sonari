@@ -391,11 +391,32 @@
             "title": "Estimated allocation",
             "main": {
                 "label": "Main Pool",
-                "detail": "Transparent reserve for verified aid"
+                "detail": "Transparent reserve for verified aid",
+                "campaignDetail": "Receives the campaign remainder, or the campaign share after donation end"
+            },
+            "operations": {
+                "label": "Operations Pool",
+                "detail": "Protocol operations reserve",
+                "campaignDetail": "Campaign-defined share, capped by campaign terms"
+            },
+            "campaign": {
+                "detail": "Selected campaign pool before donation end"
+            },
+            "category": {
+                "detail": "Selected category pool"
             },
             "relief": {
                 "label": "Relief Pool",
                 "detail": "Selected earthquake relief campaign"
+            },
+            "value": {
+                "generalMainShare": "95%",
+                "categoryMainShare": "5%",
+                "operationsShare": "5%",
+                "categoryShare": "90%",
+                "campaignTerms": "Campaign terms",
+                "campaignRemainder": "Remainder",
+                "campaignOperations": "Capped share"
             }
         },
         "result": {

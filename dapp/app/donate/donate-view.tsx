@@ -17,6 +17,7 @@ import { readDonateConfig } from "./donate-config";
 import { readDonateDestinations } from "./donate-destinations";
 import { buildDonateTransaction, type DonateDestinationInput } from "./donate-transaction";
 import {
+    buildDonateSplitRows,
     buildDonateTxResultView,
     type DonateDestinationMode,
     type DonateDestinationReadState,
@@ -192,46 +193,22 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
 
     const splitRows = useMemo(
         () =>
-            mode === "general"
-                ? [
-                      {
-                          key: "main",
-                          label: t("split.main.label"),
-                          detail: t("split.main.detail"),
-                          value: selectedAmountLabel,
-                      },
-                  ]
-                : [
-                      {
-                          key: "main",
-                          label: t("split.main.label"),
-                          detail: t("split.main.detail"),
-                          value: selectedAmountLabel,
-                      },
-                      {
-                          key: "destination",
-                          label:
-                              mode === "campaign"
-                                  ? (destinationState.campaigns.find(
-                                        (campaign) => campaign.id === campaignId,
-                                    )?.label ?? t("types.campaign.label"))
-                                  : (destinationState.categories.find(
-                                        (category) => category.id === categoryPoolId,
-                                    )?.label ?? t("types.category.label")),
-                          detail:
-                              mode === "campaign"
-                                  ? t("types.campaign.destination")
-                                  : t("types.category.destination"),
-                          value: selectedAmountLabel,
-                      },
-                  ],
+            buildDonateSplitRows({
+                mode,
+                campaignLabel:
+                    destinationState.campaigns.find((campaign) => campaign.id === campaignId)
+                        ?.label ?? t("types.campaign.label"),
+                categoryLabel:
+                    destinationState.categories.find((category) => category.id === categoryPoolId)
+                        ?.label ?? t("types.category.label"),
+                t,
+            }),
         [
             campaignId,
             categoryPoolId,
             destinationState.campaigns,
             destinationState.categories,
             mode,
-            selectedAmountLabel,
             t,
         ],
     );

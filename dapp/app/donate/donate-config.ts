@@ -28,9 +28,11 @@ const DONATE_CONFIG_ENTRIES = [
     ["NEXT_PUBLIC_SONARI_USDC_TYPE", "usdcType"],
 ] as const;
 
-export function readDonateConfig(
-    env: Record<string, string | undefined> = process.env,
-): DonateConfigResult {
+type DonateConfigEnvKey = (typeof DONATE_CONFIG_ENTRIES)[number][0];
+
+type DonateConfigEnv = Readonly<Record<DonateConfigEnvKey, string | undefined>>;
+
+export function readDonateConfigFromEnv(env: DonateConfigEnv): DonateConfigResult {
     const values: Record<keyof DonateConfig, string> = {
         fundingPackageId: "",
         donationPauseStateId: "",
@@ -61,4 +63,18 @@ export function readDonateConfig(
         kind: "ok",
         config: values,
     };
+}
+
+export function readDonateConfig(): DonateConfigResult {
+    return readDonateConfigFromEnv({
+        NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID,
+        NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID:
+            process.env.NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID,
+        NEXT_PUBLIC_SONARI_MAIN_POOL_ID: process.env.NEXT_PUBLIC_SONARI_MAIN_POOL_ID,
+        NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID:
+            process.env.NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID,
+        NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID:
+            process.env.NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID,
+        NEXT_PUBLIC_SONARI_USDC_TYPE: process.env.NEXT_PUBLIC_SONARI_USDC_TYPE,
+    });
 }
