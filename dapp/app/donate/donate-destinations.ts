@@ -1,17 +1,22 @@
 const QUERY_EVENTS_PAGE_LIMIT = 100;
 
+export interface DonateEventCursor {
+    readonly txDigest: string;
+    readonly eventSeq: string;
+}
+
 export interface DonateDestinationReadClient {
     queryEvents(input: {
         readonly query: {
             readonly MoveEventType: string;
         };
-        readonly cursor?: unknown;
+        readonly cursor?: DonateEventCursor | null;
         readonly limit?: number;
         readonly order?: "ascending" | "descending";
     }): Promise<{
         readonly data: readonly unknown[];
         readonly hasNextPage?: boolean;
-        readonly nextCursor?: unknown;
+        readonly nextCursor?: DonateEventCursor | null;
     }>;
 }
 
@@ -133,12 +138,12 @@ async function readDestinationEvents<T>(
     parse: (value: unknown) => T | null,
 ): Promise<T[]> {
     const options: T[] = [];
-    let cursor: unknown;
+    let cursor: DonateEventCursor | null | undefined;
 
     for (;;) {
         const response = await client.queryEvents({
             query: { MoveEventType: eventType },
-            cursor,
+            ...(cursor !== undefined ? { cursor } : {}),
             limit: QUERY_EVENTS_PAGE_LIMIT,
             order: "descending",
         });
@@ -150,7 +155,7 @@ async function readDestinationEvents<T>(
             }
         }
 
-        if (response.hasNextPage !== true || response.nextCursor === undefined) {
+        if (response.hasNextPage !== true || response.nextCursor == null) {
             return options;
         }
         cursor = response.nextCursor;

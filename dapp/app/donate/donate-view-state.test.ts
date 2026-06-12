@@ -1,0 +1,185 @@
+import { describe, expect, it } from "vitest";
+import {
+    buildDonateTxResultView,
+    resolveDonateSubmitDisabledReason,
+    type DonateDestinationReadState,
+    type DonateTxState,
+} from "./donate-view-state";
+
+const readyDestinationState: DonateDestinationReadState = {
+    status: "ready",
+    campaigns: [{
+        kind: "campaign",
+        id: "0xcampaign",
+        label: "Campaign",
+        campaignId: "0xcampaign",
+        categoryPoolId: "0xcategory",
+        category: 1,
+        donationEndMs: "1000",
+    }],
+    categories: [{
+        kind: "category",
+        id: "0xcategory",
+        label: "Category",
+        categoryPoolId: "0xcategory",
+        category: 1,
+    }],
+    errorMessage: null,
+};
+
+describe("resolveDonateSubmitDisabledReason", () => {
+    it("returns configMissing when config is not ready", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: false,
+            walletConnected: true,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            selectedMode: "general",
+            destinationState: readyDestinationState,
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "configMissing" });
+    });
+
+    it("returns walletDisconnected when no wallet is connected", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: false,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            selectedMode: "general",
+            destinationState: readyDestinationState,
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "walletDisconnected" });
+    });
+
+    it("returns amountInvalid for invalid amount", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: true,
+            amountValidation: { ok: false, errorCode: "zero" },
+            selectedMode: "general",
+            destinationState: readyDestinationState,
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "amountInvalid", code: "zero" });
+    });
+
+    it("returns destinationLoading for campaign mode while loading destinations", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: true,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            selectedMode: "campaign",
+            destinationState: {
+                status: "loading",
+                campaigns: [],
+                categories: [],
+                errorMessage: null,
+            },
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "destinationsLoading", mode: "campaign" });
+    });
+
+    it("returns destinationNotFound for category mode when no categories exist", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: true,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            selectedMode: "category",
+            destinationState: {
+                status: "ready",
+                campaigns: [],
+                categories: [],
+                errorMessage: null,
+            },
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "destinationNotFound", mode: "category" });
+    });
+
+    it("returns null when all prerequisites are satisfied", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: true,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            selectedMode: "campaign",
+            destinationState: readyDestinationState,
+            selectedCampaignId: "0xcampaign",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toBeNull();
+    });
+});
+
+describe("buildDonateTxResultView", () => {
+    const digest = "8oM2nT3kQ4abcDEFghiJKLmnopQRstUVwxyz1234567";
+
+    it("returns not loading and no CTA when idle", () => {
+        const view = buildDonateTxResultView({ status: "idle" }, "testnet");
+        expect(view).toEqual({
+            loading: false,
+            digest: null,
+            explorerUrl: null,
+            canRetry: false,
+        });
+    });
+
+    it("returns loading while building", () => {
+        const view = buildDonateTxResultView({ status: "building" }, "testnet");
+        expect(view).toEqual({
+            loading: true,
+            digest: null,
+            explorerUrl: null,
+            canRetry: false,
+        });
+    });
+
+    it("returns loading while submitting", () => {
+        const view = buildDonateTxResultView({ status: "submitting" }, "testnet");
+        expect(view.loading).toBe(true);
+        expect(view.canRetry).toBe(false);
+    });
+
+    it("returns digest and explorer URL on testnet after submitted", () => {
+        const state: DonateTxState = { status: "submitted", digest };
+        const view = buildDonateTxResultView(state, "testnet");
+        expect(view).toEqual({
+            loading: false,
+            digest,
+            explorerUrl: `https://testnet.suivision.xyz/txblock/${digest}`,
+            canRetry: false,
+        });
+    });
+
+    it("returns digest with no explorer URL on localnet", () => {
+        const state: DonateTxState = { status: "submitted", digest };
+        const view = buildDonateTxResultView(state, "localnet");
+        expect(view.explorerUrl).toBeNull();
+    });
+
+    it("returns retryable failure state", () => {
+        const view = buildDonateTxResultView(
+            { status: "failed", message: "Wallet rejected" },
+            "testnet",
+        );
+
+        expect(view).toEqual({
+            loading: false,
+            digest: null,
+            explorerUrl: null,
+            canRetry: true,
+        });
+    });
+});

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+    type DonateEventCursor,
     type DonateDestinationReadClient,
     parseCampaignCreatedEvent,
     parseCategoryPoolCreatedEvent,
@@ -126,14 +127,18 @@ describe("readDonateDestinations", () => {
     });
 
     it("follows paged queryEvents responses", async () => {
+        const nextCursor: DonateEventCursor = {
+            txDigest: "digest",
+            eventSeq: "1",
+        };
         const queryEvents = vi.fn(async (input: {
             query: { MoveEventType: string };
-            cursor?: unknown;
+            cursor?: DonateEventCursor | null;
         }) => {
             if (input.query.MoveEventType === CATEGORY_POOL_TYPE) {
                 return { data: [], hasNextPage: false };
             }
-            if (input.cursor === "next-campaign") {
+            if (input.cursor === nextCursor) {
                 return {
                     data: [{ parsedJson: campaignParsedJson({ category: 2 }) }],
                     hasNextPage: false,
@@ -142,7 +147,7 @@ describe("readDonateDestinations", () => {
             return {
                 data: [{ parsedJson: campaignParsedJson({ category: 1 }) }],
                 hasNextPage: true,
-                nextCursor: "next-campaign",
+                nextCursor,
             };
         });
         const client: DonateDestinationReadClient = { queryEvents };
@@ -155,7 +160,7 @@ describe("readDonateDestinations", () => {
         }
         expect(result.campaigns.map((campaign) => campaign.category)).toEqual([1, 2]);
         expect(
-            queryEvents.mock.calls.some((call) => call[0].cursor === "next-campaign"),
+            queryEvents.mock.calls.some((call) => call[0].cursor === nextCursor),
         ).toBe(true);
     });
 

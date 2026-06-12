@@ -331,16 +331,30 @@
             "title": "Donation setup",
             "typeLegend": "Donation type",
             "poolLegend": "Pool",
+            "campaignLegend": "Campaign donation",
+            "categoryLegend": "Category donation",
             "amountLabel": "Amount",
             "displayLegend": "Display preferences",
             "donatePreview": "Donate preview",
-            "saveDraft": "Save draft"
+            "saveDraft": "Save draft",
+            "submit": "Donate now",
+            "submitting": "Submitting donation…"
         },
         "types": {
             "general": {
                 "label": "General Donation",
                 "description": "Supports the main relief pool for future verified aid.",
                 "destination": "100% Main Pool"
+            },
+            "campaign": {
+                "label": "Campaign Donation",
+                "description": "Directs your donation to a selected disaster campaign pool.",
+                "destination": "All to selected campaign"
+            },
+            "category": {
+                "label": "Category Donation",
+                "description": "Directs your donation to a selected category pool.",
+                "destination": "Main + category pool"
             },
             "earthquake": {
                 "label": "Earthquake Relief",
@@ -402,6 +416,52 @@
             "leaderboard": {
                 "label": "Leaderboard",
                 "value": "Rank updates without claim rights or payout priority"
+            }
+        },
+        "amount": {
+            "error": {
+                "empty": "Enter an amount.",
+                "invalid_format": "Enter a valid USDC amount.",
+                "negative": "Amount must be greater than zero.",
+                "zero": "Amount must be greater than zero.",
+                "too_many_decimals": "USDC accepts up to 6 decimal places.",
+                "overflow": "Amount is too large."
+            }
+        },
+        "submit": {
+            "disabled": {
+                "configMissing": "Donation is not configured yet.",
+                "walletDisconnected": "Connect your wallet to donate.",
+                "campaignLoading": "Loading campaign options…",
+                "campaignNotFound": "No campaign options are available.",
+                "campaignNotSelected": "Select a campaign donation destination.",
+                "categoryLoading": "Loading category options…",
+                "categoryNotFound": "No category options are available.",
+                "categoryNotSelected": "Select a category donation destination."
+            }
+        },
+        "tx": {
+            "idle": {
+                "message": "Ready to prepare donation.",
+                "detail": "Set amount and destination, then submit."
+            },
+            "building": {
+                "message": "Preparing donation transaction.",
+                "detail": "Building an on-chain transaction for signing."
+            },
+            "submitting": {
+                "message": "Approve the donation transaction.",
+                "detail": "Approve and submit the donation transaction in your wallet."
+            },
+            "submitted": {
+                "message": "Donation transaction submitted.",
+                "detail": "Transaction digest: {digest}",
+                "explorerLink": "View on explorer"
+            },
+            "failed": {
+                "message": "Donation transaction failed.",
+                "retryHint": "Retry from the same amount and destination.",
+                "generic": "Donation transaction failed."
             }
         },
         "note": {
