@@ -186,7 +186,13 @@ export async function buildAndSaveProofArtifacts(
         }),
     };
 
-    await saveProofArtifacts({ bucket, manifest, shardEntriesMap });
+    // shardEntriesMap から直列化済み文字列 map を構築して saveProofArtifacts に渡す
+    // （STEP 2 で単一パス化するまでの橋渡し）
+    const serializedShards = new Map<string, string>();
+    for (const [k, entries] of shardEntriesMap) {
+        serializedShards.set(k, serializeShardEntries(entries));
+    }
+    await saveProofArtifacts({ bucket, manifest, serializedShards });
 
     return { manifest, shardEntriesMap };
 }

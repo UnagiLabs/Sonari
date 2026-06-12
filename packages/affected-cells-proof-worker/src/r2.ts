@@ -203,15 +203,19 @@ export function serializeShardEntries(entries: AffectedCellsProofShardEntry[]): 
 export interface SaveProofArtifactsParams {
     bucket: AffectedProofR2Bucket;
     manifest: AffectedCellsProofManifest;
-    shardEntriesMap: Map<string, AffectedCellsProofShardEntry[]>;
+    /** shardKey → 直列化済み JSON 文字列。saveProofArtifacts はこの文字列をそのまま put する（再直列化しない）。 */
+    serializedShards: Map<string, string>;
 }
 
 /**
  * manifest と各 shard を R2 に put する。
  * isolate 内の manifest cache も更新する（同 bucket インスタンスへの後続 read でキャッシュが有効になる）。
+ *
+ * shard は呼び出し側が直列化済みの文字列として渡す。
+ * この関数は渡された文字列をそのまま put するだけで、再直列化は行わない。
  */
 export async function saveProofArtifacts(params: SaveProofArtifactsParams): Promise<void> {
-    const { bucket, manifest, shardEntriesMap } = params;
+    const { bucket, manifest, serializedShards } = params;
 
     // manifest を保存
     const mKey = manifestR2Key(manifest.event_uid, manifest.event_revision);
@@ -226,9 +230,9 @@ export async function saveProofArtifacts(params: SaveProofArtifactsParams): Prom
     }
     bucketCache.set(cacheKey, Promise.resolve(manifest));
 
-    // 各 shard を保存
-    for (const [shardKey, entries] of shardEntriesMap) {
+    // 各 shard を保存（渡された文字列をそのまま put する）
+    for (const [shardKey, serialized] of serializedShards) {
         const sKey = shardR2Key(manifest.event_uid, manifest.event_revision, shardKey);
-        await bucket.put(sKey, serializeShardEntries(entries));
+        await bucket.put(sKey, serialized);
     }
 }
