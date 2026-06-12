@@ -737,6 +737,9 @@
             "title": "検証チェック",
             "checkButton": "受給資格を確認"
         },
+        "worldId": {
+            "title": "World ID 証明"
+        },
         "checks": {
             "finalized": {
                 "label": "DisasterEvent が確定済み",
@@ -786,6 +789,12 @@
         },
         "claimButton": "支援を申請",
         "claimButtonInFlight": "処理中…",
+        "actions": {
+            "submit": "被災セル証明を送信",
+            "verify": "申請を検証",
+            "floor": "床払いを受け取る",
+            "payout": "本払いを受け取る"
+        },
         "note": {
             "title": "プライバシーの境界",
             "body": "公開画面には H3 セル・パスの状態・検証の状態・匿名化された受給者の参照だけを表示します。"
