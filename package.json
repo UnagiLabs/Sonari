@@ -9,7 +9,7 @@
         "format:ts": "biome check --write .",
         "format:rust": "cargo fmt --all",
         "check": "pnpm check:ts && pnpm check:rust",
-        "check:move": "sui move build -p contracts --force --lint --warnings-are-errors && sui move test -p contracts",
+        "check:move": "tsx scripts/check_move_struct_field_limit.ts && sui move build -p contracts --force --lint --warnings-are-errors && sui move test -p contracts",
         "check:ts": "biome check . && pnpm typecheck",
         "check:rust": "cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings",
         "lint": "pnpm check",
