@@ -242,6 +242,12 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_SENDER_ADDRESS");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_SIGNER_SECRET_ARN");
         expect(jobEnvMatch?.[1]).not.toContain("RELAYER_ALLOW_SUBMIT");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_MODE");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_TARGET");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_PAUSE_STATE");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_CATEGORY_POOL");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_MAIN_POOL");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");
 
         expectContainsAll(workflow, [
             "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
@@ -478,6 +484,28 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "AFFECTED_PROOF_WORKER_URL: $" + "{{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}",
         );
         expect(workflow).toContain("AffectedProofRegistrarUrl=$AFFECTED_PROOF_WORKER_URL");
+    });
+
+    it("wires floor census CloudFormation parameters from repo-level variables", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "FLOOR_CENSUS_MODE: $" + "{{ vars.SONARI_FLOOR_CENSUS_MODE }}",
+            "FLOOR_CENSUS_TARGET: $" + "{{ vars.SONARI_FLOOR_CENSUS_TARGET }}",
+            "FLOOR_CENSUS_PAUSE_STATE: $" + "{{ vars.SONARI_FLOOR_CENSUS_PAUSE_STATE }}",
+            "FLOOR_CENSUS_CATEGORY_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_CATEGORY_POOL }}",
+            "FLOOR_CENSUS_MAIN_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_MAIN_POOL }}",
+            "FLOOR_CENSUS_JSON_RPC_URL: $" + "{{ vars.SONARI_FLOOR_CENSUS_JSON_RPC_URL }}",
+            "FloorCensusMode=$FLOOR_CENSUS_MODE",
+            "FloorCensusTarget=$FLOOR_CENSUS_TARGET",
+            "FloorCensusPauseState=$FLOOR_CENSUS_PAUSE_STATE",
+            "FloorCensusCategoryPool=$FLOOR_CENSUS_CATEGORY_POOL",
+            "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
+            "FloorCensusJsonRpcUrl=$FLOOR_CENSUS_JSON_RPC_URL",
+        ]);
+
+        const requiredNamesMatch = workflow.match(/required_names=\(\n([\s\S]*?)\n {10}\)/u);
+        expect(requiredNamesMatch?.[1]).not.toContain("FLOOR_CENSUS_MODE");
     });
 
     it("takes the Sui network from the shared variable and keeps other earthquake relayer wiring unchanged", async () => {

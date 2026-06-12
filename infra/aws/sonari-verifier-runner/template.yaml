@@ -217,6 +217,31 @@ Parameters:
     Type: String
     Default: ""
     Description: Secrets Manager ARN containing the Sui private key for earthquake relayer submit.
+  FloorCensusMode:
+    Type: String
+    Default: disabled
+    AllowedValues: [disabled, submit]
+    Description: Enable floor census submission after successful earthquake relayer submit.
+  FloorCensusTarget:
+    Type: String
+    Default: ""
+    Description: Move target for floor census submission. Use <PACKAGE_ID>::accessor::set_floor_census.
+  FloorCensusPauseState:
+    Type: String
+    Default: ""
+    Description: PauseState object ID used by accessor::set_floor_census.
+  FloorCensusCategoryPool:
+    Type: String
+    Default: ""
+    Description: CategoryPool object ID used by accessor::set_floor_census.
+  FloorCensusMainPool:
+    Type: String
+    Default: ""
+    Description: MainPool object ID used by accessor::set_floor_census.
+  FloorCensusJsonRpcUrl:
+    Type: String
+    Default: ""
+    Description: Optional Sui JSON-RPC URL for floor census event and transaction readback.
   RelayerAllowSubmit:
     Type: String
     Default: "false"
@@ -1194,6 +1219,12 @@ Resources:
           RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
           RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
           RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
+          FLOOR_CENSUS_MODE: !Ref FloorCensusMode
+          FLOOR_CENSUS_TARGET: !Ref FloorCensusTarget
+          FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState
+          FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool
+          FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool
+          FLOOR_CENSUS_JSON_RPC_URL: !Ref FloorCensusJsonRpcUrl
           IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
           SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
           SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId
@@ -1473,8 +1504,16 @@ Resources:
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
               "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
-              "Next": "StopInstance",
+              "Next": "RunFloorCensus",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }],
+              "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
+            },
+            "RunFloorCensus": {
+              "Type": "Task",
+              "Resource": "${RunnerControlLambda.Arn}",
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "run_floor_census", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
+              "Next": "StopInstance",
+              "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
             "MarkFailed": {

@@ -618,6 +618,35 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit");
     });
 
+    it("runs floor census after a successful earthquake relayer record", async () => {
+        const template = await readTemplate();
+        const start = template.indexOf("EarthquakeRunnerStateMachine:");
+        const end = template.indexOf("MembershipRunnerStateMachine:");
+        const earthquake = template.slice(start, end);
+
+        expect(template).toContain("FloorCensusMode:");
+        expect(template).toContain("AllowedValues: [disabled, submit]");
+        expect(template).toContain("FloorCensusTarget:");
+        expect(template).toContain("FloorCensusPauseState:");
+        expect(template).toContain("FloorCensusCategoryPool:");
+        expect(template).toContain("FloorCensusMainPool:");
+        expect(template).toContain("FloorCensusJsonRpcUrl:");
+        expect(template).toContain("FLOOR_CENSUS_MODE: !Ref FloorCensusMode");
+        expect(template).toContain("FLOOR_CENSUS_TARGET: !Ref FloorCensusTarget");
+        expect(template).toContain("FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState");
+        expect(template).toContain("FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool");
+        expect(template).toContain("FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool");
+        expect(template).toContain("FLOOR_CENSUS_JSON_RPC_URL: !Ref FloorCensusJsonRpcUrl");
+
+        expect(earthquake).toContain('"Next": "RunFloorCensus"');
+        expect(earthquake).toContain('"RunFloorCensus"');
+        expect(earthquake).toContain('"action": "run_floor_census"');
+        expect(earthquake.indexOf('"action": "record_relayer_success"')).toBeLessThan(
+            earthquake.indexOf('"action": "run_floor_census"'),
+        );
+        expect(earthquake).toContain('"Next": "StopInstance"');
+    });
+
     it("wires DynamoDB Streams event-driven membership trigger with DLQ", async () => {
         const template = await readTemplate();
 

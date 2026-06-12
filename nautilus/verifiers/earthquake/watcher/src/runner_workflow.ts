@@ -65,6 +65,12 @@ import {
     IntegrityAffectedCellsProofRegistrationError,
     RetryableAffectedCellsProofRegistrationError,
 } from "./affected_cells_proof_registrar.js";
+import {
+    DirectFloorCensusAdapter,
+    type FloorCensusAdapter,
+    type FloorCensusSubmitConfig,
+    JsonRpcFloorCensusReader,
+} from "./census.js";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
 import {
@@ -106,6 +112,7 @@ export interface RunnerWorkflowConfig {
             config: RelayerSubmitConfig,
         ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
     };
+    floorCensus?: FloorCensusSubmitConfig;
 }
 
 export interface AutoScalingClientLike {
@@ -184,6 +191,8 @@ export interface AffectedCellsProofRegistrarAdapter {
         input: AffectedCellsProofRegistrationInput,
     ): Promise<AffectedCellsProofRegistrationResult>;
 }
+
+export interface RunnerFloorCensusAdapter extends FloorCensusAdapter {}
 
 export interface EnclaveRegistrationConfig {
     target: string;
@@ -352,6 +361,13 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               relayer_success: RelayerRecordSuccessInput;
           }
         | {
+              action: "run_floor_census";
+              source_event_id: string;
+              attempt?: number | undefined;
+              result_s3_key: string;
+              relayer_success: RelayerRecordSuccessInput;
+          }
+        | {
               action: "mark_failed";
               source_event_id: string;
               attempt?: number | undefined;
@@ -462,6 +478,13 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
           }
+        | {
+              source_event_id: string;
+              attempt?: number | undefined;
+              floor_census: "skipped" | "succeeded";
+              result_s3_key: string;
+              result_status: TeeCoreResult["status"];
+          }
         | { source_event_id: string; attempt?: number | undefined; failed: true }
     );
 
@@ -475,6 +498,7 @@ export interface RunnerControlHandlerOptions {
     enclaveRegistration?: EnclaveRegistrationAdapter;
     sourceArchive?: SourceArchiveAdapter;
     affectedCellsProofRegistrar?: AffectedCellsProofRegistrarAdapter;
+    floorCensus?: RunnerFloorCensusAdapter;
     now?: () => number;
     config: RunnerWorkflowConfig;
 }
@@ -1037,6 +1061,103 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     result_status: result.status,
                 });
             }
+            case "run_floor_census": {
+                const repository = requireRepository(options);
+                const nowMs = options.now?.() ?? Date.now();
+                await requireCurrentWorkflowAttempt(options, event, {
+                    phase: "complete",
+                    nowMs,
+                    resultS3Key: event.result_s3_key,
+                    allowNonProcessing: true,
+                });
+                const row = await repository.get(event.source_event_id);
+                if (row?.floor_census_status === "succeeded") {
+                    return retainVerifierKind({
+                        source_event_id: event.source_event_id,
+                        attempt: event.attempt,
+                        floor_census: "skipped",
+                        result_s3_key: event.result_s3_key,
+                        result_status: "finalized",
+                    });
+                }
+                const markedProcessing = await repository.markFloorCensusProcessing(
+                    event.source_event_id,
+                    nowMs,
+                    event.attempt,
+                );
+                if (!markedProcessing) {
+                    throw new Error("stale runner workflow attempt");
+                }
+                const result = await readTeeResultFromS3(options, event);
+                const floorCensus =
+                    options.floorCensus ?? buildFloorCensusFromConfig(options.config);
+                if (floorCensus === undefined) {
+                    await repository.markFloorCensusResult(
+                        event.source_event_id,
+                        { status: "skipped", message: "floor census is not configured" },
+                        nowMs,
+                        event.attempt,
+                    );
+                    return retainVerifierKind({
+                        source_event_id: event.source_event_id,
+                        attempt: event.attempt,
+                        floor_census: "skipped",
+                        result_s3_key: event.result_s3_key,
+                        result_status: result.status,
+                    });
+                }
+                try {
+                    const census = await floorCensus.run({
+                        sourceEventId: event.source_event_id,
+                        result,
+                        relayerDigest: event.relayer_success.digest,
+                        disasterEventId: event.relayer_success.objectId,
+                    });
+                    if (census.status === "skipped") {
+                        await repository.markFloorCensusResult(
+                            event.source_event_id,
+                            { status: "skipped", message: census.reason },
+                            nowMs,
+                            event.attempt,
+                        );
+                        return retainVerifierKind({
+                            source_event_id: event.source_event_id,
+                            attempt: event.attempt,
+                            floor_census: "skipped",
+                            result_s3_key: event.result_s3_key,
+                            result_status: result.status,
+                        });
+                    }
+                    await repository.markFloorCensusResult(
+                        event.source_event_id,
+                        {
+                            status: "succeeded",
+                            digest: census.digest,
+                            counts: census.counts,
+                        },
+                        nowMs,
+                        event.attempt,
+                    );
+                    return retainVerifierKind({
+                        source_event_id: event.source_event_id,
+                        attempt: event.attempt,
+                        floor_census: "succeeded",
+                        result_s3_key: event.result_s3_key,
+                        result_status: result.status,
+                    });
+                } catch (error) {
+                    await repository.markFloorCensusResult(
+                        event.source_event_id,
+                        {
+                            status: "failed",
+                            message: error instanceof Error ? error.message : String(error),
+                        },
+                        nowMs,
+                        event.attempt,
+                    );
+                    throw error;
+                }
+            }
             case "mark_failed": {
                 const repository = requireRepository(options);
                 const nowMs = options.now?.() ?? Date.now();
@@ -1579,6 +1700,12 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
         const relayer = readRelayerConfigFromEnv(new AwsRelayerSignerSecretReader());
         if (relayer !== undefined) {
             config.relayer = relayer;
+        }
+    }
+    if (event.action === "run_floor_census") {
+        const floorCensus = readFloorCensusConfigFromEnv(new AwsRelayerSignerSecretReader());
+        if (floorCensus !== undefined) {
+            config.floorCensus = floorCensus;
         }
     }
     const enclaveRegistration =
@@ -2360,6 +2487,13 @@ function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | 
     return new DirectRelayerAdapter(config.relayer);
 }
 
+function buildFloorCensusFromConfig(config: RunnerWorkflowConfig): FloorCensusAdapter | undefined {
+    if (config.floorCensus === undefined) {
+        return undefined;
+    }
+    return new DirectFloorCensusAdapter(config.floorCensus);
+}
+
 function compactRelayerSuccess(success: RelayerSuccess): RelayerRecordSuccessInput {
     return {
         mode: success.mode,
@@ -2519,6 +2653,91 @@ export function readEnclaveRegistrationConfigFromEnv(
             );
     }
     return config;
+}
+
+export function readFloorCensusConfigFromEnv(
+    secretReader: RelayerSignerSecretReader,
+): RunnerWorkflowConfig["floorCensus"] {
+    const mode = process.env.FLOOR_CENSUS_MODE;
+    if (mode === undefined || mode.length === 0 || mode === "disabled") {
+        return undefined;
+    }
+    const network = readSuiNetwork(process.env.RELAYER_NETWORK);
+    const target = process.env.FLOOR_CENSUS_TARGET ?? "";
+    const grpcUrl = process.env.RELAYER_GRPC_URL;
+    const jsonRpcUrl =
+        process.env.FLOOR_CENSUS_JSON_RPC_URL === undefined ||
+        process.env.FLOOR_CENSUS_JSON_RPC_URL.length === 0
+            ? defaultSuiJsonRpcUrl(network)
+            : process.env.FLOOR_CENSUS_JSON_RPC_URL;
+    const missing = [
+        ["FLOOR_CENSUS_TARGET", target],
+        ["FLOOR_CENSUS_PAUSE_STATE", process.env.FLOOR_CENSUS_PAUSE_STATE],
+        ["FLOOR_CENSUS_CATEGORY_POOL", process.env.FLOOR_CENSUS_CATEGORY_POOL],
+        ["FLOOR_CENSUS_MAIN_POOL", process.env.FLOOR_CENSUS_MAIN_POOL],
+        ["SONARI_MEMBERSHIP_REGISTRY_ID", process.env.SONARI_MEMBERSHIP_REGISTRY_ID],
+        ["RELAYER_VERIFIER_REGISTRY", process.env.RELAYER_VERIFIER_REGISTRY],
+        ["RELAYER_NETWORK", process.env.RELAYER_NETWORK],
+        ["RELAYER_GRPC_URL", grpcUrl],
+        ["RELAYER_SIGNER_SECRET_ARN", process.env.RELAYER_SIGNER_SECRET_ARN],
+    ]
+        .filter(([, value]) => value === undefined || value.length === 0)
+        .map(([name]) => name);
+    let configurationError =
+        missing.length === 0
+            ? undefined
+            : `${missing.join(", ")} required for FLOOR_CENSUS_MODE=${mode}`;
+    if (mode !== "submit") {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "FLOOR_CENSUS_MODE currently supports submit only",
+        );
+    }
+    if (process.env.RELAYER_NETWORK !== undefined && network === undefined) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "RELAYER_NETWORK is required for floor census",
+        );
+    }
+    const config: FloorCensusSubmitConfig = {
+        target,
+        pauseState: process.env.FLOOR_CENSUS_PAUSE_STATE ?? "",
+        verifierRegistry: process.env.RELAYER_VERIFIER_REGISTRY ?? "",
+        categoryPool: process.env.FLOOR_CENSUS_CATEGORY_POOL ?? "",
+        mainPool: process.env.FLOOR_CENSUS_MAIN_POOL ?? "",
+        membershipRegistry: process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "",
+        reader: jsonRpcUrl === undefined ? undefined : new JsonRpcFloorCensusReader(jsonRpcUrl),
+    };
+    if (network !== undefined) {
+        config.network = network;
+    }
+    if (grpcUrl !== undefined) {
+        config.grpcUrl = grpcUrl;
+        if (network !== undefined) {
+            config.client = new SuiGrpcClient({
+                network,
+                baseUrl: grpcUrl,
+            }) as unknown as NonNullable<FloorCensusSubmitConfig["client"]>;
+        }
+    }
+    if (configurationError !== undefined) {
+        config.configurationError = configurationError;
+    }
+    const signerSecretArn = process.env.RELAYER_SIGNER_SECRET_ARN;
+    if (signerSecretArn !== undefined && signerSecretArn.length > 0) {
+        config.loadSigner = async () =>
+            createEd25519SuiSignerFromPrivateKey(
+                await secretReader.getSecretString(signerSecretArn),
+            );
+    }
+    return config;
+}
+
+function defaultSuiJsonRpcUrl(network: SuiNetwork | undefined): string | undefined {
+    if (network === undefined) {
+        return undefined;
+    }
+    return `https://fullnode.${network}.sui.io:443`;
 }
 
 function appendConfigurationError(existing: string | undefined, next: string): string {

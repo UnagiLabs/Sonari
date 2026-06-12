@@ -692,6 +692,13 @@ jobs:
           SONARI_VERIFIER_REGISTRY_ID: ${{ vars.SONARI_VERIFIER_REGISTRY_ID }}
           # affected-cells-proof-worker の URL は dapp と同じ repo-level 単一情報源を使う。
           AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
+          # FloorCensus 設定は repo-level Variables（SONARI_*）を単一情報源にする。
+          FLOOR_CENSUS_MODE: ${{ vars.SONARI_FLOOR_CENSUS_MODE }}
+          FLOOR_CENSUS_TARGET: ${{ vars.SONARI_FLOOR_CENSUS_TARGET }}
+          FLOOR_CENSUS_PAUSE_STATE: ${{ vars.SONARI_FLOOR_CENSUS_PAUSE_STATE }}
+          FLOOR_CENSUS_CATEGORY_POOL: ${{ vars.SONARI_FLOOR_CENSUS_CATEGORY_POOL }}
+          FLOOR_CENSUS_MAIN_POOL: ${{ vars.SONARI_FLOOR_CENSUS_MAIN_POOL }}
+          FLOOR_CENSUS_JSON_RPC_URL: ${{ vars.SONARI_FLOOR_CENSUS_JSON_RPC_URL }}
         run: |
           set -euo pipefail
           mapfile -t deploy_plan_parameter_overrides < <(
@@ -773,6 +780,24 @@ jobs:
           # registrar を有効化する。token secret ARN は AWS Secrets Manager 管理（スコープ外）。
           if [[ -n "${AFFECTED_PROOF_WORKER_URL:-}" ]]; then
             extra_parameter_overrides+=("AffectedProofRegistrarUrl=$AFFECTED_PROOF_WORKER_URL")
+          fi
+          if [[ -n "${FLOOR_CENSUS_MODE:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusMode=$FLOOR_CENSUS_MODE")
+          fi
+          if [[ -n "${FLOOR_CENSUS_TARGET:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusTarget=$FLOOR_CENSUS_TARGET")
+          fi
+          if [[ -n "${FLOOR_CENSUS_PAUSE_STATE:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusPauseState=$FLOOR_CENSUS_PAUSE_STATE")
+          fi
+          if [[ -n "${FLOOR_CENSUS_CATEGORY_POOL:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusCategoryPool=$FLOOR_CENSUS_CATEGORY_POOL")
+          fi
+          if [[ -n "${FLOOR_CENSUS_MAIN_POOL:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL")
+          fi
+          if [[ -n "${FLOOR_CENSUS_JSON_RPC_URL:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusJsonRpcUrl=$FLOOR_CENSUS_JSON_RPC_URL")
           fi
 
           aws cloudformation deploy \
