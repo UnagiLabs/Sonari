@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement Codex Plan"
+  short_description: "Faithfully implement an existing plan from .codex/prompts/issue-<number>.md without re-planning"
+  default_prompt: "Use $implement-codex-plan to faithfully implement the existing plan in .codex/prompts/issue-<number>.md. Do NOT re-plan, audit, or seek plan approval, and do NOT use gh-issue-implement. Treat the plan as the contract: implement it 1 step = 1 commit with TDD, run local verification, have a clean-context subagent run the default Codex CLI /review command once as a PR-style comparison between the implementation branch and main, then open a PR with $prepare-pr. Stop and ask the user only if the plan materially conflicts with the actual code."

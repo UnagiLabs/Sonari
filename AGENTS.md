@@ -106,6 +106,8 @@ commit message 作成や PR 準備では.agents/skills/draft-commit-message / .a
 
 issue 作成では `.agents/skills/prepare-issue` を必ず使用してください。新規実装や修正を実装する前に issue を起票し、その issue を `.agents/skills/gh-issue-implement` で実装する流れを基本にしてください。
 
+ただし、Claude 側の `issue-to-codex-plan` で確定済みの実装計画（`.codex/prompts/issue-<番号>.md`）が既にある場合は、計画を二重に作らないために `.agents/skills/gh-issue-implement` ではなく `.agents/skills/implement-codex-plan` を使い、その計画を忠実に実装してください。`implement-codex-plan` は計画立案・計画監査・計画承認を行わず、受け取った計画を契約として実装します。
+
 ## セキュリティとローカル設定
 
 secret、API key、private credential、local MCP auth、個人用 Codex 設定、ローカルマシン固有の path、不要な生成物はコミットしないでください。
