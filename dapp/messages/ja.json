@@ -631,6 +631,9 @@
         },
         "statusBar": {
             "previewData": "プレビューデータ",
+            "liveData": "チェーン実データ",
+            "loadingData": "チェーンデータ取得中",
+            "unavailable": "チェーンデータ取得不可",
             "lastRefreshed": "最終更新 {time}",
             "publicView": "公開の透明性ビュー"
         },
@@ -675,6 +678,9 @@
             "main": {
                 "name": "メインプール"
             },
+            "operations": {
+                "name": "運用プール"
+            },
             "earthquake": {
                 "name": "地震救援プール"
             }
@@ -706,7 +712,16 @@
             "action": "リーダーボード全体",
             "individualDonors": "個人の寄付者",
             "corporateSponsors": "企業スポンサー",
+            "noSupporters": "チェーンデータから作れる支援者ランキングはまだありません。",
             "rankLabel": "順位 #{rank}"
+        },
+        "states": {
+            "loadingTitle": "チェーンデータを取得中",
+            "loadingBody": "Sui RPC からプール残高と最近の活動を読み取っています。",
+            "errorTitle": "ダッシュボードデータを取得できませんでした",
+            "errorBody": "この画面は代替のモックデータを表示しません。設定を確認するか、RPC request を再試行してください。",
+            "retry": "再試行",
+            "noItems": "表示できるチェーン上の活動はまだありません。"
         }
     },
     "claim": {
