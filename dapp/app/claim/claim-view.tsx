@@ -13,8 +13,8 @@ import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
-    buildClaimDisasterUsdcTransaction,
-    type ClaimDisasterUsdcObjectConfig,
+    buildSubmitClaimV2Transaction,
+    type ClaimTransactionObjectConfig,
     fetchAffectedCellsProof,
 } from "./affected-cells-proof";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "./claim-messages";
@@ -26,7 +26,7 @@ type ClaimableEvent = {
     eventUid: string;
     eventRevision: number;
     affectedCellsRoot: string;
-    txObjects: ClaimDisasterUsdcObjectConfig;
+    txObjects: ClaimTransactionObjectConfig;
     packageId: string;
     region: string;
     intensity: string;
@@ -46,20 +46,13 @@ const membershipPass = {
 
 const affectedProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL ?? "";
 
-const claimTxObjects: ClaimDisasterUsdcObjectConfig = {
+const claimTxObjects: ClaimTransactionObjectConfig = {
     pauseState: "0x0000000000000000000000000000000000000000000000000000000000000011",
-    claimIndex: "0x0000000000000000000000000000000000000000000000000000000000000012",
     membershipRegistry: "0x0000000000000000000000000000000000000000000000000000000000000013",
-    program: "0x0000000000000000000000000000000000000000000000000000000000000014",
     campaign: "0x0000000000000000000000000000000000000000000000000000000000000015",
-    policy: "0x0000000000000000000000000000000000000000000000000000000000000016",
-    budget: "0x0000000000000000000000000000000000000000000000000000000000000017",
-    binding: "0x0000000000000000000000000000000000000000000000000000000000000018",
     disasterEvent: "0x0000000000000000000000000000000000000000000000000000000000000019",
     identityRegistry: "0x000000000000000000000000000000000000000000000000000000000000001a",
     pass: membershipPass.passObjectId,
-    designatedPool: "0x000000000000000000000000000000000000000000000000000000000000001c",
-    mainPool: "0x000000000000000000000000000000000000000000000000000000000000001d",
 };
 
 const claimableEvents: ClaimableEvent[] = [
@@ -231,7 +224,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
 
         setTxState({ status: "building" });
         try {
-            const { transaction } = buildClaimDisasterUsdcTransaction({
+            const { transaction } = buildSubmitClaimV2Transaction({
                 senderAddress: account.address,
                 packageId: selectedEvent.packageId,
                 proof: proofState.proof,
@@ -242,10 +235,6 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                     affectedCellsRoot: selectedEvent.affectedCellsRoot,
                 },
                 objects: selectedEvent.txObjects,
-                identityProvider: 1,
-                duplicateKeyHash:
-                    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                userMaxAmountUsdc: "50000000",
             });
 
             setTxState({ status: "submitting" });

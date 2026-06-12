@@ -3,7 +3,10 @@ import {
     assertProofMatchesClaimContext,
     buildAffectedCellLeafMoveArgs,
     buildAffectedCellProofMoveArgs,
-    buildClaimDisasterUsdcTransaction,
+    buildClaimFloorTransaction,
+    buildClaimPayoutTransaction,
+    buildSubmitClaimV2Transaction,
+    buildVerifyClaimV2Transaction,
     ClaimProofError,
     fetchAffectedCellsProof,
     parseAffectedCellsProofResponse,
@@ -266,9 +269,35 @@ describe("claim transaction arguments", () => {
         ).toThrow(/affected_cells_root/);
     });
 
-    it("builds the full claim_disaster_usdc transaction with ordered object and value inputs", async () => {
+    it("builds claim_floor with ordered object and value inputs", () => {
+        const { transaction } = buildClaimFloorTransaction({
+            senderAddress: SENDER,
+            packageId: PACKAGE_ID,
+            objects: buildObjectConfig(),
+            identityProvider: 2,
+            duplicateKeyHash:
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        });
+
+        const data = transaction.getData();
+        const claim = data.commands.at(-1);
+        expect(data.sender).toBe(SENDER);
+        expect(data.commands).toHaveLength(1);
+        expect(claim?.$kind).toBe("MoveCall");
+        if (claim?.$kind !== "MoveCall") {
+            throw new Error("last command must be MoveCall");
+        }
+        expect(claim.MoveCall).toMatchObject({
+            package: PACKAGE_ID,
+            module: "accessor",
+            function: "claim_floor",
+        });
+        expect(claim.MoveCall.arguments).toHaveLength(8);
+    });
+
+    it("builds submit_claim_v2 with affected cell leaf and proof inputs", async () => {
         const proof = await parseAffectedCellsProofResponse(workerProofResponse);
-        const { transaction } = buildClaimDisasterUsdcTransaction({
+        const { transaction } = buildSubmitClaimV2Transaction({
             senderAddress: SENDER,
             packageId: PACKAGE_ID,
             proof,
@@ -279,10 +308,6 @@ describe("claim transaction arguments", () => {
                 affectedCellsRoot: AFFECTED_CELLS_ROOT,
             },
             objects: buildObjectConfig(),
-            identityProvider: 1,
-            duplicateKeyHash:
-                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            userMaxAmountUsdc: "50000000",
         });
 
         const data = transaction.getData();
@@ -295,7 +320,7 @@ describe("claim transaction arguments", () => {
             "new_affected_cell_leaf",
             "new_affected_cell_proof_step_left",
             "MakeMoveVec",
-            "claim_disaster_usdc",
+            "submit_claim_v2",
         ]);
 
         const proofVector = data.commands[2];
@@ -313,11 +338,60 @@ describe("claim transaction arguments", () => {
         expect(claim.MoveCall).toMatchObject({
             package: PACKAGE_ID,
             module: "accessor",
-            function: "claim_disaster_usdc",
+            function: "submit_claim_v2",
         });
-        expect(claim.MoveCall.arguments).toHaveLength(19);
-        expect(claim.MoveCall.arguments[12]).toEqual({ Result: 0, $kind: "Result" });
-        expect(claim.MoveCall.arguments[13]).toEqual({ Result: 2, $kind: "Result" });
+        expect(claim.MoveCall.arguments).toHaveLength(8);
+        expect(claim.MoveCall.arguments[5]).toEqual({ Result: 0, $kind: "Result" });
+        expect(claim.MoveCall.arguments[6]).toEqual({ Result: 2, $kind: "Result" });
+    });
+
+    it("builds verify_claim_v2 with ordered object and value inputs", () => {
+        const { transaction } = buildVerifyClaimV2Transaction({
+            senderAddress: SENDER,
+            packageId: PACKAGE_ID,
+            objects: buildObjectConfig(),
+            identityProvider: 2,
+            duplicateKeyHash:
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        });
+
+        const data = transaction.getData();
+        const verify = data.commands.at(-1);
+        expect(data.sender).toBe(SENDER);
+        expect(data.commands).toHaveLength(1);
+        expect(verify?.$kind).toBe("MoveCall");
+        if (verify?.$kind !== "MoveCall") {
+            throw new Error("last command must be MoveCall");
+        }
+        expect(verify.MoveCall).toMatchObject({
+            package: PACKAGE_ID,
+            module: "accessor",
+            function: "verify_claim_v2",
+        });
+        expect(verify.MoveCall.arguments).toHaveLength(8);
+    });
+
+    it("builds claim_payout with ordered object inputs", () => {
+        const { transaction } = buildClaimPayoutTransaction({
+            senderAddress: SENDER,
+            packageId: PACKAGE_ID,
+            objects: buildObjectConfig(),
+        });
+
+        const data = transaction.getData();
+        const payout = data.commands.at(-1);
+        expect(data.sender).toBe(SENDER);
+        expect(data.commands).toHaveLength(1);
+        expect(payout?.$kind).toBe("MoveCall");
+        if (payout?.$kind !== "MoveCall") {
+            throw new Error("last command must be MoveCall");
+        }
+        expect(payout.MoveCall).toMatchObject({
+            package: PACKAGE_ID,
+            module: "accessor",
+            function: "claim_payout",
+        });
+        expect(payout.MoveCall.arguments).toHaveLength(5);
     });
 });
 
