@@ -18,6 +18,12 @@ const ED25519_SIGNATURE_BYTES = 64;
 const ED25519_PUBLIC_KEY_BYTES = 32;
 const U32_MAX = 0xffff_ffff;
 const U64_MAX = 0xffff_ffff_ffff_ffffn;
+// Sui public fullnodes cap suix_queryEvents at QUERY_MAX_RESULT_LIMIT=50.
+const QUERY_EVENTS_PAGE_LIMIT = 50;
+const RPC_MAX_ATTEMPTS = 4;
+const RPC_INITIAL_RETRY_DELAY_MS = 500;
+const RPC_RETRY_BACKOFF_FACTOR = 2;
+const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503]);
 
 export interface HomeCellRegisteredEvent {
     lineage: string;
@@ -369,7 +375,7 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
             const page = await this.call("suix_queryEvents", [
                 { MoveEventType: eventType },
                 cursor,
-                1_000,
+                QUERY_EVENTS_PAGE_LIMIT,
                 false,
             ]);
             const records = readArrayField(page, "data");
@@ -450,7 +456,7 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
     }
 
     private async call(method: string, params: unknown[]): Promise<unknown> {
-        const response = await fetch(this.endpoint, {
+        const request = {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
@@ -459,18 +465,68 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
                 method,
                 params,
             }),
-        });
-        if (!response.ok) {
-            throw new Error(`Sui RPC ${method} failed with HTTP ${response.status}`);
+        };
+        for (let attempt = 0; attempt < RPC_MAX_ATTEMPTS; attempt += 1) {
+            let response: Response;
+            try {
+                response = await fetch(this.endpoint, request);
+            } catch (error) {
+                if (attempt + 1 >= RPC_MAX_ATTEMPTS) {
+                    throw new Error(`Sui RPC ${method} failed with network error`, {
+                        cause: error,
+                    });
+                }
+                await sleep(rpcRetryDelayMs(attempt));
+                continue;
+            }
+            if (!response.ok) {
+                if (isRetryableHttpStatus(response.status) && attempt + 1 < RPC_MAX_ATTEMPTS) {
+                    await sleep(rpcRetryDelayMs(attempt, response.headers.get("retry-after")));
+                    continue;
+                }
+                throw new Error(`Sui RPC ${method} failed with HTTP ${response.status}`);
+            }
+            const body = (await response.json()) as unknown;
+            const error = readRecordField(body, "error");
+            if (error !== undefined) {
+                const message = readStringField(error, "message") ?? JSON.stringify(error);
+                throw new Error(`Sui RPC ${method} failed: ${message}`);
+            }
+            return readUnknownField(body, "result");
         }
-        const body = (await response.json()) as unknown;
-        const error = readRecordField(body, "error");
-        if (error !== undefined) {
-            const message = readStringField(error, "message") ?? JSON.stringify(error);
-            throw new Error(`Sui RPC ${method} failed: ${message}`);
-        }
-        return readUnknownField(body, "result");
+        throw new Error(`Sui RPC ${method} retry attempts exhausted`);
     }
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+    return RETRYABLE_HTTP_STATUSES.has(status);
+}
+
+function rpcRetryDelayMs(attempt: number, retryAfterHeader?: string | null): number {
+    const retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+    if (retryAfterMs !== undefined) {
+        return retryAfterMs;
+    }
+    return RPC_INITIAL_RETRY_DELAY_MS * RPC_RETRY_BACKOFF_FACTOR ** attempt;
+}
+
+function parseRetryAfterMs(header: string | null | undefined): number | undefined {
+    if (header === null || header === undefined || header.length === 0) {
+        return undefined;
+    }
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.trunc(seconds * 1_000);
+    }
+    const timestamp = Date.parse(header);
+    if (Number.isNaN(timestamp)) {
+        return undefined;
+    }
+    return Math.max(0, timestamp - Date.now());
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function validateCensusBinding(input: FloorCensusCountsInput): void {

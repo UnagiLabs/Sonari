@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
+import { afterEach, describe, expect, it } from "vitest";
 import {
     computeFloorCensusCounts,
     encodeFloorCensusResultBcs,
+    JsonRpcFloorCensusReader,
     signFloorCensusResult,
     type HomeCellRegisteredEvent,
 } from "../src/census.js";
@@ -10,6 +11,7 @@ import type { RelayerSigner } from "@sonari/earthquake-relayer";
 
 const eventUid = `0x${"aa".repeat(32)}`;
 const affectedCellsRoot = `0x${"bb".repeat(32)}`;
+const originalFetch = globalThis.fetch;
 
 const affectedCells = {
     event_uid: eventUid,
@@ -26,6 +28,10 @@ const affectedCells = {
         { h3_index: "30", intensity_value: 700, cell_band: 3 },
     ],
 };
+
+afterEach(() => {
+    globalThis.fetch = originalFetch;
+});
 
 describe("floor census core", () => {
     it("uses the last pre-cutoff home cell, filters active lineages, and counts by band", () => {
@@ -110,12 +116,81 @@ describe("floor census core", () => {
     });
 });
 
+describe("JsonRpcFloorCensusReader", () => {
+    it("retries a rate-limited event page request and uses the Sui page limit", async () => {
+        const requests: unknown[] = [];
+        globalThis.fetch = async (_input, init) => {
+            requests.push(JSON.parse(String(init?.body)));
+            if (requests.length === 1) {
+                return jsonResponse({}, { status: 429, headers: { "retry-after": "0" } });
+            }
+            return jsonResponse({
+                result: {
+                    data: [
+                        {
+                            parsedJson: {
+                                lineage: "0xlineage1",
+                                home_cell: "10",
+                                registered_at: 900,
+                            },
+                        },
+                    ],
+                    nextCursor: null,
+                    hasNextPage: false,
+                },
+            });
+        };
+
+        const reader = new JsonRpcFloorCensusReader("https://rpc.example");
+        const events = await reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" });
+
+        expect(events).toEqual([
+            { lineage: "0xlineage1", homeCell: "10", registeredAtMs: 900 },
+        ]);
+        expect(requests).toHaveLength(2);
+        expect(requests).toEqual([
+            expect.objectContaining({
+                method: "suix_queryEvents",
+                params: [{ MoveEventType: "0xpackage::membership::HomeCellRegistered" }, null, 50, false],
+            }),
+            expect.objectContaining({
+                method: "suix_queryEvents",
+                params: [{ MoveEventType: "0xpackage::membership::HomeCellRegistered" }, null, 50, false],
+            }),
+        ]);
+    });
+
+    it("does not retry non-rate-limited client errors", async () => {
+        let requests = 0;
+        globalThis.fetch = async () => {
+            requests += 1;
+            return jsonResponse({}, { status: 400 });
+        };
+
+        const reader = new JsonRpcFloorCensusReader("https://rpc.example");
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "Sui RPC suix_queryEvents failed with HTTP 400",
+        );
+        expect(requests).toBe(1);
+    });
+});
+
 function expectedRoot(): string {
     const root = computeAffectedCellsRootForTest(affectedCells);
     if (root === null) {
         throw new Error("fixture should produce root");
     }
     return root;
+}
+
+function jsonResponse(
+    body: unknown,
+    init: { status?: number; headers?: Record<string, string> } = {},
+): Response {
+    return new Response(JSON.stringify(body), {
+        status: init.status ?? 200,
+        headers: { "content-type": "application/json", ...init.headers },
+    });
 }
 
 function computeAffectedCellsRootForTest(input: typeof affectedCells): string | null {
