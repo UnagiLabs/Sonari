@@ -681,8 +681,8 @@
             "operations": {
                 "name": "Operations Pool"
             },
-            "category": {
-                "name": "Category Pool"
+            "earthquake": {
+                "name": "Earthquake Relief Pool"
             }
         },
         "eventPanel": {

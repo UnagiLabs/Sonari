@@ -1,3 +1,6 @@
+const QUERY_EVENTS_PAGE_LIMIT = 50;
+const EARTHQUAKE_CATEGORY = 1;
+
 export interface DashboardPoolReadObject {
     readonly objectId: string;
     readonly type?: string;
@@ -9,6 +12,31 @@ export interface DashboardPoolReadClient {
         objectIds: string[];
         include: { json: true };
     }): Promise<{ objects: ReadonlyArray<DashboardPoolReadObject | Error> }>;
+}
+
+export interface DashboardEventCursor {
+    readonly txDigest: string;
+    readonly eventSeq: string;
+}
+
+export interface DashboardCategoryPoolIdReadClient {
+    queryEvents(input: {
+        readonly query: {
+            readonly MoveEventType: string;
+        };
+        readonly cursor?: DashboardEventCursor | null;
+        readonly limit?: number;
+        readonly order?: "ascending" | "descending";
+    }): Promise<{
+        readonly data: readonly unknown[];
+        readonly hasNextPage?: boolean;
+        readonly nextCursor?: DashboardEventCursor | null;
+    }>;
+}
+
+export interface DashboardPoolEnvIds {
+    readonly mainPoolId: string;
+    readonly operationsPoolId: string;
 }
 
 export interface DashboardPoolIds {
@@ -56,7 +84,7 @@ export type DashboardPoolReadResult =
 export function parseDashboardPoolIds(
     env: Record<string, string | undefined>,
 ):
-    | { readonly kind: "ok"; readonly ids: DashboardPoolIds }
+    | { readonly kind: "ok"; readonly ids: DashboardPoolEnvIds }
     | { readonly kind: "error"; readonly message: string } {
     const mainPoolId = parseObjectId(env.NEXT_PUBLIC_SONARI_MAIN_POOL_ID);
     if (mainPoolId === null) {
@@ -74,15 +102,58 @@ export function parseDashboardPoolIds(
         };
     }
 
-    const categoryPoolId = parseObjectId(env.NEXT_PUBLIC_SONARI_CATEGORY_POOL_ID);
-    if (categoryPoolId === null) {
+    return { kind: "ok", ids: { mainPoolId, operationsPoolId } };
+}
+
+export async function readEarthquakeCategoryPoolId(
+    client: DashboardCategoryPoolIdReadClient,
+    input: { readonly packageId: string },
+): Promise<
+    | { readonly kind: "ok"; readonly categoryPoolId: string }
+    | { readonly kind: "error"; readonly message: string }
+> {
+    const packageId = parseObjectId(input.packageId);
+    if (packageId === null) {
         return {
             kind: "error",
-            message: "NEXT_PUBLIC_SONARI_CATEGORY_POOL_ID must be a 32-byte Sui object id.",
+            message: "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID must be a 32-byte Sui package id.",
         };
     }
 
-    return { kind: "ok", ids: { mainPoolId, operationsPoolId, categoryPoolId } };
+    try {
+        let cursor: DashboardEventCursor | null | undefined;
+        for (;;) {
+            const response = await client.queryEvents({
+                query: { MoveEventType: `${packageId}::category_pool::CategoryPoolCreated` },
+                ...(cursor !== undefined ? { cursor } : {}),
+                limit: QUERY_EVENTS_PAGE_LIMIT,
+                order: "descending",
+            });
+
+            for (const item of response.data) {
+                const parsed = parseCategoryPoolCreatedEvent(readParsedJson(item));
+                if (parsed !== null && parsed.category === EARTHQUAKE_CATEGORY) {
+                    return { kind: "ok", categoryPoolId: parsed.poolId };
+                }
+            }
+
+            if (response.hasNextPage !== true || response.nextCursor == null) {
+                return {
+                    kind: "error",
+                    message: "Earthquake category pool was not found on chain.",
+                };
+            }
+            cursor = response.nextCursor;
+        }
+    } catch (error) {
+        return {
+            kind: "error",
+            message:
+                error instanceof Error
+                    ? error.message
+                    : "Failed to read earthquake category pool id.",
+        };
+    }
 }
 
 export async function readDashboardPools(
@@ -110,6 +181,17 @@ export async function readDashboardPools(
             message: error instanceof Error ? error.message : "Failed to read dashboard pools.",
         };
     }
+}
+
+export function parseCategoryPoolCreatedEvent(
+    raw: unknown,
+): { readonly poolId: string; readonly category: number } | null {
+    if (!isRecord(raw)) {
+        return null;
+    }
+    const poolId = parseObjectId(raw.pool_id);
+    const category = parseU8(raw.category);
+    return poolId === null || category === null ? null : { poolId, category };
 }
 
 export function parseMainPoolObject(raw: unknown): DashboardMainPool | null {
@@ -213,6 +295,13 @@ function parsePoolObject(
     }
 
     return { objectId, json: raw.json };
+}
+
+function readParsedJson(value: unknown): unknown {
+    if (!isRecord(value)) {
+        return undefined;
+    }
+    return value.parsedJson;
 }
 
 function parseBalanceValue(raw: unknown): bigint | null {

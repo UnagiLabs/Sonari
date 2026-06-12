@@ -9,7 +9,7 @@ import type {
 } from "./dashboard-events";
 
 export type DashboardMetricKey = "totalDonated" | "aidDelivered" | "activePools" | "receipts";
-export type DashboardPoolKey = "main" | "operations" | "category";
+export type DashboardPoolKey = "main" | "operations" | "earthquake";
 
 export interface DashboardPoolSummary {
     readonly key: DashboardPoolKey;
@@ -156,7 +156,7 @@ function deriveCategoryPool(
     locale: SonariLocale,
 ): DashboardPoolSummary {
     return {
-        key: "category",
+        key: "earthquake",
         balance: formatUsdc(pool.balanceUsdc, locale),
         received: formatUsdc(pool.totalReceivedUsdc, locale),
         paidOut: formatUsdc(pool.totalFloorFundedUsdc, locale),

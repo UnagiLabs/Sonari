@@ -7,7 +7,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
-import { parseDashboardPoolIds, readDashboardPools } from "./dashboard-chain";
+import {
+    parseDashboardPoolIds,
+    readDashboardPools,
+    readEarthquakeCategoryPoolId,
+} from "./dashboard-chain";
 import { readDashboardEvents } from "./dashboard-events";
 import {
     type DashboardActivityItem,
@@ -34,8 +38,6 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                 NEXT_PUBLIC_SONARI_MAIN_POOL_ID: process.env.NEXT_PUBLIC_SONARI_MAIN_POOL_ID,
                 NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID:
                     process.env.NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID,
-                NEXT_PUBLIC_SONARI_CATEGORY_POOL_ID:
-                    process.env.NEXT_PUBLIC_SONARI_CATEGORY_POOL_ID,
             }),
         [],
     );
@@ -66,10 +68,25 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
 
         const eventClient = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
 
-        void Promise.all([
-            readDashboardPools(client, poolIdsResult.ids),
-            readDashboardEvents(eventClient, { packageId: fundingPackageId }),
-        ]).then(([poolResult, eventResult]) => {
+        void (async () => {
+            const categoryPoolResult = await readEarthquakeCategoryPoolId(eventClient, {
+                packageId: fundingPackageId,
+            });
+            if (cancelled) {
+                return;
+            }
+            if (categoryPoolResult.kind === "error") {
+                setState({ status: "error", message: categoryPoolResult.message });
+                return;
+            }
+
+            const [poolResult, eventResult] = await Promise.all([
+                readDashboardPools(client, {
+                    ...poolIdsResult.ids,
+                    categoryPoolId: categoryPoolResult.categoryPoolId,
+                }),
+                readDashboardEvents(eventClient, { packageId: fundingPackageId }),
+            ]);
             if (cancelled) {
                 return;
             }
@@ -94,6 +111,16 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                     latestEvent: eventResult.latestEvent,
                 }),
             });
+        })().catch((error: unknown) => {
+            if (!cancelled) {
+                setState({
+                    status: "error",
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to read dashboard data.",
+                });
+            }
         });
 
         return cancel;

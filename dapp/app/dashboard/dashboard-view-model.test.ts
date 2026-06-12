@@ -93,7 +93,7 @@ describe("deriveDashboardViewModel", () => {
             activePools: "3 pools read from chain",
             receipts: "12 finalized claim events",
         });
-        expect(view.pools.map((pool) => pool.key)).toEqual(["main", "operations", "category"]);
+        expect(view.pools.map((pool) => pool.key)).toEqual(["main", "operations", "earthquake"]);
         expect(view.pools[0]?.available).toBe("$11.00");
         expect(view.pools[1]?.paidOut).toBe("$1.00");
         expect(view.donations[0]).toEqual({

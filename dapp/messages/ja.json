@@ -681,8 +681,8 @@
             "operations": {
                 "name": "運用プール"
             },
-            "category": {
-                "name": "カテゴリープール"
+            "earthquake": {
+                "name": "地震救援プール"
             }
         },
         "eventPanel": {
