@@ -766,6 +766,20 @@
             "ready": "準備完了",
             "pending": "保留中"
         },
+        "status": {
+            "connectWallet": "ウォレットを接続して MembershipPass を読み込みます。",
+            "configMissing": "申請設定が不足しています。",
+            "configInvalid": "申請設定に不正な object ID が含まれています。",
+            "campaignsLoading": "申請できるキャンペーンを読み込んでいます。",
+            "campaignsFailed": "申請できるキャンペーンを読み込めませんでした。",
+            "noCampaigns": "申請できるキャンペーンはありません。",
+            "passLoading": "MembershipPass を読み込んでいます。",
+            "passMissing": "このウォレットは MembershipPass を所有していません。",
+            "passFailed": "MembershipPass を読み込めませんでした。",
+            "worldIdConfigMissing": "World ID 設定が不足しています。",
+            "worldIdRequired": "申請の検証前に World ID 検証を完了してください。",
+            "retry": "再試行"
+        },
         "proof": {
             "idle": "受給資格はまだ確認されていません。",
             "checking": "被災セルの証明を確認しています。",

@@ -42,6 +42,13 @@ import {
 } from "./claim-flow";
 import { resolveWorldIdClaimIdentity } from "./claim-identity";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "./claim-messages";
+import {
+    buildCampaignNotice,
+    buildConfigNotice,
+    buildPassNotice,
+    buildWorldIdNotice,
+    type ClaimNotice,
+} from "./claim-notices";
 import { buildClaimResultView, type TxState } from "./claim-result";
 
 const WorldIdVerifyButton = dynamic(
@@ -110,6 +117,8 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const [completedActions, setCompletedActions] = useState<ClaimFlowCompleted>(() =>
         emptyClaimFlowCompleted(),
     );
+    const [campaignReadNonce, setCampaignReadNonce] = useState(0);
+    const [passReadNonce, setPassReadNonce] = useState(0);
     const [campaignState, setCampaignState] = useState<CampaignState>({
         status: "loading",
         campaigns: [],
@@ -144,7 +153,20 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         inFlight: isClaimInFlight,
         completed: completedActions,
     });
+    const configNotice = buildConfigNotice(claimConfigResult.kind);
+    const campaignNotice = buildCampaignNotice({
+        status: campaignState.status,
+        campaignCount: campaignState.campaigns.length,
+    });
+    const passNotice = buildPassNotice({
+        walletConnected: isWalletConnected,
+        status: passState.status,
+    });
+    const worldIdNotice = buildWorldIdNotice(
+        identityMaterial.kind === "missing" ? identityMaterial.reason : null,
+    );
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: campaignReadNonce is a retry trigger.
     useEffect(() => {
         if (claimConfig === null) {
             setCampaignState({ status: "ready", campaigns: [] });
@@ -182,7 +204,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [claimConfig, client]);
+    }, [campaignReadNonce, claimConfig, client]);
 
     useEffect(() => {
         if (campaignState.status !== "ready") {
@@ -198,6 +220,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         }
     }, [campaignState, selectedEventId]);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: passReadNonce is a retry trigger.
     useEffect(() => {
         setProofState({ status: "idle" });
         setTxState({ status: "idle" });
@@ -251,11 +274,23 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [account, claimConfig, client]);
+    }, [account, claimConfig, client, passReadNonce]);
 
     // カタログのキー or 原文を、現在の locale で表示文字列へ解決する。
     const renderMessage = (message: ClaimMessage): string =>
         message.kind === "key" ? t(message.key) : message.text;
+
+    const renderNotice = (notice: ClaimNotice | null, onRetry?: () => void) =>
+        notice === null ? null : (
+            <div className={`claim-inline-notice ${notice.level}`} role="status">
+                <span>{t(notice.key)}</span>
+                {notice.retryable && onRetry !== undefined ? (
+                    <button className="text-action" onClick={onRetry} type="button">
+                        {t("status.retry")}
+                    </button>
+                ) : null}
+            </div>
+        );
 
     const proofMessage = (): string => {
         switch (proofState.status) {
@@ -490,6 +525,9 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                         </dd>
                                     </div>
                                 </dl>
+                                {renderNotice(passNotice, () =>
+                                    setPassReadNonce((value) => value + 1),
+                                )}
                             </section>
 
                             <section
@@ -505,6 +543,10 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                         {t("event.viewEvents")}
                                     </a>
                                 </div>
+                                {renderNotice(configNotice)}
+                                {renderNotice(campaignNotice, () =>
+                                    setCampaignReadNonce((value) => value + 1),
+                                )}
 
                                 <fieldset className="control-group">
                                     <legend>{t("event.selectLegend")}</legend>
@@ -598,6 +640,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                         statementsAccepted={true}
                                         verified={worldIdResponse !== null}
                                     />
+                                    {renderNotice(worldIdNotice)}
                                 </fieldset>
                             </section>
                         </div>

@@ -2025,6 +2025,29 @@ h4 {
   margin-top: 0;
 }
 
+.claim-inline-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.claim-inline-notice.info {
+  background: var(--surface-soft);
+}
+
+.claim-inline-notice.error {
+  border-color: oklch(0.72 0.14 30);
+  background: oklch(0.96 0.04 40);
+  color: var(--ink);
+}
+
 .claim-note {
   display: grid;
   gap: 10px;

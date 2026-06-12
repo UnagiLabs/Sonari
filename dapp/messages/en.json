@@ -766,6 +766,20 @@
             "ready": "ready",
             "pending": "pending"
         },
+        "status": {
+            "connectWallet": "Connect a wallet to read your MembershipPass.",
+            "configMissing": "Claim configuration is incomplete.",
+            "configInvalid": "Claim configuration contains an invalid object ID.",
+            "campaignsLoading": "Loading claimable campaigns.",
+            "campaignsFailed": "Claimable campaigns could not be loaded.",
+            "noCampaigns": "No claimable campaigns are available.",
+            "passLoading": "Loading your MembershipPass.",
+            "passMissing": "This wallet does not own a MembershipPass.",
+            "passFailed": "MembershipPass could not be loaded.",
+            "worldIdConfigMissing": "World ID configuration is incomplete.",
+            "worldIdRequired": "Complete World ID verification before claim verification.",
+            "retry": "Retry"
+        },
         "proof": {
             "idle": "Eligibility has not been checked.",
             "checking": "Checking affected cells proof.",
