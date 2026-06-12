@@ -4,9 +4,49 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - main
+    paths:
+      - .github/workflows/ci.yml
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.json
+      - tsconfig.base.json
+      - biome.json
+      - vitest.config.ts
+      - Cargo.toml
+      - Cargo.lock
+      - contracts/Move.toml
+      - contracts/Move.lock
+      - contracts/Published.toml
+      - contracts/sources/**
+      - contracts/tests/**
+      - dapp/app/**
+      - dapp/messages/**
+      - dapp/next.config.ts
+      - dapp/open-next.config.ts
+      - dapp/package.json
+      - dapp/tsconfig.json
+      - infra/aws/**
+      - packages/**/package.json
+      - packages/**/tsconfig.json
+      - packages/**/src/**
+      - scripts/**/*.ts
+      - scripts/tsconfig.json
+      - scripts/aws/README.md
+      - nautilus/verifiers/**/package.json
+      - nautilus/verifiers/**/tsconfig.json
+      - nautilus/verifiers/**/Cargo.toml
+      - nautilus/verifiers/**/*.rs
+      - nautilus/verifiers/**/*.ts
+      - nautilus/verifiers/**/fixtures/**
+      - nautilus/verifiers/**/src/testdata/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   SUI_CLI_URL: https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/sui-testnet-v1.71.1-ubuntu-x86_64.tgz
@@ -23,22 +63,59 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect changed areas
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          base_ref="FETCH_HEAD"
+          changed_files="$RUNNER_TEMP/changed-files.txt"
+          git diff --name-only "$base_ref" "$GITHUB_SHA" > "$changed_files"
+
+          has_changes() {
+            grep -Eq "$1" "$changed_files"
+          }
+
+          if has_changes '^(\.github/workflows/ci\.yml|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig\.json|tsconfig\.base\.json|biome\.json|vitest\.config\.ts|dapp/(app/|messages/|next\.config\.ts$|open-next\.config\.ts$|package\.json$|tsconfig\.json$)|infra/aws/|packages/[^/]+/(package\.json$|tsconfig\.json$|src/)|scripts/.*\.ts$|scripts/tsconfig\.json$|scripts/aws/README\.md$|nautilus/verifiers/.*/(package\.json$|tsconfig\.json$|.*\.ts$|fixtures/|src/testdata/))'; then
+            echo "typescript=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "typescript=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if has_changes '^(\.github/workflows/ci\.yml|package\.json|Cargo\.toml|Cargo\.lock|nautilus/verifiers/.*/Cargo\.toml$|nautilus/verifiers/.*\.rs$|nautilus/verifiers/.*/(fixtures/|src/testdata/))'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if has_changes '^(\.github/workflows/ci\.yml|package\.json|pnpm-lock\.yaml|contracts/(Move\.toml$|Move\.lock$|Published\.toml$|sources/|tests/))'; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "move=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Node.js
+        if: steps.changes.outputs.typescript == 'true' || steps.changes.outputs.move == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 24.x
 
       - name: Enable pnpm
+        if: steps.changes.outputs.typescript == 'true' || steps.changes.outputs.move == 'true'
         run: |
           corepack enable
           corepack prepare pnpm@10.27.0 --activate
 
       - name: Get pnpm store path
+        if: steps.changes.outputs.typescript == 'true'
         id: pnpm-store
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
+        if: steps.changes.outputs.typescript == 'true'
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
@@ -47,11 +124,13 @@ jobs:
             pnpm-store-${{ runner.os }}-
 
       - name: Set up Rust
+        if: steps.changes.outputs.rust == 'true'
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
 
       - name: Cache Cargo dependencies
+        if: steps.changes.outputs.rust == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -62,40 +141,15 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: Detect Move changes
-        id: move-changes
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-            base_ref="FETCH_HEAD"
-          else
-            base_ref="${{ github.event.before }}"
-            if [[ -z "$base_ref" || "$base_ref" =~ ^0+$ ]]; then
-              echo "changed=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-
-          git diff --name-only "$base_ref" "$GITHUB_SHA" > "$RUNNER_TEMP/changed-files.txt"
-          # Move-related files include contracts/, Move.toml, and Move.lock.
-          if grep -Eq '^(contracts/|contracts/Move\.toml$|contracts/Move\.lock$|package\.json$|pnpm-lock\.yaml$|\.github/workflows/ci\.yml$)' "$RUNNER_TEMP/changed-files.txt"; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Cache Sui CLI artifact
-        if: steps.move-changes.outputs.changed == 'true'
+        if: steps.changes.outputs.move == 'true'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/sui/${{ env.SUI_CLI_SHA256 }}
           key: sui-cli-${{ runner.os }}-${{ env.SUI_CLI_SHA256 }}
 
       - name: Install pinned Sui CLI
-        if: steps.move-changes.outputs.changed == 'true'
+        if: steps.changes.outputs.move == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -120,20 +174,25 @@ jobs:
           "$install_dir/sui" --version
 
       - name: Install dependencies
+        if: steps.changes.outputs.typescript == 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting and lint
-        run: pnpm check
+      - name: Check TypeScript formatting, lint, and types
+        if: steps.changes.outputs.typescript == 'true'
+        run: pnpm check:ts
+
+      - name: Check Rust formatting and lint
+        if: steps.changes.outputs.rust == 'true'
+        run: cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Check Move contracts
-        if: steps.move-changes.outputs.changed == 'true'
+        if: steps.changes.outputs.move == 'true'
         run: pnpm check:move
 
-      - name: Typecheck
-        run: pnpm typecheck
-
       - name: Test TypeScript
+        if: steps.changes.outputs.typescript == 'true'
         run: pnpm test
 
       - name: Test Rust TEE
+        if: steps.changes.outputs.rust == 'true'
         run: cargo test --workspace
