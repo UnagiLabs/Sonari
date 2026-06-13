@@ -506,24 +506,6 @@
             "notePrivate": "居住データは非公開のまま",
             "noteVerified": "検証済みの災害イベント"
         },
-        "stats": {
-            "totalDonated": {
-                "label": "寄付総額",
-                "meta": "直近24時間で + $48,200"
-            },
-            "reliefDelivered": {
-                "label": "届けた支援",
-                "meta": "検証済み申請 1,291 件"
-            },
-            "activePools": {
-                "label": "稼働中のプール",
-                "meta": "メインと地震"
-            },
-            "verifiedEvents": {
-                "label": "検証済みイベント",
-                "meta": "USGS の情報源データ"
-            }
-        },
         "sponsors": {
             "title": "透明なパートナーに支えられて"
         },

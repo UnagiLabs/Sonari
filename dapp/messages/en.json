@@ -506,24 +506,6 @@
             "notePrivate": "Residence data stays private",
             "noteVerified": "Verified disaster events"
         },
-        "stats": {
-            "totalDonated": {
-                "label": "Total donated",
-                "meta": "+ $48,200 in 24h"
-            },
-            "reliefDelivered": {
-                "label": "Relief delivered",
-                "meta": "1,291 verified claims"
-            },
-            "activePools": {
-                "label": "Active pools",
-                "meta": "Main and earthquake"
-            },
-            "verifiedEvents": {
-                "label": "Verified events",
-                "meta": "USGS source data"
-            }
-        },
         "sponsors": {
             "title": "Supported by transparent partners"
         },

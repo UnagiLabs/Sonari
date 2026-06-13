@@ -44,6 +44,17 @@ const removedLeaderboardLinkKeys = [
     "dashboard.supportersPanel.action",
 ] as const;
 
+const removedHomeStatsKeys = [
+    "home.stats.totalDonated.label",
+    "home.stats.totalDonated.meta",
+    "home.stats.reliefDelivered.label",
+    "home.stats.reliefDelivered.meta",
+    "home.stats.activePools.label",
+    "home.stats.activePools.meta",
+    "home.stats.verifiedEvents.label",
+    "home.stats.verifiedEvents.meta",
+] as const;
+
 describe("messages catalog parity", () => {
     it("en と ja のキー集合が完全に一致する", () => {
         expect([...ja.keys()].sort()).toEqual([...en.keys()].sort());
@@ -93,6 +104,13 @@ describe("messages catalog parity", () => {
 
     it("/leaderboard 導線で使っていた文言キーを残さない", () => {
         for (const key of removedLeaderboardLinkKeys) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
+    });
+
+    it("トップページのダミー指標で使っていた文言キーを残さない", () => {
+        for (const key of removedHomeStatsKeys) {
             expect(en.has(key), key).toBe(false);
             expect(ja.has(key), key).toBe(false);
         }

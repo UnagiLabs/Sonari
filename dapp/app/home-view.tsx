@@ -41,15 +41,6 @@ type Donor = {
     corporate?: boolean;
 };
 
-// 金額・残高・固有名詞などのモックデータは翻訳対象外なので定数のまま保持する。
-const statKeys = ["totalDonated", "reliefDelivered", "activePools", "verifiedEvents"] as const;
-const statValues: Record<(typeof statKeys)[number], string> = {
-    totalDonated: "$3.2M",
-    reliefDelivered: "$1.2M",
-    activePools: "2",
-    verifiedEvents: "14",
-};
-
 const sponsors: Sponsor[] = [
     { name: "Aizome Foundation", logo: "AF", color: "oklch(0.55 0.06 145)" },
     { name: "Kibou Capital", logo: "KC", color: "oklch(0.58 0.07 120)" },
@@ -202,17 +193,6 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
                                 />
                             </div>
                         </div>
-
-                        <div className="metrics-strip hero-stats-grid">
-                            {statKeys.map((key) => (
-                                <StatCard
-                                    key={key}
-                                    label={t(`stats.${key}.label`)}
-                                    meta={t(`stats.${key}.meta`)}
-                                    value={statValues[key]}
-                                />
-                            ))}
-                        </div>
                     </section>
 
                     <section className="section-tight" aria-labelledby="sponsors-title">
@@ -357,16 +337,6 @@ function SectionHeader({
             </div>
             {action ? <div>{action}</div> : null}
         </div>
-    );
-}
-
-function StatCard({ label, meta, value }: { label: string; meta: string; value: string }) {
-    return (
-        <article className="metric-item">
-            <div className="label">{label}</div>
-            <div className="value">{value}</div>
-            <div className="meta">{meta}</div>
-        </article>
     );
 }
 
