@@ -4,6 +4,11 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
+import {
+    GENESIS_OBJECT_KIND,
+    readGenesisObjectIds,
+    selectGenesisObjectId,
+} from "../chain/genesis-objects";
 import { LoadingIndicator } from "../components/loading-indicator";
 import { formatAmount } from "../i18n/format";
 import { SiteTopbar } from "../i18n/site-topbar";
@@ -13,7 +18,7 @@ import { WalletConnect } from "../wallet/wallet-connect";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
 import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import { validateDonationAmount } from "./donate-amount";
-import { readDonateConfig } from "./donate-config";
+import { combineDonateConfig, type DonateConfig, readDonateEnvConfig } from "./donate-config";
 import { readDonateDestinations } from "./donate-destinations";
 import { buildDonateTransaction, type DonateDestinationInput } from "./donate-transaction";
 import {
@@ -32,9 +37,11 @@ const DEFAULT_DONATION_AMOUNT = "400";
 export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("donate");
     const account = useCurrentAccount();
-    const donateConfig = useMemo(() => readDonateConfig(), []);
-    const config = donateConfig.kind === "ok" ? donateConfig.config : null;
     const network = readWalletNetwork();
+    // env から読むのは packageID だけ。pause_state / pool は packageID 起点で導出する。
+    const envConfig = useMemo(() => readDonateEnvConfig(), []);
+    const fundingPackageId = envConfig.kind === "ok" ? envConfig.config.fundingPackageId : null;
+    const [config, setConfig] = useState<DonateConfig | null>(null);
 
     const [destinationState, setDestinationState] = useState<DonateDestinationReadState>({
         status: "idle",
@@ -51,8 +58,64 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     const amountValidation = useMemo(() => validateDonationAmount(amountInput), [amountInput]);
     const isWalletConnected = account !== null;
 
+    // packageID から pause_state / pool を導出して完全な設定を組み立てる。
+    // 失敗の詳細は開発者向けに console へ出し、画面には設定不備の汎用文言を出す。
     useEffect(() => {
-        if (config === null) {
+        if (fundingPackageId === null) {
+            console.error(
+                "donate config failed: NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.",
+            );
+            setConfig(null);
+            return;
+        }
+
+        const client = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+        let cancelled = false;
+        setConfig(null);
+
+        void (async () => {
+            const genesis = await readGenesisObjectIds(client, { packageId: fundingPackageId });
+            if (cancelled) {
+                return;
+            }
+            if (genesis.kind === "error") {
+                console.error(`donate config failed: ${genesis.message}`);
+                setConfig(null);
+                return;
+            }
+
+            const donationPauseStateId = selectGenesisObjectId(
+                genesis.ids,
+                GENESIS_OBJECT_KIND.pauseState,
+            );
+            const mainPoolId = selectGenesisObjectId(genesis.ids, GENESIS_OBJECT_KIND.mainPool);
+            const operationsPoolId = selectGenesisObjectId(
+                genesis.ids,
+                GENESIS_OBJECT_KIND.operationsPool,
+            );
+            if (donationPauseStateId === null || mainPoolId === null || operationsPoolId === null) {
+                console.error(
+                    "donate config failed: genesis objects for pause/main/operations were not found.",
+                );
+                setConfig(null);
+                return;
+            }
+
+            setConfig(
+                combineDonateConfig(
+                    { fundingPackageId },
+                    { donationPauseStateId, mainPoolId, operationsPoolId },
+                ),
+            );
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [fundingPackageId, network]);
+
+    useEffect(() => {
+        if (fundingPackageId === null) {
             setDestinationState({
                 status: "ready",
                 campaigns: [],
@@ -74,7 +137,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         void (async () => {
             try {
                 const result = await readDonateDestinations(client, {
-                    packageId: config.fundingPackageId,
+                    packageId: fundingPackageId,
                 });
 
                 if (cancelled) {
@@ -117,7 +180,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [config, network]);
+    }, [fundingPackageId, network]);
 
     useEffect(() => {
         if (destinationState.status !== "ready") {
