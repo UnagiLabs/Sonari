@@ -36,6 +36,14 @@ const ja = new Map<string, unknown>();
 flattenKeys(loadCatalog("en"), "", en);
 flattenKeys(loadCatalog("ja"), "", ja);
 
+const removedLeaderboardLinkKeys = [
+    "topbar.nav.leaderboard",
+    "home.supporters.fullLeaderboard",
+    "home.footer.linkLeaderboard",
+    "dashboard.supportersPanel.eyebrow",
+    "dashboard.supportersPanel.action",
+] as const;
+
 describe("messages catalog parity", () => {
     it("en と ja のキー集合が完全に一致する", () => {
         expect([...ja.keys()].sort()).toEqual([...en.keys()].sort());
@@ -69,5 +77,12 @@ describe("messages catalog parity", () => {
         expect(doneStepSource).not.toContain('href="/dashboard"');
         expect(ja.get("register.wizard.done.mypageCta")).toBe("マイページで確認");
         expect(en.get("register.wizard.done.mypageCta")).toBe("Check My Page");
+    });
+
+    it("/leaderboard 導線で使っていた文言キーを残さない", () => {
+        for (const key of removedLeaderboardLinkKeys) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
     });
 });

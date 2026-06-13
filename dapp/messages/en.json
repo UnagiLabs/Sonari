@@ -310,7 +310,6 @@
             "home": "Home",
             "donate": "Donate",
             "dashboard": "Dashboard",
-            "leaderboard": "Leaderboard",
             "register": "Register",
             "claim": "Claim",
             "mypage": "My Page"
@@ -569,7 +568,6 @@
         "supporters": {
             "eyebrow": "Top supporters",
             "title": "People and partners keeping the reserve full.",
-            "fullLeaderboard": "Full leaderboard",
             "individuals": "Individuals",
             "corporate": "Corporate sponsors"
         },
@@ -607,7 +605,6 @@
             "transparencyTitle": "Transparency",
             "linkDonate": "Donate",
             "linkDashboard": "Dashboard",
-            "linkLeaderboard": "Leaderboard",
             "linkClaim": "Claim",
             "linkRegister": "Register",
             "linkReceipts": "Receipts",
@@ -707,9 +704,7 @@
             "action": "All receipts"
         },
         "supportersPanel": {
-            "eyebrow": "Leaderboard",
             "title": "Top supporters",
-            "action": "Full leaderboard",
             "individualDonors": "Individual donors",
             "corporateSponsors": "Corporate sponsors",
             "noSupporters": "No supporter ranking is available from chain data yet.",

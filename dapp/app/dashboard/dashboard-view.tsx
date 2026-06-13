@@ -295,11 +295,7 @@ function DashboardContent({ view }: { readonly view: DashboardViewModel }) {
                 />
 
                 <section className="dash-panel dash-panel-wide" aria-labelledby="supporters-title">
-                    <PanelHeader
-                        eyebrow={t("supportersPanel.eyebrow")}
-                        titleId="supporters-title"
-                        title={t("supportersPanel.title")}
-                    />
+                    <PanelHeader titleId="supporters-title" title={t("supportersPanel.title")} />
                     <div className="dashboard-supporters">
                         <SupporterColumn
                             supporters={view.topDonors}

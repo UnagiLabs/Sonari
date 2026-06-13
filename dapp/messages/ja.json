@@ -310,7 +310,6 @@
             "home": "ホーム",
             "donate": "寄付",
             "dashboard": "ダッシュボード",
-            "leaderboard": "リーダーボード",
             "register": "登録",
             "claim": "申請",
             "mypage": "マイページ"
@@ -569,7 +568,6 @@
         "supporters": {
             "eyebrow": "トップ支援者",
             "title": "準備金を満たし続ける人々とパートナー。",
-            "fullLeaderboard": "リーダーボード全体",
             "individuals": "個人",
             "corporate": "企業スポンサー"
         },
@@ -607,7 +605,6 @@
             "transparencyTitle": "透明性",
             "linkDonate": "寄付",
             "linkDashboard": "ダッシュボード",
-            "linkLeaderboard": "リーダーボード",
             "linkClaim": "申請",
             "linkRegister": "登録",
             "linkReceipts": "レシート",
@@ -707,9 +704,7 @@
             "action": "すべてのレシート"
         },
         "supportersPanel": {
-            "eyebrow": "リーダーボード",
             "title": "トップ支援者",
-            "action": "リーダーボード全体",
             "individualDonors": "個人の寄付者",
             "corporateSponsors": "企業スポンサー",
             "noSupporters": "チェーンデータから作れる支援者ランキングはまだありません。",
