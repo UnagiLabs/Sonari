@@ -473,7 +473,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         <>
             <div className="watercolor-bg" />
             <div className="app">
-                <SiteTopbar active="claim" locale={locale} showWallet />
+                <SiteTopbar active="claim" locale={locale} />
 
                 <main className="page claim-page">
                     <header className="claim-hero">

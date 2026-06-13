@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import enMessages from "../../messages/en.json";
 import jaMessages from "../../messages/ja.json";
 import { canonicalMetadata } from "../i18n/site-metadata";
+import { SiteTopbar } from "../i18n/site-topbar";
 import { parseLocale, SONARI_LOCALE_COOKIE, type SonariLocale } from "../register/wizard/locale";
 import { MypageIntlProvider } from "./mypage-intl-provider";
 import { MypageView } from "./mypage-view";
@@ -23,6 +24,7 @@ export default async function MyPage() {
         <MypageIntlProvider locale={locale} messages={messagesByLocale[locale]}>
             <div className="watercolor-bg" />
             <div className="app">
+                <SiteTopbar active="mypage" locale={locale} />
                 <main className="page wizard-page">
                     <MypageView locale={locale} />
                 </main>

@@ -138,7 +138,7 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
         <>
             <div className="watercolor-bg" />
             <div className="app">
-                <SiteTopbar active="home" locale={locale} showDonateCta showWallet />
+                <SiteTopbar active="home" locale={locale} />
 
                 <main className="page">
                     <section className="hero" aria-labelledby="hero-title">

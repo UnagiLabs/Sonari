@@ -4,7 +4,6 @@ import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-ki
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
-import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { HomeCellMap } from "./home-cell-map";
@@ -94,9 +93,6 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
 
     return (
         <div className="mypage">
-            {/* mypage の nav は home / register / mypage の 3 項目（旧インライン実装と同一） */}
-            <SiteTopbar active="mypage" items={["home", "register", "mypage"]} locale={locale} />
-
             <section aria-labelledby="mypage-title" className="wizard-step-content">
                 <header className="wizard-heading">
                     <h1 className="wizard-title" id="mypage-title">

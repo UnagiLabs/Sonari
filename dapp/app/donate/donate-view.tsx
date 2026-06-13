@@ -384,7 +384,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         <>
             <div className="watercolor-bg" />
             <div className="app">
-                <SiteTopbar active="donate" locale={locale} showWallet />
+                <SiteTopbar active="donate" locale={locale} />
 
                 <main className="page donate-page">
                     <header className="donate-hero">
