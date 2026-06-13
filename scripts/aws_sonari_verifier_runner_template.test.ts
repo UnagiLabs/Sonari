@@ -124,6 +124,46 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
     });
 
+    it("exposes IdentityStatus through a read-only public POST Function URL", async () => {
+        const template = await readTemplate();
+
+        // 状態クエリ用 GSI とその最小 Query 権限が揃っていること。
+        expect(template).toContain("OwnerMembershipUpdatedAtIndex");
+        expect(template).toContain(
+            "Resource: !Sub $" + "{VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex",
+        );
+
+        // 読み取り専用 Lambda 本体。
+        expect(template).toContain("IdentityStatusLambda:");
+        expect(template).toContain("Handler: dist/src/lambda.identityStatusHandler");
+
+        const start = template.indexOf("IdentityStatusFunctionUrl:");
+        const end = template.indexOf("BatchVerifierLambda:", start);
+        const statusUrlResources = template.slice(start, end);
+
+        expect(start).toBeGreaterThan(-1);
+        expect(end).toBeGreaterThan(start);
+        expect(statusUrlResources).toContain("Type: AWS::Lambda::Url");
+        expect(statusUrlResources).toContain("AuthType: NONE");
+        expect(statusUrlResources).toContain("TargetFunctionArn: !Ref IdentityStatusLambda");
+        expect(statusUrlResources).toContain("Cors:");
+        expect(statusUrlResources).toContain("- POST");
+        expect(statusUrlResources).toContain("Action: lambda:InvokeFunctionUrl");
+        expect(statusUrlResources).toContain("FunctionUrlAuthType: NONE");
+        expect(statusUrlResources).toContain("InvokedViaFunctionUrl: true");
+
+        // status Lambda の write 権限が無いこと（Query のみ）を保証する。
+        const roleStart = template.indexOf("IdentityStatusLambdaRole:");
+        const roleEnd = template.indexOf("BatchVerifierLambdaRole:", roleStart);
+        const roleResources = template.slice(roleStart, roleEnd);
+        expect(roleResources).not.toContain("dynamodb:PutItem");
+        expect(roleResources).toContain("Action: dynamodb:Query");
+
+        expect(template).toContain(
+            "IdentityStatusFunctionUrlOutput:\n    Value: !GetAtt IdentityStatusFunctionUrl.FunctionUrl",
+        );
+    });
+
     it("passes verifier kind through every runner control task", async () => {
         const template = await readTemplate();
         const runnerTaskCount =

@@ -319,9 +319,24 @@ Resources:
       AttributeDefinitions:
         - AttributeName: job_id
           AttributeType: S
+        # 本人確認ジョブ状態 API（IdentityStatusLambda）が owner+membership 単位で
+        # 最新ジョブを引くための GSI キー。upsertRequest が両属性を書き込む。
+        - AttributeName: owner_membership_key
+          AttributeType: S
+        - AttributeName: updated_at_ms
+          AttributeType: N
       KeySchema:
         - AttributeName: job_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerMembershipUpdatedAtIndex
+          KeySchema:
+            - AttributeName: owner_membership_key
+              KeyType: HASH
+            - AttributeName: updated_at_ms
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       StreamSpecification:
         StreamViewType: NEW_AND_OLD_IMAGES
 
@@ -899,6 +914,27 @@ Resources:
                   - dynamodb:PutItem
                 Resource: !GetAtt VerificationJobsTable.Arn
 
+  IdentityStatusLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ReadVerificationJobStatus
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub ${VerificationJobsTable.Arn}/index/OwnerMembershipUpdatedAtIndex
+
   BatchVerifierLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -1178,6 +1214,53 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref SubmitVerificationLambda
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+  # 本人確認ジョブ状態 API。wallet 署名付き request を検証し sanitized status だけ返す
+  # 読み取り専用 Lambda（dist/src/lambda.identityStatusHandler）。書き込み権限は持たせない。
+  IdentityStatusLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: dist/src/lambda.identityStatusHandler
+      Role: !GetAtt IdentityStatusLambdaRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          VERIFICATION_JOBS_TABLE_NAME: !Ref VerificationJobsTable
+
+  IdentityStatusFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !Ref IdentityStatusLambda
+      Cors:
+        AllowHeaders:
+          - content-type
+        AllowMethods:
+          - POST
+        AllowOrigins:
+          - "*"
+        MaxAge: 300
+
+  IdentityStatusFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref IdentityStatusLambda
+      Principal: "*"
+      FunctionUrlAuthType: NONE
+
+  IdentityStatusFunctionInvokeUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref IdentityStatusLambda
       Principal: "*"
       InvokedViaFunctionUrl: true
 
@@ -1881,6 +1964,10 @@ Outputs:
     Value: !Ref SubmitVerificationLambda
   SubmitVerificationFunctionUrlOutput:
     Value: !GetAtt SubmitVerificationFunctionUrl.FunctionUrl
+  IdentityStatusLambdaName:
+    Value: !Ref IdentityStatusLambda
+  IdentityStatusFunctionUrlOutput:
+    Value: !GetAtt IdentityStatusFunctionUrl.FunctionUrl
   BatchVerifierLambdaName:
     Value: !Ref BatchVerifierLambda
   MembershipJobStreamLambdaName:

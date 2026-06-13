@@ -56,6 +56,7 @@ describe("AWS Sonari verifier runner Lambda artifact builder", () => {
         expect(lambdaJs).toContain("scheduledHandler");
         expect(lambdaJs).toContain("manualHandler");
         expect(lambdaJs).toContain("submitVerificationHandler");
+        expect(lambdaJs).toContain("identityStatusHandler");
         expect(lambdaJs).toContain("batchVerifierHandler");
         expect(lambdaJs).toContain("jobStreamHandler");
         expect(lambdaJs).toContain("createRequire(import.meta.url)");
