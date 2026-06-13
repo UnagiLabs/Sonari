@@ -125,3 +125,49 @@ describe("home view featured pools", () => {
         expect(homeViewSource).not.toContain("/assets/donation_flood.webp");
     });
 });
+
+// Top supporters 削除の検査。HOME 専用の実装トークンが残らないことを見る。
+// Aizome / Kibou / Midori は corporateDonors にのみ残っていた社名なので、削除後は消える。
+// type Donor で検査し、individualDonors などへの部分一致誤検知を避ける。
+const removedSupportersTokens = [
+    "SupporterList",
+    "SupporterGroup",
+    "individualDonors",
+    "corporateDonors",
+    "type Donor",
+    "supporters-title",
+    "home.supporters",
+    "Aizome Foundation",
+    "Kibou Capital",
+    "Midori Logistics",
+] as const;
+
+// ダッシュボードの SupporterColumn が使う共有 CSS。HOME 削除で消してはいけない。
+const sharedSupporterClasses = [
+    ".supporter-group",
+    ".supporter-group-label",
+    ".row-item",
+    ".row-name",
+    ".row-meta",
+    ".row-amount",
+    ".avatar",
+    ".avatar-sq",
+] as const;
+
+describe("home view top supporters removal", () => {
+    it("HOME から Top supporters の実装を残さない", () => {
+        for (const token of removedSupportersTokens) {
+            expect(homeViewSource, token).not.toContain(token);
+        }
+    });
+
+    it("HOME 専用の .supporter-list CSS を残さない", () => {
+        expect(globalsSource).not.toContain(".supporter-list");
+    });
+
+    it("ダッシュボード共有の supporter / row / avatar CSS は残す", () => {
+        for (const cls of sharedSupporterClasses) {
+            expect(globalsSource, cls).toContain(cls);
+        }
+    });
+});

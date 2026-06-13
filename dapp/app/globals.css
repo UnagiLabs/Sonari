@@ -963,13 +963,6 @@ h4 {
   font-size: 12px;
 }
 
-.supporter-list {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 34px;
-  border-top: 1px solid var(--line);
-}
-
 .supporter-group {
   padding-top: 16px;
 }
@@ -2818,7 +2811,6 @@ h4 {
   }
 
   .section-title-row,
-  .supporter-list,
   .value-grid,
   .dashboard-supporters {
     grid-template-columns: 1fr;
