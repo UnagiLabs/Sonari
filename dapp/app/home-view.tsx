@@ -193,7 +193,6 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
                                 />
                             </div>
                         </div>
-
                     </section>
 
                     <section className="section-tight" aria-labelledby="sponsors-title">
