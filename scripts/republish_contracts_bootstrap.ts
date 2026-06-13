@@ -25,20 +25,6 @@ export const GENESIS_KIND = {
     EARTHQUAKE_POOL: 11,
 } as const;
 
-/** init が publish 時に必ず emit する genesis kind の集合。すべて揃っていなければ fail-closed。 */
-const EXPECTED_GENESIS_KINDS: readonly number[] = [
-    GENESIS_KIND.ADMIN_CAP,
-    GENESIS_KIND.PAUSE_STATE,
-    GENESIS_KIND.MAIN_POOL,
-    GENESIS_KIND.OPERATIONS_POOL,
-    GENESIS_KIND.DONOR_REGISTRY,
-    GENESIS_KIND.MEMBERSHIP_REGISTRY,
-    GENESIS_KIND.VERIFIER_REGISTRY,
-    GENESIS_KIND.IDENTITY_REGISTRY,
-    GENESIS_KIND.CATEGORY_REGISTRY,
-    GENESIS_KIND.EARTHQUAKE_POOL,
-];
-
 // ---------------------------------------------------------------------------
 // GitHub 設定の張替え先スコープ。
 // ---------------------------------------------------------------------------
@@ -279,6 +265,51 @@ export function assertWorldIdActionFormat(action: string): void {
             `World ID action must match ${WORLD_ID_ACTION_PATTERN.source}: got "${action}"`,
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// 4. Published.toml の published-at / original-id を新 package id へ書換える。
+//    再 publish（アップグレードではない）なので original-id も新 id と一致させる。
+//    対象 env のセクション内だけを書換え、他 env を巻き込まない。
+// ---------------------------------------------------------------------------
+export function rewritePublishedTomlPackageId(
+    toml: string,
+    env: string,
+    newPackageId: string,
+): string {
+    assertHexObjectId(newPackageId, "newPackageId");
+
+    const sectionHeader = `[published.${env}]`;
+    const headerIndex = toml.indexOf(sectionHeader);
+    if (headerIndex === -1) {
+        throw new Error(`Published.toml does not contain section ${sectionHeader}`);
+    }
+    const bodyStart = headerIndex + sectionHeader.length;
+    // 次のセクション見出し（行頭の "[..."）までを対象 env の本文とする。
+    const nextSection = toml.slice(bodyStart).search(/\n\[/);
+    const bodyEnd = nextSection === -1 ? toml.length : bodyStart + nextSection;
+
+    const head = toml.slice(0, bodyStart);
+    let body = toml.slice(bodyStart, bodyEnd);
+    const tail = toml.slice(bodyEnd);
+
+    body = replaceTomlField(body, "published-at", newPackageId, sectionHeader);
+    body = replaceTomlField(body, "original-id", newPackageId, sectionHeader);
+
+    return head + body + tail;
+}
+
+function replaceTomlField(
+    body: string,
+    field: string,
+    value: string,
+    sectionHeader: string,
+): string {
+    const pattern = new RegExp(`^(\\s*${field}\\s*=\\s*)"[^"]*"`, "m");
+    if (!pattern.test(body)) {
+        throw new Error(`Published.toml section ${sectionHeader} does not contain field ${field}`);
+    }
+    return body.replace(pattern, `$1"${value}"`);
 }
 
 // ---------------------------------------------------------------------------
