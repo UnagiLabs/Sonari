@@ -28,13 +28,6 @@ type IconName =
     | "waves"
     | "bolt";
 
-type Donor = {
-    name: string;
-    amount: string;
-    meta: string;
-    corporate?: boolean;
-};
-
 // ハッカソンの実スポンサー。表示順は指定どおり固定する。
 // logo は public/assets/sponsors の画像パス。
 // chip が true のロゴは黒一色で背景に埋もれるため、白背景チップに乗せる。
@@ -57,18 +50,6 @@ const FEATURED_POOLS: readonly { key: "main" | "earthquake"; icon: IconName; ima
 
 // pool ID は環境変数ではなく funding package ID 起点の genesis イベントから導出する。
 const fundingPackageId = process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID ?? "";
-
-const individualDonors: Donor[] = [
-    { name: "haru.sui", amount: "$89,400", meta: "41 donations, Earthquake" },
-    { name: "Anonymous Donor", amount: "$52,100", meta: "19 donations, Main" },
-    { name: "matcha_dev", amount: "$34,200", meta: "52 donations, Earthquake" },
-];
-
-const corporateDonors: Donor[] = [
-    { name: "Aizome Foundation", amount: "$524,800", meta: "84 donations", corporate: true },
-    { name: "Kibou Capital", amount: "$412,300", meta: "62 donations", corporate: true },
-    { name: "Midori Logistics", amount: "$76,250", meta: "28 donations", corporate: true },
-];
 
 const stepKeys = ["step1", "step2", "step3", "step4"] as const;
 const stepNumbers: Record<(typeof stepKeys)[number], string> = {
@@ -211,14 +192,6 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
                             title={t("pools.title")}
                         />
                         <FeaturedPools locale={locale} />
-                    </section>
-
-                    <section className="section" aria-labelledby="supporters-title">
-                        <SectionHeader
-                            eyebrow={t("supporters.eyebrow")}
-                            title={t("supporters.title")}
-                        />
-                        <SupporterList />
                     </section>
 
                     <section className="section" aria-labelledby="why-title">
@@ -510,43 +483,6 @@ function PoolCard({
                 </div>
             </div>
         </a>
-    );
-}
-
-function SupporterList() {
-    const t = useTranslations("home.supporters");
-
-    return (
-        <div className="supporter-list">
-            <SupporterGroup donors={individualDonors} label={t("individuals")} />
-            <SupporterGroup donors={corporateDonors} label={t("corporate")} />
-        </div>
-    );
-}
-
-function SupporterGroup({ donors, label }: { donors: Donor[]; label: string }) {
-    return (
-        <section className="supporter-group" aria-label={label}>
-            <div className="supporter-group-label">{label}</div>
-            {donors.map((donor, index) => (
-                <div className="row-item" key={donor.name}>
-                    <div className={`avatar ${donor.corporate ? "avatar-sq" : ""}`}>
-                        {donor.name
-                            .replace(/[^A-Za-z]/g, "")
-                            .slice(0, 2)
-                            .toUpperCase() || "?"}
-                    </div>
-                    <div>
-                        <div className="row-name">{donor.name}</div>
-                        <div className="row-meta">{donor.meta}</div>
-                    </div>
-                    <div className="row-amount">
-                        <span className="stat-num">{donor.amount}</span>
-                        <small>#{index + 1}</small>
-                    </div>
-                </div>
-            ))}
-        </section>
     );
 }
 
