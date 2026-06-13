@@ -1,9 +1,11 @@
 // USDC は Sui 上で一意に決まる coin type。contracts/Move.toml の addr_subst
-// (usdc = 0xdba34672…) と一致させる cross-language contract。publish のたびに
+// (usdc = 0xa1ec7fc0…) と一致させる cross-language contract。publish のたびに
 // 変わる値ではないため、環境変数ではなくコード定数として持つ。
 // 値を変えるときは Move.toml の addr_subst と同時に更新する。
+// testnet では Circle 公式 USDC のアドレス。デプロイ済み funding package の
+// donate_*_usdc が要求する Coin<...::usdc::USDC> 型と一致させること。
 export const SONARI_USDC_TYPE =
-    "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC";
+    "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC";
 
 // 環境変数から読むのは packageID だけにする。pause_state / pool は packageID 起点で
 // genesis イベントから導出し、usdcType は上記の定数を使う。
