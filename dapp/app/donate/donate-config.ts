@@ -32,6 +32,7 @@ export type DonateEnvConfig = {
 // packageID 起点で導出する寄付先オブジェクト群。
 export type DonatePoolObjects = {
     readonly donationPauseStateId: string;
+    readonly donorRegistryId: string;
     readonly mainPoolId: string;
     readonly operationsPoolId: string;
 };
@@ -39,6 +40,7 @@ export type DonatePoolObjects = {
 export type DonateConfig = {
     readonly fundingPackageId: string;
     readonly donationPauseStateId: string;
+    readonly donorRegistryId: string;
     readonly mainPoolId: string;
     readonly operationsPoolId: string;
     readonly usdcType: string;
@@ -108,6 +110,7 @@ export function combineDonateConfig(
     return {
         fundingPackageId: env.fundingPackageId,
         donationPauseStateId: pools.donationPauseStateId,
+        donorRegistryId: pools.donorRegistryId,
         mainPoolId: pools.mainPoolId,
         operationsPoolId: pools.operationsPoolId,
         usdcType: resolveUsdcType(network),

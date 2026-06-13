@@ -10,6 +10,7 @@ const PACKAGE_ID = `0x${"ab".repeat(32)}`;
 const PAUSE_STATE_ID = `0x${"02".repeat(32)}`;
 const MAIN_POOL_ID = `0x${"03".repeat(32)}`;
 const OPERATIONS_POOL_ID = `0x${"04".repeat(32)}`;
+const DONOR_REGISTRY_ID = `0x${"05".repeat(32)}`;
 const CATEGORY_REGISTRY_ID = `0x${"0a".repeat(32)}`;
 const EARTHQUAKE_POOL_ID = `0x${"0b".repeat(32)}`;
 
@@ -63,6 +64,7 @@ describe("readGenesisObjectIds", () => {
                 genesisEvent(PAUSE_STATE_ID, GENESIS_OBJECT_KIND.pauseState),
                 genesisEvent(MAIN_POOL_ID, GENESIS_OBJECT_KIND.mainPool),
                 genesisEvent(OPERATIONS_POOL_ID, GENESIS_OBJECT_KIND.operationsPool),
+                genesisEvent(DONOR_REGISTRY_ID, GENESIS_OBJECT_KIND.donorRegistry),
                 genesisEvent(CATEGORY_REGISTRY_ID, GENESIS_OBJECT_KIND.categoryRegistry),
                 genesisEvent(EARTHQUAKE_POOL_ID, GENESIS_OBJECT_KIND.earthquakePool),
             ],
@@ -78,6 +80,9 @@ describe("readGenesisObjectIds", () => {
         expect(selectGenesisObjectId(result.ids, GENESIS_OBJECT_KIND.mainPool)).toBe(MAIN_POOL_ID);
         expect(selectGenesisObjectId(result.ids, GENESIS_OBJECT_KIND.operationsPool)).toBe(
             OPERATIONS_POOL_ID,
+        );
+        expect(selectGenesisObjectId(result.ids, GENESIS_OBJECT_KIND.donorRegistry)).toBe(
+            DONOR_REGISTRY_ID,
         );
         expect(selectGenesisObjectId(result.ids, GENESIS_OBJECT_KIND.categoryRegistry)).toBe(
             CATEGORY_REGISTRY_ID,

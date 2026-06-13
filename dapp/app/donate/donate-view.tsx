@@ -93,9 +93,18 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 genesis.ids,
                 GENESIS_OBJECT_KIND.operationsPool,
             );
-            if (donationPauseStateId === null || mainPoolId === null || operationsPoolId === null) {
+            const donorRegistryId = selectGenesisObjectId(
+                genesis.ids,
+                GENESIS_OBJECT_KIND.donorRegistry,
+            );
+            if (
+                donationPauseStateId === null ||
+                donorRegistryId === null ||
+                mainPoolId === null ||
+                operationsPoolId === null
+            ) {
                 console.error(
-                    "donate config failed: genesis objects for pause/main/operations were not found.",
+                    "donate config failed: genesis objects for pause/donor registry/main/operations were not found.",
                 );
                 setConfig(null);
                 return;
@@ -104,7 +113,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
             setConfig(
                 combineDonateConfig(
                     { fundingPackageId },
-                    { donationPauseStateId, mainPoolId, operationsPoolId },
+                    { donationPauseStateId, donorRegistryId, mainPoolId, operationsPoolId },
                     network,
                 ),
             );
