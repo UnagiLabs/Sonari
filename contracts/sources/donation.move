@@ -11,7 +11,8 @@ use sui::event;
 use usdc::usdc::USDC;
 
 const DONATION_TYPE_GENERAL: u8 = 1;
-const DONATION_TYPE_OPERATIONS: u8 = 3;
+const DONATION_TYPE_CAMPAIGN: u8 = 2;
+const DONATION_TYPE_CATEGORY: u8 = 4;
 
 const TIER_NONE: u8 = 0;
 const TIER_BRONZE: u8 = 1;
@@ -93,18 +94,6 @@ public struct DonationRecord has key, store {
     donated_at_ms: u64,
 }
 
-public struct GeneralDonationReceived has copy, drop {
-    pool_id: ID,
-    amount: u64,
-    actor: address,
-}
-
-public struct OperationsDonationReceived has copy, drop {
-    pool_id: ID,
-    amount: u64,
-    actor: address,
-}
-
 public struct DonorPassIssued has copy, drop {
     donor_pass_id: ID,
     owner: address,
@@ -148,152 +137,6 @@ public(package) fun create_donor_registry(ctx: &mut TxContext): ID {
     registry_id
 }
 
-public(package) fun donate_general_usdc(
-    registry: &mut DonorRegistry,
-    main_pool: &mut MainPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
-    process_first_donation(
-        registry,
-        DONATION_TYPE_GENERAL,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_general_usdc_with_pass(
-    registry: &DonorRegistry,
-    main_pool: &mut MainPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
-
-    let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
-    process_with_pass_donation(
-        pass,
-        DONATION_TYPE_GENERAL,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_operations_usdc(
-    registry: &mut DonorRegistry,
-    operations_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
-    process_first_donation(
-        registry,
-        DONATION_TYPE_OPERATIONS,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_operations_usdc_with_pass(
-    registry: &DonorRegistry,
-    operations_pool: &mut OperationsPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
-
-    let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
-    process_with_pass_donation(
-        pass,
-        DONATION_TYPE_OPERATIONS,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-fun deposit_general_usdc_and_emit(
-    main_pool: &mut MainPool,
-    coin: Coin<USDC>,
-    ctx: &TxContext,
-): (ID, u64) {
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::main_pool_id(main_pool);
-    pools::deposit_main_usdc(main_pool, coin);
-    event::emit(GeneralDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    (pool_id, amount)
-}
-
-fun deposit_operations_usdc_and_emit(
-    operations_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &TxContext,
-): (ID, u64) {
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::operations_pool_id(operations_pool);
-    pools::deposit_operations_usdc(operations_pool, coin);
-    event::emit(OperationsDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    (pool_id, amount)
-}
-
-fun process_first_donation(
-    registry: &mut DonorRegistry,
-    donation_type: u8,
-    pool_id: ID,
-    amount: u64,
-    ctx: &mut TxContext,
-) {
-    let mut pass = new_donor_pass(registry, ctx);
-    record_donation(
-        &mut pass,
-        donation_type,
-        option::none(),
-        option::none(),
-        pool_id,
-        amount,
-        ctx,
-    );
-    transfer::transfer(pass, ctx.sender());
-}
-
-fun process_with_pass_donation(
-    pass: &mut DonorPass,
-    donation_type: u8,
-    pool_id: ID,
-    amount: u64,
-    ctx: &mut TxContext,
-) {
-    record_donation(
-        pass,
-        donation_type,
-        option::none(),
-        option::none(),
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
 fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass {
     let donor = ctx.sender();
     assert!(!dynamic_field::exists_with_type<address, ID>(&registry.id, donor), EDonorPassAlreadyIssued);
@@ -323,6 +166,21 @@ fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass
     });
 
     pass
+}
+
+/// DonorPass を発行して戻り値として返す。registry への登録もここで行う。
+/// transfer はしない（PTB の次コマンドで `&mut` 参照できるように return 形にする）。
+public(package) fun issue_donor_pass(
+    registry: &mut DonorRegistry,
+    ctx: &mut TxContext,
+): DonorPass {
+    new_donor_pass(registry, ctx)
+}
+
+/// 発行直後の DonorPass を sender へ soulbound 転送する。
+/// DonorPass は `store` を持たないため、モジュール内 `transfer::transfer` 経由でのみ送れる。
+public(package) fun transfer_donor_pass(pass: DonorPass, ctx: &TxContext) {
+    transfer::transfer(pass, ctx.sender());
 }
 
 fun assert_registered_pass(registry: &DonorRegistry, pass: &DonorPass, donor: address) {
@@ -464,8 +322,12 @@ public(package) fun donation_type_general(): u8 {
     DONATION_TYPE_GENERAL
 }
 
-public(package) fun donation_type_operations(): u8 {
-    DONATION_TYPE_OPERATIONS
+public(package) fun donation_type_campaign(): u8 {
+    DONATION_TYPE_CAMPAIGN
+}
+
+public(package) fun donation_type_category(): u8 {
+    DONATION_TYPE_CATEGORY
 }
 
 public(package) fun tier_none(): u8 {
@@ -512,7 +374,115 @@ public(package) fun registry_kind_donor(): u8 {
 // V2: split donation functions
 // ---------------------------------------------------------------
 
+/// bps（万分率）から金額を計算する。総額 * bps / 10_000 を u128 で計算し u64 に戻す。
+fun bps_amount(total: u64, bps: u64): u64 {
+    ((total as u128) * (bps as u128) / (BPS_DENOMINATOR as u128)) as u64
+}
+
+/// 按分済みの main / ops コインを deposit し、DonorPass に総額を記録し、
+/// DonationSplit イベントを emit する。按分・記録ロジックの唯一の置き場。
+/// destination 固有の deposit（campaign / category）は呼び出し側の薄い entry で行う。
+fun split_and_record(
+    pass: &mut DonorPass,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    main_coin: Coin<USDC>,
+    ops_coin: Coin<USDC>,
+    donation_target: u8,
+    donation_type: u8,
+    campaign_id: Option<ID>,
+    primary_pool_id: Option<ID>,
+    total: u64,
+    reported_primary: u64,
+    reported_main: u64,
+    ops_amount: u64,
+    ops_cap_overflow_usdc: u64,
+    after_donation_end: bool,
+    ctx: &mut TxContext,
+) {
+    let main_pool_id = pools::main_pool_id(main_pool);
+    let ops_pool_id = pools::operations_pool_id(ops_pool);
+
+    pools::deposit_main_usdc(main_pool, main_coin);
+    pools::deposit_operations_usdc(ops_pool, ops_coin);
+
+    // 記録の pool_id は主送付先（campaign / category）。general は main を使う。
+    let record_pool_id = if (primary_pool_id.is_some()) {
+        *primary_pool_id.borrow()
+    } else {
+        main_pool_id
+    };
+    record_donation(
+        pass,
+        donation_type,
+        option::none(),
+        campaign_id,
+        record_pool_id,
+        total,
+        ctx,
+    );
+
+    event::emit(DonationSplit {
+        donation_target,
+        primary_pool_id,
+        main_pool_id,
+        ops_pool_id,
+        total_amount: total,
+        primary_amount: reported_primary,
+        main_amount: reported_main,
+        ops_amount,
+        ops_cap_overflow_usdc,
+        after_donation_end,
+        donor: ctx.sender(),
+    });
+}
+
+/// 一般寄付。main / ops へ按分し、DonorPass に総額を記録する。
+public(package) fun donate_general(
+    registry: &DonorRegistry,
+    pass: &mut DonorPass,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
+
+    let total = coin::value(&coin);
+    assert!(total > 0, EZeroDonation);
+
+    let ops_calc = bps_amount(total, SPLIT_GENERAL_OPS_BPS);
+    let main_calc = total - ops_calc;
+
+    let mut remaining = coin;
+    let ops_coin = coin::split(&mut remaining, ops_calc, ctx);
+
+    split_and_record(
+        pass,
+        main_pool,
+        ops_pool,
+        remaining,
+        ops_coin,
+        DONATION_TARGET_NONE,
+        DONATION_TYPE_GENERAL,
+        option::none(),
+        option::none(),
+        total,
+        0,
+        main_calc,
+        ops_calc,
+        0,
+        false,
+        ctx,
+    );
+}
+
+/// campaign 寄付。config 由来の bps で campaign / main / ops へ按分する。
+/// ops_cap を超えた分は main へ、donation_end 経過後は campaign 分を main へ回す。
+/// DonorPass に総額を記録する。
 public(package) fun donate_to_campaign(
+    registry: &DonorRegistry,
+    pass: &mut DonorPass,
     camp: &mut Campaign,
     main_pool: &mut MainPool,
     ops_pool: &mut OperationsPool,
@@ -520,6 +490,8 @@ public(package) fun donate_to_campaign(
     now_ms: u64,
     ctx: &mut TxContext,
 ) {
+    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
+
     let total = coin::value(&coin);
     assert!(total > 0, EZeroDonation);
     assert!(!campaign::campaign_closed(camp), ECampaignClosed);
@@ -527,8 +499,8 @@ public(package) fun donate_to_campaign(
     let primary_bps = campaign::campaign_split_campaign_bps(camp);
     let ops_bps = campaign::campaign_split_ops_bps(camp);
 
-    let primary_calc = ((total as u128) * (primary_bps as u128) / (BPS_DENOMINATOR as u128)) as u64;
-    let ops_calc = ((total as u128) * (ops_bps as u128) / (BPS_DENOMINATOR as u128)) as u64;
+    let primary_calc = bps_amount(total, primary_bps);
+    let ops_calc = bps_amount(total, ops_bps);
 
     // ops_cap check
     let ops_cap = campaign::campaign_ops_cap_usdc(camp);
@@ -560,9 +532,7 @@ public(package) fun donate_to_campaign(
         option::none()
     };
 
-    // deposit
-    pools::deposit_main_usdc(main_pool, remaining);
-    pools::deposit_operations_usdc(ops_pool, ops_coin);
+    // destination 固有の deposit（campaign）
     if (campaign_coin.is_some()) {
         let c = campaign_coin.destroy_some();
         campaign::deposit_campaign_usdc(camp, c);
@@ -572,45 +542,51 @@ public(package) fun donate_to_campaign(
     };
     campaign::update_ops_withheld(camp, ops_actual);
 
-    let primary_pool_id = option::some(campaign::campaign_id(camp));
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let ops_pool_id = pools::operations_pool_id(ops_pool);
-
+    let campaign_id_val = campaign::campaign_id(camp);
     // reported primary_amount is the calculated portion (before after_end redirect)
-    let reported_primary = primary_calc;
     let reported_main = if (after_donation_end) {
         total - ops_actual
     } else {
         main_total
     };
 
-    event::emit(DonationSplit {
-        donation_target: DONATION_TARGET_CAMPAIGN,
-        primary_pool_id,
-        main_pool_id,
-        ops_pool_id,
-        total_amount: total,
-        primary_amount: reported_primary,
-        main_amount: reported_main,
-        ops_amount: ops_actual,
-        ops_cap_overflow_usdc: overflow,
+    split_and_record(
+        pass,
+        main_pool,
+        ops_pool,
+        remaining,
+        ops_coin,
+        DONATION_TARGET_CAMPAIGN,
+        DONATION_TYPE_CAMPAIGN,
+        option::some(campaign_id_val),
+        option::some(campaign_id_val),
+        total,
+        primary_calc,
+        reported_main,
+        ops_actual,
+        overflow,
         after_donation_end,
-        donor: ctx.sender(),
-    });
+        ctx,
+    );
 }
 
+/// category 寄付。category / main / ops へ 90 / 5 / 5 で按分し、DonorPass に総額を記録する。
 public(package) fun donate_to_category(
+    registry: &DonorRegistry,
+    pass: &mut DonorPass,
     cat_pool: &mut CategoryPool,
     main_pool: &mut MainPool,
     ops_pool: &mut OperationsPool,
     coin: Coin<USDC>,
     ctx: &mut TxContext,
 ) {
+    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
+
     let total = coin::value(&coin);
     assert!(total > 0, EZeroDonation);
 
-    let primary_calc = ((total as u128) * (SPLIT_CATEGORY_PRIMARY_BPS as u128) / (BPS_DENOMINATOR as u128)) as u64;
-    let ops_calc = ((total as u128) * (SPLIT_CATEGORY_OPS_BPS as u128) / (BPS_DENOMINATOR as u128)) as u64;
+    let primary_calc = bps_amount(total, SPLIT_CATEGORY_PRIMARY_BPS);
+    let ops_calc = bps_amount(total, SPLIT_CATEGORY_OPS_BPS);
     let main_calc = total - primary_calc - ops_calc;
 
     let mut remaining = coin;
@@ -618,63 +594,27 @@ public(package) fun donate_to_category(
     let category_coin = coin::split(&mut remaining, primary_calc, ctx);
     // remaining is main
 
-    let primary_pool_id = option::some(category_pool::category_pool_id(cat_pool));
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let ops_pool_id = pools::operations_pool_id(ops_pool);
-
+    let category_pool_id = category_pool::category_pool_id(cat_pool);
     category_pool::deposit_category_usdc(cat_pool, category_coin);
-    pools::deposit_main_usdc(main_pool, remaining);
-    pools::deposit_operations_usdc(ops_pool, ops_coin);
 
-    event::emit(DonationSplit {
-        donation_target: DONATION_TARGET_CATEGORY,
-        primary_pool_id,
-        main_pool_id,
-        ops_pool_id,
-        total_amount: total,
-        primary_amount: primary_calc,
-        main_amount: main_calc,
-        ops_amount: ops_calc,
-        ops_cap_overflow_usdc: 0,
-        after_donation_end: false,
-        donor: ctx.sender(),
-    });
-}
-
-public(package) fun donate_general_split(
-    main_pool: &mut MainPool,
-    ops_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let total = coin::value(&coin);
-    assert!(total > 0, EZeroDonation);
-
-    let ops_calc = ((total as u128) * (SPLIT_GENERAL_OPS_BPS as u128) / (BPS_DENOMINATOR as u128)) as u64;
-    let main_calc = total - ops_calc;
-
-    let mut remaining = coin;
-    let ops_coin = coin::split(&mut remaining, ops_calc, ctx);
-
-    let main_pool_id = pools::main_pool_id(main_pool);
-    let ops_pool_id = pools::operations_pool_id(ops_pool);
-
-    pools::deposit_main_usdc(main_pool, remaining);
-    pools::deposit_operations_usdc(ops_pool, ops_coin);
-
-    event::emit(DonationSplit {
-        donation_target: DONATION_TARGET_NONE,
-        primary_pool_id: option::none(),
-        main_pool_id,
-        ops_pool_id,
-        total_amount: total,
-        primary_amount: 0,
-        main_amount: main_calc,
-        ops_amount: ops_calc,
-        ops_cap_overflow_usdc: 0,
-        after_donation_end: false,
-        donor: ctx.sender(),
-    });
+    split_and_record(
+        pass,
+        main_pool,
+        ops_pool,
+        remaining,
+        ops_coin,
+        DONATION_TARGET_CATEGORY,
+        DONATION_TYPE_CATEGORY,
+        option::none(),
+        option::some(category_pool_id),
+        total,
+        primary_calc,
+        main_calc,
+        ops_calc,
+        0,
+        false,
+        ctx,
+    );
 }
 
 public(package) fun donation_target_campaign(): u8 {
@@ -687,22 +627,6 @@ public(package) fun donation_target_category(): u8 {
 
 public(package) fun donation_target_none(): u8 {
     DONATION_TARGET_NONE
-}
-
-#[test_only]
-public fun general_donation_received_event_fields(
-    event: GeneralDonationReceived,
-): (ID, u64, address) {
-    let GeneralDonationReceived { pool_id, amount, actor } = event;
-    (pool_id, amount, actor)
-}
-
-#[test_only]
-public fun operations_donation_received_event_fields(
-    event: OperationsDonationReceived,
-): (ID, u64, address) {
-    let OperationsDonationReceived { pool_id, amount, actor } = event;
-    (pool_id, amount, actor)
 }
 
 #[test_only]

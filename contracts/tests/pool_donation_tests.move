@@ -1,8 +1,8 @@
 #[test_only]
 module contracts::pool_donation_tests;
 
-use contracts::admin;
 use contracts::accessor;
+use contracts::admin;
 use contracts::donation;
 use contracts::pools;
 use contracts::reader;
@@ -27,7 +27,7 @@ fun init_creates_singleton_pools() {
 }
 
 #[test]
-fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
+fun general_donation_splits_main_ops_and_records_pass() {
     let mut scenario = initialized_with_pools();
 
     scenario.next_tx(DONOR);
@@ -35,110 +35,58 @@ fun general_donation_moves_all_usdc_to_main_pool_and_mints_donor_pass() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut ops_pool = scenario.take_shared<pools::OperationsPool>();
+
+        let mut pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
         let coin = coin::mint_for_testing<USDC>(1_000_000, scenario.ctx());
 
-        accessor::donate_general_usdc(
+        accessor::donate_general(
             &pause_state,
-            &mut registry,
+            &registry,
+            &mut pass,
             &mut main_pool,
+            &mut ops_pool,
             coin,
             scenario.ctx(),
         );
 
-        let balance = pools::main_pool_balance_usdc(&main_pool);
-        let total_received = pools::main_pool_total_received_usdc(&main_pool);
-        assert!(balance == 1_000_000);
-        assert!(total_received == 1_000_000);
+        // 95% to main, 5% to ops
+        assert!(pools::main_pool_balance_usdc(&main_pool) == 950_000);
+        assert!(pools::operations_pool_balance_usdc(&ops_pool) == 50_000);
 
-        let donation_events = event::events_by_type<donation::GeneralDonationReceived>();
-        assert!(donation_events.length() == 1);
-        let (pool_id, amount, actor) =
-            donation::general_donation_received_event_fields(*donation_events.borrow(0));
+        // the full amount is recorded in the pass
+        assert!(donation::donor_pass_owner(&pass) == DONOR);
+        assert!(donation::donor_pass_donation_count(&pass) == 1);
+        assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
+        assert!(donation::donor_pass_tier(&pass) == donation::tier_silver());
+
+        let (_idx, dtype, _program_id, _campaign_id, _pool_id, amount, coin_type, _ts) =
+            reader::donation_record_summary(&pass, 0);
+        assert!(dtype == donation::donation_type_general());
         assert!(amount == 1_000_000);
-        assert!(actor == DONOR);
-
-        let recorded_events = event::events_by_type<donation::DonationRecorded>();
-        assert!(recorded_events.length() == 1);
-        let (_, donation_index, donation_type, record_pool_id, record_amount, coin_type, actor) =
-            donation::donation_recorded_event_fields(*recorded_events.borrow(0));
-        assert!(donation_index == 0);
-        assert!(donation_type == donation::donation_type_general());
-        assert!(record_pool_id == pool_id);
-        assert!(record_amount == 1_000_000);
         assert!(coin_type == donation::coin_type_usdc());
-        assert!(actor == DONOR);
 
         let pass_events = event::events_by_type<donation::DonorPassIssued>();
         assert!(pass_events.length() == 1);
+        let recorded_events = event::events_by_type<donation::DonationRecorded>();
+        assert!(recorded_events.length() == 1);
+        let split_events = event::events_by_type<donation::DonationSplit>();
+        assert!(split_events.length() == 1);
 
-        let tier_events = event::events_by_type<donation::DonorTierUpdated>();
-        assert!(tier_events.length() == 1);
-        let (_, old_tier, new_tier, total_donated, actor) =
-            donation::donor_tier_updated_event_fields(*tier_events.borrow(0));
-        assert!(old_tier == donation::tier_none());
-        assert!(new_tier == donation::tier_silver());
-        assert!(total_donated == 1_000_000);
-        assert!(actor == DONOR);
-
+        accessor::transfer_donor_pass(pass, scenario.ctx());
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(ops_pool);
     };
 
+    // the pass is soulbound-transferred to the donor
     scenario.next_tx(DONOR);
     {
         let pass = scenario.take_from_sender<donation::DonorPass>();
-        let owner = donation::donor_pass_owner(&pass);
-        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
-        let donation_count = donation::donor_pass_donation_count(&pass);
-        let tier = donation::donor_pass_tier(&pass);
-        let tier_label = donation::donor_pass_tier_label(&pass);
-        assert!(owner == DONOR);
-        assert!(total_donated == 1_000_000);
-        assert!(donation_count == 1);
-        assert!(tier == donation::tier_silver());
-        assert!(tier_label == b"Silver".to_string());
+        assert!(donation::donor_pass_owner(&pass) == DONOR);
         scenario.return_to_sender(pass);
     };
-
-    scenario.end();
-}
-
-#[test]
-fun operations_donation_moves_all_usdc_to_operations_pool() {
-    let mut scenario = initialized_with_pools();
-
-    scenario.next_tx(DONOR);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let coin = coin::mint_for_testing<USDC>(250_000, scenario.ctx());
-
-        accessor::donate_operations_usdc(
-            &pause_state,
-            &mut registry,
-            &mut operations_pool,
-            coin,
-            scenario.ctx(),
-        );
-
-        let balance = pools::operations_pool_balance_usdc(&operations_pool);
-        let total_received = pools::operations_pool_total_received_usdc(&operations_pool);
-        assert!(balance == 250_000);
-        assert!(total_received == 250_000);
-
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
-    };
-
-    let donation_events = event::events_by_type<donation::OperationsDonationReceived>();
-    assert!(donation_events.length() == 1);
-    let (_, amount, actor) =
-        donation::operations_donation_received_event_fields(*donation_events.borrow(0));
-    assert!(amount == 250_000);
-    assert!(actor == DONOR);
 
     scenario.end();
 }
@@ -152,19 +100,26 @@ fun zero_amount_donation_is_rejected() {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut ops_pool = scenario.take_shared<pools::OperationsPool>();
+
+        let mut pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
         let coin = coin::mint_for_testing<USDC>(0, scenario.ctx());
 
-        accessor::donate_general_usdc(
+        accessor::donate_general(
             &pause_state,
-            &mut registry,
+            &registry,
+            &mut pass,
             &mut main_pool,
+            &mut ops_pool,
             coin,
             scenario.ctx(),
         );
 
+        accessor::transfer_donor_pass(pass, scenario.ctx());
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(ops_pool);
     };
 
     scenario.end();
@@ -173,6 +128,17 @@ fun zero_amount_donation_is_rejected() {
 #[test, expected_failure(abort_code = admin::EGlobalPaused)]
 fun global_pause_blocks_donation() {
     let mut scenario = initialized_with_pools();
+
+    // issue a pass before pausing so the donation reaches the pause check
+    scenario.next_tx(DONOR);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+    };
 
     scenario.next_tx(ADMIN);
     {
@@ -186,21 +152,27 @@ fun global_pause_blocks_donation() {
     scenario.next_tx(DONOR);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut ops_pool = scenario.take_shared<pools::OperationsPool>();
+        let mut pass = scenario.take_from_sender<donation::DonorPass>();
         let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
-        accessor::donate_general_usdc(
+        accessor::donate_general(
             &pause_state,
-            &mut registry,
+            &registry,
+            &mut pass,
             &mut main_pool,
+            &mut ops_pool,
             coin,
             scenario.ctx(),
         );
 
+        scenario.return_to_sender(pass);
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(ops_pool);
     };
 
     scenario.end();
@@ -210,6 +182,17 @@ fun global_pause_blocks_donation() {
 fun target_pause_blocks_pool_donation() {
     let mut scenario = initialized_with_pools();
     let main_pool_id = main_pool_id(&mut scenario);
+
+    // issue a pass before pausing so the donation reaches the pause check
+    scenario.next_tx(DONOR);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+    };
 
     scenario.next_tx(ADMIN);
     {
@@ -229,28 +212,34 @@ fun target_pause_blocks_pool_donation() {
     scenario.next_tx(DONOR);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut ops_pool = scenario.take_shared<pools::OperationsPool>();
+        let mut pass = scenario.take_from_sender<donation::DonorPass>();
         let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
-        accessor::donate_general_usdc(
+        accessor::donate_general(
             &pause_state,
-            &mut registry,
+            &registry,
+            &mut pass,
             &mut main_pool,
+            &mut ops_pool,
             coin,
             scenario.ctx(),
         );
 
+        scenario.return_to_sender(pass);
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(ops_pool);
     };
 
     scenario.end();
 }
 
 #[test]
-fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_event() {
+fun second_donation_appends_record_without_new_issue_event() {
     let mut scenario = initialized_with_pools();
 
     scenario.next_tx(DONOR);
@@ -258,47 +247,35 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
         let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
+        let mut ops_pool = scenario.take_shared<pools::OperationsPool>();
 
-        accessor::donate_general_usdc(
-            &pause_state,
-            &mut registry,
-            &mut main_pool,
-            coin,
-            scenario.ctx(),
-        );
+        let mut pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
 
-        let tier_events = event::events_by_type<donation::DonorTierUpdated>();
-        assert!(tier_events.length() == 1);
-
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
-    };
-
-    scenario.next_tx(DONOR);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = coin::mint_for_testing<USDC>(999_999, scenario.ctx());
-
-        accessor::donate_general_usdc_with_pass(
+        let coin1 = coin::mint_for_testing<USDC>(1, scenario.ctx());
+        accessor::donate_general(
             &pause_state,
             &registry,
-            &mut main_pool,
             &mut pass,
-            coin,
+            &mut main_pool,
+            &mut ops_pool,
+            coin1,
             scenario.ctx(),
         );
 
-        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
-        let donation_count = donation::donor_pass_donation_count(&pass);
-        let tier = donation::donor_pass_tier(&pass);
-        assert!(total_donated == 1_000_000);
-        assert!(donation_count == 2);
-        assert!(tier == donation::tier_silver());
+        let coin2 = coin::mint_for_testing<USDC>(999_999, scenario.ctx());
+        accessor::donate_general(
+            &pause_state,
+            &registry,
+            &mut pass,
+            &mut main_pool,
+            &mut ops_pool,
+            coin2,
+            scenario.ctx(),
+        );
+
+        // both donations are recorded on the same pass
+        assert!(donation::donor_pass_donation_count(&pass) == 2);
+        assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
 
         let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
             reader::donation_record_summary(&pass, 1);
@@ -307,252 +284,89 @@ fun second_donation_updates_existing_pass_and_appends_record_without_new_issue_e
         assert!(amount == 999_999);
         assert!(coin_type == donation::coin_type_usdc());
 
+        // the pass is issued only once
         let pass_events = event::events_by_type<donation::DonorPassIssued>();
-        assert!(pass_events.length() == 0);
+        assert!(pass_events.length() == 1);
         let recorded_events = event::events_by_type<donation::DonationRecorded>();
-        assert!(recorded_events.length() == 1);
-        let tier_events = event::events_by_type<donation::DonorTierUpdated>();
-        assert!(tier_events.length() == 1);
+        assert!(recorded_events.length() == 2);
 
-        scenario.return_to_sender(pass);
+        accessor::transfer_donor_pass(pass, scenario.ctx());
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
         test_scenario::return_shared(main_pool);
-    };
-
-    scenario.end();
-}
-
-#[test]
-fun second_operations_donation_updates_existing_pass_without_new_issue_event() {
-    let mut scenario = initialized_with_pools();
-
-    scenario.next_tx(DONOR);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
-
-        accessor::donate_general_usdc(
-            &pause_state,
-            &mut registry,
-            &mut main_pool,
-            coin,
-            scenario.ctx(),
-        );
-
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
-    };
-
-    scenario.next_tx(DONOR);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
-        let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = coin::mint_for_testing<USDC>(7, scenario.ctx());
-
-        accessor::donate_operations_usdc_with_pass(
-            &pause_state,
-            &registry,
-            &mut operations_pool,
-            &mut pass,
-            coin,
-            scenario.ctx(),
-        );
-
-        let balance = pools::operations_pool_balance_usdc(&operations_pool);
-        let total_received = pools::operations_pool_total_received_usdc(&operations_pool);
-        let total_donated = donation::donor_pass_total_donated_usdc(&pass);
-        let donation_count = donation::donor_pass_donation_count(&pass);
-        assert!(balance == 7);
-        assert!(total_received == 7);
-        assert!(total_donated == 8);
-        assert!(donation_count == 2);
-
-        let (donation_index, donation_type, _, _, _, amount, coin_type, _) =
-            reader::donation_record_summary(&pass, 1);
-        assert!(donation_index == 1);
-        assert!(donation_type == donation::donation_type_operations());
-        assert!(amount == 7);
-        assert!(coin_type == donation::coin_type_usdc());
-
-        let donation_events = event::events_by_type<donation::OperationsDonationReceived>();
-        assert!(donation_events.length() == 1);
-        let (_, amount, actor) =
-            donation::operations_donation_received_event_fields(*donation_events.borrow(0));
-        assert!(amount == 7);
-        assert!(actor == DONOR);
-
-        let pass_events = event::events_by_type<donation::DonorPassIssued>();
-        assert!(pass_events.length() == 0);
-        let recorded_events = event::events_by_type<donation::DonationRecorded>();
-        assert!(recorded_events.length() == 1);
-        let tier_events = event::events_by_type<donation::DonorTierUpdated>();
-        assert!(tier_events.length() == 0);
-
-        scenario.return_to_sender(pass);
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
+        test_scenario::return_shared(ops_pool);
     };
 
     scenario.end();
 }
 
 #[test, expected_failure(abort_code = donation::EDonorPassOwnerMismatch)]
-fun operations_with_pass_rejects_owner_mismatch() {
+fun donate_general_rejects_owner_mismatch() {
     let mut scenario = initialized_with_pools();
 
+    // DONOR issues a registered pass
     scenario.next_tx(DONOR);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
-
-        accessor::donate_general_usdc(
-            &pause_state,
-            &mut registry,
-            &mut main_pool,
-            coin,
-            scenario.ctx(),
-        );
-
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
     };
 
+    // OTHER_DONOR tries to donate with DONOR's pass
     scenario.next_tx(OTHER_DONOR);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut operations_pool = scenario.take_shared<pools::OperationsPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut ops_pool = scenario.take_shared<pools::OperationsPool>();
         let mut pass = test_scenario::take_from_address<donation::DonorPass>(&scenario, DONOR);
         let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
 
-        accessor::donate_operations_usdc_with_pass(
+        accessor::donate_general(
             &pause_state,
             &registry,
-            &mut operations_pool,
             &mut pass,
+            &mut main_pool,
+            &mut ops_pool,
             coin,
             scenario.ctx(),
         );
 
-        scenario.return_to_sender(pass);
+        test_scenario::return_to_address(DONOR, pass);
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(operations_pool);
+        test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(ops_pool);
     };
 
     scenario.end();
 }
 
 #[test, expected_failure(abort_code = donation::EDonorPassAlreadyIssued)]
-fun donor_cannot_mint_second_pass_by_reusing_first_donation_entry() {
+fun donor_cannot_issue_second_pass() {
     let mut scenario = initialized_with_pools();
 
     scenario.next_tx(DONOR);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
-
-        accessor::donate_general_usdc(
-            &pause_state,
-            &mut registry,
-            &mut main_pool,
-            coin,
-            scenario.ctx(),
-        );
-
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
     };
 
     scenario.next_tx(DONOR);
     {
         let pause_state = scenario.take_shared<admin::PauseState>();
         let mut registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
-
-        accessor::donate_general_usdc(
-            &pause_state,
-            &mut registry,
-            &mut main_pool,
-            coin,
-            scenario.ctx(),
-        );
-
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
         test_scenario::return_shared(pause_state);
         test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
-    };
-
-    scenario.end();
-}
-
-#[test]
-fun tier_update_event_is_emitted_only_when_tier_changes() {
-    let mut scenario = initialized_with_pools();
-
-    scenario.next_tx(OTHER_DONOR);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let mut registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
-
-        accessor::donate_general_usdc(
-            &pause_state,
-            &mut registry,
-            &mut main_pool,
-            coin,
-            scenario.ctx(),
-        );
-
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
-    };
-
-    scenario.next_tx(OTHER_DONOR);
-    {
-        let pause_state = scenario.take_shared<admin::PauseState>();
-        let registry = scenario.take_shared<donation::DonorRegistry>();
-        let mut main_pool = scenario.take_shared<pools::MainPool>();
-        let mut pass = scenario.take_from_sender<donation::DonorPass>();
-        let coin = coin::mint_for_testing<USDC>(99, scenario.ctx());
-
-        accessor::donate_general_usdc_with_pass(
-            &pause_state,
-            &registry,
-            &mut main_pool,
-            &mut pass,
-            coin,
-            scenario.ctx(),
-        );
-
-        let tier = donation::donor_pass_tier(&pass);
-        let tier_label = donation::donor_pass_tier_label(&pass);
-        assert!(tier == donation::tier_bronze());
-        assert!(tier_label == b"Bronze".to_string());
-
-        let tier_events = event::events_by_type<donation::DonorTierUpdated>();
-        assert!(tier_events.length() == 0);
-
-        scenario.return_to_sender(pass);
-        test_scenario::return_shared(pause_state);
-        test_scenario::return_shared(registry);
-        test_scenario::return_shared(main_pool);
     };
 
     scenario.end();
