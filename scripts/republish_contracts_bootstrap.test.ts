@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
+import type { SuiCommandPlan, SuiCommandResult } from "./membership_identity_testnet_fixture.js";
 import {
     assertWorldIdActionFormat,
     buildSettingsAssignments,
     GENESIS_KIND,
     GH_SCOPE,
+    guardSecrets,
+    parseDisasterRegistryId,
     parseGenesisObjectIds,
+    parsePublishedPackageId,
+    type RepublishBootstrapOptions,
     type RewireInput,
+    redactSecrets,
     rewritePublishedTomlPackageId,
+    runRepublishBootstrap,
 } from "./republish_contracts_bootstrap.js";
 
 function objectId(byte: string): string {
@@ -222,6 +229,266 @@ describe("assertWorldIdActionFormat", () => {
         expect(() => assertWorldIdActionFormat("sonari_membership_register_v8 ")).toThrow();
         expect(() => assertWorldIdActionFormat("SONARI_membership_register_v8")).toThrow();
         expect(() => assertWorldIdActionFormat("other_action_v8")).toThrow();
+    });
+});
+
+describe("guardSecrets", () => {
+    const plan: SuiCommandPlan = { command: "sui", args: ["client", "publish", "contracts"] };
+
+    it("どの引数にも secret が現れなければ通す", () => {
+        expect(() => guardSecrets([plan], ["super-secret-key"])).not.toThrow();
+    });
+
+    it("引数に secret が混入していれば fail-closed で throw する", () => {
+        const leaky: SuiCommandPlan = {
+            command: "sui",
+            args: ["client", "--key", "super-secret-key"],
+        };
+        expect(() => guardSecrets([leaky], ["super-secret-key"])).toThrow();
+    });
+
+    it("空文字の secret は無視する（誤検知しない）", () => {
+        expect(() => guardSecrets([plan], ["", "  "])).not.toThrow();
+    });
+});
+
+describe("redactSecrets", () => {
+    it("出力中の secret を伏字へ置換する", () => {
+        const out = redactSecrets("token=super-secret-key done", ["super-secret-key"]);
+        expect(out).not.toContain("super-secret-key");
+        expect(out).toContain("***REDACTED***");
+    });
+
+    it("secret が無ければ原文のまま返す", () => {
+        expect(redactSecrets("nothing here", ["abc"])).toBe("nothing here");
+    });
+});
+
+describe("parsePublishedPackageId", () => {
+    it("objectChanges の published 項目から package id を取り出す", () => {
+        const id = parsePublishedPackageId({
+            objectChanges: [{ type: "published", packageId: objectId("ff") }],
+        });
+        expect(id).toBe(objectId("ff"));
+    });
+
+    it("published 項目が無ければ throw する", () => {
+        expect(() => parsePublishedPackageId({ objectChanges: [{ type: "created" }] })).toThrow();
+    });
+});
+
+describe("parseDisasterRegistryId", () => {
+    it("DisasterRegistryCreated イベントから registry_id を取り出す", () => {
+        const id = parseDisasterRegistryId({
+            events: [
+                {
+                    type: `${objectId("aa")}::disaster_event::DisasterRegistryCreated`,
+                    parsedJson: { registry_id: objectId("d1") },
+                },
+            ],
+        });
+        expect(id).toBe(objectId("d1"));
+    });
+
+    it("イベントが無ければ throw する", () => {
+        expect(() => parseDisasterRegistryId({ events: [] })).toThrow();
+    });
+});
+
+describe("runRepublishBootstrap", () => {
+    const REAL_ROOT = `0x${"33".repeat(32)}`;
+    const SOURCE_HASH = `0x${"11".repeat(32)}`;
+    const TOML = [
+        "[published.testnet]",
+        'published-at = "0xold"',
+        'original-id = "0xold"',
+        "version = 1",
+    ].join("\n");
+
+    function baseOptions(
+        overrides: Partial<RepublishBootstrapOptions> = {},
+    ): RepublishBootstrapOptions {
+        return {
+            clientConfig: ".local/sonari-dev/sui_wallets/admin/client.yaml",
+            env: "testnet",
+            publishedToml: TOML,
+            residenceRoot: REAL_ROOT,
+            residenceGeoResolution: "9",
+            residenceAllowlistVersion: "1",
+            residenceSourceHash: SOURCE_HASH,
+            dryRun: true,
+            secrets: ["super-secret-key"],
+            ...overrides,
+        };
+    }
+
+    function liveExecutor(): {
+        executor: (plan: SuiCommandPlan) => Promise<SuiCommandResult>;
+        calls: SuiCommandPlan[];
+    } {
+        const calls: SuiCommandPlan[] = [];
+        const executor = (plan: SuiCommandPlan): Promise<SuiCommandResult> => {
+            calls.push(plan);
+            const json = (value: unknown): SuiCommandResult => ({
+                code: 0,
+                stdout: JSON.stringify(value),
+                stderr: "",
+            });
+            if (plan.args.includes("publish")) {
+                return Promise.resolve(
+                    json({
+                        objectChanges: [{ type: "published", packageId: objectId("ff") }],
+                        events: [
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.ADMIN_CAP,
+                                    object_id: objectId("01"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.PAUSE_STATE,
+                                    object_id: objectId("02"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.MAIN_POOL,
+                                    object_id: objectId("03"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.OPERATIONS_POOL,
+                                    object_id: objectId("04"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.DONOR_REGISTRY,
+                                    object_id: objectId("05"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.MEMBERSHIP_REGISTRY,
+                                    object_id: objectId("06"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.VERIFIER_REGISTRY,
+                                    object_id: objectId("07"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.IDENTITY_REGISTRY,
+                                    object_id: objectId("09"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.CATEGORY_REGISTRY,
+                                    object_id: objectId("10"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.EARTHQUAKE_POOL,
+                                    object_id: objectId("11"),
+                                },
+                            },
+                        ],
+                    }),
+                );
+            }
+            if (plan.args.includes("create_disaster_registry")) {
+                return Promise.resolve(
+                    json({
+                        events: [
+                            {
+                                type: `${objectId("ff")}::disaster_event::DisasterRegistryCreated`,
+                                parsedJson: { registry_id: objectId("d1") },
+                            },
+                        ],
+                    }),
+                );
+            }
+            if (plan.args.includes("create_allowed_residence_cell_registry")) {
+                return Promise.resolve(
+                    json({
+                        events: [
+                            {
+                                type: `${objectId("ff")}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
+                                parsedJson: { registry_id: objectId("e1") },
+                            },
+                        ],
+                    }),
+                );
+            }
+            throw new Error(`unexpected command: ${plan.args.join(" ")}`);
+        };
+        return { executor, calls };
+    }
+
+    it("dry-run では executor を一切呼ばず publish 計画だけ返す", async () => {
+        const { executor, calls } = liveExecutor();
+        const result = await runRepublishBootstrap(baseOptions({ dryRun: true }), executor);
+        expect(calls).toHaveLength(0);
+        expect(result.dryRun).toBe(true);
+        expect(result.plannedCommands[0]?.args).toContain("publish");
+        expect(result.settings).toBeUndefined();
+        expect(result.packageId).toBeUndefined();
+    });
+
+    it("live 実行で publish → disaster → residence の順に呼び、ID と settings と新 toml を返す", async () => {
+        const { executor, calls } = liveExecutor();
+        const result = await runRepublishBootstrap(baseOptions({ dryRun: false }), executor);
+        expect(
+            calls.map((c) =>
+                c.args.includes("publish") ? "publish" : c.args[c.args.indexOf("--function") + 1],
+            ),
+        ).toEqual([
+            "publish",
+            "create_disaster_registry",
+            "create_allowed_residence_cell_registry",
+        ]);
+        expect(result.packageId).toBe(objectId("ff"));
+        expect(result.disasterRegistryId).toBe(objectId("d1"));
+        expect(result.allowedResidenceCellRegistryId).toBe(objectId("e1"));
+        expect(
+            result.settings?.assignments.find((a) => a.name === "SONARI_ADMIN_CAP_ID")?.value,
+        ).toBe(objectId("01"));
+        expect(result.rewrittenPublishedToml).toContain(`published-at = "${objectId("ff")}"`);
+    });
+
+    it("residence 作成は AdminCap・実 root・source hash を引数に渡す", async () => {
+        const { executor, calls } = liveExecutor();
+        await runRepublishBootstrap(baseOptions({ dryRun: false }), executor);
+        const residence = calls.find((c) =>
+            c.args.includes("create_allowed_residence_cell_registry"),
+        );
+        expect(residence?.args).toContain(objectId("01")); // AdminCap
+        expect(residence?.args).toContain(REAL_ROOT);
+        expect(residence?.args).toContain(SOURCE_HASH);
+    });
+
+    it("residenceRoot が hex32 でなければ throw する", async () => {
+        const { executor } = liveExecutor();
+        await expect(
+            runRepublishBootstrap(baseOptions({ dryRun: false, residenceRoot: "0x12" }), executor),
+        ).rejects.toThrow();
     });
 });
 

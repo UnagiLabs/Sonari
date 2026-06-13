@@ -4,9 +4,26 @@
  * issue #361: #349/PR#360 で claim の ABI が破壊的に変わったため、Sui の互換アップグレードでは
  * 公開関数を削除できない。よって新 package として publish し直し、全オブジェクト ID を張替える。
  *
- * このファイルは決定的な pure function のみを置く。実際の `sui` 実行・`gh` 設定・World ID portal 操作は
- * STEP 3 以降の orchestration 層が担当し、副作用を持たないこの層をテストで固める。
+ * 決定的な pure function に加えて、注入された executor で `sui` を実行する orchestration を持つ。
+ * executor を差し替えればテストでき、`--dry-run` 既定で誤実行を防ぐ。実際の `gh` 設定や World ID
+ * portal 操作はこの外（手順書 / 別 step）で行う。
  */
+
+import { spawn } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import {
+    assertFixtureNetwork,
+    buildSuiCallCommand,
+    buildSuiPublishCommand,
+    type FixtureNetwork,
+    parseAllowedResidenceCellRegistryId,
+    parseSuiJsonCommandResult,
+    type SuiClientOptions,
+    type SuiCommandExecutor,
+    type SuiCommandPlan,
+    type SuiCommandResult,
+} from "./membership_identity_testnet_fixture.js";
 
 // ---------------------------------------------------------------------------
 // Genesis kinds — contracts/sources/admin.move の定数と必ず一致させる契約値。
@@ -313,6 +330,212 @@ function replaceTomlField(
 }
 
 // ---------------------------------------------------------------------------
+// 5. publish 結果のパース（package id / DisasterRegistry id）。
+// ---------------------------------------------------------------------------
+export function parsePublishedPackageId(input: unknown): string {
+    const changes =
+        isRecord(input) && Array.isArray(input.objectChanges) ? input.objectChanges : [];
+    for (const change of changes) {
+        if (!isRecord(change) || change.type !== "published") {
+            continue;
+        }
+        const packageId = change.packageId ?? change.package_id;
+        if (typeof packageId !== "string") {
+            throw new Error("publish result published change did not include packageId");
+        }
+        assertHexObjectId(packageId, "packageId");
+        return packageId;
+    }
+    throw new Error("publish result did not include a published package");
+}
+
+export function parseDisasterRegistryId(input: unknown): string {
+    const events = isRecord(input) && Array.isArray(input.events) ? input.events : [];
+    for (const event of events) {
+        if (!isRecord(event)) {
+            continue;
+        }
+        if (
+            typeof event.type !== "string" ||
+            !event.type.endsWith("::disaster_event::DisasterRegistryCreated")
+        ) {
+            continue;
+        }
+        if (!isRecord(event.parsedJson)) {
+            throw new Error("DisasterRegistryCreated event is missing parsedJson");
+        }
+        const registryId = event.parsedJson.registry_id ?? event.parsedJson.registryId;
+        if (typeof registryId !== "string") {
+            throw new Error("DisasterRegistryCreated event is missing registry_id");
+        }
+        assertHexObjectId(registryId, "DisasterRegistryCreated.registry_id");
+        return registryId;
+    }
+    throw new Error("transaction result did not include DisasterRegistryCreated event");
+}
+
+// ---------------------------------------------------------------------------
+// 6. secret の漏洩防止。command 引数への混入は fail-closed、出力は伏字化。
+// ---------------------------------------------------------------------------
+const REDACTION = "***REDACTED***";
+
+export function guardSecrets(
+    plans: readonly SuiCommandPlan[],
+    secrets: readonly string[] | undefined,
+): void {
+    const active = (secrets ?? []).filter((s) => s.trim().length > 0);
+    if (active.length === 0) {
+        return;
+    }
+    for (const plan of plans) {
+        for (const arg of plan.args) {
+            for (const secret of active) {
+                if (arg.includes(secret)) {
+                    throw new Error(
+                        "refusing to run: a secret value would appear in a sui command argument",
+                    );
+                }
+            }
+        }
+    }
+}
+
+export function redactSecrets(text: string, secrets: readonly string[] | undefined): string {
+    let out = text;
+    for (const secret of (secrets ?? []).filter((s) => s.trim().length > 0)) {
+        out = out.split(secret).join(REDACTION);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// 7. orchestration: 注入 executor で publish と後付けオブジェクト作成を実行する。
+//    dryRun=true（既定）では executor を呼ばず、最初に実行する publish 計画だけ返す。
+// ---------------------------------------------------------------------------
+export interface RepublishBootstrapOptions {
+    /** `.local/sonari-dev/sui_wallets/admin` 配下の sui client config パス。 */
+    readonly clientConfig: string;
+    readonly env: FixtureNetwork;
+    /** 現在の Published.toml の中身。 */
+    readonly publishedToml: string;
+    /** 実 residence root（hex32）。golden root を使うと register_member が abort 0 する。 */
+    readonly residenceRoot: string;
+    readonly residenceGeoResolution: string;
+    readonly residenceAllowlistVersion: string;
+    readonly residenceSourceHash: string;
+    readonly gasBudget?: string;
+    /** true（既定）なら実行せず計画のみ返す。 */
+    readonly dryRun: boolean;
+    /** command 引数や出力に絶対現れてはいけない値（保険のガード）。 */
+    readonly secrets?: readonly string[];
+}
+
+export interface RepublishBootstrapResult {
+    readonly dryRun: boolean;
+    readonly plannedCommands: readonly SuiCommandPlan[];
+    readonly packageId?: string;
+    readonly genesisObjectIds?: Record<number, string>;
+    readonly disasterRegistryId?: string;
+    readonly allowedResidenceCellRegistryId?: string;
+    readonly settings?: SettingsPlan;
+    readonly rewrittenPublishedToml?: string;
+}
+
+export async function runRepublishBootstrap(
+    options: RepublishBootstrapOptions,
+    executor: SuiCommandExecutor,
+): Promise<RepublishBootstrapResult> {
+    assertHex32(options.residenceRoot, "residenceRoot");
+    assertHex32(options.residenceSourceHash, "residenceSourceHash");
+
+    const clientOptions: SuiClientOptions = {
+        clientConfig: options.clientConfig,
+        env: options.env,
+        ...(options.gasBudget ? { gasBudget: options.gasBudget } : {}),
+    };
+
+    const publishCommand = buildSuiPublishCommand(clientOptions);
+    guardSecrets([publishCommand], options.secrets);
+
+    if (options.dryRun) {
+        return { dryRun: true, plannedCommands: [publishCommand] };
+    }
+
+    // 1. 新 package を publish
+    const publishJson = parseSuiJsonCommandResult(
+        await executor(publishCommand),
+        "sui client publish",
+    );
+    const packageId = parsePublishedPackageId(publishJson);
+    const genesisObjectIds = parseGenesisObjectIds(publishJson);
+    const adminCapId = requireGenesisId(
+        genesisObjectIds,
+        GENESIS_KIND.ADMIN_CAP,
+        "AdminCap(kind=1)",
+    );
+
+    // 2. DisasterRegistry を後付け作成
+    const disasterCommand = buildSuiCallCommand({
+        options: clientOptions,
+        packageId,
+        module: "admin",
+        functionName: "create_disaster_registry",
+        args: [adminCapId],
+    });
+    guardSecrets([disasterCommand], options.secrets);
+    const disasterJson = parseSuiJsonCommandResult(
+        await executor(disasterCommand),
+        "admin::create_disaster_registry",
+    );
+    const disasterRegistryId = parseDisasterRegistryId(disasterJson);
+
+    // 3. AllowedResidenceCellRegistry を実 root で後付け作成
+    const residenceCommand = buildSuiCallCommand({
+        options: clientOptions,
+        packageId,
+        module: "admin",
+        functionName: "create_allowed_residence_cell_registry",
+        args: [
+            adminCapId,
+            options.residenceRoot,
+            options.residenceGeoResolution,
+            options.residenceAllowlistVersion,
+            options.residenceSourceHash,
+        ],
+    });
+    guardSecrets([residenceCommand], options.secrets);
+    const residenceJson = parseSuiJsonCommandResult(
+        await executor(residenceCommand),
+        "admin::create_allowed_residence_cell_registry",
+    );
+    const allowedResidenceCellRegistryId = parseAllowedResidenceCellRegistryId(residenceJson);
+
+    // 4. GitHub 設定計画と新 Published.toml を組み立てる
+    const settings = buildSettingsAssignments({
+        packageId,
+        genesisObjectIds,
+        disasterRegistryId,
+        allowedResidenceCellRegistryId,
+    });
+    const rewrittenPublishedToml = rewritePublishedTomlPackageId(
+        options.publishedToml,
+        options.env,
+        packageId,
+    );
+
+    return {
+        dryRun: false,
+        plannedCommands: [publishCommand, disasterCommand, residenceCommand],
+        packageId,
+        genesisObjectIds: Object.fromEntries(genesisObjectIds),
+        disasterRegistryId,
+        allowedResidenceCellRegistryId,
+        settings,
+        rewrittenPublishedToml,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 function requireGenesisId(ids: ReadonlyMap<number, string>, kind: number, label: string): string {
@@ -329,6 +552,105 @@ function assertHexObjectId(value: string, fieldName: string): void {
     }
 }
 
+function assertHex32(value: string, fieldName: string): void {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+        throw new Error(`${fieldName} must be 32-byte 0x-prefixed hex`);
+    }
+}
+
 function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+// ---------------------------------------------------------------------------
+// CLI entrypoint
+// ---------------------------------------------------------------------------
+const DEFAULT_CLIENT_CONFIG = ".local/sonari-dev/sui_wallets/admin/client.yaml";
+const DEFAULT_PUBLISHED_TOML = "contracts/Published.toml";
+
+function readFlag(argv: readonly string[], name: string): string | undefined {
+    const index = argv.indexOf(`--${name}`);
+    return index >= 0 ? argv[index + 1] : undefined;
+}
+
+function requireValue(value: string | undefined, label: string): string {
+    if (value === undefined || value.trim().length === 0) {
+        throw new Error(`missing required ${label}`);
+    }
+    return value;
+}
+
+async function spawnSuiCommand(plan: SuiCommandPlan): Promise<SuiCommandResult> {
+    return new Promise((resolve, reject) => {
+        const child = spawn(plan.command, [...plan.args], { stdio: ["ignore", "pipe", "pipe"] });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => {
+            stdout += chunk;
+        });
+        child.stderr.on("data", (chunk: string) => {
+            stderr += chunk;
+        });
+        child.on("error", reject);
+        child.on("close", (code) => {
+            resolve({ code: code ?? 1, stdout, stderr });
+        });
+    });
+}
+
+async function main(): Promise<void> {
+    const argv = process.argv.slice(2);
+    const dryRun = !argv.includes("--live");
+    const publishedTomlPath = readFlag(argv, "published-toml") ?? DEFAULT_PUBLISHED_TOML;
+    const secrets = [process.env.SONARI_DEV_ADMIN_PRIVATE_KEY].filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+    );
+    const gasBudget = readFlag(argv, "gas-budget");
+
+    const options: RepublishBootstrapOptions = {
+        clientConfig:
+            readFlag(argv, "client-config") ??
+            process.env.SONARI_ADMIN_SUI_CLIENT_CONFIG ??
+            DEFAULT_CLIENT_CONFIG,
+        env: assertFixtureNetwork(readFlag(argv, "env") ?? "testnet"),
+        publishedToml: readFileSync(publishedTomlPath, "utf8"),
+        residenceRoot: requireValue(
+            readFlag(argv, "residence-root") ?? process.env.SONARI_RESIDENCE_ROOT,
+            "--residence-root",
+        ),
+        residenceGeoResolution: readFlag(argv, "geo-resolution") ?? "9",
+        residenceAllowlistVersion: readFlag(argv, "allowlist-version") ?? "1",
+        residenceSourceHash: requireValue(
+            readFlag(argv, "source-hash") ?? process.env.SONARI_RESIDENCE_SOURCE_HASH,
+            "--source-hash",
+        ),
+        ...(gasBudget ? { gasBudget } : {}),
+        dryRun,
+        secrets,
+    };
+
+    const result = await runRepublishBootstrap(options, spawnSuiCommand);
+
+    if (!dryRun && result.rewrittenPublishedToml) {
+        writeFileSync(publishedTomlPath, result.rewrittenPublishedToml);
+    }
+
+    const summary = redactSecrets(
+        JSON.stringify({ ...result, rewrittenPublishedToml: undefined }, null, 2),
+        secrets,
+    );
+    process.stdout.write(`${summary}\n`);
+    if (dryRun) {
+        process.stdout.write("dry-run: no sui command was executed. pass --live to publish.\n");
+    }
+}
+
+const mainPath = process.argv[1] === undefined ? null : pathToFileURL(process.argv[1]).href;
+if (mainPath !== null && import.meta.url === mainPath) {
+    main().catch((error: unknown) => {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+    });
 }
