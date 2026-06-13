@@ -453,6 +453,7 @@
             "disabled": {
                 "configMissing": "Donation is not configured yet.",
                 "walletDisconnected": "Connect your wallet to donate.",
+                "donorPassLoading": "Checking your DonorPass status…",
                 "campaignLoading": "Loading campaign options…",
                 "campaignNotFound": "No campaign options are available.",
                 "campaignNotSelected": "Select a campaign donation destination.",

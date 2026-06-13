@@ -87,10 +87,41 @@ export interface DonateDestinationReadState {
     readonly errorMessage: string | null;
 }
 
+export type DonateDonorPassReadState =
+    | { readonly status: "idle" }
+    | { readonly status: "loading" }
+    | { readonly status: "ready"; readonly passId: string | null }
+    | { readonly status: "error"; readonly message: string };
+
+export type DonateDonorPassLookupResult =
+    | { readonly kind: "ok"; readonly passId: string }
+    | { readonly kind: "none" }
+    | { readonly kind: "error"; readonly message: string };
+
+const DONOR_PASS_NOT_FOUND_AFTER_SUBMIT =
+    "DonorPass was not found after donation submission. Please wait and try again.";
+
+export function buildDonateDonorPassReadState(
+    result: DonateDonorPassLookupResult,
+    input: { readonly noneAsError: boolean },
+): DonateDonorPassReadState {
+    switch (result.kind) {
+        case "ok":
+            return { status: "ready", passId: result.passId };
+        case "none":
+            return input.noneAsError
+                ? { status: "error", message: DONOR_PASS_NOT_FOUND_AFTER_SUBMIT }
+                : { status: "ready", passId: null };
+        case "error":
+            return { status: "error", message: result.message };
+    }
+}
+
 export interface DonateSubmitDisabledInput {
     readonly configReady: boolean;
     readonly walletConnected: boolean;
     readonly amountValidation: DonationAmountValidationResult;
+    readonly donorPassState: DonateDonorPassReadState;
     readonly selectedMode: DonateDestinationMode;
     readonly destinationState: DonateDestinationReadState;
     readonly selectedCampaignId: string;
@@ -101,6 +132,8 @@ export type DonateSubmitDisabledReason =
     | { readonly kind: "configMissing" }
     | { readonly kind: "walletDisconnected" }
     | { readonly kind: "amountInvalid"; readonly code: DonationAmountErrorCode }
+    | { readonly kind: "donorPassLoading" }
+    | { readonly kind: "donorPassError"; readonly message: string }
     | {
           readonly kind: "destinationsLoading";
           readonly mode: "campaign" | "category";
@@ -132,6 +165,14 @@ export function resolveDonateSubmitDisabledReason(
 
     if (!input.amountValidation.ok) {
         return { kind: "amountInvalid", code: input.amountValidation.errorCode };
+    }
+
+    if (input.donorPassState.status === "loading") {
+        return { kind: "donorPassLoading" };
+    }
+
+    if (input.donorPassState.status === "error") {
+        return { kind: "donorPassError", message: input.donorPassState.message };
     }
 
     if (input.selectedMode === "campaign") {

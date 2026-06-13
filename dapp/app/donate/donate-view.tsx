@@ -1,9 +1,10 @@
 "use client";
 
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     GENESIS_OBJECT_KIND,
     readGenesisObjectIds,
@@ -22,17 +23,22 @@ import { combineDonateConfig, type DonateConfig, readDonateEnvConfig } from "./d
 import { readDonateDestinations } from "./donate-destinations";
 import { buildDonateTransaction, type DonateDestinationInput } from "./donate-transaction";
 import {
+    buildDonateDonorPassReadState,
     buildDonateSplitRows,
     buildDonateTxResultView,
     type DonateDestinationMode,
     type DonateDestinationReadState,
+    type DonateDonorPassReadState,
     type DonateSubmitDisabledReason,
     type DonateTxState,
     resolveDonateSubmitDisabledReason,
 } from "./donate-view-state";
+import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
 const DEFAULT_DONATION_AMOUNT = "400";
+const POST_SUBMIT_DONOR_PASS_LOOKUP_ATTEMPTS = 8;
+const POST_SUBMIT_DONOR_PASS_LOOKUP_DELAY_MS = 750;
 
 export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("donate");
@@ -42,12 +48,24 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     const envConfig = useMemo(() => readDonateEnvConfig(), []);
     const fundingPackageId = envConfig.kind === "ok" ? envConfig.config.fundingPackageId : null;
     const [config, setConfig] = useState<DonateConfig | null>(null);
+    const latestDonorPassLookupContext = useRef<{
+        readonly owner: string | null;
+        readonly network: typeof network;
+        readonly donorRegistryId: string | null;
+    }>({
+        owner: null,
+        network,
+        donorRegistryId: null,
+    });
 
     const [destinationState, setDestinationState] = useState<DonateDestinationReadState>({
         status: "idle",
         campaigns: [],
         categories: [],
         errorMessage: null,
+    });
+    const [donorPassState, setDonorPassState] = useState<DonateDonorPassReadState>({
+        status: "idle",
     });
     const [mode, setMode] = useState<DonateDestinationMode>("general");
     const [campaignId, setCampaignId] = useState("");
@@ -57,6 +75,14 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
 
     const amountValidation = useMemo(() => validateDonationAmount(amountInput), [amountInput]);
     const isWalletConnected = account !== null;
+
+    useEffect(() => {
+        latestDonorPassLookupContext.current = {
+            owner: account?.address ?? null,
+            network,
+            donorRegistryId: config?.donorRegistryId ?? null,
+        };
+    }, [account?.address, config?.donorRegistryId, network]);
 
     // packageID から pause_state / pool を導出して完全な設定を組み立てる。
     // 失敗の詳細は開発者向けに console へ出し、画面には設定不備の汎用文言を出す。
@@ -93,9 +119,18 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 genesis.ids,
                 GENESIS_OBJECT_KIND.operationsPool,
             );
-            if (donationPauseStateId === null || mainPoolId === null || operationsPoolId === null) {
+            const donorRegistryId = selectGenesisObjectId(
+                genesis.ids,
+                GENESIS_OBJECT_KIND.donorRegistry,
+            );
+            if (
+                donationPauseStateId === null ||
+                donorRegistryId === null ||
+                mainPoolId === null ||
+                operationsPoolId === null
+            ) {
                 console.error(
-                    "donate config failed: genesis objects for pause/main/operations were not found.",
+                    "donate config failed: genesis objects for pause/donor registry/main/operations were not found.",
                 );
                 setConfig(null);
                 return;
@@ -104,7 +139,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
             setConfig(
                 combineDonateConfig(
                     { fundingPackageId },
-                    { donationPauseStateId, mainPoolId, operationsPoolId },
+                    { donationPauseStateId, donorRegistryId, mainPoolId, operationsPoolId },
                     network,
                 ),
             );
@@ -184,6 +219,30 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     }, [fundingPackageId, network]);
 
     useEffect(() => {
+        if (config === null || account === null) {
+            setDonorPassState({ status: "idle" });
+            return;
+        }
+
+        const client = new SuiGrpcClient({ network, baseUrl: resolveGrpcBaseUrl(network) });
+        let cancelled = false;
+        setDonorPassState({ status: "loading" });
+
+        void (async () => {
+            const result = await readDonorPassId(client, config.donorRegistryId, account.address);
+            if (cancelled) {
+                return;
+            }
+
+            setDonorPassState(buildDonateDonorPassReadState(result, { noneAsError: false }));
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [account, config, network]);
+
+    useEffect(() => {
         if (destinationState.status !== "ready") {
             return;
         }
@@ -212,6 +271,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         configReady: config !== null,
         walletConnected: isWalletConnected,
         amountValidation,
+        donorPassState,
         selectedMode: mode,
         destinationState,
         selectedCampaignId: campaignId,
@@ -356,9 +416,25 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
             });
             return;
         }
+        if (donorPassState.status !== "ready") {
+            setTxState({
+                status: "failed",
+                message: txMessage(),
+            });
+            return;
+        }
 
         setTxState({ status: "building" });
         try {
+            const donorPass =
+                donorPassState.passId === null
+                    ? ({ kind: "none" } as const)
+                    : ({ kind: "existing", passId: donorPassState.passId } as const);
+            const submittedLookupContext = {
+                owner: account.address,
+                network,
+                donorRegistryId: config.donorRegistryId,
+            };
             const { transaction } = buildDonateTransaction({
                 senderAddress: account.address,
                 packageId: config.fundingPackageId,
@@ -366,15 +442,42 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 amountMicroUsdc: amountValidation.microUsdc,
                 objects: {
                     pauseState: config.donationPauseStateId,
+                    donorRegistry: config.donorRegistryId,
                     mainPool: config.mainPoolId,
                     operationsPool: config.operationsPoolId,
                 },
                 destination,
+                donorPass,
             });
 
             setTxState({ status: "submitting" });
             const { digest } = await executeWalletTransaction(dAppKit, { transaction });
             setTxState({ status: "submitted", digest });
+            if (donorPass.kind === "none") {
+                setDonorPassState({ status: "loading" });
+                const client = new SuiGrpcClient({
+                    network,
+                    baseUrl: resolveGrpcBaseUrl(network),
+                });
+                const result = await readDonorPassIdUntilVisible(
+                    client,
+                    config.donorRegistryId,
+                    account.address,
+                    {
+                        maxAttempts: POST_SUBMIT_DONOR_PASS_LOOKUP_ATTEMPTS,
+                        delayMs: POST_SUBMIT_DONOR_PASS_LOOKUP_DELAY_MS,
+                    },
+                );
+                const latestLookupContext = latestDonorPassLookupContext.current;
+                if (
+                    latestLookupContext.owner !== submittedLookupContext.owner ||
+                    latestLookupContext.network !== submittedLookupContext.network ||
+                    latestLookupContext.donorRegistryId !== submittedLookupContext.donorRegistryId
+                ) {
+                    return;
+                }
+                setDonorPassState(buildDonateDonorPassReadState(result, { noneAsError: true }));
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : t("tx.failed.generic");
             setTxState({ status: "failed", message });
@@ -662,6 +765,10 @@ function formatSubmitDisabledReason(
             return t("submit.disabled.walletDisconnected");
         case "amountInvalid":
             return t(`amount.error.${reason.code}`);
+        case "donorPassLoading":
+            return t("submit.disabled.donorPassLoading");
+        case "donorPassError":
+            return reason.message;
         case "destinationNotFound":
             return reason.mode === "campaign"
                 ? t("submit.disabled.campaignNotFound")

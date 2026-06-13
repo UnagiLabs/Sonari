@@ -63,6 +63,7 @@ describe("combineDonateConfig", () => {
             { fundingPackageId: "0xfunding" },
             {
                 donationPauseStateId: "0xpause",
+                donorRegistryId: "0xdonor",
                 mainPoolId: "0xmain",
                 operationsPoolId: "0xoperations",
             },
@@ -72,6 +73,7 @@ describe("combineDonateConfig", () => {
         expect(config).toEqual({
             fundingPackageId: "0xfunding",
             donationPauseStateId: "0xpause",
+            donorRegistryId: "0xdonor",
             mainPoolId: "0xmain",
             operationsPoolId: "0xoperations",
             usdcType: TESTNET_USDC,
