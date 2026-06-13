@@ -1,6 +1,7 @@
 #[test_only]
 module contracts::donation_v2_tests;
 
+use contracts::accessor;
 use contracts::admin;
 use contracts::campaign;
 use contracts::category_pool;
@@ -388,6 +389,97 @@ fun donate_to_campaign_zero_amount_is_rejected() {
     test_scenario::return_shared(camp);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// STEP 1: issue_donor_pass / transfer_donor_pass
+// ---------------------------------------------------------------
+
+fun initialized(): test_scenario::Scenario {
+    let mut scenario = test_scenario::begin(ADMIN);
+    admin::init_for_testing(scenario.ctx());
+    scenario.next_tx(ADMIN);
+    scenario
+}
+
+#[test]
+fun issue_donor_pass_returns_unissued_pass_and_emits_event() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(DONOR);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+
+        assert!(donation::donor_pass_owner(&pass) == DONOR);
+        assert!(donation::donor_pass_donation_count(&pass) == 0);
+        assert!(donation::donor_pass_total_donated_usdc(&pass) == 0);
+        assert!(donation::donor_pass_tier(&pass) == donation::tier_none());
+
+        let issued = event::events_by_type<donation::DonorPassIssued>();
+        assert!(issued.length() == 1);
+
+        accessor::transfer_donor_pass(pass, scenario.ctx());
+
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.end();
+}
+
+#[test]
+fun transfer_donor_pass_sends_pass_to_sender() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(DONOR);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.next_tx(DONOR);
+    {
+        let pass = scenario.take_from_sender<donation::DonorPass>();
+        assert!(donation::donor_pass_owner(&pass) == DONOR);
+        scenario.return_to_sender(pass);
+    };
+
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = donation::EDonorPassAlreadyIssued)]
+fun issue_donor_pass_twice_for_same_donor_aborts() {
+    let mut scenario = initialized();
+
+    scenario.next_tx(DONOR);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+    };
+
+    scenario.next_tx(DONOR);
+    {
+        let pause_state = scenario.take_shared<admin::PauseState>();
+        let mut registry = scenario.take_shared<donation::DonorRegistry>();
+        let pass = accessor::issue_donor_pass(&pause_state, &mut registry, scenario.ctx());
+        accessor::transfer_donor_pass(pass, scenario.ctx());
+        test_scenario::return_shared(pause_state);
+        test_scenario::return_shared(registry);
+    };
+
     scenario.end();
 }
 

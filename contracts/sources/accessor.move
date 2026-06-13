@@ -83,6 +83,22 @@ public fun donate_operations_usdc_with_pass(
     );
 }
 
+/// DonorPass を発行して呼び出し元へ返す。PTB では次コマンドで `&mut` 参照する。
+public fun issue_donor_pass(
+    pause_state: &PauseState,
+    registry: &mut DonorRegistry,
+    ctx: &mut TxContext,
+): DonorPass {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, donation::registry_id(registry));
+    donation::issue_donor_pass(registry, ctx)
+}
+
+/// 発行直後の DonorPass を sender へ soulbound 転送する。
+public fun transfer_donor_pass(pass: DonorPass, ctx: &TxContext) {
+    donation::transfer_donor_pass(pass, ctx);
+}
+
 public fun register_member(
     pause_state: &PauseState,
     registry: &mut membership::MembershipRegistry,

@@ -325,6 +325,21 @@ fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass
     pass
 }
 
+/// DonorPass を発行して戻り値として返す。registry への登録もここで行う。
+/// transfer はしない（PTB の次コマンドで `&mut` 参照できるように return 形にする）。
+public(package) fun issue_donor_pass(
+    registry: &mut DonorRegistry,
+    ctx: &mut TxContext,
+): DonorPass {
+    new_donor_pass(registry, ctx)
+}
+
+/// 発行直後の DonorPass を sender へ soulbound 転送する。
+/// DonorPass は `store` を持たないため、モジュール内 `transfer::transfer` 経由でのみ送れる。
+public(package) fun transfer_donor_pass(pass: DonorPass, ctx: &TxContext) {
+    transfer::transfer(pass, ctx.sender());
+}
+
 fun assert_registered_pass(registry: &DonorRegistry, pass: &DonorPass, donor: address) {
     assert!(dynamic_field::exists_with_type<address, ID>(&registry.id, donor), EDonorPassNotIssued);
     let donor_pass_id = dynamic_field::borrow<address, ID>(&registry.id, donor);
