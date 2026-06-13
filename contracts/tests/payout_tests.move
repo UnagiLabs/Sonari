@@ -3,9 +3,11 @@
 module contracts::payout_tests;
 
 use contracts::admin;
+use contracts::affected_cell;
 use contracts::campaign;
 use contracts::category_pool;
 use contracts::census_result;
+use contracts::identity_registry;
 use contracts::membership;
 use contracts::pools;
 use sui::event;
@@ -82,6 +84,38 @@ fun make_pass_for(
     scenario: &mut test_scenario::Scenario,
 ): (membership::MembershipRegistry, membership::MembershipPass) {
     membership::create_registry_and_pass_for_testing(owner, 1, b"", scenario.ctx())
+}
+
+// 本払いのみの claim 呼び出し。これらのテストはセンサス未設定なので
+// 床払い・本人確認は発生せず、本払い経路だけが走る。
+// leaf/proof/disaster 引数は既申請ブランチで使われないためダミーを渡す。
+// 本人確認も skip されるので空の IdentityRegistry を都度作って破棄する。
+fun claim_payout_only(
+    c: &mut campaign::Campaign,
+    mem_registry: &membership::MembershipRegistry,
+    pass: &membership::MembershipPass,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    let id_registry = identity_registry::create_identity_registry_for_testing(ctx);
+    campaign::claim(
+        c,
+        object::id_from_address(@0xDEAD),
+        EVENT_UID,
+        EVENT_REVISION,
+        b"",
+        NOW_MS,
+        &id_registry,
+        mem_registry,
+        pass,
+        identity_registry::provider_kyc(),
+        b"",
+        option::none<affected_cell::AffectedCellLeaf>(),
+        vector[],
+        now_ms,
+        ctx,
+    );
+    identity_registry::destroy_identity_registry_for_testing(id_registry);
 }
 
 
@@ -265,7 +299,7 @@ fun claim_payout_transfers_coin_and_issues_receipt() {
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
         // Claim payout
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         let events = event::events_by_type<campaign::PayoutClaimed>();
         assert!(events.length() == 1);
@@ -288,7 +322,7 @@ fun claim_payout_transfers_coin_and_issues_receipt() {
 // 6. reject: claim_payout duplicate (same pass + same round)
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::EDuplicatePayout)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_payout_rejects_duplicate() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario);
@@ -310,9 +344,9 @@ fun claim_payout_rejects_duplicate() {
         campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
-        // Second claim → EDuplicatePayout
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        // 2 回目は支払い対象がないため ENothingToClaim で abort する
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -325,7 +359,7 @@ fun claim_payout_rejects_duplicate() {
 // 7. reject: claim_payout before finalize (round==0) → ERoundNotStarted
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::ERoundNotStarted)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_payout_rejects_before_finalize() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario);
@@ -339,8 +373,8 @@ fun claim_payout_rejects_before_finalize() {
         campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
         campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
 
-        // No finalize_round called → current_round == 0
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, NOW_MS, scenario.ctx());
+        // No finalize_round called → current_round == 0 なので支払い対象なし → ENothingToClaim
+        claim_payout_only(&mut c, &mem_registry, &pass, NOW_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -385,7 +419,7 @@ fun claim_payout_rejects_excluded_member() {
         );
 
         // Claim → EClaimExcluded
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -398,7 +432,7 @@ fun claim_payout_rejects_excluded_member() {
 // 9. reject: claim_payout with verified_in_round >= current_round
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::ERoundNotEligible)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_payout_rejects_verified_after_finalize() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario);
@@ -425,8 +459,8 @@ fun claim_payout_rejects_verified_after_finalize() {
         // Now "verify" the member at round 1 (verified_in_round = 1)
         campaign::set_claim_verified(&mut c, pass_lineage_id, 1);
 
-        // verified_in_round (1) == current_round (1) → ERoundNotEligible
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        // verified_in_round (1) == current_round (1) なので支払い対象なし → ENothingToClaim
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -793,7 +827,7 @@ fun claim_payout_issues_claim_receipt_with_payout_kind() {
         campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
         campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);

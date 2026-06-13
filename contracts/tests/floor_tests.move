@@ -2,6 +2,7 @@
 module contracts::floor_tests;
 
 use contracts::admin;
+use contracts::affected_cell;
 use contracts::campaign;
 use contracts::category_pool;
 use contracts::census_result;
@@ -412,13 +413,21 @@ fun claim_floor_pays_correct_amount_and_emits_events() {
         // Add a verified ClaimApplication
         campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
 
-        campaign::claim_floor_payment(
+        // 既申請者の床払い: leaf/proof は不要（既申請ブランチで破棄される）
+        campaign::claim(
             &mut c,
+            object::id_from_address(@0xDEAD),
+            EVENT_UID,
+            EVENT_REVISION,
+            CELLS_ROOT,
+            NOW_MS,
             &id_registry,
             &mem_registry,
             &pass,
             identity_registry::provider_kyc(),
             KYC_DUPLICATE_KEY,
+            option::none<affected_cell::AffectedCellLeaf>(),
+            vector[],
             NOW_MS,
             scenario.ctx(),
         );
@@ -449,10 +458,10 @@ fun claim_floor_pays_correct_amount_and_emits_events() {
 }
 
 // ---------------------------------------------------------------
-// 7. claim_floor census not set aborts EFloorCensusNotSet
+// 7. claim: センサス未確定では床払いできず（既申請・本払いも無いので）ENothingToClaim
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::EFloorCensusNotSet)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_floor_census_not_set_is_rejected() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario, EVENT_UID);
@@ -463,13 +472,20 @@ fun claim_floor_census_not_set_is_rejected() {
     let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
     campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
 
-    campaign::claim_floor_payment(
+    campaign::claim(
         &mut c,
+        object::id_from_address(@0xDEAD),
+        EVENT_UID,
+        EVENT_REVISION,
+        CELLS_ROOT,
+        NOW_MS,
         &id_registry,
         &mem_registry,
         &pass,
         identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY,
+        option::none<affected_cell::AffectedCellLeaf>(),
+        vector[],
         NOW_MS,
         scenario.ctx(),
     );
@@ -482,7 +498,7 @@ fun claim_floor_census_not_set_is_rejected() {
 }
 
 // ---------------------------------------------------------------
-// 8. claim_floor not verified aborts EClaimNotVerified
+// 8. claim: 既申請が未検証なら EClaimNotVerified
 // ---------------------------------------------------------------
 
 #[test, expected_failure(abort_code = campaign::EClaimNotVerified)]
@@ -515,13 +531,20 @@ fun claim_floor_not_verified_is_rejected() {
     // Not verified
     campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, false, false, false, NOW_MS);
 
-    campaign::claim_floor_payment(
+    campaign::claim(
         &mut c,
+        object::id_from_address(@0xDEAD),
+        EVENT_UID,
+        EVENT_REVISION,
+        CELLS_ROOT,
+        NOW_MS,
         &id_registry,
         &mem_registry,
         &pass,
         identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY,
+        option::none<affected_cell::AffectedCellLeaf>(),
+        vector[],
         NOW_MS,
         scenario.ctx(),
     );
@@ -534,10 +557,10 @@ fun claim_floor_not_verified_is_rejected() {
 }
 
 // ---------------------------------------------------------------
-// 9. claim_floor already claimed aborts EFloorAlreadyClaimed
+// 9. claim: 既に床受給済みなら（本払いも無いので）ENothingToClaim
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::EFloorAlreadyClaimed)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_floor_already_claimed_is_rejected() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario, EVENT_UID);
@@ -567,13 +590,20 @@ fun claim_floor_already_claimed_is_rejected() {
     // Already claimed
     campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, true, false, NOW_MS);
 
-    campaign::claim_floor_payment(
+    campaign::claim(
         &mut c,
+        object::id_from_address(@0xDEAD),
+        EVENT_UID,
+        EVENT_REVISION,
+        CELLS_ROOT,
+        NOW_MS,
         &id_registry,
         &mem_registry,
         &pass,
         identity_registry::provider_kyc(),
         KYC_DUPLICATE_KEY,
+        option::none<affected_cell::AffectedCellLeaf>(),
+        vector[],
         NOW_MS,
         scenario.ctx(),
     );
@@ -762,13 +792,20 @@ fun claim_floor_issues_claim_receipt_with_floor_kind() {
         let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
         campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
 
-        campaign::claim_floor_payment(
+        campaign::claim(
             &mut c,
+            object::id_from_address(@0xDEAD),
+            EVENT_UID,
+            EVENT_REVISION,
+            CELLS_ROOT,
+            NOW_MS,
             &id_registry,
             &mem_registry,
             &pass,
             identity_registry::provider_kyc(),
             KYC_DUPLICATE_KEY,
+            option::none<affected_cell::AffectedCellLeaf>(),
+            vector[],
             NOW_MS,
             scenario.ctx(),
         );

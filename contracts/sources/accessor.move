@@ -8,9 +8,9 @@ use contracts::category_pool::{Self, CategoryPool, CategoryRegistry};
 use contracts::census_result;
 use contracts::disaster_event::{Self, DisasterEvent, DisasterRegistry};
 use contracts::donation::{Self, DonorPass, DonorRegistry};
-use contracts::identity_registry::{Self, IdentityRegistry};
+use contracts::identity_registry;
 use contracts::identity_result_v1;
-use contracts::membership::{Self, MembershipRegistry, MembershipPass};
+use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::pools::{Self, MainPool, OperationsPool};
 use sui::clock::{Self, Clock};
@@ -351,35 +351,6 @@ public fun set_floor_census(
     );
 }
 
-public fun claim_floor(
-    pause_state: &PauseState,
-    campaign: &mut campaign_v2::Campaign,
-    identity_registry: &IdentityRegistry,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    identity_provider: u8,
-    duplicate_key_hash: vector<u8>,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
-    admin::assert_target_not_paused(
-        pause_state,
-        identity_registry::registry_id(identity_registry),
-    );
-    campaign_v2::claim_floor_payment(
-        campaign,
-        identity_registry,
-        membership_registry,
-        pass,
-        identity_provider,
-        duplicate_key_hash,
-        clock::timestamp_ms(clock),
-        ctx,
-    );
-}
-
 public fun return_floor_budget(
     pause_state: &PauseState,
     campaign: &mut campaign_v2::Campaign,
@@ -398,64 +369,6 @@ public fun return_floor_budget(
     );
 }
 
-public fun submit_claim_v2(
-    pause_state: &PauseState,
-    campaign: &mut campaign_v2::Campaign,
-    disaster_event: &DisasterEvent,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    leaf: AffectedCellLeaf,
-    proof: vector<ProofStep>,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
-    campaign_v2::submit_claim(
-        campaign,
-        object::id(disaster_event),
-        disaster_event::event_uid(disaster_event),
-        disaster_event::event_revision(disaster_event),
-        disaster_event::affected_cells_root(disaster_event),
-        disaster_event::occurred_at_ms(disaster_event),
-        membership_registry,
-        pass,
-        leaf,
-        proof,
-        clock::timestamp_ms(clock),
-        ctx,
-    );
-}
-
-public fun verify_claim_v2(
-    pause_state: &PauseState,
-    campaign: &mut campaign_v2::Campaign,
-    identity_registry: &IdentityRegistry,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    identity_provider: u8,
-    duplicate_key_hash: vector<u8>,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
-    admin::assert_target_not_paused(
-        pause_state,
-        identity_registry::registry_id(identity_registry),
-    );
-    campaign_v2::verify_claim(
-        campaign,
-        identity_registry,
-        membership_registry,
-        pass,
-        identity_provider,
-        duplicate_key_hash,
-        clock::timestamp_ms(clock),
-        ctx,
-    );
-}
-
 public fun finalize_round(
     pause_state: &PauseState,
     campaign: &mut campaign_v2::Campaign,
@@ -465,25 +378,6 @@ public fun finalize_round(
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
     campaign_v2::finalize_round_v2(campaign, clock::timestamp_ms(clock));
-}
-
-public fun claim_payout(
-    pause_state: &PauseState,
-    campaign: &mut campaign_v2::Campaign,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
-    campaign_v2::claim_payout_v2(
-        campaign,
-        membership_registry,
-        pass,
-        clock::timestamp_ms(clock),
-        ctx,
-    );
 }
 
 public fun sweep_residual(
