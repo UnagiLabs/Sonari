@@ -4,7 +4,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     GENESIS_OBJECT_KIND,
     readGenesisObjectIds,
@@ -33,10 +33,12 @@ import {
     type DonateTxState,
     resolveDonateSubmitDisabledReason,
 } from "./donate-view-state";
-import { readDonorPassId } from "./donor-pass-read";
+import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
 const DEFAULT_DONATION_AMOUNT = "400";
+const POST_SUBMIT_DONOR_PASS_LOOKUP_ATTEMPTS = 8;
+const POST_SUBMIT_DONOR_PASS_LOOKUP_DELAY_MS = 750;
 
 export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("donate");
@@ -46,6 +48,15 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     const envConfig = useMemo(() => readDonateEnvConfig(), []);
     const fundingPackageId = envConfig.kind === "ok" ? envConfig.config.fundingPackageId : null;
     const [config, setConfig] = useState<DonateConfig | null>(null);
+    const latestDonorPassLookupContext = useRef<{
+        readonly owner: string | null;
+        readonly network: typeof network;
+        readonly donorRegistryId: string | null;
+    }>({
+        owner: null,
+        network,
+        donorRegistryId: null,
+    });
 
     const [destinationState, setDestinationState] = useState<DonateDestinationReadState>({
         status: "idle",
@@ -64,6 +75,14 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
 
     const amountValidation = useMemo(() => validateDonationAmount(amountInput), [amountInput]);
     const isWalletConnected = account !== null;
+
+    useEffect(() => {
+        latestDonorPassLookupContext.current = {
+            owner: account?.address ?? null,
+            network,
+            donorRegistryId: config?.donorRegistryId ?? null,
+        };
+    }, [account?.address, config?.donorRegistryId, network]);
 
     // packageID から pause_state / pool を導出して完全な設定を組み立てる。
     // 失敗の詳細は開発者向けに console へ出し、画面には設定不備の汎用文言を出す。
@@ -411,6 +430,11 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 donorPassState.passId === null
                     ? ({ kind: "none" } as const)
                     : ({ kind: "existing", passId: donorPassState.passId } as const);
+            const submittedLookupContext = {
+                owner: account.address,
+                network,
+                donorRegistryId: config.donorRegistryId,
+            };
             const { transaction } = buildDonateTransaction({
                 senderAddress: account.address,
                 packageId: config.fundingPackageId,
@@ -435,11 +459,23 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                     network,
                     baseUrl: resolveGrpcBaseUrl(network),
                 });
-                const result = await readDonorPassId(
+                const result = await readDonorPassIdUntilVisible(
                     client,
                     config.donorRegistryId,
                     account.address,
+                    {
+                        maxAttempts: POST_SUBMIT_DONOR_PASS_LOOKUP_ATTEMPTS,
+                        delayMs: POST_SUBMIT_DONOR_PASS_LOOKUP_DELAY_MS,
+                    },
                 );
+                const latestLookupContext = latestDonorPassLookupContext.current;
+                if (
+                    latestLookupContext.owner !== submittedLookupContext.owner ||
+                    latestLookupContext.network !== submittedLookupContext.network ||
+                    latestLookupContext.donorRegistryId !== submittedLookupContext.donorRegistryId
+                ) {
+                    return;
+                }
                 setDonorPassState(buildDonateDonorPassReadState(result, { noneAsError: true }));
             }
         } catch (error) {

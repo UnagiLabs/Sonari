@@ -3,6 +3,7 @@ import {
     type DonorPassReadClient,
     type DonorPassRegistryFieldObject,
     readDonorPassId,
+    readDonorPassIdUntilVisible,
 } from "./donor-pass-read";
 
 const REGISTRY_ID = `0x${"aa".repeat(32)}`;
@@ -99,5 +100,44 @@ describe("readDonorPassId", () => {
 
         expect(result.kind).toBe("error");
         expect(getObjects).not.toHaveBeenCalled();
+    });
+});
+
+describe("readDonorPassIdUntilVisible", () => {
+    it("retries while the dynamic field is not visible yet", async () => {
+        const getObjects = vi
+            .fn()
+            .mockResolvedValueOnce({ objects: [] })
+            .mockResolvedValueOnce({ objects: [] })
+            .mockResolvedValueOnce({ objects: [fieldJson(PASS_ID)] });
+        const sleep = vi.fn(() => Promise.resolve());
+
+        const result = await readDonorPassIdUntilVisible(
+            { getObjects },
+            REGISTRY_ID,
+            DONOR_ADDRESS,
+            { maxAttempts: 3, delayMs: 5, sleep },
+        );
+
+        expect(result).toEqual({ kind: "ok", passId: PASS_ID });
+        expect(getObjects).toHaveBeenCalledTimes(3);
+        expect(sleep).toHaveBeenCalledTimes(2);
+        expect(sleep).toHaveBeenCalledWith(5);
+    });
+
+    it("returns none after the final attempt still cannot see the field", async () => {
+        const { client, getObjects } = stubClient({ objects: [] });
+        const sleep = vi.fn(() => Promise.resolve());
+
+        const result = await readDonorPassIdUntilVisible(
+            client,
+            REGISTRY_ID,
+            DONOR_ADDRESS,
+            { maxAttempts: 2, sleep },
+        );
+
+        expect(result).toEqual({ kind: "none" });
+        expect(getObjects).toHaveBeenCalledTimes(2);
+        expect(sleep).toHaveBeenCalledTimes(1);
     });
 });

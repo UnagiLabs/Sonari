@@ -18,6 +18,12 @@ export type DonorPassLookupResult =
     | { readonly kind: "none" }
     | { readonly kind: "error"; readonly message: string };
 
+export interface DonorPassReadRetryOptions {
+    readonly maxAttempts?: number;
+    readonly delayMs?: number;
+    readonly sleep?: (delayMs: number) => Promise<void>;
+}
+
 export async function readDonorPassId(
     client: DonorPassReadClient,
     donorRegistryId: string,
@@ -61,10 +67,37 @@ export async function readDonorPassId(
     return { kind: "ok", passId };
 }
 
+export async function readDonorPassIdUntilVisible(
+    client: DonorPassReadClient,
+    donorRegistryId: string,
+    donorAddress: string,
+    options: DonorPassReadRetryOptions = {},
+): Promise<DonorPassLookupResult> {
+    const maxAttempts = Math.max(1, options.maxAttempts ?? 6);
+    const delayMs = Math.max(0, options.delayMs ?? 750);
+    const sleep = options.sleep ?? defaultSleep;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        const result = await readDonorPassId(client, donorRegistryId, donorAddress);
+        if (result.kind !== "none" || attempt === maxAttempts) {
+            return result;
+        }
+        await sleep(delayMs);
+    }
+
+    return { kind: "none" };
+}
+
 function parseObjectId(raw: unknown): string | null {
     if (typeof raw !== "string") {
         return null;
     }
     const trimmed = raw.trim();
     return /^0x[0-9a-fA-F]{64}$/u.test(trimmed) ? trimmed : null;
+}
+
+function defaultSleep(delayMs: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, delayMs);
+    });
 }
