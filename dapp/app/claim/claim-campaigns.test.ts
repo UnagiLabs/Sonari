@@ -144,6 +144,8 @@ describe("deriveClaimCampaignState", () => {
             affectedCellCount: "42",
             donationEndMs: "1500",
             claimEndMs: "2000",
+            censusSet: true,
+            floorBudgetReturned: false,
             claimWindowOpen: true,
             floorClaimAvailable: true,
             payoutFinalized: true,

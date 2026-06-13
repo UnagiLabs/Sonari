@@ -90,36 +90,6 @@ export interface ClaimTransactionObjectConfig {
     readonly clock?: string | undefined;
 }
 
-export interface BuildClaimFloorTransactionInput {
-    readonly senderAddress?: string | undefined;
-    readonly packageId: string;
-    readonly objects: ClaimTransactionObjectConfig;
-    readonly identityProvider: number;
-    readonly duplicateKeyHash: string;
-}
-
-export interface BuildSubmitClaimV2TransactionInput {
-    readonly senderAddress?: string | undefined;
-    readonly packageId: string;
-    readonly proof: AffectedCellsProof;
-    readonly context: ClaimProofContext;
-    readonly objects: ClaimTransactionObjectConfig;
-}
-
-export interface BuildVerifyClaimV2TransactionInput {
-    readonly senderAddress?: string | undefined;
-    readonly packageId: string;
-    readonly objects: ClaimTransactionObjectConfig;
-    readonly identityProvider: number;
-    readonly duplicateKeyHash: string;
-}
-
-export interface BuildClaimPayoutTransactionInput {
-    readonly senderAddress?: string | undefined;
-    readonly packageId: string;
-    readonly objects: ClaimTransactionObjectConfig;
-}
-
 export type ClaimProofInput =
     | {
           readonly kind: "initial";
@@ -141,12 +111,6 @@ export interface BuildClaimTransactionInput {
 
 export interface ClaimTransactionResult {
     readonly transaction: Transaction;
-}
-
-export interface SubmitClaimV2TransactionResult {
-    readonly transaction: Transaction;
-    readonly leafArgs: AffectedCellLeafMoveArgs;
-    readonly proofArgs: AffectedCellProofMoveArg[];
 }
 
 export async function fetchAffectedCellsProof(
@@ -299,98 +263,6 @@ export function buildClaimTransaction(
             duplicateKeyHashArg(tx, input.duplicateKeyHash),
             leafOption,
             proofVector,
-            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
-        ],
-    });
-
-    return { transaction: tx };
-}
-
-export function buildClaimFloorTransaction(
-    input: BuildClaimFloorTransactionInput,
-): ClaimTransactionResult {
-    const tx = newClaimTransaction(input.senderAddress);
-
-    tx.moveCall({
-        target: `${input.packageId}::accessor::claim_floor`,
-        arguments: [
-            tx.object(input.objects.pauseState),
-            tx.object(input.objects.campaign),
-            tx.object(input.objects.identityRegistry),
-            tx.object(input.objects.membershipRegistry),
-            tx.object(input.objects.pass),
-            tx.pure.u8(input.identityProvider),
-            duplicateKeyHashArg(tx, input.duplicateKeyHash),
-            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
-        ],
-    });
-
-    return { transaction: tx };
-}
-
-export function buildSubmitClaimV2Transaction(
-    input: BuildSubmitClaimV2TransactionInput,
-): SubmitClaimV2TransactionResult {
-    assertProofMatchesClaimContext(input.proof, input.context);
-
-    const tx = newClaimTransaction(input.senderAddress);
-    const { leaf, leafArgs, proof, proofArgs } = buildAffectedCellMoveInputs(
-        tx,
-        input.packageId,
-        input.proof,
-    );
-
-    tx.moveCall({
-        target: `${input.packageId}::accessor::submit_claim_v2`,
-        arguments: [
-            tx.object(input.objects.pauseState),
-            tx.object(input.objects.campaign),
-            tx.object(input.objects.disasterEvent),
-            tx.object(input.objects.membershipRegistry),
-            tx.object(input.objects.pass),
-            leaf,
-            proof,
-            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
-        ],
-    });
-
-    return { transaction: tx, leafArgs, proofArgs };
-}
-
-export function buildVerifyClaimV2Transaction(
-    input: BuildVerifyClaimV2TransactionInput,
-): ClaimTransactionResult {
-    const tx = newClaimTransaction(input.senderAddress);
-
-    tx.moveCall({
-        target: `${input.packageId}::accessor::verify_claim_v2`,
-        arguments: [
-            tx.object(input.objects.pauseState),
-            tx.object(input.objects.campaign),
-            tx.object(input.objects.identityRegistry),
-            tx.object(input.objects.membershipRegistry),
-            tx.object(input.objects.pass),
-            tx.pure.u8(input.identityProvider),
-            duplicateKeyHashArg(tx, input.duplicateKeyHash),
-            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
-        ],
-    });
-
-    return { transaction: tx };
-}
-
-export function buildClaimPayoutTransaction(
-    input: BuildClaimPayoutTransactionInput,
-): ClaimTransactionResult {
-    const tx = newClaimTransaction(input.senderAddress);
-
-    tx.moveCall({
-        target: `${input.packageId}::accessor::claim_payout`,
-        arguments: [
-            tx.object(input.objects.pauseState),
-            tx.object(input.objects.campaign),
-            tx.object(input.objects.membershipRegistry),
-            tx.object(input.objects.pass),
             tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
         ],
     });

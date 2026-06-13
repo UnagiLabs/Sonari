@@ -1,20 +1,17 @@
-export type ClaimFlowAction = "submit" | "verify" | "floor" | "payout";
+export type ClaimFlowAction = "claim";
 
 export interface ClaimFlowCompleted {
-    readonly submit: boolean;
-    readonly verify: boolean;
-    readonly floor: boolean;
-    readonly payout: boolean;
+    readonly claim: boolean;
 }
 
 export interface ClaimFlowInput {
     readonly proofReady: boolean;
+    readonly proofRequired: boolean;
     readonly walletConnected: boolean;
     readonly txObjectsReady: boolean;
     readonly worldIdReady: boolean;
-    readonly claimWindowOpen: boolean;
-    readonly floorClaimAvailable: boolean;
-    readonly payoutFinalized: boolean;
+    readonly worldIdRequired: boolean;
+    readonly claimable: boolean;
     readonly inFlight: boolean;
     readonly completed: ClaimFlowCompleted;
 }
@@ -25,10 +22,10 @@ export interface ClaimFlowActionView {
     readonly completed: boolean;
 }
 
-const actionOrder: readonly ClaimFlowAction[] = ["submit", "verify", "floor", "payout"];
+const actionOrder: readonly ClaimFlowAction[] = ["claim"];
 
 export function emptyClaimFlowCompleted(): ClaimFlowCompleted {
-    return { submit: false, verify: false, floor: false, payout: false };
+    return { claim: false };
 }
 
 export function buildClaimFlowActions(input: ClaimFlowInput): readonly ClaimFlowActionView[] {
@@ -53,13 +50,11 @@ export function isClaimFlowActionDisabled(
     }
 
     switch (action) {
-        case "submit":
-            return !input.proofReady || !input.claimWindowOpen;
-        case "verify":
-            return !input.completed.submit || !input.worldIdReady;
-        case "floor":
-            return !input.completed.verify || !input.floorClaimAvailable || !input.worldIdReady;
-        case "payout":
-            return !input.completed.verify || !input.payoutFinalized;
+        case "claim":
+            return (
+                !input.claimable ||
+                (input.proofRequired && !input.proofReady) ||
+                (input.worldIdRequired && !input.worldIdReady)
+            );
     }
 }

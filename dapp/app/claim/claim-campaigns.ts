@@ -74,6 +74,8 @@ export interface ClaimCampaignState {
     readonly affectedCellCount: string;
     readonly donationEndMs: string;
     readonly claimEndMs: string;
+    readonly censusSet: boolean;
+    readonly floorBudgetReturned: boolean;
     readonly claimWindowOpen: boolean;
     readonly floorClaimAvailable: boolean;
     readonly payoutFinalized: boolean;
@@ -285,6 +287,8 @@ export function deriveClaimCampaignState(
         affectedCellCount: disaster.affectedCellCount,
         donationEndMs: campaign.donationEndMs,
         claimEndMs: campaign.claimEndMs,
+        censusSet: campaign.censusSet,
+        floorBudgetReturned: campaign.floorBudgetReturned,
         claimWindowOpen: BigInt(now) < BigInt(campaign.claimEndMs),
         floorClaimAvailable: campaign.censusSet && !campaign.floorBudgetReturned,
         payoutFinalized: BigInt(campaign.currentRound) > 0n,
@@ -352,7 +356,14 @@ export async function readClaimEligibility(
     client: ClaimCampaignReadClient,
     input: {
         readonly packageId: string;
-        readonly campaign: ClaimCampaignObjectData;
+        readonly campaign: Pick<
+            ClaimCampaignObjectData,
+            | "campaignId"
+            | "censusSet"
+            | "floorBudgetReturned"
+            | "claimEndMs"
+            | "currentRound"
+        >;
         readonly passLineageId: string;
         readonly nowMs: string | number;
     },
