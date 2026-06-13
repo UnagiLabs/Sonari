@@ -104,9 +104,11 @@
                     "advancedSummary": "Advanced cell input",
                     "advancedLabel": "H3 resolution 7 cell (hex)",
                     "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID.",
-                    "legend.selected": "Selected",
-                    "legend.selectable": "Selectable",
-                    "legend.disabled": "Unavailable",
+                    "legend": {
+                        "selected": "Selected",
+                        "selectable": "Selectable",
+                        "disabled": "Unavailable"
+                    },
                     "retryMapLoad": "Retry"
                 }
             },
