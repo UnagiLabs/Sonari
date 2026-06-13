@@ -11,8 +11,11 @@ const MAIN_POOL_ID = `0x${"11".repeat(32)}`;
 const OPERATIONS_POOL_ID = `0x${"22".repeat(32)}`;
 const CATEGORY_POOL_ID = `0x${"33".repeat(32)}`;
 
-function balance(value: string): Record<string, unknown> {
-    return { value };
+// 実際の Sui gRPC は Balance<USDC> を u64 値そのもの（文字列）へ畳んで返す。
+// 例: { "balance": "12000000" }。以前のテストは `{ value }` という存在しない
+// 形を仮定していたため、本物の応答で必ず失敗する parse バグを検出できなかった。
+function balance(value: string): string {
+    return value;
 }
 
 function mainPoolJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -92,6 +95,23 @@ describe("pool object parsers", () => {
             balanceUsdc: 8000000n,
             totalReceivedUsdc: 9000000n,
             totalFloorFundedUsdc: 1000000n,
+        });
+    });
+
+    it("also accepts the legacy object-shaped balance { value }", () => {
+        expect(
+            parseMainPoolObject({
+                objectId: MAIN_POOL_ID,
+                type: "0xabc::pools::MainPool",
+                json: mainPoolJson({ balance: { value: "12000000" } }),
+            }),
+        ).toEqual({
+            key: "main",
+            objectId: MAIN_POOL_ID,
+            balanceUsdc: 12000000n,
+            totalReceivedUsdc: 30000000n,
+            totalFloorFundedUsdc: 7000000n,
+            reserveFloorUsdc: 1000000n,
         });
     });
 
