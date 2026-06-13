@@ -5,7 +5,7 @@ import type {
     DashboardDisasterEvent,
     DashboardDonationEvent,
 } from "./dashboard-events";
-import { deriveDashboardViewModel } from "./dashboard-view-model";
+import { deriveDashboardViewModel, deriveFeaturedPools } from "./dashboard-view-model";
 
 const pools: DashboardPools = {
     main: {
@@ -146,5 +146,62 @@ describe("deriveDashboardViewModel", () => {
             affectedCells: "0 cells",
             claimWindow: "Not available",
         });
+    });
+});
+
+// 全残高ゼロのプール。残高が入っていない初期状態の検証に使う。
+const emptyPools: DashboardPools = {
+    main: {
+        key: "main",
+        objectId: `0x${"11".repeat(32)}`,
+        balanceUsdc: 0n,
+        totalReceivedUsdc: 0n,
+        totalFloorFundedUsdc: 0n,
+        reserveFloorUsdc: 0n,
+    },
+    operations: {
+        key: "operations",
+        objectId: `0x${"22".repeat(32)}`,
+        balanceUsdc: 0n,
+        totalReceivedUsdc: 0n,
+        totalSpentUsdc: 0n,
+    },
+    category: {
+        key: "category",
+        objectId: `0x${"33".repeat(32)}`,
+        category: 1,
+        balanceUsdc: 0n,
+        totalReceivedUsdc: 0n,
+        totalFloorFundedUsdc: 0n,
+    },
+};
+
+describe("deriveFeaturedPools", () => {
+    it("returns only the main and earthquake pools with formatted values", () => {
+        const featured = deriveFeaturedPools(pools, "en");
+
+        expect(featured.map((pool) => pool.key)).toEqual(["main", "earthquake"]);
+        expect(featured[0]?.available).toBe("$11.00");
+        expect(featured[0]?.received).toBe("$30.00");
+        expect(featured[0]?.paidOut).toBe("$7.00");
+        expect(featured[1]?.available).toBe("$8.00");
+        expect(featured[1]?.received).toBe("$9.00");
+        expect(featured[1]?.paidOut).toBe("$1.00");
+    });
+
+    it("excludes the operations pool", () => {
+        const featured = deriveFeaturedPools(pools, "en");
+
+        expect(featured.some((pool) => pool.key === "operations")).toBe(false);
+    });
+
+    it("handles all-zero balances without throwing", () => {
+        const featured = deriveFeaturedPools(emptyPools, "en");
+
+        expect(featured.map((pool) => pool.key)).toEqual(["main", "earthquake"]);
+        expect(featured[0]?.available).toBe("$0.00");
+        expect(featured[0]?.percentAvailable).toBe(0);
+        expect(featured[1]?.available).toBe("$0.00");
+        expect(featured[1]?.percentAvailable).toBe(0);
     });
 });

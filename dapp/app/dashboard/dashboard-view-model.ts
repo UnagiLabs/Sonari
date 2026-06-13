@@ -118,6 +118,15 @@ export function deriveDashboardViewModel(input: {
     };
 }
 
+// HOME のトップページ用に、Main と Earthquake の2プールだけを整形して返す。
+// Operations Pool は運営費のため含めない。ダッシュボードと同じ導出ロジックを再利用する。
+export function deriveFeaturedPools(
+    pools: DashboardPools,
+    locale: SonariLocale,
+): readonly DashboardPoolSummary[] {
+    return [deriveMainPool(pools.main, locale), deriveCategoryPool(pools.category, locale)];
+}
+
 function deriveMainPool(
     pool: DashboardPools["main"],
     locale: SonariLocale,
