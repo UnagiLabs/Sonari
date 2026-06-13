@@ -119,4 +119,9 @@ describe("home view featured pools", () => {
         expect(homeViewSource).toContain('status: "loading"');
         expect(homeViewSource).toContain('status: "error"');
     });
+
+    it("メインプール画像を新パスに差し替え、旧パスを残さない", () => {
+        expect(homeViewSource).toContain("/assets/pool_main_support.jpg");
+        expect(homeViewSource).not.toContain("/assets/donation_flood.webp");
+    });
 });

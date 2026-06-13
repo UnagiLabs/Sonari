@@ -51,7 +51,7 @@ const sponsors = [
 // トップページに出す注目プールの静的設定。Operations Pool は運営費のため出さない。
 // 金額は実残高をチェーンから取得して埋める（FeaturedPools 参照）。icon と画像は固定。
 const FEATURED_POOLS: readonly { key: "main" | "earthquake"; icon: IconName; image: string }[] = [
-    { key: "main", icon: "waves", image: "/assets/donation_flood.webp" },
+    { key: "main", icon: "waves", image: "/assets/pool_main_support.jpg" },
     { key: "earthquake", icon: "bolt", image: "/assets/donation_earthquake.png" },
 ];
 
