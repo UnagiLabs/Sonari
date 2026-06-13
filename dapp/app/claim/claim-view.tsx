@@ -4,7 +4,7 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
 import { SiteTopbar } from "../i18n/site-topbar";
 import {
@@ -137,6 +137,14 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const [eligibilityState, setEligibilityState] = useState<EligibilityState>({
         status: "idle",
     });
+    const resetClaimProgress = useCallback(() => {
+        setProofState({ status: "idle" });
+        setTxState({ status: "idle" });
+        setTxAction(null);
+        setWorldIdResponse(null);
+        setCompletedActions(emptyClaimFlowCompleted());
+        setEligibilityState({ status: "idle" });
+    }, []);
     const network = readWalletNetwork();
     const resultView = buildClaimResultView(txState, network);
     const selectedEvent =
@@ -231,23 +239,13 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         }
         if (!campaignState.campaigns.some((event) => event.campaignId === selectedEventId)) {
             setSelectedEventId(campaignState.campaigns[0]?.campaignId ?? "");
-            setProofState({ status: "idle" });
-            setTxState({ status: "idle" });
-            setTxAction(null);
-            setWorldIdResponse(null);
-            setCompletedActions(emptyClaimFlowCompleted());
-            setEligibilityState({ status: "idle" });
+            resetClaimProgress();
         }
-    }, [campaignState, selectedEventId]);
+    }, [campaignState, resetClaimProgress, selectedEventId]);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: passReadNonce is a retry trigger.
     useEffect(() => {
-        setProofState({ status: "idle" });
-        setTxState({ status: "idle" });
-        setTxAction(null);
-        setWorldIdResponse(null);
-        setCompletedActions(emptyClaimFlowCompleted());
-        setEligibilityState({ status: "idle" });
+        resetClaimProgress();
 
         if (account === null) {
             setPassState({ status: "idle" });
@@ -295,7 +293,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [account, claimConfig, client, passReadNonce]);
+    }, [account, claimConfig, client, passReadNonce, resetClaimProgress]);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: eligibilityReadNonce is a retry trigger.
     useEffect(() => {
@@ -633,14 +631,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                                     name="claimEvent"
                                                     onChange={() => {
                                                         setSelectedEventId(event.campaignId);
-                                                        setProofState({ status: "idle" });
-                                                        setTxState({ status: "idle" });
-                                                        setTxAction(null);
-                                                        setWorldIdResponse(null);
-                                                        setCompletedActions(
-                                                            emptyClaimFlowCompleted(),
-                                                        );
-                                                        setEligibilityState({ status: "idle" });
+                                                        resetClaimProgress();
                                                     }}
                                                     type="radio"
                                                     value={event.campaignId}
