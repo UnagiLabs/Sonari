@@ -49,6 +49,8 @@ export interface ClaimCampaignObjectData {
     readonly donationEndMs: string;
     readonly claimEndMs: string;
     readonly currentRound: string;
+    readonly roundFinalizedAtMs: string;
+    readonly roundIntervalMs: string;
 }
 
 export interface ClaimDisasterEventObjectData {
@@ -80,6 +82,8 @@ export interface ClaimCampaignState {
     readonly floorClaimAvailable: boolean;
     readonly payoutFinalized: boolean;
     readonly currentRound: string;
+    readonly roundFinalizedAtMs: string;
+    readonly roundIntervalMs: string;
 }
 
 export interface ClaimApplicationData {
@@ -160,6 +164,8 @@ export function parseCampaignObject(
     const donationEndMs = parseU64String(json.donation_end_ms);
     const claimEndMs = parseU64String(json.claim_end_ms);
     const currentRound = parseU64String(json.current_round);
+    const roundFinalizedAtMs = parseU64String(json.round_finalized_at_ms);
+    const roundIntervalMs = parseCampaignRoundIntervalMs(json.terms);
 
     if (
         disasterEventId === null ||
@@ -169,7 +175,9 @@ export function parseCampaignObject(
         floorBudgetReturned === null ||
         donationEndMs === null ||
         claimEndMs === null ||
-        currentRound === null
+        currentRound === null ||
+        roundFinalizedAtMs === null ||
+        roundIntervalMs === null
     ) {
         return null;
     }
@@ -184,6 +192,8 @@ export function parseCampaignObject(
         donationEndMs,
         claimEndMs,
         currentRound,
+        roundFinalizedAtMs,
+        roundIntervalMs,
     };
 }
 
@@ -293,13 +303,21 @@ export function deriveClaimCampaignState(
         floorClaimAvailable: campaign.censusSet && !campaign.floorBudgetReturned,
         payoutFinalized: BigInt(campaign.currentRound) > 0n,
         currentRound: campaign.currentRound,
+        roundFinalizedAtMs: campaign.roundFinalizedAtMs,
+        roundIntervalMs: campaign.roundIntervalMs,
     };
 }
 
 export function deriveClaimEligibility(input: {
     readonly campaign: Pick<
         ClaimCampaignObjectData,
-        "censusSet" | "floorBudgetReturned" | "claimEndMs" | "currentRound"
+        | "censusSet"
+        | "floorBudgetReturned"
+        | "claimEndMs"
+        | "currentRound"
+        | "donationEndMs"
+        | "roundFinalizedAtMs"
+        | "roundIntervalMs"
     >;
     readonly application: ClaimApplicationData | null;
     readonly payoutClaimed: boolean;
@@ -330,7 +348,7 @@ export function deriveClaimEligibility(input: {
         !floorAlreadyClaimed &&
         input.campaign.censusSet &&
         !input.campaign.floorBudgetReturned;
-    const currentRound = BigInt(input.campaign.currentRound);
+    const currentRound = deriveClaimEffectiveRound(input.campaign, now);
     const verifiedInRound =
         input.application === null ? currentRound : BigInt(input.application.verifiedInRound);
     const willPayPayout =
@@ -352,6 +370,22 @@ export function deriveClaimEligibility(input: {
     };
 }
 
+function deriveClaimEffectiveRound(
+    campaign: Pick<
+        ClaimCampaignObjectData,
+        "currentRound" | "donationEndMs" | "roundFinalizedAtMs" | "roundIntervalMs"
+    >,
+    nowMs: string,
+): bigint {
+    const currentRound = BigInt(campaign.currentRound);
+    const now = BigInt(nowMs);
+    const boundaryReached =
+        currentRound === 0n
+            ? now >= BigInt(campaign.donationEndMs)
+            : now >= BigInt(campaign.roundFinalizedAtMs) + BigInt(campaign.roundIntervalMs);
+    return boundaryReached ? currentRound + 1n : currentRound;
+}
+
 export async function readClaimEligibility(
     client: ClaimCampaignReadClient,
     input: {
@@ -361,26 +395,34 @@ export async function readClaimEligibility(
             | "campaignId"
             | "censusSet"
             | "floorBudgetReturned"
+            | "donationEndMs"
             | "claimEndMs"
             | "currentRound"
+            | "roundFinalizedAtMs"
+            | "roundIntervalMs"
         >;
         readonly passLineageId: string;
         readonly nowMs: string | number;
     },
 ): Promise<ClaimEligibilityReadResult> {
     try {
+        const now = parseU64String(input.nowMs);
+        if (now === null) {
+            return { kind: "error", message: "Claim eligibility inputs are invalid." };
+        }
+        const effectiveRound = deriveClaimEffectiveRound(input.campaign, now);
         const application = await readClaimApplication(
             client,
             input.campaign.campaignId,
             input.passLineageId,
         );
         const payoutClaimed =
-            BigInt(input.campaign.currentRound) >= 1n
+            effectiveRound >= 1n
                 ? await readPayoutClaimed(client, {
                       packageId: input.packageId,
                       campaignId: input.campaign.campaignId,
                       passLineageId: input.passLineageId,
-                      round: input.campaign.currentRound,
+                      round: effectiveRound.toString(),
                   })
                 : false;
         const eligibility = deriveClaimEligibility({
@@ -624,6 +666,13 @@ function parseBytes32Hex(value: unknown): string | null {
 
 function parseBoolean(value: unknown): boolean | null {
     return typeof value === "boolean" ? value : null;
+}
+
+function parseCampaignRoundIntervalMs(value: unknown): string | null {
+    if (!isRecord(value)) {
+        return null;
+    }
+    return parseU64String(value.round_interval_ms);
 }
 
 function parseNonEmptyString(value: unknown): string | null {

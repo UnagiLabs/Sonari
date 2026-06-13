@@ -45,6 +45,7 @@ function campaignObjectJson(overrides: Record<string, unknown> = {}): Record<str
         claim_end_ms: "2000",
         current_round: "1",
         round_finalized_at_ms: "1800",
+        terms: { round_interval_ms: "100" },
         floor_amount_by_band: ["100", "200", "300"],
         round_payout_by_band: ["1000", "2000", "3000"],
         closed: false,
@@ -150,6 +151,8 @@ describe("deriveClaimCampaignState", () => {
             floorClaimAvailable: true,
             payoutFinalized: true,
             currentRound: "1",
+            roundFinalizedAtMs: "1800",
+            roundIntervalMs: "100",
         });
     });
 
@@ -253,6 +256,79 @@ describe("deriveClaimEligibility", () => {
                 application,
                 payoutClaimed: false,
                 nowMs: "2500",
+            }),
+        ).toEqual({
+            kind: "claimable",
+            claimProofKind: "continuing",
+            requiresIdentity: false,
+            willPayFloor: false,
+            willPayPayout: true,
+        });
+    });
+
+    it("allows continuing claim when lazy finalize will open round 1", () => {
+        const campaign = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({
+                census_set: true,
+                floor_budget_returned: false,
+                current_round: "0",
+                donation_end_ms: "1500",
+                round_finalized_at_ms: "0",
+                terms: { round_interval_ms: "100" },
+            }),
+        );
+        const application = parseClaimApplicationObject(
+            claimApplicationJson({
+                verified_in_round: "0",
+                floor_claimed: true,
+            }),
+        );
+        if (campaign === null || application === null) {
+            throw new Error("fixtures must parse");
+        }
+
+        expect(
+            deriveClaimEligibility({
+                campaign,
+                application,
+                payoutClaimed: false,
+                nowMs: "1600",
+            }),
+        ).toEqual({
+            kind: "claimable",
+            claimProofKind: "continuing",
+            requiresIdentity: false,
+            willPayFloor: false,
+            willPayPayout: true,
+        });
+    });
+
+    it("allows continuing claim when lazy finalize will open the next round", () => {
+        const campaign = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({
+                current_round: "1",
+                round_finalized_at_ms: "1800",
+                terms: { round_interval_ms: "100" },
+            }),
+        );
+        const application = parseClaimApplicationObject(
+            claimApplicationJson({
+                verified_in_round: "1",
+                floor_claimed: true,
+            }),
+        );
+        if (campaign === null || application === null) {
+            throw new Error("fixtures must parse");
+        }
+
+        expect(
+            deriveClaimEligibility({
+                campaign,
+                application,
+                payoutClaimed: false,
+                nowMs: "1900",
             }),
         ).toEqual({
             kind: "claimable",
