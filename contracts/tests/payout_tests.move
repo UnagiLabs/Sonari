@@ -769,7 +769,56 @@ fun sweep_residual_rejects_when_sweep_eligible_reset() {
 }
 
 // ---------------------------------------------------------------
-// 17. reject: finalize_round Round 2 too early
+// 17. claim_payout issues ClaimReceipt with kind=PAYOUT
+// ---------------------------------------------------------------
+
+#[test]
+fun claim_payout_issues_claim_receipt_with_payout_kind() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        campaign::fund_campaign_for_testing(&mut c, 1_000_000_000, scenario.ctx());
+        test_scenario::return_shared(c);
+    };
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let (mem_registry, pass) = make_pass_for(MEMBER, &mut scenario);
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+
+        membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
+        membership::destroy_pass_for_testing(pass);
+        test_scenario::return_shared(c);
+    };
+
+    // Verify ClaimReceipt transferred to MEMBER
+    scenario.next_tx(MEMBER);
+    {
+        let receipt = scenario.take_from_sender<campaign::ClaimReceipt>();
+        let (campaign_id_r, pass_lineage_id_r, round_r, band_r, amount_usdc_r, claimed_at_ms_r, kind_r) =
+            campaign::claim_receipt_fields(receipt);
+        assert!(band_r == 1u8);
+        assert!(amount_usdc_r == 150_000_000);
+        assert!(round_r == 1);
+        assert!(claimed_at_ms_r == DONATION_END_MS);
+        assert!(kind_r == campaign::claim_kind_payout());
+        let _ = campaign_id_r;
+        let _ = pass_lineage_id_r;
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 18. reject: finalize_round Round 2 too early
 // ---------------------------------------------------------------
 
 #[test, expected_failure(abort_code = campaign::ERoundTooEarly)]

@@ -20,6 +20,8 @@ use usdc::usdc::USDC;
 
 const VERSION: u64 = 1;
 const HAZARD_TYPE_EARTHQUAKE: u8 = 1;
+const CLAIM_KIND_FLOOR: u8 = 0;
+const CLAIM_KIND_PAYOUT: u8 = 1;
 const BAND_COUNT: u64 = 3;
 const BAND_1_TARGET_USDC: u64 = 50_000_000;
 const BAND_2_TARGET_USDC: u64 = 150_000_000;
@@ -145,13 +147,15 @@ public struct PayoutKey has copy, drop, store {
     round: u64,
 }
 
-public struct FloorReceipt has key {
+public struct ClaimReceipt has key {
     id: UID,
     campaign_id: ID,
     pass_lineage_id: ID,
+    round: u64,
     band: u8,
     amount_usdc: u64,
     claimed_at_ms: u64,
+    kind: u8,
 }
 
 public struct FloorCensusSet has copy, drop {
@@ -195,15 +199,7 @@ public struct ClaimVerified has copy, drop {
     verifier: address,
 }
 
-public struct PayoutReceipt has key {
-    id: UID,
-    campaign_id: ID,
-    pass_lineage_id: ID,
-    round: u64,
-    band: u8,
-    amount_usdc: u64,
-    claimed_at_ms: u64,
-}
+// PayoutReceipt は ClaimReceipt に統合された（kind=CLAIM_KIND_PAYOUT）
 
 public struct RoundFinalized has copy, drop {
     campaign_id: ID,
@@ -616,6 +612,65 @@ public(package) fun set_claim_verified(
     *count = *count + 1;
 }
 
+// ---------------------------------------------------------------
+// pay_claim: 床払い・本払い共通の「コイン送出 + ClaimReceipt 発行 + イベント発行」
+// ---------------------------------------------------------------
+
+fun pay_claim(
+    campaign: &mut Campaign,
+    kind: u8,
+    amount: u64,
+    round: u64,
+    band: u8,
+    pass_lineage_id: ID,
+    recipient: address,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    let campaign_id = object::id(campaign);
+
+    // kind に応じて balance を取り出す
+    let coin = if (kind == CLAIM_KIND_FLOOR) {
+        coin::from_balance(campaign.floor_balance.split(amount), ctx)
+    } else {
+        coin::from_balance(campaign.balance.split(amount), ctx)
+    };
+    transfer::public_transfer(coin, recipient);
+
+    let receipt = ClaimReceipt {
+        id: object::new(ctx),
+        campaign_id,
+        pass_lineage_id,
+        round,
+        band,
+        amount_usdc: amount,
+        claimed_at_ms: now_ms,
+        kind,
+    };
+    transfer::transfer(receipt, recipient);
+
+    // イベントは種別に応じて従来のまま emit する（dapp が型文字列を購読しているため変更禁止）
+    if (kind == CLAIM_KIND_FLOOR) {
+        event::emit(FloorPaid {
+            campaign_id,
+            pass_lineage_id,
+            band,
+            amount_usdc: amount,
+            recipient,
+            paid_at_ms: now_ms,
+        });
+    } else {
+        event::emit(PayoutClaimed {
+            campaign_id,
+            round,
+            pass_lineage_id,
+            band,
+            amount_usdc: amount,
+            recipient,
+        });
+    };
+}
+
 public(package) fun claim_floor_payment(
     campaign: &mut Campaign,
     identity_registry: &IdentityRegistry,
@@ -664,29 +719,8 @@ public(package) fun claim_floor_payment(
     campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
 
     let recipient = membership::membership_pass_owner(pass);
-    let campaign_id = object::id(campaign);
 
-    let floor_coin = coin::from_balance(campaign.floor_balance.split(amount), ctx);
-    transfer::public_transfer(floor_coin, recipient);
-
-    let receipt = FloorReceipt {
-        id: object::new(ctx),
-        campaign_id,
-        pass_lineage_id,
-        band,
-        amount_usdc: amount,
-        claimed_at_ms: now_ms,
-    };
-    transfer::transfer(receipt, recipient);
-
-    event::emit(FloorPaid {
-        campaign_id,
-        pass_lineage_id,
-        band,
-        amount_usdc: amount,
-        recipient,
-        paid_at_ms: now_ms,
-    });
+    pay_claim(campaign, CLAIM_KIND_FLOOR, amount, 0, band, pass_lineage_id, recipient, now_ms, ctx);
 }
 
 // ---------------------------------------------------------------
@@ -1001,30 +1035,9 @@ public(package) fun claim_payout_v2(
     campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
 
     let recipient = membership::membership_pass_owner(pass);
-    let campaign_id = object::id(campaign);
+    let round = campaign.current_round;
 
-    let payout_coin = coin::from_balance(campaign.balance.split(amount), ctx);
-    transfer::public_transfer(payout_coin, recipient);
-
-    let receipt = PayoutReceipt {
-        id: object::new(ctx),
-        campaign_id,
-        pass_lineage_id,
-        round: campaign.current_round,
-        band,
-        amount_usdc: amount,
-        claimed_at_ms: now_ms,
-    };
-    transfer::transfer(receipt, recipient);
-
-    event::emit(PayoutClaimed {
-        campaign_id,
-        round: campaign.current_round,
-        pass_lineage_id,
-        band,
-        amount_usdc: amount,
-        recipient,
-    });
+    pay_claim(campaign, CLAIM_KIND_PAYOUT, amount, round, band, pass_lineage_id, recipient, now_ms, ctx);
 }
 
 public(package) fun sweep_residual_v2(
@@ -1271,13 +1284,19 @@ public fun floor_budget_returned_event_fields(
 }
 
 #[test_only]
-public fun floor_receipt_fields(
-    receipt: FloorReceipt,
-): (ID, ID, u8, u64, u64) {
-    let FloorReceipt { id, campaign_id, pass_lineage_id, band, amount_usdc, claimed_at_ms } = receipt;
+public fun claim_receipt_fields(
+    receipt: ClaimReceipt,
+): (ID, ID, u64, u8, u64, u64, u8) {
+    let ClaimReceipt { id, campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms, kind } = receipt;
     id.delete();
-    (campaign_id, pass_lineage_id, band, amount_usdc, claimed_at_ms)
+    (campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms, kind)
 }
+
+#[test_only]
+public fun claim_kind_floor(): u8 { CLAIM_KIND_FLOOR }
+
+#[test_only]
+public fun claim_kind_payout(): u8 { CLAIM_KIND_PAYOUT }
 
 #[test_only]
 public fun set_donation_end_ms_for_testing(c: &mut Campaign, donation_end_ms: u64) {
@@ -1319,14 +1338,7 @@ public fun claim_verified_event_fields(
     (campaign_id, pass_lineage_id, band, verified_at_ms, verifier)
 }
 
-#[test_only]
-public fun payout_receipt_fields(
-    receipt: PayoutReceipt,
-): (ID, ID, u64, u8, u64, u64) {
-    let PayoutReceipt { id, campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms } = receipt;
-    id.delete();
-    (campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms)
-}
+// payout_receipt_fields は ClaimReceipt 統合により claim_receipt_fields に置き換えられた
 
 #[test_only]
 public fun round_finalized_event_fields(

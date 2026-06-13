@@ -730,7 +730,79 @@ fun floor_census_from_different_disaster_event_is_rejected() {
 }
 
 // ---------------------------------------------------------------
-// 13. return_floor_budget twice aborts EFloorBudgetAlreadyReturned
+// 13. claim_floor issues ClaimReceipt with kind=FLOOR
+// ---------------------------------------------------------------
+
+#[test]
+fun claim_floor_issues_claim_receipt_with_floor_kind() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario, EVENT_UID);
+    fund_category_pool(&mut scenario, 10_000_000_000);
+    fund_main_pool(&mut scenario, 200_000_000_000);
+
+    // Set census: 1 member in band 1
+    scenario.next_tx(ADMIN);
+    {
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let result = make_census_result(vector[1, 0, 0]);
+        campaign::apply_floor_census(
+            &mut c, &result, EVENT_UID, EVENT_REVISION, CELLS_ROOT, &mut cat_pool, &mut main_pool, NOW_MS, scenario.ctx(),
+        );
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
+        test_scenario::return_shared(c);
+    };
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let (mut id_registry, mem_registry, pass) = setup_verified_member(&mut scenario);
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
+
+        campaign::claim_floor_payment(
+            &mut c,
+            &id_registry,
+            &mem_registry,
+            &pass,
+            identity_registry::provider_kyc(),
+            KYC_DUPLICATE_KEY,
+            NOW_MS,
+            scenario.ctx(),
+        );
+
+        test_scenario::return_shared(c);
+        identity_registry::remove_binding_for_testing(
+            &mut id_registry,
+            identity_registry::provider_kyc(),
+            KYC_DUPLICATE_KEY,
+        );
+        identity_registry::destroy_identity_registry_for_testing(id_registry);
+        membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
+        membership::destroy_pass_for_testing(pass);
+    };
+
+    // Verify ClaimReceipt transferred to MEMBER
+    scenario.next_tx(MEMBER);
+    {
+        let receipt = scenario.take_from_sender<campaign::ClaimReceipt>();
+        let (campaign_id_r, pass_lineage_id_r, round_r, band_r, amount_usdc_r, claimed_at_ms_r, kind_r) =
+            campaign::claim_receipt_fields(receipt);
+        assert!(band_r == 1u8);
+        assert!(amount_usdc_r == 25_000_000);
+        assert!(claimed_at_ms_r == NOW_MS);
+        assert!(round_r == 0);
+        assert!(kind_r == campaign::claim_kind_floor());
+        let _ = campaign_id_r;
+        let _ = pass_lineage_id_r;
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 14. return_floor_budget twice aborts EFloorBudgetAlreadyReturned
 // ---------------------------------------------------------------
 
 #[test, expected_failure(abort_code = campaign::EFloorBudgetAlreadyReturned)]
