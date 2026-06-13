@@ -30,10 +30,10 @@ const ConnectWalletButtonDynamic = dynamic(
 );
 
 // 各ページが import する公開エントリ。
-// ConnectWalletButton（内部の WalletStatus を含む）と loading fallback の両方が
-// wallet 文言を必要とするため、WalletI18nProvider で両者をまとめて包む。
+// ConnectWalletButton と loading fallback の両方が wallet 文言を必要とするため、
+// WalletI18nProvider で両者をまとめて包む。
 // home / claim / donate / dashboard は NextIntlClientProvider を持たないため、
-// この provider が無いと WalletStatus の useTranslations が実行時に throw する。
+// この provider が無いと fallback の useTranslations が実行時に throw する。
 export function WalletConnect() {
     return (
         <WalletI18nProvider>

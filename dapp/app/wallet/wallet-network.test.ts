@@ -3,6 +3,7 @@ import {
     isAllowedNetwork,
     resolveGrpcBaseUrl,
     resolveNetwork,
+    shouldShowTestnetBadge,
     shouldWarnNetworkMismatch,
 } from "./wallet-network";
 
@@ -101,6 +102,40 @@ describe("shouldWarnNetworkMismatch", () => {
 
     it("returns false when reconnecting even if network is mainnet", () => {
         expect(shouldWarnNetworkMismatch("reconnecting", "mainnet")).toBe(false);
+    });
+});
+
+describe("shouldShowTestnetBadge", () => {
+    it("returns true only when connected to testnet", () => {
+        expect(shouldShowTestnetBadge("connected", "testnet")).toBe(true);
+    });
+
+    it("returns false when disconnected even if network is testnet", () => {
+        expect(shouldShowTestnetBadge("disconnected", "testnet")).toBe(false);
+    });
+
+    it("returns false when connected to localnet", () => {
+        expect(shouldShowTestnetBadge("connected", "localnet")).toBe(false);
+    });
+
+    it("returns false when connected to mainnet", () => {
+        expect(shouldShowTestnetBadge("connected", "mainnet")).toBe(false);
+    });
+
+    it("trims surrounding whitespace before checking testnet", () => {
+        expect(shouldShowTestnetBadge("connected", " testnet ")).toBe(true);
+    });
+
+    it("returns false when connected but network is empty", () => {
+        expect(shouldShowTestnetBadge("connected", "")).toBe(false);
+    });
+
+    it("returns false when connected but network is null", () => {
+        expect(shouldShowTestnetBadge("connected", null)).toBe(false);
+    });
+
+    it("returns false when connected but network is undefined", () => {
+        expect(shouldShowTestnetBadge("connected", undefined)).toBe(false);
     });
 });
 

@@ -38,6 +38,16 @@ export function shouldWarnNetworkMismatch(
     return !isAllowedNetwork(trimmed);
 }
 
+export function shouldShowTestnetBadge(
+    status: string,
+    network: string | null | undefined,
+): boolean {
+    if (status !== "connected") {
+        return false;
+    }
+    return (network ?? "").trim() === "testnet";
+}
+
 export function readWalletNetwork(
     raw: string | undefined = process.env.NEXT_PUBLIC_SUI_NETWORK,
 ): WalletNetwork {
