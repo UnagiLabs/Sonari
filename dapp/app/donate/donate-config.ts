@@ -1,49 +1,58 @@
+// USDC は Sui 上で一意に決まる coin type。contracts/Move.toml の addr_subst
+// (usdc = 0xdba34672…) と一致させる cross-language contract。publish のたびに
+// 変わる値ではないため、環境変数ではなくコード定数として持つ。
+// 値を変えるときは Move.toml の addr_subst と同時に更新する。
+export const SONARI_USDC_TYPE =
+    "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC";
+
+// 環境変数から読むのは packageID だけにする。pause_state / pool は packageID 起点で
+// genesis イベントから導出し、usdcType は上記の定数を使う。
+export type DonateEnvConfig = {
+    readonly fundingPackageId: string;
+};
+
+// packageID 起点で導出する寄付先オブジェクト群。
+export type DonatePoolObjects = {
+    readonly donationPauseStateId: string;
+    readonly mainPoolId: string;
+    readonly operationsPoolId: string;
+};
+
 export type DonateConfig = {
     readonly fundingPackageId: string;
     readonly donationPauseStateId: string;
     readonly mainPoolId: string;
     readonly operationsPoolId: string;
-    readonly categoryRegistryId: string;
     readonly usdcType: string;
 };
 
-type DonateConfigOkResult = {
+type DonateEnvConfigOkResult = {
     readonly kind: "ok";
-    readonly config: DonateConfig;
+    readonly config: DonateEnvConfig;
 };
 
-type DonateConfigMissingResult = {
+type DonateEnvConfigMissingResult = {
     readonly kind: "missing_keys";
     readonly missingKeys: readonly string[];
 };
 
-export type DonateConfigResult = DonateConfigOkResult | DonateConfigMissingResult;
+export type DonateEnvConfigResult = DonateEnvConfigOkResult | DonateEnvConfigMissingResult;
 
-const DONATE_CONFIG_ENTRIES = [
+const DONATE_ENV_ENTRIES = [
     ["NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID", "fundingPackageId"],
-    ["NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID", "donationPauseStateId"],
-    ["NEXT_PUBLIC_SONARI_MAIN_POOL_ID", "mainPoolId"],
-    ["NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID", "operationsPoolId"],
-    ["NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID", "categoryRegistryId"],
-    ["NEXT_PUBLIC_SONARI_USDC_TYPE", "usdcType"],
 ] as const;
 
-type DonateConfigEnvKey = (typeof DONATE_CONFIG_ENTRIES)[number][0];
+type DonateEnvKey = (typeof DONATE_ENV_ENTRIES)[number][0];
 
-type DonateConfigEnv = Readonly<Record<DonateConfigEnvKey, string | undefined>>;
+type DonateConfigEnv = Readonly<Record<DonateEnvKey, string | undefined>>;
 
-export function readDonateConfigFromEnv(env: DonateConfigEnv): DonateConfigResult {
-    const values: Record<keyof DonateConfig, string> = {
+export function readDonateEnvConfigFromEnv(env: DonateConfigEnv): DonateEnvConfigResult {
+    const values: Record<keyof DonateEnvConfig, string> = {
         fundingPackageId: "",
-        donationPauseStateId: "",
-        mainPoolId: "",
-        operationsPoolId: "",
-        categoryRegistryId: "",
-        usdcType: "",
     };
     const missingKeys: string[] = [];
 
-    for (const [key, target] of DONATE_CONFIG_ENTRIES) {
+    for (const [key, target] of DONATE_ENV_ENTRIES) {
         const value = (env[key] ?? "").trim();
         if (value.length === 0) {
             missingKeys.push(key);
@@ -65,16 +74,22 @@ export function readDonateConfigFromEnv(env: DonateConfigEnv): DonateConfigResul
     };
 }
 
-export function readDonateConfig(): DonateConfigResult {
-    return readDonateConfigFromEnv({
+export function readDonateEnvConfig(): DonateEnvConfigResult {
+    return readDonateEnvConfigFromEnv({
         NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID,
-        NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID:
-            process.env.NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID,
-        NEXT_PUBLIC_SONARI_MAIN_POOL_ID: process.env.NEXT_PUBLIC_SONARI_MAIN_POOL_ID,
-        NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID:
-            process.env.NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID,
-        NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID:
-            process.env.NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID,
-        NEXT_PUBLIC_SONARI_USDC_TYPE: process.env.NEXT_PUBLIC_SONARI_USDC_TYPE,
     });
+}
+
+// env 由来の packageID と、導出した pool / pause を合成して完全な設定にする pure 関数。
+export function combineDonateConfig(
+    env: DonateEnvConfig,
+    pools: DonatePoolObjects,
+): DonateConfig {
+    return {
+        fundingPackageId: env.fundingPackageId,
+        donationPauseStateId: pools.donationPauseStateId,
+        mainPoolId: pools.mainPoolId,
+        operationsPoolId: pools.operationsPoolId,
+        usdcType: SONARI_USDC_TYPE,
+    };
 }

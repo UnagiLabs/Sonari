@@ -1,46 +1,59 @@
 import { describe, expect, it } from "vitest";
-import { readDonateConfigFromEnv } from "./donate-config";
+import {
+    combineDonateConfig,
+    readDonateEnvConfigFromEnv,
+    SONARI_USDC_TYPE,
+} from "./donate-config";
 
-describe("readDonateConfig", () => {
-    it("returns ok when all required values are present", () => {
-        const result = readDonateConfigFromEnv({
-            NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: "0xfunding",
-            NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID: " 0xpause ",
-            NEXT_PUBLIC_SONARI_MAIN_POOL_ID: "0xmain",
-            NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID: "0xoperations",
-            NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID: " 0xcategory ",
-            NEXT_PUBLIC_SONARI_USDC_TYPE: "0xusdc",
+describe("readDonateEnvConfigFromEnv", () => {
+    it("returns ok when the funding package id is present", () => {
+        const result = readDonateEnvConfigFromEnv({
+            NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: " 0xfunding ",
         });
 
         expect(result).toEqual({
             kind: "ok",
             config: {
                 fundingPackageId: "0xfunding",
-                donationPauseStateId: "0xpause",
-                mainPoolId: "0xmain",
-                operationsPoolId: "0xoperations",
-                categoryRegistryId: "0xcategory",
-                usdcType: "0xusdc",
             },
         });
     });
 
-    it("returns missing_keys when one or more required keys are missing", () => {
-        const result = readDonateConfigFromEnv({
+    it("returns missing_keys when the funding package id is missing", () => {
+        const result = readDonateEnvConfigFromEnv({
             NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: "",
-            NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID: undefined,
-            NEXT_PUBLIC_SONARI_MAIN_POOL_ID: "0xmain",
-            NEXT_PUBLIC_SONARI_USDC_TYPE: "0xusdc",
         });
 
         expect(result).toEqual({
             kind: "missing_keys",
-            missingKeys: [
-                "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID",
-                "NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID",
-                "NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID",
-                "NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID",
-            ],
+            missingKeys: ["NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID"],
         });
+    });
+});
+
+describe("combineDonateConfig", () => {
+    it("merges env config, derived pools, and the usdc constant", () => {
+        const config = combineDonateConfig(
+            { fundingPackageId: "0xfunding" },
+            {
+                donationPauseStateId: "0xpause",
+                mainPoolId: "0xmain",
+                operationsPoolId: "0xoperations",
+            },
+        );
+
+        expect(config).toEqual({
+            fundingPackageId: "0xfunding",
+            donationPauseStateId: "0xpause",
+            mainPoolId: "0xmain",
+            operationsPoolId: "0xoperations",
+            usdcType: SONARI_USDC_TYPE,
+        });
+    });
+
+    it("uses the canonical USDC coin type from Move.toml addr_subst", () => {
+        expect(SONARI_USDC_TYPE).toBe(
+            "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+        );
     });
 });
