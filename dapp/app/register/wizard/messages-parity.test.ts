@@ -55,6 +55,13 @@ const removedHomeStatsKeys = [
     "home.stats.verifiedEvents.meta",
 ] as const;
 
+const removedSupportersKeys = [
+    "home.supporters.eyebrow",
+    "home.supporters.title",
+    "home.supporters.individuals",
+    "home.supporters.corporate",
+] as const;
+
 describe("messages catalog parity", () => {
     it("en と ja のキー集合が完全に一致する", () => {
         expect([...ja.keys()].sort()).toEqual([...en.keys()].sort());
@@ -111,6 +118,13 @@ describe("messages catalog parity", () => {
 
     it("トップページのダミー指標で使っていた文言キーを残さない", () => {
         for (const key of removedHomeStatsKeys) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
+    });
+
+    it("HOME の Top supporters で使っていた文言キーを残さない", () => {
+        for (const key of removedSupportersKeys) {
             expect(en.has(key), key).toBe(false);
             expect(ja.has(key), key).toBe(false);
         }
