@@ -334,7 +334,8 @@ function SectionHeader({
 
 function SponsorMarquee() {
     // 7社を1行で流す。シームレスにループさせるため同じ並びを2コピー複製する。
-    // 各ロゴはリンクにしない。画像が読み込めないときは alt の社名が表示される。
+    // 各社はロゴ画像と社名を横並びで表示する。リンクはなし。
+    // 画像が読み込めないときは alt の社名が表示される。
     return (
         <div className="marquee-wrap">
             <div className="marquee">
@@ -353,6 +354,7 @@ function SponsorMarquee() {
                                     src={sponsor.logo}
                                 />
                             </span>
+                            <span>{sponsor.name}</span>
                         </div>
                     )),
                 )}
