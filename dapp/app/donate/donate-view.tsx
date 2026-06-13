@@ -105,6 +105,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 combineDonateConfig(
                     { fundingPackageId },
                     { donationPauseStateId, mainPoolId, operationsPoolId },
+                    network,
                 ),
             );
         })();
