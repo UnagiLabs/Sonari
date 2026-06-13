@@ -120,6 +120,25 @@ export interface BuildClaimPayoutTransactionInput {
     readonly objects: ClaimTransactionObjectConfig;
 }
 
+export type ClaimProofInput =
+    | {
+          readonly kind: "initial";
+          readonly proof: AffectedCellsProof;
+          readonly context: ClaimProofContext;
+      }
+    | {
+          readonly kind: "continuing";
+      };
+
+export interface BuildClaimTransactionInput {
+    readonly senderAddress?: string | undefined;
+    readonly packageId: string;
+    readonly objects: ClaimTransactionObjectConfig;
+    readonly identityProvider: number;
+    readonly duplicateKeyHash: string;
+    readonly claimProof: ClaimProofInput;
+}
+
 export interface ClaimTransactionResult {
     readonly transaction: Transaction;
 }
@@ -253,6 +272,38 @@ export function buildAffectedCellProofMoveArgs(
             : "new_affected_cell_proof_step_right",
         siblingHashBytes: hexToByteArray(step.sibling_hash),
     }));
+}
+
+export function buildClaimTransaction(
+    input: BuildClaimTransactionInput,
+): ClaimTransactionResult {
+    const tx = newClaimTransaction(input.senderAddress);
+    const affectedCellLeafType = `${input.packageId}::affected_cell::AffectedCellLeaf`;
+    const proofStepType = `${input.packageId}::affected_cell::ProofStep`;
+
+    const { leafOption, proofVector } =
+        input.claimProof.kind === "initial"
+            ? buildInitialClaimProofInputs(tx, input.packageId, input.claimProof)
+            : buildContinuingClaimProofInputs(tx, affectedCellLeafType, proofStepType);
+
+    tx.moveCall({
+        target: `${input.packageId}::accessor::claim`,
+        arguments: [
+            tx.object(input.objects.pauseState),
+            tx.object(input.objects.campaign),
+            tx.object(input.objects.disasterEvent),
+            tx.object(input.objects.identityRegistry),
+            tx.object(input.objects.membershipRegistry),
+            tx.object(input.objects.pass),
+            tx.pure.u8(input.identityProvider),
+            duplicateKeyHashArg(tx, input.duplicateKeyHash),
+            leafOption,
+            proofVector,
+            tx.object(input.objects.clock ?? SUI_CLOCK_OBJECT_ID),
+        ],
+    });
+
+    return { transaction: tx };
 }
 
 export function buildClaimFloorTransaction(
@@ -390,6 +441,39 @@ function buildAffectedCellMoveInputs(
     });
 
     return { leaf, leafArgs, proof: proofVector, proofArgs };
+}
+
+function buildInitialClaimProofInputs(
+    tx: Transaction,
+    packageId: string,
+    input: Extract<ClaimProofInput, { readonly kind: "initial" }>,
+) {
+    assertProofMatchesClaimContext(input.proof, input.context);
+    const { leaf, proof } = buildAffectedCellMoveInputs(tx, packageId, input.proof);
+    const affectedCellLeafType = `${packageId}::affected_cell::AffectedCellLeaf`;
+    const leafOption = tx.moveCall({
+        target: "0x1::option::some",
+        typeArguments: [affectedCellLeafType],
+        arguments: [leaf],
+    });
+    return { leafOption, proofVector: proof };
+}
+
+function buildContinuingClaimProofInputs(
+    tx: Transaction,
+    affectedCellLeafType: string,
+    proofStepType: string,
+) {
+    const leafOption = tx.moveCall({
+        target: "0x1::option::none",
+        typeArguments: [affectedCellLeafType],
+        arguments: [],
+    });
+    const proofVector = tx.makeMoveVec({
+        type: proofStepType,
+        elements: [],
+    });
+    return { leafOption, proofVector };
 }
 
 function duplicateKeyHashArg(tx: Transaction, duplicateKeyHash: string) {
