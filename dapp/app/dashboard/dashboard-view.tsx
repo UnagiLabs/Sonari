@@ -138,7 +138,7 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
         <>
             <div className="watercolor-bg" />
             <div className="app">
-                <SiteTopbar active="dashboard" locale={locale} showDonateCta showWallet={false} />
+                <SiteTopbar active="dashboard" locale={locale} />
 
                 <main className="page dashboard-page">
                     <header className="dashboard-hero">

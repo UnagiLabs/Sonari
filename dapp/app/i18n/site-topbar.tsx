@@ -7,32 +7,33 @@ import { LocaleSwitcher } from "../register/wizard/locale-switcher";
 import { NetworkMismatchBanner } from "../wallet/network-mismatch-banner";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { SiteMobileMenu } from "./site-mobile-menu";
-import { NAV_DEFS, type NavKey, resolveNavItems } from "./topbar-nav";
+import { NAV_DEFS, type NavKey, type ResolvedNavItem, resolveNavItems } from "./topbar-nav";
 
-// 全ページ共通の topbar。ナビ・言語切替・wallet 接続をまとめ、各ページは
-// active なナビ項目と右側アクション（寄付 CTA / wallet）の有無を props で渡す。
-// 表示する nav 項目はページごとに異なるため items で並びを渡せる（省略時は
-// 既定 6 項目）。文言は topbar.nav.* カタログから引く。
+// 全ページ共通の topbar（issue #330）。ナビ・言語切替・wallet 接続をまとめ、
+// すべてのページが同じヘッダーを使う。プライマリナビは全ページ同一の共通項目で、
+// ページごとの出し分けはしない。My Page はアカウント導線として右側に固定し、
+// wallet 接続ボタンも常時表示する。各ページは active なナビ項目だけを渡す。
+// 文言は topbar.nav.* カタログから引く。
+
+// My Page はプライマリナビとは性質が違うため、右クラスタに固定する。
+// モバイルメニューにも載せるため、href は共通ナビと同じ NAV_DEFS から引く。
+const MYPAGE_ITEM: ResolvedNavItem = { key: "mypage", href: NAV_DEFS.mypage.href };
 
 export function SiteTopbar({
     active,
     locale,
-    items,
-    showDonateCta = false,
-    showWallet = true,
 }: {
     readonly active: NavKey;
     readonly locale: SonariLocale;
-    readonly items?: readonly NavKey[];
-    readonly showDonateCta?: boolean;
-    readonly showWallet?: boolean;
 }) {
     const t = useTranslations("topbar");
-    const navItems = resolveNavItems(items);
+    const navItems = resolveNavItems();
     // ハンバーガーメニューは翻訳に依存しないため、ここで全 nav キーの文言を解決して渡す。
     const navLabels = Object.fromEntries(
         (Object.keys(NAV_DEFS) as NavKey[]).map((key) => [key, t(`nav.${key}`)]),
     ) as Record<NavKey, string>;
+    // モバイルメニューでもマイページへ行けるよう、共通ナビの末尾に My Page を足す。
+    const mobileItems: readonly ResolvedNavItem[] = [...navItems, MYPAGE_ITEM];
 
     return (
         <>
@@ -62,23 +63,23 @@ export function SiteTopbar({
                         ))}
                     </nav>
                     <div className="topbar-spacer" />
-                    {showDonateCta ? (
-                        <a className="wallet-btn" href="/donate">
-                            <span className="wallet-dot" />
-                            {t("donateCta")}
-                        </a>
-                    ) : null}
+                    <a
+                        className={`nav-item topbar-mypage${active === "mypage" ? " active" : ""}`}
+                        href={MYPAGE_ITEM.href}
+                    >
+                        {t("nav.mypage")}
+                    </a>
                     <LocaleSwitcher current={locale} />
-                    {showWallet ? <WalletConnect /> : null}
+                    <WalletConnect />
                     <SiteMobileMenu
                         active={active}
-                        items={navItems}
+                        items={mobileItems}
                         menuLabel={t("menuOpenAria")}
                         navLabels={navLabels}
                     />
                 </div>
             </header>
-            {showWallet ? <NetworkMismatchBanner /> : null}
+            <NetworkMismatchBanner />
         </>
     );
 }

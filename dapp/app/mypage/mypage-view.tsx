@@ -95,7 +95,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
     return (
         <div className="mypage">
             {/* mypage の nav は home / register / mypage の 3 項目（旧インライン実装と同一） */}
-            <SiteTopbar active="mypage" items={["home", "register", "mypage"]} locale={locale} />
+            <SiteTopbar active="mypage" locale={locale} />
 
             <section aria-labelledby="mypage-title" className="wizard-step-content">
                 <header className="wizard-heading">

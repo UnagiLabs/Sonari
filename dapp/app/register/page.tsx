@@ -25,12 +25,7 @@ export default async function RegisterPage() {
         <RegisterIntlProvider locale={locale} messages={messagesByLocale[locale]}>
             <div className="watercolor-bg" />
             <div className="app">
-                {/* register の nav は leaderboard なしの 5 項目（旧専用 topbar と同一） */}
-                <SiteTopbar
-                    active="register"
-                    items={["home", "donate", "dashboard", "register", "claim"]}
-                    locale={locale}
-                />
+                <SiteTopbar active="register" locale={locale} />
                 <main className="page wizard-page">
                     {/* useSearchParams を使う client コンポーネントは Suspense 境界が必須 */}
                     <Suspense fallback={null}>

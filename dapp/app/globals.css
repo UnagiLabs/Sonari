@@ -319,25 +319,6 @@ h4 {
   box-shadow: var(--shadow-md);
 }
 
-.wallet-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.15s;
-}
-
-.wallet-btn:hover {
-  border-color: var(--sage-400);
-  background: var(--sage-50);
-}
-
 .wallet-dot {
   width: 8px;
   height: 8px;
@@ -2804,6 +2785,11 @@ h4 {
     display: none;
   }
 
+  /* 狭い画面では My Page 固定リンクもハンバーガーメニューに集約する。 */
+  .topbar-mypage {
+    display: none;
+  }
+
   .nav-menu {
     display: block;
   }
@@ -2888,15 +2874,6 @@ h4 {
 
   h2 {
     font-size: 32px;
-  }
-
-  /*
-   * 寄付 CTA はメニュー内「寄付」リンクで代替できるため隠す。
-   * 一方でウォレット接続ボタンは隠さず、狭い画面でも接続できるようにする
-   * （issue #282 完了条件 4）。
-   */
-  .wallet-btn {
-    display: none;
   }
 
   .hero-ctas .btn,
