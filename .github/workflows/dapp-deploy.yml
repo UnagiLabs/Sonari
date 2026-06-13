@@ -147,11 +147,9 @@ jobs:
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
           NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
           NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: ${{ vars.SONARI_FUNDING_PACKAGE_ID }}
-          NEXT_PUBLIC_SONARI_DONATION_PAUSE_STATE_ID: ${{ vars.SONARI_DONATION_PAUSE_STATE_ID }}
-          NEXT_PUBLIC_SONARI_MAIN_POOL_ID: ${{ vars.SONARI_MAIN_POOL_ID }}
-          NEXT_PUBLIC_SONARI_OPERATIONS_POOL_ID: ${{ vars.SONARI_OPERATIONS_POOL_ID }}
-          NEXT_PUBLIC_SONARI_CATEGORY_REGISTRY_ID: ${{ vars.SONARI_CATEGORY_REGISTRY_ID }}
-          NEXT_PUBLIC_SONARI_USDC_TYPE: ${{ vars.SONARI_USDC_TYPE }}
+          # pause_state / pool / category_registry は packageID 起点で
+          # admin::GenesisObjectCreated イベントから dapp が導出するため env では渡さない。
+          # USDC の coin type は Sui 上で一意に決まる定数のため dapp/app/donate/donate-config.ts に持つ。
           # dapp 固有（environment-level Variables）。
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}
