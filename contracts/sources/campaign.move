@@ -20,6 +20,8 @@ use usdc::usdc::USDC;
 
 const VERSION: u64 = 1;
 const HAZARD_TYPE_EARTHQUAKE: u8 = 1;
+const CLAIM_KIND_FLOOR: u8 = 0;
+const CLAIM_KIND_PAYOUT: u8 = 1;
 const BAND_COUNT: u64 = 3;
 const BAND_1_TARGET_USDC: u64 = 50_000_000;
 const BAND_2_TARGET_USDC: u64 = 150_000_000;
@@ -49,8 +51,7 @@ const EClaimBandTooLow: u64 = 6;
 const EAccountCreatedAfterCutoff: u64 = 7;
 const EHomeCellRegisteredAfterCutoff: u64 = 8;
 const EResidenceCellMismatch: u64 = 9;
-const EDuplicateApplication: u64 = 10;
-const EClaimAlreadyVerified: u64 = 11;
+// 10 (EDuplicateApplication) / 11 (EClaimAlreadyVerified) は claim 統合で不要になり削除
 const EClaimAlreadyExcluded: u64 = 12;
 const ECampaignClosed: u64 = 13;
 const EFloorCensusAlreadySet: u64 = 14;
@@ -61,17 +62,18 @@ const ECampaignCategoryPoolMismatch: u64 = 18;
 const EFloorCensusBindingMismatch: u64 = 19;
 const EClaimApplicationNotFound: u64 = 20;
 const EClaimNotVerified: u64 = 21;
-const EFloorAlreadyClaimed: u64 = 22;
+// 22 (EFloorAlreadyClaimed) は claim 統合で ENothingToClaim に集約され削除
 const EClaimExcluded: u64 = 23;
 const EFloorCensusAfterDonationEnd: u64 = 24;
 const EAlreadyClosed: u64 = 25;
-const ERoundNotStarted: u64 = 26;
+// 26 (ERoundNotStarted) は claim 統合で ENothingToClaim に集約され削除
 const ERoundTooEarly: u64 = 27;
-const ERoundNotEligible: u64 = 28;
-const EDuplicatePayout: u64 = 29;
+// 28 (ERoundNotEligible) / 29 (EDuplicatePayout) は claim 統合で ENothingToClaim に集約され削除
 const ESweepNotEligible: u64 = 30;
 const EFloorBudgetNotReturned: u64 = 31;
 const EApplicationNotVerified: u64 = 32;
+const ENothingToClaim: u64 = 33;
+const EClaimLeafRequired: u64 = 34;
 
 // ---------------------------------------------------------------
 // structs
@@ -145,13 +147,15 @@ public struct PayoutKey has copy, drop, store {
     round: u64,
 }
 
-public struct FloorReceipt has key {
+public struct ClaimReceipt has key {
     id: UID,
     campaign_id: ID,
     pass_lineage_id: ID,
+    round: u64,
     band: u8,
     amount_usdc: u64,
     claimed_at_ms: u64,
+    kind: u8,
 }
 
 public struct FloorCensusSet has copy, drop {
@@ -195,15 +199,7 @@ public struct ClaimVerified has copy, drop {
     verifier: address,
 }
 
-public struct PayoutReceipt has key {
-    id: UID,
-    campaign_id: ID,
-    pass_lineage_id: ID,
-    round: u64,
-    band: u8,
-    amount_usdc: u64,
-    claimed_at_ms: u64,
-}
+// PayoutReceipt は ClaimReceipt に統合された（kind=CLAIM_KIND_PAYOUT）
 
 public struct RoundFinalized has copy, drop {
     campaign_id: ID,
@@ -616,77 +612,63 @@ public(package) fun set_claim_verified(
     *count = *count + 1;
 }
 
-public(package) fun claim_floor_payment(
+// ---------------------------------------------------------------
+// pay_claim: 床払い・本払い共通の「コイン送出 + ClaimReceipt 発行 + イベント発行」
+// ---------------------------------------------------------------
+
+fun pay_claim(
     campaign: &mut Campaign,
-    identity_registry: &IdentityRegistry,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    identity_provider: u8,
-    duplicate_key_hash: vector<u8>,
+    kind: u8,
+    amount: u64,
+    round: u64,
+    band: u8,
+    pass_lineage_id: ID,
+    recipient: address,
     now_ms: u64,
     ctx: &mut TxContext,
 ) {
-    assert!(campaign.census_set, EFloorCensusNotSet);
-    assert!(!campaign.floor_budget_returned, EFloorBudgetAlreadyReturned);
-
-    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
-
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
-    identity_registry::assert_identity_verified(
-        identity_registry,
-        pass_lineage_id,
-        ctx.sender(),
-        identity_provider,
-        now_ms,
-    );
-    identity_registry::assert_duplicate_key_bound_to_pass(
-        identity_registry,
-        pass_lineage_id,
-        identity_provider,
-        duplicate_key_hash,
-    );
-
-    assert!(
-        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
-        EClaimApplicationNotFound,
-    );
-    let app = dynamic_field::borrow_mut<ID, ClaimApplication>(&mut campaign.id, pass_lineage_id);
-    assert!(app.verified, EClaimNotVerified);
-    assert!(!app.excluded, EClaimExcluded);
-    assert!(!app.floor_claimed, EFloorAlreadyClaimed);
-
-    let band = app.band;
-    app.floor_claimed = true;
-
-    let band_idx = (band as u64) - 1;
-    let amount = *campaign.floor_amount_by_band.borrow(band_idx);
-
-    campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
-
-    let recipient = membership::membership_pass_owner(pass);
     let campaign_id = object::id(campaign);
 
-    let floor_coin = coin::from_balance(campaign.floor_balance.split(amount), ctx);
-    transfer::public_transfer(floor_coin, recipient);
+    // kind に応じて balance を取り出す
+    let coin = if (kind == CLAIM_KIND_FLOOR) {
+        coin::from_balance(campaign.floor_balance.split(amount), ctx)
+    } else {
+        coin::from_balance(campaign.balance.split(amount), ctx)
+    };
+    transfer::public_transfer(coin, recipient);
 
-    let receipt = FloorReceipt {
+    let receipt = ClaimReceipt {
         id: object::new(ctx),
         campaign_id,
         pass_lineage_id,
+        round,
         band,
         amount_usdc: amount,
         claimed_at_ms: now_ms,
+        kind,
     };
     transfer::transfer(receipt, recipient);
 
-    event::emit(FloorPaid {
-        campaign_id,
-        pass_lineage_id,
-        band,
-        amount_usdc: amount,
-        recipient,
-        paid_at_ms: now_ms,
-    });
+    // イベントは種別に応じて従来のまま emit する（dapp が型文字列を購読しているため変更禁止）
+    if (kind == CLAIM_KIND_FLOOR) {
+        event::emit(FloorPaid {
+            campaign_id,
+            pass_lineage_id,
+            band,
+            amount_usdc: amount,
+            recipient,
+            paid_at_ms: now_ms,
+        });
+    } else {
+        event::emit(PayoutClaimed {
+            campaign_id,
+            round,
+            pass_lineage_id,
+            band,
+            amount_usdc: amount,
+            recipient,
+        });
+    };
 }
 
 // ---------------------------------------------------------------
@@ -748,127 +730,199 @@ public(package) fun return_floor_budget(
 // ---------------------------------------------------------------
 
 // ---------------------------------------------------------------
-// submit_claim / verify_claim
+// claim: 受け取りの単一入口（初回の資格確立・床払い・本払い・lazy finalize を内包）
 // ---------------------------------------------------------------
 
-public(package) fun submit_claim(
+/// ラウンドを進める時間境界に達しているかを返す。
+/// finalize_round_v2 の時間ガードと同一の条件で判定する。
+fun round_boundary_reached(campaign: &Campaign, now_ms: u64): bool {
+    if (campaign.current_round == 0) {
+        now_ms >= campaign.donation_end_ms
+    } else {
+        now_ms >= campaign.round_finalized_at_ms + campaign.terms.round_interval_ms
+    }
+}
+
+/// 被災者の受け取り単一入口。
+/// - 初回（申請未登録）: submit_claim + verify_claim 相当の検証を 1 回で行い、資格を確立する。
+/// - 既申請: 検証済みかつ未除外であることを確認する。leaf/proof が来ても破棄する。
+/// - lazy finalize: 時間境界を跨いでいればラウンドを確定する（独立 finalize 入口の代替）。
+/// - 床払い・本払い: 受給可能ならそれぞれ pay_claim で支払う。
+/// お金の計算ルールは旧 claim_floor_payment / claim_payout_v2 と一切変えない。
+public(package) fun claim(
     campaign: &mut Campaign,
     disaster_event_id: ID,
     disaster_event_uid: vector<u8>,
     disaster_event_revision: u32,
     disaster_event_affected_cells_root: vector<u8>,
     disaster_event_occurred_at_ms: u64,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    leaf: AffectedCellLeaf,
-    proof: vector<ProofStep>,
-    now_ms: u64,
-    ctx: &TxContext,
-) {
-    assert!(!campaign.closed, ECampaignClosed);
-    assert!(now_ms < campaign.claim_end_ms, EClaimWindowClosed);
-
-    // Disaster event binding
-    assert!(campaign.disaster_event_id == disaster_event_id, EDisasterEventMismatch);
-    assert!(affected_cell::event_uid(&leaf) == disaster_event_uid, EDisasterEventMismatch);
-    assert!(
-        affected_cell::event_revision(&leaf) == disaster_event_revision,
-        EDisasterEventMismatch,
-    );
-
-    // Merkle proof
-    assert!(
-        affected_cell::verify_proof(&leaf, proof, disaster_event_affected_cells_root),
-        EInvalidAffectedCellProof,
-    );
-
-    // Band check
-    let cell_band = affected_cell::cell_band(&leaf);
-    assert!(cell_band >= campaign.terms.min_claim_band, EClaimBandTooLow);
-
-    // SBT precheck
-    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
-
-    // Time cutoff
-    let (account_created_at_ms, home_cell, home_cell_registered_at_ms, _, _) =
-        membership::membership_pass_mvp_summary(pass);
-    assert!(account_created_at_ms < disaster_event_occurred_at_ms, EAccountCreatedAfterCutoff);
-    assert!(
-        home_cell_registered_at_ms < disaster_event_occurred_at_ms,
-        EHomeCellRegisteredAfterCutoff,
-    );
-
-    // Area check
-    assert!(home_cell == affected_cell::h3_index(&leaf), EResidenceCellMismatch);
-
-    // Duplicate check
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
-    assert!(
-        !dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
-        EDuplicateApplication,
-    );
-
-    // Register application
-    add_claim_application(campaign, pass_lineage_id, cell_band, now_ms);
-
-    let campaign_id = object::id(campaign);
-    event::emit(ClaimSubmitted {
-        campaign_id,
-        pass_lineage_id,
-        band: cell_band,
-        applied_at_ms: now_ms,
-        applicant: ctx.sender(),
-    });
-}
-
-public(package) fun verify_claim(
-    campaign: &mut Campaign,
     identity_registry: &IdentityRegistry,
     membership_registry: &MembershipRegistry,
     pass: &MembershipPass,
     identity_provider: u8,
     duplicate_key_hash: vector<u8>,
+    leaf: option::Option<AffectedCellLeaf>,
+    proof: vector<ProofStep>,
     now_ms: u64,
-    ctx: &TxContext,
+    ctx: &mut TxContext,
 ) {
+    // 先頭ガード
+    assert!(campaign.version == VERSION, EVersionMismatch);
+    assert!(!campaign.paused, ECampaignPaused);
+    assert!(!campaign.closed, ECampaignClosed);
+
+    // SBT precheck（全経路共通）
     membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
-
     let pass_lineage_id = membership::membership_pass_lineage_id(pass);
-    identity_registry::assert_identity_verified(
-        identity_registry,
-        pass_lineage_id,
-        ctx.sender(),
-        identity_provider,
-        now_ms,
-    );
-    identity_registry::assert_duplicate_key_bound_to_pass(
-        identity_registry,
-        pass_lineage_id,
-        identity_provider,
-        duplicate_key_hash,
-    );
+    let pass_owner = membership::membership_pass_owner(pass);
 
-    assert!(
-        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
-        EClaimApplicationNotFound,
-    );
-    let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
-    assert!(!app.verified, EClaimAlreadyVerified);
-    assert!(!app.excluded, EClaimAlreadyExcluded);
+    let is_first_time =
+        !dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
 
-    let band = app.band;
-    // read current_round before mutable borrow in set_claim_verified
+    // 床払い可否（センサス確定済み・予算未返却・未受給）を先に判定する。
+    let floor_already_claimed = if (is_first_time) {
+        false
+    } else {
+        let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+        app.floor_claimed
+    };
+    let will_pay_floor =
+        !floor_already_claimed && campaign.census_set && !campaign.floor_budget_returned;
+
+    // 本人確認は初回の資格確立（旧 verify_claim）と床払い（旧 claim_floor_payment）で必須。
+    // 本払いのみ（旧 claim_payout_v2）は従来どおり本人確認を要求しない。
+    if (is_first_time || will_pay_floor) {
+        identity_registry::assert_identity_verified(
+            identity_registry,
+            pass_lineage_id,
+            ctx.sender(),
+            identity_provider,
+            now_ms,
+        );
+        identity_registry::assert_duplicate_key_bound_to_pass(
+            identity_registry,
+            pass_lineage_id,
+            identity_provider,
+            duplicate_key_hash,
+        );
+    };
+
+    if (is_first_time) {
+        // 初回: submit_claim + verify_claim の検証を 1 回で実施する。
+        assert!(now_ms < campaign.claim_end_ms, EClaimWindowClosed);
+        assert!(leaf.is_some(), EClaimLeafRequired);
+        let leaf_val = leaf.destroy_some();
+
+        // Disaster event binding
+        assert!(campaign.disaster_event_id == disaster_event_id, EDisasterEventMismatch);
+        assert!(affected_cell::event_uid(&leaf_val) == disaster_event_uid, EDisasterEventMismatch);
+        assert!(
+            affected_cell::event_revision(&leaf_val) == disaster_event_revision,
+            EDisasterEventMismatch,
+        );
+
+        // Merkle proof
+        assert!(
+            affected_cell::verify_proof(&leaf_val, proof, disaster_event_affected_cells_root),
+            EInvalidAffectedCellProof,
+        );
+
+        // Band check
+        let cell_band = affected_cell::cell_band(&leaf_val);
+        assert!(cell_band >= campaign.terms.min_claim_band, EClaimBandTooLow);
+
+        // Time cutoff
+        let (account_created_at_ms, home_cell, home_cell_registered_at_ms, _, _) =
+            membership::membership_pass_mvp_summary(pass);
+        assert!(account_created_at_ms < disaster_event_occurred_at_ms, EAccountCreatedAfterCutoff);
+        assert!(
+            home_cell_registered_at_ms < disaster_event_occurred_at_ms,
+            EHomeCellRegisteredAfterCutoff,
+        );
+
+        // Area check
+        assert!(home_cell == affected_cell::h3_index(&leaf_val), EResidenceCellMismatch);
+
+        // Register + mark verified
+        add_claim_application(campaign, pass_lineage_id, cell_band, now_ms);
+        let current_round = campaign.current_round;
+        set_claim_verified(campaign, pass_lineage_id, current_round);
+
+        let campaign_id = object::id(campaign);
+        event::emit(ClaimSubmitted {
+            campaign_id,
+            pass_lineage_id,
+            band: cell_band,
+            applied_at_ms: now_ms,
+            applicant: ctx.sender(),
+        });
+        event::emit(ClaimVerified {
+            campaign_id,
+            pass_lineage_id,
+            band: cell_band,
+            verified_at_ms: now_ms,
+            verifier: ctx.sender(),
+        });
+    } else {
+        // 既申請: 検証済みかつ未除外を要求する。
+        let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+        assert!(app.verified, EClaimNotVerified);
+        assert!(!app.excluded, EClaimExcluded);
+    };
+
+    // lazy finalize: 時間境界を跨いでいればラウンドを確定する。
+    if (round_boundary_reached(campaign, now_ms)) {
+        finalize_round_v2(campaign, now_ms);
+    };
+
+    let mut paid_something = false;
+
+    // 床払い（Round 0 escrow）
+    if (will_pay_floor) {
+        let band = {
+            let app = dynamic_field::borrow_mut<ID, ClaimApplication>(&mut campaign.id, pass_lineage_id);
+            app.floor_claimed = true;
+            app.band
+        };
+        let band_idx = (band as u64) - 1;
+        let amount = *campaign.floor_amount_by_band.borrow(band_idx);
+        campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
+        pay_claim(campaign, CLAIM_KIND_FLOOR, amount, 0, band, pass_lineage_id, pass_owner, now_ms, ctx);
+        paid_something = true;
+    };
+
+    // 本払い（Round 1 以降）
     let current_round = campaign.current_round;
-    set_claim_verified(campaign, pass_lineage_id, current_round);
+    if (current_round >= 1) {
+        let (verified_in_round, band) = {
+            let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+            (app.verified_in_round, app.band)
+        };
+        if (verified_in_round < current_round) {
+            let payout_key = PayoutKey { pass_lineage_id, round: current_round };
+            if (!dynamic_field::exists_with_type<PayoutKey, bool>(&campaign.id, payout_key)) {
+                let band_idx = (band as u64) - 1;
+                let amount = *campaign.round_payout_by_band.borrow(band_idx);
+                dynamic_field::add(&mut campaign.id, payout_key, true);
+                campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
+                pay_claim(
+                    campaign,
+                    CLAIM_KIND_PAYOUT,
+                    amount,
+                    current_round,
+                    band,
+                    pass_lineage_id,
+                    pass_owner,
+                    now_ms,
+                    ctx,
+                );
+                paid_something = true;
+            };
+        };
+    };
 
-    let campaign_id = object::id(campaign);
-    event::emit(ClaimVerified {
-        campaign_id,
-        pass_lineage_id,
-        band,
-        verified_at_ms: now_ms,
-        verifier: ctx.sender(),
-    });
+    // 受け取りは必ず前進すること。初回登録か、何らかの支払いが発生していなければ拒否する。
+    assert!(is_first_time || paid_something, ENothingToClaim);
 }
 
 // ---------------------------------------------------------------
@@ -963,70 +1017,6 @@ public(package) fun finalize_round_v2(
     });
 }
 
-public(package) fun claim_payout_v2(
-    campaign: &mut Campaign,
-    membership_registry: &MembershipRegistry,
-    pass: &MembershipPass,
-    now_ms: u64,
-    ctx: &mut TxContext,
-) {
-    assert!(campaign.version == VERSION, EVersionMismatch);
-    assert!(!campaign.paused, ECampaignPaused);
-    assert!(!campaign.closed, EAlreadyClosed);
-    assert!(campaign.current_round >= 1, ERoundNotStarted);
-
-    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
-
-    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
-    assert!(
-        dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id),
-        EClaimApplicationNotFound,
-    );
-    let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
-    assert!(app.verified, EClaimNotVerified);
-    assert!(!app.excluded, EClaimExcluded);
-    assert!(app.verified_in_round < campaign.current_round, ERoundNotEligible);
-
-    let payout_key = PayoutKey { pass_lineage_id, round: campaign.current_round };
-    assert!(
-        !dynamic_field::exists_with_type<PayoutKey, bool>(&campaign.id, payout_key),
-        EDuplicatePayout,
-    );
-
-    let band = app.band;
-    let band_idx = (band as u64) - 1;
-    let amount = *campaign.round_payout_by_band.borrow(band_idx);
-
-    dynamic_field::add(&mut campaign.id, payout_key, true);
-    campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
-
-    let recipient = membership::membership_pass_owner(pass);
-    let campaign_id = object::id(campaign);
-
-    let payout_coin = coin::from_balance(campaign.balance.split(amount), ctx);
-    transfer::public_transfer(payout_coin, recipient);
-
-    let receipt = PayoutReceipt {
-        id: object::new(ctx),
-        campaign_id,
-        pass_lineage_id,
-        round: campaign.current_round,
-        band,
-        amount_usdc: amount,
-        claimed_at_ms: now_ms,
-    };
-    transfer::transfer(receipt, recipient);
-
-    event::emit(PayoutClaimed {
-        campaign_id,
-        round: campaign.current_round,
-        pass_lineage_id,
-        band,
-        amount_usdc: amount,
-        recipient,
-    });
-}
-
 public(package) fun sweep_residual_v2(
     campaign: &mut Campaign,
     main_pool: &mut MainPool,
@@ -1037,10 +1027,17 @@ public(package) fun sweep_residual_v2(
     assert!(!campaign.closed, EAlreadyClosed);
     assert!(campaign.floor_budget_returned, EFloorBudgetNotReturned);
 
-    // Sweep is allowed when: sweep_eligible flag set by finalize, OR no finalize ever run but time passed
-    let initial_timeout = campaign.current_round == 0
-        && now_ms >= campaign.donation_end_ms + campaign.terms.round_interval_ms;
-    assert!(campaign.sweep_eligible || initial_timeout, ESweepNotEligible);
+    // 回収条件: finalize が立てた sweep_eligible フラグ、またはタイムアウト経過。
+    // タイムアウトは finalize の実行有無に依存させず、資金が永久に stuck するのを防ぐ。
+    // - Round 0（finalize 未実行）: donation_end_ms を基準にする。
+    // - Round >=1（finalize 済みだが誰も claim しない）: 直近 finalize 時刻を基準にする。
+    let timeout_base_ms = if (campaign.current_round == 0) {
+        campaign.donation_end_ms
+    } else {
+        campaign.round_finalized_at_ms
+    };
+    let timeout_reached = now_ms >= timeout_base_ms + campaign.terms.round_interval_ms;
+    assert!(campaign.sweep_eligible || timeout_reached, ESweepNotEligible);
 
     let amount = campaign.balance.value();
     let final_round = campaign.current_round;
@@ -1058,7 +1055,6 @@ public(package) fun sweep_residual_v2(
         amount_usdc: amount,
         final_round,
     });
-    let _ = now_ms;
 }
 
 public(package) fun exclude_recipient_internal(
@@ -1108,7 +1104,6 @@ public(package) fun e_campaign_category_pool_mismatch(): u64 { ECampaignCategory
 public(package) fun e_floor_census_binding_mismatch(): u64 { EFloorCensusBindingMismatch }
 public(package) fun e_claim_application_not_found(): u64 { EClaimApplicationNotFound }
 public(package) fun e_claim_not_verified(): u64 { EClaimNotVerified }
-public(package) fun e_floor_already_claimed(): u64 { EFloorAlreadyClaimed }
 public(package) fun e_floor_census_after_donation_end(): u64 { EFloorCensusAfterDonationEnd }
 public(package) fun e_claim_window_closed(): u64 { EClaimWindowClosed }
 public(package) fun e_disaster_event_mismatch(): u64 { EDisasterEventMismatch }
@@ -1117,17 +1112,14 @@ public(package) fun e_claim_band_too_low(): u64 { EClaimBandTooLow }
 public(package) fun e_account_created_after_cutoff(): u64 { EAccountCreatedAfterCutoff }
 public(package) fun e_home_cell_registered_after_cutoff(): u64 { EHomeCellRegisteredAfterCutoff }
 public(package) fun e_residence_cell_mismatch(): u64 { EResidenceCellMismatch }
-public(package) fun e_duplicate_application(): u64 { EDuplicateApplication }
-public(package) fun e_claim_already_verified(): u64 { EClaimAlreadyVerified }
 public(package) fun e_claim_already_excluded(): u64 { EClaimAlreadyExcluded }
 public(package) fun e_already_closed(): u64 { EAlreadyClosed }
-public(package) fun e_round_not_started(): u64 { ERoundNotStarted }
 public(package) fun e_round_too_early(): u64 { ERoundTooEarly }
-public(package) fun e_round_not_eligible(): u64 { ERoundNotEligible }
-public(package) fun e_duplicate_payout(): u64 { EDuplicatePayout }
 public(package) fun e_sweep_not_eligible(): u64 { ESweepNotEligible }
 public(package) fun e_floor_budget_not_returned(): u64 { EFloorBudgetNotReturned }
 public(package) fun e_application_not_verified(): u64 { EApplicationNotVerified }
+public(package) fun e_nothing_to_claim(): u64 { ENothingToClaim }
+public(package) fun e_claim_leaf_required(): u64 { EClaimLeafRequired }
 
 // ---------------------------------------------------------------
 // accessor read-only helpers for tests
@@ -1271,13 +1263,19 @@ public fun floor_budget_returned_event_fields(
 }
 
 #[test_only]
-public fun floor_receipt_fields(
-    receipt: FloorReceipt,
-): (ID, ID, u8, u64, u64) {
-    let FloorReceipt { id, campaign_id, pass_lineage_id, band, amount_usdc, claimed_at_ms } = receipt;
+public fun claim_receipt_fields(
+    receipt: ClaimReceipt,
+): (ID, ID, u64, u8, u64, u64, u8) {
+    let ClaimReceipt { id, campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms, kind } = receipt;
     id.delete();
-    (campaign_id, pass_lineage_id, band, amount_usdc, claimed_at_ms)
+    (campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms, kind)
 }
+
+#[test_only]
+public fun claim_kind_floor(): u8 { CLAIM_KIND_FLOOR }
+
+#[test_only]
+public fun claim_kind_payout(): u8 { CLAIM_KIND_PAYOUT }
 
 #[test_only]
 public fun set_donation_end_ms_for_testing(c: &mut Campaign, donation_end_ms: u64) {
@@ -1319,14 +1317,7 @@ public fun claim_verified_event_fields(
     (campaign_id, pass_lineage_id, band, verified_at_ms, verifier)
 }
 
-#[test_only]
-public fun payout_receipt_fields(
-    receipt: PayoutReceipt,
-): (ID, ID, u64, u8, u64, u64) {
-    let PayoutReceipt { id, campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms } = receipt;
-    id.delete();
-    (campaign_id, pass_lineage_id, round, band, amount_usdc, claimed_at_ms)
-}
+// payout_receipt_fields は ClaimReceipt 統合により claim_receipt_fields に置き換えられた
 
 #[test_only]
 public fun round_finalized_event_fields(

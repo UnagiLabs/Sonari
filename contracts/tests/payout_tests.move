@@ -3,9 +3,11 @@
 module contracts::payout_tests;
 
 use contracts::admin;
+use contracts::affected_cell;
 use contracts::campaign;
 use contracts::category_pool;
 use contracts::census_result;
+use contracts::identity_registry;
 use contracts::membership;
 use contracts::pools;
 use sui::event;
@@ -82,6 +84,38 @@ fun make_pass_for(
     scenario: &mut test_scenario::Scenario,
 ): (membership::MembershipRegistry, membership::MembershipPass) {
     membership::create_registry_and_pass_for_testing(owner, 1, b"", scenario.ctx())
+}
+
+// 本払いのみの claim 呼び出し。これらのテストはセンサス未設定なので
+// 床払い・本人確認は発生せず、本払い経路だけが走る。
+// leaf/proof/disaster 引数は既申請ブランチで使われないためダミーを渡す。
+// 本人確認も skip されるので空の IdentityRegistry を都度作って破棄する。
+fun claim_payout_only(
+    c: &mut campaign::Campaign,
+    mem_registry: &membership::MembershipRegistry,
+    pass: &membership::MembershipPass,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    let id_registry = identity_registry::create_identity_registry_for_testing(ctx);
+    campaign::claim(
+        c,
+        object::id_from_address(@0xDEAD),
+        EVENT_UID,
+        EVENT_REVISION,
+        b"",
+        NOW_MS,
+        &id_registry,
+        mem_registry,
+        pass,
+        identity_registry::provider_kyc(),
+        b"",
+        option::none<affected_cell::AffectedCellLeaf>(),
+        vector[],
+        now_ms,
+        ctx,
+    );
+    identity_registry::destroy_identity_registry_for_testing(id_registry);
 }
 
 
@@ -265,7 +299,7 @@ fun claim_payout_transfers_coin_and_issues_receipt() {
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
         // Claim payout
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         let events = event::events_by_type<campaign::PayoutClaimed>();
         assert!(events.length() == 1);
@@ -288,7 +322,7 @@ fun claim_payout_transfers_coin_and_issues_receipt() {
 // 6. reject: claim_payout duplicate (same pass + same round)
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::EDuplicatePayout)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_payout_rejects_duplicate() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario);
@@ -310,9 +344,9 @@ fun claim_payout_rejects_duplicate() {
         campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
         campaign::finalize_round_v2(&mut c, DONATION_END_MS);
 
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
-        // Second claim → EDuplicatePayout
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        // 2 回目は支払い対象がないため ENothingToClaim で abort する
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -325,7 +359,7 @@ fun claim_payout_rejects_duplicate() {
 // 7. reject: claim_payout before finalize (round==0) → ERoundNotStarted
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::ERoundNotStarted)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_payout_rejects_before_finalize() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario);
@@ -339,8 +373,8 @@ fun claim_payout_rejects_before_finalize() {
         campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
         campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
 
-        // No finalize_round called → current_round == 0
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, NOW_MS, scenario.ctx());
+        // No finalize_round called → current_round == 0 なので支払い対象なし → ENothingToClaim
+        claim_payout_only(&mut c, &mem_registry, &pass, NOW_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -385,7 +419,7 @@ fun claim_payout_rejects_excluded_member() {
         );
 
         // Claim → EClaimExcluded
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -398,7 +432,7 @@ fun claim_payout_rejects_excluded_member() {
 // 9. reject: claim_payout with verified_in_round >= current_round
 // ---------------------------------------------------------------
 
-#[test, expected_failure(abort_code = campaign::ERoundNotEligible)]
+#[test, expected_failure(abort_code = campaign::ENothingToClaim)]
 fun claim_payout_rejects_verified_after_finalize() {
     let mut scenario = setup();
     create_campaign_in_scenario(&mut scenario);
@@ -425,8 +459,8 @@ fun claim_payout_rejects_verified_after_finalize() {
         // Now "verify" the member at round 1 (verified_in_round = 1)
         campaign::set_claim_verified(&mut c, pass_lineage_id, 1);
 
-        // verified_in_round (1) == current_round (1) → ERoundNotEligible
-        campaign::claim_payout_v2(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+        // verified_in_round (1) == current_round (1) なので支払い対象なし → ENothingToClaim
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
 
         membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
         membership::destroy_pass_for_testing(pass);
@@ -769,7 +803,56 @@ fun sweep_residual_rejects_when_sweep_eligible_reset() {
 }
 
 // ---------------------------------------------------------------
-// 17. reject: finalize_round Round 2 too early
+// 17. claim_payout issues ClaimReceipt with kind=PAYOUT
+// ---------------------------------------------------------------
+
+#[test]
+fun claim_payout_issues_claim_receipt_with_payout_kind() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        campaign::fund_campaign_for_testing(&mut c, 1_000_000_000, scenario.ctx());
+        test_scenario::return_shared(c);
+    };
+
+    scenario.next_tx(MEMBER);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let (mem_registry, pass) = make_pass_for(MEMBER, &mut scenario);
+        let pass_lineage_id = membership::membership_pass_lineage_id(&pass);
+
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage_id, 1u8, true, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage_id, 0);
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+        claim_payout_only(&mut c, &mem_registry, &pass, DONATION_END_MS, scenario.ctx());
+
+        membership::destroy_membership_registry_for_testing(mem_registry, MEMBER, pass_lineage_id);
+        membership::destroy_pass_for_testing(pass);
+        test_scenario::return_shared(c);
+    };
+
+    // Verify ClaimReceipt transferred to MEMBER
+    scenario.next_tx(MEMBER);
+    {
+        let receipt = scenario.take_from_sender<campaign::ClaimReceipt>();
+        let (campaign_id_r, pass_lineage_id_r, round_r, band_r, amount_usdc_r, claimed_at_ms_r, kind_r) =
+            campaign::claim_receipt_fields(receipt);
+        assert!(band_r == 1u8);
+        assert!(amount_usdc_r == 150_000_000);
+        assert!(round_r == 1);
+        assert!(claimed_at_ms_r == DONATION_END_MS);
+        assert!(kind_r == campaign::claim_kind_payout());
+        let _ = campaign_id_r;
+        let _ = pass_lineage_id_r;
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 18. reject: finalize_round Round 2 too early
 // ---------------------------------------------------------------
 
 #[test, expected_failure(abort_code = campaign::ERoundTooEarly)]
@@ -786,6 +869,139 @@ fun finalize_round_2_rejects_too_early() {
         campaign::finalize_round_v2(&mut c, DONATION_END_MS + 1);
 
         test_scenario::return_shared(c);
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 19. ケースB: Round>=1 に進んだ後、誰も claim せず時間経過 → 回収できる
+//     適格者ありで finalize するため sweep_eligible=false。
+//     タイムアウト経路（round_finalized_at_ms 基準）だけで回収する。
+// ---------------------------------------------------------------
+
+#[test]
+fun sweep_residual_recovers_after_round_timeout() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+
+        campaign::fund_campaign_for_testing(&mut c, 10_000_000, scenario.ctx());
+
+        // 床センサス（0人）を donation 期間中に確定し census_set を満たす
+        let census = census_result::new_for_testing(
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            vector[0, 0, 0],
+            NOW_MS,
+        );
+        campaign::apply_floor_census(
+            &mut c,
+            &census,
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            &mut cat_pool,
+            &mut main_pool,
+            NOW_MS,
+            scenario.ctx(),
+        );
+
+        // 適格 band1 メンバーを 1 名仕込む → liability>0 → finalize で sweep_eligible=false
+        let pass_lineage = object::id_from_address(@0x0001);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage, 1u8, false, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage, 0);
+
+        // Round 1 確定（current_round=1, round_finalized_at_ms=DONATION_END_MS, sweep_eligible=false）
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+        let (round_after, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
+        assert!(round_after == 1);
+        assert!(!sweep_eligible);
+
+        // 床予算を返還（sweep の前提条件）
+        campaign::return_floor_budget(&mut c, &mut cat_pool, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        let main_before = pools::main_pool_balance_usdc(&main_pool);
+
+        // 誰も claim しないままラウンド間隔が経過 → タイムアウト回収
+        let sweep_time = DONATION_END_MS + ROUND_INTERVAL_MS;
+        campaign::sweep_residual_v2(&mut c, &mut main_pool, sweep_time, scenario.ctx());
+
+        let (_, _, _, closed, _) = campaign::campaign_payout_round_fields(&c);
+        assert!(closed);
+
+        let main_after = pools::main_pool_balance_usdc(&main_pool);
+        assert!(main_after == main_before + 10_000_000);
+
+        let events = event::events_by_type<campaign::ResidualSweep>();
+        assert!(events.length() == 1);
+        let (_, ev_amount, ev_final_round) = campaign::residual_sweep_event_fields(*events.borrow(0));
+        assert!(ev_amount == 10_000_000);
+        assert!(ev_final_round == 1);
+
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 20. ケースB の早すぎる回収: Round>=1 でも round_interval 未経過なら拒否
+//     round_finalized_at_ms と同時刻の sweep は ESweepNotEligible で止まる。
+// ---------------------------------------------------------------
+
+#[test, expected_failure(abort_code = campaign::ESweepNotEligible)]
+fun sweep_residual_rejects_before_round_timeout() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+
+        campaign::fund_campaign_for_testing(&mut c, 10_000_000, scenario.ctx());
+
+        let census = census_result::new_for_testing(
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            vector[0, 0, 0],
+            NOW_MS,
+        );
+        campaign::apply_floor_census(
+            &mut c,
+            &census,
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            &mut cat_pool,
+            &mut main_pool,
+            NOW_MS,
+            scenario.ctx(),
+        );
+
+        let pass_lineage = object::id_from_address(@0x0001);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage, 1u8, false, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage, 0);
+
+        // Round 1 確定（sweep_eligible=false, round_finalized_at_ms=DONATION_END_MS）
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+        campaign::return_floor_budget(&mut c, &mut cat_pool, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        // round_interval 未経過の DONATION_END_MS で回収 → ESweepNotEligible
+        campaign::sweep_residual_v2(&mut c, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
     };
     scenario.end();
 }
