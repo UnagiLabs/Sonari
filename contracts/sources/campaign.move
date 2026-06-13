@@ -74,6 +74,8 @@ const EDuplicatePayout: u64 = 29;
 const ESweepNotEligible: u64 = 30;
 const EFloorBudgetNotReturned: u64 = 31;
 const EApplicationNotVerified: u64 = 32;
+const ENothingToClaim: u64 = 33;
+const EClaimLeafRequired: u64 = 34;
 
 // ---------------------------------------------------------------
 // structs
@@ -906,6 +908,202 @@ public(package) fun verify_claim(
 }
 
 // ---------------------------------------------------------------
+// claim: 受け取りの単一入口（初回の資格確立・床払い・本払い・lazy finalize を内包）
+// ---------------------------------------------------------------
+
+/// ラウンドを進める時間境界に達しているかを返す。
+/// finalize_round_v2 の時間ガードと同一の条件で判定する。
+fun round_boundary_reached(campaign: &Campaign, now_ms: u64): bool {
+    if (campaign.current_round == 0) {
+        now_ms >= campaign.donation_end_ms
+    } else {
+        now_ms >= campaign.round_finalized_at_ms + campaign.terms.round_interval_ms
+    }
+}
+
+/// 被災者の受け取り単一入口。
+/// - 初回（申請未登録）: submit_claim + verify_claim 相当の検証を 1 回で行い、資格を確立する。
+/// - 既申請: 検証済みかつ未除外であることを確認する。leaf/proof が来ても破棄する。
+/// - lazy finalize: 時間境界を跨いでいればラウンドを確定する（独立 finalize 入口の代替）。
+/// - 床払い・本払い: 受給可能ならそれぞれ pay_claim で支払う。
+/// お金の計算ルールは旧 claim_floor_payment / claim_payout_v2 と一切変えない。
+public(package) fun claim(
+    campaign: &mut Campaign,
+    disaster_event_id: ID,
+    disaster_event_uid: vector<u8>,
+    disaster_event_revision: u32,
+    disaster_event_affected_cells_root: vector<u8>,
+    disaster_event_occurred_at_ms: u64,
+    identity_registry: &IdentityRegistry,
+    membership_registry: &MembershipRegistry,
+    pass: &MembershipPass,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
+    leaf: option::Option<AffectedCellLeaf>,
+    proof: vector<ProofStep>,
+    now_ms: u64,
+    ctx: &mut TxContext,
+) {
+    // 先頭ガード
+    assert!(campaign.version == VERSION, EVersionMismatch);
+    assert!(!campaign.paused, ECampaignPaused);
+    assert!(!campaign.closed, ECampaignClosed);
+
+    // SBT precheck（全経路共通）
+    membership::assert_current_pass_precheck(membership_registry, pass, ctx.sender());
+    let pass_lineage_id = membership::membership_pass_lineage_id(pass);
+    let pass_owner = membership::membership_pass_owner(pass);
+
+    let is_first_time =
+        !dynamic_field::exists_with_type<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+
+    // 床払い可否（センサス確定済み・予算未返却・未受給）を先に判定する。
+    let floor_already_claimed = if (is_first_time) {
+        false
+    } else {
+        let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+        app.floor_claimed
+    };
+    let will_pay_floor =
+        !floor_already_claimed && campaign.census_set && !campaign.floor_budget_returned;
+
+    // 本人確認は初回の資格確立（旧 verify_claim）と床払い（旧 claim_floor_payment）で必須。
+    // 本払いのみ（旧 claim_payout_v2）は従来どおり本人確認を要求しない。
+    if (is_first_time || will_pay_floor) {
+        identity_registry::assert_identity_verified(
+            identity_registry,
+            pass_lineage_id,
+            ctx.sender(),
+            identity_provider,
+            now_ms,
+        );
+        identity_registry::assert_duplicate_key_bound_to_pass(
+            identity_registry,
+            pass_lineage_id,
+            identity_provider,
+            duplicate_key_hash,
+        );
+    };
+
+    if (is_first_time) {
+        // 初回: submit_claim + verify_claim の検証を 1 回で実施する。
+        assert!(now_ms < campaign.claim_end_ms, EClaimWindowClosed);
+        assert!(leaf.is_some(), EClaimLeafRequired);
+        let leaf_val = leaf.destroy_some();
+
+        // Disaster event binding
+        assert!(campaign.disaster_event_id == disaster_event_id, EDisasterEventMismatch);
+        assert!(affected_cell::event_uid(&leaf_val) == disaster_event_uid, EDisasterEventMismatch);
+        assert!(
+            affected_cell::event_revision(&leaf_val) == disaster_event_revision,
+            EDisasterEventMismatch,
+        );
+
+        // Merkle proof
+        assert!(
+            affected_cell::verify_proof(&leaf_val, proof, disaster_event_affected_cells_root),
+            EInvalidAffectedCellProof,
+        );
+
+        // Band check
+        let cell_band = affected_cell::cell_band(&leaf_val);
+        assert!(cell_band >= campaign.terms.min_claim_band, EClaimBandTooLow);
+
+        // Time cutoff
+        let (account_created_at_ms, home_cell, home_cell_registered_at_ms, _, _) =
+            membership::membership_pass_mvp_summary(pass);
+        assert!(account_created_at_ms < disaster_event_occurred_at_ms, EAccountCreatedAfterCutoff);
+        assert!(
+            home_cell_registered_at_ms < disaster_event_occurred_at_ms,
+            EHomeCellRegisteredAfterCutoff,
+        );
+
+        // Area check
+        assert!(home_cell == affected_cell::h3_index(&leaf_val), EResidenceCellMismatch);
+
+        // Register + mark verified
+        add_claim_application(campaign, pass_lineage_id, cell_band, now_ms);
+        let current_round = campaign.current_round;
+        set_claim_verified(campaign, pass_lineage_id, current_round);
+
+        let campaign_id = object::id(campaign);
+        event::emit(ClaimSubmitted {
+            campaign_id,
+            pass_lineage_id,
+            band: cell_band,
+            applied_at_ms: now_ms,
+            applicant: ctx.sender(),
+        });
+        event::emit(ClaimVerified {
+            campaign_id,
+            pass_lineage_id,
+            band: cell_band,
+            verified_at_ms: now_ms,
+            verifier: ctx.sender(),
+        });
+    } else {
+        // 既申請: 検証済みかつ未除外を要求する。
+        let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+        assert!(app.verified, EClaimNotVerified);
+        assert!(!app.excluded, EClaimExcluded);
+    };
+
+    // lazy finalize: 時間境界を跨いでいればラウンドを確定する。
+    if (round_boundary_reached(campaign, now_ms)) {
+        finalize_round_v2(campaign, now_ms);
+    };
+
+    let mut paid_something = false;
+
+    // 床払い（Round 0 escrow）
+    if (will_pay_floor) {
+        let band = {
+            let app = dynamic_field::borrow_mut<ID, ClaimApplication>(&mut campaign.id, pass_lineage_id);
+            app.floor_claimed = true;
+            app.band
+        };
+        let band_idx = (band as u64) - 1;
+        let amount = *campaign.floor_amount_by_band.borrow(band_idx);
+        campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
+        pay_claim(campaign, CLAIM_KIND_FLOOR, amount, 0, band, pass_lineage_id, pass_owner, now_ms, ctx);
+        paid_something = true;
+    };
+
+    // 本払い（Round 1 以降）
+    let current_round = campaign.current_round;
+    if (current_round >= 1) {
+        let (verified_in_round, band) = {
+            let app = dynamic_field::borrow<ID, ClaimApplication>(&campaign.id, pass_lineage_id);
+            (app.verified_in_round, app.band)
+        };
+        if (verified_in_round < current_round) {
+            let payout_key = PayoutKey { pass_lineage_id, round: current_round };
+            if (!dynamic_field::exists_with_type<PayoutKey, bool>(&campaign.id, payout_key)) {
+                let band_idx = (band as u64) - 1;
+                let amount = *campaign.round_payout_by_band.borrow(band_idx);
+                dynamic_field::add(&mut campaign.id, payout_key, true);
+                campaign.total_paid_usdc = campaign.total_paid_usdc + amount;
+                pay_claim(
+                    campaign,
+                    CLAIM_KIND_PAYOUT,
+                    amount,
+                    current_round,
+                    band,
+                    pass_lineage_id,
+                    pass_owner,
+                    now_ms,
+                    ctx,
+                );
+                paid_something = true;
+            };
+        };
+    };
+
+    // 受け取りは必ず前進すること。初回登録か、何らかの支払いが発生していなければ拒否する。
+    assert!(is_first_time || paid_something, ENothingToClaim);
+}
+
+// ---------------------------------------------------------------
 // finalize_round / claim_payout / sweep_residual / exclude_recipient
 // ---------------------------------------------------------------
 
@@ -1141,6 +1339,8 @@ public(package) fun e_duplicate_payout(): u64 { EDuplicatePayout }
 public(package) fun e_sweep_not_eligible(): u64 { ESweepNotEligible }
 public(package) fun e_floor_budget_not_returned(): u64 { EFloorBudgetNotReturned }
 public(package) fun e_application_not_verified(): u64 { EApplicationNotVerified }
+public(package) fun e_nothing_to_claim(): u64 { ENothingToClaim }
+public(package) fun e_claim_leaf_required(): u64 { EClaimLeafRequired }
 
 // ---------------------------------------------------------------
 // accessor read-only helpers for tests
