@@ -85,15 +85,13 @@ pub fn resolve_world_id_verifier_mode(
             )),
             _ => Err(IdentityError::Request(format!(
                 "dummy World ID proof mode requires network to be testnet or devnet; \
-                 got {:?} — refusing to allow dummy on unknown or unset network (fail-closed)",
-                network
+                 got {network:?} — refusing to allow dummy on unknown or unset network (fail-closed)"
             ))),
         };
     }
 
     Err(IdentityError::Request(format!(
-        "unknown SONARI_WORLD_ID_PROOF_MODE value {:?}; expected \"real\" or \"dummy\" (fail-closed)",
-        proof_mode
+        "unknown SONARI_WORLD_ID_PROOF_MODE value {proof_mode:?}; expected \"real\" or \"dummy\" (fail-closed)"
     )))
 }
 

@@ -1,4 +1,5 @@
 use clap::Parser;
+use sonari_tee_core::enclave::{AF_VSOCK, SockAddrVm};
 use std::fs::File;
 use std::io;
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -64,21 +65,24 @@ fn join_copy(handle: thread::JoinHandle<io::Result<u64>>) -> io::Result<u64> {
 }
 
 fn connect_vsock(cid: u32, port: u32) -> io::Result<File> {
-    let fd = unsafe { libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+    let fd = unsafe { libc::socket(AF_VSOCK, libc::SOCK_STREAM, 0) };
     if fd < 0 {
         return Err(io::Error::last_os_error());
     }
 
-    let mut address = unsafe { std::mem::zeroed::<libc::sockaddr_vm>() };
-    address.svm_family = libc::AF_VSOCK as libc::sa_family_t;
-    address.svm_port = port;
-    address.svm_cid = cid;
+    let address = SockAddrVm {
+        svm_family: AF_VSOCK as libc::sa_family_t,
+        svm_reserved1: 0,
+        svm_port: port,
+        svm_cid: cid,
+        svm_zero: [0; 4],
+    };
 
     let result = unsafe {
         libc::connect(
             fd,
-            (&address as *const libc::sockaddr_vm).cast::<libc::sockaddr>(),
-            std::mem::size_of::<libc::sockaddr_vm>() as libc::socklen_t,
+            (&address as *const SockAddrVm).cast::<libc::sockaddr>(),
+            std::mem::size_of::<SockAddrVm>() as libc::socklen_t,
         )
     };
     if result < 0 {
