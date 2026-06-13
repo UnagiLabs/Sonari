@@ -3,6 +3,7 @@ import {
     buildDonateSplitRows,
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
+    type DonateDonorPassReadState,
     type DonateDestinationReadState,
     type DonateTxState,
 } from "./donate-view-state";
@@ -26,6 +27,11 @@ const readyDestinationState: DonateDestinationReadState = {
         category: 1,
     }],
     errorMessage: null,
+};
+
+const readyDonorPassState: DonateDonorPassReadState = {
+    status: "ready",
+    passId: null,
 };
 
 const t = (key: string) => key;
@@ -97,6 +103,7 @@ describe("resolveDonateSubmitDisabledReason", () => {
             configReady: false,
             walletConnected: true,
             amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: readyDonorPassState,
             selectedMode: "general",
             destinationState: readyDestinationState,
             selectedCampaignId: "",
@@ -111,6 +118,7 @@ describe("resolveDonateSubmitDisabledReason", () => {
             configReady: true,
             walletConnected: false,
             amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: readyDonorPassState,
             selectedMode: "general",
             destinationState: readyDestinationState,
             selectedCampaignId: "",
@@ -125,6 +133,7 @@ describe("resolveDonateSubmitDisabledReason", () => {
             configReady: true,
             walletConnected: true,
             amountValidation: { ok: false, errorCode: "zero" },
+            donorPassState: readyDonorPassState,
             selectedMode: "general",
             destinationState: readyDestinationState,
             selectedCampaignId: "",
@@ -139,6 +148,7 @@ describe("resolveDonateSubmitDisabledReason", () => {
             configReady: true,
             walletConnected: true,
             amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: readyDonorPassState,
             selectedMode: "campaign",
             destinationState: {
                 status: "loading",
@@ -158,6 +168,7 @@ describe("resolveDonateSubmitDisabledReason", () => {
             configReady: true,
             walletConnected: true,
             amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: readyDonorPassState,
             selectedMode: "category",
             destinationState: {
                 status: "ready",
@@ -177,6 +188,7 @@ describe("resolveDonateSubmitDisabledReason", () => {
             configReady: true,
             walletConnected: true,
             amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: readyDonorPassState,
             selectedMode: "campaign",
             destinationState: readyDestinationState,
             selectedCampaignId: "0xcampaign",
@@ -184,6 +196,36 @@ describe("resolveDonateSubmitDisabledReason", () => {
         });
 
         expect(reason).toBeNull();
+    });
+
+    it("returns donorPassLoading while the donor pass lookup is loading", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: true,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: { status: "loading" },
+            selectedMode: "general",
+            destinationState: readyDestinationState,
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "donorPassLoading" });
+    });
+
+    it("returns donorPassError when the donor pass lookup fails", () => {
+        const reason = resolveDonateSubmitDisabledReason({
+            configReady: true,
+            walletConnected: true,
+            amountValidation: { ok: true, microUsdc: 1_000_000n },
+            donorPassState: { status: "error", message: "registry down" },
+            selectedMode: "general",
+            destinationState: readyDestinationState,
+            selectedCampaignId: "",
+            selectedCategoryPoolId: "",
+        });
+
+        expect(reason).toEqual({ kind: "donorPassError", message: "registry down" });
     });
 });
 

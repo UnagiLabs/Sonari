@@ -87,10 +87,17 @@ export interface DonateDestinationReadState {
     readonly errorMessage: string | null;
 }
 
+export type DonateDonorPassReadState =
+    | { readonly status: "idle" }
+    | { readonly status: "loading" }
+    | { readonly status: "ready"; readonly passId: string | null }
+    | { readonly status: "error"; readonly message: string };
+
 export interface DonateSubmitDisabledInput {
     readonly configReady: boolean;
     readonly walletConnected: boolean;
     readonly amountValidation: DonationAmountValidationResult;
+    readonly donorPassState: DonateDonorPassReadState;
     readonly selectedMode: DonateDestinationMode;
     readonly destinationState: DonateDestinationReadState;
     readonly selectedCampaignId: string;
@@ -101,6 +108,8 @@ export type DonateSubmitDisabledReason =
     | { readonly kind: "configMissing" }
     | { readonly kind: "walletDisconnected" }
     | { readonly kind: "amountInvalid"; readonly code: DonationAmountErrorCode }
+    | { readonly kind: "donorPassLoading" }
+    | { readonly kind: "donorPassError"; readonly message: string }
     | {
           readonly kind: "destinationsLoading";
           readonly mode: "campaign" | "category";
@@ -132,6 +141,14 @@ export function resolveDonateSubmitDisabledReason(
 
     if (!input.amountValidation.ok) {
         return { kind: "amountInvalid", code: input.amountValidation.errorCode };
+    }
+
+    if (input.donorPassState.status === "loading") {
+        return { kind: "donorPassLoading" };
+    }
+
+    if (input.donorPassState.status === "error") {
+        return { kind: "donorPassError", message: input.donorPassState.message };
     }
 
     if (input.selectedMode === "campaign") {

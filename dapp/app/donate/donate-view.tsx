@@ -1,6 +1,7 @@
 "use client";
 
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
@@ -26,10 +27,12 @@ import {
     buildDonateTxResultView,
     type DonateDestinationMode,
     type DonateDestinationReadState,
+    type DonateDonorPassReadState,
     type DonateSubmitDisabledReason,
     type DonateTxState,
     resolveDonateSubmitDisabledReason,
 } from "./donate-view-state";
+import { readDonorPassId } from "./donor-pass-read";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
 const DEFAULT_DONATION_AMOUNT = "400";
@@ -48,6 +51,9 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         campaigns: [],
         categories: [],
         errorMessage: null,
+    });
+    const [donorPassState, setDonorPassState] = useState<DonateDonorPassReadState>({
+        status: "idle",
     });
     const [mode, setMode] = useState<DonateDestinationMode>("general");
     const [campaignId, setCampaignId] = useState("");
@@ -193,6 +199,40 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     }, [fundingPackageId, network]);
 
     useEffect(() => {
+        if (config === null || account === null) {
+            setDonorPassState({ status: "idle" });
+            return;
+        }
+
+        const client = new SuiGrpcClient({ network, baseUrl: resolveGrpcBaseUrl(network) });
+        let cancelled = false;
+        setDonorPassState({ status: "loading" });
+
+        void (async () => {
+            const result = await readDonorPassId(client, config.donorRegistryId, account.address);
+            if (cancelled) {
+                return;
+            }
+
+            switch (result.kind) {
+                case "ok":
+                    setDonorPassState({ status: "ready", passId: result.passId });
+                    return;
+                case "none":
+                    setDonorPassState({ status: "ready", passId: null });
+                    return;
+                case "error":
+                    setDonorPassState({ status: "error", message: result.message });
+                    return;
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [account, config, network]);
+
+    useEffect(() => {
         if (destinationState.status !== "ready") {
             return;
         }
@@ -221,6 +261,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         configReady: config !== null,
         walletConnected: isWalletConnected,
         amountValidation,
+        donorPassState,
         selectedMode: mode,
         destinationState,
         selectedCampaignId: campaignId,
@@ -365,9 +406,20 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
             });
             return;
         }
+        if (donorPassState.status !== "ready") {
+            setTxState({
+                status: "failed",
+                message: txMessage(),
+            });
+            return;
+        }
 
         setTxState({ status: "building" });
         try {
+            const donorPass =
+                donorPassState.passId === null
+                    ? ({ kind: "none" } as const)
+                    : ({ kind: "existing", passId: donorPassState.passId } as const);
             const { transaction } = buildDonateTransaction({
                 senderAddress: account.address,
                 packageId: config.fundingPackageId,
@@ -380,7 +432,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                     operationsPool: config.operationsPoolId,
                 },
                 destination,
-                donorPass: { kind: "none" },
+                donorPass,
             });
 
             setTxState({ status: "submitting" });
@@ -673,6 +725,10 @@ function formatSubmitDisabledReason(
             return t("submit.disabled.walletDisconnected");
         case "amountInvalid":
             return t(`amount.error.${reason.code}`);
+        case "donorPassLoading":
+            return t("submit.disabled.donorPassLoading");
+        case "donorPassError":
+            return reason.message;
         case "destinationNotFound":
             return reason.mode === "campaign"
                 ? t("submit.disabled.campaignNotFound")

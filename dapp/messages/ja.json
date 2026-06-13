@@ -453,6 +453,7 @@
             "disabled": {
                 "configMissing": "寄付設定が未完了です。",
                 "walletDisconnected": "ウォレットを接続してください。",
+                "donorPassLoading": "DonorPass の状態を確認しています…",
                 "campaignLoading": "キャンペーン候補を読み込み中…",
                 "campaignNotFound": "利用可能なキャンペーンがありません。",
                 "campaignNotSelected": "キャンペーンを選択してください。",
