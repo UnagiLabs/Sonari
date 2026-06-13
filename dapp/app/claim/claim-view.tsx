@@ -26,11 +26,11 @@ import {
     fetchAffectedCellsProof,
 } from "./affected-cells-proof";
 import {
-    type ClaimEligibility,
     type ClaimCampaignReadClient,
     type ClaimCampaignState,
-    readClaimEligibility,
+    type ClaimEligibility,
     readClaimCampaigns,
+    readClaimEligibility,
 } from "./claim-campaigns";
 import { type ClaimConfig, readClaimConfig } from "./claim-config";
 import {
