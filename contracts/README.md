@@ -33,7 +33,7 @@ DonorPass や Membership SBT は支払い保証を与えない。
 受給の基本ルール:
 
 - 災害前に作成され、災害前に居住セルを登録した active な Membership SBT の owner だけが申請できる。
-- KYC または World ID で本人確認済みであることが支払い条件である。
+- 初回資格確立と床払いには、KYC または World ID で本人確認済みであることを要求する。
 - **支払額は早い者勝ちにならない**。床払いは作成直後にセンサスで1人あたり額を固定し、
   本払いは募集締切後にラウンド単位で按分確定して全員が同じ比率で受け取る。
 
@@ -41,7 +41,7 @@ DonorPass や Membership SBT は支払い保証を与えない。
 
 | 段階 | 名称 | 時期 | 資金源 | 金額の決まり方 |
 | --- | --- | --- | --- | --- |
-| 即時 | **床払い（Floor / Round 0）** | Day 0–30、本人確認完了しだい随時 | **Category Pool + Main Pool**（Campaign は使わない） | 後置センサスで作成直後に固定。タイミング非依存 |
+| 即時 | **床払い（Floor / Round 0）** | `return_floor_budget` 実行まで、本人確認完了しだい随時 | **Category Pool + Main Pool**（Campaign は使わない） | 後置センサスで作成直後に固定。タイミング非依存 |
 | 締切後 | **本払い（Round 1 以降）** | Day 30 に Round 1、以後90日ごと | **Campaign Pool のみ**（Category / Main は使わない） | ラウンド確定（claim 内 lazy finalize）で按分。全員同比率 |
 
 ## 2. 設計原則
@@ -202,7 +202,7 @@ public struct Campaign has key {
 
     // ---- リアルタイム表示用 ----
     total_donated_usdc: u64,            // Campaign 取り分の寄付累計
-    total_paid_usdc: u64,               // 本払い支払済み総額
+    total_paid_usdc: u64,               // 床払い + 本払いの支払済み総額
     ops_withheld_usdc: u64,             // この Campaign 起点で Ops へ送った累計（ops cap 判定）
 
     // ---- 作成時スナップショット（以後不変） ----
@@ -474,7 +474,7 @@ floor_amount_by_band[b] = band_target[b] × floor_ratio_bps / 10_000            
 > ほぼ同水準の床を受けられる持続的支出ルールになる。分母 `max_liability` を作成直後に固定するため、
 > 受給者間の早い者勝ち（予算枯渇による金額差）も発生しない。
 
-### 7.3 床払いの受取（単一入口 `claim` の床払い経路、Day 0–30・本人確認完了しだい随時）
+### 7.3 床払いの受取（単一入口 `claim` の床払い経路、`return_floor_budget` 実行まで・本人確認完了しだい随時）
 
 床払いには専用 entry を設けず、単一入口 `claim`（§9.1）の中で処理する。
 `claim` は次の条件で床払い経路（旧 `claim_floor`）を実行する:
@@ -584,9 +584,9 @@ Day 0        DisasterEvent finalize + Campaign 自動作成（同一 tx、Catego
 Day 0+       set_floor_census（センサス受理 → floor_ratio 確定 → 床予算 escrow → 床払い開始）
 Day 0–30     寄付受付（Campaign 宛て 90/5/5）
 Day 0–21     claim（初回）: 申請＋本人確認を 1 回で確立し、床払い可能なら即時受取
-Day 0–30     claim（床払い経路）: 検証完了済みの受給者へ固定額を随時支払い
-Day 30       return_floor_budget（未消化床予算を Category / Main へ返還）
-             claim の初回呼び出しが Round 1 を lazy finalize → 本払い開始（Campaign 残高のみ）
+Day 0+       claim（床払い経路）: `return_floor_budget` 実行前の検証完了済み受給者へ固定額を随時支払い
+Day 30以降   return_floor_budget（未消化床予算を Category / Main へ返還）
+             claim の呼び出しが Round 1 を lazy finalize → 本払い開始（Campaign 残高のみ）
 以後90日ごと  claim が境界を跨いだ初回呼び出しで次ラウンドを lazy finalize（補填なし）
 終了時/期限超過  sweep_residual → 端数のみ Main Pool へ（Category へは流さない）
 ```
@@ -608,7 +608,9 @@ claim（本払い経路）:
   受取済みフラグ（ラウンド単位）で二重受取を防ぐ。受取先は Membership SBT owner の Sui address。
 ```
 
-本人確認の種類で支給率を変えない（KYC / World ID どちらも満額。unverified は支払い不可）。
+本人確認の種類で支給率を変えない（KYC / World ID どちらも満額）。
+初回資格確立と床払いでは有効な本人確認記録を要求し、本払いのみの経路では
+すでに検証済みの `ClaimApplication` と `verified_in_round` を支払い条件にする。
 受給資格判定（business_logic.md §3）は床払い・本払いとも同一。
 
 ### 9.1 受給単一入口 `claim`（初回申請・本人確認・床払い・本払いを内包）
@@ -652,7 +654,8 @@ SBT precheck（active / sender = owner / registry record 整合）。
   - 検証を通すと `ClaimApplication { band, verified: true, verified_in_round: current_round, ... }`
     を登録し、`ClaimSubmitted` と `ClaimVerified` を発行する。
   - 申請受付は Day 21 で締切済みのため、後から `claim` を呼んでも申請者集合は増えない。
-    Round N の finalize 後に検証された者は Round N+1 から本払いに参加する。
+    現行パラメータでは `claim_end_ms < donation_end_ms` なので、Round 1 以降の
+    lazy finalize 後に新規検証者が増えることは想定しない。
 
 **既申請（`is_first_time == false`、旧 `claim_floor` / `claim_payout` 相当）**:
 
@@ -664,7 +667,7 @@ SBT precheck（active / sender = owner / registry record 整合）。
 Round N+1 は前回 finalize + 90日 以降）`finalize_round_v2`（§9.2）を 1 回だけ実行して
 ラウンドを確定する。独立した `finalize_round` 入口は持たない。
 
-**床払い経路（旧 `claim_floor`、Day 0–30）**:
+**床払い経路（旧 `claim_floor`、`return_floor_budget` 実行まで）**:
 `will_pay_floor` = 床未受取 && `census_set` && `floor_budget_returned == false` のとき:
 
   1. 本人確認（有効な record・provider bit・duplicate key 束縛）を要求する。
@@ -857,7 +860,7 @@ assert!(obj.version == VERSION, EVersionMismatch);
 | `CategoryPoolCreated` | Category Pool 新設（admin） | pool_id、category、actor |
 | `DonationSplit` | すべての寄付 | target_kind（CAMPAIGN/CATEGORY/NONE）、各 Pool 実額、適用 bps、ops cap 超過振替額、期限後ルーティングフラグ、donor |
 | `ClaimSubmitted` | claim（初回） | campaign_id、pass_lineage_id、band |
-| `ClaimVerified` | claim（初回） | campaign_id、pass_lineage_id、band、round |
+| `ClaimVerified` | claim（初回） | campaign_id、pass_lineage_id、band、verified_at_ms、verifier |
 | `RoundFinalized` | claim 内 lazy finalize | round、liability、campaign_available、band_payout[]、eligible_count |
 | `PayoutClaimed` | claim（本払い経路） | round、pass_lineage_id、band、amount、recipient |
 | `OpsSpend` | spend_operations | amount、recipient、reason_code、actor |
@@ -885,7 +888,7 @@ assert!(obj.version == VERSION, EVersionMismatch);
 | must | Campaign と Category Pool の紐付けは hazard_type から決定論的に行う（裁量なし） |
 | must | Nautilus 署名済み result（災害・本人確認・センサス）だけを信頼する |
 | must | センサスは `(event_uid, event_revision, affected_cells_root)` への束縛と family/PCR を検証する |
-| must | IdentityRegistry の有効な本人確認記録を床払い・本払い双方に要求する |
+| must | IdentityRegistry の有効な本人確認記録を初回資格確立と床払いに要求する。本払いのみの経路は検証済み `ClaimApplication` と `verified_in_round` で参加可否を判定する |
 | must | provider 内 duplicate key を検証する |
 | must | Membership SBT owner にだけ支払う |
 | must | 床払いは pass あたり1回、本払いは campaign / round あたり1回に制限する |
@@ -953,7 +956,7 @@ target 仕様として残っていないことを確認する。
 - DisasterEvent finalize と同一 tx での Campaign 自動作成（band 条件 + Category Pool 自動紐付け）
 - **後置センサス受理 `set_floor_census` → 床予算 escrow（Category ÷5 → Main ×20%, reserve floor）→ floor_ratio 固定**
 - **受給単一入口 `claim`（初回申請＋本人確認＋床払い＋本払いを内包、lazy finalize）**
-- 床払いは `claim` の床払い経路（Day 0–30、固定額）/ `return_floor_budget`（Day 30）
+- 床払いは `claim` の床払い経路（`return_floor_budget` 実行まで、固定額）/ `return_floor_budget`（Day 30 以降）
 - 本払いは Campaign 残のみで按分（補填なし、Round 1 + 90日ごと再分配）。確定は `claim` 内 lazy finalize
 - `sweep_residual`（Main へのみ）/ `exclude_recipient` / `extend_donation_period` / `spend_operations` / `create_category_pool`
 - `metadata_verifier` に census family（= 5）を追加
@@ -978,11 +981,11 @@ target 仕様として残っていないことを確認する。
 | OQ-1 | reserve floor の絶対額 | 100,000 USDC（`MAIN_RESERVE_FLOOR_USDC`）。中規模災害1件（1,000人 × Band2 150 USDC ≒ 150k）の概ね 2/3 を常時下支え。migrate で調整 |
 | OQ-2 | `CATEGORY_ANNUAL_EVENT_DIVISOR = 5` の較正 | finalize 条件（severity_band ≥ MIN_CLAIM_BAND）を満たす地震の年間頻度を USGS 履歴で推定し upgrade で較正。初期は保守的に 5 |
 | OQ-3 | **対象地域の登録者数の供給方式（TEE / contract）** | **後置センサス（off-chain 集計→署名→`set_floor_census`、#296）** を採用。純オンチェーン集計は DF 列挙不可・affected cells は root のみ・最大100万セル・cutoff 履歴で不可能。地震 TEE への同梱（全 membership スキャン）は重く密結合のため不採用。署名は census family（#296 で a:運営/census 鍵 vs b:enclave アテステーションを決定） |
-| OQ-4 | 床払いの受取期限 | `return_floor_budget`（Day 30）実行までを期限とする。間に合わなかった検証済み者は床を失効（本払いには引き続き参加可）。Day 30 ちょうどの競合は return を Day 30 厳密以降に限定して回避 |
+| OQ-4 | 床払いの受取期限 | `return_floor_budget`（Day 30 以降）実行までを期限とする。間に合わなかった検証済み者は床を失効（本払いには引き続き参加可）。Day 30 以降は `claim` と `return_floor_budget` のトランザクション順で決まり、返還後は床払い不可 |
 | OQ-5 | センサス未到達 / 遅延時の fallback | `census_set == false` のまま Day 30 を迎えたら床払いは行われず本払いのみとなる。off-chain scheduler が finalize 後すぐ census を submit する運用を前提。デッドラインや代替集計は #296 で詰める |
 | OQ-6 | 本払いラウンド終了閾値 | `MIN_PAYOUT_PER_RECIPIENT_USDC = 1 USDC` + 絶対額ガード（`campaign_balance < 10 USDC`） |
 | OQ-7 | finalize / 返還 / センサス submit の実行者・インセンティブ | permissionless（計算/検証は決定的）+ 運営 off-chain scheduler（既存 AWS runner に cron）。gas bounty は将来 |
-| OQ-8 | 検証遅延者のラウンド参加の状態遷移 | `claim` 初回経路で検証した時点の `current_round` を `verified_in_round` に記録し、`claim` 本払い経路は `verified_in_round < current_round` を要求。lazy finalize は実行時点の `verified_count_by_band` を母数にするため整合 |
+| OQ-8 | 検証遅延者のラウンド参加の状態遷移 | `claim` 初回経路で検証した時点の `current_round` を `verified_in_round` に記録し、`claim` 本払い経路は `verified_in_round < current_round` を要求。現行パラメータでは `claim_end_ms < donation_end_ms` のため Round 1 以降に新規検証者は増えないが、guard はラウンド確定前に検証済みの者だけを支払い対象にする不変条件として維持する |
 | OQ-9 | 除外の遡及範囲 | 確定済みラウンドの `band_payout` は再計算しない。除外者の未受取分は次ラウンドで全員へ再分配。確定値の不変性（早い者勝ち排除）を優先 |
 | OQ-10 | DisasterEvent revision 更新時の Campaign | 作り直さない（最初の Campaign を維持）。revision で対象が広がるケースの救済は別 issue |
 | OQ-11 | severity_band を affected cells 最大 band の代理にしてよいか | verifier 仕様（`schemas/`）で `severity_band == max(cell_band)` を明文化。将来 band 別セル数を payload に持つ場合は oracle_version を上げる |
