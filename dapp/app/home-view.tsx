@@ -120,7 +120,6 @@ const footerColumns = [
         links: [
             { key: "linkDonate", href: "/donate" },
             { key: "linkDashboard", href: "/dashboard" },
-            { key: "linkLeaderboard", href: "/leaderboard" },
         ],
     },
     {
@@ -259,12 +258,6 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
 
                     <section className="section" aria-labelledby="supporters-title">
                         <SectionHeader
-                            action={
-                                <a className="btn btn-ghost" href="/leaderboard">
-                                    {t("supporters.fullLeaderboard")}{" "}
-                                    <Icon name="arrowRight" size={14} />
-                                </a>
-                            }
                             eyebrow={t("supporters.eyebrow")}
                             title={t("supporters.title")}
                         />

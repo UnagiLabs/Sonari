@@ -295,13 +295,7 @@ function DashboardContent({ view }: { readonly view: DashboardViewModel }) {
                 />
 
                 <section className="dash-panel dash-panel-wide" aria-labelledby="supporters-title">
-                    <PanelHeader
-                        actionHref="/leaderboard"
-                        actionLabel={t("supportersPanel.action")}
-                        eyebrow={t("supportersPanel.eyebrow")}
-                        titleId="supporters-title"
-                        title={t("supportersPanel.title")}
-                    />
+                    <PanelHeader titleId="supporters-title" title={t("supportersPanel.title")} />
                     <div className="dashboard-supporters">
                         <SupporterColumn
                             supporters={view.topDonors}
@@ -334,8 +328,8 @@ function PanelHeader({
     title,
     titleId,
 }: {
-    actionHref: string;
-    actionLabel: string;
+    actionHref?: string;
+    actionLabel?: string;
     eyebrow?: string;
     title: string;
     titleId?: string;
@@ -346,9 +340,11 @@ function PanelHeader({
                 {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
                 <h2 id={titleId}>{title}</h2>
             </div>
-            <a className="text-action" href={actionHref}>
-                {actionLabel}
-            </a>
+            {actionHref && actionLabel ? (
+                <a className="text-action" href={actionHref}>
+                    {actionLabel}
+                </a>
+            ) : null}
         </div>
     );
 }
