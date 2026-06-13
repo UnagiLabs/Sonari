@@ -375,10 +375,12 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 amountMicroUsdc: amountValidation.microUsdc,
                 objects: {
                     pauseState: config.donationPauseStateId,
+                    donorRegistry: config.donorRegistryId,
                     mainPool: config.mainPoolId,
                     operationsPool: config.operationsPoolId,
                 },
                 destination,
+                donorPass: { kind: "none" },
             });
 
             setTxState({ status: "submitting" });
