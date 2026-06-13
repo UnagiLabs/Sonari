@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
     buildDonateSplitRows,
+    buildDonateDonorPassReadState,
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
     type DonateDonorPassReadState,
@@ -226,6 +227,30 @@ describe("resolveDonateSubmitDisabledReason", () => {
         });
 
         expect(reason).toEqual({ kind: "donorPassError", message: "registry down" });
+    });
+});
+
+describe("buildDonateDonorPassReadState", () => {
+    it("keeps none as ready before the first donation", () => {
+        expect(buildDonateDonorPassReadState({ kind: "none" }, { noneAsError: false })).toEqual({
+            status: "ready",
+            passId: null,
+        });
+    });
+
+    it("treats none as error after an initial donation submission", () => {
+        expect(buildDonateDonorPassReadState({ kind: "none" }, { noneAsError: true })).toMatchObject({
+            status: "error",
+        });
+    });
+
+    it("returns the pass id when lookup succeeds", () => {
+        expect(
+            buildDonateDonorPassReadState(
+                { kind: "ok", passId: "0xpass" },
+                { noneAsError: true },
+            ),
+        ).toEqual({ status: "ready", passId: "0xpass" });
     });
 });
 

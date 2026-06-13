@@ -93,6 +93,30 @@ export type DonateDonorPassReadState =
     | { readonly status: "ready"; readonly passId: string | null }
     | { readonly status: "error"; readonly message: string };
 
+export type DonateDonorPassLookupResult =
+    | { readonly kind: "ok"; readonly passId: string }
+    | { readonly kind: "none" }
+    | { readonly kind: "error"; readonly message: string };
+
+const DONOR_PASS_NOT_FOUND_AFTER_SUBMIT =
+    "DonorPass was not found after donation submission. Please wait and try again.";
+
+export function buildDonateDonorPassReadState(
+    result: DonateDonorPassLookupResult,
+    input: { readonly noneAsError: boolean },
+): DonateDonorPassReadState {
+    switch (result.kind) {
+        case "ok":
+            return { status: "ready", passId: result.passId };
+        case "none":
+            return input.noneAsError
+                ? { status: "error", message: DONOR_PASS_NOT_FOUND_AFTER_SUBMIT }
+                : { status: "ready", passId: null };
+        case "error":
+            return { status: "error", message: result.message };
+    }
+}
+
 export interface DonateSubmitDisabledInput {
     readonly configReady: boolean;
     readonly walletConnected: boolean;

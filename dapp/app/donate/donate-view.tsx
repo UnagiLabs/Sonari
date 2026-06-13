@@ -23,6 +23,7 @@ import { combineDonateConfig, type DonateConfig, readDonateEnvConfig } from "./d
 import { readDonateDestinations } from "./donate-destinations";
 import { buildDonateTransaction, type DonateDestinationInput } from "./donate-transaction";
 import {
+    buildDonateDonorPassReadState,
     buildDonateSplitRows,
     buildDonateTxResultView,
     type DonateDestinationMode,
@@ -214,17 +215,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 return;
             }
 
-            switch (result.kind) {
-                case "ok":
-                    setDonorPassState({ status: "ready", passId: result.passId });
-                    return;
-                case "none":
-                    setDonorPassState({ status: "ready", passId: null });
-                    return;
-                case "error":
-                    setDonorPassState({ status: "error", message: result.message });
-                    return;
-            }
+            setDonorPassState(buildDonateDonorPassReadState(result, { noneAsError: false }));
         })();
 
         return () => {
@@ -438,6 +429,19 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
             setTxState({ status: "submitting" });
             const { digest } = await executeWalletTransaction(dAppKit, { transaction });
             setTxState({ status: "submitted", digest });
+            if (donorPass.kind === "none") {
+                setDonorPassState({ status: "loading" });
+                const client = new SuiGrpcClient({
+                    network,
+                    baseUrl: resolveGrpcBaseUrl(network),
+                });
+                const result = await readDonorPassId(
+                    client,
+                    config.donorRegistryId,
+                    account.address,
+                );
+                setDonorPassState(buildDonateDonorPassReadState(result, { noneAsError: true }));
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : t("tx.failed.generic");
             setTxState({ status: "failed", message });
