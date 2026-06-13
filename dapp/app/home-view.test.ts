@@ -99,3 +99,29 @@ describe("home view sponsor logos", () => {
         expect(positions).toEqual(sorted);
     });
 });
+
+// モックのプール金額。実残高化で home-view.tsx から消えること。
+const removedPoolMockTokens = ["$1.28M", "$2.10M", "$820K", "$642K", "$980K", "$337K"] as const;
+
+describe("home view featured pools", () => {
+    it("モックのプール金額を残さない", () => {
+        for (const token of removedPoolMockTokens) {
+            expect(homeViewSource, token).not.toContain(token);
+        }
+    });
+
+    it("実データ取得（deriveFeaturedPools / readDashboardPools）を使う", () => {
+        expect(homeViewSource).toContain("deriveFeaturedPools");
+        expect(homeViewSource).toContain("readDashboardPools");
+    });
+
+    it("読み込み中と失敗の状態を持つ（fail-close）", () => {
+        expect(homeViewSource).toContain('status: "loading"');
+        expect(homeViewSource).toContain('status: "error"');
+    });
+
+    it("メインプール画像を新パスに差し替え、旧パスを残さない", () => {
+        expect(homeViewSource).toContain("/assets/pool_main_support.jpg");
+        expect(homeViewSource).not.toContain("/assets/donation_flood.webp");
+    });
+});

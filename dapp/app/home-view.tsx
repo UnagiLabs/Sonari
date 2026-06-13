@@ -1,10 +1,20 @@
 "use client";
 
+import { useCurrentClient } from "@mysten/dapp-kit-react";
+import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
-import type { ReactNode } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+    GENESIS_OBJECT_KIND,
+    readGenesisObjectIds,
+    selectGenesisObjectId,
+} from "./chain/genesis-objects";
+import { readDashboardPools } from "./dashboard/dashboard-chain";
+import { type DashboardPoolSummary, deriveFeaturedPools } from "./dashboard/dashboard-view-model";
 import { SiteTopbar } from "./i18n/site-topbar";
 import type { SonariLocale } from "./register/wizard/locale";
+import { readWalletNetwork, resolveGrpcBaseUrl } from "./wallet/wallet-network";
 
 type IconName =
     | "arrowRight"
@@ -17,16 +27,6 @@ type IconName =
     | "verified"
     | "waves"
     | "bolt";
-
-type Pool = {
-    key: "main" | "earthquake";
-    balance: string;
-    receivedAmount: string;
-    deliveredAmount: string;
-    percent: number;
-    icon: IconName;
-    image: string;
-};
 
 type Donor = {
     name: string;
@@ -48,26 +48,15 @@ const sponsors = [
     { name: "OtterSec", logo: "/assets/sponsors/ottersec.png", chip: false },
 ] as const;
 
-const pools: Pool[] = [
-    {
-        key: "main",
-        balance: "$1.28M",
-        receivedAmount: "$2.10M",
-        deliveredAmount: "$820K",
-        percent: 61,
-        icon: "waves",
-        image: "/assets/donation_flood.webp",
-    },
-    {
-        key: "earthquake",
-        balance: "$642K",
-        receivedAmount: "$980K",
-        deliveredAmount: "$337K",
-        percent: 66,
-        icon: "bolt",
-        image: "/assets/donation_earthquake.png",
-    },
+// トップページに出す注目プールの静的設定。Operations Pool は運営費のため出さない。
+// 金額は実残高をチェーンから取得して埋める（FeaturedPools 参照）。icon と画像は固定。
+const FEATURED_POOLS: readonly { key: "main" | "earthquake"; icon: IconName; image: string }[] = [
+    { key: "main", icon: "waves", image: "/assets/pool_main_support.jpg" },
+    { key: "earthquake", icon: "bolt", image: "/assets/donation_earthquake.png" },
 ];
+
+// pool ID は環境変数ではなく funding package ID 起点の genesis イベントから導出する。
+const fundingPackageId = process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID ?? "";
 
 const individualDonors: Donor[] = [
     { name: "haru.sui", amount: "$89,400", meta: "41 donations, Earthquake" },
@@ -221,11 +210,7 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
                             eyebrow={t("pools.eyebrow")}
                             title={t("pools.title")}
                         />
-                        <div className="pools-grid">
-                            {pools.map((pool) => (
-                                <PoolCard key={pool.key} pool={pool} />
-                            ))}
-                        </div>
+                        <FeaturedPools locale={locale} />
                     </section>
 
                     <section className="section" aria-labelledby="supporters-title">
@@ -363,40 +348,165 @@ function SponsorMarquee() {
     );
 }
 
-function PoolCard({ pool }: { pool: Pool }) {
+type FeaturedPoolsState =
+    | { readonly status: "loading" }
+    | { readonly status: "ready"; readonly pools: readonly DashboardPoolSummary[] }
+    | { readonly status: "error" };
+
+// Featured pools をチェーンの実残高で描画する。取得はダッシュボードと同じ流れ。
+// 読み込み中・失敗時はカードの骨格だけ出し、金額は出さない（fail-close）。
+function FeaturedPools({ locale }: { locale: SonariLocale }) {
+    const client = useCurrentClient();
+    const network = readWalletNetwork();
+    const [state, setState] = useState<FeaturedPoolsState>({ status: "loading" });
+    const cancelRef = useRef<() => void>(() => {});
+
+    const load = useCallback((): (() => void) => {
+        cancelRef.current();
+
+        // 詳細な原因は開発者向けに console へ出し、画面には金額を出さない。
+        const failClosed = (detail: string) => {
+            console.error(`featured pools load failed: ${detail}`);
+            setState({ status: "error" });
+        };
+
+        if (fundingPackageId.trim().length === 0) {
+            failClosed("NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.");
+            return () => {};
+        }
+
+        let cancelled = false;
+        const cancel = () => {
+            cancelled = true;
+        };
+        cancelRef.current = cancel;
+        setState({ status: "loading" });
+
+        const eventClient = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+
+        void (async () => {
+            const genesisResult = await readGenesisObjectIds(eventClient, {
+                packageId: fundingPackageId,
+            });
+            if (cancelled) {
+                return;
+            }
+            if (genesisResult.kind === "error") {
+                failClosed(genesisResult.message);
+                return;
+            }
+
+            const mainPoolId = selectGenesisObjectId(
+                genesisResult.ids,
+                GENESIS_OBJECT_KIND.mainPool,
+            );
+            const operationsPoolId = selectGenesisObjectId(
+                genesisResult.ids,
+                GENESIS_OBJECT_KIND.operationsPool,
+            );
+            const categoryPoolId = selectGenesisObjectId(
+                genesisResult.ids,
+                GENESIS_OBJECT_KIND.earthquakePool,
+            );
+            if (mainPoolId === null || operationsPoolId === null || categoryPoolId === null) {
+                failClosed("genesis objects for main/operations/earthquake pool were not found.");
+                return;
+            }
+
+            const poolResult = await readDashboardPools(client, {
+                mainPoolId,
+                operationsPoolId,
+                categoryPoolId,
+            });
+            if (cancelled) {
+                return;
+            }
+            if (poolResult.kind === "error") {
+                failClosed(poolResult.message);
+                return;
+            }
+            setState({ status: "ready", pools: deriveFeaturedPools(poolResult.pools, locale) });
+        })().catch((error: unknown) => {
+            if (cancelled) {
+                return;
+            }
+            failClosed(error instanceof Error ? error.message : "unknown error");
+        });
+
+        return cancel;
+    }, [client, network, locale]);
+
+    useEffect(() => load(), [load]);
+
+    const summaries = state.status === "ready" ? state.pools : [];
+
+    return (
+        <div className="pools-grid" aria-busy={state.status === "loading"}>
+            {FEATURED_POOLS.map(({ key, icon, image }) => (
+                <PoolCard
+                    key={key}
+                    poolKey={key}
+                    icon={icon}
+                    image={image}
+                    summary={summaries.find((pool) => pool.key === key) ?? null}
+                />
+            ))}
+        </div>
+    );
+}
+
+function PoolCard({
+    poolKey,
+    icon,
+    image,
+    summary,
+}: {
+    poolKey: "main" | "earthquake";
+    icon: IconName;
+    image: string;
+    summary: DashboardPoolSummary | null;
+}) {
     const t = useTranslations("home.pools");
+    const placeholder = "—";
 
     return (
         <a className="pool-card" href="/pools">
             <figure className="pool-image">
                 <Image
-                    src={pool.image}
-                    alt={t(`${pool.key}.imageAlt`)}
+                    src={image}
+                    alt={t(`${poolKey}.imageAlt`)}
                     fill
                     sizes="(min-width: 920px) 33vw, 100vw"
                 />
             </figure>
             <div className="header">
                 <div className="icon">
-                    <Icon name={pool.icon} size={20} />
+                    <Icon name={icon} size={20} />
                 </div>
                 <span className="tag tag-ok tag-dot">{t("statusActive")}</span>
             </div>
             <div>
-                <h3>{t(`${pool.key}.name`)}</h3>
-                <p className="muted">{t(`${pool.key}.description`)}</p>
+                <h3>{t(`${poolKey}.name`)}</h3>
+                <p className="muted">{t(`${poolKey}.description`)}</p>
             </div>
             <div>
-                <div className="balance">{pool.balance}</div>
+                <div className="balance">{summary ? summary.available : placeholder}</div>
                 <div className="faint">{t("available")}</div>
             </div>
             <div>
                 <div className="meter">
-                    <div className="meter-fill" style={{ width: `${pool.percent}%` }} />
+                    <div
+                        className="meter-fill"
+                        style={{ width: `${summary ? summary.percentAvailable : 0}%` }}
+                    />
                 </div>
                 <div className="footer-row">
-                    <span>{t("received", { amount: pool.receivedAmount })}</span>
-                    <span>{t("delivered", { amount: pool.deliveredAmount })}</span>
+                    <span>
+                        {t("received", { amount: summary ? summary.received : placeholder })}
+                    </span>
+                    <span>
+                        {t("delivered", { amount: summary ? summary.paidOut : placeholder })}
+                    </span>
                 </div>
             </div>
         </a>
