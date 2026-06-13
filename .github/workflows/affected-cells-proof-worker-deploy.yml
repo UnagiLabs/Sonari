@@ -1,7 +1,8 @@
 name: Affected Cells Proof Worker Deploy
 
-# packages/affected-cells-proof-worker か依存先 packages/proof-core が main に入ると
-# 自動で Cloudflare へ wrangler deploy する。手動デプロイ漏れを防ぐのが目的。
+# packages/affected-cells-proof-worker か実行時に使う packages/proof-core の実装が main に入ると
+# 自動で Cloudflare へ wrangler deploy する。依存 lockfile だけの変更は手動 dispatch で反映し、
+# 不要なデプロイを抑える。
 # パターンは .github/workflows/aws-sonari-verifier-runner-dev-deploy.yml に倣う。
 on:
   push:
@@ -9,8 +10,9 @@ on:
       - main
     paths:
       - packages/affected-cells-proof-worker/**
-      - packages/proof-core/**
-      - pnpm-lock.yaml
+      - packages/proof-core/package.json
+      - packages/proof-core/tsconfig.json
+      - packages/proof-core/src/**
       - .github/workflows/affected-cells-proof-worker-deploy.yml
   workflow_dispatch:
 
@@ -26,10 +28,10 @@ jobs:
     # を参照する。secret は GitHub の Settings で別途登録する（本リポジトリには平文を置かない）。
     environment: cloudflare-affected-cells-proof-worker
     timeout-minutes: 30
-    # 同一 worker への同時デプロイを直列化する。実行中の deploy は途中で殺さない。
+    # 同一 worker への同時デプロイを直列化する。新しい main の deploy を優先する。
     concurrency:
       group: affected-cells-proof-worker-deploy
-      cancel-in-progress: false
+      cancel-in-progress: true
 
     steps:
       - name: Checkout
