@@ -21,100 +21,25 @@ function expectContainsAll(source: string, expected: readonly string[]): void {
     }
 }
 
-function readPushPaths(workflow: string): string[] {
-    const pathsMatch = workflow.match(/ {4}paths:\n((?: {6}- .+\n)+)/u);
-    const pathsBlock = pathsMatch?.[1];
-    if (pathsBlock === undefined) {
-        return [];
-    }
-    return pathsBlock
-        .trimEnd()
-        .split("\n")
-        .map((line) => line.trim().replace(/^- /u, ""));
-}
-
 describe("AWS Sonari verifier runner dev deploy workflow", () => {
     it("does not keep the legacy earthquake runner deploy workflow", async () => {
         await expect(access(legacyEarthquakeWorkflowPath)).rejects.toThrow();
     });
 
-    it("runs only for main pushes and manual dev retries with dev-scoped names", async () => {
+    it("runs only on manual dispatch to avoid wasteful auto-deploys, with dev-scoped names", async () => {
         const workflow = await readWorkflow();
 
         expectContainsAll(workflow, [
             "name: AWS Sonari Verifier Runner Dev Deploy",
-            "push:",
-            "branches:",
-            "- main",
             "workflow_dispatch:",
             "environment: aws-sonari-verifier-runner-dev",
             "group: aws-sonari-verifier-runner-dev-deploy",
         ]);
+        // GitHub Actions のコスト削減のため、push などの自動 trigger は持たず手動実行限定にする。
+        // EIF 再ビルドを伴うフルデプロイは毎 push で走らせない（PCR 自動再登録も dispatch 時のみ動く）。
+        expect(workflow).not.toContain("push:");
         expect(workflow).not.toContain("pull_request:");
         expect(workflow).not.toContain("aws-sonari-verifier-runner-prod");
-    });
-
-    it("filters main pushes to AWS deploy artifact and CloudFormation inputs", async () => {
-        const workflow = await readWorkflow();
-        const pushPaths = readPushPaths(workflow);
-
-        expectContainsAll(workflow, [
-            "push:",
-            "branches:",
-            "- main",
-            "paths:",
-            "workflow_dispatch:",
-        ]);
-        expect(workflow).not.toContain("pull_request:");
-        expect(pushPaths).toEqual(
-            expect.arrayContaining([
-                ".github/workflows/aws-sonari-verifier-runner-dev-deploy.yml",
-                "infra/aws/sonari-verifier-runner/template.yaml",
-                "scripts/build_aws_*.ts",
-                "scripts/aws_sonari_verifier_runner_deploy_plan.ts",
-                "scripts/tsconfig.json",
-                "nautilus/verifiers/common/contracts/src/**",
-                "nautilus/verifiers/earthquake/shared/src/**",
-                "nautilus/verifiers/earthquake/watcher/src/**",
-                "nautilus/verifiers/earthquake/relayer/src/**",
-                "nautilus/verifiers/earthquake/tee/src/**",
-                "nautilus/verifiers/membership/shared/src/**",
-                "nautilus/verifiers/membership/runner/src/**",
-                "nautilus/verifiers/membership/tee/src/**",
-                "nautilus/verifiers/shared-tee/src/**",
-                "nautilus/verifiers/common/contracts/package.json",
-                "nautilus/verifiers/common/contracts/tsconfig.json",
-                "nautilus/verifiers/earthquake/shared/package.json",
-                "nautilus/verifiers/earthquake/shared/tsconfig.json",
-                "nautilus/verifiers/earthquake/watcher/package.json",
-                "nautilus/verifiers/earthquake/watcher/tsconfig.json",
-                "nautilus/verifiers/earthquake/relayer/package.json",
-                "nautilus/verifiers/earthquake/relayer/tsconfig.json",
-                "nautilus/verifiers/earthquake/tee/Cargo.toml",
-                "nautilus/verifiers/membership/shared/package.json",
-                "nautilus/verifiers/membership/shared/tsconfig.json",
-                "nautilus/verifiers/membership/runner/package.json",
-                "nautilus/verifiers/membership/runner/tsconfig.json",
-                "nautilus/verifiers/membership/tee/Cargo.toml",
-                "nautilus/verifiers/shared-tee/Cargo.toml",
-                "package.json",
-                "pnpm-lock.yaml",
-                "tsconfig.json",
-                "Cargo.toml",
-                "Cargo.lock",
-            ]),
-        );
-        expect(pushPaths).not.toEqual(expect.arrayContaining(["docs/**"]));
-        expect(pushPaths).not.toEqual(
-            expect.arrayContaining([
-                "README.md",
-                "infra/aws/sonari-verifier-runner/README.md",
-                "dapp/**",
-                "contracts/**",
-                "nautilus/verifiers/earthquake/watcher/test/**",
-                "nautilus/verifiers/membership/tee/tests/**",
-            ]),
-        );
     });
 
     it("uses GitHub OIDC and only dev-prefixed GitHub variables for AWS access", async () => {
@@ -431,6 +356,59 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         const workflow = await readWorkflow();
 
         expect(workflow).not.toContain("set -x");
+    });
+
+    it("auto-registers on-chain verifier PCR configs from the rebuilt EIFs", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            // testnet 互換の pinned Sui CLI を取得して register スクリプトに供給する。
+            "SUI_CLI_URL: https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/",
+            "SUI_CLI_SHA256: ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5",
+            "Cache Sui CLI artifact",
+            "Install pinned Sui CLI",
+            "Register verifier PCR configs from rebuilt EIFs",
+            "scripts/register-verifier-configs.sh",
+            '--package-id "$SONARI_IDENTITY_PACKAGE_ID"',
+            '--admin-cap-id "$SONARI_ADMIN_CAP_ID"',
+            '--verifier-registry-id "$SONARI_VERIFIER_REGISTRY_ID"',
+            '--sui-config "$client_config"',
+            "--sui-env testnet",
+            // PCR は EIF 値の env fallback で渡る（手書きしない）。
+            "register-verifier-configs.sh",
+        ]);
+        // admin cap id と registry id は repo-level Variables、admin 鍵は環境スコープ secret から。
+        expect(workflow).toContain("SONARI_ADMIN_CAP_ID: $" + "{{ vars.SONARI_ADMIN_CAP_ID }}");
+        expect(workflow).toContain(
+            "SONARI_DEV_ADMIN_PRIVATE_KEY: $" + "{{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}",
+        );
+    });
+
+    it("keeps the dev admin key out of logs and cleans it up afterwards", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "set +x",
+            'echo "::add-mask::$' + '{SONARI_DEV_ADMIN_PRIVATE_KEY}"',
+            "Cleanup admin wallet materials",
+            "if: always()",
+            'rm -rf "$RUNNER_TEMP/sui-admin"',
+        ]);
+        // 使い捨て admin 鍵は AWS Secrets Manager / Variables に置かない。
+        expect(workflow).not.toContain("aws secretsmanager");
+    });
+
+    it("verifies on-chain PCR matches the rebuilt EIFs to catch silent partial failures", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "Verify on-chain PCR config matches rebuilt EIFs",
+            'object "$SONARI_VERIFIER_REGISTRY_ID" --json',
+            "verifier_family",
+            "EARTHQUAKE_EIF_PCR0",
+            "MEMBERSHIP_IDENTITY_EIF_PCR0",
+            "process.exit(1)",
+        ]);
     });
 
     it("wires shared object ids from repo-level variables and forwards them as CloudFormation parameters", async () => {
