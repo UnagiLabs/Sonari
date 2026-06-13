@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
     buildClaimFlowActions,
-    emptyClaimFlowCompleted,
     isClaimFlowActionDisabled,
     type ClaimFlowInput,
 } from "./claim-flow";
@@ -16,7 +15,6 @@ function input(overrides: Partial<ClaimFlowInput> = {}): ClaimFlowInput {
         worldIdRequired: true,
         claimable: true,
         inFlight: false,
-        completed: emptyClaimFlowCompleted(),
         ...overrides,
     };
 }
@@ -51,11 +49,5 @@ describe("buildClaimFlowActions", () => {
     it("disables claim when there is nothing to receive or a transaction is in flight", () => {
         expect(isClaimFlowActionDisabled("claim", input({ claimable: false }))).toBe(true);
         expect(isClaimFlowActionDisabled("claim", input({ inFlight: true }))).toBe(true);
-        expect(
-            isClaimFlowActionDisabled(
-                "claim",
-                input({ completed: { claim: true } }),
-            ),
-        ).toBe(true);
     });
 });

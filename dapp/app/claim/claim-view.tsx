@@ -33,12 +33,7 @@ import {
     readClaimEligibility,
 } from "./claim-campaigns";
 import { type ClaimConfig, readClaimConfig } from "./claim-config";
-import {
-    buildClaimFlowActions,
-    type ClaimFlowAction,
-    type ClaimFlowCompleted,
-    emptyClaimFlowCompleted,
-} from "./claim-flow";
+import { buildClaimFlowActions, type ClaimFlowAction } from "./claim-flow";
 import { resolveWorldIdClaimIdentity } from "./claim-identity";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "./claim-messages";
 import {
@@ -110,6 +105,7 @@ type ClaimViewReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
 
 const EMPTY_DUPLICATE_KEY_HASH =
     "0x0000000000000000000000000000000000000000000000000000000000000000";
+const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
 
 export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("claim");
@@ -124,9 +120,6 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const [txAction, setTxAction] = useState<ClaimFlowAction | null>(null);
     const [passState, setPassState] = useState<PassState>({ status: "idle" });
     const [worldIdResponse, setWorldIdResponse] = useState<Record<string, unknown> | null>(null);
-    const [completedActions, setCompletedActions] = useState<ClaimFlowCompleted>(() =>
-        emptyClaimFlowCompleted(),
-    );
     const [campaignReadNonce, setCampaignReadNonce] = useState(0);
     const [passReadNonce, setPassReadNonce] = useState(0);
     const [eligibilityReadNonce, setEligibilityReadNonce] = useState(0);
@@ -142,7 +135,6 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         setTxState({ status: "idle" });
         setTxAction(null);
         setWorldIdResponse(null);
-        setCompletedActions(emptyClaimFlowCompleted());
         setEligibilityState({ status: "idle" });
     }, []);
     const network = readWalletNetwork();
@@ -178,7 +170,6 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         worldIdRequired,
         claimable,
         inFlight: isClaimInFlight,
-        completed: completedActions,
     });
     const configNotice = buildConfigNotice(claimConfigResult.kind);
     const campaignNotice = buildCampaignNotice({
@@ -341,6 +332,24 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
             cancelled = true;
         };
     }, [account, claimConfig, client, eligibilityReadNonce, membershipPass, selectedEvent]);
+
+    useEffect(() => {
+        if (
+            claimConfig === null ||
+            selectedEvent === null ||
+            membershipPass === null ||
+            account === null
+        ) {
+            return;
+        }
+
+        const timer = window.setInterval(() => {
+            setEligibilityReadNonce((value) => value + 1);
+        }, ELIGIBILITY_REFRESH_INTERVAL_MS);
+        return () => {
+            window.clearInterval(timer);
+        };
+    }, [account, claimConfig, membershipPass, selectedEvent]);
 
     // カタログのキー or 原文を、現在の locale で表示文字列へ解決する。
     const renderMessage = (message: ClaimMessage): string =>
@@ -519,7 +528,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
 
             setTxState({ status: "submitting" });
             const { digest } = await executeWalletTransaction(dAppKit, { transaction });
-            setCompletedActions((current) => ({ ...current, [action]: true }));
+            setEligibilityReadNonce((value) => value + 1);
             setTxState({ status: "submitted", digest });
         } catch (error) {
             setTxState({ status: "failed", message: resolveClaimTxError(error) });
