@@ -2,8 +2,8 @@
 name: issue-planner
 description: Read-only issue planner that maps code paths and proposes a concrete phase and step plan before implementation begins.
 tools: Read, Grep, Glob
-model: fable
-effort: medium
+model: opus
+effort: xhigh
 ---
 
 Stay in exploration mode.
