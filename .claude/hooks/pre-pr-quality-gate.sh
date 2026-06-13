@@ -4,6 +4,16 @@
 # コミットごとには走らせない（commit-auto のトークン消費とリトライ往復を避けるため）。
 set -u
 
+# 自己ガード: settings.json の `if` は複数行・複合コマンド（例: `cd && git add && git commit`）で
+# パターン解析に失敗すると fail-open して発火する。その誤発火でコミット時にゲートが走らないよう、
+# PreToolUse の stdin から実コマンドを読み、`gh pr create` を含む場合のみ続行する。
+input="$(cat 2>/dev/null || true)"
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+case "$cmd" in
+  *"gh pr create"*) ;;  # PR 作成コマンドのみ続行
+  *) exit 0 ;;          # それ以外（commit 等）は即 no-op
+esac
+
 root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "${root:-}" ] || exit 0
 cd "$root" || exit 0
