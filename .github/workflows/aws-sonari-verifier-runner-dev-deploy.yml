@@ -40,6 +40,9 @@ jobs:
       WORLD_ID_PROOF_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_PROOF_MODE }}
       NITRO_CLI_TAG: v1.4.4
       S3_PREFIX: sonari-verifier-runner
+      # testnet 互換の pinned Sui CLI（PCR 自動再登録で sui client / keytool を使う）。
+      SUI_CLI_URL: https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/sui-testnet-v1.71.1-ubuntu-x86_64.tgz
+      SUI_CLI_SHA256: ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5
 
     steps:
       - name: Checkout
@@ -858,3 +861,234 @@ jobs:
           [[ "$deployed_earthquake_eif_sha256" == "$EARTHQUAKE_EIF_SHA256" ]]
           [[ "$deployed_membership_tee_artifact_sha256" == "$MEMBERSHIP_TEE_ARTIFACT_SHA256" ]]
           [[ "$deployed_tee_eif_sha256" == "$MEMBERSHIP_EIF_SHA256" ]]
+
+      # --- PCR ドリフトの自動再登録（dev/testnet 専用）---
+      # フルデプロイのたびに EIF が再ビルドされ PCR0/1/2 がドリフトするが、on-chain
+      # VerifierRegistry の PCR 再登録が手動だと忘れられ smoke/verify で abort 21
+      # (EEnclavePcrMismatch) が再発する。dev/testnet 専用の使い捨て admin 鍵を使い、
+      # EIF ビルド後に on-chain PCR を自動再登録してトラップを構造的に消す。
+      # 本番（mainnet）の AdminCap は引き続き CI/AWS に置かない（docs/pcr-config.md 参照）。
+      - name: Cache Sui CLI artifact
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/sonari/cli-artifacts/sui/${{ env.SUI_CLI_SHA256 }}
+          key: sui-cli-${{ runner.os }}-${{ env.SUI_CLI_SHA256 }}
+
+      - name: Install pinned Sui CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/sonari-bin"
+          cache_dir="$HOME/.cache/sonari/cli-artifacts/sui/$SUI_CLI_SHA256"
+          download_path="$cache_dir/download"
+          extract_dir="$RUNNER_TEMP/sui-extract"
+
+          mkdir -p "$install_dir" "$cache_dir" "$extract_dir"
+          if [[ ! -f "$download_path" ]]; then
+            curl -fsSL "$SUI_CLI_URL" -o "$download_path"
+          fi
+          printf '%s  %s\n' "$SUI_CLI_SHA256" "$download_path" | sha256sum -c -
+          tar -xzf "$download_path" -C "$extract_dir"
+          source_path="$(find "$extract_dir" -type f -name sui | head -n 1)"
+          if [[ -z "$source_path" || ! -f "$source_path" ]]; then
+            echo "Unable to find sui in downloaded Sui CLI artifact" >&2
+            exit 1
+          fi
+          install -m 0755 "$source_path" "$install_dir/sui"
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/sui" --version
+
+      - name: Register verifier PCR configs from rebuilt EIFs
+        shell: bash
+        env:
+          # dev/testnet 専用の使い捨て admin 鍵（bech32 suiprivkey1...）。本番 AdminCap とは別物。
+          # secret は環境 aws-sonari-verifier-runner-dev スコープ＋手動 dispatch 限定で fork から不可視。
+          SONARI_DEV_ADMIN_PRIVATE_KEY: ${{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}
+          SONARI_ADMIN_CAP_ID: ${{ vars.SONARI_ADMIN_CAP_ID }}
+          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.SONARI_VERIFIER_REGISTRY_ID }}
+          # SONARI_IDENTITY_PACKAGE_ID は前段 step が Published.toml から導出して GITHUB_ENV に置く。
+          SUI_TESTNET_RPC_URL: https://fullnode.testnet.sui.io:443
+        run: |
+          set -euo pipefail
+          # 鍵をログに出さない（trace 無効・mask）。
+          set +x
+          if [[ -z "${SONARI_DEV_ADMIN_PRIVATE_KEY:-}" ]]; then
+            echo "SONARI_DEV_ADMIN_PRIVATE_KEY secret is required for PCR auto-registration" >&2
+            exit 1
+          fi
+          if [[ -z "${SONARI_ADMIN_CAP_ID:-}" ]]; then
+            echo "SONARI_ADMIN_CAP_ID variable is required for PCR auto-registration" >&2
+            exit 1
+          fi
+          if [[ -z "${SONARI_VERIFIER_REGISTRY_ID:-}" ]]; then
+            echo "SONARI_VERIFIER_REGISTRY_ID variable is required for PCR auto-registration" >&2
+            exit 1
+          fi
+          if [[ -z "${SONARI_IDENTITY_PACKAGE_ID:-}" ]]; then
+            echo "SONARI_IDENTITY_PACKAGE_ID must be resolved from Published.toml before registration" >&2
+            exit 1
+          fi
+          echo "::add-mask::${SONARI_DEV_ADMIN_PRIVATE_KEY}"
+
+          admin_dir="$RUNNER_TEMP/sui-admin"
+          rm -rf "$admin_dir"
+          mkdir -p "$admin_dir"
+          keystore_path="$admin_dir/sui.keystore"
+          client_config="$admin_dir/client.yaml"
+
+          # 使い捨て keystore に dev admin 鍵を投入し、address を取得する（鍵は echo しない）。
+          import_json="$(sui keytool --keystore-path "$keystore_path" import \
+            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --json)"
+          admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
+          const parsed = JSON.parse(process.env.SUI_IMPORT_JSON ?? "{}");
+          const address = parsed.suiAddress ?? parsed.address;
+          if (typeof address !== "string" || !/^0x[0-9a-fA-F]+$/.test(address)) {
+            process.stderr.write("sui keytool import did not return a Sui address\n");
+            process.exit(1);
+          }
+          process.stdout.write(address);
+          NODE
+          )"
+
+          # active env=testnet・active address=admin の最小 client.yaml を生成する。
+          cat > "$client_config" <<YAML
+          ---
+          keystore:
+            File: $keystore_path
+          envs:
+            - alias: testnet
+              rpc: "$SUI_TESTNET_RPC_URL"
+              ws: ~
+              basic_auth: ~
+          active_env: testnet
+          active_address: "$admin_address"
+          YAML
+
+          echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
+          # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で
+          # 新 EIF 値が自動的に入る。idempotent（create→abort9→update fallback）なので再実行安全。
+          scripts/register-verifier-configs.sh \
+            --package-id "$SONARI_IDENTITY_PACKAGE_ID" \
+            --admin-cap-id "$SONARI_ADMIN_CAP_ID" \
+            --verifier-registry-id "$SONARI_VERIFIER_REGISTRY_ID" \
+            --sui-config "$client_config" \
+            --sui-env testnet
+
+      - name: Verify on-chain PCR config matches rebuilt EIFs
+        shell: bash
+        env:
+          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.SONARI_VERIFIER_REGISTRY_ID }}
+          SUI_TESTNET_RPC_URL: https://fullnode.testnet.sui.io:443
+        run: |
+          set -euo pipefail
+          # AdminCap 不要の read-only 検証。再登録後の on-chain config PCR が新 EIF と一致するか確認し、
+          # サイレントな部分失敗（abort 21 の再発源）を検出する。
+          registry_json="$(sui client \
+            --client.config "$RUNNER_TEMP/sui-admin/client.yaml" \
+            --client.env testnet \
+            object "$SONARI_VERIFIER_REGISTRY_ID" --json)"
+
+          REGISTRY_JSON="$registry_json" node --input-type=module <<'NODE'
+          const EXPECTED = {
+            // verifier_family: earthquake=3, identity=4（contracts/sources/metadata_verifier.move）。
+            3: {
+              label: "earthquake",
+              pcr0: process.env.EARTHQUAKE_EIF_PCR0,
+              pcr1: process.env.EARTHQUAKE_EIF_PCR1,
+              pcr2: process.env.EARTHQUAKE_EIF_PCR2,
+            },
+            4: {
+              label: "membership identity",
+              pcr0: process.env.MEMBERSHIP_IDENTITY_EIF_PCR0,
+              pcr1: process.env.MEMBERSHIP_IDENTITY_EIF_PCR1,
+              pcr2: process.env.MEMBERSHIP_IDENTITY_EIF_PCR2,
+            },
+          };
+
+          function bytesToHex(value) {
+            if (!Array.isArray(value)) {
+              throw new Error("PCR field is not a byte array");
+            }
+            return value
+              .map((byte) => {
+                const num = Number(byte);
+                if (!Number.isInteger(num) || num < 0 || num > 255) {
+                  throw new Error("PCR byte out of range");
+                }
+                return num.toString(16).padStart(2, "0");
+              })
+              .join("");
+          }
+
+          // VerifierRegistry の configs VecMap から family ごとの config を集める。
+          // RPC の object JSON 形は version で揺れるため、pcr0/1/2 と verifier_family を持つ
+          // ノードを再帰的に拾う（VecMap entries の表現差異を吸収する）。
+          const configs = new Map();
+          function walk(node) {
+            if (Array.isArray(node)) {
+              for (const item of node) {
+                walk(item);
+              }
+              return;
+            }
+            if (node === null || typeof node !== "object") {
+              return;
+            }
+            const fields =
+              node.fields && typeof node.fields === "object" ? node.fields : node;
+            if (
+              fields &&
+              "verifier_family" in fields &&
+              "pcr0" in fields &&
+              "pcr1" in fields &&
+              "pcr2" in fields
+            ) {
+              const family = Number(fields.verifier_family);
+              configs.set(family, {
+                pcr0: bytesToHex(fields.pcr0),
+                pcr1: bytesToHex(fields.pcr1),
+                pcr2: bytesToHex(fields.pcr2),
+              });
+            }
+            for (const value of Object.values(node)) {
+              if (value && typeof value === "object") {
+                walk(value);
+              }
+            }
+          }
+          walk(JSON.parse(process.env.REGISTRY_JSON ?? "null"));
+
+          const failures = [];
+          for (const [family, expected] of Object.entries(EXPECTED)) {
+            const onChain = configs.get(Number(family));
+            if (onChain === undefined) {
+              failures.push(`${expected.label} config (family ${family}) not found on-chain`);
+              continue;
+            }
+            for (const pcr of ["pcr0", "pcr1", "pcr2"]) {
+              const want = (expected[pcr] ?? "").toLowerCase();
+              if (!/^[0-9a-f]{96}$/.test(want)) {
+                failures.push(`${expected.label} expected ${pcr} is not a valid EIF measurement`);
+                continue;
+              }
+              if (onChain[pcr] !== want) {
+                failures.push(
+                  `${expected.label} ${pcr} mismatch: on-chain ${onChain[pcr]} != EIF ${want}`,
+                );
+              }
+            }
+          }
+
+          if (failures.length > 0) {
+            process.stderr.write(`${failures.join("\n")}\n`);
+            process.exit(1);
+          }
+          process.stdout.write("on-chain PCR config matches rebuilt EIFs\n");
+          NODE
+
+      - name: Cleanup admin wallet materials
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/sui-admin"
