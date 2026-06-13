@@ -11,7 +11,6 @@ const navLabels: Readonly<Record<NavKey, string>> = {
     home: "ホーム",
     donate: "寄付",
     dashboard: "ダッシュボード",
-    leaderboard: "リーダーボード",
     register: "登録",
     claim: "申請",
     mypage: "マイページ",
@@ -40,7 +39,7 @@ describe("buildMobileMenuItems", () => {
         expect(home?.className).toBe("nav-item");
     });
 
-    it("渡した items の並びだけを対象にする（既定 6 項目）", () => {
+    it("渡した items の並びだけを対象にする", () => {
         const model = buildMobileMenuItems(resolveNavItems(["home", "claim"]), "claim", navLabels);
         expect(model.map((m) => m.key)).toEqual(["home", "claim"]);
         expect(model.find((m) => m.key === "claim")?.className).toBe("nav-item active");
