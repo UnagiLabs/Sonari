@@ -63,14 +63,14 @@ export function SiteTopbar({
                         ))}
                     </nav>
                     <div className="topbar-spacer" />
+                    <LocaleSwitcher current={locale} />
+                    <WalletConnect />
                     <a
                         className={`nav-item topbar-mypage${active === "mypage" ? " active" : ""}`}
                         href={MYPAGE_ITEM.href}
                     >
                         {t("nav.mypage")}
                     </a>
-                    <LocaleSwitcher current={locale} />
-                    <WalletConnect />
                     <SiteMobileMenu
                         active={active}
                         items={mobileItems}
