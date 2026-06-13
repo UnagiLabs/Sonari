@@ -351,6 +351,49 @@ public fun set_floor_census(
     );
 }
 
+/// 被災者の受け取り単一入口。
+/// campaign::claim に委譲し、初回の資格確立・床払い・本払いを 1 回で処理する。
+/// 独立した finalize 入口は廃止し、claim 内の lazy finalize で時間境界を確定する。
+/// leaf は初回のみ必須（option::some）、既申請の床払い・本払いでは option::none を渡す。
+public fun claim(
+    pause_state: &PauseState,
+    campaign: &mut campaign_v2::Campaign,
+    disaster_event: &DisasterEvent,
+    identity_registry: &identity_registry::IdentityRegistry,
+    membership_registry: &membership::MembershipRegistry,
+    pass: &membership::MembershipPass,
+    identity_provider: u8,
+    duplicate_key_hash: vector<u8>,
+    leaf: option::Option<AffectedCellLeaf>,
+    proof: vector<ProofStep>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
+    admin::assert_target_not_paused(
+        pause_state,
+        identity_registry::registry_id(identity_registry),
+    );
+    campaign_v2::claim(
+        campaign,
+        object::id(disaster_event),
+        disaster_event::event_uid(disaster_event),
+        disaster_event::event_revision(disaster_event),
+        disaster_event::affected_cells_root(disaster_event),
+        disaster_event::occurred_at_ms(disaster_event),
+        identity_registry,
+        membership_registry,
+        pass,
+        identity_provider,
+        duplicate_key_hash,
+        leaf,
+        proof,
+        clock::timestamp_ms(clock),
+        ctx,
+    );
+}
+
 public fun return_floor_budget(
     pause_state: &PauseState,
     campaign: &mut campaign_v2::Campaign,
@@ -367,17 +410,6 @@ public fun return_floor_budget(
         clock::timestamp_ms(clock),
         ctx,
     );
-}
-
-public fun finalize_round(
-    pause_state: &PauseState,
-    campaign: &mut campaign_v2::Campaign,
-    clock: &Clock,
-    _ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
-    campaign_v2::finalize_round_v2(campaign, clock::timestamp_ms(clock));
 }
 
 public fun sweep_residual(
