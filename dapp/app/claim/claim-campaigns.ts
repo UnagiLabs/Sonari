@@ -1,3 +1,6 @@
+import { bcs } from "@mysten/sui/bcs";
+import { deriveDynamicFieldID } from "@mysten/sui/utils";
+
 const QUERY_EVENTS_PAGE_LIMIT = 100;
 
 export interface ClaimCampaignEventCursor {
@@ -77,6 +80,32 @@ export interface ClaimCampaignState {
     readonly currentRound: string;
 }
 
+export interface ClaimApplicationData {
+    readonly band: number;
+    readonly appliedAtMs: string;
+    readonly verified: boolean;
+    readonly verifiedInRound: string;
+    readonly floorClaimed: boolean;
+    readonly excluded: boolean;
+}
+
+export type ClaimEligibility =
+    | {
+          readonly kind: "claimable";
+          readonly claimProofKind: "initial" | "continuing";
+          readonly requiresIdentity: boolean;
+          readonly willPayFloor: boolean;
+          readonly willPayPayout: boolean;
+      }
+    | {
+          readonly kind: "none";
+          readonly reason:
+              | "claim_window_closed"
+              | "claim_not_verified"
+              | "claim_excluded"
+              | "nothing_to_claim";
+      };
+
 export type ClaimCampaignReadResult =
     | {
           readonly kind: "ok";
@@ -86,6 +115,10 @@ export type ClaimCampaignReadResult =
           readonly kind: "error";
           readonly message: string;
       };
+
+export type ClaimEligibilityReadResult =
+    | { readonly kind: "ok"; readonly eligibility: ClaimEligibility }
+    | { readonly kind: "error"; readonly message: string };
 
 export function parseCampaignCreatedEvent(value: unknown): CampaignCreatedEvent | null {
     if (!isRecord(value)) {
@@ -150,6 +183,35 @@ export function parseCampaignObject(
         claimEndMs,
         currentRound,
     };
+}
+
+export function parseClaimApplicationObject(
+    json: Record<string, unknown> | null,
+): ClaimApplicationData | null {
+    if (json === null) {
+        return null;
+    }
+
+    const raw = isRecord(json.value) ? json.value : json;
+    const band = parseU8(raw.band);
+    const appliedAtMs = parseU64String(raw.applied_at_ms);
+    const verified = parseBoolean(raw.verified);
+    const verifiedInRound = parseU64String(raw.verified_in_round);
+    const floorClaimed = parseBoolean(raw.floor_claimed);
+    const excluded = parseBoolean(raw.excluded);
+
+    if (
+        band === null ||
+        appliedAtMs === null ||
+        verified === null ||
+        verifiedInRound === null ||
+        floorClaimed === null ||
+        excluded === null
+    ) {
+        return null;
+    }
+
+    return { band, appliedAtMs, verified, verifiedInRound, floorClaimed, excluded };
 }
 
 export function parseDisasterEventObject(
@@ -230,6 +292,105 @@ export function deriveClaimCampaignState(
     };
 }
 
+export function deriveClaimEligibility(input: {
+    readonly campaign: Pick<
+        ClaimCampaignObjectData,
+        "censusSet" | "floorBudgetReturned" | "claimEndMs" | "currentRound"
+    >;
+    readonly application: ClaimApplicationData | null;
+    readonly payoutClaimed: boolean;
+    readonly nowMs: string | number;
+}): ClaimEligibility | null {
+    const now = parseU64String(input.nowMs);
+    if (now === null) {
+        return null;
+    }
+
+    const isFirstTime = input.application === null;
+    const claimWindowOpen = BigInt(now) < BigInt(input.campaign.claimEndMs);
+    if (isFirstTime && !claimWindowOpen) {
+        return { kind: "none", reason: "claim_window_closed" };
+    }
+
+    if (input.application !== null) {
+        if (!input.application.verified) {
+            return { kind: "none", reason: "claim_not_verified" };
+        }
+        if (input.application.excluded) {
+            return { kind: "none", reason: "claim_excluded" };
+        }
+    }
+
+    const floorAlreadyClaimed = input.application?.floorClaimed ?? false;
+    const willPayFloor =
+        !floorAlreadyClaimed &&
+        input.campaign.censusSet &&
+        !input.campaign.floorBudgetReturned;
+    const currentRound = BigInt(input.campaign.currentRound);
+    const verifiedInRound =
+        input.application === null ? currentRound : BigInt(input.application.verifiedInRound);
+    const willPayPayout =
+        !isFirstTime &&
+        currentRound >= 1n &&
+        verifiedInRound < currentRound &&
+        !input.payoutClaimed;
+
+    if (!isFirstTime && !willPayFloor && !willPayPayout) {
+        return { kind: "none", reason: "nothing_to_claim" };
+    }
+
+    return {
+        kind: "claimable",
+        claimProofKind: isFirstTime ? "initial" : "continuing",
+        requiresIdentity: isFirstTime || willPayFloor,
+        willPayFloor,
+        willPayPayout,
+    };
+}
+
+export async function readClaimEligibility(
+    client: ClaimCampaignReadClient,
+    input: {
+        readonly packageId: string;
+        readonly campaign: ClaimCampaignObjectData;
+        readonly passLineageId: string;
+        readonly nowMs: string | number;
+    },
+): Promise<ClaimEligibilityReadResult> {
+    try {
+        const application = await readClaimApplication(
+            client,
+            input.campaign.campaignId,
+            input.passLineageId,
+        );
+        const payoutClaimed =
+            BigInt(input.campaign.currentRound) >= 1n
+                ? await readPayoutClaimed(client, {
+                      packageId: input.packageId,
+                      campaignId: input.campaign.campaignId,
+                      passLineageId: input.passLineageId,
+                      round: input.campaign.currentRound,
+                  })
+                : false;
+        const eligibility = deriveClaimEligibility({
+            campaign: input.campaign,
+            application,
+            payoutClaimed,
+            nowMs: input.nowMs,
+        });
+        if (eligibility === null) {
+            return { kind: "error", message: "Claim eligibility inputs are invalid." };
+        }
+        return { kind: "ok", eligibility };
+    } catch (error) {
+        return {
+            kind: "error",
+            message:
+                error instanceof Error ? error.message : "Failed to read claim eligibility.",
+        };
+    }
+}
+
 export async function readClaimCampaigns(
     client: ClaimCampaignReadClient,
     input: { readonly packageId: string; readonly nowMs: string | number },
@@ -270,6 +431,67 @@ export async function readClaimCampaigns(
             message: error instanceof Error ? error.message : "Failed to read claim campaigns.",
         };
     }
+}
+
+async function readClaimApplication(
+    client: ClaimCampaignReadClient,
+    campaignId: string,
+    passLineageId: string,
+): Promise<ClaimApplicationData | null> {
+    const fieldId = deriveObjectIdDynamicFieldId(campaignId, passLineageId);
+    const response = await client.getObjects({
+        objectIds: [fieldId],
+        include: { json: true },
+    });
+    const item = response.objects[0];
+    if (item === undefined || item instanceof Error || item.json === null) {
+        return null;
+    }
+    return parseClaimApplicationObject(item.json);
+}
+
+async function readPayoutClaimed(
+    client: ClaimCampaignReadClient,
+    input: {
+        readonly packageId: string;
+        readonly campaignId: string;
+        readonly passLineageId: string;
+        readonly round: string;
+    },
+): Promise<boolean> {
+    const fieldId = derivePayoutKeyDynamicFieldId(input);
+    const response = await client.getObjects({
+        objectIds: [fieldId],
+        include: { json: true },
+    });
+    const item = response.objects[0];
+    return item !== undefined && !(item instanceof Error) && item.json !== null;
+}
+
+function deriveObjectIdDynamicFieldId(parentId: string, objectId: string): string {
+    const keyBytes = bcs.Address.serialize(objectId).toBytes();
+    return deriveDynamicFieldID(parentId, "0x2::object::ID", keyBytes);
+}
+
+function derivePayoutKeyDynamicFieldId(input: {
+    readonly packageId: string;
+    readonly campaignId: string;
+    readonly passLineageId: string;
+    readonly round: string;
+}): string {
+    const PayoutKey = bcs.struct("PayoutKey", {
+        pass_lineage_id: bcs.Address,
+        round: bcs.u64(),
+    });
+    const keyBytes = PayoutKey.serialize({
+        pass_lineage_id: input.passLineageId,
+        round: BigInt(input.round),
+    }).toBytes();
+    return deriveDynamicFieldID(
+        input.campaignId,
+        `${input.packageId}::campaign::PayoutKey`,
+        keyBytes,
+    );
 }
 
 async function readCampaignCreatedEvents(

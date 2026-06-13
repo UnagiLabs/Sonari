@@ -3,9 +3,12 @@ import {
     type ClaimCampaignEventCursor,
     type ClaimCampaignReadClient,
     deriveClaimCampaignState,
+    deriveClaimEligibility,
     parseCampaignCreatedEvent,
+    parseClaimApplicationObject,
     parseCampaignObject,
     parseDisasterEventObject,
+    readClaimEligibility,
     readClaimCampaigns,
 } from "./claim-campaigns";
 
@@ -13,6 +16,7 @@ const PACKAGE_ID = `0x${"ab".repeat(32)}`;
 const CAMPAIGN_TYPE = `${PACKAGE_ID}::campaign::CampaignCreated`;
 const CAMPAIGN_ID = `0x${"11".repeat(32)}`;
 const DISASTER_EVENT_ID = `0x${"22".repeat(32)}`;
+const PASS_LINEAGE_ID = `0x${"44".repeat(32)}`;
 const EVENT_UID = `0x${"cd".repeat(32)}`;
 const AFFECTED_CELLS_ROOT = `0x${"ef".repeat(32)}`;
 
@@ -61,6 +65,20 @@ function disasterEventObjectJson(overrides: Record<string, unknown> = {}): Recor
     };
 }
 
+function claimApplicationJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        value: {
+            band: "2",
+            applied_at_ms: "1200",
+            verified: true,
+            verified_in_round: "0",
+            floor_claimed: false,
+            excluded: false,
+            ...overrides,
+        },
+    };
+}
+
 describe("claim campaign parsing", () => {
     it("parses CampaignCreated event fields used by the claim page", () => {
         expect(parseCampaignCreatedEvent(campaignCreatedParsedJson())).toEqual({
@@ -91,6 +109,18 @@ describe("claim campaign parsing", () => {
         expect(parseDisasterEventObject(DISASTER_EVENT_ID, disasterEventObjectJson({
             affected_cells_root: "0x1234",
         }))).toBeNull();
+    });
+
+    it("parses ClaimApplication dynamic field values", () => {
+        expect(parseClaimApplicationObject(claimApplicationJson())).toEqual({
+            band: 2,
+            appliedAtMs: "1200",
+            verified: true,
+            verifiedInRound: "0",
+            floorClaimed: false,
+            excluded: false,
+        });
+        expect(parseClaimApplicationObject(claimApplicationJson({ verified: "yes" }))).toBeNull();
     });
 });
 
@@ -140,6 +170,122 @@ describe("deriveClaimCampaignState", () => {
         expect(state?.claimWindowOpen).toBe(false);
         expect(state?.floorClaimAvailable).toBe(false);
         expect(state?.payoutFinalized).toBe(false);
+    });
+});
+
+describe("deriveClaimEligibility", () => {
+    it("allows first-time claim while the claim window is open even before payouts exist", () => {
+        const campaign = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({
+                census_set: false,
+                floor_budget_returned: false,
+                current_round: "0",
+            }),
+        );
+        if (campaign === null) {
+            throw new Error("campaign fixture must parse");
+        }
+
+        expect(
+            deriveClaimEligibility({
+                campaign,
+                application: null,
+                payoutClaimed: false,
+                nowMs: "1900",
+            }),
+        ).toEqual({
+            kind: "claimable",
+            claimProofKind: "initial",
+            requiresIdentity: true,
+            willPayFloor: false,
+            willPayPayout: false,
+        });
+    });
+
+    it("requires identity for a continuing claim when floor payment remains", () => {
+        const campaign = parseCampaignObject(CAMPAIGN_ID, campaignObjectJson());
+        const application = parseClaimApplicationObject(claimApplicationJson());
+        if (campaign === null || application === null) {
+            throw new Error("fixtures must parse");
+        }
+
+        expect(
+            deriveClaimEligibility({
+                campaign,
+                application,
+                payoutClaimed: false,
+                nowMs: "2500",
+            }),
+        ).toEqual({
+            kind: "claimable",
+            claimProofKind: "continuing",
+            requiresIdentity: true,
+            willPayFloor: true,
+            willPayPayout: true,
+        });
+    });
+
+    it("allows payout-only continuing claim without identity material", () => {
+        const campaign = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({
+                census_set: true,
+                floor_budget_returned: false,
+                current_round: "2",
+            }),
+        );
+        const application = parseClaimApplicationObject(
+            claimApplicationJson({
+                verified_in_round: "1",
+                floor_claimed: true,
+            }),
+        );
+        if (campaign === null || application === null) {
+            throw new Error("fixtures must parse");
+        }
+
+        expect(
+            deriveClaimEligibility({
+                campaign,
+                application,
+                payoutClaimed: false,
+                nowMs: "2500",
+            }),
+        ).toEqual({
+            kind: "claimable",
+            claimProofKind: "continuing",
+            requiresIdentity: false,
+            willPayFloor: false,
+            willPayPayout: true,
+        });
+    });
+
+    it("returns none when a continuing claim has nothing payable", () => {
+        const campaign = parseCampaignObject(
+            CAMPAIGN_ID,
+            campaignObjectJson({
+                current_round: "2",
+            }),
+        );
+        const application = parseClaimApplicationObject(
+            claimApplicationJson({
+                verified_in_round: "2",
+                floor_claimed: true,
+            }),
+        );
+        if (campaign === null || application === null) {
+            throw new Error("fixtures must parse");
+        }
+
+        expect(
+            deriveClaimEligibility({
+                campaign,
+                application,
+                payoutClaimed: true,
+                nowMs: "2500",
+            }),
+        ).toEqual({ kind: "none", reason: "nothing_to_claim" });
     });
 });
 
@@ -206,5 +352,46 @@ describe("readClaimCampaigns", () => {
         });
         await expect(readClaimCampaigns(client, { packageId: PACKAGE_ID, nowMs: "1" }))
             .resolves.toEqual({ kind: "error", message: "rpc unavailable" });
+    });
+});
+
+describe("readClaimEligibility", () => {
+    it("reads ClaimApplication and PayoutKey dynamic fields", async () => {
+        const campaign = parseCampaignObject(CAMPAIGN_ID, campaignObjectJson());
+        if (campaign === null) {
+            throw new Error("campaign fixture must parse");
+        }
+
+        const getObjects = vi
+            .fn()
+            .mockResolvedValueOnce({
+                objects: [{ objectId: `0x${"55".repeat(32)}`, json: claimApplicationJson() }],
+            })
+            .mockResolvedValueOnce({ objects: [] });
+        const client: ClaimCampaignReadClient = {
+            queryEvents: vi.fn(),
+            getObjects,
+        };
+
+        await expect(
+            readClaimEligibility(client, {
+                packageId: PACKAGE_ID,
+                campaign,
+                passLineageId: PASS_LINEAGE_ID,
+                nowMs: "2500",
+            }),
+        ).resolves.toEqual({
+            kind: "ok",
+            eligibility: {
+                kind: "claimable",
+                claimProofKind: "continuing",
+                requiresIdentity: true,
+                willPayFloor: true,
+                willPayPayout: true,
+            },
+        });
+        expect(getObjects).toHaveBeenCalledTimes(2);
+        expect(getObjects.mock.calls[0]?.[0].objectIds).toHaveLength(1);
+        expect(getObjects.mock.calls[1]?.[0].objectIds).toHaveLength(1);
     });
 });
