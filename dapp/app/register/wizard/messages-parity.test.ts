@@ -65,6 +65,18 @@ describe("messages catalog parity", () => {
         }
     });
 
+    it("404 ページの必須文言を en/ja catalog で管理する", () => {
+        for (const key of [
+            "notFound.eyebrow",
+            "notFound.title",
+            "notFound.body",
+            "notFound.homeCta",
+        ]) {
+            expect(en.has(key), key).toBe(true);
+            expect(ja.has(key), key).toBe(true);
+        }
+    });
+
     it("本人確認 submit 成功後の待ち時間案内を日本語 catalog で管理する", () => {
         expect(ja.get("register.wizard.identity.submit.processingNotice")).toBe(
             "処理に数分〜1時間程度かかります。処理状況はmypageで確認できます。",

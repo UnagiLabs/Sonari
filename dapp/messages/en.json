@@ -852,6 +852,13 @@
             }
         }
     },
+    "notFound": {
+        "brandHomeAria": "Go to Sonari home",
+        "eyebrow": "404 / Page not found",
+        "title": "This path has no Sonari page.",
+        "body": "The page may have moved, or the link may be incorrect. Return home to continue with donations, registration, or claims.",
+        "homeCta": "Back to Home"
+    },
     "wallet": {
         "connect": "Connect wallet",
         "connecting": "Connecting…",
