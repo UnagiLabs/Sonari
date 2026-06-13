@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildMobileMenuItems } from "./mobile-menu-model";
-import type { NavKey } from "./topbar-nav";
+import type { NavKey, ResolvedNavItem } from "./topbar-nav";
 import { resolveNavItems } from "./topbar-nav";
 
 // ハンバーガーメニューの表示モデルを組み立てる純粋関数のテスト（issue #282）。
@@ -40,7 +40,11 @@ describe("buildMobileMenuItems", () => {
     });
 
     it("渡した items の並びだけを対象にする", () => {
-        const model = buildMobileMenuItems(resolveNavItems(["home", "claim"]), "claim", navLabels);
+        const items: readonly ResolvedNavItem[] = [
+            { key: "home", href: "/" },
+            { key: "claim", href: "/claim" },
+        ];
+        const model = buildMobileMenuItems(items, "claim", navLabels);
         expect(model.map((m) => m.key)).toEqual(["home", "claim"]);
         expect(model.find((m) => m.key === "claim")?.className).toBe("nav-item active");
     });

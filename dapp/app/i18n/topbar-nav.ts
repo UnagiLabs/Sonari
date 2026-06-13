@@ -1,7 +1,7 @@
-// トップバーの nav 構成を 1 箇所に集約する。表示する項目はページごとに異なる
-// （既定 5 項目 / register 5 項目 / mypage 3 項目）ため、表示したいキーの並びを
-// items で受け取り、各キーの遷移先（href）を付けて返す純粋関数にする。
-// 文言は messages の topbar.nav.* カタログから引くため、ここでは持たない。
+// トップバーの nav 構成を 1 箇所に集約する。nav は全ページ共通の同じ並びに
+// 統一したため（issue #330）、表示項目はページごとに絞らず DEFAULT_NAV_ITEMS を
+// 正典として常に同じ並びを返す。文言は messages の topbar.nav.* カタログから引く
+// ため、ここでは持たない。
 
 export type NavKey = "home" | "donate" | "dashboard" | "register" | "claim" | "mypage";
 
@@ -15,7 +15,11 @@ export const NAV_DEFS: Record<NavKey, { readonly href: string }> = {
     mypage: { href: "/mypage" },
 };
 
-/** 既定のサイト nav。home / donate / dashboard / claim ページが使う 5 項目。 */
+/**
+ * 全ページ共通のプライマリ nav。home / donate / dashboard / register / claim の
+ * 5 項目を正典として持つ。mypage はアカウント導線としてヘッダー右側に固定するため
+ * ここには含めない。
+ */
 export const DEFAULT_NAV_ITEMS: readonly NavKey[] = [
     "home",
     "donate",
@@ -31,9 +35,9 @@ export interface ResolvedNavItem {
 }
 
 /**
- * 表示したいキー並びから、href 付きの nav 項目リストを作る。
- * items を省略すると既定の 5 項目を返す。順序は items の指定どおりに保つ。
+ * 共通 nav（DEFAULT_NAV_ITEMS）を href 付きの項目リストに解決して返す。
+ * 全ページで同じ並びを保つため、ページごとの出し分けは行わない。
  */
-export function resolveNavItems(items?: readonly NavKey[]): readonly ResolvedNavItem[] {
-    return (items ?? DEFAULT_NAV_ITEMS).map((key) => ({ key, href: NAV_DEFS[key].href }));
+export function resolveNavItems(): readonly ResolvedNavItem[] {
+    return DEFAULT_NAV_ITEMS.map((key) => ({ key, href: NAV_DEFS[key].href }));
 }
