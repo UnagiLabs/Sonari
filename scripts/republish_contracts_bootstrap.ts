@@ -1,0 +1,303 @@
+/**
+ * Sonari Move contract republish bootstrap — pure functions.
+ *
+ * issue #361: #349/PR#360 で claim の ABI が破壊的に変わったため、Sui の互換アップグレードでは
+ * 公開関数を削除できない。よって新 package として publish し直し、全オブジェクト ID を張替える。
+ *
+ * このファイルは決定的な pure function のみを置く。実際の `sui` 実行・`gh` 設定・World ID portal 操作は
+ * STEP 3 以降の orchestration 層が担当し、副作用を持たないこの層をテストで固める。
+ */
+
+// ---------------------------------------------------------------------------
+// Genesis kinds — contracts/sources/admin.move の定数と必ず一致させる契約値。
+// admin::initialize が publish 時に emit する種別。kind 8 は欠番。
+// ---------------------------------------------------------------------------
+export const GENESIS_KIND = {
+    ADMIN_CAP: 1,
+    PAUSE_STATE: 2,
+    MAIN_POOL: 3,
+    OPERATIONS_POOL: 4,
+    DONOR_REGISTRY: 5,
+    MEMBERSHIP_REGISTRY: 6,
+    VERIFIER_REGISTRY: 7,
+    IDENTITY_REGISTRY: 9,
+    CATEGORY_REGISTRY: 10,
+    EARTHQUAKE_POOL: 11,
+} as const;
+
+/** init が publish 時に必ず emit する genesis kind の集合。すべて揃っていなければ fail-closed。 */
+const EXPECTED_GENESIS_KINDS: readonly number[] = [
+    GENESIS_KIND.ADMIN_CAP,
+    GENESIS_KIND.PAUSE_STATE,
+    GENESIS_KIND.MAIN_POOL,
+    GENESIS_KIND.OPERATIONS_POOL,
+    GENESIS_KIND.DONOR_REGISTRY,
+    GENESIS_KIND.MEMBERSHIP_REGISTRY,
+    GENESIS_KIND.VERIFIER_REGISTRY,
+    GENESIS_KIND.IDENTITY_REGISTRY,
+    GENESIS_KIND.CATEGORY_REGISTRY,
+    GENESIS_KIND.EARTHQUAKE_POOL,
+];
+
+// ---------------------------------------------------------------------------
+// GitHub 設定の張替え先スコープ。
+// ---------------------------------------------------------------------------
+export const GH_SCOPE = {
+    /** repository-level Variables（共有 env の単一情報源）。 */
+    REPO: "repo",
+    /** environment `aws-sonari-verifier-runner-dev`。deploy job が environment 指定で参照する実効スコープ。 */
+    ENV_AWS_DEV: "env:aws-sonari-verifier-runner-dev",
+} as const;
+
+export type GhScope = (typeof GH_SCOPE)[keyof typeof GH_SCOPE];
+
+/** 新しい object ID を 1 つの GitHub 設定へ張替える指示。 */
+export interface GhSettingAssignment {
+    /** GitHub Variables / Secrets の名前。 */
+    readonly name: string;
+    /** 設定する値。 */
+    readonly value: string;
+    /** 設定するスコープ。両スコープに存在する変数は両方へ設定して整合を保つ。 */
+    readonly scopes: readonly GhScope[];
+    /** Secrets なら true、Variables なら false。 */
+    readonly secret: boolean;
+    /** 値の由来。レビューと手順書のための来歴情報。 */
+    readonly source: string;
+}
+
+/** 本 issue では張替えないが、新 publish に存在することを確認する genesis object。 */
+export interface GenesisCrossCheck {
+    readonly objectKind: number;
+    readonly label: string;
+    readonly objectId: string;
+    readonly note: string;
+}
+
+/** buildSettingsAssignments の出力。張替え対象と cross-check を分離して返す。 */
+export interface SettingsPlan {
+    readonly assignments: readonly GhSettingAssignment[];
+    readonly crossChecks: readonly GenesisCrossCheck[];
+}
+
+/** buildSettingsAssignments の入力。 */
+export interface RewireInput {
+    /** 新 publish の package id。 */
+    readonly packageId: string;
+    /** parseGenesisObjectIds の結果。 */
+    readonly genesisObjectIds: ReadonlyMap<number, string>;
+    /** 後付けで作成した DisasterRegistry の object id。 */
+    readonly disasterRegistryId: string;
+    /** 後付けで作成した AllowedResidenceCellRegistry の object id（実 root で作成）。 */
+    readonly allowedResidenceCellRegistryId: string;
+}
+
+// ---------------------------------------------------------------------------
+// 1. publish 結果から genesis object id を取り出す。
+// ---------------------------------------------------------------------------
+export function parseGenesisObjectIds(input: unknown): Map<number, string> {
+    const ids = new Map<number, string>();
+    const events = isRecord(input) && Array.isArray(input.events) ? input.events : [];
+    for (const event of events) {
+        if (!isRecord(event)) {
+            continue;
+        }
+        if (
+            typeof event.type !== "string" ||
+            !event.type.endsWith("::admin::GenesisObjectCreated")
+        ) {
+            continue;
+        }
+        if (!isRecord(event.parsedJson)) {
+            throw new Error("GenesisObjectCreated event is missing parsedJson");
+        }
+        const objectKind = event.parsedJson.object_kind ?? event.parsedJson.objectKind;
+        const objectId = event.parsedJson.object_id ?? event.parsedJson.objectId;
+        if (typeof objectKind !== "number" || typeof objectId !== "string") {
+            throw new Error("GenesisObjectCreated event is missing object_kind or object_id");
+        }
+        assertHexObjectId(objectId, "GenesisObjectCreated.object_id");
+        ids.set(objectKind, objectId);
+    }
+    return ids;
+}
+
+// ---------------------------------------------------------------------------
+// 2. 新しい object id を GitHub 設定へ張替える計画を作る。
+// ---------------------------------------------------------------------------
+export function buildSettingsAssignments(input: RewireInput): SettingsPlan {
+    assertHexObjectId(input.packageId, "packageId");
+    assertHexObjectId(input.disasterRegistryId, "disasterRegistryId");
+    assertHexObjectId(input.allowedResidenceCellRegistryId, "allowedResidenceCellRegistryId");
+
+    // publish が emit するはずの genesis をすべて取得（欠けていれば fail-closed）。
+    const id = (kind: number, label: string): string =>
+        requireGenesisId(input.genesisObjectIds, kind, label);
+    const adminCap = id(GENESIS_KIND.ADMIN_CAP, "AdminCap(kind=1)");
+    const pauseState = id(GENESIS_KIND.PAUSE_STATE, "PauseState(kind=2)");
+    const mainPool = id(GENESIS_KIND.MAIN_POOL, "MainPool(kind=3)");
+    const operationsPool = id(GENESIS_KIND.OPERATIONS_POOL, "OperationsPool(kind=4)");
+    const donorRegistry = id(GENESIS_KIND.DONOR_REGISTRY, "DonorRegistry(kind=5)");
+    const membershipRegistry = id(GENESIS_KIND.MEMBERSHIP_REGISTRY, "MembershipRegistry(kind=6)");
+    const verifierRegistry = id(GENESIS_KIND.VERIFIER_REGISTRY, "VerifierRegistry(kind=7)");
+    const identityRegistry = id(GENESIS_KIND.IDENTITY_REGISTRY, "IdentityRegistry(kind=9)");
+    const categoryRegistry = id(GENESIS_KIND.CATEGORY_REGISTRY, "CategoryRegistry(kind=10)");
+    const earthquakePool = id(GENESIS_KIND.EARTHQUAKE_POOL, "EarthquakePool(kind=11)");
+
+    const repo: readonly GhScope[] = [GH_SCOPE.REPO];
+    const repoAndEnv: readonly GhScope[] = [GH_SCOPE.REPO, GH_SCOPE.ENV_AWS_DEV];
+
+    const assignments: GhSettingAssignment[] = [
+        // genesis（init が emit）
+        {
+            name: "SONARI_ADMIN_CAP_ID",
+            value: adminCap,
+            scopes: repo,
+            secret: false,
+            source: "genesis:AdminCap(kind=1)",
+        },
+        {
+            name: "SONARI_IDENTITY_PAUSE_STATE_ID",
+            value: pauseState,
+            scopes: repo,
+            secret: false,
+            source: "genesis:PauseState(kind=2)",
+        },
+        {
+            name: "SONARI_FLOOR_CENSUS_PAUSE_STATE",
+            value: pauseState,
+            scopes: repo,
+            secret: false,
+            source: "genesis:PauseState(kind=2)",
+        },
+        {
+            name: "SONARI_FLOOR_CENSUS_MAIN_POOL",
+            value: mainPool,
+            scopes: repo,
+            secret: false,
+            source: "genesis:MainPool(kind=3)",
+        },
+        {
+            name: "SONARI_MEMBERSHIP_REGISTRY_ID",
+            value: membershipRegistry,
+            scopes: repo,
+            secret: false,
+            source: "genesis:MembershipRegistry(kind=6)",
+        },
+        {
+            name: "SONARI_VERIFIER_REGISTRY_ID",
+            value: verifierRegistry,
+            scopes: repo,
+            secret: false,
+            source: "genesis:VerifierRegistry(kind=7)",
+        },
+        {
+            name: "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY",
+            value: verifierRegistry,
+            scopes: repoAndEnv,
+            secret: false,
+            source: "genesis:VerifierRegistry(kind=7)",
+        },
+        {
+            name: "SONARI_IDENTITY_REGISTRY_ID",
+            value: identityRegistry,
+            scopes: repo,
+            secret: false,
+            source: "genesis:IdentityRegistry(kind=9)",
+        },
+        {
+            name: "SONARI_CATEGORY_REGISTRY_ID",
+            value: categoryRegistry,
+            scopes: repo,
+            secret: false,
+            source: "genesis:CategoryRegistry(kind=10)",
+        },
+        {
+            name: "SONARI_EARTHQUAKE_CATEGORY_POOL_ID",
+            value: earthquakePool,
+            scopes: repo,
+            secret: false,
+            source: "genesis:EarthquakePool(kind=11)",
+        },
+        {
+            name: "SONARI_FLOOR_CENSUS_CATEGORY_POOL",
+            value: earthquakePool,
+            scopes: repo,
+            secret: false,
+            source: "genesis:EarthquakePool(kind=11)",
+        },
+        // 後付けオブジェクト
+        {
+            name: "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY",
+            value: input.disasterRegistryId,
+            scopes: repoAndEnv,
+            secret: false,
+            source: "afterTheFact:DisasterRegistry",
+        },
+        {
+            name: "SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID",
+            value: input.allowedResidenceCellRegistryId,
+            scopes: repo,
+            secret: false,
+            source: "afterTheFact:AllowedResidenceCellRegistry",
+        },
+        // package id から導出
+        {
+            name: "SONARI_FLOOR_CENSUS_TARGET",
+            value: `${input.packageId}::accessor::set_floor_census`,
+            scopes: repo,
+            secret: false,
+            source: "derived:package",
+        },
+    ];
+
+    const crossChecks: GenesisCrossCheck[] = [
+        {
+            objectKind: GENESIS_KIND.OPERATIONS_POOL,
+            label: "OperationsPool",
+            objectId: operationsPool,
+            note: "#350 / dapp スコープ。本 issue では張替えない（存在確認のみ）。",
+        },
+        {
+            objectKind: GENESIS_KIND.DONOR_REGISTRY,
+            label: "DonorRegistry",
+            objectId: donorRegistry,
+            note: "#350 / dapp スコープ。本 issue では張替えない（存在確認のみ）。",
+        },
+    ];
+
+    return { assignments, crossChecks };
+}
+
+// ---------------------------------------------------------------------------
+// 3. World ID action の形式検証（dapp-deploy と同一仕様）。
+// ---------------------------------------------------------------------------
+const WORLD_ID_ACTION_PATTERN = /^sonari_membership_register_v[0-9]+$/;
+
+export function assertWorldIdActionFormat(action: string): void {
+    if (!WORLD_ID_ACTION_PATTERN.test(action)) {
+        throw new Error(
+            `World ID action must match ${WORLD_ID_ACTION_PATTERN.source}: got "${action}"`,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+function requireGenesisId(ids: ReadonlyMap<number, string>, kind: number, label: string): string {
+    const value = ids.get(kind);
+    if (typeof value !== "string") {
+        throw new Error(`publish result did not include genesis object ${label}`);
+    }
+    return value;
+}
+
+function assertHexObjectId(value: string, fieldName: string): void {
+    if (!/^0x[0-9a-fA-F]+$/.test(value)) {
+        throw new Error(`${fieldName} must be a 0x-prefixed hex object id`);
+    }
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+    return typeof input === "object" && input !== null && !Array.isArray(input);
+}
