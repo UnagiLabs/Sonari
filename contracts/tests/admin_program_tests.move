@@ -10,7 +10,6 @@ use contracts::identity_registry;
 use contracts::membership;
 use contracts::metadata_verifier;
 use contracts::pools;
-use contracts::reader;
 use sui::display::{Self, Display};
 use sui::event;
 use sui::package::Publisher;
