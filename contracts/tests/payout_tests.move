@@ -872,3 +872,136 @@ fun finalize_round_2_rejects_too_early() {
     };
     scenario.end();
 }
+
+// ---------------------------------------------------------------
+// 19. ケースB: Round>=1 に進んだ後、誰も claim せず時間経過 → 回収できる
+//     適格者ありで finalize するため sweep_eligible=false。
+//     タイムアウト経路（round_finalized_at_ms 基準）だけで回収する。
+// ---------------------------------------------------------------
+
+#[test]
+fun sweep_residual_recovers_after_round_timeout() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+
+        campaign::fund_campaign_for_testing(&mut c, 10_000_000, scenario.ctx());
+
+        // 床センサス（0人）を donation 期間中に確定し census_set を満たす
+        let census = census_result::new_for_testing(
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            vector[0, 0, 0],
+            NOW_MS,
+        );
+        campaign::apply_floor_census(
+            &mut c,
+            &census,
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            &mut cat_pool,
+            &mut main_pool,
+            NOW_MS,
+            scenario.ctx(),
+        );
+
+        // 適格 band1 メンバーを 1 名仕込む → liability>0 → finalize で sweep_eligible=false
+        let pass_lineage = object::id_from_address(@0x0001);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage, 1u8, false, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage, 0);
+
+        // Round 1 確定（current_round=1, round_finalized_at_ms=DONATION_END_MS, sweep_eligible=false）
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+        let (round_after, _, _, _, sweep_eligible) = campaign::campaign_payout_round_fields(&c);
+        assert!(round_after == 1);
+        assert!(!sweep_eligible);
+
+        // 床予算を返還（sweep の前提条件）
+        campaign::return_floor_budget(&mut c, &mut cat_pool, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        let main_before = pools::main_pool_balance_usdc(&main_pool);
+
+        // 誰も claim しないままラウンド間隔が経過 → タイムアウト回収
+        let sweep_time = DONATION_END_MS + ROUND_INTERVAL_MS;
+        campaign::sweep_residual_v2(&mut c, &mut main_pool, sweep_time, scenario.ctx());
+
+        let (_, _, _, closed, _) = campaign::campaign_payout_round_fields(&c);
+        assert!(closed);
+
+        let main_after = pools::main_pool_balance_usdc(&main_pool);
+        assert!(main_after == main_before + 10_000_000);
+
+        let events = event::events_by_type<campaign::ResidualSweep>();
+        assert!(events.length() == 1);
+        let (_, ev_amount, ev_final_round) = campaign::residual_sweep_event_fields(*events.borrow(0));
+        assert!(ev_amount == 10_000_000);
+        assert!(ev_final_round == 1);
+
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
+    };
+    scenario.end();
+}
+
+// ---------------------------------------------------------------
+// 20. ケースB の早すぎる回収: Round>=1 でも round_interval 未経過なら拒否
+//     round_finalized_at_ms と同時刻の sweep は ESweepNotEligible で止まる。
+// ---------------------------------------------------------------
+
+#[test, expected_failure(abort_code = campaign::ESweepNotEligible)]
+fun sweep_residual_rejects_before_round_timeout() {
+    let mut scenario = setup();
+    create_campaign_in_scenario(&mut scenario);
+
+    scenario.next_tx(ADMIN);
+    {
+        let mut c = scenario.take_shared<campaign::Campaign>();
+        let mut cat_pool = scenario.take_shared<category_pool::CategoryPool>();
+        let mut main_pool = scenario.take_shared<pools::MainPool>();
+
+        campaign::fund_campaign_for_testing(&mut c, 10_000_000, scenario.ctx());
+
+        let census = census_result::new_for_testing(
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            vector[0, 0, 0],
+            NOW_MS,
+        );
+        campaign::apply_floor_census(
+            &mut c,
+            &census,
+            EVENT_UID,
+            EVENT_REVISION,
+            x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            &mut cat_pool,
+            &mut main_pool,
+            NOW_MS,
+            scenario.ctx(),
+        );
+
+        let pass_lineage = object::id_from_address(@0x0001);
+        campaign::add_claim_application_for_testing(&mut c, pass_lineage, 1u8, false, false, false, NOW_MS);
+        campaign::set_claim_verified(&mut c, pass_lineage, 0);
+
+        // Round 1 確定（sweep_eligible=false, round_finalized_at_ms=DONATION_END_MS）
+        campaign::finalize_round_v2(&mut c, DONATION_END_MS);
+        campaign::return_floor_budget(&mut c, &mut cat_pool, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        // round_interval 未経過の DONATION_END_MS で回収 → ESweepNotEligible
+        campaign::sweep_residual_v2(&mut c, &mut main_pool, DONATION_END_MS, scenario.ctx());
+
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(cat_pool);
+        test_scenario::return_shared(main_pool);
+    };
+    scenario.end();
+}

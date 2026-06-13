@@ -1027,10 +1027,17 @@ public(package) fun sweep_residual_v2(
     assert!(!campaign.closed, EAlreadyClosed);
     assert!(campaign.floor_budget_returned, EFloorBudgetNotReturned);
 
-    // Sweep is allowed when: sweep_eligible flag set by finalize, OR no finalize ever run but time passed
-    let initial_timeout = campaign.current_round == 0
-        && now_ms >= campaign.donation_end_ms + campaign.terms.round_interval_ms;
-    assert!(campaign.sweep_eligible || initial_timeout, ESweepNotEligible);
+    // 回収条件: finalize が立てた sweep_eligible フラグ、またはタイムアウト経過。
+    // タイムアウトは finalize の実行有無に依存させず、資金が永久に stuck するのを防ぐ。
+    // - Round 0（finalize 未実行）: donation_end_ms を基準にする。
+    // - Round >=1（finalize 済みだが誰も claim しない）: 直近 finalize 時刻を基準にする。
+    let timeout_base_ms = if (campaign.current_round == 0) {
+        campaign.donation_end_ms
+    } else {
+        campaign.round_finalized_at_ms
+    };
+    let timeout_reached = now_ms >= timeout_base_ms + campaign.terms.round_interval_ms;
+    assert!(campaign.sweep_eligible || timeout_reached, ESweepNotEligible);
 
     let amount = campaign.balance.value();
     let final_round = campaign.current_round;
@@ -1048,7 +1055,6 @@ public(package) fun sweep_residual_v2(
         amount_usdc: amount,
         final_round,
     });
-    let _ = now_ms;
 }
 
 public(package) fun exclude_recipient_internal(
