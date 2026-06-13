@@ -39,3 +39,63 @@ describe("home view dummy stats removal", () => {
         expect(globalsSource).toContain(".dashboard-metrics");
     });
 });
+
+// 実スポンサー7社。指定の並び順（Sui → Walrus → DeepBook → Mysten Labs →
+// Scallop.io → OpenZeppelin → OtterSec）で定義する。logo は表示に使う画像パス。
+const realSponsors = [
+    { name: "Sui", logo: "/assets/sponsors/sui.png" },
+    { name: "Walrus", logo: "/assets/sponsors/walrus.svg" },
+    { name: "DeepBook", logo: "/assets/sponsors/deepbook.png" },
+    { name: "Mysten Labs", logo: "/assets/sponsors/mysten-labs.png" },
+    { name: "Scallop.io", logo: "/assets/sponsors/scallop.png" },
+    { name: "OpenZeppelin", logo: "/assets/sponsors/openzeppelin.png" },
+    { name: "OtterSec", logo: "/assets/sponsors/ottersec.png" },
+] as const;
+
+// ダミー実装の痕跡を表すトークン。
+// Aizome Foundation / Kibou Capital / Midori Logistics は corporateDonors にも
+// 出るため、スポンサー欄だけに使われていた 9 社名と CSS マーカーで検査する。
+const removedSponsorTokens = [
+    "Hinode Bank",
+    "Sora Networks",
+    "Kogane Energy",
+    "Yume Robotics",
+    "Hana Health",
+    "Niji Studios",
+    "Kawa Mobility",
+    "Tomoshibi Co-op",
+    "Mori Cloud",
+    "logo-square",
+    "type Sponsor",
+    "oklch(",
+] as const;
+
+describe("home view sponsor logos", () => {
+    it("ダミースポンサー（色付き四角＋イニシャル）の実装を残さない", () => {
+        for (const token of removedSponsorTokens) {
+            expect(homeViewSource, token).not.toContain(token);
+        }
+    });
+
+    it("ダミー用の .logo-square CSS を残さない", () => {
+        expect(globalsSource).not.toContain(".logo-square");
+    });
+
+    it("実スポンサー7社の社名とロゴパスを持つ", () => {
+        for (const sponsor of realSponsors) {
+            expect(homeViewSource, sponsor.name).toContain(sponsor.name);
+            expect(homeViewSource, sponsor.logo).toContain(sponsor.logo);
+        }
+    });
+
+    it("実スポンサーが指定順で並ぶ", () => {
+        const positions = realSponsors.map((sponsor) =>
+            homeViewSource.indexOf(sponsor.logo),
+        );
+        for (const position of positions) {
+            expect(position).toBeGreaterThanOrEqual(0);
+        }
+        const sorted = [...positions].sort((a, b) => a - b);
+        expect(positions).toEqual(sorted);
+    });
+});

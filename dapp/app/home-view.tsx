@@ -18,12 +18,6 @@ type IconName =
     | "waves"
     | "bolt";
 
-type Sponsor = {
-    name: string;
-    logo: string;
-    color: string;
-};
-
 type Pool = {
     key: "main" | "earthquake";
     balance: string;
@@ -41,20 +35,18 @@ type Donor = {
     corporate?: boolean;
 };
 
-const sponsors: Sponsor[] = [
-    { name: "Aizome Foundation", logo: "AF", color: "oklch(0.55 0.06 145)" },
-    { name: "Kibou Capital", logo: "KC", color: "oklch(0.58 0.07 120)" },
-    { name: "Midori Logistics", logo: "ML", color: "oklch(0.5 0.05 170)" },
-    { name: "Hinode Bank", logo: "HB", color: "oklch(0.6 0.07 50)" },
-    { name: "Sora Networks", logo: "SN", color: "oklch(0.5 0.06 230)" },
-    { name: "Kogane Energy", logo: "KE", color: "oklch(0.62 0.08 80)" },
-    { name: "Yume Robotics", logo: "YR", color: "oklch(0.5 0.06 290)" },
-    { name: "Hana Health", logo: "HH", color: "oklch(0.6 0.06 10)" },
-    { name: "Niji Studios", logo: "NS", color: "oklch(0.58 0.07 300)" },
-    { name: "Kawa Mobility", logo: "KM", color: "oklch(0.5 0.05 180)" },
-    { name: "Tomoshibi Co-op", logo: "TC", color: "oklch(0.55 0.06 140)" },
-    { name: "Mori Cloud", logo: "MC", color: "oklch(0.54 0.05 200)" },
-];
+// ハッカソンの実スポンサー。表示順は指定どおり固定する。
+// logo は public/assets/sponsors の画像パス。
+// chip が true のロゴは黒一色で背景に埋もれるため、白背景チップに乗せる。
+const sponsors = [
+    { name: "Sui", logo: "/assets/sponsors/sui.png", chip: false },
+    { name: "Walrus", logo: "/assets/sponsors/walrus.svg", chip: true },
+    { name: "DeepBook", logo: "/assets/sponsors/deepbook.png", chip: false },
+    { name: "Mysten Labs", logo: "/assets/sponsors/mysten-labs.png", chip: false },
+    { name: "Scallop.io", logo: "/assets/sponsors/scallop.png", chip: false },
+    { name: "OpenZeppelin", logo: "/assets/sponsors/openzeppelin.png", chip: false },
+    { name: "OtterSec", logo: "/assets/sponsors/ottersec.png", chip: false },
+] as const;
 
 const pools: Pool[] = [
     {
@@ -341,39 +333,27 @@ function SectionHeader({
 }
 
 function SponsorMarquee() {
-    const firstRow = sponsors.slice(0, 6);
-    const secondRow = sponsors.slice(6, 12);
-
-    return (
-        <div className="sponsor-marquee">
-            <SponsorRow sponsors={firstRow} />
-            <SponsorRow reverse sponsors={secondRow} />
-        </div>
-    );
-}
-
-function SponsorRow({
-    reverse = false,
-    sponsors: row,
-}: {
-    reverse?: boolean;
-    sponsors: Sponsor[];
-}) {
+    // 7社を1行で流す。シームレスにループさせるため同じ並びを2コピー複製する。
+    // 各ロゴはリンクにしない。画像が読み込めないときは alt の社名が表示される。
     return (
         <div className="marquee-wrap">
-            <div className={`marquee ${reverse ? "reverse" : ""}`}>
+            <div className="marquee">
                 {(["first", "second"] as const).flatMap((copy) =>
-                    row.map((sponsor) => (
-                        <a
-                            className="marquee-item"
-                            href="/sponsors"
-                            key={`${copy}-${sponsor.name}`}
-                        >
-                            <span className="logo-square" style={{ background: sponsor.color }}>
-                                {sponsor.logo}
+                    sponsors.map((sponsor) => (
+                        <div className="marquee-item" key={`${copy}-${sponsor.name}`}>
+                            <span
+                                className={`sponsor-logo-frame${
+                                    sponsor.chip ? " sponsor-logo-chip" : ""
+                                }`}
+                            >
+                                {/* biome-ignore lint/performance/noImgElement: next.config の images.unoptimized:true で画像最適化は無効なため next/image の利点がなく、社ごとに縦横比が異なり SVG も含むため素の img が扱いやすい。 */}
+                                <img
+                                    alt={sponsor.name}
+                                    className="sponsor-logo"
+                                    src={sponsor.logo}
+                                />
                             </span>
-                            <span>{sponsor.name}</span>
-                        </a>
+                        </div>
                     )),
                 )}
             </div>

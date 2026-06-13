@@ -711,12 +711,6 @@ h4 {
   text-align: center;
 }
 
-.sponsor-marquee {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .marquee-wrap {
   overflow: hidden;
   padding: 8px 0;
@@ -728,10 +722,6 @@ h4 {
   width: max-content;
   gap: 56px;
   animation: marquee 40s linear infinite;
-}
-
-.marquee.reverse {
-  animation: marquee-reverse 44s linear infinite;
 }
 
 .marquee-item {
@@ -746,15 +736,29 @@ h4 {
   white-space: nowrap;
 }
 
-.logo-square {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
+.sponsor-logo-frame {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* 黒一色ロゴ（Walrus）は白背景チップに乗せて視認できるようにする。 */
+.sponsor-logo-chip {
+  padding: 5px 10px;
   border-radius: 8px;
-  color: var(--sage-50);
-  font-family: var(--font-serif);
-  font-size: 18px;
+  background: #fff;
+}
+
+/* 社ごとに縦横比が違うため、高さを揃えて幅は内容に合わせる。 */
+.sponsor-logo {
+  width: auto;
+  height: 32px;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.sponsor-logo-chip .sponsor-logo {
+  height: 20px;
+  border-radius: 0;
 }
 
 @keyframes marquee {
@@ -764,16 +768,6 @@ h4 {
 
   to {
     transform: translateX(-50%);
-  }
-}
-
-@keyframes marquee-reverse {
-  from {
-    transform: translateX(-50%);
-  }
-
-  to {
-    transform: translateX(0);
   }
 }
 
