@@ -95,7 +95,7 @@ public fun issue_donor_pass(
 }
 
 /// 発行直後の DonorPass を sender へ soulbound 転送する。
-public fun transfer_donor_pass(pass: DonorPass, ctx: &TxContext) {
+public fun transfer_donor_pass(pass: DonorPass, ctx: &mut TxContext) {
     donation::transfer_donor_pass(pass, ctx);
 }
 
@@ -284,8 +284,24 @@ public fun new_affected_cell_proof_step_right(sibling_hash: vector<u8>): ProofSt
     affected_cell::new_proof_step_right(sibling_hash)
 }
 
-public fun donate_to_campaign_usdc(
+public fun donate_general(
     pause_state: &PauseState,
+    registry: &DonorRegistry,
+    pass: &mut DonorPass,
+    main_pool: &mut MainPool,
+    ops_pool: &mut OperationsPool,
+    coin: Coin<USDC>,
+    ctx: &mut TxContext,
+) {
+    admin::assert_not_globally_paused(pause_state);
+    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
+    donation::donate_general(registry, pass, main_pool, ops_pool, coin, ctx);
+}
+
+public fun donate_to_campaign(
+    pause_state: &PauseState,
+    registry: &DonorRegistry,
+    pass: &mut DonorPass,
     campaign: &mut campaign_v2::Campaign,
     main_pool: &mut MainPool,
     ops_pool: &mut OperationsPool,
@@ -295,11 +311,22 @@ public fun donate_to_campaign_usdc(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, campaign_v2::campaign_id(campaign));
-    donation::donate_to_campaign(campaign, main_pool, ops_pool, coin, clock::timestamp_ms(clock), ctx);
+    donation::donate_to_campaign(
+        registry,
+        pass,
+        campaign,
+        main_pool,
+        ops_pool,
+        coin,
+        clock::timestamp_ms(clock),
+        ctx,
+    );
 }
 
-public fun donate_to_category_usdc(
+public fun donate_to_category(
     pause_state: &PauseState,
+    registry: &DonorRegistry,
+    pass: &mut DonorPass,
     category_pool: &mut CategoryPool,
     main_pool: &mut MainPool,
     ops_pool: &mut OperationsPool,
@@ -308,19 +335,7 @@ public fun donate_to_category_usdc(
 ) {
     admin::assert_not_globally_paused(pause_state);
     admin::assert_target_not_paused(pause_state, category_pool::category_pool_id(category_pool));
-    donation::donate_to_category(category_pool, main_pool, ops_pool, coin, ctx);
-}
-
-public fun donate_general_split_usdc(
-    pause_state: &PauseState,
-    main_pool: &mut MainPool,
-    ops_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    donation::donate_general_split(main_pool, ops_pool, coin, ctx);
+    donation::donate_to_category(registry, pass, category_pool, main_pool, ops_pool, coin, ctx);
 }
 
 public fun set_floor_census(

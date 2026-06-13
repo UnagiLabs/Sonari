@@ -108,12 +108,16 @@ fun donate_to_campaign_splits_90_5_5() {
     let mut camp = scenario.take_shared_by_id<campaign::Campaign>(campaign_id);
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     let coin = coin::mint_for_testing<USDC>(1_000_000, scenario.ctx());
     let mut clock = clock::create_for_testing(scenario.ctx());
     clock.set_for_testing(NOW_MS); // before donation_end_ms
 
     donation::donate_to_campaign(
+        &registry,
+        &mut pass,
         &mut camp,
         &mut main_pool,
         &mut ops_pool,
@@ -128,6 +132,18 @@ fun donate_to_campaign_splits_90_5_5() {
     assert!(pools::main_pool_balance_usdc(&main_pool) == 50_000);
     // Ops pool got 50_000 (5%)
     assert!(pools::operations_pool_balance_usdc(&ops_pool) == 50_000);
+
+    // donation is recorded in the pass with the full amount
+    assert!(donation::donor_pass_donation_count(&pass) == 1);
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
+    let (rec_idx, rec_type, _program_id, rec_campaign_id, _pool_id, rec_amount, _coin_type, _ts) =
+        donation::donation_record_summary(&pass, 0);
+    assert!(rec_idx == 0);
+    assert!(rec_type == donation::donation_type_campaign());
+    assert!(rec_campaign_id.is_some());
+    assert!(rec_amount == 1_000_000);
+    let recorded = event::events_by_type<donation::DonationRecorded>();
+    assert!(recorded.length() == 1);
 
     // DonationSplit event
     let events = event::events_by_type<donation::DonationSplit>();
@@ -144,10 +160,12 @@ fun donate_to_campaign_splits_90_5_5() {
     assert!(after_end == false);
     assert!(donor == DONOR);
 
+    donation::transfer_donor_pass(pass, scenario.ctx());
     clock.destroy_for_testing();
     test_scenario::return_shared(camp);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
 
@@ -165,6 +183,8 @@ fun donate_to_campaign_ops_cap_overflow_goes_to_main() {
     let mut camp = scenario.take_shared_by_id<campaign::Campaign>(campaign_id);
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     // Fill ops almost to cap (cap = 50_000_000_000, leave only 10_000 remaining)
     let remaining_cap = 10_000u64;
@@ -177,6 +197,8 @@ fun donate_to_campaign_ops_cap_overflow_goes_to_main() {
     clock.set_for_testing(NOW_MS);
 
     donation::donate_to_campaign(
+        &registry,
+        &mut pass,
         &mut camp,
         &mut main_pool,
         &mut ops_pool,
@@ -191,6 +213,9 @@ fun donate_to_campaign_ops_cap_overflow_goes_to_main() {
     assert!(pools::main_pool_balance_usdc(&main_pool) == 90_000);
     assert!(campaign::campaign_total_donated_usdc(&camp) == 900_000);
 
+    // pass records the full donated amount regardless of ops_cap redistribution
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
+
     let events = event::events_by_type<donation::DonationSplit>();
     assert!(events.length() == 1);
     let ev = *events.borrow(0);
@@ -198,10 +223,12 @@ fun donate_to_campaign_ops_cap_overflow_goes_to_main() {
     assert!(ops == 10_000);
     assert!(overflow == 40_000);
 
+    donation::transfer_donor_pass(pass, scenario.ctx());
     clock.destroy_for_testing();
     test_scenario::return_shared(camp);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
 
@@ -219,6 +246,8 @@ fun donate_to_campaign_after_donation_end_redirects_to_main() {
     let mut camp = scenario.take_shared_by_id<campaign::Campaign>(campaign_id);
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     let donation_end = campaign::campaign_donation_end_ms(&camp);
     let after_end_ms = donation_end + 1;
@@ -228,6 +257,8 @@ fun donate_to_campaign_after_donation_end_redirects_to_main() {
     clock.set_for_testing(after_end_ms);
 
     donation::donate_to_campaign(
+        &registry,
+        &mut pass,
         &mut camp,
         &mut main_pool,
         &mut ops_pool,
@@ -241,6 +272,9 @@ fun donate_to_campaign_after_donation_end_redirects_to_main() {
     assert!(pools::main_pool_balance_usdc(&main_pool) == 950_000);
     assert!(pools::operations_pool_balance_usdc(&ops_pool) == 50_000);
 
+    // pass records the full donated amount even when the campaign portion is redirected
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
+
     let events = event::events_by_type<donation::DonationSplit>();
     assert!(events.length() == 1);
     let ev = *events.borrow(0);
@@ -252,10 +286,12 @@ fun donate_to_campaign_after_donation_end_redirects_to_main() {
     assert!(overflow == 0);
     assert!(after_end == true);
 
+    donation::transfer_donor_pass(pass, scenario.ctx());
     clock.destroy_for_testing();
     test_scenario::return_shared(camp);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
 
@@ -273,10 +309,14 @@ fun donate_to_category_splits_90_5_5() {
     let mut cat_pool = scenario.take_shared_by_id<category_pool::CategoryPool>(cat_pool_id);
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     let coin = coin::mint_for_testing<USDC>(500_000, scenario.ctx());
 
     donation::donate_to_category(
+        &registry,
+        &mut pass,
         &mut cat_pool,
         &mut main_pool,
         &mut ops_pool,
@@ -288,6 +328,15 @@ fun donate_to_category_splits_90_5_5() {
     assert!(category_pool::category_pool_balance_usdc(&cat_pool) == 450_000);
     assert!(pools::main_pool_balance_usdc(&main_pool) == 25_000);
     assert!(pools::operations_pool_balance_usdc(&ops_pool) == 25_000);
+
+    // donation is recorded in the pass with the full amount and category type
+    assert!(donation::donor_pass_donation_count(&pass) == 1);
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 500_000);
+    let (_rec_idx, rec_type, _program_id, rec_campaign_id, _pool_id, rec_amount, _coin_type, _ts) =
+        donation::donation_record_summary(&pass, 0);
+    assert!(rec_type == donation::donation_type_category());
+    assert!(rec_campaign_id.is_none());
+    assert!(rec_amount == 500_000);
 
     let events = event::events_by_type<donation::DonationSplit>();
     assert!(events.length() == 1);
@@ -303,18 +352,20 @@ fun donate_to_category_splits_90_5_5() {
     assert!(after_end == false);
     assert!(donor == DONOR);
 
+    donation::transfer_donor_pass(pass, scenario.ctx());
     test_scenario::return_shared(cat_pool);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
 
 // ---------------------------------------------------------------
-// 5. donate_general_split: splits 95/5
+// 5. donate_general: splits 95/5
 // ---------------------------------------------------------------
 
 #[test]
-fun donate_general_split_splits_95_5() {
+fun donate_general_splits_95_5() {
     let (mut scenario, _campaign_id, _cat_pool_id, main_pool_id, ops_pool_id) =
         initialized_with_campaign();
 
@@ -322,10 +373,14 @@ fun donate_general_split_splits_95_5() {
 
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     let coin = coin::mint_for_testing<USDC>(1_000_000, scenario.ctx());
 
-    donation::donate_general_split(
+    donation::donate_general(
+        &registry,
+        &mut pass,
         &mut main_pool,
         &mut ops_pool,
         coin,
@@ -335,6 +390,15 @@ fun donate_general_split_splits_95_5() {
     // 950_000 to main (95%), 50_000 to ops (5%)
     assert!(pools::main_pool_balance_usdc(&main_pool) == 950_000);
     assert!(pools::operations_pool_balance_usdc(&ops_pool) == 50_000);
+
+    // donation is recorded in the pass with the full amount and general type
+    assert!(donation::donor_pass_donation_count(&pass) == 1);
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
+    let (_rec_idx, rec_type, _program_id, rec_campaign_id, _pool_id, rec_amount, _coin_type, _ts) =
+        donation::donation_record_summary(&pass, 0);
+    assert!(rec_type == donation::donation_type_general());
+    assert!(rec_campaign_id.is_none());
+    assert!(rec_amount == 1_000_000);
 
     let events = event::events_by_type<donation::DonationSplit>();
     assert!(events.length() == 1);
@@ -351,8 +415,10 @@ fun donate_general_split_splits_95_5() {
     assert!(after_end == false);
     assert!(donor == DONOR);
 
+    donation::transfer_donor_pass(pass, scenario.ctx());
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
 
@@ -371,12 +437,16 @@ fun donate_to_campaign_zero_amount_is_rejected() {
     let mut camp = scenario.take_shared_by_id<campaign::Campaign>(campaign_id);
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     let coin = coin::mint_for_testing<USDC>(0, scenario.ctx());
     let mut clock = clock::create_for_testing(scenario.ctx());
     clock.set_for_testing(NOW_MS);
 
     donation::donate_to_campaign(
+        &registry,
+        &mut pass,
         &mut camp,
         &mut main_pool,
         &mut ops_pool,
@@ -385,10 +455,12 @@ fun donate_to_campaign_zero_amount_is_rejected() {
         scenario.ctx(),
     );
 
+    donation::transfer_donor_pass(pass, scenario.ctx());
     clock.destroy_for_testing();
     test_scenario::return_shared(camp);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
 
@@ -497,6 +569,8 @@ fun donate_to_campaign_rounding_stays_in_main() {
     let mut camp = scenario.take_shared_by_id<campaign::Campaign>(campaign_id);
     let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
     let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
 
     // Donate 1 unit: primary = floor(1 * 9000 / 10000) = 0, ops = floor(1 * 500 / 10000) = 0, main = 1
     let coin = coin::mint_for_testing<USDC>(1, scenario.ctx());
@@ -504,6 +578,8 @@ fun donate_to_campaign_rounding_stays_in_main() {
     clock.set_for_testing(NOW_MS);
 
     donation::donate_to_campaign(
+        &registry,
+        &mut pass,
         &mut camp,
         &mut main_pool,
         &mut ops_pool,
@@ -516,9 +592,14 @@ fun donate_to_campaign_rounding_stays_in_main() {
     assert!(pools::main_pool_balance_usdc(&main_pool) == 1);
     assert!(pools::operations_pool_balance_usdc(&ops_pool) == 0);
 
+    // pass records the full 1 unit even when split rounds everything to main
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 1);
+
+    donation::transfer_donor_pass(pass, scenario.ctx());
     clock.destroy_for_testing();
     test_scenario::return_shared(camp);
     test_scenario::return_shared(main_pool);
     test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
     scenario.end();
 }
