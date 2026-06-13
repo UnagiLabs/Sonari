@@ -183,11 +183,13 @@ function parsePoolObject(
     return { objectId, json: raw.json };
 }
 
+// Sui gRPC は Balance<USDC> を u64 値そのもの（文字列または数値）へ畳んで返す。
+// 例: { "balance": "12000000" }。古い struct 形 { value } も将来差異に備えて受け付ける。
 function parseBalanceValue(raw: unknown): bigint | null {
-    if (!isRecord(raw)) {
-        return null;
+    if (isRecord(raw)) {
+        return parseU64(raw.value);
     }
-    return parseU64(raw.value);
+    return parseU64(raw);
 }
 
 function parseObjectId(raw: unknown): string | null {
