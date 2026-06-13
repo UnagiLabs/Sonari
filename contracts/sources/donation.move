@@ -12,7 +12,6 @@ use usdc::usdc::USDC;
 
 const DONATION_TYPE_GENERAL: u8 = 1;
 const DONATION_TYPE_CAMPAIGN: u8 = 2;
-const DONATION_TYPE_OPERATIONS: u8 = 3;
 const DONATION_TYPE_CATEGORY: u8 = 4;
 
 const TIER_NONE: u8 = 0;
@@ -95,18 +94,6 @@ public struct DonationRecord has key, store {
     donated_at_ms: u64,
 }
 
-public struct GeneralDonationReceived has copy, drop {
-    pool_id: ID,
-    amount: u64,
-    actor: address,
-}
-
-public struct OperationsDonationReceived has copy, drop {
-    pool_id: ID,
-    amount: u64,
-    actor: address,
-}
-
 public struct DonorPassIssued has copy, drop {
     donor_pass_id: ID,
     owner: address,
@@ -148,152 +135,6 @@ public(package) fun create_donor_registry(ctx: &mut TxContext): ID {
 
     transfer::share_object(registry);
     registry_id
-}
-
-public(package) fun donate_general_usdc(
-    registry: &mut DonorRegistry,
-    main_pool: &mut MainPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
-    process_first_donation(
-        registry,
-        DONATION_TYPE_GENERAL,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_general_usdc_with_pass(
-    registry: &DonorRegistry,
-    main_pool: &mut MainPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
-
-    let (pool_id, amount) = deposit_general_usdc_and_emit(main_pool, coin, ctx);
-    process_with_pass_donation(
-        pass,
-        DONATION_TYPE_GENERAL,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_operations_usdc(
-    registry: &mut DonorRegistry,
-    operations_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
-    process_first_donation(
-        registry,
-        DONATION_TYPE_OPERATIONS,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-public(package) fun donate_operations_usdc_with_pass(
-    registry: &DonorRegistry,
-    operations_pool: &mut OperationsPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    assert_valid_registered_pass_owner(registry, pass, ctx.sender());
-
-    let (pool_id, amount) = deposit_operations_usdc_and_emit(operations_pool, coin, ctx);
-    process_with_pass_donation(
-        pass,
-        DONATION_TYPE_OPERATIONS,
-        pool_id,
-        amount,
-        ctx,
-    );
-}
-
-fun deposit_general_usdc_and_emit(
-    main_pool: &mut MainPool,
-    coin: Coin<USDC>,
-    ctx: &TxContext,
-): (ID, u64) {
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::main_pool_id(main_pool);
-    pools::deposit_main_usdc(main_pool, coin);
-    event::emit(GeneralDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    (pool_id, amount)
-}
-
-fun deposit_operations_usdc_and_emit(
-    operations_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &TxContext,
-): (ID, u64) {
-    let amount = coin::value(&coin);
-    assert!(amount > 0, EZeroDonation);
-
-    let pool_id = pools::operations_pool_id(operations_pool);
-    pools::deposit_operations_usdc(operations_pool, coin);
-    event::emit(OperationsDonationReceived {
-        pool_id,
-        amount,
-        actor: ctx.sender(),
-    });
-
-    (pool_id, amount)
-}
-
-fun process_first_donation(
-    registry: &mut DonorRegistry,
-    donation_type: u8,
-    pool_id: ID,
-    amount: u64,
-    ctx: &mut TxContext,
-) {
-    let mut pass = new_donor_pass(registry, ctx);
-    record_donation(
-        &mut pass,
-        donation_type,
-        option::none(),
-        option::none(),
-        pool_id,
-        amount,
-        ctx,
-    );
-    transfer::transfer(pass, ctx.sender());
-}
-
-fun process_with_pass_donation(
-    pass: &mut DonorPass,
-    donation_type: u8,
-    pool_id: ID,
-    amount: u64,
-    ctx: &mut TxContext,
-) {
-    record_donation(
-        pass,
-        donation_type,
-        option::none(),
-        option::none(),
-        pool_id,
-        amount,
-        ctx,
-    );
 }
 
 fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass {
@@ -487,10 +328,6 @@ public(package) fun donation_type_campaign(): u8 {
 
 public(package) fun donation_type_category(): u8 {
     DONATION_TYPE_CATEGORY
-}
-
-public(package) fun donation_type_operations(): u8 {
-    DONATION_TYPE_OPERATIONS
 }
 
 public(package) fun tier_none(): u8 {
@@ -790,22 +627,6 @@ public(package) fun donation_target_category(): u8 {
 
 public(package) fun donation_target_none(): u8 {
     DONATION_TARGET_NONE
-}
-
-#[test_only]
-public fun general_donation_received_event_fields(
-    event: GeneralDonationReceived,
-): (ID, u64, address) {
-    let GeneralDonationReceived { pool_id, amount, actor } = event;
-    (pool_id, amount, actor)
-}
-
-#[test_only]
-public fun operations_donation_received_event_fields(
-    event: OperationsDonationReceived,
-): (ID, u64, address) {
-    let OperationsDonationReceived { pool_id, amount, actor } = event;
-    (pool_id, amount, actor)
 }
 
 #[test_only]

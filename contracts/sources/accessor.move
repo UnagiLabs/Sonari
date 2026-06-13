@@ -21,68 +21,6 @@ const EInvalidResidenceCellProof: u64 = 0;
 // campaign::EDisasterEventMismatch のミラー定数（lint 要件: assert には named constant が必要）
 const EDisasterEventMismatch: u64 = 4;
 
-public fun donate_general_usdc(
-    pause_state: &PauseState,
-    registry: &mut DonorRegistry,
-    main_pool: &mut MainPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    donation::donate_general_usdc(registry, main_pool, coin, ctx);
-}
-
-public fun donate_general_usdc_with_pass(
-    pause_state: &PauseState,
-    registry: &DonorRegistry,
-    main_pool: &mut MainPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::main_pool_id(main_pool));
-    donation::donate_general_usdc_with_pass(
-        registry,
-        main_pool,
-        pass,
-        coin,
-        ctx,
-    );
-}
-
-public fun donate_operations_usdc(
-    pause_state: &PauseState,
-    registry: &mut DonorRegistry,
-    operations_pool: &mut OperationsPool,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
-    donation::donate_operations_usdc(registry, operations_pool, coin, ctx);
-}
-
-public fun donate_operations_usdc_with_pass(
-    pause_state: &PauseState,
-    registry: &DonorRegistry,
-    operations_pool: &mut OperationsPool,
-    pass: &mut DonorPass,
-    coin: Coin<USDC>,
-    ctx: &mut TxContext,
-) {
-    admin::assert_not_globally_paused(pause_state);
-    admin::assert_target_not_paused(pause_state, pools::operations_pool_id(operations_pool));
-    donation::donate_operations_usdc_with_pass(
-        registry,
-        operations_pool,
-        pass,
-        coin,
-        ctx,
-    );
-}
-
 /// DonorPass を発行して呼び出し元へ返す。PTB では次コマンドで `&mut` 参照する。
 public fun issue_donor_pass(
     pause_state: &PauseState,
