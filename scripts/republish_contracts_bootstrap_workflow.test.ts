@@ -21,7 +21,8 @@ describe("Sonari contract republish bootstrap workflow", () => {
         expect(workflow).toContain("paths:");
         expect(workflow).toContain("- contracts/Published.toml");
         expect(workflow).toContain("workflow_dispatch:");
-        expect(workflow).toContain("network:");
+        expect(workflow).toContain("branches:");
+        expect(workflow).toContain("- main");
         expect(workflow).toContain("runs-on: [self-hosted, linux, x64, manji]");
         expect(workflow).toContain(
             "SONARI_DEV_ADMIN_PRIVATE_KEY: $" + "{{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}",
@@ -37,6 +38,7 @@ describe("Sonari contract republish bootstrap workflow", () => {
 
         expect(workflow).toContain("Resolve Sonari contract ids from Published.toml");
         expect(workflow).toContain("scripts/resolve_published_contract_ids.ts");
+        expect(workflow).toContain('--network "testnet"');
         expect(workflow).toContain("SONARI_RESIDENCE_ROOT: $" + "{{ vars.SONARI_RESIDENCE_ROOT }}");
         expect(workflow).toContain(
             "SONARI_RESIDENCE_SOURCE_HASH: $" + "{{ vars.SONARI_RESIDENCE_SOURCE_HASH }}",
@@ -53,6 +55,13 @@ describe("Sonari contract republish bootstrap workflow", () => {
         expect(workflow).toContain("$SONARI_ADMIN_CAP_ID");
         expect(workflow).toContain("$SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID");
         expect(workflow).toContain("AllowedResidenceCellRootUpdated");
+        expect(workflow).not.toContain("sui client new-env");
+        expect(workflow).toContain(
+            'sui client switch --env testnet --address "$admin_address" --quiet',
+        );
+        expect(workflow).toContain("sui client active-address");
+        expect(workflow).toContain("SONARI_ADMIN_SUI_ENV=testnet");
+        expect(workflow).toContain('--client.env "$SONARI_ADMIN_SUI_ENV"');
     });
 
     it("does not publish, rewrite Published.toml, commit, or read Cloudflare state", async () => {

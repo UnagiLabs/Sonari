@@ -6,16 +6,7 @@ on:
       - main
     paths:
       - contracts/Published.toml
-  workflow_dispatch:
-    inputs:
-      network:
-        description: Sui network to update
-        required: true
-        default: testnet
-        type: choice
-        options:
-          - testnet
-          - mainnet
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -27,10 +18,10 @@ jobs:
     environment: aws-sonari-verifier-runner-dev
     timeout-minutes: 30
     concurrency:
-      group: sonari-contract-post-publish-bootstrap-${{ inputs.network || vars.SONARI_SUI_NETWORK || 'testnet' }}
+      group: sonari-contract-post-publish-bootstrap-testnet
       cancel-in-progress: false
     env:
-      SONARI_SUI_NETWORK: ${{ inputs.network || vars.SONARI_SUI_NETWORK || 'testnet' }}
+      SONARI_SUI_NETWORK: "testnet"
       SONARI_RESIDENCE_ROOT: ${{ vars.SONARI_RESIDENCE_ROOT }}
       SONARI_RESIDENCE_SOURCE_HASH: ${{ vars.SONARI_RESIDENCE_SOURCE_HASH }}
       SONARI_GEO_RESOLUTION: ${{ vars.SONARI_GEO_RESOLUTION }}
@@ -96,19 +87,6 @@ jobs:
           fi
           echo "::add-mask::${SONARI_DEV_ADMIN_PRIVATE_KEY}"
 
-          case "$SONARI_SUI_NETWORK" in
-            mainnet)
-              rpc_url="${SUI_RPC_URL:-https://fullnode.mainnet.sui.io:443}"
-              ;;
-            testnet)
-              rpc_url="${SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}"
-              ;;
-            *)
-              echo "unsupported SONARI_SUI_NETWORK: $SONARI_SUI_NETWORK" >&2
-              exit 1
-              ;;
-          esac
-
           admin_dir="$RUNNER_TEMP/sui-admin"
           rm -rf "$admin_dir"
           mkdir -p "$admin_dir"
@@ -117,7 +95,6 @@ jobs:
 
           export SUI_CONFIG_DIR="$admin_dir"
           sui client --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
-          sui client new-env --alias "$SONARI_SUI_NETWORK" --rpc "$rpc_url"
           import_json="$(sui keytool import \
             "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --alias "$admin_alias" --json)"
           admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
@@ -130,8 +107,14 @@ jobs:
           process.stdout.write(address);
           NODE
           )"
-          sui client switch --env "$SONARI_SUI_NETWORK" --address "$admin_address" --quiet
+          sui client switch --env testnet --address "$admin_address" --quiet
+          active_address="$(sui client active-address)"
+          if [[ "$active_address" != "$admin_address" ]]; then
+            echo "Sui client active address mismatch after admin key import" >&2
+            exit 1
+          fi
           echo "SONARI_ADMIN_SUI_CLIENT_CONFIG=$client_config" >> "$GITHUB_ENV"
+          echo "SONARI_ADMIN_SUI_ENV=testnet" >> "$GITHUB_ENV"
 
       - name: Resolve Sonari contract ids from Published.toml
         shell: bash
@@ -141,7 +124,7 @@ jobs:
           set -euo pipefail
           resolver_args=(
             scripts/resolve_published_contract_ids.ts
-            --network "$SONARI_SUI_NETWORK"
+            --network "testnet"
           )
           if [[ -n "${SUI_RPC_URL:-}" ]]; then
             resolver_args+=(--rpc-url "$SUI_RPC_URL")
@@ -192,7 +175,7 @@ jobs:
           update_json="$(sui \
             client \
             --client.config "$SONARI_ADMIN_SUI_CLIENT_CONFIG" \
-            --client.env "$SONARI_SUI_NETWORK" \
+            --client.env "$SONARI_ADMIN_SUI_ENV" \
             call \
             --package "$SONARI_IDENTITY_PACKAGE_ID" \
             --module admin \
