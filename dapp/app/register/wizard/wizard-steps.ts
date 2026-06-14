@@ -1,7 +1,14 @@
 // 登録ウィザードのステップ定義と進行ロジック。
 // UI から切り離した pure module として保ち、unit test で仕様を固定する。
 
-export const WIZARD_STEPS = ["welcome", "residence", "membership", "identity", "done"] as const;
+export const WIZARD_STEPS = [
+    "welcome",
+    "consent",
+    "residence",
+    "membership",
+    "identity",
+    "done",
+] as const;
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number];
 
@@ -10,7 +17,7 @@ export type WizardIdentityProvider = "kyc" | "world_id";
 export interface WizardState {
     /** membership SBT の発行完了フラグ */
     readonly membershipIssued: boolean;
-    /** welcome ステップで免責事項への同意を完了したか */
+    /** consent ステップで免責事項への同意を完了したか */
     readonly disclaimersAccepted: boolean;
     /** 選択中の H3 res7 セル（10進文字列）。未選択は null */
     readonly selectedCellDecimal: string | null;
@@ -48,6 +55,10 @@ export function parseStepParam(value: string | null | undefined): WizardStepId {
 export function canProceed(state: WizardState, step: WizardStepId): boolean {
     switch (step) {
         case "welcome":
+            // ウォレット接続は UI 側（WelcomeStep）でボタンを gating する。
+            // ナビゲーション上は常に consent へ進める。
+            return true;
+        case "consent":
             return state.disclaimersAccepted;
         case "residence":
             return state.selectedCellDecimal !== null && state.residenceSaved;

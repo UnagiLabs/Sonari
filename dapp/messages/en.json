@@ -7,6 +7,7 @@
                 "optionalTag": "Optional",
                 "steps": {
                     "welcome": "Welcome",
+                    "consent": "Agreement",
                     "residence": "Residence",
                     "membership": "Membership",
                     "identity": "Identity",
@@ -24,22 +25,6 @@
                 "lead": "Three clear steps: choose your residence area, issue one soulbound Membership SBT, and verify your identity whenever you are ready.",
                 "walletHint": "Connect your Sui wallet to get started.",
                 "cta": "Get started",
-                "disclaimers": {
-                    "heading": "Please review and agree before you start.",
-                    "residenceTitle": "Residence area",
-                    "membershipTitle": "Membership SBT",
-                    "residence": {
-                        "0": "On the next step I will choose the area where I currently live, and Sonari uses that area to check my eligibility.",
-                        "1": "If I change my residence area after a disaster's deadline, the change will not count for that disaster.",
-                        "2": "Sonari saves only the residence area I choose (a small zone on the map), not my exact address or location history."
-                    },
-                    "membership": {
-                        "0": "When I continue, the wallet I connect will receive one Sonari Membership SBT, and each wallet can hold only one.",
-                        "1": "The Membership SBT is soulbound, which means it cannot be transferred or sold to anyone else.",
-                        "2": "Holding a Membership SBT does not guarantee that I will receive aid, and it gives no priority for payouts."
-                    },
-                    "agreeAll": "I agree to all of the above."
-                },
                 "membership": {
                     "checking": "Checking your Membership SBT…",
                     "registeredTitle": "You already have a Membership SBT.",
@@ -47,6 +32,24 @@
                     "dashboardCta": "Go to dashboard",
                     "errorNote": "Could not check your Membership SBT. You can still continue with Get started."
                 }
+            },
+            "consent": {
+                "eyebrow": "Agreement",
+                "title": "Review and agree",
+                "lead": "Please read the items below. You can continue once you agree to all of them.",
+                "residenceTitle": "Residence area",
+                "membershipTitle": "Membership SBT",
+                "residence": {
+                    "0": "On the next step I will choose the area where I currently live, and Sonari uses that area to check my eligibility.",
+                    "1": "If I change my residence area after a disaster's deadline, the change will not count for that disaster.",
+                    "2": "Sonari saves only the residence area I choose (a small zone on the map), not my exact address or location history."
+                },
+                "membership": {
+                    "0": "When I continue, the wallet I connect will receive one Sonari Membership SBT, and each wallet can hold only one.",
+                    "1": "The Membership SBT is soulbound, which means it cannot be transferred or sold to anyone else.",
+                    "2": "Holding a Membership SBT does not guarantee that I will receive aid, and it gives no priority for payouts."
+                },
+                "agreeAll": "I agree to all of the above."
             },
             "residence": {
                 "eyebrow": "Step 1",

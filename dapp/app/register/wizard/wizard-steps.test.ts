@@ -33,13 +33,21 @@ const residenceDone = {
 // ---------------------------------------------------------------------------
 
 describe("WIZARD_STEPS", () => {
-    it("welcome → residence → membership → identity → done の順で5ステップ", () => {
-        expect(WIZARD_STEPS).toEqual(["welcome", "residence", "membership", "identity", "done"]);
+    it("welcome → consent → residence → membership → identity → done の順で6ステップ", () => {
+        expect(WIZARD_STEPS).toEqual([
+            "welcome",
+            "consent",
+            "residence",
+            "membership",
+            "identity",
+            "done",
+        ]);
     });
 
     it("stepIndex はステップ順の位置を返す", () => {
         expect(stepIndex("welcome")).toBe(0);
-        expect(stepIndex("done")).toBe(4);
+        expect(stepIndex("consent")).toBe(1);
+        expect(stepIndex("done")).toBe(5);
     });
 });
 
@@ -49,6 +57,7 @@ describe("WIZARD_STEPS", () => {
 
 describe("parseStepParam", () => {
     it("正しいステップ ID はそのまま返す", () => {
+        expect(parseStepParam("consent")).toBe("consent");
         expect(parseStepParam("residence")).toBe("residence");
         expect(parseStepParam("identity")).toBe("identity");
     });
@@ -84,12 +93,17 @@ describe("createInitialWizardState", () => {
 // ---------------------------------------------------------------------------
 
 describe("canProceed", () => {
-    it("welcome は disclaimersAccepted が false なら前進不可", () => {
-        expect(canProceed(createInitialWizardState(), "welcome")).toBe(false);
+    it("welcome は常に前進できる（ウォレット接続は UI 側で gating）", () => {
+        expect(canProceed(createInitialWizardState(), "welcome")).toBe(true);
+        expect(canProceed(stateWith({ disclaimersAccepted: true }), "welcome")).toBe(true);
     });
 
-    it("welcome は disclaimersAccepted が true なら前進可", () => {
-        expect(canProceed(stateWith({ disclaimersAccepted: true }), "welcome")).toBe(true);
+    it("consent は disclaimersAccepted が false なら前進不可", () => {
+        expect(canProceed(createInitialWizardState(), "consent")).toBe(false);
+    });
+
+    it("consent は disclaimersAccepted が true なら前進可", () => {
+        expect(canProceed(stateWith({ disclaimersAccepted: true }), "consent")).toBe(true);
     });
 
     it("membership はセル選択・発行・保存で前進できる（配列同意なし）", () => {
@@ -144,12 +158,17 @@ describe("canProceed", () => {
 // ---------------------------------------------------------------------------
 
 describe("clampStepForState", () => {
-    it("未同意（disclaimersAccepted: false）で done を要求しても welcome を返す", () => {
-        expect(clampStepForState(createInitialWizardState(), "done")).toBe("welcome");
+    it("未同意（disclaimersAccepted: false）で done を要求しても consent を返す", () => {
+        expect(clampStepForState(createInitialWizardState(), "done")).toBe("consent");
     });
 
-    it("未同意（disclaimersAccepted: false）で membership を要求しても welcome を返す", () => {
-        expect(clampStepForState(createInitialWizardState(), "membership")).toBe("welcome");
+    it("未同意（disclaimersAccepted: false）で membership を要求しても consent を返す", () => {
+        expect(clampStepForState(createInitialWizardState(), "membership")).toBe("consent");
+    });
+
+    it("welcome は未同意でも到達でき、gating は consent から始まる", () => {
+        expect(clampStepForState(createInitialWizardState(), "welcome")).toBe("welcome");
+        expect(clampStepForState(createInitialWizardState(), "consent")).toBe("consent");
     });
 
     it("同意済みでセル未選択なら residence で止まる", () => {
@@ -191,7 +210,8 @@ describe("clampStepForState", () => {
 
 describe("nextStep / previousStep", () => {
     it("nextStep は次のステップを返し、終端では null", () => {
-        expect(nextStep("welcome")).toBe("residence");
+        expect(nextStep("welcome")).toBe("consent");
+        expect(nextStep("consent")).toBe("residence");
         expect(nextStep("residence")).toBe("membership");
         expect(nextStep("identity")).toBe("done");
         expect(nextStep("done")).toBeNull();
@@ -199,7 +219,8 @@ describe("nextStep / previousStep", () => {
 
     it("previousStep は前のステップを返し、先頭では null", () => {
         expect(previousStep("membership")).toBe("residence");
-        expect(previousStep("residence")).toBe("welcome");
+        expect(previousStep("residence")).toBe("consent");
+        expect(previousStep("consent")).toBe("welcome");
         expect(previousStep("welcome")).toBeNull();
     });
 });
