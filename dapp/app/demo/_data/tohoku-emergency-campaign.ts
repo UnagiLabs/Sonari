@@ -2,12 +2,12 @@ import type {
     EmergencyBannerCampaign,
     EmergencyBannerDetail,
 } from "../../donate/emergency-banner-state";
-import type { TohokuDemoEarthquake } from "../_data/tohoku-2011";
+import type { TohokuDemoEarthquake } from "./tohoku-2011";
 
 /**
  * デモ用の固定キャンペーン ID。
  * 実在のオンチェーンキャンペーンではなく、表示専用の識別子。
- * デモモードの DonateView は送金導線を持たないため、この ID で送金は発生しない。
+ * デモモードの DonateView / HomeView は送金導線を持たないため、この ID で送金は発生しない。
  */
 export const TOHOKU_DEMO_CAMPAIGN_ID = "demo-tohoku-2011";
 
@@ -30,6 +30,9 @@ export interface TohokuEmergencyLabels {
  * 東北デモデータとローカライズ済みラベルから、緊急バナー用のキャンペーンを組み立てる。
  * 表示値（M9.1 など）は data から決定的に生成し、ラベルだけ言語ごとに差し替える。
  * React / next-intl に依存しない純関数なので、vitest で直接検証できる。
+ *
+ * demo/donate と demo/home の両方がこの変換を使うため、特定ページ配下ではなく
+ * 共有の _data 配下に置く。
  */
 export function buildTohokuEmergencyCampaign(
     labels: TohokuEmergencyLabels,

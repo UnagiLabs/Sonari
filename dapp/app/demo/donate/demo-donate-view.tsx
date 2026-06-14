@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { DonateView } from "../../donate/donate-view";
 import type { SonariLocale } from "../../register/wizard/locale";
 import { TOHOKU_2011_DEMO_EARTHQUAKE } from "../_data/tohoku-2011";
-import { buildTohokuEmergencyCampaign } from "./demo-donate-campaign";
+import { buildTohokuEmergencyCampaign } from "../_data/tohoku-emergency-campaign";
 
 /**
  * デモ用の寄付ビュー。

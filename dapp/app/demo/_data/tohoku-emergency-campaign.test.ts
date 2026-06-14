@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { TOHOKU_2011_DEMO_EARTHQUAKE } from "../_data/tohoku-2011";
 import {
     buildTohokuEmergencyCampaign,
     TOHOKU_DEMO_CAMPAIGN_ID,
     type TohokuEmergencyLabels,
-} from "./demo-donate-campaign";
+} from "./tohoku-emergency-campaign";
+import { TOHOKU_2011_DEMO_EARTHQUAKE } from "./tohoku-2011";
 
 // ラベルは識別しやすい sentinel にして、値が固定データ由来であることを検証する。
 const labels: TohokuEmergencyLabels = {
