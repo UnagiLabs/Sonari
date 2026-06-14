@@ -58,7 +58,7 @@ fun general_donation_splits_main_ops_and_records_pass() {
         assert!(donation::donor_pass_owner(&pass) == DONOR);
         assert!(donation::donor_pass_donation_count(&pass) == 1);
         assert!(donation::donor_pass_total_donated_usdc(&pass) == 1_000_000);
-        assert!(donation::donor_pass_tier(&pass) == donation::tier_silver());
+        assert!(donation::donor_pass_tier(&pass) == donation::tier_bronze());
 
         let (_idx, dtype, _program_id, _campaign_id, _pool_id, amount, coin_type, _ts) =
             reader::donation_record_summary(&pass, 0);

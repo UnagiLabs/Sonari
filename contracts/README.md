@@ -756,6 +756,15 @@ public fun donate_general(
 - 寄付は **Campaign 本払い残高（`balance`）** に入る。床払い escrow（`floor_balance`）には入らない。
 - DonorPass（tier 付き寄付者 SBT、Bronze/Silver/Gold）は記録用として維持する。
   `*_with_pass` 変種で既存 pass への履歴追記を提供する。Claim 権利は与えない。
+- DonorPass tier は `total_donated_usdc` の raw units（USDC decimals = 6）で判定する。
+  Bronze は「1 unit 以上寄付済み」を表す tier である。
+
+| tier | raw units threshold | 表示額 |
+| --- | ---: | ---: |
+| None | `0` | 0 USDC |
+| Bronze | `1` | 0.000001 USDC |
+| Silver | `50_000_000` | 50 USDC |
+| Gold | `250_000_000` | 250 USDC |
 
 ### 9.5 spend_operations（運営費支出）
 

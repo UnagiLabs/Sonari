@@ -19,9 +19,9 @@ const TIER_BRONZE: u8 = 1;
 const TIER_SILVER: u8 = 2;
 const TIER_GOLD: u8 = 3;
 
-const BRONZE_THRESHOLD_USDC: u64 = 1;
-const SILVER_THRESHOLD_USDC: u64 = 1_000_000;
-const GOLD_THRESHOLD_USDC: u64 = 10_000_000;
+const BRONZE_THRESHOLD_USDC_RAW_UNITS: u64 = 1;
+const SILVER_THRESHOLD_USDC_RAW_UNITS: u64 = 50_000_000;
+const GOLD_THRESHOLD_USDC_RAW_UNITS: u64 = 250_000_000;
 
 const COIN_TYPE_USDC: vector<u8> = b"USDC";
 const REGISTRY_KIND_DONOR: u8 = 1;
@@ -260,11 +260,11 @@ fun record_donation(
 }
 
 fun tier_for_total(total_donated_usdc: u64): u8 {
-    if (total_donated_usdc >= GOLD_THRESHOLD_USDC) {
+    if (total_donated_usdc >= GOLD_THRESHOLD_USDC_RAW_UNITS) {
         TIER_GOLD
-    } else if (total_donated_usdc >= SILVER_THRESHOLD_USDC) {
+    } else if (total_donated_usdc >= SILVER_THRESHOLD_USDC_RAW_UNITS) {
         TIER_SILVER
-    } else if (total_donated_usdc >= BRONZE_THRESHOLD_USDC) {
+    } else if (total_donated_usdc >= BRONZE_THRESHOLD_USDC_RAW_UNITS) {
         TIER_BRONZE
     } else {
         TIER_NONE
@@ -403,15 +403,15 @@ public(package) fun tier_gold(): u8 {
 }
 
 public(package) fun bronze_threshold_usdc(): u64 {
-    BRONZE_THRESHOLD_USDC
+    BRONZE_THRESHOLD_USDC_RAW_UNITS
 }
 
 public(package) fun silver_threshold_usdc(): u64 {
-    SILVER_THRESHOLD_USDC
+    SILVER_THRESHOLD_USDC_RAW_UNITS
 }
 
 public(package) fun gold_threshold_usdc(): u64 {
-    GOLD_THRESHOLD_USDC
+    GOLD_THRESHOLD_USDC_RAW_UNITS
 }
 
 public(package) fun coin_type_usdc(): vector<u8> {

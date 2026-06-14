@@ -675,6 +675,100 @@ fun donor_pass_tracks_display_total_separately_from_raw_units() {
     scenario.end();
 }
 
+#[test]
+fun donor_pass_tier_thresholds_use_raw_units() {
+    let (mut scenario, _campaign_id, _cat_pool_id, main_pool_id, ops_pool_id) =
+        initialized_with_campaign();
+
+    scenario.next_tx(DONOR);
+
+    let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
+    let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
+
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 0);
+    assert!(donation::donor_pass_tier(&pass) == donation::tier_none());
+
+    assert_tier_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        1,
+        donation::tier_bronze(),
+        scenario.ctx(),
+    );
+    assert_tier_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        49_999_998,
+        donation::tier_bronze(),
+        scenario.ctx(),
+    );
+    assert_tier_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        1,
+        donation::tier_silver(),
+        scenario.ctx(),
+    );
+    assert_tier_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        199_999_999,
+        donation::tier_silver(),
+        scenario.ctx(),
+    );
+    assert_tier_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        1,
+        donation::tier_gold(),
+        scenario.ctx(),
+    );
+
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 250_000_000);
+
+    let tier_updates = event::events_by_type<donation::DonorTierUpdated>();
+    assert!(tier_updates.length() == 3);
+
+    let (_pass_id, old_tier, new_tier, raw_total, actor) =
+        donation::donor_tier_updated_event_fields(*tier_updates.borrow(0));
+    assert!(old_tier == donation::tier_none());
+    assert!(new_tier == donation::tier_bronze());
+    assert!(raw_total == 1);
+    assert!(actor == DONOR);
+
+    let (_pass_id, old_tier, new_tier, raw_total, actor) =
+        donation::donor_tier_updated_event_fields(*tier_updates.borrow(1));
+    assert!(old_tier == donation::tier_bronze());
+    assert!(new_tier == donation::tier_silver());
+    assert!(raw_total == 50_000_000);
+    assert!(actor == DONOR);
+
+    let (_pass_id, old_tier, new_tier, raw_total, actor) =
+        donation::donor_tier_updated_event_fields(*tier_updates.borrow(2));
+    assert!(old_tier == donation::tier_silver());
+    assert!(new_tier == donation::tier_gold());
+    assert!(raw_total == 250_000_000);
+    assert!(actor == DONOR);
+
+    donation::transfer_donor_pass(pass, scenario.ctx());
+    test_scenario::return_shared(main_pool);
+    test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
+    scenario.end();
+}
+
 fun assert_display_after_general_donation(
     registry: &donation::DonorRegistry,
     pass: &mut donation::DonorPass,
@@ -687,4 +781,18 @@ fun assert_display_after_general_donation(
     let coin = coin::mint_for_testing<USDC>(amount, ctx);
     donation::donate_general(registry, pass, main_pool, ops_pool, coin, ctx);
     assert!(donation::donor_pass_total_donated_usdc_display(pass) == expected_display);
+}
+
+fun assert_tier_after_general_donation(
+    registry: &donation::DonorRegistry,
+    pass: &mut donation::DonorPass,
+    main_pool: &mut pools::MainPool,
+    ops_pool: &mut pools::OperationsPool,
+    amount: u64,
+    expected_tier: u8,
+    ctx: &mut TxContext,
+) {
+    let coin = coin::mint_for_testing<USDC>(amount, ctx);
+    donation::donate_general(registry, pass, main_pool, ops_pool, coin, ctx);
+    assert!(donation::donor_pass_tier(pass) == expected_tier);
 }
