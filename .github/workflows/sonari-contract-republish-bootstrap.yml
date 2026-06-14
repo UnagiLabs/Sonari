@@ -1,52 +1,40 @@
-name: Sonari Contract Republish Bootstrap
+name: Sonari Contract Post-Publish Bootstrap
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - contracts/Published.toml
   workflow_dispatch:
     inputs:
       network:
-        description: Sui network to publish to
+        description: Sui network to update
         required: true
         default: testnet
         type: choice
         options:
           - testnet
           - mainnet
-      residence_root:
-        description: 32-byte 0x Merkle root for AllowedResidenceCellRegistry
-        required: true
-        type: string
-      residence_source_hash:
-        description: 32-byte 0x source hash for the residence allowlist
-        required: true
-        type: string
-      residence_allowlist_version:
-        description: u64 allowlist version
-        required: true
-        default: "1"
-        type: string
-      commit_published_toml:
-        description: Commit and push the Published.toml update to this branch
-        required: true
-        default: false
-        type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   bootstrap:
-    name: Publish contract and register residence root
+    name: Update residence root on published contract
     runs-on: [self-hosted, linux, x64, manji]
     environment: aws-sonari-verifier-runner-dev
-    timeout-minutes: 45
+    timeout-minutes: 30
     concurrency:
-      group: sonari-contract-republish-bootstrap-${{ inputs.network }}
+      group: sonari-contract-post-publish-bootstrap-${{ inputs.network || vars.SONARI_SUI_NETWORK || 'testnet' }}
       cancel-in-progress: false
     env:
-      SONARI_SUI_NETWORK: ${{ inputs.network }}
-      SONARI_RESIDENCE_ROOT: ${{ inputs.residence_root }}
-      SONARI_RESIDENCE_SOURCE_HASH: ${{ inputs.residence_source_hash }}
-      SONARI_RESIDENCE_ALLOWLIST_VERSION: ${{ inputs.residence_allowlist_version }}
+      SONARI_SUI_NETWORK: ${{ inputs.network || vars.SONARI_SUI_NETWORK || 'testnet' }}
+      SONARI_RESIDENCE_ROOT: ${{ vars.SONARI_RESIDENCE_ROOT }}
+      SONARI_RESIDENCE_SOURCE_HASH: ${{ vars.SONARI_RESIDENCE_SOURCE_HASH }}
+      SONARI_GEO_RESOLUTION: ${{ vars.SONARI_GEO_RESOLUTION }}
+      SONARI_RESIDENCE_ALLOWLIST_VERSION: "1"
       SONARI_DEV_ADMIN_PRIVATE_KEY: ${{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}
       SUI_CLI_URL: https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/sui-testnet-v1.71.1-ubuntu-x86_64.tgz
       SUI_CLI_SHA256: ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5
@@ -54,8 +42,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -105,7 +91,7 @@ jobs:
           set -euo pipefail
           set +x
           if [[ -z "${SONARI_DEV_ADMIN_PRIVATE_KEY:-}" ]]; then
-            echo "SONARI_DEV_ADMIN_PRIVATE_KEY secret is required for contract republish bootstrap" >&2
+            echo "SONARI_DEV_ADMIN_PRIVATE_KEY secret is required for contract post-publish bootstrap" >&2
             exit 1
           fi
           echo "::add-mask::${SONARI_DEV_ADMIN_PRIVATE_KEY}"
@@ -127,7 +113,7 @@ jobs:
           rm -rf "$admin_dir"
           mkdir -p "$admin_dir"
           client_config="$admin_dir/client.yaml"
-          admin_alias="sonari-republish-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          admin_alias="sonari-post-publish-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           export SUI_CONFIG_DIR="$admin_dir"
           sui client --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
@@ -147,35 +133,102 @@ jobs:
           sui client switch --env "$SONARI_SUI_NETWORK" --address "$admin_address" --quiet
           echo "SONARI_ADMIN_SUI_CLIENT_CONFIG=$client_config" >> "$GITHUB_ENV"
 
-      - name: Publish and register residence root
+      - name: Resolve Sonari contract ids from Published.toml
         shell: bash
+        env:
+          SUI_RPC_URL: ${{ vars.SONARI_SUI_RPC_URL }}
         run: |
           set -euo pipefail
-          pnpm run republish:bootstrap -- \
-            --live \
-            --env "$SONARI_SUI_NETWORK" \
-            --client-config "$SONARI_ADMIN_SUI_CLIENT_CONFIG" \
-            --residence-root "$SONARI_RESIDENCE_ROOT" \
-            --geo-resolution 7 \
-            --allowlist-version "$SONARI_RESIDENCE_ALLOWLIST_VERSION" \
-            --source-hash "$SONARI_RESIDENCE_SOURCE_HASH"
+          resolver_args=(
+            scripts/resolve_published_contract_ids.ts
+            --network "$SONARI_SUI_NETWORK"
+          )
+          if [[ -n "${SUI_RPC_URL:-}" ]]; then
+            resolver_args+=(--rpc-url "$SUI_RPC_URL")
+          fi
+          pnpm tsx "${resolver_args[@]}"
 
-      - name: Verify Published.toml changed
+      - name: Validate residence root update inputs
         shell: bash
         run: |
           set -euo pipefail
-          git diff --exit-code -- contracts/Published.toml && {
-            echo "contracts/Published.toml was not updated by republish bootstrap" >&2
+          hex32='^0x[0-9a-fA-F]{64}$'
+          object_id='^0x[0-9a-fA-F]{64}$'
+          integer='^[0-9]+$'
+
+          if [[ ! "${SONARI_RESIDENCE_ROOT:-}" =~ $hex32 ]]; then
+            echo "SONARI_RESIDENCE_ROOT must be 32-byte 0x-prefixed hex" >&2
             exit 1
-          }
+          fi
+          if [[ ! "${SONARI_RESIDENCE_SOURCE_HASH:-}" =~ $hex32 ]]; then
+            echo "SONARI_RESIDENCE_SOURCE_HASH must be 32-byte 0x-prefixed hex" >&2
+            exit 1
+          fi
+          if [[ ! "${SONARI_GEO_RESOLUTION:-}" =~ $integer ]]; then
+            echo "SONARI_GEO_RESOLUTION must be an integer" >&2
+            exit 1
+          fi
+          if [[ ! "${SONARI_RESIDENCE_ALLOWLIST_VERSION:-}" =~ $integer ]]; then
+            echo "SONARI_RESIDENCE_ALLOWLIST_VERSION must be an integer" >&2
+            exit 1
+          fi
+          if [[ ! "${SONARI_IDENTITY_PACKAGE_ID:-}" =~ $object_id ]]; then
+            echo "SONARI_IDENTITY_PACKAGE_ID must be a 32-byte 0x object id" >&2
+            exit 1
+          fi
+          if [[ ! "${SONARI_ADMIN_CAP_ID:-}" =~ $object_id ]]; then
+            echo "SONARI_ADMIN_CAP_ID must be a 32-byte 0x object id" >&2
+            exit 1
+          fi
+          if [[ ! "${SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID:-}" =~ $object_id ]]; then
+            echo "SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID must be a 32-byte 0x object id" >&2
+            exit 1
+          fi
 
-      - name: Commit Published.toml
-        if: ${{ inputs.commit_published_toml }}
+      - name: Update AllowedResidenceCellRegistry root
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add contracts/Published.toml
-          git commit -m "chore: Published.tomlをrepublish結果で更新する"
-          git push
+          update_json="$(sui \
+            client \
+            --client.config "$SONARI_ADMIN_SUI_CLIENT_CONFIG" \
+            --client.env "$SONARI_SUI_NETWORK" \
+            call \
+            --package "$SONARI_IDENTITY_PACKAGE_ID" \
+            --module admin \
+            --function update_allowed_residence_cell_root \
+            --args \
+              "$SONARI_ADMIN_CAP_ID" \
+              "$SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID" \
+              "$SONARI_RESIDENCE_ROOT" \
+              "$SONARI_GEO_RESOLUTION" \
+              "$SONARI_RESIDENCE_ALLOWLIST_VERSION" \
+              "$SONARI_RESIDENCE_SOURCE_HASH" \
+            --gas-budget 100000000 \
+            --json)"
+
+          UPDATE_RESULT_JSON="$update_json" node --input-type=module <<'NODE'
+          const parsed = JSON.parse(process.env.UPDATE_RESULT_JSON ?? "{}");
+          const expectedRegistryId = process.env.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID;
+          const events = Array.isArray(parsed.events) ? parsed.events : [];
+          const matched = events.some((event) => {
+            if (event === null || typeof event !== "object") {
+              return false;
+            }
+            const type = event.type;
+            const parsedJson = event.parsedJson;
+            return (
+              typeof type === "string" &&
+              type.includes("::allowed_residence_cell::AllowedResidenceCellRootUpdated") &&
+              parsedJson !== null &&
+              typeof parsedJson === "object" &&
+              parsedJson.registry_id === expectedRegistryId
+            );
+          });
+          if (!matched) {
+            process.stderr.write(
+              "admin::update_allowed_residence_cell_root did not emit the expected registry_id\n",
+            );
+            process.exit(1);
+          }
+          NODE

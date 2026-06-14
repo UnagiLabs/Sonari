@@ -107,8 +107,12 @@ export async function resolvePublishedContractIds(
         `${packageId}::disaster_event::DisasterRegistryCreated`,
         "DisasterRegistryCreated",
     );
-    env.NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID =
-        await readSingleAllowedResidenceCellRegistryId(input.client, packageId);
+    const allowedResidenceCellRegistryId = await readSingleAllowedResidenceCellRegistryId(
+        input.client,
+        packageId,
+    );
+    env.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID = allowedResidenceCellRegistryId;
+    env.NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID = allowedResidenceCellRegistryId;
     env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID = requireEnvValue(
         env,
         "SONARI_IDENTITY_REGISTRY_ID",
