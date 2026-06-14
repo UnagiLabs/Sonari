@@ -5,6 +5,7 @@ import { domAnimation, LazyMotion, MotionConfig, m } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ResidenceSaveErrorCode, saveResidenceSelection } from "./residence-save";
+import { ConsentStep } from "./steps/consent-step";
 import { DoneStep } from "./steps/done-step";
 import { IdentityStep } from "./steps/identity-step";
 import { MembershipStep } from "./steps/membership-step";
@@ -163,9 +164,12 @@ export function RegisterWizard() {
     function renderStep(step: WizardStepId) {
         switch (step) {
             case "welcome":
+                return <WelcomeStep onNext={goNext} />;
+            case "consent":
                 return (
-                    <WelcomeStep
+                    <ConsentStep
                         disclaimersAccepted={state.disclaimersAccepted}
+                        onBack={goBack}
                         onNext={goNext}
                         onToggleDisclaimers={handleDisclaimersToggle}
                     />

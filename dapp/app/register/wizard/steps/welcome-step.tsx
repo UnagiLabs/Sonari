@@ -11,18 +11,7 @@ import { deriveMembershipPresenceView, type MembershipPresenceView } from "./mem
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 
-const residenceDisclaimerKeys = ["0", "1", "2"] as const;
-const membershipDisclaimerKeys = ["0", "1", "2"] as const;
-
-export function WelcomeStep({
-    onNext,
-    disclaimersAccepted,
-    onToggleDisclaimers,
-}: {
-    readonly onNext: () => void;
-    readonly disclaimersAccepted: boolean;
-    readonly onToggleDisclaimers: (checked: boolean) => void;
-}) {
+export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
     const t = useTranslations("register.wizard.welcome");
 
     const account = useCurrentAccount();
@@ -109,41 +98,10 @@ export function WelcomeStep({
                 </div>
             ) : null}
 
-            <div className="wizard-card">
-                <p className="field-note">{t("disclaimers.heading")}</p>
-                <div className="disclaimer-group">
-                    <p className="disclaimer-group-title">{t("disclaimers.residenceTitle")}</p>
-                    <ul className="disclaimer-list">
-                        {residenceDisclaimerKeys.map((key) => (
-                            <li key={key}>{t(`disclaimers.residence.${key}`)}</li>
-                        ))}
-                    </ul>
-                </div>
-                <div className="disclaimer-group">
-                    <p className="disclaimer-group-title">{t("disclaimers.membershipTitle")}</p>
-                    <ul className="disclaimer-list">
-                        {membershipDisclaimerKeys.map((key) => (
-                            <li key={key}>{t(`disclaimers.membership.${key}`)}</li>
-                        ))}
-                    </ul>
-                </div>
-                <div className="control-group">
-                    <input
-                        checked={disclaimersAccepted}
-                        id="disclaimers-agree-all"
-                        type="checkbox"
-                        onChange={(e) => {
-                            onToggleDisclaimers(e.target.checked);
-                        }}
-                    />
-                    <label htmlFor="disclaimers-agree-all">{t("disclaimers.agreeAll")}</label>
-                </div>
-            </div>
-
             <div className="wizard-cta-bar">
                 <button
                     className="btn btn-primary btn-lg wizard-cta"
-                    disabled={!disclaimersAccepted}
+                    disabled={!connected}
                     onClick={onNext}
                     type="button"
                 >
