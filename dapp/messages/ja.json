@@ -23,37 +23,6 @@
                 "title": "Sonari のメンバーになる",
                 "lead": "手順は3つだけ。先に居住エリアを選び、譲渡不可のメンバーシップ SBT を発行し、本人確認は準備ができたときに行えます。",
                 "walletHint": "Sui ウォレットを接続してはじめましょう。",
-                "privacySummary": "Sonari が保存する情報",
-                "privacy": {
-                    "walletAddress": {
-                        "label": "ウォレットアドレス",
-                        "value": "SBT の所有者のみ"
-                    },
-                    "nickname": {
-                        "label": "ニックネーム",
-                        "value": "あとから追加可能"
-                    },
-                    "addressSearch": {
-                        "label": "住所検索",
-                        "value": "Sonari は保存しない"
-                    },
-                    "phoneEmail": {
-                        "label": "電話番号・メール",
-                        "value": "収集しない"
-                    },
-                    "gpsHistory": {
-                        "label": "GPS 履歴",
-                        "value": "保存しない"
-                    },
-                    "deviceInfo": {
-                        "label": "端末情報",
-                        "value": "公開しない"
-                    },
-                    "h3Cell": {
-                        "label": "H3 セル",
-                        "value": "解像度 7 の出力のみ"
-                    }
-                },
                 "cta": "はじめる",
                 "disclaimers": {
                     "heading": "はじめる前にご確認のうえ同意してください。",
