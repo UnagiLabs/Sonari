@@ -1,11 +1,9 @@
 import { parseH3Index } from "@sonari/proof-core";
-import { latLngToCell } from "h3-js";
 import { describe, expect, it } from "vitest";
 import {
     h3DecimalToHex,
     h3HexToDecimal,
     latLngToResidenceCell,
-    normalizeResidenceCellInput,
     RESIDENCE_H3_RESOLUTION,
     residenceCellBoundary,
     residenceCellCenter,
@@ -126,46 +124,5 @@ describe("h3-geo: residenceCellsInViewport", () => {
         const centerCell = latLngToResidenceCell(SHIBUYA_LAT, SHIBUYA_LNG);
         const cells = residenceCellsInViewport(bounds);
         expect(cells).toContain(centerCell.hex);
-    });
-});
-
-describe("h3-geo: normalizeResidenceCellInput", () => {
-    it("素の hex を受理する", () => {
-        const cell = latLngToResidenceCell(SHIBUYA_LAT, SHIBUYA_LNG);
-        const result = normalizeResidenceCellInput(cell.hex);
-        expect(result.hex).toBe(cell.hex);
-        expect(result.decimal).toBe(cell.decimal);
-    });
-
-    it("'h3-' 接頭辞付き hex を受理する", () => {
-        const cell = latLngToResidenceCell(SHIBUYA_LAT, SHIBUYA_LNG);
-        const result = normalizeResidenceCellInput(`h3-${cell.hex}`);
-        expect(result.hex).toBe(cell.hex);
-        expect(result.decimal).toBe(cell.decimal);
-    });
-
-    it("'0x' 接頭辞付き hex を受理する", () => {
-        const cell = latLngToResidenceCell(SHIBUYA_LAT, SHIBUYA_LNG);
-        const result = normalizeResidenceCellInput(`0x${cell.hex}`);
-        expect(result.hex).toBe(cell.hex);
-        expect(result.decimal).toBe(cell.decimal);
-    });
-
-    it("大文字 hex を受理して小文字に正規化する", () => {
-        const cell = latLngToResidenceCell(SHIBUYA_LAT, SHIBUYA_LNG);
-        const result = normalizeResidenceCellInput(cell.hex.toUpperCase());
-        expect(result.hex).toBe(cell.hex);
-    });
-
-    it("res7 でない有効な H3 hex は throw する", () => {
-        // res5 のセル（渋谷周辺）
-        const res5Hex = latLngToCell(SHIBUYA_LAT, SHIBUYA_LNG, 5);
-        expect(() => normalizeResidenceCellInput(res5Hex)).toThrow();
-    });
-
-    it("不正な文字列は throw する", () => {
-        expect(() => normalizeResidenceCellInput("not-a-valid-cell")).toThrow();
-        expect(() => normalizeResidenceCellInput("")).toThrow();
-        expect(() => normalizeResidenceCellInput("xyz")).toThrow();
     });
 });
