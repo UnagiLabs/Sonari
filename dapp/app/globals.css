@@ -3667,3 +3667,53 @@ h4 {
   font-weight: 600;
   cursor: pointer;
 }
+
+.donate-emergency-banner-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: oklch(0.62 0.18 25);
+  color: oklch(0.99 0.005 25);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.donate-emergency-banner-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: oklch(0.99 0.005 25);
+}
+
+.donate-emergency-banner-details {
+  display: grid;
+  gap: 6px 16px;
+  margin: 2px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: oklch(0.99 0.01 25);
+  border: 1px solid oklch(0.88 0.05 25);
+}
+
+.donate-emergency-banner-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.donate-emergency-banner-detail dt {
+  color: oklch(0.5 0.06 25);
+  font-weight: 600;
+}
+
+.donate-emergency-banner-detail dd {
+  margin: 0;
+  color: oklch(0.34 0.09 25);
+  font-weight: 600;
+  text-align: right;
+}
