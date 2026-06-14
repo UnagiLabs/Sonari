@@ -484,6 +484,7 @@ fun issue_donor_pass_returns_unissued_pass_and_emits_event() {
         assert!(donation::donor_pass_owner(&pass) == DONOR);
         assert!(donation::donor_pass_donation_count(&pass) == 0);
         assert!(donation::donor_pass_total_donated_usdc(&pass) == 0);
+        assert!(donation::donor_pass_total_donated_usdc_display(&pass) == b"0".to_string());
         assert!(donation::donor_pass_tier(&pass) == donation::tier_none());
 
         let issued = event::events_by_type<donation::DonorPassIssued>();
@@ -597,4 +598,93 @@ fun donate_to_campaign_rounding_stays_in_main() {
     test_scenario::return_shared(ops_pool);
     test_scenario::return_shared(registry);
     scenario.end();
+}
+
+#[test]
+fun donor_pass_tracks_display_total_separately_from_raw_units() {
+    let (mut scenario, _campaign_id, _cat_pool_id, main_pool_id, ops_pool_id) =
+        initialized_with_campaign();
+
+    scenario.next_tx(DONOR);
+
+    let mut main_pool = scenario.take_shared_by_id<pools::MainPool>(main_pool_id);
+    let mut ops_pool = scenario.take_shared_by_id<pools::OperationsPool>(ops_pool_id);
+    let mut registry = scenario.take_shared<donation::DonorRegistry>();
+    let mut pass = donation::issue_donor_pass(&mut registry, scenario.ctx());
+
+    assert_display_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        1,
+        b"0.000001".to_string(),
+        scenario.ctx(),
+    );
+    assert_display_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        999_999,
+        b"1".to_string(),
+        scenario.ctx(),
+    );
+    assert_display_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        4_000_000,
+        b"5".to_string(),
+        scenario.ctx(),
+    );
+    assert_display_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        1,
+        b"5.000001".to_string(),
+        scenario.ctx(),
+    );
+    assert_display_after_general_donation(
+        &registry,
+        &mut pass,
+        &mut main_pool,
+        &mut ops_pool,
+        9_999,
+        b"5.01".to_string(),
+        scenario.ctx(),
+    );
+
+    assert!(donation::donor_pass_total_donated_usdc(&pass) == 5_010_000);
+    let (_rec_idx, _rec_type, _program_id, _campaign_id, rec_amount, _coin_type, _ts) =
+        donation::donation_record_fields_for_testing(&pass, 4);
+    assert!(rec_amount == 9_999);
+
+    let recorded = event::events_by_type<donation::DonationRecorded>();
+    let (_pass_id, _idx, _typ, _pool_id, event_amount, _coin_type, _actor) =
+        donation::donation_recorded_event_fields(*recorded.borrow(4));
+    assert!(event_amount == 9_999);
+
+    donation::transfer_donor_pass(pass, scenario.ctx());
+    test_scenario::return_shared(main_pool);
+    test_scenario::return_shared(ops_pool);
+    test_scenario::return_shared(registry);
+    scenario.end();
+}
+
+fun assert_display_after_general_donation(
+    registry: &donation::DonorRegistry,
+    pass: &mut donation::DonorPass,
+    main_pool: &mut pools::MainPool,
+    ops_pool: &mut pools::OperationsPool,
+    amount: u64,
+    expected_display: std::string::String,
+    ctx: &mut TxContext,
+) {
+    let coin = coin::mint_for_testing<USDC>(amount, ctx);
+    donation::donate_general(registry, pass, main_pool, ops_pool, coin, ctx);
+    assert!(donation::donor_pass_total_donated_usdc_display(pass) == expected_display);
 }
