@@ -170,6 +170,14 @@ describe("messages catalog parity", () => {
         }
     });
 
+    it("welcome のプライバシー情報カードで使っていた文言キーを残さない", () => {
+        // privacySummary と privacy.* を welcome から削除した。再追加を防ぐ。
+        const removedPrivacyPrefix = "register.wizard.welcome.privacy";
+        for (const key of [...en.keys(), ...ja.keys()]) {
+            expect(key.startsWith(removedPrivacyPrefix), key).toBe(false);
+        }
+    });
+
     it("membership ゲートの disabled 理由キーが en/ja catalog に全て存在する", () => {
         // disabledReasonMessageKey が返すキーが削除済みキーを指していないことを固定する。
         // 削除された文言（旧 nextHint 等）を理由コードが参照すると missing key で UI が壊れる。

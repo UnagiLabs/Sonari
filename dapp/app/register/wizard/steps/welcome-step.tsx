@@ -9,16 +9,6 @@ import type { MembershipLookupResult } from "../../identity/membership-lookup";
 import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { deriveMembershipPresenceView, type MembershipPresenceView } from "./membership-presence";
 
-const privacyKeys = [
-    "walletAddress",
-    "nickname",
-    "addressSearch",
-    "phoneEmail",
-    "gpsHistory",
-    "deviceInfo",
-    "h3Cell",
-] as const;
-
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 
 const residenceDisclaimerKeys = ["0", "1", "2"] as const;
@@ -118,18 +108,6 @@ export function WelcomeStep({
                     <small>{t("membership.errorNote")}</small>
                 </div>
             ) : null}
-
-            <details className="wizard-details">
-                <summary>{t("privacySummary")}</summary>
-                <div className="privacy-list">
-                    {privacyKeys.map((key) => (
-                        <div className="privacy-row" key={key}>
-                            <span>{t(`privacy.${key}.label`)}</span>
-                            <strong>{t(`privacy.${key}.value`)}</strong>
-                        </div>
-                    ))}
-                </div>
-            </details>
 
             <div className="wizard-card">
                 <p className="field-note">{t("disclaimers.heading")}</p>

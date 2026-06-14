@@ -23,37 +23,6 @@
                 "title": "Become a Sonari member.",
                 "lead": "Three clear steps: choose your residence area, issue one soulbound Membership SBT, and verify your identity whenever you are ready.",
                 "walletHint": "Connect your Sui wallet to get started.",
-                "privacySummary": "What Sonari stores",
-                "privacy": {
-                    "walletAddress": {
-                        "label": "Wallet address",
-                        "value": "SBT owner only"
-                    },
-                    "nickname": {
-                        "label": "Nickname",
-                        "value": "Can be added later"
-                    },
-                    "addressSearch": {
-                        "label": "Address search",
-                        "value": "Not stored by Sonari"
-                    },
-                    "phoneEmail": {
-                        "label": "Phone / email",
-                        "value": "Not collected"
-                    },
-                    "gpsHistory": {
-                        "label": "GPS history",
-                        "value": "Not stored"
-                    },
-                    "deviceInfo": {
-                        "label": "Device info",
-                        "value": "Not published"
-                    },
-                    "h3Cell": {
-                        "label": "H3 cell",
-                        "value": "Resolution 7 output"
-                    }
-                },
                 "cta": "Get started",
                 "disclaimers": {
                     "heading": "Please review and agree before you start.",
