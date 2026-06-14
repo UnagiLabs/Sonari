@@ -117,9 +117,9 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "NITRO_CLI_TAG: v1.4.4",
             "Cache Nitro CLI build",
             "Use local Nitro CLI",
-            'if: runner.name == "manji"',
+            "if: runner.name == 'manji'",
             "Install pinned Nitro CLI",
-            'if: runner.name != "manji"',
+            "if: runner.name != 'manji'",
             "https://github.com/aws/aws-nitro-enclaves-cli",
             "cargo build",
             '--manifest-path "$source_dir/Cargo.toml"',
@@ -129,7 +129,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'sudo chown "$(id -u):$(id -g)" /var/log/nitro_enclaves',
             "NITRO_CLI_BLOBS=$blobs_dir",
             'export SUI_CONFIG_DIR="$admin_dir"',
-            'admin_alias="sonari-dev-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+            'admin_alias="sonari-dev-admin-$' + "{GITHUB_RUN_ID}-$" + '{GITHUB_RUN_ATTEMPT}"',
             "sui client --yes new-address ed25519 sonari-bootstrap",
             "sui keytool import",
             '--alias "$admin_alias"',
@@ -193,11 +193,6 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         expectContainsAll(workflow, [
             "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
-            "RELAYER_REGISTRY: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
-            "RELAYER_VERIFIER_REGISTRY: $" +
-                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
-            "RELAYER_CATEGORY_REGISTRY: $" + "{{ vars.SONARI_CATEGORY_REGISTRY_ID }}",
-            "RELAYER_CATEGORY_POOL: $" + "{{ vars.SONARI_EARTHQUAKE_CATEGORY_POOL_ID }}",
             "RELAYER_GRPC_URL: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}",
             "RELAYER_SENDER_ADDRESS: $" +
                 "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}",
@@ -206,6 +201,19 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "RELAYER_ALLOW_SUBMIT: $" +
                 "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}",
         ]);
+        expect(workflow).not.toContain(
+            "RELAYER_REGISTRY: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}",
+        );
+        expect(workflow).not.toContain(
+            "RELAYER_VERIFIER_REGISTRY: $" +
+                "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}",
+        );
+        expect(workflow).not.toContain(
+            "RELAYER_CATEGORY_REGISTRY: $" + "{{ vars.SONARI_CATEGORY_REGISTRY_ID }}",
+        );
+        expect(workflow).not.toContain(
+            "RELAYER_CATEGORY_POOL: $" + "{{ vars.SONARI_EARTHQUAKE_CATEGORY_POOL_ID }}",
+        );
     });
 
     it("uploads commit-scoped artifacts under one Sonari verifier runner prefix", async () => {
@@ -392,8 +400,11 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             // PCR は EIF 値の env fallback で渡る（手書きしない）。
             "register-verifier-configs.sh",
         ]);
-        // admin cap id と registry id は repo-level Variables、admin 鍵は環境スコープ secret から。
-        expect(workflow).toContain("SONARI_ADMIN_CAP_ID: $" + "{{ vars.SONARI_ADMIN_CAP_ID }}");
+        // admin cap id と registry id は resolver 由来、admin 鍵は環境スコープ secret から。
+        expect(workflow).not.toContain("SONARI_ADMIN_CAP_ID: $" + "{{ vars.SONARI_ADMIN_CAP_ID }}");
+        expect(workflow).not.toContain(
+            "SONARI_VERIFIER_REGISTRY_ID: $" + "{{ vars.SONARI_VERIFIER_REGISTRY_ID }}",
+        );
         expect(workflow).toContain(
             "SONARI_DEV_ADMIN_PRIVATE_KEY: $" + "{{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}",
         );
@@ -426,20 +437,20 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         ]);
     });
 
-    it("wires shared object ids from repo-level variables and forwards them as CloudFormation parameters", async () => {
+    it("wires shared object ids from resolver output and forwards them as CloudFormation parameters", async () => {
         const workflow = await readWorkflow();
 
-        // 共有 object id は repo-level Variables（SONARI_*）= dapp / AWS の単一情報源から配線する。
-        expect(workflow).toContain(
+        // 共有 object id は resolver が GITHUB_ENV へ書くため、workflow env で Variables から再宣言しない。
+        expect(workflow).not.toContain(
             "SONARI_IDENTITY_PAUSE_STATE_ID: $" + "{{ vars.SONARI_IDENTITY_PAUSE_STATE_ID }}",
         );
-        expect(workflow).toContain(
+        expect(workflow).not.toContain(
             "SONARI_IDENTITY_REGISTRY_ID: $" + "{{ vars.SONARI_IDENTITY_REGISTRY_ID }}",
         );
-        expect(workflow).toContain(
+        expect(workflow).not.toContain(
             "SONARI_MEMBERSHIP_REGISTRY_ID: $" + "{{ vars.SONARI_MEMBERSHIP_REGISTRY_ID }}",
         );
-        expect(workflow).toContain(
+        expect(workflow).not.toContain(
             "SONARI_VERIFIER_REGISTRY_ID: $" + "{{ vars.SONARI_VERIFIER_REGISTRY_ID }}",
         );
 
@@ -460,15 +471,12 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(workflow).toContain("RelayerCategoryPool=$RELAYER_CATEGORY_POOL");
     });
 
-    it("derives the Sonari package id from Published.toml instead of a GitHub variable", async () => {
+    it("derives Sonari contract ids from Published.toml and Sui events instead of GitHub variables", async () => {
         const workflow = await readWorkflow();
 
-        // package id は GH 変数の手書きをやめ、contracts/Published.toml の published-at から導出する。
-        expect(workflow).toContain("Resolve Sonari Move package id from Published.toml");
-        expect(workflow).toContain("contracts/Published.toml");
-        expect(workflow).toContain(
-            "RELAYER_TARGET=%s::accessor::create_disaster_event_and_campaign_from_signed_payload",
-        );
+        // package id は Published.toml、object id は Sui event から導出する。
+        expect(workflow).toContain("Resolve Sonari contract ids from Published.toml");
+        expect(workflow).toContain("scripts/resolve_published_contract_ids.ts");
         expect(workflow).not.toContain(
             "RELAYER_TARGET: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_TARGET }}",
         );
@@ -495,10 +503,6 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         expectContainsAll(workflow, [
             "FLOOR_CENSUS_MODE: $" + "{{ vars.SONARI_FLOOR_CENSUS_MODE }}",
-            "FLOOR_CENSUS_TARGET: $" + "{{ vars.SONARI_FLOOR_CENSUS_TARGET }}",
-            "FLOOR_CENSUS_PAUSE_STATE: $" + "{{ vars.SONARI_FLOOR_CENSUS_PAUSE_STATE }}",
-            "FLOOR_CENSUS_CATEGORY_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_CATEGORY_POOL }}",
-            "FLOOR_CENSUS_MAIN_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_MAIN_POOL }}",
             "FLOOR_CENSUS_JSON_RPC_URL: $" + "{{ vars.SONARI_FLOOR_CENSUS_JSON_RPC_URL }}",
             "FloorCensusMode=$FLOOR_CENSUS_MODE",
             "FloorCensusTarget=$FLOOR_CENSUS_TARGET",
@@ -507,6 +511,18 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
             "FloorCensusJsonRpcUrl=$FLOOR_CENSUS_JSON_RPC_URL",
         ]);
+        expect(workflow).not.toContain(
+            "FLOOR_CENSUS_TARGET: $" + "{{ vars.SONARI_FLOOR_CENSUS_TARGET }}",
+        );
+        expect(workflow).not.toContain(
+            "FLOOR_CENSUS_PAUSE_STATE: $" + "{{ vars.SONARI_FLOOR_CENSUS_PAUSE_STATE }}",
+        );
+        expect(workflow).not.toContain(
+            "FLOOR_CENSUS_CATEGORY_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_CATEGORY_POOL }}",
+        );
+        expect(workflow).not.toContain(
+            "FLOOR_CENSUS_MAIN_POOL: $" + "{{ vars.SONARI_FLOOR_CENSUS_MAIN_POOL }}",
+        );
 
         const requiredNamesMatch = workflow.match(/required_names=\(\n([\s\S]*?)\n {10}\)/u);
         expect(requiredNamesMatch?.[1]).not.toContain("FLOOR_CENSUS_MODE");

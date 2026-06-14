@@ -104,6 +104,22 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve Sonari contract ids from Published.toml
+        env:
+          SONARI_SUI_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
+          SUI_RPC_URL: ${{ vars.SONARI_SUI_RPC_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolver_args=(
+            scripts/resolve_published_contract_ids.ts
+            --network "${SONARI_SUI_NETWORK:-testnet}"
+          )
+          if [[ -n "${SUI_RPC_URL:-}" ]]; then
+            resolver_args+=(--rpc-url "$SUI_RPC_URL")
+          fi
+          pnpm tsx "${resolver_args[@]}"
+
       # `deploy` script は `opennextjs-cloudflare build && opennextjs-cloudflare deploy`。
       # 前段の build が型検査も兼ねる（型エラーがあればここで失敗し deploy に進まない）。
       # よって独立した `next build` step は冗長なため置かない。
@@ -137,10 +153,6 @@ jobs:
           NEXT_PUBLIC_SONARI_AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
           NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL: ${{ vars.SONARI_IDENTITY_SUBMIT_URL }}
           NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL: ${{ vars.SONARI_IDENTITY_STATUS_URL }}
-          NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID: ${{ vars.SONARI_IDENTITY_REGISTRY_ID }}
-          NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID: ${{ vars.SONARI_IDENTITY_PAUSE_STATE_ID }}
-          NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID: ${{ vars.SONARI_MEMBERSHIP_REGISTRY_ID }}
-          NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID: ${{ vars.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID }}
           NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
           NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}

@@ -665,73 +665,39 @@ jobs:
           }
           NODE
 
-      - name: Resolve Sonari Move package id from Published.toml
+      - name: Resolve Sonari contract ids from Published.toml
         shell: bash
         env:
           # Sui network の単一情報源。Published.toml の [published.<network>] section を選ぶ。
           SONARI_SUI_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
+          SUI_RPC_URL: ${{ vars.SONARI_SUI_RPC_URL }}
         run: |
           set -euo pipefail
-          # contracts/Published.toml の published-at を Move publish の正典（単一情報源）として読む。
-          # dapp/next.config.ts の parsePublishedTomlPackageId と同じ inline-regex 流儀で抽出し、
-          # package id を GH var で二重管理しない（publish のたび toml が自動更新される）。
-          package_id="$(node --input-type=module <<'NODE'
-          import { readFile } from "node:fs/promises";
-
-          const network = (process.env.SONARI_SUI_NETWORK ?? "").trim() || "testnet";
-          const input = await readFile("contracts/Published.toml", "utf8");
-          const section = new RegExp(
-            `\\[published\\.${network}\\]([\\s\\S]*?)(?:\\n\\[|$)`,
-          ).exec(input)?.[1];
-          const publishedAt =
-            section === undefined
-              ? undefined
-              : /^\s*published-at\s*=\s*"([^"]+)"/m.exec(section)?.[1];
-          if (publishedAt === undefined || !/^0x[0-9a-fA-F]+$/.test(publishedAt)) {
-            process.stderr.write(
-              `contracts/Published.toml is missing a valid published-at for [published.${network}]\n`,
-            );
-            process.exit(1);
-          }
-          process.stdout.write(publishedAt);
-          NODE
-          )"
-
-          printf 'SONARI_IDENTITY_PACKAGE_ID=%s\n' "$package_id" >> "$GITHUB_ENV"
-          printf 'RELAYER_TARGET=%s::accessor::create_disaster_event_and_campaign_from_signed_payload\n' "$package_id" >> "$GITHUB_ENV"
-          echo "Resolved Sonari Move package id from Published.toml: $package_id"
+          resolver_args=(
+            scripts/resolve_published_contract_ids.ts
+            --network "${SONARI_SUI_NETWORK:-testnet}"
+          )
+          if [[ -n "${SUI_RPC_URL:-}" ]]; then
+            resolver_args+=(--rpc-url "$SUI_RPC_URL")
+          fi
+          pnpm tsx "${resolver_args[@]}"
 
       - name: Deploy CloudFormation stack
         shell: bash
         env:
           # earthquake relayer target は Published.toml 由来 package id から前段 step で導出する。
-          # object id は publish tx の GenesisObject 由来値を GH Variables で渡す。
+          # object id は前段 resolver が publish tx の events から導出して GITHUB_ENV に置く。
           RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}
           RELAYER_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
-          RELAYER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY }}
-          RELAYER_VERIFIER_REGISTRY: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY }}
-          RELAYER_CATEGORY_REGISTRY: ${{ vars.SONARI_CATEGORY_REGISTRY_ID }}
-          RELAYER_CATEGORY_POOL: ${{ vars.SONARI_EARTHQUAKE_CATEGORY_POOL_ID }}
           RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}
           RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
           RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
           RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}
           IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}
-          # 共有 object id は repo-level Variables（SONARI_*）= dapp / AWS の単一情報源。
-          # SONARI_IDENTITY_PACKAGE_ID は GH var をやめ、前段 step が contracts/Published.toml から
-          # 導出して GITHUB_ENV に置いた値を使う（ここで env に再宣言すると上書きされるので宣言しない）。
-          SONARI_IDENTITY_PAUSE_STATE_ID: ${{ vars.SONARI_IDENTITY_PAUSE_STATE_ID }}
-          SONARI_IDENTITY_REGISTRY_ID: ${{ vars.SONARI_IDENTITY_REGISTRY_ID }}
-          SONARI_MEMBERSHIP_REGISTRY_ID: ${{ vars.SONARI_MEMBERSHIP_REGISTRY_ID }}
-          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.SONARI_VERIFIER_REGISTRY_ID }}
           # affected-cells-proof-worker の URL は dapp と同じ repo-level 単一情報源を使う。
           AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
-          # FloorCensus 設定は repo-level Variables（SONARI_*）を単一情報源にする。
+          # FloorCensus mode / RPC は repo-level Variables のまま。target と object ids は resolver 由来。
           FLOOR_CENSUS_MODE: ${{ vars.SONARI_FLOOR_CENSUS_MODE }}
-          FLOOR_CENSUS_TARGET: ${{ vars.SONARI_FLOOR_CENSUS_TARGET }}
-          FLOOR_CENSUS_PAUSE_STATE: ${{ vars.SONARI_FLOOR_CENSUS_PAUSE_STATE }}
-          FLOOR_CENSUS_CATEGORY_POOL: ${{ vars.SONARI_FLOOR_CENSUS_CATEGORY_POOL }}
-          FLOOR_CENSUS_MAIN_POOL: ${{ vars.SONARI_FLOOR_CENSUS_MAIN_POOL }}
           FLOOR_CENSUS_JSON_RPC_URL: ${{ vars.SONARI_FLOOR_CENSUS_JSON_RPC_URL }}
         run: |
           set -euo pipefail
@@ -983,9 +949,7 @@ jobs:
           # dev/testnet 専用の使い捨て admin 鍵（bech32 suiprivkey1...）。本番 AdminCap とは別物。
           # secret は環境 aws-sonari-verifier-runner-dev スコープ＋手動 dispatch 限定で fork から不可視。
           SONARI_DEV_ADMIN_PRIVATE_KEY: ${{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}
-          SONARI_ADMIN_CAP_ID: ${{ vars.SONARI_ADMIN_CAP_ID }}
-          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.SONARI_VERIFIER_REGISTRY_ID }}
-          # SONARI_IDENTITY_PACKAGE_ID は前段 step が Published.toml から導出して GITHUB_ENV に置く。
+          # SONARI_* IDs は前段 step が Published.toml と Sui events から導出して GITHUB_ENV に置く。
           SUI_TESTNET_RPC_URL: https://fullnode.testnet.sui.io:443
         run: |
           set -euo pipefail
@@ -1056,7 +1020,6 @@ jobs:
       - name: Verify on-chain PCR config matches rebuilt EIFs
         shell: bash
         env:
-          SONARI_VERIFIER_REGISTRY_ID: ${{ vars.SONARI_VERIFIER_REGISTRY_ID }}
           SUI_TESTNET_RPC_URL: https://fullnode.testnet.sui.io:443
         run: |
           set -euo pipefail
