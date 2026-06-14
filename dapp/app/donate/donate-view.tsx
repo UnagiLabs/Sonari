@@ -35,8 +35,8 @@ import {
     resolveDonateSubmitDisabledReason,
     selectEmergencyBannerCampaign,
 } from "./donate-view-state";
-import { EmergencyBanner } from "./emergency-banner";
 import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
+import { EmergencyBanner } from "./emergency-banner";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
 const DEFAULT_DONATION_AMOUNT = "400";
