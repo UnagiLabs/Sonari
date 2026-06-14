@@ -8,10 +8,14 @@ import {
     WIZARD_STORAGE_KEY,
 } from "./wizard-storage";
 
+// MEMBERSHIP_STATEMENT_COUNT / RESIDENCE_STATEMENT_COUNT は wizard-steps から引き続き
+// export されているため import は通る。STEP 2 で STORAGE_VERSION を上げるタイミングで整理する。
+void MEMBERSHIP_STATEMENT_COUNT;
+void RESIDENCE_STATEMENT_COUNT;
+
 const fullState: WizardState = {
     membershipIssued: true,
-    membershipAccepted: [true, true, true],
-    residenceAccepted: [true, false, true],
+    disclaimersAccepted: true,
     selectedCellDecimal: "608533827635118079",
     residenceSaved: true,
     identityProvider: "kyc",
@@ -49,8 +53,7 @@ describe("保存対象の allowlist", () => {
             [
                 "version",
                 "membershipIssued",
-                "membershipAccepted",
-                "residenceAccepted",
+                "disclaimersAccepted",
                 "selectedCellDecimal",
                 "residenceSaved",
                 "identityProvider",
@@ -95,16 +98,17 @@ describe("deserializeWizardState の fail-closed 検証", () => {
         expect(deserializeWizardState(raw)).toEqual(initial);
     });
 
-    it("承諾フラグ配列の型や長さが不正なら初期状態を返す", () => {
+    it("membershipIssued が boolean でなければ初期状態を返す", () => {
         const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
         expect(
             deserializeWizardState(JSON.stringify({ ...base, membershipIssued: "yes" })),
         ).toEqual(initial);
+    });
+
+    it("disclaimersAccepted が boolean でなければ初期状態を返す", () => {
+        const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
         expect(
-            deserializeWizardState(JSON.stringify({ ...base, membershipAccepted: [true, 1, true] })),
-        ).toEqual(initial);
-        expect(
-            deserializeWizardState(JSON.stringify({ ...base, residenceAccepted: [true] })),
+            deserializeWizardState(JSON.stringify({ ...base, disclaimersAccepted: "yes" })),
         ).toEqual(initial);
     });
 
@@ -188,8 +192,7 @@ describe("clearWizardStorage", () => {
 
 const completedState: WizardState = {
     membershipIssued: true,
-    membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => true),
-    residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => true),
+    disclaimersAccepted: true,
     selectedCellDecimal: "608533827635118079",
     residenceSaved: true,
     identityProvider: "world_id",

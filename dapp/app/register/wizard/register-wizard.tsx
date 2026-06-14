@@ -17,7 +17,6 @@ import {
     nextStep,
     parseStepParam,
     previousStep,
-    RESIDENCE_STATEMENT_COUNT,
     stepIndex,
     WIZARD_STEPS,
     type WizardIdentityProvider,
@@ -116,21 +115,13 @@ export function RegisterWizard() {
         }
     }, [activeStep, goTo]);
 
-    const handleMembershipToggle = useCallback((index: number, checked: boolean) => {
-        setState((current) => ({
-            ...current,
-            membershipAccepted: current.membershipAccepted.map((value, position) =>
-                position === index ? checked : value,
-            ),
-        }));
+    // TODO(STEP 3): membership / residence の個別ステートメント承諾は disclaimersAccepted に統合予定。
+    // 配列同意フィールドは WizardState から削除済みのため、このハンドラは後続 STEP で整理する。
+    const handleMembershipToggle = useCallback((_index: number, _checked: boolean) => {
+        // no-op: 配列同意は削除済み。STEP 3 で UI ごと整理する。
     }, []);
-    const handleResidenceToggle = useCallback((index: number, checked: boolean) => {
-        setState((current) => ({
-            ...current,
-            residenceAccepted: current.residenceAccepted.map((value, position) =>
-                position === index ? checked : value,
-            ),
-        }));
+    const handleResidenceToggle = useCallback((_index: number, _checked: boolean) => {
+        // no-op: 配列同意は削除済み。STEP 3 で UI ごと整理する。
     }, []);
     const handleMembershipIssued = useCallback(() => {
         setState((current) =>
@@ -177,13 +168,11 @@ export function RegisterWizard() {
                 // Next ボタンは「保存前の準備完了条件」で制御する。
                 // canProceed("residence") は residenceSaved も含むため、保存前のボタンが
                 // 永続 disabled になる鶏卵問題を避けるため別途計算する。
-                const residenceReadyToSave =
-                    state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
-                    state.residenceAccepted.every(Boolean) &&
-                    state.selectedCellDecimal !== null;
+                // TODO(STEP 3): residenceAccepted 配列は削除済み。UI ごと整理する。
+                const residenceReadyToSave = state.selectedCellDecimal !== null;
                 return (
                     <ResidenceStep
-                        accepted={state.residenceAccepted}
+                        accepted={[]}
                         canContinue={residenceReadyToSave}
                         fullbleed={activeStep === "residence"}
                         saveError={residenceSaveError}
@@ -196,9 +185,10 @@ export function RegisterWizard() {
                 );
             }
             case "membership":
+                // TODO(STEP 3): membershipAccepted 配列は削除済み。UI ごと整理する。
                 return (
                     <MembershipStep
-                        accepted={state.membershipAccepted}
+                        accepted={[]}
                         membershipIssued={state.membershipIssued}
                         onBack={goBack}
                         onIssued={handleMembershipIssued}

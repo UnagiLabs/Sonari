@@ -15,10 +15,8 @@ export const RESIDENCE_STATEMENT_COUNT = 3;
 export interface WizardState {
     /** membership SBT の発行完了フラグ */
     readonly membershipIssued: boolean;
-    /** membership ステップの承諾フラグ（ステートメントごと） */
-    readonly membershipAccepted: readonly boolean[];
-    /** residence ステップの承諾フラグ（ステートメントごと） */
-    readonly residenceAccepted: readonly boolean[];
+    /** welcome ステップで免責事項への同意を完了したか */
+    readonly disclaimersAccepted: boolean;
     /** 選択中の H3 res7 セル（10進文字列）。未選択は null */
     readonly selectedCellDecimal: string | null;
     /** residence ステップで選択セルの保存を完了したか */
@@ -32,8 +30,7 @@ export interface WizardState {
 export function createInitialWizardState(): WizardState {
     return {
         membershipIssued: false,
-        membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => false),
-        residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => false),
+        disclaimersAccepted: false,
         selectedCellDecimal: null,
         residenceSaved: false,
         identityProvider: "world_id",
@@ -56,20 +53,13 @@ export function parseStepParam(value: string | null | undefined): WizardStepId {
 export function canProceed(state: WizardState, step: WizardStepId): boolean {
     switch (step) {
         case "welcome":
-            return true;
+            return state.disclaimersAccepted;
         case "residence":
-            return (
-                state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
-                state.residenceAccepted.every((accepted) => accepted) &&
-                state.selectedCellDecimal !== null &&
-                state.residenceSaved
-            );
+            return state.selectedCellDecimal !== null && state.residenceSaved;
         case "membership":
             return (
                 state.membershipIssued &&
                 state.residenceSaved &&
-                state.membershipAccepted.length === MEMBERSHIP_STATEMENT_COUNT &&
-                state.membershipAccepted.every((accepted) => accepted) &&
                 state.selectedCellDecimal !== null
             );
         case "identity":
