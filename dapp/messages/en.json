@@ -581,7 +581,6 @@
         },
         "actions": {
             "donate": "Donate",
-            "claimRelief": "Claim relief",
             "refresh": "Refresh data"
         },
         "statusBar": {
@@ -654,8 +653,7 @@
             "action": "Donation history"
         },
         "claims": {
-            "title": "Recent claims",
-            "action": "Claim flow"
+            "title": "Recent claims"
         },
         "receiptsPanel": {
             "title": "Impact receipts",

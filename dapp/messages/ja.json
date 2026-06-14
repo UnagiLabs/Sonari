@@ -581,7 +581,6 @@
         },
         "actions": {
             "donate": "寄付",
-            "claimRelief": "支援を申請",
             "refresh": "データを更新"
         },
         "statusBar": {
@@ -654,8 +653,7 @@
             "action": "寄付履歴"
         },
         "claims": {
-            "title": "最近の申請",
-            "action": "申請フロー"
+            "title": "最近の申請"
         },
         "receiptsPanel": {
             "title": "インパクトレシート",
