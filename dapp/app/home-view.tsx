@@ -3,6 +3,7 @@
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -12,6 +13,13 @@ import {
 } from "./chain/genesis-objects";
 import { readDashboardPools } from "./dashboard/dashboard-chain";
 import { type DashboardPoolSummary, deriveFeaturedPools } from "./dashboard/dashboard-view-model";
+import { readDonateDestinations } from "./donate/donate-destinations";
+import {
+    type DonateDestinationReadState,
+    selectEmergencyBannerCampaign,
+} from "./donate/donate-view-state";
+import { EmergencyBanner } from "./donate/emergency-banner";
+import type { EmergencyBannerCampaign } from "./donate/emergency-banner-state";
 import { SiteTopbar } from "./i18n/site-topbar";
 import type { SonariLocale } from "./register/wizard/locale";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "./wallet/wallet-network";
@@ -93,7 +101,21 @@ const footerColumns = [
     },
 ] as const;
 
-export function HomeView({ locale }: { readonly locale: SonariLocale }) {
+/**
+ * デモ用ホームが固定キャンペーンを差し込むための設定。
+ * 本番ホームは demo を渡さないため、緊急バナーはチェーン実データから判定する。
+ */
+export interface HomeDemoConfig {
+    readonly emergencyCampaign: EmergencyBannerCampaign;
+}
+
+export function HomeView({
+    locale,
+    demo,
+}: {
+    readonly locale: SonariLocale;
+    readonly demo?: HomeDemoConfig;
+}) {
     const t = useTranslations("home");
 
     return (
@@ -103,6 +125,15 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
                 <SiteTopbar active="home" locale={locale} />
 
                 <main className="page">
+                    {demo !== undefined ? (
+                        <HomeEmergencyBannerView
+                            campaign={demo.emergencyCampaign}
+                            donateHref="/demo/donate"
+                        />
+                    ) : (
+                        <HomeEmergencyBanner />
+                    )}
+
                     <section className="hero" aria-labelledby="hero-title">
                         <div className="hero-grid">
                             <div>
@@ -265,6 +296,104 @@ export function HomeView({ locale }: { readonly locale: SonariLocale }) {
             </div>
         </>
     );
+}
+
+// 緊急バナーを描く共通の薄い包み。
+// campaign が null のときは EmergencyBanner 側が何も描かない（非表示）。
+// onDonate は donateHref への遷移に留め、チェーン送金は起こさない（本番・デモとも）。
+function HomeEmergencyBannerView({
+    campaign,
+    donateHref,
+}: {
+    campaign: EmergencyBannerCampaign | null;
+    donateHref: string;
+}) {
+    const router = useRouter();
+    return (
+        <EmergencyBanner
+            campaign={campaign}
+            onDonate={() => {
+                router.push(donateHref);
+            }}
+        />
+    );
+}
+
+// 本番ホームの緊急バナー。チェーンからキャンペーンを読み、実施中のものだけ表示する。
+// 取得は donate ページと同じ readDonateDestinations を使う。読み込み中・失敗・
+// 該当なしのときは selectEmergencyBannerCampaign が null を返し、バナーは出ない（fail-close）。
+function HomeEmergencyBanner() {
+    const network = readWalletNetwork();
+    const [state, setState] = useState<DonateDestinationReadState>({
+        status: "loading",
+        campaigns: [],
+        categories: [],
+        errorMessage: null,
+    });
+
+    useEffect(() => {
+        // funding package 未設定では実施中キャンペーンを判定できないため非表示にする。
+        if (fundingPackageId.trim().length === 0) {
+            setState({
+                status: "error",
+                campaigns: [],
+                categories: [],
+                errorMessage: "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.",
+            });
+            return;
+        }
+
+        const client = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+        let cancelled = false;
+        setState({ status: "loading", campaigns: [], categories: [], errorMessage: null });
+
+        void (async () => {
+            try {
+                const result = await readDonateDestinations(client, {
+                    packageId: fundingPackageId,
+                });
+                if (cancelled) {
+                    return;
+                }
+                if (result.kind === "ok") {
+                    setState({
+                        status: "ready",
+                        campaigns: result.campaigns,
+                        categories: result.categories,
+                        errorMessage: null,
+                    });
+                    return;
+                }
+                setState({
+                    status: "error",
+                    campaigns: [],
+                    categories: [],
+                    errorMessage: result.message,
+                });
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+                setState({
+                    status: "error",
+                    campaigns: [],
+                    categories: [],
+                    errorMessage:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to load emergency campaign.",
+                });
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [network]);
+
+    // 現在時刻で実施中判定する。該当が無ければ null になりバナーは非表示。
+    const campaign = selectEmergencyBannerCampaign(state, BigInt(Date.now()));
+    return <HomeEmergencyBannerView campaign={campaign} donateHref="/donate" />;
 }
 
 function SectionHeader({
