@@ -10,7 +10,7 @@ permissions:
 jobs:
   deploy-dev:
     name: Deploy dev stack
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, manji]
     environment: aws-sonari-verifier-runner-dev
     timeout-minutes: 120
     concurrency:
