@@ -10,12 +10,16 @@ const proofCoreSrc = "../packages/proof-core/src";
 // membership package ID は contracts/Published.toml（commit 済み＝GitHub 管理の正典）を
 // 単一の出所とし、ビルド時にここで読み取って NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID へ注入する。
 // env への手書きをやめることで「再 publish のたびに env と toml の両方を直す」二重管理を解消する。
-type SonariNetwork = "testnet" | "localnet";
+type SonariNetwork = "mainnet" | "testnet" | "localnet";
 
-// network 解決は wallet-network.ts と同じ意味（"localnet" 厳密一致以外は testnet）だが、
+// network 解決は wallet-network.ts と同じ意味（mainnet / testnet / localnet のみ許可）だが、
 // config を app のモジュールグラフへ結合させないため import せず inline する。
 function resolveSonariNetwork(raw: string | undefined): SonariNetwork {
-    return (raw ?? "").trim() === "localnet" ? "localnet" : "testnet";
+    const trimmed = (raw ?? "").trim();
+    if (trimmed === "mainnet" || trimmed === "localnet") {
+        return trimmed;
+    }
+    return "testnet";
 }
 
 // scripts/membership_identity_testnet_fixture.ts の parsePublishedTomlPackageId と同じ

@@ -12,10 +12,11 @@ export const USDC_TYPE_BY_NETWORK = {
 } as const;
 
 // 接続中の network に対応する USDC coin type を解決する。localnet は dev 用に
-// testnet と同じ Circle USDC を使う。WalletNetwork に mainnet を追加した場合は
-// switch の網羅性チェックがここでの配線漏れを検出する（mainnet → USDC_TYPE_BY_NETWORK.mainnet）。
+// testnet と同じ Circle USDC を使う。
 export function resolveUsdcType(network: WalletNetwork): string {
     switch (network) {
+        case "mainnet":
+            return USDC_TYPE_BY_NETWORK.mainnet;
         case "testnet":
         case "localnet":
             return USDC_TYPE_BY_NETWORK.testnet;

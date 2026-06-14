@@ -41,5 +41,8 @@ describe("dapp deploy workflow", () => {
             "NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID: $" +
                 "{{ vars.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID }}",
         );
+        expect(workflow).not.toContain(
+            "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: $" + "{{ vars.SONARI_FUNDING_PACKAGE_ID }}",
+        );
     });
 });

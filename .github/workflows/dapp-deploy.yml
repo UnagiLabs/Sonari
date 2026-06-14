@@ -137,9 +137,8 @@ jobs:
       #     1 箇所更新すれば全デプロイ先へ反映される。ここでは NEXT_PUBLIC_* 名へ写し替えて渡す。
       #   - environment-level Variables（cloudflare-dapp-worker）= dapp 固有の値
       #     （Google Maps key / World ID app_id）。
-      # NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID は next.config が Published.toml から自動注入するので、env 変数としては渡さない。
-      # NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID は vars を優先し、未設定時は同じ
-      # next.config の Published.toml フォールバックを使う。
+      # NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID / NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID は
+      # next.config が Published.toml から自動注入するので、env 変数としては渡さない。
       #
       # アプリ secret（WORLD_ID_RP_SIGNING_KEY）は CI に置かない。`wrangler secret put` で
       # Cloudflare 側に別管理する。CI が扱うのは Cloudflare API token と account id、公開値のみ。
@@ -156,7 +155,6 @@ jobs:
           NEXT_PUBLIC_WORLD_ID_RP_ID: ${{ vars.SONARI_WORLD_ID_RP_ID }}
           NEXT_PUBLIC_WORLD_ID_ENVIRONMENT: ${{ vars.SONARI_WORLD_ID_ENVIRONMENT }}
           NEXT_PUBLIC_WORLD_ID_ACTION: ${{ vars.NEXT_PUBLIC_WORLD_ID_ACTION }}
-          NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: ${{ vars.SONARI_FUNDING_PACKAGE_ID }}
           # pause_state / pool / category_registry は packageID 起点で
           # admin::GenesisObjectCreated イベントから dapp が導出するため env では渡さない。
           # USDC の coin type は Sui 上で一意に決まる定数のため dapp/app/donate/donate-config.ts に持つ。

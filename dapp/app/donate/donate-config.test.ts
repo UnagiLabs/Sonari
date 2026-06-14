@@ -42,6 +42,10 @@ describe("resolveUsdcType", () => {
         expect(resolveUsdcType("testnet")).toBe(TESTNET_USDC);
     });
 
+    it("uses the mainnet Circle USDC on mainnet", () => {
+        expect(resolveUsdcType("mainnet")).toBe(MAINNET_USDC);
+    });
+
     it("uses the testnet Circle USDC on localnet (dev fallback)", () => {
         expect(resolveUsdcType("localnet")).toBe(TESTNET_USDC);
     });

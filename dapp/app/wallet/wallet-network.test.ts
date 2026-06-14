@@ -12,12 +12,12 @@ describe("isAllowedNetwork", () => {
         expect(isAllowedNetwork("testnet")).toBe(true);
     });
 
-    it("returns true for localnet", () => {
-        expect(isAllowedNetwork("localnet")).toBe(true);
+    it("returns true for mainnet", () => {
+        expect(isAllowedNetwork("mainnet")).toBe(true);
     });
 
-    it("returns false for mainnet", () => {
-        expect(isAllowedNetwork("mainnet")).toBe(false);
+    it("returns true for localnet", () => {
+        expect(isAllowedNetwork("localnet")).toBe(true);
     });
 
     it("returns false for empty string", () => {
@@ -38,8 +38,8 @@ describe("resolveNetwork", () => {
         expect(resolveNetwork("")).toBe("testnet");
     });
 
-    it("returns testnet for disallowed value like mainnet", () => {
-        expect(resolveNetwork("mainnet")).toBe("testnet");
+    it("returns mainnet for mainnet", () => {
+        expect(resolveNetwork("mainnet")).toBe("mainnet");
     });
 
     it("returns testnet for foo", () => {
@@ -58,14 +58,18 @@ describe("resolveNetwork", () => {
         expect(resolveNetwork(" testnet ")).toBe("testnet");
     });
 
+    it("trims surrounding whitespace for mainnet", () => {
+        expect(resolveNetwork("  mainnet  ")).toBe("mainnet");
+    });
+
     it("trims surrounding whitespace for localnet", () => {
         expect(resolveNetwork("  localnet  ")).toBe("localnet");
     });
 });
 
 describe("shouldWarnNetworkMismatch", () => {
-    it("returns true when connected to mainnet", () => {
-        expect(shouldWarnNetworkMismatch("connected", "mainnet")).toBe(true);
+    it("returns false when connected to mainnet", () => {
+        expect(shouldWarnNetworkMismatch("connected", "mainnet")).toBe(false);
     });
 
     it("returns false when connected to testnet", () => {
@@ -88,8 +92,8 @@ describe("shouldWarnNetworkMismatch", () => {
         expect(shouldWarnNetworkMismatch("connected", undefined)).toBe(false);
     });
 
-    it("returns true when connected to mainnet with surrounding whitespace", () => {
-        expect(shouldWarnNetworkMismatch("connected", " mainnet ")).toBe(true);
+    it("returns false when connected to mainnet with surrounding whitespace", () => {
+        expect(shouldWarnNetworkMismatch("connected", " mainnet ")).toBe(false);
     });
 
     it("returns false when disconnected even if network is mainnet", () => {
@@ -142,6 +146,10 @@ describe("shouldShowTestnetBadge", () => {
 describe("resolveGrpcBaseUrl", () => {
     it("returns the hardcoded testnet gRPC URL", () => {
         expect(resolveGrpcBaseUrl("testnet")).toBe("https://fullnode.testnet.sui.io:443");
+    });
+
+    it("returns the hardcoded mainnet gRPC URL", () => {
+        expect(resolveGrpcBaseUrl("mainnet")).toBe("https://fullnode.mainnet.sui.io:443");
     });
 
     it("returns the hardcoded localnet gRPC URL", () => {
