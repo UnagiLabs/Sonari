@@ -368,6 +368,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "Cache Sui CLI artifact",
             "Install pinned Sui CLI",
             "Register verifier PCR configs from rebuilt EIFs",
+            "sui_home=",
+            'HOME="$sui_home" sui keytool import',
             "scripts/register-verifier-configs.sh",
             '--package-id "$SONARI_IDENTITY_PACKAGE_ID"',
             '--admin-cap-id "$SONARI_ADMIN_CAP_ID"',

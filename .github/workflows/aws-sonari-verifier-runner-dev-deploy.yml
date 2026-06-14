@@ -932,12 +932,29 @@ jobs:
 
           admin_dir="$RUNNER_TEMP/sui-admin"
           rm -rf "$admin_dir"
-          mkdir -p "$admin_dir"
+          sui_home="$admin_dir/home"
+          sui_config_dir="$sui_home/.sui/sui_config"
+          mkdir -p "$sui_config_dir"
           keystore_path="$admin_dir/sui.keystore"
-          client_config="$admin_dir/client.yaml"
+          client_config="$sui_config_dir/client.yaml"
+
+          # Sui CLI 1.71 keytool import は既定の client.yaml を先に読むため、
+          # import 前に一時 HOME 配下へ最小 config を用意する。
+          cat > "$client_config" <<YAML
+          ---
+          keystore:
+            File: $keystore_path
+          envs:
+            - alias: testnet
+              rpc: "$SUI_TESTNET_RPC_URL"
+              ws: ~
+              basic_auth: ~
+          active_env: testnet
+          active_address: ~
+          YAML
 
           # 使い捨て keystore に dev admin 鍵を投入し、address を取得する（鍵は echo しない）。
-          import_json="$(sui keytool --keystore-path "$keystore_path" import \
+          import_json="$(HOME="$sui_home" sui keytool import \
             "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --json)"
           admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
           const parsed = JSON.parse(process.env.SUI_IMPORT_JSON ?? "{}");
@@ -950,7 +967,7 @@ jobs:
           NODE
           )"
 
-          # active env=testnet・active address=admin の最小 client.yaml を生成する。
+          # active env=testnet・active address=admin に更新する。
           cat > "$client_config" <<YAML
           ---
           keystore:
