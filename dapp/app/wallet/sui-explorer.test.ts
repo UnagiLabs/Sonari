@@ -10,6 +10,12 @@ describe("suiExplorerTxUrl", () => {
         );
     });
 
+    it("returns a SuiVision mainnet tx URL for mainnet", () => {
+        expect(suiExplorerTxUrl("mainnet", digest)).toBe(
+            `https://suivision.xyz/txblock/${digest}`,
+        );
+    });
+
     it("returns null for localnet because no public explorer exists", () => {
         expect(suiExplorerTxUrl("localnet", digest)).toBeNull();
     });
