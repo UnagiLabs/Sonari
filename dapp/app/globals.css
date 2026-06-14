@@ -3592,3 +3592,63 @@ h4 {
   font-weight: 500;
   border-bottom: 1px solid oklch(0.82 0.1 70);
 }
+
+/* -------------------------------------------------------------------------
+ * 緊急バナー（donate-emergency-banner）
+ * 実施中の緊急キャンペーンを最上部に赤系枠で強調表示する。
+ * .submit-status-failed と同系統の oklch(hue≈25) を使用。
+ * フォーカスアウトラインは既存 .btn クラスを再利用し、新規にリセットしない。
+ * ---------------------------------------------------------------------- */
+
+.donate-emergency-banner {
+  display: grid;
+  gap: 10px;
+  padding: 14px 20px;
+  border: 2px solid oklch(0.78 0.08 25);
+  border-radius: var(--radius-lg);
+  background: oklch(0.97 0.025 25);
+  color: oklch(0.42 0.09 25);
+}
+
+.donate-emergency-banner-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.donate-emergency-banner-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 4px);
+  background: oklch(0.78 0.08 25);
+  color: oklch(0.99 0.005 25);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.donate-emergency-banner-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: oklch(0.38 0.1 25);
+}
+
+.donate-emergency-banner-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.donate-emergency-banner-cta {
+  justify-self: start;
+  padding: 8px 16px;
+  border: 1.5px solid oklch(0.68 0.1 25);
+  border-radius: var(--radius-md);
+  background: oklch(0.94 0.04 25);
+  color: oklch(0.38 0.1 25);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
