@@ -74,6 +74,16 @@ const removedStatementKeys = [
     "register.wizard.membership.nextHint",
 ] as const;
 
+const removedPickerKeys = [
+    "register.wizard.residence.picker.summaryResolution",
+    "register.wizard.residence.picker.summaryCellId",
+    "register.wizard.residence.picker.summaryAllowlist",
+    "register.wizard.residence.picker.advancedSummary",
+    "register.wizard.residence.picker.advancedLabel",
+    "register.wizard.residence.picker.advancedHelp",
+    "register.wizard.residence.picker.invalidCellInput",
+] as const;
+
 describe("messages catalog parity", () => {
     it("en と ja のキー集合が完全に一致する", () => {
         expect([...ja.keys()].sort()).toEqual([...en.keys()].sort());
@@ -144,6 +154,13 @@ describe("messages catalog parity", () => {
 
     it("welcome 集約で使わなくなった同意文言キーを残さない", () => {
         for (const key of removedStatementKeys) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
+    });
+
+    it("居住エリアUI整理で使わなくなった picker 文言キーを残さない", () => {
+        for (const key of removedPickerKeys) {
             expect(en.has(key), key).toBe(false);
             expect(ja.has(key), key).toBe(false);
         }

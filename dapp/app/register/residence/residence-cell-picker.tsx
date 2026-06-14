@@ -2,7 +2,6 @@
 
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { shouldShowAdvancedCellInput } from "./advanced-cell-input";
 import {
     isGoogleMapsConfigured,
     loadGoogleMapsLibraries,
@@ -13,7 +12,6 @@ import type { ResidenceCellClass } from "./h3-cell-classifier";
 import {
     h3DecimalToHex,
     latLngToResidenceCell,
-    normalizeResidenceCellInput,
     residenceCellCenter,
     residenceCellsInViewport,
     type ViewportBounds,
@@ -22,7 +20,6 @@ import { canRetryMapLoad, nextRetryNonce } from "./map-load-retry";
 import { buildCellLegendEntries, polygonStyleForKind } from "./residence-cell-style";
 import {
     buildOverlayCells,
-    buildResidenceSummary,
     type OverlayCell,
     type OverlayCellKind,
     selectResidenceCell,
@@ -70,8 +67,6 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     const [status, setStatus] = useState<MapsLoaderStatus>("loading");
     const [retryNonce, setRetryNonce] = useState<number>(0);
     const [selectedDecimal, setSelectedDecimal] = useState<string | null>(null);
-    const [selectedClass, setSelectedClass] = useState<ResidenceCellClass | undefined>(undefined);
-    const [advancedInput, setAdvancedInput] = useState<string>("");
     const [notice, setNotice] = useState<string | null>(null);
 
     const mapElRef = useRef<HTMLDivElement | null>(null);
@@ -105,11 +100,6 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
     useEffect(() => {
         onSelectionChange?.(selectedDecimal);
     }, [selectedDecimal, onSelectionChange]);
-
-    // 選択が変わったら advanced 入力欄に16進表記を反映する。
-    useEffect(() => {
-        setAdvancedInput(selectedDecimal === null ? "" : h3DecimalToHex(selectedDecimal));
-    }, [selectedDecimal]);
 
     // 分類結果を取り込み、選択中でなければ該当ポリゴンの見た目を更新する。
     const applyClassification = useCallback((decimal: string, cls: ResidenceCellClass) => {
@@ -177,7 +167,6 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
 
             setNotice(null);
             setSelectedDecimal(decimal);
-            setSelectedClass(cls);
 
             // 直前の選択セルを通常の見た目へ戻す。
             if (previous !== null && previous !== decimal) {
@@ -456,157 +445,98 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
         );
     }, [focusLatLng]);
 
-    // advanced 入力欄の確定。16進セルIDを正規化して選択へ反映する。
-    const handleAdvancedCommit = useCallback(
-        (raw: string) => {
-            if (raw.trim().length === 0) {
-                return;
-            }
-            let decimal: string;
-            try {
-                decimal = normalizeResidenceCellInput(raw).decimal;
-            } catch {
-                setNotice(tRef.current("invalidCellInput"));
-                return;
-            }
-            void applySelection(decimal);
-        },
-        [applySelection],
-    );
-
-    const summary = buildResidenceSummary({ selectedDecimal, classification: selectedClass });
     const isReady = status === "ready";
     const workerUnavailable = residenceWorkerUrl.trim().length === 0;
     const legendEntries = buildCellLegendEntries();
 
     return (
-        <div className="residence-map-stage">
-            {/* 地図 canvas: unconfigured 時は描画しないが DOM 構造は維持する */}
-            {status === "unconfigured" ? (
-                <div className="residence-map-fallback" role="status">
-                    <strong>{t("unconfiguredTitle")}</strong>
-                    <p>{t("unconfiguredBody")}</p>
+        <div className="residence-picker">
+            {/* 検索バー: 通常フローで地図の上に配置 */}
+            <div className="residence-search-bar">
+                <div className="text-field">
+                    <span>{t("searchLabel")}</span>
+                    <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
+                    <small>{t("searchHint")}</small>
                 </div>
-            ) : (
-                <div
-                    aria-label={t("mapAria")}
-                    className="residence-map-canvas"
-                    ref={mapElRef}
-                    role="application"
-                />
-            )}
-
-            {/* 地図上部オーバーレイ: 検索ボックス + 現在地ボタン */}
-            <div className="residence-overlay-top">
-                <div className="residence-search-overlay">
-                    <div className="text-field">
-                        <span>{t("searchLabel")}</span>
-                        <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
-                        <small>{t("searchHint")}</small>
-                    </div>
-                    <button
-                        className="btn btn-secondary"
-                        disabled={!isReady}
-                        onClick={handleUseCurrentLocation}
-                        type="button"
-                    >
-                        {t("useCurrentLocation")}
-                    </button>
-                </div>
-
-                {/* ロード中/エラー通知 */}
-                {status === "loading" ? (
-                    <div className="residence-map-overlay-note" role="status">
-                        {t("loadingMap")}
-                    </div>
-                ) : null}
-                {status === "error" ? (
-                    <div className="residence-map-overlay-note" role="status">
-                        {t("mapError")}
-                        {canRetryMapLoad(status) ? (
-                            <button
-                                className="btn btn-secondary"
-                                onClick={() => {
-                                    setRetryNonce(nextRetryNonce);
-                                }}
-                                type="button"
-                            >
-                                {t("retryMapLoad")}
-                            </button>
-                        ) : null}
-                    </div>
-                ) : null}
+                <button
+                    className="btn btn-secondary"
+                    disabled={!isReady}
+                    onClick={handleUseCurrentLocation}
+                    type="button"
+                >
+                    {t("useCurrentLocation")}
+                </button>
             </div>
 
-            {/* 地図下部オーバーレイ: サマリ・凡例・通知 */}
-            <div className="residence-overlay-bottom">
-                <div className="residence-info-panel">
-                    <div className="selected-area-summary">
-                        <div>
-                            <span>{t("summaryResolution")}</span>
-                            <strong>{summary.resolution}</strong>
-                        </div>
-                        <div>
-                            <span>{t("summaryCellId")}</span>
-                            <strong className="mono-value">{summary.cellHex ?? "—"}</strong>
-                        </div>
-                        <div>
-                            <span>{t("summaryAllowlist")}</span>
-                            <strong>{summary.allowlistStatus}</strong>
-                        </div>
+            {/* 地図ステージ */}
+            <div className="residence-map-stage">
+                {/* 地図 canvas: unconfigured 時は描画しないが DOM 構造は維持する */}
+                {status === "unconfigured" ? (
+                    <div className="residence-map-fallback" role="status">
+                        <strong>{t("unconfiguredTitle")}</strong>
+                        <p>{t("unconfiguredBody")}</p>
                     </div>
+                ) : (
+                    <div
+                        aria-label={t("mapAria")}
+                        className="residence-map-canvas"
+                        ref={mapElRef}
+                        role="application"
+                    />
+                )}
 
-                    <ul className="residence-legend">
-                        {legendEntries.map((entry) => (
-                            <li className="residence-legend-item" key={entry.kind}>
-                                <span
-                                    className={`residence-legend-swatch swatch-${entry.swatch}`}
-                                />
-                                <span>{t(entry.labelKey as Parameters<typeof t>[0])}</span>
-                            </li>
-                        ))}
-                    </ul>
-
-                    {workerUnavailable ? (
-                        <p className="residence-notice" role="status">
-                            {t("workerUnavailable")}
-                        </p>
+                {/* 地図上部オーバーレイ: ロード中/エラー通知のみ */}
+                <div className="residence-overlay-top">
+                    {status === "loading" ? (
+                        <div className="residence-map-overlay-note" role="status">
+                            {t("loadingMap")}
+                        </div>
                     ) : null}
-                    {notice !== null ? (
-                        <p className="residence-notice" role="status">
-                            {notice}
-                        </p>
+                    {status === "error" ? (
+                        <div className="residence-map-overlay-note" role="status">
+                            {t("mapError")}
+                            {canRetryMapLoad(status) ? (
+                                <button
+                                    className="btn btn-secondary"
+                                    onClick={() => {
+                                        setRetryNonce(nextRetryNonce);
+                                    }}
+                                    type="button"
+                                >
+                                    {t("retryMapLoad")}
+                                </button>
+                            ) : null}
+                        </div>
                     ) : null}
+                </div>
 
-                    <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
+                {/* 地図下部オーバーレイ: 凡例・通知 */}
+                <div className="residence-overlay-bottom">
+                    <div className="residence-info-panel">
+                        <ul className="residence-legend">
+                            {legendEntries.map((entry) => (
+                                <li className="residence-legend-item" key={entry.kind}>
+                                    <span
+                                        className={`residence-legend-swatch swatch-${entry.swatch}`}
+                                    />
+                                    <span>{t(entry.labelKey as Parameters<typeof t>[0])}</span>
+                                </li>
+                            ))}
+                        </ul>
 
-                    {shouldShowAdvancedCellInput(status) ? (
-                        <details className="advanced-cell-input">
-                            <summary>{t("advancedSummary")}</summary>
-                            <label className="text-field" htmlFor="home-cell-advanced">
-                                <span>{t("advancedLabel")}</span>
-                                <input
-                                    id="home-cell-advanced"
-                                    onBlur={(event) => {
-                                        handleAdvancedCommit(event.target.value);
-                                    }}
-                                    onChange={(event) => {
-                                        setAdvancedInput(event.target.value);
-                                    }}
-                                    onKeyDown={(event) => {
-                                        if (event.key === "Enter") {
-                                            event.preventDefault();
-                                            handleAdvancedCommit(event.currentTarget.value);
-                                        }
-                                    }}
-                                    placeholder="872f5aa8effffff"
-                                    type="text"
-                                    value={advancedInput}
-                                />
-                                <small>{t("advancedHelp")}</small>
-                            </label>
-                        </details>
-                    ) : null}
+                        {workerUnavailable ? (
+                            <p className="residence-notice" role="status">
+                                {t("workerUnavailable")}
+                            </p>
+                        ) : null}
+                        {notice !== null ? (
+                            <p className="residence-notice" role="status">
+                                {notice}
+                            </p>
+                        ) : null}
+
+                        <input name="homeCell" type="hidden" value={selectedDecimal ?? ""} />
+                    </div>
                 </div>
             </div>
         </div>
