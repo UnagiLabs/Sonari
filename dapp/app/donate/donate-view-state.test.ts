@@ -4,10 +4,12 @@ import {
     buildDonateDonorPassReadState,
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
+    findActiveEmergencyCampaign,
     type DonateDonorPassReadState,
     type DonateDestinationReadState,
     type DonateTxState,
 } from "./donate-view-state";
+import type { CampaignDestination } from "./donate-destinations";
 
 const readyDestinationState: DonateDestinationReadState = {
     status: "ready",
@@ -251,6 +253,55 @@ describe("buildDonateDonorPassReadState", () => {
                 { noneAsError: true },
             ),
         ).toEqual({ status: "ready", passId: "0xpass" });
+    });
+});
+
+describe("findActiveEmergencyCampaign", () => {
+    const makeCampaign = (donationEndMs: string): CampaignDestination => ({
+        kind: "campaign",
+        id: `0x${"a".repeat(64)}`,
+        label: "Test Campaign",
+        campaignId: `0x${"a".repeat(64)}`,
+        categoryPoolId: `0x${"b".repeat(64)}`,
+        category: 1,
+        donationEndMs,
+    });
+
+    it("returns the campaign when its deadline is in the future", () => {
+        const nowMs = 1_000_000n;
+        const campaign = makeCampaign("2000000");
+        expect(findActiveEmergencyCampaign([campaign], nowMs)).toBe(campaign);
+    });
+
+    it("returns null when the campaign deadline is in the past", () => {
+        const nowMs = 3_000_000n;
+        const campaign = makeCampaign("1000000");
+        expect(findActiveEmergencyCampaign([campaign], nowMs)).toBeNull();
+    });
+
+    it("returns null when the campaign deadline equals nowMs (boundary: deadline reached)", () => {
+        const nowMs = 1_000_000n;
+        const campaign = makeCampaign("1000000");
+        expect(findActiveEmergencyCampaign([campaign], nowMs)).toBeNull();
+    });
+
+    it("returns null when there are no campaigns", () => {
+        expect(findActiveEmergencyCampaign([], 0n)).toBeNull();
+    });
+
+    it("returns the first active campaign when multiple campaigns are mixed", () => {
+        const nowMs = 5_000_000n;
+        const expired = makeCampaign("1000000");
+        const active1 = { ...makeCampaign("6000000"), id: `0x${"c".repeat(64)}`, campaignId: `0x${"c".repeat(64)}` };
+        const active2 = { ...makeCampaign("7000000"), id: `0x${"d".repeat(64)}`, campaignId: `0x${"d".repeat(64)}` };
+        const result = findActiveEmergencyCampaign([expired, active1, active2], nowMs);
+        expect(result).toBe(active1);
+    });
+
+    it("returns null when all campaigns have expired", () => {
+        const nowMs = 9_000_000n;
+        const campaigns = [makeCampaign("1000000"), makeCampaign("2000000")];
+        expect(findActiveEmergencyCampaign(campaigns, nowMs)).toBeNull();
     });
 });
 

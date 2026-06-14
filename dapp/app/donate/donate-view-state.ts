@@ -216,6 +216,18 @@ export function resolveDonateSubmitDisabledReason(
     return null;
 }
 
+export function findActiveEmergencyCampaign(
+    campaigns: readonly CampaignDestination[],
+    nowMs: bigint,
+): CampaignDestination | null {
+    for (const campaign of campaigns) {
+        if (BigInt(campaign.donationEndMs) > nowMs) {
+            return campaign;
+        }
+    }
+    return null;
+}
+
 export type DonateTxState =
     | { readonly status: "idle" }
     | { readonly status: "building" }
