@@ -269,6 +269,19 @@ export function resolveDonateSubmitDisabledReason(
     return null;
 }
 
+/**
+ * 寄付ボタンを無効化すべきか判定する。
+ * demoMode が true のときは、ほかの条件によらず常に無効化する。
+ * これはデモページから実送金が走らないことを保証する単一の判定点。
+ */
+export function isDonateSubmitDisabled(input: {
+    readonly demoMode: boolean;
+    readonly disabledReason: DonateSubmitDisabledReason | null;
+    readonly isInFlight: boolean;
+}): boolean {
+    return input.demoMode || input.disabledReason !== null || input.isInFlight;
+}
+
 export function findActiveEmergencyCampaign(
     campaigns: readonly CampaignDestination[],
     nowMs: bigint,

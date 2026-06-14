@@ -5,6 +5,7 @@ import {
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
     findActiveEmergencyCampaign,
+    isDonateSubmitDisabled,
     selectEmergencyBannerCampaign,
     buildCategoryListItems,
     type DonateDonorPassReadState,
@@ -533,5 +534,47 @@ describe("buildDonateTxResultView", () => {
             explorerUrl: null,
             canRetry: true,
         });
+    });
+});
+
+describe("isDonateSubmitDisabled", () => {
+    it("disables submit in demo mode regardless of other conditions", () => {
+        expect(
+            isDonateSubmitDisabled({
+                demoMode: true,
+                disabledReason: null,
+                isInFlight: false,
+            }),
+        ).toBe(true);
+    });
+
+    it("enables submit when not in demo mode, no disabled reason, and not in flight", () => {
+        expect(
+            isDonateSubmitDisabled({
+                demoMode: false,
+                disabledReason: null,
+                isInFlight: false,
+            }),
+        ).toBe(false);
+    });
+
+    it("disables submit when a disabled reason is present (non-demo)", () => {
+        expect(
+            isDonateSubmitDisabled({
+                demoMode: false,
+                disabledReason: { kind: "walletDisconnected" },
+                isInFlight: false,
+            }),
+        ).toBe(true);
+    });
+
+    it("disables submit while a transaction is in flight (non-demo)", () => {
+        expect(
+            isDonateSubmitDisabled({
+                demoMode: false,
+                disabledReason: null,
+                isInFlight: true,
+            }),
+        ).toBe(true);
     });
 });
