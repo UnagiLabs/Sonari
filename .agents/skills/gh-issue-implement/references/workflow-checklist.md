@@ -24,7 +24,8 @@ Use this checklist while running `gh-issue-implement`.
    - bounded edits per step
    - each step ends with exactly one dedicated commit
    - worktree is clean before the next step starts
-   - every commit message is generated via `draft-commit-message`
+   - every commit is created via the `commit_worker` subagent (fresh context, `gpt-5.3-codex-spark`, `xhigh`)
+   - message authoring and `git commit` happen inside `commit_worker`; raw diff stays out of the parent context
 7. Local verification:
    - available `check`
    - available `typecheck`

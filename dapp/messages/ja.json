@@ -490,6 +490,19 @@
             "title": "DonorPass について",
             "body": "DonorPass は貢献の履歴だけを記録します。申請権や支払いの優先度、支援の約束を与えるものではありません。",
             "link": "ダッシュボードを見る"
+        },
+        "emergency": {
+            "tag": "緊急",
+            "title": "緊急キャンペーン実施中",
+            "body": "現在、災害救援キャンペーンへの寄付を受け付けています: {name}",
+            "cta": "このキャンペーンに寄付する"
+        },
+        "category": {
+            "comingSoonBadge": "近日対応",
+            "comingSoon": {
+                "flood": "洪水救援",
+                "student": "学生支援"
+            }
         }
     },
     "home": {
@@ -761,6 +774,7 @@
             "campaignsLoading": "申請できるキャンペーンを読み込んでいます。",
             "campaignsFailed": "申請できるキャンペーンを読み込めませんでした。",
             "noCampaigns": "申請できるキャンペーンはありません。",
+            "eligibilityFailed": "このパスの申請状態を読み込めませんでした。",
             "passLoading": "MembershipPass を読み込んでいます。",
             "passMissing": "このウォレットは MembershipPass を所有していません。",
             "passFailed": "MembershipPass を読み込めませんでした。",
@@ -792,10 +806,7 @@
         "claimButton": "支援を申請",
         "claimButtonInFlight": "処理中…",
         "actions": {
-            "submit": "被災セル証明を送信",
-            "verify": "申請を検証",
-            "floor": "床払いを受け取る",
-            "payout": "本払いを受け取る"
+            "claim": "支援を受け取る"
         },
         "note": {
             "title": "プライバシーの境界",
@@ -826,6 +837,7 @@
             "failed": {
                 "walletRequired": "申請の前にウォレットを接続してください。",
                 "generic": "申請トランザクションに失敗しました。",
+                "nothingToClaim": "現在受け取れる支援金はありません。",
                 "detail": "申請トランザクションは完了しませんでした。"
             }
         }
@@ -843,5 +855,20 @@
         "reconnecting": "再接続中…",
         "connected": "接続済み",
         "networkWarning": "サポート外のネットワーク（{network}）に接続しています。testnet または localnet に切り替えてください。"
+    },
+    "demo": {
+        "donate": {
+            "status": "実施中",
+            "statusNote": "これはデモ表示です。実際の送金は行われません。",
+            "details": {
+                "magnitude": "マグニチュード",
+                "mmi": "最大震度 (MMI)",
+                "region": "地域",
+                "date": "発生日",
+                "affectedCells": "影響セル数",
+                "h3Resolution": "H3 解像度",
+                "epicenter": "震源"
+            }
+        }
     }
 }

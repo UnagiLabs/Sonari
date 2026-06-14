@@ -1,3 +1,6 @@
+import { bcs } from "@mysten/sui/bcs";
+import { deriveDynamicFieldID } from "@mysten/sui/utils";
+
 const QUERY_EVENTS_PAGE_LIMIT = 100;
 
 export interface ClaimCampaignEventCursor {
@@ -46,6 +49,8 @@ export interface ClaimCampaignObjectData {
     readonly donationEndMs: string;
     readonly claimEndMs: string;
     readonly currentRound: string;
+    readonly roundFinalizedAtMs: string;
+    readonly roundIntervalMs: string;
 }
 
 export interface ClaimDisasterEventObjectData {
@@ -71,11 +76,41 @@ export interface ClaimCampaignState {
     readonly affectedCellCount: string;
     readonly donationEndMs: string;
     readonly claimEndMs: string;
+    readonly censusSet: boolean;
+    readonly floorBudgetReturned: boolean;
     readonly claimWindowOpen: boolean;
     readonly floorClaimAvailable: boolean;
     readonly payoutFinalized: boolean;
     readonly currentRound: string;
+    readonly roundFinalizedAtMs: string;
+    readonly roundIntervalMs: string;
 }
+
+export interface ClaimApplicationData {
+    readonly band: number;
+    readonly appliedAtMs: string;
+    readonly verified: boolean;
+    readonly verifiedInRound: string;
+    readonly floorClaimed: boolean;
+    readonly excluded: boolean;
+}
+
+export type ClaimEligibility =
+    | {
+          readonly kind: "claimable";
+          readonly claimProofKind: "initial" | "continuing";
+          readonly requiresIdentity: boolean;
+          readonly willPayFloor: boolean;
+          readonly willPayPayout: boolean;
+      }
+    | {
+          readonly kind: "none";
+          readonly reason:
+              | "claim_window_closed"
+              | "claim_not_verified"
+              | "claim_excluded"
+              | "nothing_to_claim";
+      };
 
 export type ClaimCampaignReadResult =
     | {
@@ -86,6 +121,10 @@ export type ClaimCampaignReadResult =
           readonly kind: "error";
           readonly message: string;
       };
+
+export type ClaimEligibilityReadResult =
+    | { readonly kind: "ok"; readonly eligibility: ClaimEligibility }
+    | { readonly kind: "error"; readonly message: string };
 
 export function parseCampaignCreatedEvent(value: unknown): CampaignCreatedEvent | null {
     if (!isRecord(value)) {
@@ -125,6 +164,8 @@ export function parseCampaignObject(
     const donationEndMs = parseU64String(json.donation_end_ms);
     const claimEndMs = parseU64String(json.claim_end_ms);
     const currentRound = parseU64String(json.current_round);
+    const roundFinalizedAtMs = parseU64String(json.round_finalized_at_ms);
+    const roundIntervalMs = parseCampaignRoundIntervalMs(json.terms);
 
     if (
         disasterEventId === null ||
@@ -134,7 +175,9 @@ export function parseCampaignObject(
         floorBudgetReturned === null ||
         donationEndMs === null ||
         claimEndMs === null ||
-        currentRound === null
+        currentRound === null ||
+        roundFinalizedAtMs === null ||
+        roundIntervalMs === null
     ) {
         return null;
     }
@@ -149,7 +192,38 @@ export function parseCampaignObject(
         donationEndMs,
         claimEndMs,
         currentRound,
+        roundFinalizedAtMs,
+        roundIntervalMs,
     };
+}
+
+export function parseClaimApplicationObject(
+    json: Record<string, unknown> | null,
+): ClaimApplicationData | null {
+    if (json === null) {
+        return null;
+    }
+
+    const raw = isRecord(json.value) ? json.value : json;
+    const band = parseU8(raw.band);
+    const appliedAtMs = parseU64String(raw.applied_at_ms);
+    const verified = parseBoolean(raw.verified);
+    const verifiedInRound = parseU64String(raw.verified_in_round);
+    const floorClaimed = parseBoolean(raw.floor_claimed);
+    const excluded = parseBoolean(raw.excluded);
+
+    if (
+        band === null ||
+        appliedAtMs === null ||
+        verified === null ||
+        verifiedInRound === null ||
+        floorClaimed === null ||
+        excluded === null
+    ) {
+        return null;
+    }
+
+    return { band, appliedAtMs, verified, verifiedInRound, floorClaimed, excluded };
 }
 
 export function parseDisasterEventObject(
@@ -223,11 +297,151 @@ export function deriveClaimCampaignState(
         affectedCellCount: disaster.affectedCellCount,
         donationEndMs: campaign.donationEndMs,
         claimEndMs: campaign.claimEndMs,
+        censusSet: campaign.censusSet,
+        floorBudgetReturned: campaign.floorBudgetReturned,
         claimWindowOpen: BigInt(now) < BigInt(campaign.claimEndMs),
         floorClaimAvailable: campaign.censusSet && !campaign.floorBudgetReturned,
         payoutFinalized: BigInt(campaign.currentRound) > 0n,
         currentRound: campaign.currentRound,
+        roundFinalizedAtMs: campaign.roundFinalizedAtMs,
+        roundIntervalMs: campaign.roundIntervalMs,
     };
+}
+
+export function deriveClaimEligibility(input: {
+    readonly campaign: Pick<
+        ClaimCampaignObjectData,
+        | "censusSet"
+        | "floorBudgetReturned"
+        | "claimEndMs"
+        | "currentRound"
+        | "donationEndMs"
+        | "roundFinalizedAtMs"
+        | "roundIntervalMs"
+    >;
+    readonly application: ClaimApplicationData | null;
+    readonly payoutClaimed: boolean;
+    readonly nowMs: string | number;
+}): ClaimEligibility | null {
+    const now = parseU64String(input.nowMs);
+    if (now === null) {
+        return null;
+    }
+
+    const isFirstTime = input.application === null;
+    const claimWindowOpen = BigInt(now) < BigInt(input.campaign.claimEndMs);
+    if (isFirstTime && !claimWindowOpen) {
+        return { kind: "none", reason: "claim_window_closed" };
+    }
+
+    if (input.application !== null) {
+        if (!input.application.verified) {
+            return { kind: "none", reason: "claim_not_verified" };
+        }
+        if (input.application.excluded) {
+            return { kind: "none", reason: "claim_excluded" };
+        }
+    }
+
+    const floorAlreadyClaimed = input.application?.floorClaimed ?? false;
+    const willPayFloor =
+        !floorAlreadyClaimed &&
+        input.campaign.censusSet &&
+        !input.campaign.floorBudgetReturned;
+    const currentRound = deriveClaimEffectiveRound(input.campaign, now);
+    const verifiedInRound =
+        input.application === null ? currentRound : BigInt(input.application.verifiedInRound);
+    const willPayPayout =
+        !isFirstTime &&
+        currentRound >= 1n &&
+        verifiedInRound < currentRound &&
+        !input.payoutClaimed;
+
+    if (!isFirstTime && !willPayFloor && !willPayPayout) {
+        return { kind: "none", reason: "nothing_to_claim" };
+    }
+
+    return {
+        kind: "claimable",
+        claimProofKind: isFirstTime ? "initial" : "continuing",
+        requiresIdentity: isFirstTime || willPayFloor,
+        willPayFloor,
+        willPayPayout,
+    };
+}
+
+function deriveClaimEffectiveRound(
+    campaign: Pick<
+        ClaimCampaignObjectData,
+        "currentRound" | "donationEndMs" | "roundFinalizedAtMs" | "roundIntervalMs"
+    >,
+    nowMs: string,
+): bigint {
+    const currentRound = BigInt(campaign.currentRound);
+    const now = BigInt(nowMs);
+    const boundaryReached =
+        currentRound === 0n
+            ? now >= BigInt(campaign.donationEndMs)
+            : now >= BigInt(campaign.roundFinalizedAtMs) + BigInt(campaign.roundIntervalMs);
+    return boundaryReached ? currentRound + 1n : currentRound;
+}
+
+export async function readClaimEligibility(
+    client: ClaimCampaignReadClient,
+    input: {
+        readonly packageId: string;
+        readonly campaign: Pick<
+            ClaimCampaignObjectData,
+            | "campaignId"
+            | "censusSet"
+            | "floorBudgetReturned"
+            | "donationEndMs"
+            | "claimEndMs"
+            | "currentRound"
+            | "roundFinalizedAtMs"
+            | "roundIntervalMs"
+        >;
+        readonly passLineageId: string;
+        readonly nowMs: string | number;
+    },
+): Promise<ClaimEligibilityReadResult> {
+    try {
+        const now = parseU64String(input.nowMs);
+        if (now === null) {
+            return { kind: "error", message: "Claim eligibility inputs are invalid." };
+        }
+        const effectiveRound = deriveClaimEffectiveRound(input.campaign, now);
+        const application = await readClaimApplication(
+            client,
+            input.campaign.campaignId,
+            input.passLineageId,
+        );
+        const payoutClaimed =
+            effectiveRound >= 1n
+                ? await readPayoutClaimed(client, {
+                      packageId: input.packageId,
+                      campaignId: input.campaign.campaignId,
+                      passLineageId: input.passLineageId,
+                      round: effectiveRound.toString(),
+                  })
+                : false;
+        const eligibility = deriveClaimEligibility({
+            campaign: input.campaign,
+            application,
+            payoutClaimed,
+            nowMs: input.nowMs,
+        });
+        if (eligibility === null) {
+            return { kind: "error", message: "Claim eligibility inputs are invalid." };
+        }
+        return { kind: "ok", eligibility };
+    } catch (error) {
+        return {
+            kind: "error",
+            message:
+                error instanceof Error ? error.message : "Failed to read claim eligibility.",
+        };
+    }
 }
 
 export async function readClaimCampaigns(
@@ -270,6 +484,67 @@ export async function readClaimCampaigns(
             message: error instanceof Error ? error.message : "Failed to read claim campaigns.",
         };
     }
+}
+
+async function readClaimApplication(
+    client: ClaimCampaignReadClient,
+    campaignId: string,
+    passLineageId: string,
+): Promise<ClaimApplicationData | null> {
+    const fieldId = deriveObjectIdDynamicFieldId(campaignId, passLineageId);
+    const response = await client.getObjects({
+        objectIds: [fieldId],
+        include: { json: true },
+    });
+    const item = response.objects[0];
+    if (item === undefined || item instanceof Error || item.json === null) {
+        return null;
+    }
+    return parseClaimApplicationObject(item.json);
+}
+
+async function readPayoutClaimed(
+    client: ClaimCampaignReadClient,
+    input: {
+        readonly packageId: string;
+        readonly campaignId: string;
+        readonly passLineageId: string;
+        readonly round: string;
+    },
+): Promise<boolean> {
+    const fieldId = derivePayoutKeyDynamicFieldId(input);
+    const response = await client.getObjects({
+        objectIds: [fieldId],
+        include: { json: true },
+    });
+    const item = response.objects[0];
+    return item !== undefined && !(item instanceof Error) && item.json !== null;
+}
+
+function deriveObjectIdDynamicFieldId(parentId: string, objectId: string): string {
+    const keyBytes = bcs.Address.serialize(objectId).toBytes();
+    return deriveDynamicFieldID(parentId, "0x2::object::ID", keyBytes);
+}
+
+function derivePayoutKeyDynamicFieldId(input: {
+    readonly packageId: string;
+    readonly campaignId: string;
+    readonly passLineageId: string;
+    readonly round: string;
+}): string {
+    const PayoutKey = bcs.struct("PayoutKey", {
+        pass_lineage_id: bcs.Address,
+        round: bcs.u64(),
+    });
+    const keyBytes = PayoutKey.serialize({
+        pass_lineage_id: input.passLineageId,
+        round: BigInt(input.round),
+    }).toBytes();
+    return deriveDynamicFieldID(
+        input.campaignId,
+        `${input.packageId}::campaign::PayoutKey`,
+        keyBytes,
+    );
 }
 
 async function readCampaignCreatedEvents(
@@ -391,6 +666,13 @@ function parseBytes32Hex(value: unknown): string | null {
 
 function parseBoolean(value: unknown): boolean | null {
     return typeof value === "boolean" ? value : null;
+}
+
+function parseCampaignRoundIntervalMs(value: unknown): string | null {
+    if (!isRecord(value)) {
+        return null;
+    }
+    return parseU64String(value.round_interval_ms);
 }
 
 function parseNonEmptyString(value: unknown): string | null {

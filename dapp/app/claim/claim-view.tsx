@@ -4,7 +4,7 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
 import { SiteTopbar } from "../i18n/site-topbar";
 import {
@@ -21,25 +21,19 @@ import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
-    buildClaimFloorTransaction,
-    buildClaimPayoutTransaction,
-    buildSubmitClaimV2Transaction,
-    buildVerifyClaimV2Transaction,
+    buildClaimTransaction,
     type ClaimTransactionObjectConfig,
     fetchAffectedCellsProof,
 } from "./affected-cells-proof";
 import {
     type ClaimCampaignReadClient,
     type ClaimCampaignState,
+    type ClaimEligibility,
     readClaimCampaigns,
+    readClaimEligibility,
 } from "./claim-campaigns";
 import { type ClaimConfig, readClaimConfig } from "./claim-config";
-import {
-    buildClaimFlowActions,
-    type ClaimFlowAction,
-    type ClaimFlowCompleted,
-    emptyClaimFlowCompleted,
-} from "./claim-flow";
+import { buildClaimFlowActions, type ClaimFlowAction } from "./claim-flow";
 import { resolveWorldIdClaimIdentity } from "./claim-identity";
 import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "./claim-messages";
 import {
@@ -101,11 +95,23 @@ type CampaignState =
           readonly message: string;
       };
 
+type EligibilityState =
+    | { readonly status: "idle" }
+    | { readonly status: "loading" }
+    | { readonly status: "ready"; readonly eligibility: ClaimEligibility }
+    | { readonly status: "failed"; readonly message: string };
+
+type ClaimViewReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
+
+const EMPTY_DUPLICATE_KEY_HASH =
+    "0x0000000000000000000000000000000000000000000000000000000000000000";
+const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
+
 export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("claim");
     const account = useCurrentAccount();
-    const client = useCurrentClient() as unknown as ClaimCampaignReadClient &
-        MembershipPassReadClient;
+    const suiClient = useCurrentClient();
+    const client = useMemo(() => toClaimViewReadClient(suiClient), [suiClient]);
     const claimConfigResult = useMemo(() => readClaimConfig(), []);
     const claimConfig = claimConfigResult.kind === "ok" ? claimConfigResult.config : null;
     const [selectedEventId, setSelectedEventId] = useState("");
@@ -114,15 +120,23 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const [txAction, setTxAction] = useState<ClaimFlowAction | null>(null);
     const [passState, setPassState] = useState<PassState>({ status: "idle" });
     const [worldIdResponse, setWorldIdResponse] = useState<Record<string, unknown> | null>(null);
-    const [completedActions, setCompletedActions] = useState<ClaimFlowCompleted>(() =>
-        emptyClaimFlowCompleted(),
-    );
     const [campaignReadNonce, setCampaignReadNonce] = useState(0);
     const [passReadNonce, setPassReadNonce] = useState(0);
+    const [eligibilityReadNonce, setEligibilityReadNonce] = useState(0);
     const [campaignState, setCampaignState] = useState<CampaignState>({
         status: "loading",
         campaigns: [],
     });
+    const [eligibilityState, setEligibilityState] = useState<EligibilityState>({
+        status: "idle",
+    });
+    const resetClaimProgress = useCallback(() => {
+        setProofState({ status: "idle" });
+        setTxState({ status: "idle" });
+        setTxAction(null);
+        setWorldIdResponse(null);
+        setEligibilityState({ status: "idle" });
+    }, []);
     const network = readWalletNetwork();
     const resultView = buildClaimResultView(txState, network);
     const selectedEvent =
@@ -142,16 +156,20 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
             ? buildClaimTransactionObjects(claimConfig, membershipPass, selectedEvent)
             : null;
     const isClaimInFlight = txState.status === "building" || txState.status === "submitting";
+    const claimEligibility =
+        eligibilityState.status === "ready" ? eligibilityState.eligibility : null;
+    const claimable = claimEligibility?.kind === "claimable";
+    const proofRequired = claimable && claimEligibility.claimProofKind === "initial";
+    const worldIdRequired = claimable && claimEligibility.requiresIdentity;
     const claimActions = buildClaimFlowActions({
         proofReady: proofState.status === "ready",
+        proofRequired,
         walletConnected: isWalletConnected,
         txObjectsReady: txObjects !== null,
         worldIdReady: identityMaterial.kind === "ok",
-        claimWindowOpen: selectedEvent?.claimWindowOpen === true,
-        floorClaimAvailable: selectedEvent?.floorClaimAvailable === true,
-        payoutFinalized: selectedEvent?.payoutFinalized === true,
+        worldIdRequired,
+        claimable,
         inFlight: isClaimInFlight,
-        completed: completedActions,
     });
     const configNotice = buildConfigNotice(claimConfigResult.kind);
     const campaignNotice = buildCampaignNotice({
@@ -163,7 +181,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         status: passState.status,
     });
     const worldIdNotice = buildWorldIdNotice(
-        identityMaterial.kind === "missing" ? identityMaterial.reason : null,
+        worldIdRequired && identityMaterial.kind === "missing" ? identityMaterial.reason : null,
     );
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: campaignReadNonce is a retry trigger.
@@ -212,21 +230,13 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         }
         if (!campaignState.campaigns.some((event) => event.campaignId === selectedEventId)) {
             setSelectedEventId(campaignState.campaigns[0]?.campaignId ?? "");
-            setProofState({ status: "idle" });
-            setTxState({ status: "idle" });
-            setTxAction(null);
-            setWorldIdResponse(null);
-            setCompletedActions(emptyClaimFlowCompleted());
+            resetClaimProgress();
         }
-    }, [campaignState, selectedEventId]);
+    }, [campaignState, resetClaimProgress, selectedEventId]);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: passReadNonce is a retry trigger.
     useEffect(() => {
-        setProofState({ status: "idle" });
-        setTxState({ status: "idle" });
-        setTxAction(null);
-        setWorldIdResponse(null);
-        setCompletedActions(emptyClaimFlowCompleted());
+        resetClaimProgress();
 
         if (account === null) {
             setPassState({ status: "idle" });
@@ -274,7 +284,72 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [account, claimConfig, client, passReadNonce]);
+    }, [account, claimConfig, client, passReadNonce, resetClaimProgress]);
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: eligibilityReadNonce is a retry trigger.
+    useEffect(() => {
+        if (
+            claimConfig === null ||
+            selectedEvent === null ||
+            membershipPass === null ||
+            account === null
+        ) {
+            setEligibilityState({ status: "idle" });
+            return;
+        }
+
+        let cancelled = false;
+        setEligibilityState({ status: "loading" });
+        readClaimEligibility(client, {
+            packageId: claimConfig.packageId,
+            campaign: selectedEvent,
+            passLineageId: membershipPass.passLineageId,
+            nowMs: Date.now(),
+        })
+            .then((result) => {
+                if (cancelled) {
+                    return;
+                }
+                if (result.kind === "ok") {
+                    setEligibilityState({ status: "ready", eligibility: result.eligibility });
+                    return;
+                }
+                setEligibilityState({ status: "failed", message: result.message });
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setEligibilityState({
+                        status: "failed",
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : "Failed to read claim eligibility.",
+                    });
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [account, claimConfig, client, eligibilityReadNonce, membershipPass, selectedEvent]);
+
+    useEffect(() => {
+        if (
+            claimConfig === null ||
+            selectedEvent === null ||
+            membershipPass === null ||
+            account === null
+        ) {
+            return;
+        }
+
+        const timer = window.setInterval(() => {
+            setEligibilityReadNonce((value) => value + 1);
+        }, ELIGIBILITY_REFRESH_INTERVAL_MS);
+        return () => {
+            window.clearInterval(timer);
+        };
+    }, [account, claimConfig, membershipPass, selectedEvent]);
 
     // カタログのキー or 原文を、現在の locale で表示文字列へ解決する。
     const renderMessage = (message: ClaimMessage): string =>
@@ -358,6 +433,10 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         if (selectedEvent === null || membershipPass === null) {
             return;
         }
+        if (!proofRequired) {
+            setProofState({ status: "idle" });
+            return;
+        }
 
         setProofState({ status: "checking" });
         setTxState({ status: "idle" });
@@ -399,7 +478,14 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
             });
             return;
         }
-        if ((action === "verify" || action === "floor") && identityMaterial.kind !== "ok") {
+        if (claimEligibility?.kind !== "claimable") {
+            setTxState({
+                status: "failed",
+                message: { kind: "key", key: "tx.failed.nothingToClaim" },
+            });
+            return;
+        }
+        if (claimEligibility.requiresIdentity && identityMaterial.kind !== "ok") {
             setTxState({
                 status: "failed",
                 message: { kind: "key", key: "tx.failed.generic" },
@@ -410,59 +496,39 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         setTxState({ status: "building" });
         setTxAction(action);
         try {
-            const transaction = (() => {
-                switch (action) {
-                    case "submit": {
-                        if (proofState.status !== "ready") {
-                            throw new Error("Affected cells proof is not ready.");
-                        }
-                        return buildSubmitClaimV2Transaction({
-                            senderAddress: account.address,
-                            packageId: claimConfig.packageId,
-                            proof: proofState.proof,
-                            context: {
-                                eventUid: selectedEvent.eventUid,
-                                eventRevision: selectedEvent.eventRevision,
-                                homeCell: membershipPass.homeCell,
-                                affectedCellsRoot: selectedEvent.affectedCellsRoot,
-                            },
-                            objects: txObjects,
-                        }).transaction;
-                    }
-                    case "verify":
-                        if (identityMaterial.kind !== "ok") {
-                            throw new Error("World ID material is not ready.");
-                        }
-                        return buildVerifyClaimV2Transaction({
-                            senderAddress: account.address,
-                            packageId: claimConfig.packageId,
-                            objects: txObjects,
-                            identityProvider: identityMaterial.identityProvider,
-                            duplicateKeyHash: identityMaterial.duplicateKeyHash,
-                        }).transaction;
-                    case "floor":
-                        if (identityMaterial.kind !== "ok") {
-                            throw new Error("World ID material is not ready.");
-                        }
-                        return buildClaimFloorTransaction({
-                            senderAddress: account.address,
-                            packageId: claimConfig.packageId,
-                            objects: txObjects,
-                            identityProvider: identityMaterial.identityProvider,
-                            duplicateKeyHash: identityMaterial.duplicateKeyHash,
-                        }).transaction;
-                    case "payout":
-                        return buildClaimPayoutTransaction({
-                            senderAddress: account.address,
-                            packageId: claimConfig.packageId,
-                            objects: txObjects,
-                        }).transaction;
-                }
-            })();
+            const transaction = buildClaimTransaction({
+                senderAddress: account.address,
+                packageId: claimConfig.packageId,
+                objects: txObjects,
+                identityProvider:
+                    identityMaterial.kind === "ok" ? identityMaterial.identityProvider : 0,
+                duplicateKeyHash:
+                    identityMaterial.kind === "ok"
+                        ? identityMaterial.duplicateKeyHash
+                        : EMPTY_DUPLICATE_KEY_HASH,
+                claimProof:
+                    claimEligibility.claimProofKind === "initial"
+                        ? (() => {
+                              if (proofState.status !== "ready") {
+                                  throw new Error("Affected cells proof is not ready.");
+                              }
+                              return {
+                                  kind: "initial" as const,
+                                  proof: proofState.proof,
+                                  context: {
+                                      eventUid: selectedEvent.eventUid,
+                                      eventRevision: selectedEvent.eventRevision,
+                                      homeCell: membershipPass.homeCell,
+                                      affectedCellsRoot: selectedEvent.affectedCellsRoot,
+                                  },
+                              };
+                          })()
+                        : { kind: "continuing" },
+            }).transaction;
 
             setTxState({ status: "submitting" });
             const { digest } = await executeWalletTransaction(dAppKit, { transaction });
-            setCompletedActions((current) => ({ ...current, [action]: true }));
+            setEligibilityReadNonce((value) => value + 1);
             setTxState({ status: "submitted", digest });
         } catch (error) {
             setTxState({ status: "failed", message: resolveClaimTxError(error) });
@@ -547,6 +613,16 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                 {renderNotice(campaignNotice, () =>
                                     setCampaignReadNonce((value) => value + 1),
                                 )}
+                                {renderNotice(
+                                    eligibilityState.status === "failed"
+                                        ? {
+                                              key: "status.eligibilityFailed",
+                                              level: "error",
+                                              retryable: true,
+                                          }
+                                        : null,
+                                    () => setEligibilityReadNonce((value) => value + 1),
+                                )}
 
                                 <fieldset className="control-group">
                                     <legend>{t("event.selectLegend")}</legend>
@@ -564,13 +640,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                                     name="claimEvent"
                                                     onChange={() => {
                                                         setSelectedEventId(event.campaignId);
-                                                        setProofState({ status: "idle" });
-                                                        setTxState({ status: "idle" });
-                                                        setTxAction(null);
-                                                        setWorldIdResponse(null);
-                                                        setCompletedActions(
-                                                            emptyClaimFlowCompleted(),
-                                                        );
+                                                        resetClaimProgress();
                                                     }}
                                                     type="radio"
                                                     value={event.campaignId}
@@ -604,7 +674,9 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                     </div>
                                     <button
                                         className="btn btn-secondary"
-                                        disabled={proofState.status === "checking"}
+                                        disabled={
+                                            !proofRequired || proofState.status === "checking"
+                                        }
                                         onClick={handleCheckEligibility}
                                         type="button"
                                     >
@@ -676,7 +748,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                         >
                                             {isClaimInFlight && txAction === action.action
                                                 ? t("claimButtonInFlight")
-                                                : t(`actions.${action.action}`)}
+                                                : t("actions.claim")}
                                         </button>
                                     ))}
                                 </div>
@@ -734,6 +806,32 @@ function buildClaimTransactionObjects(
         identityRegistry: config.identityRegistryId,
         pass: pass.objectId,
     };
+}
+
+function toClaimViewReadClient(client: unknown): ClaimViewReadClient {
+    if (!isRecord(client)) {
+        throw new Error("Sui client is not available.");
+    }
+    const queryEvents = client.queryEvents;
+    const getObjects = client.getObjects;
+    const listOwnedObjects = client.listOwnedObjects;
+    if (
+        typeof queryEvents !== "function" ||
+        typeof getObjects !== "function" ||
+        typeof listOwnedObjects !== "function"
+    ) {
+        throw new Error("Sui client does not support required claim reads.");
+    }
+
+    return {
+        queryEvents: (input) => queryEvents.call(client, input),
+        getObjects: (input) => getObjects.call(client, input),
+        listOwnedObjects: (input) => listOwnedObjects.call(client, input),
+    };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function shortObjectId(value: string): string {

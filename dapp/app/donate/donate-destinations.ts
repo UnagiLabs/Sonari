@@ -79,6 +79,14 @@ export function parseCampaignCreatedEvent(value: unknown): CampaignDestination |
     };
 }
 
+const CATEGORY_LABELS: Readonly<Record<number, string>> = {
+    1: "Earthquake Relief Pool",
+};
+
+export function categoryLabel(category: number): string {
+    return CATEGORY_LABELS[category] ?? `Category ${category}`;
+}
+
 export function parseCategoryPoolCreatedEvent(value: unknown): CategoryDestination | null {
     if (!isRecord(value)) {
         return null;
@@ -94,7 +102,7 @@ export function parseCategoryPoolCreatedEvent(value: unknown): CategoryDestinati
     return {
         kind: "category",
         id: categoryPoolId,
-        label: `Category ${category}`,
+        label: categoryLabel(category),
         categoryPoolId,
         category,
     };

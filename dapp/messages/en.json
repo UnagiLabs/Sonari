@@ -490,6 +490,19 @@
             "title": "DonorPass note",
             "body": "DonorPass records contribution history only. It does not provide claim rights, payout priority, or promised aid.",
             "link": "View dashboard"
+        },
+        "emergency": {
+            "tag": "Emergency",
+            "title": "Active Emergency Campaign",
+            "body": "A disaster relief campaign is currently accepting donations: {name}",
+            "cta": "Donate to this campaign"
+        },
+        "category": {
+            "comingSoonBadge": "Coming soon",
+            "comingSoon": {
+                "flood": "Flood Relief",
+                "student": "Student Support"
+            }
         }
     },
     "home": {
@@ -761,6 +774,7 @@
             "campaignsLoading": "Loading claimable campaigns.",
             "campaignsFailed": "Claimable campaigns could not be loaded.",
             "noCampaigns": "No claimable campaigns are available.",
+            "eligibilityFailed": "Could not read claim status for this pass.",
             "passLoading": "Loading your MembershipPass.",
             "passMissing": "This wallet does not own a MembershipPass.",
             "passFailed": "MembershipPass could not be loaded.",
@@ -792,10 +806,7 @@
         "claimButton": "Claim relief",
         "claimButtonInFlight": "Processing…",
         "actions": {
-            "submit": "Submit affected-cell proof",
-            "verify": "Verify claim",
-            "floor": "Claim floor payment",
-            "payout": "Claim payout"
+            "claim": "Claim relief"
         },
         "note": {
             "title": "Privacy boundary",
@@ -826,6 +837,7 @@
             "failed": {
                 "walletRequired": "Connect a wallet before claiming.",
                 "generic": "Claim transaction failed.",
+                "nothingToClaim": "There is no relief available to claim right now.",
                 "detail": "The claim transaction was not completed."
             }
         }
@@ -843,5 +855,20 @@
         "reconnecting": "Reconnecting…",
         "connected": "Connected",
         "networkWarning": "Connected to an unsupported network ({network}). Switch to testnet or localnet."
+    },
+    "demo": {
+        "donate": {
+            "status": "Active",
+            "statusNote": "This is a demo view. No real transaction is sent.",
+            "details": {
+                "magnitude": "Magnitude",
+                "mmi": "Max intensity (MMI)",
+                "region": "Region",
+                "date": "Date",
+                "affectedCells": "Affected cells",
+                "h3Resolution": "H3 resolution",
+                "epicenter": "Epicenter"
+            }
+        }
     }
 }

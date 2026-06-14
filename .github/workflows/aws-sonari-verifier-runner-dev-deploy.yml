@@ -10,7 +10,7 @@ permissions:
 jobs:
   deploy-dev:
     name: Deploy dev stack
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, manji]
     environment: aws-sonari-verifier-runner-dev
     timeout-minutes: 120
     concurrency:
@@ -185,12 +185,21 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.27.0 --activate
 
+      - name: Configure local pnpm store
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm config set store-dir "$HOME/.cache/sonari/github-actions/pnpm-store"
+
       - name: Get pnpm store path
+        if: runner.name != 'manji'
         id: pnpm-store
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
@@ -205,10 +214,34 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
           rustup target add x86_64-unknown-linux-musl
+
+      - name: Configure local Cargo target cache
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="$HOME/.cache/sonari/github-actions/cargo-target/aws-sonari-verifier-runner-dev-deploy"
+          mkdir -p "$target_dir"
+          echo "CARGO_TARGET_DIR=$target_dir" >> "$GITHUB_ENV"
+
+      - name: Verify local Rust system dependencies
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v musl-gcc
+          command -v unzip
+
+      - name: Install Rust system dependencies
+        if: runner.name != 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y musl-tools unzip
 
       - name: Cache Cargo dependencies
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: |
@@ -220,12 +253,24 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Cache Walrus CLI artifact
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/walrus/${{ env.WALRUS_CLI_SHA256 }}
           key: walrus-cli-${{ runner.os }}-${{ env.WALRUS_CLI_SHA256 }}
 
+      - name: Use local Walrus CLI
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          walrus_path="$(command -v walrus)"
+          echo "$(dirname "$walrus_path")" >> "$GITHUB_PATH"
+          echo "SONARI_WALRUS_CLI=$walrus_path" >> "$GITHUB_ENV"
+          "$walrus_path" --version
+
       - name: Install pinned Walrus CLI
+        if: runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail
@@ -268,12 +313,35 @@ jobs:
           echo "SONARI_WALRUS_CLI=$RUNNER_TEMP/sonari-bin/walrus" >> "$GITHUB_ENV"
 
       - name: Cache Nitro CLI build
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/nitro/${{ env.NITRO_CLI_TAG }}
           key: nitro-cli-${{ runner.os }}-${{ env.NITRO_CLI_TAG }}
 
+      - name: Use local Nitro CLI
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nitro_cli_path="$(command -v nitro-cli)"
+          blobs_dir="$HOME/.cache/sonari/cli-artifacts/nitro/$NITRO_CLI_TAG/install/usr/share/nitro_enclaves/blobs"
+          if [[ ! -d "$blobs_dir" ]]; then
+            echo "Nitro CLI blobs directory is missing: $blobs_dir" >&2
+            exit 1
+          fi
+          if [[ ! -d /var/log/nitro_enclaves || ! -w /var/log/nitro_enclaves ]]; then
+            echo "/var/log/nitro_enclaves must exist and be writable by the runner user" >&2
+            exit 1
+          fi
+
+          "$nitro_cli_path" --version
+          echo "$(dirname "$nitro_cli_path")" >> "$GITHUB_PATH"
+          echo "NITRO_CLI_BLOBS=$blobs_dir" >> "$GITHUB_ENV"
+
       - name: Install pinned Nitro CLI
+        if: runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail
@@ -869,12 +937,23 @@ jobs:
       # EIF ビルド後に on-chain PCR を自動再登録してトラップを構造的に消す。
       # 本番（mainnet）の AdminCap は引き続き CI/AWS に置かない（docs/pcr-config.md 参照）。
       - name: Cache Sui CLI artifact
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/sui/${{ env.SUI_CLI_SHA256 }}
           key: sui-cli-${{ runner.os }}-${{ env.SUI_CLI_SHA256 }}
 
+      - name: Use local Sui CLI
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sui_path="$(command -v sui)"
+          echo "$(dirname "$sui_path")" >> "$GITHUB_PATH"
+          "$sui_path" --version
+
       - name: Install pinned Sui CLI
+        if: runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail
@@ -932,31 +1011,19 @@ jobs:
 
           admin_dir="$RUNNER_TEMP/sui-admin"
           rm -rf "$admin_dir"
-          sui_home="$admin_dir/home"
-          sui_config_dir="$sui_home/.sui/sui_config"
-          mkdir -p "$sui_config_dir"
-          keystore_path="$admin_dir/sui.keystore"
+          mkdir -p "$admin_dir"
           client_config="$admin_dir/client.yaml"
-          keytool_config="$sui_config_dir/client.yaml"
+          admin_alias="sonari-dev-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # Sui CLI 1.71 keytool import は既定の client.yaml を先に読むため、
-          # import 前に一時 HOME 配下へ最小 config を用意する。
-          cat > "$keytool_config" <<YAML
-          ---
-          keystore:
-            File: $keystore_path
-          envs:
-            - alias: testnet
-              rpc: "$SUI_TESTNET_RPC_URL"
-              ws: ~
-              basic_auth: ~
-          active_env: testnet
-          active_address: ~
-          YAML
+          export SUI_CONFIG_DIR="$admin_dir"
+
+          # 現行 Sui CLI が期待する managed address metadata を含む一時 client config を生成する。
+          # 生成される bootstrap key は使わず、後続で dev admin key を同じ一時 config に import する。
+          sui client --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
 
           # 使い捨て keystore に dev admin 鍵を投入し、address を取得する（鍵は echo しない）。
-          import_json="$(HOME="$sui_home" sui keytool import \
-            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --json)"
+          import_json="$(sui keytool import \
+            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --alias "$admin_alias" --json)"
           admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
           const parsed = JSON.parse(process.env.SUI_IMPORT_JSON ?? "{}");
           const address = parsed.suiAddress ?? parsed.address;
@@ -968,20 +1035,12 @@ jobs:
           NODE
           )"
 
-          # active env=testnet・active address=admin の client.yaml を生成する。
-          cat > "$client_config" <<YAML
-          ---
-          keystore:
-            File: $keystore_path
-          envs:
-            - alias: testnet
-              rpc: "$SUI_TESTNET_RPC_URL"
-              ws: ~
-              basic_auth: ~
-          active_env: testnet
-          active_address: "$admin_address"
-          YAML
-          cp "$client_config" "$keytool_config"
+          sui client switch --env testnet --address "$admin_address" --quiet
+          active_address="$(sui client active-address)"
+          if [[ "$active_address" != "$admin_address" ]]; then
+            echo "Sui client active address mismatch after admin key import" >&2
+            exit 1
+          fi
 
           echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
           # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で
@@ -991,7 +1050,8 @@ jobs:
             --admin-cap-id "$SONARI_ADMIN_CAP_ID" \
             --verifier-registry-id "$SONARI_VERIFIER_REGISTRY_ID" \
             --sui-config "$client_config" \
-            --sui-env testnet
+            --sui-env testnet \
+            --sender "$admin_address"
 
       - name: Verify on-chain PCR config matches rebuilt EIFs
         shell: bash
@@ -1025,18 +1085,28 @@ jobs:
           };
 
           function bytesToHex(value) {
-            if (!Array.isArray(value)) {
-              throw new Error("PCR field is not a byte array");
+            if (Array.isArray(value)) {
+              if (value.length !== 48) {
+                throw new Error("PCR byte array must be 48 bytes");
+              }
+              return value
+                .map((byte) => {
+                  const num = Number(byte);
+                  if (!Number.isInteger(num) || num < 0 || num > 255) {
+                    throw new Error("PCR byte out of range");
+                  }
+                  return num.toString(16).padStart(2, "0");
+                })
+                .join("");
             }
-            return value
-              .map((byte) => {
-                const num = Number(byte);
-                if (!Number.isInteger(num) || num < 0 || num > 255) {
-                  throw new Error("PCR byte out of range");
-                }
-                return num.toString(16).padStart(2, "0");
-              })
-              .join("");
+            if (typeof value === "string") {
+              const bytes = Buffer.from(value, "base64");
+              if (bytes.length !== 48) {
+                throw new Error("PCR base64 field must decode to 48 bytes");
+              }
+              return bytes.toString("hex");
+            }
+            throw new Error("PCR field is not a byte array or base64 string");
           }
 
           // VerifierRegistry の configs VecMap から family ごとの config を集める。

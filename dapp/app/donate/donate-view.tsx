@@ -23,6 +23,7 @@ import { combineDonateConfig, type DonateConfig, readDonateEnvConfig } from "./d
 import { readDonateDestinations } from "./donate-destinations";
 import { buildDonateTransaction, type DonateDestinationInput } from "./donate-transaction";
 import {
+    buildCategoryListItems,
     buildDonateDonorPassReadState,
     buildDonateSplitRows,
     buildDonateTxResultView,
@@ -31,16 +32,40 @@ import {
     type DonateDonorPassReadState,
     type DonateSubmitDisabledReason,
     type DonateTxState,
+    isDonateSubmitDisabled,
     resolveDonateSubmitDisabledReason,
+    selectEmergencyBannerCampaign,
 } from "./donate-view-state";
 import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
+import { EmergencyBanner } from "./emergency-banner";
+import type { EmergencyBannerCampaign } from "./emergency-banner-state";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
 const DEFAULT_DONATION_AMOUNT = "400";
 const POST_SUBMIT_DONOR_PASS_LOOKUP_ATTEMPTS = 8;
 const POST_SUBMIT_DONOR_PASS_LOOKUP_DELAY_MS = 750;
 
-export function DonateView({ locale }: { readonly locale: SonariLocale }) {
+/**
+ * デモページ用の差し込み設定。
+ * このオブジェクトが渡されたときだけ DonateView は「デモモード」になり、
+ * 緊急バナーに固定キャンペーンを表示し、実送金を一切行わない。
+ * 本番 /donate は demo を渡さないため、挙動は従来と変わらない。
+ */
+export interface DonateDemoConfig {
+    /** 緊急バナーに固定表示するキャンペーン（実施中・概要付き）。 */
+    readonly emergencyCampaign: EmergencyBannerCampaign;
+    /** 結果パネルに表示する、デモであることの注記（ローカライズ済み）。 */
+    readonly statusNote: string;
+}
+
+export function DonateView({
+    locale,
+    demo,
+}: {
+    readonly locale: SonariLocale;
+    readonly demo?: DonateDemoConfig;
+}) {
+    const demoMode = demo !== undefined;
     const t = useTranslations("donate");
     const account = useCurrentAccount();
     const network = readWalletNetwork();
@@ -87,6 +112,11 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     // packageID から pause_state / pool を導出して完全な設定を組み立てる。
     // 失敗の詳細は開発者向けに console へ出し、画面には設定不備の汎用文言を出す。
     useEffect(() => {
+        // デモモードではチェーンを読まない（送金導線を持たない表示専用のため）。
+        if (demoMode) {
+            setConfig(null);
+            return;
+        }
         if (fundingPackageId === null) {
             console.error(
                 "donate config failed: NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.",
@@ -148,10 +178,11 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [fundingPackageId, network]);
+    }, [demoMode, fundingPackageId, network]);
 
     useEffect(() => {
-        if (fundingPackageId === null) {
+        // デモモードではチェーンを読まず、空の ready 状態にしてフォーム表示だけ保つ。
+        if (demoMode || fundingPackageId === null) {
             setDestinationState({
                 status: "ready",
                 campaigns: [],
@@ -216,7 +247,7 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         return () => {
             cancelled = true;
         };
-    }, [fundingPackageId, network]);
+    }, [demoMode, fundingPackageId, network]);
 
     useEffect(() => {
         if (config === null || account === null) {
@@ -262,23 +293,37 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 (category) => category.id === categoryPoolId,
             );
             if (!hasSelected) {
-                setCategoryPoolId(destinationState.categories[0]?.id ?? "");
+                // Auto-select the first available (real on-chain) category.
+                // buildCategoryListItems puts earthquake first, so use sorted order.
+                const categoryItems = buildCategoryListItems(destinationState.categories);
+                const firstAvailable = categoryItems.find((item) => item.kind === "available");
+                setCategoryPoolId(
+                    firstAvailable?.kind === "available" ? firstAvailable.categoryPoolId : "",
+                );
             }
         }
     }, [destinationState, mode, campaignId, categoryPoolId]);
 
-    const disabledReason = resolveDonateSubmitDisabledReason({
-        configReady: config !== null,
-        walletConnected: isWalletConnected,
-        amountValidation,
-        donorPassState,
-        selectedMode: mode,
-        destinationState,
-        selectedCampaignId: campaignId,
-        selectedCategoryPoolId: categoryPoolId,
-    });
+    // デモモードでは送金導線を出さないため、無効化理由の算出自体を省く。
+    const disabledReason = demoMode
+        ? null
+        : resolveDonateSubmitDisabledReason({
+              configReady: config !== null,
+              walletConnected: isWalletConnected,
+              amountValidation,
+              donorPassState,
+              selectedMode: mode,
+              destinationState,
+              selectedCampaignId: campaignId,
+              selectedCategoryPoolId: categoryPoolId,
+          });
 
     const resultView = buildDonateTxResultView(txState, network);
+    // デモモードでは固定キャンペーンを注入し、本番ではチェーン由来の実施中キャンペーンを選ぶ。
+    const emergencyBannerCampaign =
+        demo !== undefined
+            ? demo.emergencyCampaign
+            : selectEmergencyBannerCampaign(destinationState, BigInt(Date.now()));
     const destination = useMemo<DonateDestinationInput>(() => {
         if (mode === "campaign") {
             return { kind: "campaign", campaignId };
@@ -290,7 +335,11 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     }, [campaignId, categoryPoolId, mode]);
 
     const isDonateInFlight = txState.status === "building" || txState.status === "submitting";
-    const isSubmitDisabled = disabledReason !== null || isDonateInFlight;
+    const isSubmitDisabled = isDonateSubmitDisabled({
+        demoMode,
+        disabledReason,
+        isInFlight: isDonateInFlight,
+    });
 
     const statusClass =
         txState.status === "failed"
@@ -338,6 +387,9 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     );
 
     const txMessage = () => {
+        if (demo !== undefined) {
+            return demo.statusNote;
+        }
         if (txState.status === "failed") {
             return t("tx.failed.message");
         }
@@ -358,6 +410,9 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     };
 
     const txDetail = () => {
+        if (demo !== undefined) {
+            return "";
+        }
         if (txState.status === "submitted") {
             return t("tx.submitted.detail", { digest: txState.digest });
         }
@@ -405,7 +460,21 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         setTxState({ status: "idle" });
     }
 
+    function handleBannerDonate(bannerCampaignId: string) {
+        // デモモードではバナー CTA を無効化し、送金フローへのモード切替を行わない。
+        if (demoMode) {
+            return;
+        }
+        setMode("campaign");
+        setCampaignId(bannerCampaignId);
+        setTxState({ status: "idle" });
+    }
+
     async function handleSubmit() {
+        // デモモードでは実送金を一切行わない（最初の防御線）。
+        if (demoMode) {
+            return;
+        }
         if (disabledReason !== null || isDonateInFlight || config === null) {
             return;
         }
@@ -491,6 +560,10 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 <SiteTopbar active="donate" locale={locale} />
 
                 <main className="page donate-page">
+                    <EmergencyBanner
+                        campaign={emergencyBannerCampaign}
+                        onDonate={handleBannerDonate}
+                    />
                     <header className="donate-hero">
                         <div>
                             <div className="eyebrow">{t("hero.eyebrow")}</div>
@@ -528,19 +601,6 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                                         <span>
                                             <strong>{t("types.general.label")}</strong>
                                             <small>{t("types.general.description")}</small>
-                                        </span>
-                                    </label>
-                                    <label className="choice-option">
-                                        <input
-                                            checked={mode === "campaign"}
-                                            name="donationMode"
-                                            onChange={() => handleModeChange("campaign")}
-                                            type="radio"
-                                            value="campaign"
-                                        />
-                                        <span>
-                                            <strong>{t("types.campaign.label")}</strong>
-                                            <small>{t("types.campaign.description")}</small>
                                         </span>
                                     </label>
                                     <label className="choice-option">
@@ -602,37 +662,92 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                                 <fieldset className="control-group">
                                     <legend>{t("form.categoryLegend")}</legend>
                                     <div className="pool-select-list">
-                                        {destinationState.status === "ready" &&
-                                        destinationState.categories.length > 0 ? (
-                                            destinationState.categories.map((category) => (
-                                                <label
-                                                    className="pool-select-option"
-                                                    key={category.id}
-                                                >
-                                                    <input
-                                                        checked={category.id === categoryPoolId}
-                                                        name="donateCategory"
-                                                        onChange={() =>
-                                                            handleCategoryChange(category.id)
-                                                        }
-                                                        type="radio"
-                                                        value={category.id}
-                                                    />
-                                                    <span>
-                                                        <strong>{category.label}</strong>
-                                                        <small>{category.categoryPoolId}</small>
-                                                    </span>
-                                                </label>
-                                            ))
-                                        ) : destinationState.status === "loading" ? (
+                                        {destinationState.status === "loading" ? (
                                             <p className="faint">
                                                 {t("submit.disabled.categoryLoading")}
                                             </p>
-                                        ) : destinationState.categories.length === 0 ? (
-                                            <p className="faint">
-                                                {t("submit.disabled.categoryNotFound")}
-                                            </p>
-                                        ) : null}
+                                        ) : destinationState.status === "ready" &&
+                                          destinationState.categories.length === 0 ? (
+                                            <>
+                                                <p className="faint">
+                                                    {t("submit.disabled.categoryNotFound")}
+                                                </p>
+                                                {buildCategoryListItems([]).map((item) =>
+                                                    item.kind === "comingSoon" ? (
+                                                        <label
+                                                            className="pool-select-option pool-select-option-disabled"
+                                                            key={item.id}
+                                                        >
+                                                            <input
+                                                                disabled
+                                                                name="donateCategory"
+                                                                type="radio"
+                                                                value={item.id}
+                                                            />
+                                                            <span>
+                                                                <strong>{t(item.labelKey)}</strong>
+                                                                <small className="tag tag-neutral">
+                                                                    {t("category.comingSoonBadge")}
+                                                                </small>
+                                                            </span>
+                                                        </label>
+                                                    ) : null,
+                                                )}
+                                            </>
+                                        ) : (
+                                            buildCategoryListItems(destinationState.categories).map(
+                                                (item) => {
+                                                    if (item.kind === "available") {
+                                                        return (
+                                                            <label
+                                                                className="pool-select-option"
+                                                                key={item.id}
+                                                            >
+                                                                <input
+                                                                    checked={
+                                                                        item.categoryPoolId ===
+                                                                        categoryPoolId
+                                                                    }
+                                                                    name="donateCategory"
+                                                                    onChange={() =>
+                                                                        handleCategoryChange(
+                                                                            item.categoryPoolId,
+                                                                        )
+                                                                    }
+                                                                    type="radio"
+                                                                    value={item.categoryPoolId}
+                                                                />
+                                                                <span>
+                                                                    <strong>{item.label}</strong>
+                                                                    <small>
+                                                                        {item.categoryPoolId}
+                                                                    </small>
+                                                                </span>
+                                                            </label>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <label
+                                                            className="pool-select-option pool-select-option-disabled"
+                                                            key={item.id}
+                                                        >
+                                                            <input
+                                                                disabled
+                                                                name="donateCategory"
+                                                                type="radio"
+                                                                value={item.id}
+                                                            />
+                                                            <span>
+                                                                <strong>{t(item.labelKey)}</strong>
+                                                                <small className="tag tag-neutral">
+                                                                    {t("category.comingSoonBadge")}
+                                                                </small>
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                },
+                                            )
+                                        )}
                                     </div>
                                 </fieldset>
                             ) : null}

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     type DonateEventCursor,
     type DonateDestinationReadClient,
+    categoryLabel,
     parseCampaignCreatedEvent,
     parseCategoryPoolCreatedEvent,
     readDonateDestinations,
@@ -70,6 +71,18 @@ describe("parseCampaignCreatedEvent", () => {
     });
 });
 
+describe("categoryLabel", () => {
+    it("returns 'Earthquake Relief Pool' for category 1", () => {
+        expect(categoryLabel(1)).toBe("Earthquake Relief Pool");
+    });
+
+    it("returns fallback label for unknown category", () => {
+        expect(categoryLabel(7)).toBe("Category 7");
+        expect(categoryLabel(0)).toBe("Category 0");
+        expect(categoryLabel(255)).toBe("Category 255");
+    });
+});
+
 describe("parseCategoryPoolCreatedEvent", () => {
     it("returns deterministic category option for valid parsedJson", () => {
         const result = parseCategoryPoolCreatedEvent(categoryPoolParsedJson());
@@ -80,6 +93,18 @@ describe("parseCategoryPoolCreatedEvent", () => {
             label: "Category 7",
             categoryPoolId: CATEGORY_POOL_ID,
             category: 7,
+        });
+    });
+
+    it("uses 'Earthquake Relief Pool' label for category 1", () => {
+        const result = parseCategoryPoolCreatedEvent(categoryPoolParsedJson({ category: 1 }));
+
+        expect(result).toEqual({
+            kind: "category",
+            id: CATEGORY_POOL_ID,
+            label: "Earthquake Relief Pool",
+            categoryPoolId: CATEGORY_POOL_ID,
+            category: 1,
         });
     });
 
