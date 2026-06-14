@@ -173,6 +173,14 @@ function PassDetails({
     return (
         <div className="mypage-groups">
             <section className="mypage-group">
+                <h2>{t("claim.heading")}</h2>
+                <p>{t("claim.body")}</p>
+                <a className="btn btn-primary" href="/claim">
+                    {t("claim.cta")}
+                </a>
+            </section>
+
+            <section className="mypage-group">
                 <h2>{t("residence.heading")}</h2>
                 <dl>
                     <dt>{t("residence.cellLabel")}</dt>

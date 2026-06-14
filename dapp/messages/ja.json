@@ -213,6 +213,11 @@
     "mypage": {
         "title": "マイページ",
         "subtitle": "あなたの会員証（MembershipPass）の内容を確認できます。",
+        "claim": {
+            "heading": "救済を受け取る",
+            "body": "あなたが対象となりうる災害支援が実施されているとき、ここから受け取り資格を確認して救済を受け取れます。",
+            "cta": "受け取りへ進む"
+        },
         "states": {
             "disconnectedTitle": "ウォレットを接続してください",
             "disconnectedBody": "会員証の内容を読み取るには、ウォレットの接続が必要です。",

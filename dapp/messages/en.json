@@ -213,6 +213,11 @@
     "mypage": {
         "title": "My Page",
         "subtitle": "Review the contents of your MembershipPass.",
+        "claim": {
+            "heading": "Receive relief",
+            "body": "When relief is active for a disaster you may be affected by, you can check your eligibility and receive it here.",
+            "cta": "Go to claim"
+        },
         "states": {
             "disconnectedTitle": "Connect your wallet",
             "disconnectedBody": "Connect a wallet to read your membership details.",
