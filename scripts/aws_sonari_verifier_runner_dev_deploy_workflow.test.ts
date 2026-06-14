@@ -136,6 +136,8 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'sui client switch --env testnet --address "$admin_address"',
             "Sui client active address mismatch after admin key import",
             '--sender "$admin_address"',
+            'Buffer.from(value, "base64")',
+            "PCR field is not a byte array or base64 string",
         ]);
     });
 

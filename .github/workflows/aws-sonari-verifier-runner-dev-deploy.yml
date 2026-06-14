@@ -1085,18 +1085,28 @@ jobs:
           };
 
           function bytesToHex(value) {
-            if (!Array.isArray(value)) {
-              throw new Error("PCR field is not a byte array");
+            if (Array.isArray(value)) {
+              if (value.length !== 48) {
+                throw new Error("PCR byte array must be 48 bytes");
+              }
+              return value
+                .map((byte) => {
+                  const num = Number(byte);
+                  if (!Number.isInteger(num) || num < 0 || num > 255) {
+                    throw new Error("PCR byte out of range");
+                  }
+                  return num.toString(16).padStart(2, "0");
+                })
+                .join("");
             }
-            return value
-              .map((byte) => {
-                const num = Number(byte);
-                if (!Number.isInteger(num) || num < 0 || num > 255) {
-                  throw new Error("PCR byte out of range");
-                }
-                return num.toString(16).padStart(2, "0");
-              })
-              .join("");
+            if (typeof value === "string") {
+              const bytes = Buffer.from(value, "base64");
+              if (bytes.length !== 48) {
+                throw new Error("PCR base64 field must decode to 48 bytes");
+              }
+              return bytes.toString("hex");
+            }
+            throw new Error("PCR field is not a byte array or base64 string");
           }
 
           // VerifierRegistry の configs VecMap から family ごとの config を集める。
