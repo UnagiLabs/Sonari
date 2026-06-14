@@ -936,11 +936,12 @@ jobs:
           sui_config_dir="$sui_home/.sui/sui_config"
           mkdir -p "$sui_config_dir"
           keystore_path="$admin_dir/sui.keystore"
-          client_config="$sui_config_dir/client.yaml"
+          client_config="$admin_dir/client.yaml"
+          keytool_config="$sui_config_dir/client.yaml"
 
           # Sui CLI 1.71 keytool import は既定の client.yaml を先に読むため、
           # import 前に一時 HOME 配下へ最小 config を用意する。
-          cat > "$client_config" <<YAML
+          cat > "$keytool_config" <<YAML
           ---
           keystore:
             File: $keystore_path
@@ -967,7 +968,7 @@ jobs:
           NODE
           )"
 
-          # active env=testnet・active address=admin に更新する。
+          # active env=testnet・active address=admin の client.yaml を生成する。
           cat > "$client_config" <<YAML
           ---
           keystore:
@@ -980,6 +981,7 @@ jobs:
           active_env: testnet
           active_address: "$admin_address"
           YAML
+          cp "$client_config" "$keytool_config"
 
           echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
           # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で
