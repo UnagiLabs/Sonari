@@ -1,20 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_NAV_ITEMS, NAV_DEFS, resolveNavItems } from "./topbar-nav";
 
-// トップバーの nav 構成を導く純粋関数のテスト。nav は全ページ共通の 5 項目に
-// 統一したため（issue #330）、resolveNavItems は常に同じ並びを返す。各項目の
-// 遷移先（href）が固定であることもあわせて保証する。
+// トップバーの nav 構成を導く純粋関数のテスト。nav は全ページ共通の 4 項目に
+// 統一したため（issue #330, #379）、resolveNavItems は常に同じ並びを返す。各項目の
+// 遷移先（href）が固定であることもあわせて保証する。claim は受け取り導線を Mypage と
+// 災害バナーへ寄せたため共通ナビからは外した（href 定義は深リンク用に残す）。
 
 describe("resolveNavItems", () => {
-    it("常に共通の 5 項目を順序どおり返す", () => {
+    it("常に共通の 4 項目を順序どおり返す", () => {
         const items = resolveNavItems();
-        expect(items.map((i) => i.key)).toEqual([
-            "home",
-            "donate",
-            "dashboard",
-            "register",
-            "claim",
-        ]);
+        expect(items.map((i) => i.key)).toEqual(["home", "donate", "dashboard", "register"]);
     });
 
     it("共通ナビに mypage と leaderboard を含めない", () => {
