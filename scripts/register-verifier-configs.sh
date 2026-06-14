@@ -22,6 +22,7 @@ Required environment fallback (if flags are omitted):
 Optional:
   --sui-config <path>        (default: .local/sonari-dev/sui_wallets/admin/sui_config.yaml)
   --sui-env <env>            (default: testnet)
+  --sender <address>         (optional explicit transaction sender)
   --gas-budget <amount>      (default: 100000000)
   --skip-identity            (skip identity config only)
   --help
@@ -65,6 +66,11 @@ run_sui_tx() {
   local pcr0="$2"
   local pcr1="$3"
   local pcr2="$4"
+  local sender_args=()
+
+  if [[ -n "$SUI_SENDER" ]]; then
+    sender_args=(--sender "$SUI_SENDER")
+  fi
 
   LAST_TX_OUTPUT=""
   set +e
@@ -77,6 +83,7 @@ run_sui_tx() {
       --module admin \
       --function "$function_name" \
       --args "$ADMIN_CAP_ID" "$VERIFIER_REGISTRY_ID" "0x$pcr0" "0x$pcr1" "0x$pcr2" \
+      "${sender_args[@]}" \
       --gas-budget "$GAS_BUDGET" \
       --json \
       2>&1
@@ -121,6 +128,7 @@ register_family() {
 SUI_BIN="sui"
 SUI_CLIENT_CONFIG="${SUI_CLIENT_CONFIG:-.local/sonari-dev/sui_wallets/admin/sui_config.yaml}"
 SUI_CLIENT_ENV="${SUI_CLIENT_ENV:-testnet}"
+SUI_SENDER="${SUI_SENDER:-}"
 GAS_BUDGET="${GAS_BUDGET:-100000000}"
 PACKAGE_ID=""
 ADMIN_CAP_ID=""
@@ -184,6 +192,10 @@ while [[ $# -gt 0 ]]; do
       SUI_CLIENT_ENV="$2"
       shift 2
       ;;
+    --sender)
+      SUI_SENDER="$2"
+      shift 2
+      ;;
     --gas-budget)
       GAS_BUDGET="$2"
       shift 2
@@ -237,6 +249,10 @@ if [[ "$SUI_CLIENT_ENV" != "testnet" && "$SUI_CLIENT_ENV" != "devnet" && "$SUI_C
   echo "--sui-env should be testnet, devnet, or mainnet" >&2
   exit 1
 fi
+if [[ -n "$SUI_SENDER" && ! "$SUI_SENDER" =~ ^0x[0-9a-fA-F]+$ ]]; then
+  echo "--sender must be a Sui address" >&2
+  exit 1
+fi
 
 if [[ ! "$GAS_BUDGET" =~ ^[0-9]+$ ]]; then
   echo "--gas-budget must be an integer" >&2
@@ -248,6 +264,9 @@ echo "admin cap:          $ADMIN_CAP_ID"
 echo "verifier registry:  $VERIFIER_REGISTRY_ID"
 echo "sui config:        $SUI_CLIENT_CONFIG"
 echo "sui env:           $SUI_CLIENT_ENV"
+if [[ -n "$SUI_SENDER" ]]; then
+  echo "sender:            $SUI_SENDER"
+fi
 echo "gas budget:        $GAS_BUDGET"
 if [[ "$SKIP_IDENTITY" -eq 1 ]]; then
   echo "identity:          skipped"

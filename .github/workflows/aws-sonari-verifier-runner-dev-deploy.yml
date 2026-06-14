@@ -1033,13 +1033,6 @@ jobs:
           NODE
           )"
 
-          sui client --client.config "$client_config" switch --env testnet --address "$admin_address" --quiet
-          active_address="$(sui client --client.config "$client_config" active-address)"
-          if [[ "$active_address" != "$admin_address" ]]; then
-            echo "Sui client active address mismatch after admin key import" >&2
-            exit 1
-          fi
-
           echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
           # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で
           # 新 EIF 値が自動的に入る。idempotent（create→abort9→update fallback）なので再実行安全。
@@ -1048,7 +1041,8 @@ jobs:
             --admin-cap-id "$SONARI_ADMIN_CAP_ID" \
             --verifier-registry-id "$SONARI_VERIFIER_REGISTRY_ID" \
             --sui-config "$client_config" \
-            --sui-env testnet
+            --sui-env testnet \
+            --sender "$admin_address"
 
       - name: Verify on-chain PCR config matches rebuilt EIFs
         shell: bash

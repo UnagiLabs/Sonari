@@ -131,8 +131,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'sui client --client.config "$client_config" --yes new-address ed25519 sonari-bootstrap',
             'sui keytool --keystore-path "$keystore_path" import',
             "--alias sonari-dev-admin",
-            'sui client --client.config "$client_config" switch --env testnet --address "$admin_address"',
-            "Sui client active address mismatch after admin key import",
+            '--sender "$admin_address"',
         ]);
     });
 
