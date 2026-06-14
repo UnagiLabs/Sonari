@@ -517,11 +517,19 @@ export async function runRepublishBootstrap(
         disasterRegistryId,
         allowedResidenceCellRegistryId,
     });
-    const rewrittenPublishedToml = rewritePublishedTomlPackageId(
-        options.publishedToml,
-        options.env,
-        packageId,
-    );
+    // 再 publish（ABI 破壊）の場合は事前に testnet セクションを除去してから sui を実行するため、
+    // options.publishedToml にセクションが存在しないことがある。その場合は sui が書いた新
+    // Published.toml をそのまま使うので、ここでは rewrite をスキップして undefined を返す。
+    let rewrittenPublishedToml: string | undefined;
+    try {
+        rewrittenPublishedToml = rewritePublishedTomlPackageId(
+            options.publishedToml,
+            options.env,
+            packageId,
+        );
+    } catch {
+        // section absent — main() will leave the file that sui publish wrote as-is
+    }
 
     return {
         dryRun: false,
@@ -608,14 +616,40 @@ async function main(): Promise<void> {
         (value): value is string => typeof value === "string" && value.length > 0,
     );
     const gasBudget = readFlag(argv, "gas-budget");
+    const env = assertFixtureNetwork(readFlag(argv, "env") ?? "testnet");
+
+    // 再 publish（ABI 破壊）時は Published.toml に既存 testnet セクションがあると sui が拒否する。
+    // --live 実行前に testnet セクションを除去した内容をディスクへ書き、sui に空 env を渡す。
+    // sui publish 後は sui 自身が正しい upgrade-capability を含む新セクションを書くので、
+    // rewritePublishedTomlPackageId は不要（options.publishedToml を除去済みにしておくと
+    // section-absent で catch → rewrittenPublishedToml=undefined → ファイルを上書きしない）。
+    const originalPublishedToml = readFileSync(publishedTomlPath, "utf8");
+    if (!dryRun) {
+        const sectionHeader = `[published.${env}]`;
+        const headerIndex = originalPublishedToml.indexOf(sectionHeader);
+        if (headerIndex !== -1) {
+            const nextSection = originalPublishedToml
+                .slice(headerIndex + sectionHeader.length)
+                .search(/\n\[/);
+            const sectionEnd =
+                nextSection === -1
+                    ? originalPublishedToml.length
+                    : headerIndex + sectionHeader.length + nextSection;
+            const cleared =
+                originalPublishedToml.slice(0, headerIndex).trimEnd() +
+                "\n" +
+                originalPublishedToml.slice(sectionEnd);
+            writeFileSync(publishedTomlPath, cleared.trimStart() ? cleared : "");
+        }
+    }
 
     const options: RepublishBootstrapOptions = {
         clientConfig:
             readFlag(argv, "client-config") ??
             process.env.SONARI_ADMIN_SUI_CLIENT_CONFIG ??
             DEFAULT_CLIENT_CONFIG,
-        env: assertFixtureNetwork(readFlag(argv, "env") ?? "testnet"),
-        publishedToml: readFileSync(publishedTomlPath, "utf8"),
+        env,
+        publishedToml: dryRun ? originalPublishedToml : readFileSync(publishedTomlPath, "utf8"),
         residenceRoot: requireValue(
             readFlag(argv, "residence-root") ?? process.env.SONARI_RESIDENCE_ROOT,
             "--residence-root",
@@ -633,6 +667,8 @@ async function main(): Promise<void> {
 
     const result = await runRepublishBootstrap(options, spawnSuiCommand);
 
+    // rewrittenPublishedToml が undefined の場合（再 publish で section 除去済み）は
+    // sui publish が書いた新 Published.toml をそのまま使うので上書きしない。
     if (!dryRun && result.rewrittenPublishedToml) {
         writeFileSync(publishedTomlPath, result.rewrittenPublishedToml);
     }
