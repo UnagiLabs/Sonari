@@ -453,19 +453,19 @@ export function ResidenceCellPicker({ onSelectionChange }: ResidenceCellPickerPr
         <div className="residence-picker">
             {/* 検索バー: 通常フローで地図の上に配置 */}
             <div className="residence-search-bar">
-                <div className="text-field">
-                    <span>{t("searchLabel")}</span>
+                <span className="residence-search-label">{t("searchLabel")}</span>
+                <div className="residence-search-row">
                     <div className="residence-autocomplete-host" ref={autocompleteHostRef} />
-                    <small>{t("searchHint")}</small>
+                    <button
+                        className="btn btn-secondary residence-locate-btn"
+                        disabled={!isReady}
+                        onClick={handleUseCurrentLocation}
+                        type="button"
+                    >
+                        {t("useCurrentLocation")}
+                    </button>
                 </div>
-                <button
-                    className="btn btn-secondary"
-                    disabled={!isReady}
-                    onClick={handleUseCurrentLocation}
-                    type="button"
-                >
-                    {t("useCurrentLocation")}
-                </button>
+                <small className="residence-search-hint">{t("searchHint")}</small>
             </div>
 
             {/* 地図ステージ */}

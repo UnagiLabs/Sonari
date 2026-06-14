@@ -2393,16 +2393,48 @@ h4 {
   gap: 8px;
 }
 
-/* 検索バー: 通常フローで地図の上に配置（絶対配置しない） */
+/* 検索バー: 通常フローで地図の上に配置（絶対配置しない）。
+   ラベルを上、検索入力＋現在地ボタンを同じ行（中央そろえ）、ヒントを下に置く。 */
 .residence-search-bar {
-  display: grid;
-  align-items: start;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   background: var(--cream-50, #fafaf7);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: 8px 10px;
+}
+
+.residence-search-label {
+  color: var(--sage-900);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 検索入力（Google のオートコンプリート）とボタンを横並びで縦中央そろえ。 */
+.residence-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 注入される PlaceAutocompleteElement をホスト幅にそろえ、はみ出し・過大表示を防ぐ。 */
+.residence-autocomplete-host {
+  min-width: 0;
+}
+
+.residence-autocomplete-host > * {
+  width: 100%;
+}
+
+.residence-locate-btn {
+  white-space: nowrap;
+}
+
+.residence-search-hint {
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 
 .residence-map-stage {
