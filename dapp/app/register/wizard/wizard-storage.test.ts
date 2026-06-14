@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialWizardState, MEMBERSHIP_STATEMENT_COUNT, RESIDENCE_STATEMENT_COUNT, type WizardState } from "./wizard-steps";
+import { createInitialWizardState, type WizardState } from "./wizard-steps";
 import {
     clearWizardStorage,
     deserializeWizardState,
@@ -7,11 +7,6 @@ import {
     shouldClearStorage,
     WIZARD_STORAGE_KEY,
 } from "./wizard-storage";
-
-// MEMBERSHIP_STATEMENT_COUNT / RESIDENCE_STATEMENT_COUNT は wizard-steps から引き続き
-// export されているため import は通る。STEP 2 で STORAGE_VERSION を上げるタイミングで整理する。
-void MEMBERSHIP_STATEMENT_COUNT;
-void RESIDENCE_STATEMENT_COUNT;
 
 const fullState: WizardState = {
     membershipIssued: true,
@@ -38,7 +33,7 @@ describe("serializeWizardState / deserializeWizardState", () => {
     });
 
     it("storage key はバージョン付きで固定", () => {
-        expect(WIZARD_STORAGE_KEY).toBe("sonari.register.wizard.v1");
+        expect(WIZARD_STORAGE_KEY).toBe("sonari.register.wizard.v2");
     });
 });
 
@@ -60,7 +55,7 @@ describe("保存対象の allowlist", () => {
                 "identityVerified",
             ].sort(),
         );
-        expect(parsed.version).toBe(1);
+        expect(parsed.version).toBe(2);
     });
 
     it("wallet アドレスや World ID 応答に相当するキーは含まれない", () => {
@@ -93,7 +88,15 @@ describe("deserializeWizardState の fail-closed 検証", () => {
     it("未知の version は初期状態を返す", () => {
         const raw = JSON.stringify({
             ...JSON.parse(serializeWizardState(fullState)),
-            version: 2,
+            version: 99,
+        });
+        expect(deserializeWizardState(raw)).toEqual(initial);
+    });
+
+    it("旧 version（1）の JSON は初期状態を返す（fail-closed）", () => {
+        const raw = JSON.stringify({
+            ...JSON.parse(serializeWizardState(fullState)),
+            version: 1,
         });
         expect(deserializeWizardState(raw)).toEqual(initial);
     });

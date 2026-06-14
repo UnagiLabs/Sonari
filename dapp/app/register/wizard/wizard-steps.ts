@@ -7,11 +7,6 @@ export type WizardStepId = (typeof WIZARD_STEPS)[number];
 
 export type WizardIdentityProvider = "kyc" | "world_id";
 
-// membership / residence の承諾ステートメント数。文言は messages 側で管理し、
-// ロジックは個数のみに依存させる。
-export const MEMBERSHIP_STATEMENT_COUNT = 3;
-export const RESIDENCE_STATEMENT_COUNT = 3;
-
 export interface WizardState {
     /** membership SBT の発行完了フラグ */
     readonly membershipIssued: boolean;

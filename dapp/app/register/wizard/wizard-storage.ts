@@ -5,19 +5,12 @@
 
 import {
     createInitialWizardState,
-    MEMBERSHIP_STATEMENT_COUNT,
-    RESIDENCE_STATEMENT_COUNT,
     type WizardIdentityProvider,
     type WizardState,
     type WizardStepId,
 } from "./wizard-steps";
 
-// MEMBERSHIP_STATEMENT_COUNT / RESIDENCE_STATEMENT_COUNT は wizard-storage.test.ts が
-// import しているため削除できない。STEP 2 で STORAGE_VERSION を上げるタイミングで整理する。
-void MEMBERSHIP_STATEMENT_COUNT;
-void RESIDENCE_STATEMENT_COUNT;
-
-export const WIZARD_STORAGE_KEY = "sonari.register.wizard.v1";
+export const WIZARD_STORAGE_KEY = "sonari.register.wizard.v2";
 
 export function clearWizardStorage(storage: Storage): void {
     storage.removeItem(WIZARD_STORAGE_KEY);
@@ -28,7 +21,7 @@ export function shouldClearStorage(activeStep: WizardStepId, state: WizardState)
     return activeStep === "done" && state.membershipIssued && state.residenceSaved;
 }
 
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 
 // H3 セルは res7 の 10 進文字列としてのみ受け付ける。
 const DECIMAL_CELL_PATTERN = /^[0-9]{1,20}$/;

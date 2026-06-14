@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
     createInitialWizardState,
-    RESIDENCE_STATEMENT_COUNT,
     type WizardState,
 } from "./wizard-steps";
 import { saveResidenceSelection } from "./residence-save";
@@ -14,7 +13,6 @@ function stateWith(overrides: Partial<WizardState>): WizardState {
 }
 
 const residenceDone = {
-    residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => true),
     selectedCellDecimal: VALID_CELL,
 } as const;
 

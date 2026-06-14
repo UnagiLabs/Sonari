@@ -3,11 +3,9 @@ import {
     canProceed,
     clampStepForState,
     createInitialWizardState,
-    MEMBERSHIP_STATEMENT_COUNT,
     nextStep,
     parseStepParam,
     previousStep,
-    RESIDENCE_STATEMENT_COUNT,
     slideDirection,
     stepIndex,
     WIZARD_STEPS,
@@ -218,13 +216,3 @@ describe("slideDirection", () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// 定数（後続 STEP で参照している間は存在する）
-// ---------------------------------------------------------------------------
-
-describe("exported constants", () => {
-    it("MEMBERSHIP_STATEMENT_COUNT / RESIDENCE_STATEMENT_COUNT は数値として export されている", () => {
-        expect(typeof MEMBERSHIP_STATEMENT_COUNT).toBe("number");
-        expect(typeof RESIDENCE_STATEMENT_COUNT).toBe("number");
-    });
-});
