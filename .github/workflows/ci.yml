@@ -142,14 +142,23 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Cache Sui CLI artifact
-        if: steps.changes.outputs.move == 'true'
+        if: steps.changes.outputs.move == 'true' && runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/sui/${{ env.SUI_CLI_SHA256 }}
           key: sui-cli-${{ runner.os }}-${{ env.SUI_CLI_SHA256 }}
 
+      - name: Use local Sui CLI
+        if: steps.changes.outputs.move == 'true' && runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sui_path="$(command -v sui)"
+          echo "$(dirname "$sui_path")" >> "$GITHUB_PATH"
+          "$sui_path" --version
+
       - name: Install pinned Sui CLI
-        if: steps.changes.outputs.move == 'true'
+        if: steps.changes.outputs.move == 'true' && runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail

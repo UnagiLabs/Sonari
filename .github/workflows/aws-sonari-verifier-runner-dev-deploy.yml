@@ -205,6 +205,20 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
           rustup target add x86_64-unknown-linux-musl
+
+      - name: Verify local Rust system dependencies
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v musl-gcc
+          command -v unzip
+
+      - name: Install Rust system dependencies
+        if: runner.name != 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y musl-tools unzip
 
@@ -220,12 +234,24 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Cache Walrus CLI artifact
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/walrus/${{ env.WALRUS_CLI_SHA256 }}
           key: walrus-cli-${{ runner.os }}-${{ env.WALRUS_CLI_SHA256 }}
 
+      - name: Use local Walrus CLI
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          walrus_path="$(command -v walrus)"
+          echo "$(dirname "$walrus_path")" >> "$GITHUB_PATH"
+          echo "SONARI_WALRUS_CLI=$walrus_path" >> "$GITHUB_ENV"
+          "$walrus_path" --version
+
       - name: Install pinned Walrus CLI
+        if: runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail
@@ -869,12 +895,23 @@ jobs:
       # EIF ビルド後に on-chain PCR を自動再登録してトラップを構造的に消す。
       # 本番（mainnet）の AdminCap は引き続き CI/AWS に置かない（docs/pcr-config.md 参照）。
       - name: Cache Sui CLI artifact
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/sui/${{ env.SUI_CLI_SHA256 }}
           key: sui-cli-${{ runner.os }}-${{ env.SUI_CLI_SHA256 }}
 
+      - name: Use local Sui CLI
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sui_path="$(command -v sui)"
+          echo "$(dirname "$sui_path")" >> "$GITHUB_PATH"
+          "$sui_path" --version
+
       - name: Install pinned Sui CLI
+        if: runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail
