@@ -2430,6 +2430,8 @@ h4 {
 
 .residence-locate-btn {
   white-space: nowrap;
+  /* 入力欄に対して視覚的にそろうよう、ボタンを少し上へ寄せる。 */
+  transform: translateY(-4mm);
 }
 
 .residence-search-hint {
