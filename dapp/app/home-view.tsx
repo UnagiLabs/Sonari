@@ -108,6 +108,11 @@ const footerColumns = [
  */
 export interface HomeDemoConfig {
     readonly emergencyCampaign: EmergencyBannerCampaign;
+    /**
+     * 任意。指定するとバナーに「受け取る」主ボタンを出す。デモでは接続や登録の判定を
+     * せず固定で見せるため、本番の useClaimBannerCta は使わずここで遷移先を渡す。
+     */
+    readonly primaryAction?: { readonly href: string; readonly label: string };
 }
 
 export function HomeView({
@@ -130,6 +135,9 @@ export function HomeView({
                         <HomeEmergencyBannerView
                             campaign={demo.emergencyCampaign}
                             donateHref="/demo/donate"
+                            {...(demo.primaryAction !== undefined
+                                ? { primaryAction: demo.primaryAction }
+                                : {})}
                         />
                     ) : (
                         <HomeEmergencyBanner />

@@ -25,7 +25,21 @@ const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID
 const identityRegistryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
 const identityStatusUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL ?? "";
 
-export function MypageView({ locale }: { readonly locale: SonariLocale }) {
+/**
+ * デモ用 My Page が登録済み状態を固定で見せるための設定。
+ * 本番は demo を渡さないため、チェーンから MembershipPass を読み取る。
+ */
+export interface MypageDemoConfig {
+    readonly pass: MembershipPassData;
+}
+
+export function MypageView({
+    locale,
+    demo,
+}: {
+    readonly locale: SonariLocale;
+    readonly demo?: MypageDemoConfig;
+}) {
     const t = useTranslations("mypage");
 
     const account = useCurrentAccount();
@@ -43,6 +57,11 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
     // so the linter sees no spurious dependency and retry needs no token state.
     const load = useCallback((): (() => void) => {
         cancelRef.current();
+
+        // デモ表示では固定の登録済み状態を見せるため、チェーンを一切読まない。
+        if (demo !== undefined) {
+            return () => {};
+        }
 
         if (!connected || owner.length === 0 || membershipPackageId.length === 0) {
             setResult(null);
@@ -76,7 +95,7 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
             });
 
         return cancel;
-    }, [client, connected, dAppKit, owner]);
+    }, [client, connected, dAppKit, owner, demo]);
 
     useEffect(() => load(), [load]);
 
@@ -84,12 +103,16 @@ export function MypageView({ locale }: { readonly locale: SonariLocale }) {
         load();
     }, [load]);
 
-    const view = deriveMypageView({
-        connected,
-        owner,
-        result,
-        lookupEnabled: membershipPackageId.length > 0,
-    });
+    // デモ表示は固定の登録済み状態（ready）を直接使い、チェーン判定を通さない。
+    const view =
+        demo !== undefined
+            ? { kind: "ready" as const, pass: demo.pass }
+            : deriveMypageView({
+                  connected,
+                  owner,
+                  result,
+                  lookupEnabled: membershipPackageId.length > 0,
+              });
 
     return (
         <div className="mypage">
