@@ -1015,9 +1015,13 @@ jobs:
           keystore_path="$admin_dir/sui.keystore"
           client_config="$admin_dir/client.yaml"
 
+          # 現行 Sui CLI が期待する managed address metadata を含む client.yaml を生成する。
+          # 生成される bootstrap key は使わず、後続で dev admin key に active address を切り替える。
+          sui client --client.config "$client_config" --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
+
           # 使い捨て keystore に dev admin 鍵を投入し、address を取得する（鍵は echo しない）。
           import_json="$(sui keytool --keystore-path "$keystore_path" import \
-            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --json)"
+            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --alias sonari-dev-admin --json)"
           admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
           const parsed = JSON.parse(process.env.SUI_IMPORT_JSON ?? "{}");
           const address = parsed.suiAddress ?? parsed.address;
@@ -1029,19 +1033,12 @@ jobs:
           NODE
           )"
 
-          # active env=testnet・active address=admin の最小 client.yaml を生成する。
-          cat > "$client_config" <<YAML
-          ---
-          keystore:
-            File: $keystore_path
-          envs:
-            - alias: testnet
-              rpc: "$SUI_TESTNET_RPC_URL"
-              ws: ~
-              basic_auth: ~
-          active_env: testnet
-          active_address: "$admin_address"
-          YAML
+          sui client --client.config "$client_config" switch --env testnet --address "$admin_address" --quiet
+          active_address="$(sui client --client.config "$client_config" active-address)"
+          if [[ "$active_address" != "$admin_address" ]]; then
+            echo "Sui client active address mismatch after admin key import" >&2
+            exit 1
+          fi
 
           echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
           # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で
