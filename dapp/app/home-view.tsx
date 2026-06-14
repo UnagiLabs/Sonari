@@ -157,9 +157,6 @@ export function HomeView({
                                         {t("hero.ctaMember")}
                                         <Icon name="arrowRight" size={16} />
                                     </a>
-                                    <a className="btn btn-ghost btn-lg" href="/claim">
-                                        {t("hero.ctaClaim")}
-                                    </a>
                                     <a className="btn btn-ghost btn-lg" href="/dashboard">
                                         {t("hero.ctaDashboard")}
                                     </a>

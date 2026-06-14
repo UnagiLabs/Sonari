@@ -482,7 +482,6 @@
             "sub": "Sonari verifies who should receive aid after a disaster using public source data, privacy-preserving residence proofs, and transparent receipts.",
             "ctaDonate": "Donate now",
             "ctaMember": "Become a member",
-            "ctaClaim": "Claim relief",
             "ctaDashboard": "View dashboard",
             "notePrivate": "Residence data stays private",
             "noteVerified": "Verified disaster events"
