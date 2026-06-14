@@ -1,6 +1,6 @@
-export type WalletNetwork = "testnet" | "localnet";
+export type WalletNetwork = "mainnet" | "testnet" | "localnet";
 
-const ALLOWED_NETWORKS: readonly WalletNetwork[] = ["testnet", "localnet"] as const;
+const ALLOWED_NETWORKS: readonly WalletNetwork[] = ["mainnet", "testnet", "localnet"] as const;
 
 export function isAllowedNetwork(value: string): value is WalletNetwork {
     return (ALLOWED_NETWORKS as readonly string[]).includes(value);
@@ -17,6 +17,8 @@ export function resolveNetwork(raw?: string | undefined): WalletNetwork {
 // gRPC エンドポイントは env から読まず、network ごとにハードコードして分岐する。
 export function resolveGrpcBaseUrl(network: WalletNetwork): string {
     switch (network) {
+        case "mainnet":
+            return "https://fullnode.mainnet.sui.io:443";
         case "testnet":
             return "https://fullnode.testnet.sui.io:443";
         case "localnet":

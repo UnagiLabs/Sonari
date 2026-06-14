@@ -28,15 +28,19 @@ const GENESIS_KIND_VERIFIER_REGISTRY: u8 = 7;
 const GENESIS_KIND_IDENTITY_REGISTRY: u8 = 9;
 const GENESIS_KIND_CATEGORY_REGISTRY: u8 = 10;
 const GENESIS_KIND_EARTHQUAKE_POOL: u8 = 11;
+const GENESIS_KIND_DISASTER_REGISTRY: u8 = 12;
+const GENESIS_KIND_ALLOWED_RESIDENCE_CELL_REGISTRY: u8 = 13;
 
 const EGlobalPaused: u64 = 0;
 const ETargetPaused: u64 = 1;
 const EAllowedResidenceCellRegistryAlreadyCreated: u64 = 2;
+const EDisasterRegistryAlreadyCreated: u64 = 3;
 
 public struct ADMIN has drop {}
 
 public struct AdminCap has key {
     id: UID,
+    disaster_registry_id: Option<ID>,
     allowed_residence_cell_registry_id: Option<ID>,
 }
 
@@ -75,10 +79,11 @@ fun init(otw: ADMIN, ctx: &mut TxContext) {
 fun initialize(ctx: &mut TxContext) {
     let admin_cap = AdminCap {
         id: object::new(ctx),
+        disaster_registry_id: option::none(),
         allowed_residence_cell_registry_id: option::none(),
     };
+    let mut admin_cap = admin_cap;
     emit_genesis_object(object::id(&admin_cap), GENESIS_KIND_ADMIN_CAP, false, ctx);
-    transfer::transfer(admin_cap, ctx.sender());
 
     let pause_state = PauseState {
         id: object::new(ctx),
@@ -116,6 +121,27 @@ fun initialize(ctx: &mut TxContext) {
     emit_genesis_object(earthquake_pool_id, GENESIS_KIND_EARTHQUAKE_POOL, true, ctx);
 
     category_pool::share_category_registry(category_registry);
+
+    let disaster_registry_id = disaster_event::create_disaster_registry(ctx);
+    admin_cap.disaster_registry_id = option::some(disaster_registry_id);
+    emit_genesis_object(disaster_registry_id, GENESIS_KIND_DISASTER_REGISTRY, true, ctx);
+
+    let allowed_residence_cell_registry_id = allowed_residence_cell::create_registry(
+        zero_hash(),
+        7,
+        0,
+        zero_hash(),
+        ctx,
+    );
+    admin_cap.allowed_residence_cell_registry_id = option::some(allowed_residence_cell_registry_id);
+    emit_genesis_object(
+        allowed_residence_cell_registry_id,
+        GENESIS_KIND_ALLOWED_RESIDENCE_CELL_REGISTRY,
+        true,
+        ctx,
+    );
+
+    transfer::transfer(admin_cap, ctx.sender());
 }
 
 #[allow(lint(self_transfer))]
@@ -203,9 +229,14 @@ public fun exclude_recipient(
     );
 }
 
-public fun create_disaster_registry(cap: &AdminCap, ctx: &mut TxContext): ID {
-    let _ = cap;
-    disaster_event::create_disaster_registry(ctx)
+public fun create_disaster_registry(cap: &mut AdminCap, ctx: &mut TxContext): ID {
+    assert!(
+        !option::is_some(&cap.disaster_registry_id),
+        EDisasterRegistryAlreadyCreated,
+    );
+    let registry_id = disaster_event::create_disaster_registry(ctx);
+    cap.disaster_registry_id = option::some(registry_id);
+    registry_id
 }
 
 public fun spend_operations(
@@ -552,6 +583,14 @@ public(package) fun genesis_kind_earthquake_pool(): u8 {
     GENESIS_KIND_EARTHQUAKE_POOL
 }
 
+public(package) fun genesis_kind_disaster_registry(): u8 {
+    GENESIS_KIND_DISASTER_REGISTRY
+}
+
+public(package) fun genesis_kind_allowed_residence_cell_registry(): u8 {
+    GENESIS_KIND_ALLOWED_RESIDENCE_CELL_REGISTRY
+}
+
 fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxContext) {
     event::emit(GenesisObjectCreated {
         object_id,
@@ -560,6 +599,10 @@ fun emit_genesis_object(object_id: ID, object_kind: u8, shared: bool, ctx: &TxCo
         created_at_ms: ctx.epoch_timestamp_ms(),
         actor: ctx.sender(),
     });
+}
+
+fun zero_hash(): vector<u8> {
+    x"0000000000000000000000000000000000000000000000000000000000000000"
 }
 
 #[test_only]
