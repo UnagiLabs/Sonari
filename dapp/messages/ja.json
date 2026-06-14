@@ -856,5 +856,20 @@
         "reconnecting": "再接続中…",
         "connected": "接続済み",
         "networkWarning": "サポート外のネットワーク（{network}）に接続しています。testnet または localnet に切り替えてください。"
+    },
+    "demo": {
+        "donate": {
+            "status": "実施中",
+            "statusNote": "これはデモ表示です。実際の送金は行われません。",
+            "details": {
+                "magnitude": "マグニチュード",
+                "mmi": "最大震度 (MMI)",
+                "region": "地域",
+                "date": "発生日",
+                "affectedCells": "影響セル数",
+                "h3Resolution": "H3 解像度",
+                "epicenter": "震源"
+            }
+        }
     }
 }

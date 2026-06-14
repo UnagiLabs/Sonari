@@ -856,5 +856,20 @@
         "reconnecting": "Reconnecting…",
         "connected": "Connected",
         "networkWarning": "Connected to an unsupported network ({network}). Switch to testnet or localnet."
+    },
+    "demo": {
+        "donate": {
+            "status": "Active",
+            "statusNote": "This is a demo view. No real transaction is sent.",
+            "details": {
+                "magnitude": "Magnitude",
+                "mmi": "Max intensity (MMI)",
+                "region": "Region",
+                "date": "Date",
+                "affectedCells": "Affected cells",
+                "h3Resolution": "H3 resolution",
+                "epicenter": "Epicenter"
+            }
+        }
     }
 }
