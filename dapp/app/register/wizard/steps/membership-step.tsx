@@ -72,7 +72,6 @@ export function MembershipStep({
     const gateInput = {
         owner,
         selectedCellDecimal,
-        allStatementsAccepted: true,
         isConfigured,
         membershipIssued,
         lookup,

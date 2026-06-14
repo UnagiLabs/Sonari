@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+    disabledReasonMessageKey,
+    type MembershipDisabledReason,
+} from "./steps/membership-gate";
 
 // en/ja の翻訳カタログが構造的に同一（キー集合が完全一致・値は空でない文字列）で
 // あることを固定するテスト。キーの欠落や空訳が UI に英語フォールバックや空文字と
@@ -163,6 +167,25 @@ describe("messages catalog parity", () => {
         for (const key of removedPickerKeys) {
             expect(en.has(key), key).toBe(false);
             expect(ja.has(key), key).toBe(false);
+        }
+    });
+
+    it("membership ゲートの disabled 理由キーが en/ja catalog に全て存在する", () => {
+        // disabledReasonMessageKey が返すキーが削除済みキーを指していないことを固定する。
+        // 削除された文言（旧 nextHint 等）を理由コードが参照すると missing key で UI が壊れる。
+        const reasons: MembershipDisabledReason[] = [
+            "wallet_disconnected",
+            "residence_unselected",
+            "submitting",
+            "checking",
+            "multiple",
+            "lookup_error",
+            "not_configured",
+        ];
+        for (const reason of reasons) {
+            const key = `register.wizard.membership.${disabledReasonMessageKey(reason)}`;
+            expect(en.has(key), key).toBe(true);
+            expect(ja.has(key), key).toBe(true);
         }
     });
 });
