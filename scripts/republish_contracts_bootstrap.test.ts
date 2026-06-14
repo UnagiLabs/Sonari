@@ -313,7 +313,7 @@ describe("runRepublishBootstrap", () => {
         overrides: Partial<RepublishBootstrapOptions> = {},
     ): RepublishBootstrapOptions {
         return {
-            clientConfig: ".local/sonari-dev/sui_wallets/admin/sui_config.yaml",
+            clientConfig: ".local/sonari-dev/sui_wallets/admin/client.yaml",
             env: "testnet",
             publishedToml: TOML,
             residenceRoot: REAL_ROOT,

@@ -590,7 +590,7 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 // ---------------------------------------------------------------------------
 // CLI entrypoint
 // ---------------------------------------------------------------------------
-const DEFAULT_CLIENT_CONFIG = ".local/sonari-dev/sui_wallets/admin/sui_config.yaml";
+const DEFAULT_CLIENT_CONFIG = ".local/sonari-dev/sui_wallets/admin/client.yaml";
 const DEFAULT_PUBLISHED_TOML = "contracts/Published.toml";
 
 function readFlag(argv: readonly string[], name: string): string | undefined {
