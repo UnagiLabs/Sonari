@@ -26,10 +26,8 @@ import {
 import { shortAddress } from "./membership-presence";
 
 interface MembershipStepProps {
-    readonly accepted: readonly boolean[];
     readonly membershipIssued: boolean;
     readonly selectedCellDecimal: string | null;
-    readonly onToggle: (index: number, checked: boolean) => void;
     readonly onIssued: () => void;
     readonly onBack: () => void;
     readonly onNext: () => void;
@@ -48,10 +46,8 @@ const allowedResidenceCellRegistryId =
     process.env.NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID ?? "";
 
 export function MembershipStep({
-    accepted,
     membershipIssued,
     selectedCellDecimal,
-    onToggle,
     onIssued,
     onBack,
     onNext,
@@ -66,7 +62,6 @@ export function MembershipStep({
     const [lookup, setLookup] = useState<MembershipLookupViewState>({ kind: "idle" });
     const [issueState, setIssueState] = useState<MembershipIssueViewState>({ kind: "idle" });
 
-    const allStatementsAccepted = accepted.length > 0 && accepted.every((value) => value);
     const isConfigured =
         membershipPackageId.length > 0 &&
         residenceProofWorkerUrl.length > 0 &&
@@ -77,7 +72,7 @@ export function MembershipStep({
     const gateInput = {
         owner,
         selectedCellDecimal,
-        allStatementsAccepted,
+        allStatementsAccepted: true,
         isConfigured,
         membershipIssued,
         lookup,
@@ -135,9 +130,6 @@ export function MembershipStep({
     }, [client, onIssued, owner, t]);
 
     function handlePrimaryAction() {
-        if (!allStatementsAccepted) {
-            return;
-        }
         if (selectedCellDecimal === null) {
             setIssueState({ kind: "failed", message: t("issue.residenceRequired") });
             return;
@@ -239,7 +231,6 @@ export function MembershipStep({
             return t("card.statusMultiple");
         }
         if (
-            allStatementsAccepted &&
             selectedCellDecimal !== null &&
             owner.length > 0 &&
             isConfigured &&
@@ -266,9 +257,6 @@ export function MembershipStep({
         }
         if (selectedCellDecimal === null) {
             return { message: t("issue.residenceRequired"), tone: "note" };
-        }
-        if (!allStatementsAccepted) {
-            return { message: t("nextHint"), tone: "note" };
         }
         if (issuance === "issued") {
             return { message: t("issue.alreadyIssued"), tone: "note" };
@@ -335,28 +323,6 @@ export function MembershipStep({
                     </strong>
                 </div>
             </div>
-
-            <fieldset className="control-group">
-                <legend>{t("statementsLegend")}</legend>
-                <div className="terms-list">
-                    {accepted.map((checked, index) => (
-                        <label
-                            className="terms-row"
-                            // 固定長の承諾フラグ配列なので index キーで安定する。
-                            // biome-ignore lint/suspicious/noArrayIndexKey: 配列は固定長・並べ替えなし
-                            key={index}
-                        >
-                            <input
-                                checked={checked}
-                                name="membershipTerms"
-                                onChange={(event) => onToggle(index, event.target.checked)}
-                                type="checkbox"
-                            />
-                            <span>{t(`statements.${index}`)}</span>
-                        </label>
-                    ))}
-                </div>
-            </fieldset>
 
             <div
                 className="field-note"

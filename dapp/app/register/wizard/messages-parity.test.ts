@@ -62,6 +62,18 @@ const removedSupportersKeys = [
     "home.supporters.corporate",
 ] as const;
 
+const removedStatementKeys = [
+    "register.wizard.residence.statements.0",
+    "register.wizard.residence.statements.1",
+    "register.wizard.residence.statements.2",
+    "register.wizard.residence.statementsLegend",
+    "register.wizard.membership.statements.0",
+    "register.wizard.membership.statements.1",
+    "register.wizard.membership.statements.2",
+    "register.wizard.membership.statementsLegend",
+    "register.wizard.membership.nextHint",
+] as const;
+
 describe("messages catalog parity", () => {
     it("en と ja のキー集合が完全に一致する", () => {
         expect([...ja.keys()].sort()).toEqual([...en.keys()].sort());
@@ -125,6 +137,13 @@ describe("messages catalog parity", () => {
 
     it("HOME の Top supporters で使っていた文言キーを残さない", () => {
         for (const key of removedSupportersKeys) {
+            expect(en.has(key), key).toBe(false);
+            expect(ja.has(key), key).toBe(false);
+        }
+    });
+
+    it("welcome 集約で使わなくなった同意文言キーを残さない", () => {
+        for (const key of removedStatementKeys) {
             expect(en.has(key), key).toBe(false);
             expect(ja.has(key), key).toBe(false);
         }

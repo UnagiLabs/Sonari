@@ -83,13 +83,7 @@
                 "eyebrow": "Step 1",
                 "title": "Choose your residence area.",
                 "lead": "Search a place or tap the map. Sonari stores only the selected H3 cell — never your raw address or GPS history.",
-                "statementsLegend": "Residence statement",
-                "statements": {
-                    "0": "This cell is my active residence area for Sonari eligibility checks.",
-                    "1": "I understand changes after a disaster cutoff do not apply to that disaster.",
-                    "2": "Sonari stores the selected H3 cell, not my raw address or GPS history."
-                },
-                "nextHint": "Select your residence cell and affirm every statement to continue.",
+                "nextHint": "Select your residence cell to continue.",
                 "sheet": {
                     "title": "Confirm Residence Area",
                     "expand": "Open confirmation panel",
@@ -149,12 +143,6 @@
                     "statusSubmitting": "Submitting",
                     "statusMultiple": "Multiple detected"
                 },
-                "statementsLegend": "Before you continue",
-                "statements": {
-                    "0": "This wallet will own one active Sonari Membership SBT.",
-                    "1": "The Membership SBT is soulbound and cannot be transferred.",
-                    "2": "Holding a Membership SBT does not guarantee aid or create payout priority."
-                },
                 "issue": {
                     "button": "Issue Membership SBT",
                     "buttonIssued": "Continue",
@@ -173,8 +161,7 @@
                     "invalidProofResponse": "The residence proof response is invalid.",
                     "residenceNotAllowed": "The selected residence cell is not in the allowlist.",
                     "transactionFailed": "Membership issuance failed."
-                },
-                "nextHint": "Affirm every statement above to continue."
+                }
             },
             "identity": {
                 "eyebrow": "Optional",
