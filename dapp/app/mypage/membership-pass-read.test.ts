@@ -10,6 +10,7 @@ const PACKAGE_ID = `0x${"ab".repeat(32)}`;
 const REGISTRY_ID = `0x${"ee".repeat(32)}`;
 const OWNER = `0x${"33".repeat(32)}`;
 const PASS_ID = `0x${"77".repeat(32)}`;
+const PASS_LINEAGE_ID = `0x${"88".repeat(32)}`;
 const EXPECTED_TYPE = `${PACKAGE_ID}::membership::MembershipPass`;
 
 // A realistic H3 res7 decimal value: exceeds Number.MAX_SAFE_INTEGER (9007199254740991).
@@ -24,6 +25,7 @@ function passSummary(objectId = PASS_ID, type = EXPECTED_TYPE): OwnedObjectSumma
 
 function passJson(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
+        pass_lineage_id: PASS_LINEAGE_ID,
         status: "1",
         issued_at_ms: "1700000000000",
         home_cell: BIG_HOME_CELL,
@@ -94,6 +96,7 @@ describe("readMembershipPass", () => {
         }
         expect(result.pass).toEqual({
             objectId: PASS_ID,
+            passLineageId: PASS_LINEAGE_ID,
             status: 1,
             issuedAtMs: 1700000000000,
             homeCell: BIG_HOME_CELL,

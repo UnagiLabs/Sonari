@@ -3,10 +3,7 @@ import {
     assertProofMatchesClaimContext,
     buildAffectedCellLeafMoveArgs,
     buildAffectedCellProofMoveArgs,
-    buildClaimFloorTransaction,
-    buildClaimPayoutTransaction,
-    buildSubmitClaimV2Transaction,
-    buildVerifyClaimV2Transaction,
+    buildClaimTransaction,
     ClaimProofError,
     fetchAffectedCellsProof,
     parseAffectedCellsProofResponse,
@@ -20,6 +17,7 @@ const AFFECTED_CELLS_ROOT =
     "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f";
 const PACKAGE_ID = "0x00000000000000000000000000000000000000000000000000000000000000aa";
 const SENDER = "0x00000000000000000000000000000000000000000000000000000000000000ff";
+const MOVE_STD_PACKAGE_ID = "0x0000000000000000000000000000000000000000000000000000000000000001";
 
 const workerProofResponse = {
     event_uid: EVENT_UID,
@@ -269,45 +267,25 @@ describe("claim transaction arguments", () => {
         ).toThrow(/affected_cells_root/);
     });
 
-    it("builds claim_floor with ordered object and value inputs", () => {
-        const { transaction } = buildClaimFloorTransaction({
+    it("builds initial claim with leaf option and proof inputs", async () => {
+        const proof = await parseAffectedCellsProofResponse(workerProofResponse);
+        const { transaction } = buildClaimTransaction({
             senderAddress: SENDER,
             packageId: PACKAGE_ID,
             objects: buildObjectConfig(),
             identityProvider: 2,
             duplicateKeyHash:
                 "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        });
-
-        const data = transaction.getData();
-        const claim = data.commands.at(-1);
-        expect(data.sender).toBe(SENDER);
-        expect(data.commands).toHaveLength(1);
-        expect(claim?.$kind).toBe("MoveCall");
-        if (claim?.$kind !== "MoveCall") {
-            throw new Error("last command must be MoveCall");
-        }
-        expect(claim.MoveCall).toMatchObject({
-            package: PACKAGE_ID,
-            module: "accessor",
-            function: "claim_floor",
-        });
-        expect(claim.MoveCall.arguments).toHaveLength(8);
-    });
-
-    it("builds submit_claim_v2 with affected cell leaf and proof inputs", async () => {
-        const proof = await parseAffectedCellsProofResponse(workerProofResponse);
-        const { transaction } = buildSubmitClaimV2Transaction({
-            senderAddress: SENDER,
-            packageId: PACKAGE_ID,
-            proof,
-            context: {
-                eventUid: EVENT_UID,
-                eventRevision: EVENT_REVISION,
-                homeCell: HOME_CELL,
-                affectedCellsRoot: AFFECTED_CELLS_ROOT,
+            claimProof: {
+                kind: "initial",
+                proof,
+                context: {
+                    eventUid: EVENT_UID,
+                    eventRevision: EVENT_REVISION,
+                    homeCell: HOME_CELL,
+                    affectedCellsRoot: AFFECTED_CELLS_ROOT,
+                },
             },
-            objects: buildObjectConfig(),
         });
 
         const data = transaction.getData();
@@ -320,15 +298,21 @@ describe("claim transaction arguments", () => {
             "new_affected_cell_leaf",
             "new_affected_cell_proof_step_left",
             "MakeMoveVec",
-            "submit_claim_v2",
+            "some",
+            "claim",
         ]);
 
-        const proofVector = data.commands[2];
-        expect(proofVector?.$kind).toBe("MakeMoveVec");
-        if (proofVector?.$kind !== "MakeMoveVec") {
-            throw new Error("third command must be MakeMoveVec");
+        const some = data.commands[3];
+        expect(some?.$kind).toBe("MoveCall");
+        if (some?.$kind !== "MoveCall") {
+            throw new Error("fourth command must be option::some");
         }
-        expect(proofVector.MakeMoveVec.type).toBe(`${PACKAGE_ID}::affected_cell::ProofStep`);
+        expect(some.MoveCall).toMatchObject({
+            package: MOVE_STD_PACKAGE_ID,
+            module: "option",
+            function: "some",
+            typeArguments: [`${PACKAGE_ID}::affected_cell::AffectedCellLeaf`],
+        });
 
         const claim = data.commands.at(-1);
         expect(claim?.$kind).toBe("MoveCall");
@@ -338,61 +322,69 @@ describe("claim transaction arguments", () => {
         expect(claim.MoveCall).toMatchObject({
             package: PACKAGE_ID,
             module: "accessor",
-            function: "submit_claim_v2",
+            function: "claim",
         });
-        expect(claim.MoveCall.arguments).toHaveLength(8);
-        expect(claim.MoveCall.arguments[5]).toEqual({ Result: 0, $kind: "Result" });
-        expect(claim.MoveCall.arguments[6]).toEqual({ Result: 2, $kind: "Result" });
+        expect(claim.MoveCall.arguments).toHaveLength(11);
+        expect(claim.MoveCall.arguments[8]).toEqual({ Result: 3, $kind: "Result" });
+        expect(claim.MoveCall.arguments[9]).toEqual({ Result: 2, $kind: "Result" });
     });
 
-    it("builds verify_claim_v2 with ordered object and value inputs", () => {
-        const { transaction } = buildVerifyClaimV2Transaction({
+    it("builds continuing claim with empty leaf option and proof vector", () => {
+        const { transaction } = buildClaimTransaction({
             senderAddress: SENDER,
             packageId: PACKAGE_ID,
             objects: buildObjectConfig(),
-            identityProvider: 2,
+            identityProvider: 0,
             duplicateKeyHash:
-                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "0x0000000000000000000000000000000000000000000000000000000000000000",
+            claimProof: { kind: "continuing" },
         });
 
         const data = transaction.getData();
-        const verify = data.commands.at(-1);
-        expect(data.sender).toBe(SENDER);
-        expect(data.commands).toHaveLength(1);
-        expect(verify?.$kind).toBe("MoveCall");
-        if (verify?.$kind !== "MoveCall") {
-            throw new Error("last command must be MoveCall");
-        }
-        expect(verify.MoveCall).toMatchObject({
-            package: PACKAGE_ID,
-            module: "accessor",
-            function: "verify_claim_v2",
-        });
-        expect(verify.MoveCall.arguments).toHaveLength(8);
-    });
+        const commandNames = data.commands.map((command) =>
+            command.$kind === "MoveCall" ? command.MoveCall.function : command.$kind,
+        );
 
-    it("builds claim_payout with ordered object inputs", () => {
-        const { transaction } = buildClaimPayoutTransaction({
-            senderAddress: SENDER,
-            packageId: PACKAGE_ID,
-            objects: buildObjectConfig(),
+        expect(data.sender).toBe(SENDER);
+        expect(commandNames).toEqual(["none", "MakeMoveVec", "claim"]);
+
+        const none = data.commands[0];
+        expect(none?.$kind).toBe("MoveCall");
+        if (none?.$kind !== "MoveCall") {
+            throw new Error("first command must be option::none");
+        }
+        expect(none.MoveCall).toMatchObject({
+            package: MOVE_STD_PACKAGE_ID,
+            module: "option",
+            function: "none",
+            typeArguments: [`${PACKAGE_ID}::affected_cell::AffectedCellLeaf`],
         });
 
-        const data = transaction.getData();
-        const payout = data.commands.at(-1);
-        expect(data.sender).toBe(SENDER);
-        expect(data.commands).toHaveLength(1);
-        expect(payout?.$kind).toBe("MoveCall");
-        if (payout?.$kind !== "MoveCall") {
+        const proofVector = data.commands[1];
+        expect(proofVector?.$kind).toBe("MakeMoveVec");
+        if (proofVector?.$kind !== "MakeMoveVec") {
+            throw new Error("second command must be MakeMoveVec");
+        }
+        expect(proofVector.MakeMoveVec.type).toBe(`${PACKAGE_ID}::affected_cell::ProofStep`);
+        expect(proofVector.MakeMoveVec.elements).toEqual([]);
+
+        const claim = data.commands.at(-1);
+        expect(claim?.$kind).toBe("MoveCall");
+        if (claim?.$kind !== "MoveCall") {
             throw new Error("last command must be MoveCall");
         }
-        expect(payout.MoveCall).toMatchObject({
+        expect(claim.MoveCall).toMatchObject({
             package: PACKAGE_ID,
             module: "accessor",
-            function: "claim_payout",
+            function: "claim",
         });
-        expect(payout.MoveCall.arguments).toHaveLength(5);
+        expect(claim.MoveCall.arguments).toHaveLength(11);
+        expect(claim.MoveCall.arguments[2]).toMatchObject({ $kind: "Input" });
+        expect(claim.MoveCall.arguments[3]).toMatchObject({ $kind: "Input" });
+        expect(claim.MoveCall.arguments[8]).toEqual({ Result: 0, $kind: "Result" });
+        expect(claim.MoveCall.arguments[9]).toEqual({ Result: 1, $kind: "Result" });
     });
+
 });
 
 function buildObjectConfig() {

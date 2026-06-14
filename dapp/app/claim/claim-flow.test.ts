@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
     buildClaimFlowActions,
-    emptyClaimFlowCompleted,
     isClaimFlowActionDisabled,
     type ClaimFlowInput,
 } from "./claim-flow";
@@ -9,80 +8,46 @@ import {
 function input(overrides: Partial<ClaimFlowInput> = {}): ClaimFlowInput {
     return {
         proofReady: true,
+        proofRequired: true,
         walletConnected: true,
         txObjectsReady: true,
         worldIdReady: true,
-        claimWindowOpen: true,
-        floorClaimAvailable: true,
-        payoutFinalized: false,
+        worldIdRequired: true,
+        claimable: true,
         inFlight: false,
-        completed: emptyClaimFlowCompleted(),
         ...overrides,
     };
 }
 
 describe("buildClaimFlowActions", () => {
-    it("enables only submit before the affected-cell proof has been submitted", () => {
-        expect(
-            buildClaimFlowActions(input()).map((action) => [action.action, action.disabled]),
-        ).toEqual([
-            ["submit", false],
-            ["verify", true],
-            ["floor", true],
-            ["payout", true],
+    it("exposes a single claim action", () => {
+        expect(buildClaimFlowActions(input())).toEqual([
+            { action: "claim", disabled: false, completed: false },
         ]);
     });
 
-    it("enables verify after submit when World ID material is ready", () => {
-        const state = input({ completed: { ...emptyClaimFlowCompleted(), submit: true } });
-
-        expect(isClaimFlowActionDisabled("verify", state)).toBe(false);
-        expect(isClaimFlowActionDisabled("floor", state)).toBe(true);
-    });
-
-    it("fails closed when World ID material is missing", () => {
-        const state = input({
-            worldIdReady: false,
-            completed: { ...emptyClaimFlowCompleted(), submit: true, verify: true },
-        });
-
-        expect(isClaimFlowActionDisabled("verify", state)).toBe(true);
-        expect(isClaimFlowActionDisabled("floor", state)).toBe(true);
-    });
-
-    it("gates floor and payout on census and floor-budget state", () => {
-        const verified = { ...emptyClaimFlowCompleted(), submit: true, verify: true };
-
+    it("requires affected-cell proof only when the claim path needs it", () => {
+        expect(isClaimFlowActionDisabled("claim", input({ proofReady: false }))).toBe(true);
         expect(
             isClaimFlowActionDisabled(
-                "floor",
-                input({ floorClaimAvailable: true, payoutFinalized: false, completed: verified }),
-            ),
-        ).toBe(false);
-        expect(
-            isClaimFlowActionDisabled(
-                "payout",
-                input({ floorClaimAvailable: true, payoutFinalized: false, completed: verified }),
-            ),
-        ).toBe(true);
-
-        expect(
-            isClaimFlowActionDisabled(
-                "floor",
-                input({ floorClaimAvailable: false, payoutFinalized: true, completed: verified }),
-            ),
-        ).toBe(true);
-        expect(
-            isClaimFlowActionDisabled(
-                "payout",
-                input({ floorClaimAvailable: false, payoutFinalized: true, completed: verified }),
+                "claim",
+                input({ proofRequired: false, proofReady: false }),
             ),
         ).toBe(false);
     });
 
-    it("disables every action while a transaction is in flight", () => {
+    it("requires World ID material only when the claim path needs it", () => {
+        expect(isClaimFlowActionDisabled("claim", input({ worldIdReady: false }))).toBe(true);
         expect(
-            buildClaimFlowActions(input({ inFlight: true })).every((action) => action.disabled),
-        ).toBe(true);
+            isClaimFlowActionDisabled(
+                "claim",
+                input({ worldIdRequired: false, worldIdReady: false }),
+            ),
+        ).toBe(false);
+    });
+
+    it("disables claim when there is nothing to receive or a transaction is in flight", () => {
+        expect(isClaimFlowActionDisabled("claim", input({ claimable: false }))).toBe(true);
+        expect(isClaimFlowActionDisabled("claim", input({ inFlight: true }))).toBe(true);
     });
 });

@@ -42,6 +42,7 @@ export interface MembershipPassReadClient extends OwnedObjectsClient {
  */
 export interface MembershipPassData {
     readonly objectId: string;
+    readonly passLineageId: string;
     readonly status: number;
     readonly issuedAtMs: number;
     readonly homeCell: string;
@@ -137,6 +138,7 @@ export async function readMembershipPass(
 
 interface MembershipPassBase {
     readonly objectId: string;
+    readonly passLineageId: string;
     readonly status: number;
     readonly issuedAtMs: number;
     readonly homeCell: string;
@@ -147,12 +149,14 @@ function parseMembershipPassBase(
     objectId: string,
     json: Record<string, unknown>,
 ): MembershipPassBase | null {
+    const passLineageId = parseObjectId(json.pass_lineage_id);
     const status = parseU8(json.status);
     const issuedAtMs = parseU64Number(json.issued_at_ms);
     const homeCell = parseU64String(json.home_cell);
     const homeCellRegisteredAtMs = parseU64Number(json.home_cell_registered_at_ms);
 
     if (
+        passLineageId === null ||
         status === null ||
         issuedAtMs === null ||
         homeCell === null ||
@@ -161,7 +165,7 @@ function parseMembershipPassBase(
         return null;
     }
 
-    return { objectId, status, issuedAtMs, homeCell, homeCellRegisteredAtMs };
+    return { objectId, passLineageId, status, issuedAtMs, homeCell, homeCellRegisteredAtMs };
 }
 
 function errorMessage(error: unknown): string {
@@ -197,6 +201,14 @@ function parseU8(raw: unknown): number | null {
         return null;
     }
     return n;
+}
+
+function parseObjectId(raw: unknown): string | null {
+    if (typeof raw !== "string") {
+        return null;
+    }
+    const trimmed = raw.trim();
+    return /^0x[0-9a-fA-F]{64}$/u.test(trimmed) ? trimmed : null;
 }
 
 function toNumber(raw: unknown): number | null {

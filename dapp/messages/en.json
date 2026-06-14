@@ -774,6 +774,7 @@
             "campaignsLoading": "Loading claimable campaigns.",
             "campaignsFailed": "Claimable campaigns could not be loaded.",
             "noCampaigns": "No claimable campaigns are available.",
+            "eligibilityFailed": "Could not read claim status for this pass.",
             "passLoading": "Loading your MembershipPass.",
             "passMissing": "This wallet does not own a MembershipPass.",
             "passFailed": "MembershipPass could not be loaded.",
@@ -805,10 +806,7 @@
         "claimButton": "Claim relief",
         "claimButtonInFlight": "Processing…",
         "actions": {
-            "submit": "Submit affected-cell proof",
-            "verify": "Verify claim",
-            "floor": "Claim floor payment",
-            "payout": "Claim payout"
+            "claim": "Claim relief"
         },
         "note": {
             "title": "Privacy boundary",
@@ -839,6 +837,7 @@
             "failed": {
                 "walletRequired": "Connect a wallet before claiming.",
                 "generic": "Claim transaction failed.",
+                "nothingToClaim": "There is no relief available to claim right now.",
                 "detail": "The claim transaction was not completed."
             }
         }

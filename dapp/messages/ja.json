@@ -774,6 +774,7 @@
             "campaignsLoading": "申請できるキャンペーンを読み込んでいます。",
             "campaignsFailed": "申請できるキャンペーンを読み込めませんでした。",
             "noCampaigns": "申請できるキャンペーンはありません。",
+            "eligibilityFailed": "このパスの申請状態を読み込めませんでした。",
             "passLoading": "MembershipPass を読み込んでいます。",
             "passMissing": "このウォレットは MembershipPass を所有していません。",
             "passFailed": "MembershipPass を読み込めませんでした。",
@@ -805,10 +806,7 @@
         "claimButton": "支援を申請",
         "claimButtonInFlight": "処理中…",
         "actions": {
-            "submit": "被災セル証明を送信",
-            "verify": "申請を検証",
-            "floor": "床払いを受け取る",
-            "payout": "本払いを受け取る"
+            "claim": "支援を受け取る"
         },
         "note": {
             "title": "プライバシーの境界",
@@ -839,6 +837,7 @@
             "failed": {
                 "walletRequired": "申請の前にウォレットを接続してください。",
                 "generic": "申請トランザクションに失敗しました。",
+                "nothingToClaim": "現在受け取れる支援金はありません。",
                 "detail": "申請トランザクションは完了しませんでした。"
             }
         }
