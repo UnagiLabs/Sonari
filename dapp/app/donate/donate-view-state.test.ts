@@ -511,7 +511,7 @@ describe("buildDonateTxResultView", () => {
         expect(view).toEqual({
             loading: false,
             digest,
-            explorerUrl: `https://testnet.suivision.xyz/txblock/${digest}`,
+            explorerUrl: `https://suiscan.xyz/testnet/tx/${digest}`,
             canRetry: false,
         });
     });

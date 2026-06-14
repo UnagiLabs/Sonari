@@ -4,15 +4,15 @@ import { suiExplorerTxUrl } from "./sui-explorer";
 describe("suiExplorerTxUrl", () => {
     const digest = "8oM2nT3kQ4abcDEFghiJKLmnopQRstUVwxyz1234567";
 
-    it("returns a SuiVision testnet tx URL for testnet", () => {
+    it("returns a SuiScan testnet tx URL for testnet", () => {
         expect(suiExplorerTxUrl("testnet", digest)).toBe(
-            `https://testnet.suivision.xyz/txblock/${digest}`,
+            `https://suiscan.xyz/testnet/tx/${digest}`,
         );
     });
 
-    it("returns a SuiVision mainnet tx URL for mainnet", () => {
+    it("returns a SuiScan mainnet tx URL for mainnet", () => {
         expect(suiExplorerTxUrl("mainnet", digest)).toBe(
-            `https://suivision.xyz/txblock/${digest}`,
+            `https://suiscan.xyz/mainnet/tx/${digest}`,
         );
     });
 
@@ -26,7 +26,7 @@ describe("suiExplorerTxUrl", () => {
 
     it("trims surrounding whitespace from the digest before building the URL", () => {
         expect(suiExplorerTxUrl("testnet", `  ${digest}  `)).toBe(
-            `https://testnet.suivision.xyz/txblock/${digest}`,
+            `https://suiscan.xyz/testnet/tx/${digest}`,
         );
     });
 
