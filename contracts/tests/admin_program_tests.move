@@ -195,7 +195,7 @@ fun init_creates_display_objects_for_explorer() {
             &donor_display,
             1,
             string::utf8(x"536f6e61726920446f6e6f72205061737320e28094207b746965725f6c6162656c7d"),
-            b"Total donated: {total_donated_usdc} USDC units across {donation_count} donations.".to_string(),
+            b"Total donated: {total_donated_usdc_display} USDC across {donation_count} donations.".to_string(),
             b"https://raw.githubusercontent.com/UnagiLabs/Sonari/main/docs/assets/display/donor-pass.svg".to_string(),
             b"https://app.sonari.xyz/donor/{id}".to_string(),
         );

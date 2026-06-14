@@ -19,12 +19,13 @@ const TIER_BRONZE: u8 = 1;
 const TIER_SILVER: u8 = 2;
 const TIER_GOLD: u8 = 3;
 
-const BRONZE_THRESHOLD_USDC: u64 = 1;
-const SILVER_THRESHOLD_USDC: u64 = 1_000_000;
-const GOLD_THRESHOLD_USDC: u64 = 10_000_000;
+const BRONZE_THRESHOLD_USDC_RAW_UNITS: u64 = 1;
+const SILVER_THRESHOLD_USDC_RAW_UNITS: u64 = 50_000_000;
+const GOLD_THRESHOLD_USDC_RAW_UNITS: u64 = 250_000_000;
 
 const COIN_TYPE_USDC: vector<u8> = b"USDC";
 const REGISTRY_KIND_DONOR: u8 = 1;
+const USDC_DISPLAY_DECIMALS: u64 = 1_000_000;
 
 const EZeroDonation: u64 = 0;
 const EDonorPassOwnerMismatch: u64 = 1;
@@ -75,6 +76,7 @@ public struct DonorPass has key {
     owner: address,
     donor_lineage_id: ID,
     total_donated_usdc: u64,
+    total_donated_usdc_display: String,
     donation_count: u64,
     first_donated_at_ms: u64,
     last_donated_at_ms: u64,
@@ -148,6 +150,7 @@ fun new_donor_pass(registry: &mut DonorRegistry, ctx: &mut TxContext): DonorPass
         owner: donor,
         donor_lineage_id,
         total_donated_usdc: 0,
+        total_donated_usdc_display: format_usdc_display(0),
         donation_count: 0,
         first_donated_at_ms: ctx.epoch_timestamp_ms(),
         last_donated_at_ms: ctx.epoch_timestamp_ms(),
@@ -228,6 +231,7 @@ fun record_donation(
 
     pass.donation_count = pass.donation_count + 1;
     pass.total_donated_usdc = pass.total_donated_usdc + amount;
+    pass.total_donated_usdc_display = format_usdc_display(pass.total_donated_usdc);
     pass.last_donated_at_ms = donated_at_ms;
 
     event::emit(DonationRecorded {
@@ -256,11 +260,11 @@ fun record_donation(
 }
 
 fun tier_for_total(total_donated_usdc: u64): u8 {
-    if (total_donated_usdc >= GOLD_THRESHOLD_USDC) {
+    if (total_donated_usdc >= GOLD_THRESHOLD_USDC_RAW_UNITS) {
         TIER_GOLD
-    } else if (total_donated_usdc >= SILVER_THRESHOLD_USDC) {
+    } else if (total_donated_usdc >= SILVER_THRESHOLD_USDC_RAW_UNITS) {
         TIER_SILVER
-    } else if (total_donated_usdc >= BRONZE_THRESHOLD_USDC) {
+    } else if (total_donated_usdc >= BRONZE_THRESHOLD_USDC_RAW_UNITS) {
         TIER_BRONZE
     } else {
         TIER_NONE
@@ -279,6 +283,54 @@ fun tier_label(tier: u8): String {
     } else {
         string::utf8(b"Unknown")
     }
+}
+
+fun format_usdc_display(raw_units: u64): String {
+    let whole = raw_units / USDC_DISPLAY_DECIMALS;
+    let fraction = raw_units % USDC_DISPLAY_DECIMALS;
+    let mut bytes = vector[];
+    append_u64_decimal(&mut bytes, whole);
+    if (fraction > 0) {
+        bytes.push_back(46);
+        append_usdc_fraction(&mut bytes, fraction);
+    };
+    string::utf8(bytes)
+}
+
+fun append_usdc_fraction(bytes: &mut vector<u8>, fraction: u64) {
+    let mut fraction_bytes = vector[];
+    let mut divisor = USDC_DISPLAY_DECIMALS / 10;
+    while (divisor > 0) {
+        let digit = ((fraction / divisor) % 10) as u8;
+        fraction_bytes.push_back(48 + digit);
+        divisor = divisor / 10;
+    };
+
+    while (fraction_bytes.length() > 0 && *fraction_bytes.borrow(fraction_bytes.length() - 1) == 48) {
+        fraction_bytes.pop_back();
+    };
+
+    bytes.append(fraction_bytes);
+}
+
+fun append_u64_decimal(bytes: &mut vector<u8>, value: u64) {
+    if (value == 0) {
+        bytes.push_back(48);
+        return
+    };
+
+    let mut divisor = 1;
+    let mut remaining = value;
+    while (remaining >= 10) {
+        remaining = remaining / 10;
+        divisor = divisor * 10;
+    };
+
+    while (divisor > 0) {
+        let digit = ((value / divisor) % 10) as u8;
+        bytes.push_back(48 + digit);
+        divisor = divisor / 10;
+    };
 }
 
 public(package) fun donation_record_summary(
@@ -304,6 +356,10 @@ public(package) fun donor_pass_owner(pass: &DonorPass): address {
 
 public(package) fun donor_pass_total_donated_usdc(pass: &DonorPass): u64 {
     pass.total_donated_usdc
+}
+
+public(package) fun donor_pass_total_donated_usdc_display(pass: &DonorPass): String {
+    pass.total_donated_usdc_display
 }
 
 public(package) fun donor_pass_donation_count(pass: &DonorPass): u64 {
@@ -347,15 +403,15 @@ public(package) fun tier_gold(): u8 {
 }
 
 public(package) fun bronze_threshold_usdc(): u64 {
-    BRONZE_THRESHOLD_USDC
+    BRONZE_THRESHOLD_USDC_RAW_UNITS
 }
 
 public(package) fun silver_threshold_usdc(): u64 {
-    SILVER_THRESHOLD_USDC
+    SILVER_THRESHOLD_USDC_RAW_UNITS
 }
 
 public(package) fun gold_threshold_usdc(): u64 {
-    GOLD_THRESHOLD_USDC
+    GOLD_THRESHOLD_USDC_RAW_UNITS
 }
 
 public(package) fun coin_type_usdc(): vector<u8> {
