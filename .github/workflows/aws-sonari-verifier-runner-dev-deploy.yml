@@ -185,12 +185,21 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.27.0 --activate
 
+      - name: Configure local pnpm store
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm config set store-dir "$HOME/.cache/sonari/github-actions/pnpm-store"
+
       - name: Get pnpm store path
+        if: runner.name != 'manji'
         id: pnpm-store
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ${{ steps.pnpm-store.outputs.STORE_PATH }}
@@ -205,6 +214,15 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
           rustup target add x86_64-unknown-linux-musl
+
+      - name: Configure local Cargo target cache
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="$HOME/.cache/sonari/github-actions/cargo-target/aws-sonari-verifier-runner-dev-deploy"
+          mkdir -p "$target_dir"
+          echo "CARGO_TARGET_DIR=$target_dir" >> "$GITHUB_ENV"
 
       - name: Verify local Rust system dependencies
         if: runner.name == 'manji'
@@ -223,6 +241,7 @@ jobs:
           sudo apt-get install -y musl-tools unzip
 
       - name: Cache Cargo dependencies
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: |
@@ -294,12 +313,35 @@ jobs:
           echo "SONARI_WALRUS_CLI=$RUNNER_TEMP/sonari-bin/walrus" >> "$GITHUB_ENV"
 
       - name: Cache Nitro CLI build
+        if: runner.name != 'manji'
         uses: actions/cache@v5
         with:
           path: ~/.cache/sonari/cli-artifacts/nitro/${{ env.NITRO_CLI_TAG }}
           key: nitro-cli-${{ runner.os }}-${{ env.NITRO_CLI_TAG }}
 
+      - name: Use local Nitro CLI
+        if: runner.name == 'manji'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nitro_cli_path="$(command -v nitro-cli)"
+          blobs_dir="$HOME/.cache/sonari/cli-artifacts/nitro/$NITRO_CLI_TAG/install/usr/share/nitro_enclaves/blobs"
+          if [[ ! -d "$blobs_dir" ]]; then
+            echo "Nitro CLI blobs directory is missing: $blobs_dir" >&2
+            exit 1
+          fi
+          if [[ ! -d /var/log/nitro_enclaves || ! -w /var/log/nitro_enclaves ]]; then
+            echo "/var/log/nitro_enclaves must exist and be writable by the runner user" >&2
+            exit 1
+          fi
+
+          "$nitro_cli_path" --version
+          echo "$(dirname "$nitro_cli_path")" >> "$GITHUB_PATH"
+          echo "NITRO_CLI_BLOBS=$blobs_dir" >> "$GITHUB_ENV"
+
       - name: Install pinned Nitro CLI
+        if: runner.name != 'manji'
         shell: bash
         run: |
           set -euo pipefail
