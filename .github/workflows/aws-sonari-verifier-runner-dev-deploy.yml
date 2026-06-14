@@ -1012,16 +1012,18 @@ jobs:
           admin_dir="$RUNNER_TEMP/sui-admin"
           rm -rf "$admin_dir"
           mkdir -p "$admin_dir"
-          keystore_path="$admin_dir/sui.keystore"
           client_config="$admin_dir/client.yaml"
+          admin_alias="sonari-dev-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
-          # 現行 Sui CLI が期待する managed address metadata を含む client.yaml を生成する。
-          # 生成される bootstrap key は使わず、後続で dev admin key に active address を切り替える。
-          sui client --client.config "$client_config" --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
+          export SUI_CONFIG_DIR="$admin_dir"
+
+          # 現行 Sui CLI が期待する managed address metadata を含む一時 client config を生成する。
+          # 生成される bootstrap key は使わず、後続で dev admin key を同じ一時 config に import する。
+          sui client --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
 
           # 使い捨て keystore に dev admin 鍵を投入し、address を取得する（鍵は echo しない）。
-          import_json="$(sui keytool --keystore-path "$keystore_path" import \
-            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --alias sonari-dev-admin --json)"
+          import_json="$(sui keytool import \
+            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --alias "$admin_alias" --json)"
           admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
           const parsed = JSON.parse(process.env.SUI_IMPORT_JSON ?? "{}");
           const address = parsed.suiAddress ?? parsed.address;
@@ -1032,6 +1034,13 @@ jobs:
           process.stdout.write(address);
           NODE
           )"
+
+          sui client switch --env testnet --address "$admin_address" --quiet
+          active_address="$(sui client active-address)"
+          if [[ "$active_address" != "$admin_address" ]]; then
+            echo "Sui client active address mismatch after admin key import" >&2
+            exit 1
+          fi
 
           echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
           # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で

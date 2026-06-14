@@ -128,9 +128,13 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "sudo mkdir -p /var/log/nitro_enclaves",
             'sudo chown "$(id -u):$(id -g)" /var/log/nitro_enclaves',
             "NITRO_CLI_BLOBS=$blobs_dir",
-            'sui client --client.config "$client_config" --yes new-address ed25519 sonari-bootstrap',
-            'sui keytool --keystore-path "$keystore_path" import',
-            "--alias sonari-dev-admin",
+            'export SUI_CONFIG_DIR="$admin_dir"',
+            'admin_alias="sonari-dev-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+            "sui client --yes new-address ed25519 sonari-bootstrap",
+            "sui keytool import",
+            '--alias "$admin_alias"',
+            'sui client switch --env testnet --address "$admin_address"',
+            "Sui client active address mismatch after admin key import",
             '--sender "$admin_address"',
         ]);
     });
