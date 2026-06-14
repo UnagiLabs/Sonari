@@ -115,6 +115,14 @@ export function RegisterWizard() {
         }
     }, [activeStep, goTo]);
 
+    const handleDisclaimersToggle = useCallback((checked: boolean) => {
+        setState((current) =>
+            current.disclaimersAccepted === checked
+                ? current
+                : { ...current, disclaimersAccepted: checked },
+        );
+    }, []);
+
     // TODO(STEP 3): membership / residence の個別ステートメント承諾は disclaimersAccepted に統合予定。
     // 配列同意フィールドは WizardState から削除済みのため、このハンドラは後続 STEP で整理する。
     const handleMembershipToggle = useCallback((_index: number, _checked: boolean) => {
@@ -163,7 +171,13 @@ export function RegisterWizard() {
     function renderStep(step: WizardStepId) {
         switch (step) {
             case "welcome":
-                return <WelcomeStep onNext={goNext} />;
+                return (
+                    <WelcomeStep
+                        disclaimersAccepted={state.disclaimersAccepted}
+                        onNext={goNext}
+                        onToggleDisclaimers={handleDisclaimersToggle}
+                    />
+                );
             case "residence": {
                 // Next ボタンは「保存前の準備完了条件」で制御する。
                 // canProceed("residence") は residenceSaved も含むため、保存前のボタンが

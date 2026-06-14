@@ -55,6 +55,22 @@
                     }
                 },
                 "cta": "Get started",
+                "disclaimers": {
+                    "heading": "Please review and agree before you start.",
+                    "residenceTitle": "Residence area",
+                    "membershipTitle": "Membership SBT",
+                    "residence": {
+                        "0": "This cell is my active residence area for Sonari eligibility checks.",
+                        "1": "I understand changes after a disaster cutoff do not apply to that disaster.",
+                        "2": "Sonari stores the selected H3 cell, not my raw address or GPS history."
+                    },
+                    "membership": {
+                        "0": "This wallet will own one active Sonari Membership SBT.",
+                        "1": "The Membership SBT is soulbound and cannot be transferred.",
+                        "2": "Holding a Membership SBT does not guarantee aid or create payout priority."
+                    },
+                    "agreeAll": "I agree to all of the above."
+                },
                 "membership": {
                     "checking": "Checking your Membership SBT…",
                     "registeredTitle": "You already have a Membership SBT.",
