@@ -33,7 +33,9 @@ import {
     type DonateSubmitDisabledReason,
     type DonateTxState,
     resolveDonateSubmitDisabledReason,
+    selectEmergencyBannerCampaign,
 } from "./donate-view-state";
+import { EmergencyBanner } from "./emergency-banner";
 import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
@@ -286,6 +288,10 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
     });
 
     const resultView = buildDonateTxResultView(txState, network);
+    const emergencyBannerCampaign = selectEmergencyBannerCampaign(
+        destinationState,
+        BigInt(Date.now()),
+    );
     const destination = useMemo<DonateDestinationInput>(() => {
         if (mode === "campaign") {
             return { kind: "campaign", campaignId };
@@ -412,6 +418,12 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
         setTxState({ status: "idle" });
     }
 
+    function handleBannerDonate(bannerCampaignId: string) {
+        setMode("campaign");
+        setCampaignId(bannerCampaignId);
+        setTxState({ status: "idle" });
+    }
+
     async function handleSubmit() {
         if (disabledReason !== null || isDonateInFlight || config === null) {
             return;
@@ -498,6 +510,10 @@ export function DonateView({ locale }: { readonly locale: SonariLocale }) {
                 <SiteTopbar active="donate" locale={locale} />
 
                 <main className="page donate-page">
+                    <EmergencyBanner
+                        campaign={emergencyBannerCampaign}
+                        onDonate={handleBannerDonate}
+                    />
                     <header className="donate-hero">
                         <div>
                             <div className="eyebrow">{t("hero.eyebrow")}</div>

@@ -5,6 +5,7 @@ import {
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
     findActiveEmergencyCampaign,
+    selectEmergencyBannerCampaign,
     buildCategoryListItems,
     type DonateDonorPassReadState,
     type DonateDestinationReadState,
@@ -303,6 +304,89 @@ describe("findActiveEmergencyCampaign", () => {
         const nowMs = 9_000_000n;
         const campaigns = [makeCampaign("1000000"), makeCampaign("2000000")];
         expect(findActiveEmergencyCampaign(campaigns, nowMs)).toBeNull();
+    });
+});
+
+describe("selectEmergencyBannerCampaign", () => {
+    const activeCampaign: CampaignDestination = {
+        kind: "campaign",
+        id: "0xcampaign1",
+        label: "Earthquake Relief Pool",
+        campaignId: "0xcampaign1",
+        categoryPoolId: "0xcategorypool",
+        category: 1,
+        donationEndMs: "9999999999999",
+    };
+
+    it("returns null when status is idle", () => {
+        const state: DonateDestinationReadState = {
+            status: "idle",
+            campaigns: [activeCampaign],
+            categories: [],
+            errorMessage: null,
+        };
+        expect(selectEmergencyBannerCampaign(state, 1000n)).toBeNull();
+    });
+
+    it("returns null when status is loading", () => {
+        const state: DonateDestinationReadState = {
+            status: "loading",
+            campaigns: [activeCampaign],
+            categories: [],
+            errorMessage: null,
+        };
+        expect(selectEmergencyBannerCampaign(state, 1000n)).toBeNull();
+    });
+
+    it("returns null when status is error", () => {
+        const state: DonateDestinationReadState = {
+            status: "error",
+            campaigns: [activeCampaign],
+            categories: [],
+            errorMessage: "network error",
+        };
+        expect(selectEmergencyBannerCampaign(state, 1000n)).toBeNull();
+    });
+
+    it("returns the active campaign when status is ready and a campaign is active", () => {
+        const state: DonateDestinationReadState = {
+            status: "ready",
+            campaigns: [activeCampaign],
+            categories: [],
+            errorMessage: null,
+        };
+        const nowMs = 1000n;
+        expect(selectEmergencyBannerCampaign(state, nowMs)).toBe(activeCampaign);
+    });
+
+    it("returns null when status is ready but no campaign is active", () => {
+        const expiredCampaign: CampaignDestination = {
+            kind: "campaign",
+            id: "0xcampaign2",
+            label: "Expired Campaign",
+            campaignId: "0xcampaign2",
+            categoryPoolId: "0xcategorypool",
+            category: 1,
+            donationEndMs: "500",
+        };
+        const state: DonateDestinationReadState = {
+            status: "ready",
+            campaigns: [expiredCampaign],
+            categories: [],
+            errorMessage: null,
+        };
+        const nowMs = 1000n;
+        expect(selectEmergencyBannerCampaign(state, nowMs)).toBeNull();
+    });
+
+    it("returns null when status is ready and campaigns array is empty", () => {
+        const state: DonateDestinationReadState = {
+            status: "ready",
+            campaigns: [],
+            categories: [],
+            errorMessage: null,
+        };
+        expect(selectEmergencyBannerCampaign(state, 1000n)).toBeNull();
     });
 });
 

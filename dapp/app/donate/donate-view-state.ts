@@ -281,6 +281,21 @@ export function findActiveEmergencyCampaign(
     return null;
 }
 
+/**
+ * DonateDestinationReadState と現在時刻から、緊急バナーに表示するキャンペーンを選定する。
+ * status が "ready" 以外の場合（loading / error / idle）は null を返してバナーを非表示にする。
+ * status が "ready" の場合は findActiveEmergencyCampaign に委譲する。
+ */
+export function selectEmergencyBannerCampaign(
+    state: DonateDestinationReadState,
+    nowMs: bigint,
+): CampaignDestination | null {
+    if (state.status !== "ready") {
+        return null;
+    }
+    return findActiveEmergencyCampaign(state.campaigns, nowMs);
+}
+
 export type DonateTxState =
     | { readonly status: "idle" }
     | { readonly status: "building" }
