@@ -539,7 +539,7 @@ export async function runRepublishBootstrap(
         disasterRegistryId,
         allowedResidenceCellRegistryId,
         settings,
-        rewrittenPublishedToml,
+        ...(rewrittenPublishedToml !== undefined ? { rewrittenPublishedToml } : {}),
     };
 }
 
