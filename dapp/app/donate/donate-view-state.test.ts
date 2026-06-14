@@ -5,11 +5,12 @@ import {
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
     findActiveEmergencyCampaign,
+    buildCategoryListItems,
     type DonateDonorPassReadState,
     type DonateDestinationReadState,
     type DonateTxState,
 } from "./donate-view-state";
-import type { CampaignDestination } from "./donate-destinations";
+import type { CampaignDestination, CategoryDestination } from "./donate-destinations";
 
 const readyDestinationState: DonateDestinationReadState = {
     status: "ready",
@@ -302,6 +303,91 @@ describe("findActiveEmergencyCampaign", () => {
         const nowMs = 9_000_000n;
         const campaigns = [makeCampaign("1000000"), makeCampaign("2000000")];
         expect(findActiveEmergencyCampaign(campaigns, nowMs)).toBeNull();
+    });
+});
+
+describe("buildCategoryListItems", () => {
+    const makeCategory = (category: number, categoryPoolId: string): CategoryDestination => ({
+        kind: "category",
+        id: categoryPoolId,
+        label: category === 1 ? "Earthquake Relief Pool" : `Category ${category}`,
+        categoryPoolId,
+        category,
+    });
+
+    const earthquakeCategory = makeCategory(1, "0x" + "a".repeat(64));
+    const floodCategory = makeCategory(3, "0x" + "b".repeat(64));
+
+    it("places the earthquake category (category number 1) first when it exists", () => {
+        const categories = [floodCategory, earthquakeCategory];
+        const items = buildCategoryListItems(categories);
+        const availableItems = items.filter((item) => item.kind === "available");
+        expect(availableItems[0]).toMatchObject({ kind: "available", category: 1 });
+    });
+
+    it("places coming soon items after available items", () => {
+        const categories = [earthquakeCategory];
+        const items = buildCategoryListItems(categories);
+        const firstComingSoonIndex = items.findIndex((item) => item.kind === "comingSoon");
+        // All items before the first comingSoon must be available
+        const itemsBeforeComingSoon = items.slice(0, firstComingSoonIndex);
+        expect(itemsBeforeComingSoon.every((item) => item.kind === "available")).toBe(true);
+        expect(firstComingSoonIndex).toBeGreaterThan(-1);
+    });
+
+    it("coming soon items have no categoryPoolId and are not selectable", () => {
+        const categories = [earthquakeCategory];
+        const items = buildCategoryListItems(categories);
+        const comingSoonItems = items.filter((item) => item.kind === "comingSoon");
+        expect(comingSoonItems.length).toBeGreaterThan(0);
+        for (const item of comingSoonItems) {
+            expect(item.kind).toBe("comingSoon");
+            if (item.kind === "comingSoon") {
+                // comingSoon items must not have categoryPoolId
+                expect(item).not.toHaveProperty("categoryPoolId");
+            }
+        }
+    });
+
+    it("returns coming soon items even when categories array is empty", () => {
+        const items = buildCategoryListItems([]);
+        const comingSoonItems = items.filter((item) => item.kind === "comingSoon");
+        expect(comingSoonItems.length).toBeGreaterThan(0);
+    });
+
+    it("preserves original order for non-earthquake categories after the earthquake entry", () => {
+        const cat2 = makeCategory(2, "0x" + "c".repeat(64));
+        const cat3 = makeCategory(3, "0x" + "d".repeat(64));
+        const categories = [cat3, earthquakeCategory, cat2];
+        const items = buildCategoryListItems(categories);
+        const availableItems = items.filter((item) => item.kind === "available");
+        expect(availableItems[0]).toMatchObject({ kind: "available", category: 1 });
+        // cat3 (index 0 in input) and cat2 (index 2 in input) maintain relative order after earthquake
+        const nonEarthquake = availableItems.slice(1);
+        expect(nonEarthquake[0]).toMatchObject({ kind: "available", category: 3 });
+        expect(nonEarthquake[1]).toMatchObject({ kind: "available", category: 2 });
+    });
+
+    it("assigns stable id to each item", () => {
+        const categories = [earthquakeCategory];
+        const items = buildCategoryListItems(categories);
+        for (const item of items) {
+            expect(typeof item.id).toBe("string");
+            expect(item.id.length).toBeGreaterThan(0);
+        }
+        const ids = items.map((item) => item.id);
+        const uniqueIds = new Set(ids);
+        expect(uniqueIds.size).toBe(ids.length);
+    });
+
+    it("available item labelKey is the category label from CategoryDestination", () => {
+        const categories = [earthquakeCategory];
+        const items = buildCategoryListItems(categories);
+        const available = items.find((item) => item.kind === "available");
+        expect(available).toBeDefined();
+        if (available?.kind === "available") {
+            expect(available.label).toBe("Earthquake Relief Pool");
+        }
     });
 });
 

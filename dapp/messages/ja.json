@@ -496,6 +496,13 @@
             "title": "緊急キャンペーン実施中",
             "body": "現在、災害救援キャンペーンへの寄付を受け付けています: {name}",
             "cta": "このキャンペーンに寄付する"
+        },
+        "category": {
+            "comingSoonBadge": "近日対応",
+            "comingSoon": {
+                "flood": "洪水救援",
+                "student": "学生支援"
+            }
         }
     },
     "home": {

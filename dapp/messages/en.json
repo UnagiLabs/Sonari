@@ -496,6 +496,13 @@
             "title": "Active Emergency Campaign",
             "body": "A disaster relief campaign is currently accepting donations: {name}",
             "cta": "Donate to this campaign"
+        },
+        "category": {
+            "comingSoonBadge": "Coming soon",
+            "comingSoon": {
+                "flood": "Flood Relief",
+                "student": "Student Support"
+            }
         }
     },
     "home": {
