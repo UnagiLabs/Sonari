@@ -8,6 +8,12 @@ export interface EmergencyBannerProps {
     readonly campaign: EmergencyBannerCampaign | null;
     /** 「寄付する」ボタン押下時のコールバック。campaignId はキャンペーンのオブジェクト ID。 */
     readonly onDonate: (campaignId: string) => void;
+    /**
+     * 任意。指定すると寄付ボタンの前に主ボタンとしてリンクを表示する（例: 受け取る導線）。
+     * バナーを 1 枠に保ったまま、見ている人に合わせたアクションを足すために使う。出すか
+     * どうかの判定は呼び出し側が行い、このコンポーネントは渡された内容を描くだけにする。
+     */
+    readonly primaryAction?: { readonly href: string; readonly label: string };
 }
 
 /**
@@ -16,7 +22,11 @@ export interface EmergencyBannerProps {
  * 描画テスト基盤が無いため、表示ロジックは buildEmergencyBannerView に分離して
  * pure function として vitest でテストする。
  */
-export function EmergencyBanner({ campaign, onDonate }: EmergencyBannerProps): React.ReactNode {
+export function EmergencyBanner({
+    campaign,
+    onDonate,
+    primaryAction,
+}: EmergencyBannerProps): React.ReactNode {
     const t = useTranslations("donate.emergency");
     const view = buildEmergencyBannerView(campaign);
 
@@ -44,15 +54,25 @@ export function EmergencyBanner({ campaign, onDonate }: EmergencyBannerProps): R
                     ))}
                 </dl>
             ) : null}
-            <button
-                type="button"
-                className="donate-emergency-banner-cta btn"
-                onClick={() => {
-                    onDonate(view.campaignId);
-                }}
-            >
-                {t("cta")}
-            </button>
+            <div className="donate-emergency-banner-actions">
+                {primaryAction !== undefined ? (
+                    <a
+                        className="donate-emergency-banner-cta donate-emergency-banner-cta-primary btn"
+                        href={primaryAction.href}
+                    >
+                        {primaryAction.label}
+                    </a>
+                ) : null}
+                <button
+                    type="button"
+                    className="donate-emergency-banner-cta btn"
+                    onClick={() => {
+                        onDonate(view.campaignId);
+                    }}
+                >
+                    {t("cta")}
+                </button>
+            </div>
         </div>
     );
 }

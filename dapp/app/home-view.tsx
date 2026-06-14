@@ -20,6 +20,7 @@ import {
 } from "./donate/donate-view-state";
 import { EmergencyBanner } from "./donate/emergency-banner";
 import type { EmergencyBannerCampaign } from "./donate/emergency-banner-state";
+import { useClaimBannerCta } from "./home-claim-banner";
 import { SiteTopbar } from "./i18n/site-topbar";
 import type { SonariLocale } from "./register/wizard/locale";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "./wallet/wallet-network";
@@ -301,9 +302,11 @@ export function HomeView({
 function HomeEmergencyBannerView({
     campaign,
     donateHref,
+    primaryAction,
 }: {
     campaign: EmergencyBannerCampaign | null;
     donateHref: string;
+    primaryAction?: { readonly href: string; readonly label: string };
 }) {
     const router = useRouter();
     return (
@@ -312,6 +315,7 @@ function HomeEmergencyBannerView({
             onDonate={() => {
                 router.push(donateHref);
             }}
+            {...(primaryAction !== undefined ? { primaryAction } : {})}
         />
     );
 }
@@ -320,7 +324,11 @@ function HomeEmergencyBannerView({
 // 取得は donate ページと同じ readDonateDestinations を使う。読み込み中・失敗・
 // 該当なしのときは selectEmergencyBannerCampaign が null を返し、バナーは出ない（fail-close）。
 function HomeEmergencyBanner() {
+    const t = useTranslations("home");
     const network = readWalletNetwork();
+    // 受け取り導線の判定は寄付バナーの取得とは独立。接続済み・登録済み・claim window
+    // 開のキャンペーンがあるときだけ「受け取る」主ボタンを足す（バナーは 1 枠のまま）。
+    const claimCta = useClaimBannerCta();
     const [state, setState] = useState<DonateDestinationReadState>({
         status: "loading",
         campaigns: [],
@@ -390,7 +398,17 @@ function HomeEmergencyBanner() {
 
     // 現在時刻で実施中判定する。該当が無ければ null になりバナーは非表示。
     const campaign = selectEmergencyBannerCampaign(state, BigInt(Date.now()));
-    return <HomeEmergencyBannerView campaign={campaign} donateHref="/donate" />;
+    const primaryAction =
+        claimCta !== null
+            ? { href: `/claim?campaign=${claimCta.campaignId}`, label: t("emergencyClaimCta") }
+            : undefined;
+    return (
+        <HomeEmergencyBannerView
+            campaign={campaign}
+            donateHref="/donate"
+            {...(primaryAction !== undefined ? { primaryAction } : {})}
+        />
+    );
 }
 
 function SectionHeader({

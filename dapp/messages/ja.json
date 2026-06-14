@@ -491,6 +491,7 @@
             "notePrivate": "居住データは非公開のまま",
             "noteVerified": "検証済みの災害イベント"
         },
+        "emergencyClaimCta": "救済を受け取る",
         "sponsors": {
             "title": "透明なパートナーに支えられて"
         },
