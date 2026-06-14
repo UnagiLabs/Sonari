@@ -46,7 +46,6 @@ fun setup(): test_scenario::Scenario {
         scenario.ctx(),
     );
     test_scenario::return_shared(registry);
-    admin::create_disaster_registry(&cap, scenario.ctx());
     scenario.return_to_sender(cap);
     scenario.next_tx(ADMIN);
 

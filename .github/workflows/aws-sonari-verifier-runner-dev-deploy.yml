@@ -1,6 +1,12 @@
 name: AWS Sonari Verifier Runner Dev Deploy
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - contracts/Published.toml
+      - .github/workflows/aws-sonari-verifier-runner-dev-deploy.yml
   workflow_dispatch:
 
 permissions:

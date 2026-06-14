@@ -58,8 +58,15 @@ fun init_creates_genesis_objects_and_tracking_events() {
         identity_registry::registry_created_event_fields(*identity_events.borrow(0));
     assert!(identity_registry_kind == identity_registry::registry_kind_identity());
 
+    let disaster_registry_events = event::events_by_type<disaster_event::DisasterRegistryCreated>();
+    assert!(disaster_registry_events.length() == 1);
+
+    let allowed_residence_events =
+        event::events_by_type<allowed_residence_cell::AllowedResidenceCellRootUpdated>();
+    assert!(allowed_residence_events.length() == 1);
+
     let genesis_events = event::events_by_type<admin::GenesisObjectCreated>();
-    assert!(genesis_events.length() == 10);
+    assert!(genesis_events.length() == 12);
     let (_, category_registry_kind, category_registry_shared, _, _) =
         admin::genesis_object_created_event_fields(*genesis_events.borrow(7));
     assert!(category_registry_kind == admin::genesis_kind_category_registry());
@@ -72,6 +79,21 @@ fun init_creates_genesis_objects_and_tracking_events() {
         admin::genesis_object_created_event_fields(*genesis_events.borrow(9));
     assert!(earthquake_pool_kind == admin::genesis_kind_earthquake_pool());
     assert!(earthquake_pool_shared);
+    let (disaster_registry_id_from_genesis, disaster_registry_kind, disaster_registry_shared, _, _) =
+        admin::genesis_object_created_event_fields(*genesis_events.borrow(10));
+    assert!(disaster_registry_kind == admin::genesis_kind_disaster_registry());
+    assert!(disaster_registry_shared);
+    let (
+        allowed_residence_registry_id_from_genesis,
+        allowed_residence_registry_kind,
+        allowed_residence_registry_shared,
+        _,
+        _,
+    ) = admin::genesis_object_created_event_fields(*genesis_events.borrow(11));
+    assert!(
+        allowed_residence_registry_kind == admin::genesis_kind_allowed_residence_cell_registry(),
+    );
+    assert!(allowed_residence_registry_shared);
 
     scenario.next_tx(ADMIN);
     {
@@ -84,6 +106,12 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(test_scenario::has_most_recent_shared<metadata_verifier::VerifierRegistry>());
         assert!(test_scenario::has_most_recent_shared<identity_registry::IdentityRegistry>());
         assert!(test_scenario::has_most_recent_shared<category_pool::CategoryRegistry>());
+        assert!(test_scenario::has_most_recent_shared<disaster_event::DisasterRegistry>());
+        assert!(
+            test_scenario::has_most_recent_shared<
+                allowed_residence_cell::AllowedResidenceCellRegistry,
+            >(),
+        );
 
         let cap = scenario.take_from_sender<admin::AdminCap>();
         let pause_state = scenario.take_shared<admin::PauseState>();
@@ -94,6 +122,9 @@ fun init_creates_genesis_objects_and_tracking_events() {
         let verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
         let identity_registry = scenario.take_shared<identity_registry::IdentityRegistry>();
         let category_registry = scenario.take_shared<category_pool::CategoryRegistry>();
+        let disaster_registry = scenario.take_shared<disaster_event::DisasterRegistry>();
+        let allowed_residence_registry =
+            scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
 
         assert!(!admin::is_global_paused(&pause_state));
         assert!(admin::paused_target_count(&pause_state) == 0);
@@ -108,6 +139,12 @@ fun init_creates_genesis_objects_and_tracking_events() {
         assert!(
             identity_registry_id_from_event == identity_registry::registry_id(&identity_registry),
         );
+        let (disaster_event_registry_id, _) =
+            disaster_event::registry_fields_for_testing(&disaster_registry);
+        assert!(disaster_registry_id_from_genesis == disaster_event_registry_id);
+        let (allowed_residence_registry_id, _, _, _, _, _) =
+            allowed_residence_cell::registry_fields_for_testing(&allowed_residence_registry);
+        assert!(allowed_residence_registry_id_from_genesis == allowed_residence_registry_id);
 
         scenario.return_to_sender(cap);
         test_scenario::return_shared(pause_state);
@@ -118,6 +155,8 @@ fun init_creates_genesis_objects_and_tracking_events() {
         test_scenario::return_shared(verifier_registry);
         test_scenario::return_shared(identity_registry);
         test_scenario::return_shared(category_registry);
+        test_scenario::return_shared(disaster_registry);
+        test_scenario::return_shared(allowed_residence_registry);
     };
 
     scenario.end();
@@ -194,50 +233,17 @@ fun non_admin_cannot_access_admin_cap_required_for_admin_entries() {
 }
 
 #[test]
-fun admin_can_create_allowed_residence_cell_registry() {
-    let mut scenario = initialized();
+fun init_creates_allowed_residence_cell_registry() {
+    let scenario = initialized();
 
-    {
-        let mut cap = scenario.take_from_sender<admin::AdminCap>();
-        let registry_id = admin::create_allowed_residence_cell_registry(
-            &mut cap,
-            root_a(),
-            7,
-            1,
-            source_hash_a(),
-            scenario.ctx(),
-        );
-        scenario.return_to_sender(cap);
-
-        let events = event::events_by_type<allowed_residence_cell::AllowedResidenceCellRootUpdated>();
-        assert!(events.length() == 1);
-        let (
-            event_registry_id,
-            event_root,
-            event_geo_resolution,
-            event_allowlist_version,
-            event_source_hash,
-            event_updated_at_ms,
-            event_actor,
-        ) = allowed_residence_cell::root_updated_event_fields(*events.borrow(0));
-        assert!(event_registry_id == registry_id);
-        assert!(event_root == root_a());
-        assert!(event_geo_resolution == 7u8);
-        assert!(event_allowlist_version == 1u64);
-        assert!(event_source_hash == source_hash_a());
-        assert!(event_updated_at_ms == 0u64);
-        assert!(event_actor == ADMIN);
-    };
-
-    scenario.next_tx(ADMIN);
     {
         let registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
         let (_, root, geo_resolution, allowlist_version, source_hash, updated_at_ms) =
             allowed_residence_cell::registry_fields_for_testing(&registry);
-        assert!(root == root_a());
+        assert!(root == zero_hash());
         assert!(geo_resolution == 7u8);
-        assert!(allowlist_version == 1u64);
-        assert!(source_hash == source_hash_a());
+        assert!(allowlist_version == 0u64);
+        assert!(source_hash == zero_hash());
         assert!(updated_at_ms == 0u64);
         test_scenario::return_shared(registry);
     };
@@ -305,7 +311,7 @@ fun admin_can_update_allowed_residence_cell_registry_metadata() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = allowed_residence_cell::EInvalidHashLength)]
+#[test, expected_failure(abort_code = admin::EAllowedResidenceCellRegistryAlreadyCreated)]
 fun create_allowed_residence_cell_registry_rejects_invalid_root_length() {
     let mut scenario = initialized();
 
@@ -323,7 +329,7 @@ fun create_allowed_residence_cell_registry_rejects_invalid_root_length() {
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = allowed_residence_cell::EInvalidHashLength)]
+#[test, expected_failure(abort_code = admin::EAllowedResidenceCellRegistryAlreadyCreated)]
 fun create_allowed_residence_cell_registry_rejects_invalid_source_hash_length() {
     let mut scenario = initialized();
 
@@ -341,7 +347,7 @@ fun create_allowed_residence_cell_registry_rejects_invalid_source_hash_length() 
     scenario.end();
 }
 
-#[test, expected_failure(abort_code = allowed_residence_cell::EUnsupportedGeoResolution)]
+#[test, expected_failure(abort_code = admin::EAllowedResidenceCellRegistryAlreadyCreated)]
 fun create_allowed_residence_cell_registry_rejects_non_res7_root() {
     let mut scenario = initialized();
 
@@ -450,9 +456,11 @@ fun initialized(): test_scenario::Scenario {
 
 fun initialized_with_allowed_residence_cell_registry(): test_scenario::Scenario {
     let mut scenario = initialized();
-    let mut cap = scenario.take_from_sender<admin::AdminCap>();
-    admin::create_allowed_residence_cell_registry(
-        &mut cap,
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut registry = scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+    admin::update_allowed_residence_cell_root(
+        &cap,
+        &mut registry,
         root_a(),
         7,
         1,
@@ -460,8 +468,13 @@ fun initialized_with_allowed_residence_cell_registry(): test_scenario::Scenario 
         scenario.ctx(),
     );
     scenario.return_to_sender(cap);
+    test_scenario::return_shared(registry);
     scenario.next_tx(ADMIN);
     scenario
+}
+
+fun zero_hash(): vector<u8> {
+    x"0000000000000000000000000000000000000000000000000000000000000000"
 }
 
 fun root_a(): vector<u8> {

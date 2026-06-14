@@ -26,19 +26,25 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         await expect(access(legacyEarthquakeWorkflowPath)).rejects.toThrow();
     });
 
-    it("runs only on manual dispatch to avoid wasteful auto-deploys, with dev-scoped names", async () => {
+    it("runs on manual dispatch or Published.toml changes on main, with dev-scoped names", async () => {
         const workflow = await readWorkflow();
 
         expectContainsAll(workflow, [
             "name: AWS Sonari Verifier Runner Dev Deploy",
+            "push:",
+            "branches:",
+            "- main",
+            "paths:",
+            "- contracts/Published.toml",
             "workflow_dispatch:",
             "environment: aws-sonari-verifier-runner-dev",
             "group: aws-sonari-verifier-runner-dev-deploy",
+            "runs-on: [self-hosted, linux, x64, manji]",
         ]);
-        // GitHub Actions のコスト削減のため、push などの自動 trigger は持たず手動実行限定にする。
-        // EIF 再ビルドを伴うフルデプロイは毎 push で走らせない（PCR 自動再登録も dispatch 時のみ動く）。
-        expect(workflow).not.toContain("push:");
+        // Published.toml 更新時だけ main merge 後に manji self-hosted runner で dev deploy する。
+        // GitHub-hosted runner では AWS dev deploy しない。
         expect(workflow).not.toContain("pull_request:");
+        expect(workflow).not.toContain("ubuntu-latest");
         expect(workflow).not.toContain("aws-sonari-verifier-runner-prod");
     });
 

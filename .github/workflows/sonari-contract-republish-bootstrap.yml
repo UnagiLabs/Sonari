@@ -1,0 +1,181 @@
+name: Sonari Contract Republish Bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: Sui network to publish to
+        required: true
+        default: testnet
+        type: choice
+        options:
+          - testnet
+          - mainnet
+      residence_root:
+        description: 32-byte 0x Merkle root for AllowedResidenceCellRegistry
+        required: true
+        type: string
+      residence_source_hash:
+        description: 32-byte 0x source hash for the residence allowlist
+        required: true
+        type: string
+      residence_allowlist_version:
+        description: u64 allowlist version
+        required: true
+        default: "1"
+        type: string
+      commit_published_toml:
+        description: Commit and push the Published.toml update to this branch
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    name: Publish contract and register residence root
+    runs-on: [self-hosted, linux, x64, manji]
+    environment: aws-sonari-verifier-runner-dev
+    timeout-minutes: 45
+    concurrency:
+      group: sonari-contract-republish-bootstrap-${{ inputs.network }}
+      cancel-in-progress: false
+    env:
+      SONARI_SUI_NETWORK: ${{ inputs.network }}
+      SONARI_RESIDENCE_ROOT: ${{ inputs.residence_root }}
+      SONARI_RESIDENCE_SOURCE_HASH: ${{ inputs.residence_source_hash }}
+      SONARI_RESIDENCE_ALLOWLIST_VERSION: ${{ inputs.residence_allowlist_version }}
+      SONARI_DEV_ADMIN_PRIVATE_KEY: ${{ secrets.SONARI_DEV_ADMIN_PRIVATE_KEY }}
+      SUI_CLI_URL: https://github.com/MystenLabs/sui/releases/download/testnet-v1.71.1/sui-testnet-v1.71.1-ubuntu-x86_64.tgz
+      SUI_CLI_SHA256: ca6bc791596d5def88500b653b5db718e72dd0d2b58039ad118f74ef9e6761a5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned Sui CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/sonari-bin"
+          cache_dir="$HOME/.cache/sonari/cli-artifacts/sui/$SUI_CLI_SHA256"
+          download_path="$cache_dir/download"
+          extract_dir="$RUNNER_TEMP/sui-extract"
+
+          mkdir -p "$install_dir" "$cache_dir" "$extract_dir"
+          if [[ ! -f "$download_path" ]]; then
+            curl -fsSL "$SUI_CLI_URL" -o "$download_path"
+          fi
+          printf '%s  %s\n' "$SUI_CLI_SHA256" "$download_path" | sha256sum -c -
+          tar -xzf "$download_path" -C "$extract_dir"
+          source_path="$(find "$extract_dir" -type f -name sui | head -n 1)"
+          if [[ -z "$source_path" || ! -f "$source_path" ]]; then
+            echo "Unable to find sui in downloaded Sui CLI artifact" >&2
+            exit 1
+          fi
+          install -m 0755 "$source_path" "$install_dir/sui"
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/sui" --version
+
+      - name: Prepare admin Sui client config
+        shell: bash
+        env:
+          SUI_RPC_URL: ${{ vars.SONARI_SUI_RPC_URL }}
+        run: |
+          set -euo pipefail
+          set +x
+          if [[ -z "${SONARI_DEV_ADMIN_PRIVATE_KEY:-}" ]]; then
+            echo "SONARI_DEV_ADMIN_PRIVATE_KEY secret is required for contract republish bootstrap" >&2
+            exit 1
+          fi
+          echo "::add-mask::${SONARI_DEV_ADMIN_PRIVATE_KEY}"
+
+          case "$SONARI_SUI_NETWORK" in
+            mainnet)
+              rpc_url="${SUI_RPC_URL:-https://fullnode.mainnet.sui.io:443}"
+              ;;
+            testnet)
+              rpc_url="${SUI_RPC_URL:-https://fullnode.testnet.sui.io:443}"
+              ;;
+            *)
+              echo "unsupported SONARI_SUI_NETWORK: $SONARI_SUI_NETWORK" >&2
+              exit 1
+              ;;
+          esac
+
+          admin_dir="$RUNNER_TEMP/sui-admin"
+          rm -rf "$admin_dir"
+          mkdir -p "$admin_dir"
+          client_config="$admin_dir/client.yaml"
+          admin_alias="sonari-republish-admin-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          export SUI_CONFIG_DIR="$admin_dir"
+          sui client --yes new-address ed25519 sonari-bootstrap --quiet >/dev/null
+          sui client new-env --alias "$SONARI_SUI_NETWORK" --rpc "$rpc_url"
+          import_json="$(sui keytool import \
+            "$SONARI_DEV_ADMIN_PRIVATE_KEY" ed25519 --alias "$admin_alias" --json)"
+          admin_address="$(SUI_IMPORT_JSON="$import_json" node --input-type=module <<'NODE'
+          const parsed = JSON.parse(process.env.SUI_IMPORT_JSON ?? "{}");
+          const address = parsed.suiAddress ?? parsed.address;
+          if (typeof address !== "string" || !/^0x[0-9a-fA-F]+$/.test(address)) {
+            process.stderr.write("sui keytool import did not return a Sui address\n");
+            process.exit(1);
+          }
+          process.stdout.write(address);
+          NODE
+          )"
+          sui client switch --env "$SONARI_SUI_NETWORK" --address "$admin_address" --quiet
+          echo "SONARI_ADMIN_SUI_CLIENT_CONFIG=$client_config" >> "$GITHUB_ENV"
+
+      - name: Publish and register residence root
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run republish:bootstrap -- \
+            --live \
+            --env "$SONARI_SUI_NETWORK" \
+            --client-config "$SONARI_ADMIN_SUI_CLIENT_CONFIG" \
+            --residence-root "$SONARI_RESIDENCE_ROOT" \
+            --geo-resolution 7 \
+            --allowlist-version "$SONARI_RESIDENCE_ALLOWLIST_VERSION" \
+            --source-hash "$SONARI_RESIDENCE_SOURCE_HASH"
+
+      - name: Verify Published.toml changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- contracts/Published.toml && {
+            echo "contracts/Published.toml was not updated by republish bootstrap" >&2
+            exit 1
+          }
+
+      - name: Commit Published.toml
+        if: ${{ inputs.commit_published_toml }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add contracts/Published.toml
+          git commit -m "chore: Published.tomlをrepublish結果で更新する"
+          git push

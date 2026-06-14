@@ -30,7 +30,7 @@ function genesisEvent(objectKind: number, id: string): unknown {
     };
 }
 
-/** publish の events 配列を、init が必ず emit する 10 種類すべて揃えて返す。 */
+/** publish の events 配列を、init が必ず emit する 12 種類すべて揃えて返す。 */
 function fullGenesisEvents(): unknown[] {
     return [
         genesisEvent(GENESIS_KIND.ADMIN_CAP, objectId("01")),
@@ -43,6 +43,8 @@ function fullGenesisEvents(): unknown[] {
         genesisEvent(GENESIS_KIND.IDENTITY_REGISTRY, objectId("09")),
         genesisEvent(GENESIS_KIND.CATEGORY_REGISTRY, objectId("10")),
         genesisEvent(GENESIS_KIND.EARTHQUAKE_POOL, objectId("11")),
+        genesisEvent(GENESIS_KIND.DISASTER_REGISTRY, objectId("d1")),
+        genesisEvent(GENESIS_KIND.ALLOWED_RESIDENCE_CELL_REGISTRY, objectId("e1")),
     ];
 }
 
@@ -56,14 +58,16 @@ function fullRewireInput(): RewireInput {
 }
 
 describe("parseGenesisObjectIds", () => {
-    it("init が emit する 10 種類の genesis kind をすべて Map に取り込む", () => {
+    it("init が emit する 12 種類の genesis kind をすべて Map に取り込む", () => {
         const ids = parseGenesisObjectIds({ events: fullGenesisEvents() });
-        expect(ids.size).toBe(10);
+        expect(ids.size).toBe(12);
         expect(ids.get(GENESIS_KIND.ADMIN_CAP)).toBe(objectId("01"));
         expect(ids.get(GENESIS_KIND.OPERATIONS_POOL)).toBe(objectId("04"));
         expect(ids.get(GENESIS_KIND.DONOR_REGISTRY)).toBe(objectId("05"));
         expect(ids.get(GENESIS_KIND.CATEGORY_REGISTRY)).toBe(objectId("10"));
         expect(ids.get(GENESIS_KIND.EARTHQUAKE_POOL)).toBe(objectId("11"));
+        expect(ids.get(GENESIS_KIND.DISASTER_REGISTRY)).toBe(objectId("d1"));
+        expect(ids.get(GENESIS_KIND.ALLOWED_RESIDENCE_CELL_REGISTRY)).toBe(objectId("e1"));
     });
 
     it("camelCase の objectKind / objectId にもフォールバックする", () => {
@@ -166,13 +170,13 @@ describe("buildSettingsAssignments", () => {
         expect(findAll("SONARI_FLOOR_CENSUS_CATEGORY_POOL")[0]?.value).toBe(objectId("11"));
     });
 
-    it("後付けの DisasterRegistry は AWS relayer registry(repo+env) へ張替える", () => {
+    it("init の DisasterRegistry は AWS relayer registry(repo+env) へ張替える", () => {
         const aws = findAll("AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY")[0];
         expect(aws?.value).toBe(objectId("d1"));
         expect(aws?.scopes).toEqual([GH_SCOPE.REPO, GH_SCOPE.ENV_AWS_DEV]);
     });
 
-    it("後付けの AllowedResidenceCellRegistry を SONARI 変数へ張替える", () => {
+    it("init の AllowedResidenceCellRegistry を SONARI 変数へ張替える", () => {
         expect(findAll("SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID")[0]?.value).toBe(objectId("e1"));
     });
 
@@ -409,23 +413,25 @@ describe("runRepublishBootstrap", () => {
                                     object_id: objectId("11"),
                                 },
                             },
-                        ],
-                    }),
-                );
-            }
-            if (plan.args.includes("create_disaster_registry")) {
-                return Promise.resolve(
-                    json({
-                        events: [
                             {
-                                type: `${objectId("ff")}::disaster_event::DisasterRegistryCreated`,
-                                parsedJson: { registry_id: objectId("d1") },
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.DISASTER_REGISTRY,
+                                    object_id: objectId("d1"),
+                                },
+                            },
+                            {
+                                type: `${objectId("ff")}::admin::GenesisObjectCreated`,
+                                parsedJson: {
+                                    object_kind: GENESIS_KIND.ALLOWED_RESIDENCE_CELL_REGISTRY,
+                                    object_id: objectId("e1"),
+                                },
                             },
                         ],
                     }),
                 );
             }
-            if (plan.args.includes("create_allowed_residence_cell_registry")) {
+            if (plan.args.includes("update_allowed_residence_cell_root")) {
                 return Promise.resolve(
                     json({
                         events: [
@@ -452,18 +458,14 @@ describe("runRepublishBootstrap", () => {
         expect(result.packageId).toBeUndefined();
     });
 
-    it("live 実行で publish → disaster → residence の順に呼び、ID と settings と新 toml を返す", async () => {
+    it("live 実行で publish → residence root update の順に呼び、ID と settings と新 toml を返す", async () => {
         const { executor, calls } = liveExecutor();
         const result = await runRepublishBootstrap(baseOptions({ dryRun: false }), executor);
         expect(
             calls.map((c) =>
                 c.args.includes("publish") ? "publish" : c.args[c.args.indexOf("--function") + 1],
             ),
-        ).toEqual([
-            "publish",
-            "create_disaster_registry",
-            "create_allowed_residence_cell_registry",
-        ]);
+        ).toEqual(["publish", "update_allowed_residence_cell_root"]);
         expect(result.packageId).toBe(objectId("ff"));
         expect(result.disasterRegistryId).toBe(objectId("d1"));
         expect(result.allowedResidenceCellRegistryId).toBe(objectId("e1"));
@@ -473,13 +475,12 @@ describe("runRepublishBootstrap", () => {
         expect(result.rewrittenPublishedToml).toContain(`published-at = "${objectId("ff")}"`);
     });
 
-    it("residence 作成は AdminCap・実 root・source hash を引数に渡す", async () => {
+    it("residence root 更新は AdminCap・registry・実 root・source hash を引数に渡す", async () => {
         const { executor, calls } = liveExecutor();
         await runRepublishBootstrap(baseOptions({ dryRun: false }), executor);
-        const residence = calls.find((c) =>
-            c.args.includes("create_allowed_residence_cell_registry"),
-        );
+        const residence = calls.find((c) => c.args.includes("update_allowed_residence_cell_root"));
         expect(residence?.args).toContain(objectId("01")); // AdminCap
+        expect(residence?.args).toContain(objectId("e1")); // AllowedResidenceCellRegistry
         expect(residence?.args).toContain(REAL_ROOT);
         expect(residence?.args).toContain(SOURCE_HASH);
     });

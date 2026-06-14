@@ -28,11 +28,6 @@ fun initialized_with_campaign(): (test_scenario::Scenario, ID, ID, ID, ID) {
     admin::init_for_testing(scenario.ctx());
     scenario.next_tx(ADMIN);
 
-    let cap = scenario.take_from_sender<admin::AdminCap>();
-    admin::create_disaster_registry(&cap, scenario.ctx());
-    scenario.return_to_sender(cap);
-    scenario.next_tx(ADMIN);
-
     let registry_id = category_pool::create_category_registry_for_testing(scenario.ctx());
     scenario.next_tx(ADMIN);
 

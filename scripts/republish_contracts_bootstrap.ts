@@ -40,6 +40,8 @@ export const GENESIS_KIND = {
     IDENTITY_REGISTRY: 9,
     CATEGORY_REGISTRY: 10,
     EARTHQUAKE_POOL: 11,
+    DISASTER_REGISTRY: 12,
+    ALLOWED_RESIDENCE_CELL_REGISTRY: 13,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -88,9 +90,9 @@ export interface RewireInput {
     readonly packageId: string;
     /** parseGenesisObjectIds の結果。 */
     readonly genesisObjectIds: ReadonlyMap<number, string>;
-    /** 後付けで作成した DisasterRegistry の object id。 */
+    /** init で作成した DisasterRegistry の object id。 */
     readonly disasterRegistryId: string;
-    /** 後付けで作成した AllowedResidenceCellRegistry の object id（実 root で作成）。 */
+    /** init で作成した AllowedResidenceCellRegistry の object id。 */
     readonly allowedResidenceCellRegistryId: string;
 }
 
@@ -145,6 +147,17 @@ export function buildSettingsAssignments(input: RewireInput): SettingsPlan {
     const identityRegistry = id(GENESIS_KIND.IDENTITY_REGISTRY, "IdentityRegistry(kind=9)");
     const categoryRegistry = id(GENESIS_KIND.CATEGORY_REGISTRY, "CategoryRegistry(kind=10)");
     const earthquakePool = id(GENESIS_KIND.EARTHQUAKE_POOL, "EarthquakePool(kind=11)");
+    const disasterRegistry = id(GENESIS_KIND.DISASTER_REGISTRY, "DisasterRegistry(kind=12)");
+    const allowedResidenceCellRegistry = id(
+        GENESIS_KIND.ALLOWED_RESIDENCE_CELL_REGISTRY,
+        "AllowedResidenceCellRegistry(kind=13)",
+    );
+    if (input.disasterRegistryId !== disasterRegistry) {
+        throw new Error("DisasterRegistry id does not match genesis kind 12");
+    }
+    if (input.allowedResidenceCellRegistryId !== allowedResidenceCellRegistry) {
+        throw new Error("AllowedResidenceCellRegistry id does not match genesis kind 13");
+    }
 
     const repo: readonly GhScope[] = [GH_SCOPE.REPO];
     const repoAndEnv: readonly GhScope[] = [GH_SCOPE.REPO, GH_SCOPE.ENV_AWS_DEV];
@@ -228,20 +241,20 @@ export function buildSettingsAssignments(input: RewireInput): SettingsPlan {
             secret: false,
             source: "genesis:EarthquakePool(kind=11)",
         },
-        // 後付けオブジェクト
+        // init が emit
         {
             name: "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY",
-            value: input.disasterRegistryId,
+            value: disasterRegistry,
             scopes: repoAndEnv,
             secret: false,
-            source: "afterTheFact:DisasterRegistry",
+            source: "genesis:DisasterRegistry(kind=12)",
         },
         {
             name: "SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID",
-            value: input.allowedResidenceCellRegistryId,
+            value: allowedResidenceCellRegistry,
             scopes: repo,
             secret: false,
-            source: "afterTheFact:AllowedResidenceCellRegistry",
+            source: "genesis:AllowedResidenceCellRegistry(kind=13)",
         },
         // package id から導出
         {
@@ -474,29 +487,27 @@ export async function runRepublishBootstrap(
         "AdminCap(kind=1)",
     );
 
-    // 2. DisasterRegistry を後付け作成
-    const disasterCommand = buildSuiCallCommand({
-        options: clientOptions,
-        packageId,
-        module: "admin",
-        functionName: "create_disaster_registry",
-        args: [adminCapId],
-    });
-    guardSecrets([disasterCommand], options.secrets);
-    const disasterJson = parseSuiJsonCommandResult(
-        await executor(disasterCommand),
-        "admin::create_disaster_registry",
+    // 2. init で作成された singleton registry を publish 結果から読む
+    const disasterRegistryId = requireGenesisId(
+        genesisObjectIds,
+        GENESIS_KIND.DISASTER_REGISTRY,
+        "DisasterRegistry(kind=12)",
     );
-    const disasterRegistryId = parseDisasterRegistryId(disasterJson);
+    const allowedResidenceCellRegistryId = requireGenesisId(
+        genesisObjectIds,
+        GENESIS_KIND.ALLOWED_RESIDENCE_CELL_REGISTRY,
+        "AllowedResidenceCellRegistry(kind=13)",
+    );
 
-    // 3. AllowedResidenceCellRegistry を実 root で後付け作成
+    // 3. AllowedResidenceCellRegistry は init の placeholder root から実 root へ更新する
     const residenceCommand = buildSuiCallCommand({
         options: clientOptions,
         packageId,
         module: "admin",
-        functionName: "create_allowed_residence_cell_registry",
+        functionName: "update_allowed_residence_cell_root",
         args: [
             adminCapId,
+            allowedResidenceCellRegistryId,
             options.residenceRoot,
             options.residenceGeoResolution,
             options.residenceAllowlistVersion,
@@ -506,9 +517,15 @@ export async function runRepublishBootstrap(
     guardSecrets([residenceCommand], options.secrets);
     const residenceJson = parseSuiJsonCommandResult(
         await executor(residenceCommand),
-        "admin::create_allowed_residence_cell_registry",
+        "admin::update_allowed_residence_cell_root",
     );
-    const allowedResidenceCellRegistryId = parseAllowedResidenceCellRegistryId(residenceJson);
+    const updatedAllowedResidenceCellRegistryId =
+        parseAllowedResidenceCellRegistryId(residenceJson);
+    if (updatedAllowedResidenceCellRegistryId !== allowedResidenceCellRegistryId) {
+        throw new Error(
+            "AllowedResidenceCellRootUpdated registry_id does not match genesis kind 13",
+        );
+    }
 
     // 4. GitHub 設定計画と新 Published.toml を組み立てる
     const settings = buildSettingsAssignments({
@@ -533,7 +550,7 @@ export async function runRepublishBootstrap(
 
     return {
         dryRun: false,
-        plannedCommands: [publishCommand, disasterCommand, residenceCommand],
+        plannedCommands: [publishCommand, residenceCommand],
         packageId,
         genesisObjectIds: Object.fromEntries(genesisObjectIds),
         disasterRegistryId,
@@ -654,7 +671,7 @@ async function main(): Promise<void> {
             readFlag(argv, "residence-root") ?? process.env.SONARI_RESIDENCE_ROOT,
             "--residence-root",
         ),
-        residenceGeoResolution: readFlag(argv, "geo-resolution") ?? "9",
+        residenceGeoResolution: readFlag(argv, "geo-resolution") ?? "7",
         residenceAllowlistVersion: readFlag(argv, "allowlist-version") ?? "1",
         residenceSourceHash: requireValue(
             readFlag(argv, "source-hash") ?? process.env.SONARI_RESIDENCE_SOURCE_HASH,

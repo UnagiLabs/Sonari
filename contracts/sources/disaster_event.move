@@ -341,6 +341,11 @@ public fun create_from_payload_for_testing(
 }
 
 #[test_only]
+public fun registry_fields_for_testing(registry: &DisasterRegistry): (ID, u64) {
+    (object::id(registry), registry.event_count)
+}
+
+#[test_only]
 public fun create_for_campaign_testing(
     registry: &mut DisasterRegistry,
     hazard_type: u8,

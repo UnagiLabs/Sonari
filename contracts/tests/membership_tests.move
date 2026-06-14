@@ -699,9 +699,12 @@ fun initialized_with_pools(): test_scenario::Scenario {
     admin::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ADMIN);
-    let mut cap = scenario.take_from_sender<admin::AdminCap>();
-    admin::create_allowed_residence_cell_registry(
-        &mut cap,
+    let cap = scenario.take_from_sender<admin::AdminCap>();
+    let mut residence_registry =
+        scenario.take_shared<allowed_residence_cell::AllowedResidenceCellRegistry>();
+    admin::update_allowed_residence_cell_root(
+        &cap,
+        &mut residence_registry,
         residence_root(),
         GEO_RESOLUTION,
         ALLOWLIST_VERSION,
@@ -709,6 +712,7 @@ fun initialized_with_pools(): test_scenario::Scenario {
         scenario.ctx(),
     );
     scenario.return_to_sender(cap);
+    test_scenario::return_shared(residence_registry);
 
     scenario.next_tx(ADMIN);
     scenario

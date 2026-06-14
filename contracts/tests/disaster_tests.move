@@ -114,13 +114,6 @@ fun finalized_disaster_payload_decodes_and_creates_certificate_object() {
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
-        admin::create_disaster_registry(&cap, scenario.ctx());
-        scenario.return_to_sender(cap);
-    };
-
-    scenario.next_tx(ADMIN);
-    {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
         register_oracle_enclave_for_testing(
@@ -579,13 +572,6 @@ fun duplicate_disaster_event_uid_and_revision_is_rejected() {
     scenario.next_tx(ADMIN);
     {
         let cap = scenario.take_from_sender<admin::AdminCap>();
-        admin::create_disaster_registry(&cap, scenario.ctx());
-        scenario.return_to_sender(cap);
-    };
-
-    scenario.next_tx(ADMIN);
-    {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
         let mut registry = scenario.take_shared<disaster_event::DisasterRegistry>();
         let mut verifier_registry = scenario.take_shared<metadata_verifier::VerifierRegistry>();
         register_oracle_enclave_for_testing(
@@ -868,12 +854,6 @@ fun initialized_disaster_registry(): test_scenario::Scenario {
     admin::init_for_testing(scenario.ctx());
 
     scenario.next_tx(ADMIN);
-    {
-        let cap = scenario.take_from_sender<admin::AdminCap>();
-        admin::create_disaster_registry(&cap, scenario.ctx());
-        scenario.return_to_sender(cap);
-    };
-
     scenario
 }
 
