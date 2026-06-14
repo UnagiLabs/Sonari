@@ -490,6 +490,19 @@
             "title": "DonorPass note",
             "body": "DonorPass records contribution history only. It does not provide claim rights, payout priority, or promised aid.",
             "link": "View dashboard"
+        },
+        "emergency": {
+            "tag": "Emergency",
+            "title": "Active Emergency Campaign",
+            "body": "A disaster relief campaign is currently accepting donations: {name}",
+            "cta": "Donate to this campaign"
+        },
+        "category": {
+            "comingSoonBadge": "Coming soon",
+            "comingSoon": {
+                "flood": "Flood Relief",
+                "student": "Student Support"
+            }
         }
     },
     "home": {

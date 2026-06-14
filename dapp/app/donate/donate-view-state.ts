@@ -3,6 +3,59 @@ import type { WalletNetwork } from "../wallet/wallet-network";
 import type { CampaignDestination, CategoryDestination } from "./donate-destinations";
 import type { DonationAmountErrorCode, DonationAmountValidationResult } from "./donate-amount";
 
+export type CategoryListItem =
+    | {
+          readonly kind: "available";
+          readonly id: string;
+          readonly label: string;
+          readonly categoryPoolId: string;
+          readonly category: number;
+      }
+    | {
+          readonly kind: "comingSoon";
+          readonly id: string;
+          readonly labelKey: string;
+      };
+
+// labelKey is relative to the "donate" i18n namespace (e.g. t("category.comingSoon.flood"))
+const COMING_SOON_POOLS: ReadonlyArray<{ readonly id: string; readonly labelKey: string }> = [
+    { id: "comingSoon-flood", labelKey: "category.comingSoon.flood" },
+    { id: "comingSoon-student", labelKey: "category.comingSoon.student" },
+];
+
+const EARTHQUAKE_CATEGORY = 1;
+
+export function buildCategoryListItems(
+    categories: readonly CategoryDestination[],
+): readonly CategoryListItem[] {
+    // Stable-sort: earthquake (category 1) first, rest preserve original order
+    const sorted = [...categories].sort((a, b) => {
+        if (a.category === EARTHQUAKE_CATEGORY && b.category !== EARTHQUAKE_CATEGORY) {
+            return -1;
+        }
+        if (a.category !== EARTHQUAKE_CATEGORY && b.category === EARTHQUAKE_CATEGORY) {
+            return 1;
+        }
+        return 0;
+    });
+
+    const available: CategoryListItem[] = sorted.map((cat) => ({
+        kind: "available",
+        id: cat.id,
+        label: cat.label,
+        categoryPoolId: cat.categoryPoolId,
+        category: cat.category,
+    }));
+
+    const comingSoon: CategoryListItem[] = COMING_SOON_POOLS.map((pool) => ({
+        kind: "comingSoon",
+        id: pool.id,
+        labelKey: pool.labelKey,
+    }));
+
+    return [...available, ...comingSoon];
+}
+
 export type DonateDestinationMode = "general" | "campaign" | "category";
 
 export interface DonateSplitRow {
@@ -214,6 +267,33 @@ export function resolveDonateSubmitDisabledReason(
     }
 
     return null;
+}
+
+export function findActiveEmergencyCampaign(
+    campaigns: readonly CampaignDestination[],
+    nowMs: bigint,
+): CampaignDestination | null {
+    for (const campaign of campaigns) {
+        if (BigInt(campaign.donationEndMs) > nowMs) {
+            return campaign;
+        }
+    }
+    return null;
+}
+
+/**
+ * DonateDestinationReadState と現在時刻から、緊急バナーに表示するキャンペーンを選定する。
+ * status が "ready" 以外の場合（loading / error / idle）は null を返してバナーを非表示にする。
+ * status が "ready" の場合は findActiveEmergencyCampaign に委譲する。
+ */
+export function selectEmergencyBannerCampaign(
+    state: DonateDestinationReadState,
+    nowMs: bigint,
+): CampaignDestination | null {
+    if (state.status !== "ready") {
+        return null;
+    }
+    return findActiveEmergencyCampaign(state.campaigns, nowMs);
 }
 
 export type DonateTxState =
