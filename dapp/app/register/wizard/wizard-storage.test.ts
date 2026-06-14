@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialWizardState, MEMBERSHIP_STATEMENT_COUNT, RESIDENCE_STATEMENT_COUNT, type WizardState } from "./wizard-steps";
+import { createInitialWizardState, type WizardState } from "./wizard-steps";
 import {
     clearWizardStorage,
     deserializeWizardState,
@@ -10,8 +10,7 @@ import {
 
 const fullState: WizardState = {
     membershipIssued: true,
-    membershipAccepted: [true, true, true],
-    residenceAccepted: [true, false, true],
+    disclaimersAccepted: true,
     selectedCellDecimal: "608533827635118079",
     residenceSaved: true,
     identityProvider: "kyc",
@@ -34,7 +33,7 @@ describe("serializeWizardState / deserializeWizardState", () => {
     });
 
     it("storage key はバージョン付きで固定", () => {
-        expect(WIZARD_STORAGE_KEY).toBe("sonari.register.wizard.v1");
+        expect(WIZARD_STORAGE_KEY).toBe("sonari.register.wizard.v2");
     });
 });
 
@@ -49,15 +48,14 @@ describe("保存対象の allowlist", () => {
             [
                 "version",
                 "membershipIssued",
-                "membershipAccepted",
-                "residenceAccepted",
+                "disclaimersAccepted",
                 "selectedCellDecimal",
                 "residenceSaved",
                 "identityProvider",
                 "identityVerified",
             ].sort(),
         );
-        expect(parsed.version).toBe(1);
+        expect(parsed.version).toBe(2);
     });
 
     it("wallet アドレスや World ID 応答に相当するキーは含まれない", () => {
@@ -90,21 +88,30 @@ describe("deserializeWizardState の fail-closed 検証", () => {
     it("未知の version は初期状態を返す", () => {
         const raw = JSON.stringify({
             ...JSON.parse(serializeWizardState(fullState)),
-            version: 2,
+            version: 99,
         });
         expect(deserializeWizardState(raw)).toEqual(initial);
     });
 
-    it("承諾フラグ配列の型や長さが不正なら初期状態を返す", () => {
+    it("旧 version（1）の JSON は初期状態を返す（fail-closed）", () => {
+        const raw = JSON.stringify({
+            ...JSON.parse(serializeWizardState(fullState)),
+            version: 1,
+        });
+        expect(deserializeWizardState(raw)).toEqual(initial);
+    });
+
+    it("membershipIssued が boolean でなければ初期状態を返す", () => {
         const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
         expect(
             deserializeWizardState(JSON.stringify({ ...base, membershipIssued: "yes" })),
         ).toEqual(initial);
+    });
+
+    it("disclaimersAccepted が boolean でなければ初期状態を返す", () => {
+        const base = JSON.parse(serializeWizardState(fullState)) as Record<string, unknown>;
         expect(
-            deserializeWizardState(JSON.stringify({ ...base, membershipAccepted: [true, 1, true] })),
-        ).toEqual(initial);
-        expect(
-            deserializeWizardState(JSON.stringify({ ...base, residenceAccepted: [true] })),
+            deserializeWizardState(JSON.stringify({ ...base, disclaimersAccepted: "yes" })),
         ).toEqual(initial);
     });
 
@@ -188,8 +195,7 @@ describe("clearWizardStorage", () => {
 
 const completedState: WizardState = {
     membershipIssued: true,
-    membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => true),
-    residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => true),
+    disclaimersAccepted: true,
     selectedCellDecimal: "608533827635118079",
     residenceSaved: true,
     identityProvider: "world_id",

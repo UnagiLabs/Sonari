@@ -1,8 +1,6 @@
 import {
-    h3DecimalToHex,
     h3HexToDecimal,
     residenceCellBoundary,
-    RESIDENCE_H3_RESOLUTION,
     type LatLng,
 } from "./h3-geo";
 import type { ResidenceCellClass } from "./h3-cell-classifier";
@@ -34,18 +32,6 @@ export interface SelectResidenceCellResult {
     readonly state: ResidenceSelectionState;
     readonly rejected: boolean;
     readonly message?: string;
-}
-
-export interface ResidenceSummary {
-    readonly resolution: number;
-    readonly cellHex: string | null;
-    readonly cellDecimal: string | null;
-    readonly allowlistStatus: string;
-}
-
-export interface BuildResidenceSummaryInput {
-    readonly selectedDecimal: string | null;
-    readonly classification: ResidenceCellClass | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,56 +112,4 @@ export function selectResidenceCell(
         state: { selectedDecimal: clickedDecimal },
         rejected: false,
     };
-}
-
-// ---------------------------------------------------------------------------
-// buildResidenceSummary
-// ---------------------------------------------------------------------------
-
-/**
- * 現在の選択状態から UI 表示用サマリを算出する。
- *
- * - resolution は常に RESIDENCE_H3_RESOLUTION (7)
- * - 未選択 (null) → cellHex/cellDecimal は null、allowlistStatus は "No cell selected"
- * - 選択済み → classification 別の allowlistStatus を付与
- * エリア名フィールドは今回スコープ外のため含めない。
- */
-export function buildResidenceSummary(input: BuildResidenceSummaryInput): ResidenceSummary {
-    const { selectedDecimal, classification } = input;
-
-    if (selectedDecimal === null) {
-        return {
-            resolution: RESIDENCE_H3_RESOLUTION,
-            cellHex: null,
-            cellDecimal: null,
-            allowlistStatus: "No cell selected",
-        };
-    }
-
-    const cellHex = h3DecimalToHex(selectedDecimal);
-    const allowlistStatus = resolveAllowlistStatus(classification);
-
-    return {
-        resolution: RESIDENCE_H3_RESOLUTION,
-        cellHex,
-        cellDecimal: selectedDecimal,
-        allowlistStatus,
-    };
-}
-
-/**
- * classification に基づく人間向けラベルを返す。
- */
-function resolveAllowlistStatus(classification: ResidenceCellClass | undefined): string {
-    switch (classification) {
-        case "land":
-            return "Land cell · in residence allowlist";
-        case "water":
-            return "Not in allowlist (sea or unsupported area)";
-        case "unknown":
-            return "Allowlist status unavailable";
-        default:
-            // undefined（pending）
-            return "Checking allowlist…";
-    }
 }

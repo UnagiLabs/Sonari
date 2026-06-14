@@ -3,11 +3,9 @@ import {
     canProceed,
     clampStepForState,
     createInitialWizardState,
-    MEMBERSHIP_STATEMENT_COUNT,
     nextStep,
     parseStepParam,
     previousStep,
-    RESIDENCE_STATEMENT_COUNT,
     slideDirection,
     stepIndex,
     WIZARD_STEPS,
@@ -22,11 +20,10 @@ function stateWith(overrides: Partial<WizardState>): WizardState {
 const membershipDone = {
     membershipIssued: true,
     residenceSaved: true,
-    membershipAccepted: Array.from({ length: MEMBERSHIP_STATEMENT_COUNT }, () => true),
+    selectedCellDecimal: "608533827635118079",
 } as const;
 
 const residenceDone = {
-    residenceAccepted: Array.from({ length: RESIDENCE_STATEMENT_COUNT }, () => true),
     selectedCellDecimal: "608533827635118079",
     residenceSaved: true,
 } as const;
@@ -69,45 +66,59 @@ describe("parseStepParam", () => {
 });
 
 // ---------------------------------------------------------------------------
+// createInitialWizardState
+// ---------------------------------------------------------------------------
+
+describe("createInitialWizardState", () => {
+    it("disclaimersAccepted が false で初期化される", () => {
+        expect(createInitialWizardState().disclaimersAccepted).toBe(false);
+    });
+
+    it("membershipIssued は false で初期化される", () => {
+        expect(createInitialWizardState().membershipIssued).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // canProceed
 // ---------------------------------------------------------------------------
 
 describe("canProceed", () => {
-    it("welcome は常に前進できる", () => {
-        expect(canProceed(createInitialWizardState(), "welcome")).toBe(true);
+    it("welcome は disclaimersAccepted が false なら前進不可", () => {
+        expect(canProceed(createInitialWizardState(), "welcome")).toBe(false);
     });
 
-    it("membership は全ステートメント承諾で前進できる", () => {
+    it("welcome は disclaimersAccepted が true なら前進可", () => {
+        expect(canProceed(stateWith({ disclaimersAccepted: true }), "welcome")).toBe(true);
+    });
+
+    it("membership はセル選択・発行・保存で前進できる（配列同意なし）", () => {
         expect(canProceed(createInitialWizardState(), "membership")).toBe(false);
-        expect(canProceed(stateWith({ ...membershipDone }), "membership")).toBe(false);
         expect(
-            canProceed(stateWith({ ...membershipDone, ...residenceDone }), "membership"),
+            canProceed(stateWith({ ...membershipDone }), "membership"),
         ).toBe(true);
     });
 
     it("membership は residenceSaved が false なら前進できない", () => {
-        const state = stateWith({ ...membershipDone, ...residenceDone, residenceSaved: false });
+        const state = stateWith({ ...membershipDone, residenceSaved: false });
         expect(canProceed(state, "membership")).toBe(false);
     });
 
-    it("membership は1つでも未承諾なら前進できない", () => {
-        const partial = stateWith({
-            membershipAccepted: [true, true, false],
-        });
-        expect(canProceed(partial, "membership")).toBe(false);
+    it("membership は membershipIssued が false なら前進できない", () => {
+        const state = stateWith({ ...membershipDone, membershipIssued: false });
+        expect(canProceed(state, "membership")).toBe(false);
     });
 
-    it("residence はセル選択と全ステートメント承諾と residenceSaved の3つが必要", () => {
+    it("membership は selectedCellDecimal が null なら前進できない", () => {
+        const state = stateWith({ ...membershipDone, selectedCellDecimal: null });
+        expect(canProceed(state, "membership")).toBe(false);
+    });
+
+    it("residence はセル選択と residenceSaved の2つが必要（配列同意なし）", () => {
         expect(canProceed(stateWith({ ...residenceDone }), "residence")).toBe(true);
         expect(
             canProceed(
                 stateWith({ ...residenceDone, selectedCellDecimal: null }),
-                "residence",
-            ),
-        ).toBe(false);
-        expect(
-            canProceed(
-                stateWith({ ...residenceDone, residenceAccepted: [true, false, true] }),
                 "residence",
             ),
         ).toBe(false);
@@ -133,32 +144,42 @@ describe("canProceed", () => {
 // ---------------------------------------------------------------------------
 
 describe("clampStepForState", () => {
-    it("初期状態で done を要求しても residence までしか進めない", () => {
-        expect(clampStepForState(createInitialWizardState(), "done")).toBe("residence");
+    it("未同意（disclaimersAccepted: false）で done を要求しても welcome を返す", () => {
+        expect(clampStepForState(createInitialWizardState(), "done")).toBe("welcome");
+    });
+
+    it("未同意（disclaimersAccepted: false）で membership を要求しても welcome を返す", () => {
+        expect(clampStepForState(createInitialWizardState(), "membership")).toBe("welcome");
+    });
+
+    it("同意済みでセル未選択なら residence で止まる", () => {
+        const state = stateWith({ disclaimersAccepted: true });
+        expect(clampStepForState(state, "done")).toBe("residence");
+        expect(clampStepForState(state, "membership")).toBe("residence");
     });
 
     it("セル選択・承諾済みでも residenceSaved: false なら membership に到達できない（URL 直リンク対策）", () => {
-        const state = stateWith({ ...residenceDone, residenceSaved: false });
+        const state = stateWith({ disclaimersAccepted: true, ...residenceDone, residenceSaved: false });
         expect(clampStepForState(state, "membership")).toBe("residence");
         expect(clampStepForState(state, "identity")).toBe("residence");
         expect(clampStepForState(state, "done")).toBe("residence");
     });
 
-    it("residence 完了済みでも membership 未発行なら membership で止まる", () => {
-        const state = stateWith({ ...residenceDone });
+    it("同意済み＋residence 完了済みでも membership 未発行なら membership で止まる", () => {
+        const state = stateWith({ disclaimersAccepted: true, ...residenceDone });
         expect(clampStepForState(state, "membership")).toBe("membership");
         expect(clampStepForState(state, "identity")).toBe("membership");
         expect(clampStepForState(state, "done")).toBe("membership");
     });
 
     it("membership と residence が完了済みなら identity / done に到達できる", () => {
-        const state = stateWith({ ...membershipDone, ...residenceDone });
+        const state = stateWith({ disclaimersAccepted: true, ...membershipDone, ...residenceDone });
         expect(clampStepForState(state, "identity")).toBe("identity");
         expect(clampStepForState(state, "done")).toBe("done");
     });
 
     it("到達可能なステップへの後退要求はそのまま通る", () => {
-        const state = stateWith({ ...membershipDone, ...residenceDone });
+        const state = stateWith({ disclaimersAccepted: true, ...membershipDone, ...residenceDone });
         expect(clampStepForState(state, "welcome")).toBe("welcome");
         expect(clampStepForState(state, "membership")).toBe("membership");
     });
@@ -194,3 +215,4 @@ describe("slideDirection", () => {
         expect(slideDirection("residence", "residence")).toBe(0);
     });
 });
+

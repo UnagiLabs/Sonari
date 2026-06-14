@@ -55,6 +55,22 @@
                     }
                 },
                 "cta": "Get started",
+                "disclaimers": {
+                    "heading": "Please review and agree before you start.",
+                    "residenceTitle": "Residence area",
+                    "membershipTitle": "Membership SBT",
+                    "residence": {
+                        "0": "On the next step I will choose the area where I currently live, and Sonari uses that area to check my eligibility.",
+                        "1": "If I change my residence area after a disaster's deadline, the change will not count for that disaster.",
+                        "2": "Sonari saves only the residence area I choose (a small zone on the map), not my exact address or location history."
+                    },
+                    "membership": {
+                        "0": "When I continue, the wallet I connect will receive one Sonari Membership SBT, and each wallet can hold only one.",
+                        "1": "The Membership SBT is soulbound, which means it cannot be transferred or sold to anyone else.",
+                        "2": "Holding a Membership SBT does not guarantee that I will receive aid, and it gives no priority for payouts."
+                    },
+                    "agreeAll": "I agree to all of the above."
+                },
                 "membership": {
                     "checking": "Checking your Membership SBT…",
                     "registeredTitle": "You already have a Membership SBT.",
@@ -67,13 +83,7 @@
                 "eyebrow": "Step 1",
                 "title": "Choose your residence area.",
                 "lead": "Search a place or tap the map. Sonari stores only the selected H3 cell — never your raw address or GPS history.",
-                "statementsLegend": "Residence statement",
-                "statements": {
-                    "0": "This cell is my active residence area for Sonari eligibility checks.",
-                    "1": "I understand changes after a disaster cutoff do not apply to that disaster.",
-                    "2": "Sonari stores the selected H3 cell, not my raw address or GPS history."
-                },
-                "nextHint": "Select your residence cell and affirm every statement to continue.",
+                "nextHint": "Select your residence cell to continue.",
                 "sheet": {
                     "title": "Confirm Residence Area",
                     "expand": "Open confirmation panel",
@@ -90,20 +100,13 @@
                     "useCurrentLocation": "Use current location",
                     "mapAria": "Residence cell map",
                     "unconfiguredTitle": "Map preview is unavailable.",
-                    "unconfiguredBody": "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable the map. You can still enter an H3 cell manually from Advanced cell input below.",
+                    "unconfiguredBody": "Set NEXT_PUBLIC_GOOGLE_MAPS_API_KEY to enable the map preview.",
                     "loadingMap": "Loading map…",
-                    "mapError": "The map failed to load. Try again later, or use Advanced cell input below.",
+                    "mapError": "The map failed to load. Try again later.",
                     "workerUnavailable": "Land/sea check is unavailable, so all cells are selectable for now.",
                     "waterMessage": "Cells over water cannot be selected as a residence.",
                     "geolocationUnavailable": "Current location is not available on this device.",
                     "geolocationDenied": "Permission to read your current location was denied.",
-                    "invalidCellInput": "The H3 cell ID is not valid (expected a resolution 7 hex cell ID).",
-                    "summaryResolution": "H3 resolution",
-                    "summaryCellId": "Cell ID",
-                    "summaryAllowlist": "Allowlist",
-                    "advancedSummary": "Advanced cell input",
-                    "advancedLabel": "H3 resolution 7 cell (hex)",
-                    "advancedHelp": "Debug only. Enter a hex H3 cell to override the selection. The saved value is the decimal cell ID.",
                     "legend": {
                         "selected": "Selected",
                         "selectable": "Selectable",
@@ -133,12 +136,6 @@
                     "statusSubmitting": "Submitting",
                     "statusMultiple": "Multiple detected"
                 },
-                "statementsLegend": "Before you continue",
-                "statements": {
-                    "0": "This wallet will own one active Sonari Membership SBT.",
-                    "1": "The Membership SBT is soulbound and cannot be transferred.",
-                    "2": "Holding a Membership SBT does not guarantee aid or create payout priority."
-                },
                 "issue": {
                     "button": "Issue Membership SBT",
                     "buttonIssued": "Continue",
@@ -157,8 +154,7 @@
                     "invalidProofResponse": "The residence proof response is invalid.",
                     "residenceNotAllowed": "The selected residence cell is not in the allowlist.",
                     "transactionFailed": "Membership issuance failed."
-                },
-                "nextHint": "Affirm every statement above to continue."
+                }
             },
             "identity": {
                 "eyebrow": "Optional",

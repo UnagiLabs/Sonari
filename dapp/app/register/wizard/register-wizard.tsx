@@ -17,7 +17,6 @@ import {
     nextStep,
     parseStepParam,
     previousStep,
-    RESIDENCE_STATEMENT_COUNT,
     stepIndex,
     WIZARD_STEPS,
     type WizardIdentityProvider,
@@ -116,22 +115,14 @@ export function RegisterWizard() {
         }
     }, [activeStep, goTo]);
 
-    const handleMembershipToggle = useCallback((index: number, checked: boolean) => {
-        setState((current) => ({
-            ...current,
-            membershipAccepted: current.membershipAccepted.map((value, position) =>
-                position === index ? checked : value,
-            ),
-        }));
+    const handleDisclaimersToggle = useCallback((checked: boolean) => {
+        setState((current) =>
+            current.disclaimersAccepted === checked
+                ? current
+                : { ...current, disclaimersAccepted: checked },
+        );
     }, []);
-    const handleResidenceToggle = useCallback((index: number, checked: boolean) => {
-        setState((current) => ({
-            ...current,
-            residenceAccepted: current.residenceAccepted.map((value, position) =>
-                position === index ? checked : value,
-            ),
-        }));
-    }, []);
+
     const handleMembershipIssued = useCallback(() => {
         setState((current) =>
             current.membershipIssued ? current : { ...current, membershipIssued: true },
@@ -172,18 +163,20 @@ export function RegisterWizard() {
     function renderStep(step: WizardStepId) {
         switch (step) {
             case "welcome":
-                return <WelcomeStep onNext={goNext} />;
+                return (
+                    <WelcomeStep
+                        disclaimersAccepted={state.disclaimersAccepted}
+                        onNext={goNext}
+                        onToggleDisclaimers={handleDisclaimersToggle}
+                    />
+                );
             case "residence": {
                 // Next ボタンは「保存前の準備完了条件」で制御する。
                 // canProceed("residence") は residenceSaved も含むため、保存前のボタンが
                 // 永続 disabled になる鶏卵問題を避けるため別途計算する。
-                const residenceReadyToSave =
-                    state.residenceAccepted.length === RESIDENCE_STATEMENT_COUNT &&
-                    state.residenceAccepted.every(Boolean) &&
-                    state.selectedCellDecimal !== null;
+                const residenceReadyToSave = state.selectedCellDecimal !== null;
                 return (
                     <ResidenceStep
-                        accepted={state.residenceAccepted}
                         canContinue={residenceReadyToSave}
                         fullbleed={activeStep === "residence"}
                         saveError={residenceSaveError}
@@ -191,19 +184,16 @@ export function RegisterWizard() {
                         onBack={goBack}
                         onCellSelectionChange={handleCellSelectionChange}
                         onNext={handleResidenceNext}
-                        onToggle={handleResidenceToggle}
                     />
                 );
             }
             case "membership":
                 return (
                     <MembershipStep
-                        accepted={state.membershipAccepted}
                         membershipIssued={state.membershipIssued}
                         onBack={goBack}
                         onIssued={handleMembershipIssued}
                         onNext={goNext}
-                        onToggle={handleMembershipToggle}
                         selectedCellDecimal={state.selectedCellDecimal}
                     />
                 );

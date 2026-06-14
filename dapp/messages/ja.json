@@ -55,6 +55,22 @@
                     }
                 },
                 "cta": "はじめる",
+                "disclaimers": {
+                    "heading": "はじめる前にご確認のうえ同意してください。",
+                    "residenceTitle": "居住エリア",
+                    "membershipTitle": "メンバーシップ SBT",
+                    "residence": {
+                        "0": "次の画面で、私が今住んでいる地域を選びます。Sonari はこの居住エリアを資格の確認に使います。",
+                        "1": "ある災害の締切を過ぎてから居住エリアを変えても、その変更はその災害には反映されません。",
+                        "2": "Sonari が保存するのは、私が選ぶ居住エリア（地図上の小さな区画）だけです。正確な住所や位置情報の履歴は保存しません。"
+                    },
+                    "membership": {
+                        "0": "先に進むと、接続したウォレットに Sonari メンバーシップ SBT が1つ発行されます。1つのウォレットにつき1つだけ持てます。",
+                        "1": "メンバーシップ SBT は「ソウルバウンド」で、他の人に譲ったり売ったりできません。",
+                        "2": "メンバーシップ SBT を持っていても、支援が必ず受けられるとは限らず、支払いの優先順位もつきません。"
+                    },
+                    "agreeAll": "上記すべてに同意します。"
+                },
                 "membership": {
                     "checking": "メンバーシップ SBT を確認中…",
                     "registeredTitle": "すでにメンバーシップ SBT をお持ちです。",
@@ -67,13 +83,7 @@
                 "eyebrow": "ステップ 1",
                 "title": "居住エリアを選ぶ",
                 "lead": "場所を検索するか地図をタップしてください。Sonari が保存するのは選択した H3 セルのみで、住所や GPS 履歴は保存しません。",
-                "statementsLegend": "居住地の確認",
-                "statements": {
-                    "0": "このセルは Sonari の資格確認に使う現在の居住エリアです。",
-                    "1": "災害の締切後に変更しても、その災害には適用されないことを理解しています。",
-                    "2": "Sonari は選択した H3 セルのみを保存し、住所や GPS 履歴は保存しません。"
-                },
-                "nextHint": "居住セルを選択し、すべての項目を確認すると次へ進めます。",
+                "nextHint": "居住エリアのセルを選んで進んでください。",
                 "sheet": {
                     "title": "居住エリアの確定",
                     "expand": "確定パネルを開く",
@@ -90,20 +100,13 @@
                     "useCurrentLocation": "現在地を使う",
                     "mapAria": "居住セルの地図",
                     "unconfiguredTitle": "地図プレビューを利用できません。",
-                    "unconfiguredBody": "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を設定すると地図が有効になります。下の詳細入力から H3 セルを直接入力することもできます。",
+                    "unconfiguredBody": "地図プレビューを表示するには NEXT_PUBLIC_GOOGLE_MAPS_API_KEY を設定してください。",
                     "loadingMap": "地図を読み込み中…",
-                    "mapError": "地図の読み込みに失敗しました。時間をおいて再試行するか、下の詳細入力をご利用ください。",
+                    "mapError": "地図の読み込みに失敗しました。時間をおいて再度お試しください。",
                     "workerUnavailable": "陸海判定を利用できないため、現在はすべてのセルを選択できます。",
                     "waterMessage": "海上などのセルは居住地として選択できません。",
                     "geolocationUnavailable": "この端末では現在地を取得できません。",
                     "geolocationDenied": "現在地の取得が許可されませんでした。",
-                    "invalidCellInput": "H3 セルIDが正しくありません（resolution 7 の16進セルID）。",
-                    "summaryResolution": "H3 解像度",
-                    "summaryCellId": "セル ID",
-                    "summaryAllowlist": "許可リスト",
-                    "advancedSummary": "詳細セル入力",
-                    "advancedLabel": "H3 解像度 7 セル（16進）",
-                    "advancedHelp": "デバッグ用。16進の H3 セルを入力すると選択を上書きします。保存される値は10進のセル ID です。",
                     "legend": {
                         "selected": "選択中",
                         "selectable": "選択可",
@@ -133,12 +136,6 @@
                     "statusSubmitting": "送信中",
                     "statusMultiple": "複数検出"
                 },
-                "statementsLegend": "進む前の確認",
-                "statements": {
-                    "0": "このウォレットが有効な Sonari メンバーシップ SBT を1つ所有します。",
-                    "1": "メンバーシップ SBT はソウルバウンドで、譲渡できません。",
-                    "2": "メンバーシップ SBT の保有は支援の保証や支払いの優先順位にはなりません。"
-                },
                 "issue": {
                     "button": "メンバーシップ SBT を発行",
                     "buttonIssued": "続ける",
@@ -157,8 +154,7 @@
                     "invalidProofResponse": "居住地証明のレスポンスが不正です。",
                     "residenceNotAllowed": "選択した居住セルは許可リストに含まれていません。",
                     "transactionFailed": "メンバーシップの発行に失敗しました。"
-                },
-                "nextHint": "上のすべての項目を確認すると次へ進めます。"
+                }
             },
             "identity": {
                 "eyebrow": "任意",

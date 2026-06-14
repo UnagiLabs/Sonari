@@ -5,14 +5,12 @@
 
 import {
     createInitialWizardState,
-    MEMBERSHIP_STATEMENT_COUNT,
-    RESIDENCE_STATEMENT_COUNT,
     type WizardIdentityProvider,
     type WizardState,
     type WizardStepId,
 } from "./wizard-steps";
 
-export const WIZARD_STORAGE_KEY = "sonari.register.wizard.v1";
+export const WIZARD_STORAGE_KEY = "sonari.register.wizard.v2";
 
 export function clearWizardStorage(storage: Storage): void {
     storage.removeItem(WIZARD_STORAGE_KEY);
@@ -23,7 +21,7 @@ export function shouldClearStorage(activeStep: WizardStepId, state: WizardState)
     return activeStep === "done" && state.membershipIssued && state.residenceSaved;
 }
 
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 
 // H3 セルは res7 の 10 進文字列としてのみ受け付ける。
 const DECIMAL_CELL_PATTERN = /^[0-9]{1,20}$/;
@@ -34,8 +32,7 @@ export function serializeWizardState(state: WizardState): string {
     return JSON.stringify({
         version: STORAGE_VERSION,
         membershipIssued: state.membershipIssued,
-        membershipAccepted: state.membershipAccepted,
-        residenceAccepted: state.residenceAccepted,
+        disclaimersAccepted: state.disclaimersAccepted,
         selectedCellDecimal: state.selectedCellDecimal,
         residenceSaved: state.residenceSaved,
         identityProvider: state.identityProvider,
@@ -60,11 +57,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
     }
 
     const membershipIssued = parsed.membershipIssued;
-    const membershipAccepted = readBooleanArray(
-        parsed.membershipAccepted,
-        MEMBERSHIP_STATEMENT_COUNT,
-    );
-    const residenceAccepted = readBooleanArray(parsed.residenceAccepted, RESIDENCE_STATEMENT_COUNT);
+    const disclaimersAccepted = parsed.disclaimersAccepted;
     const selectedCellDecimal = readCellDecimal(parsed.selectedCellDecimal);
     // residenceSaved は欠落時のみ false にフォールバック（既存セッションのデータを失わない）。
     // フィールドが存在するが boolean 以外なら fail-closed で初期状態へ落とす。
@@ -74,8 +67,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
 
     if (
         typeof membershipIssued !== "boolean" ||
-        membershipAccepted === null ||
-        residenceAccepted === null ||
+        typeof disclaimersAccepted !== "boolean" ||
         selectedCellDecimal === undefined ||
         typeof residenceSaved !== "boolean" ||
         identityProvider === null ||
@@ -86,8 +78,7 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
 
     return {
         membershipIssued,
-        membershipAccepted,
-        residenceAccepted,
+        disclaimersAccepted,
         selectedCellDecimal,
         residenceSaved,
         identityProvider,
@@ -97,17 +88,6 @@ export function deserializeWizardState(raw: string | null | undefined): WizardSt
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readBooleanArray(value: unknown, expectedLength: number): readonly boolean[] | null {
-    if (
-        !Array.isArray(value) ||
-        value.length !== expectedLength ||
-        !value.every((entry) => typeof entry === "boolean")
-    ) {
-        return null;
-    }
-    return value;
 }
 
 /** 不正値は undefined（呼び出し側で fail-closed）。null は「未選択」として有効。 */

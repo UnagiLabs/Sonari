@@ -18,7 +18,6 @@ const OWNER = `0x${"aa".repeat(32)}`; // 66-char Sui address
 const baseEnabled: MembershipGateInput = {
     owner: OWNER,
     selectedCellDecimal: "123456789",
-    allStatementsAccepted: true,
     isConfigured: true,
     membershipIssued: false,
     lookup: { kind: "none" },
@@ -195,34 +194,7 @@ describe("deriveMembershipActionState", () => {
         expect(result).toEqual({ disabled: true, reason: "residence_unselected" });
     });
 
-    it("residence_unselected beats statements_unaccepted", () => {
-        const result = deriveMembershipActionState({
-            ...baseEnabled,
-            selectedCellDecimal: null,
-            allStatementsAccepted: false,
-        });
-        expect(result).toEqual({ disabled: true, reason: "residence_unselected" });
-    });
-
-    // 優先順位 3: 同意未完
-    it("returns statements_unaccepted when allStatementsAccepted is false", () => {
-        const result = deriveMembershipActionState({
-            ...baseEnabled,
-            allStatementsAccepted: false,
-        });
-        expect(result).toEqual({ disabled: true, reason: "statements_unaccepted" });
-    });
-
-    it("statements_unaccepted beats submitting", () => {
-        const result = deriveMembershipActionState({
-            ...baseEnabled,
-            allStatementsAccepted: false,
-            isSubmitting: true,
-        });
-        expect(result).toEqual({ disabled: true, reason: "statements_unaccepted" });
-    });
-
-    // 優先順位 4: 送信中
+    // 優先順位 3: 送信中
     it("returns submitting when isSubmitting is true", () => {
         const result = deriveMembershipActionState({
             ...baseEnabled,
@@ -325,14 +297,6 @@ describe("deriveMembershipActionState", () => {
     });
 
     // issued ならその他条件が未充足でも disabled:false (発行済は「次へ」用途)
-    it("returns disabled:false even if allStatementsAccepted=false when issued", () => {
-        const result = deriveMembershipActionState({
-            ...baseIssued,
-            allStatementsAccepted: false,
-        });
-        expect(result).toEqual({ disabled: false });
-    });
-
     it("returns disabled:false even if selectedCellDecimal=null when issued", () => {
         const result = deriveMembershipActionState({
             ...baseIssued,
@@ -350,7 +314,6 @@ describe("disabledReasonMessageKey", () => {
     const cases: [MembershipDisabledReason, string][] = [
         ["wallet_disconnected", "issue.connectWallet"],
         ["residence_unselected", "issue.residenceRequired"],
-        ["statements_unaccepted", "nextHint"],
         ["submitting", "issue.submitting"],
         ["checking", "issue.checking"],
         ["multiple", "issue.multiple"],

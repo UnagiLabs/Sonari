@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { latLngToResidenceCell, h3DecimalToHex } from "./h3-geo";
+import { latLngToResidenceCell } from "./h3-geo";
 import type { ResidenceCellClass } from "./h3-cell-classifier";
 import {
     buildOverlayCells,
-    buildResidenceSummary,
     selectResidenceCell,
     type BuildOverlayCellsInput,
-    type BuildResidenceSummaryInput,
     type ResidenceSelectionState,
 } from "./residence-overlay";
 
@@ -230,104 +228,5 @@ describe("selectResidenceCell", () => {
         expect(result.state.selectedDecimal).toBe(SHINJUKU.decimal);
         // 元 state は変わらない
         expect(stateWithSelection.selectedDecimal).toBe(SHIBUYA.decimal);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// buildResidenceSummary
-// ---------------------------------------------------------------------------
-
-describe("buildResidenceSummary", () => {
-    it("selectedDecimal が null → No cell selected・cellHex null・cellDecimal null・resolution 7", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: null,
-            classification: undefined,
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.resolution).toBe(7);
-        expect(summary.cellHex).toBeNull();
-        expect(summary.cellDecimal).toBeNull();
-        expect(summary.allowlistStatus).toBe("No cell selected");
-    });
-
-    it("land → 正しい allowlistStatus", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: "land",
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.allowlistStatus).toBe("Land cell · in residence allowlist");
-    });
-
-    it("water → 正しい allowlistStatus", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: "water",
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.allowlistStatus).toBe("Not in allowlist (sea or unsupported area)");
-    });
-
-    it("unknown → 正しい allowlistStatus", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: "unknown",
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.allowlistStatus).toBe("Allowlist status unavailable");
-    });
-
-    it("undefined（pending）→ 正しい allowlistStatus", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: undefined,
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.allowlistStatus).toBe("Checking allowlist…");
-    });
-
-    it("cellHex が h3DecimalToHex の結果と一致する", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: "land",
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.cellHex).toBe(h3DecimalToHex(SHIBUYA.decimal));
-    });
-
-    it("cellDecimal が selectedDecimal と一致する", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: "land",
-        };
-        const summary = buildResidenceSummary(input);
-        expect(summary.cellDecimal).toBe(SHIBUYA.decimal);
-    });
-
-    it("resolution が常に RESIDENCE_H3_RESOLUTION (7) である", () => {
-        for (const classification of ["land", "water", "unknown", undefined] as (ResidenceCellClass | undefined)[]) {
-            const input: BuildResidenceSummaryInput = {
-                selectedDecimal: SHIBUYA.decimal,
-                classification,
-            };
-            const summary = buildResidenceSummary(input);
-            expect(summary.resolution).toBe(7);
-        }
-    });
-
-    it("エリア名フィールドが存在しない（オブジェクトのキー集合を検査）", () => {
-        const input: BuildResidenceSummaryInput = {
-            selectedDecimal: SHIBUYA.decimal,
-            classification: "land",
-        };
-        const summary = buildResidenceSummary(input);
-        const keys = Object.keys(summary);
-        // スコープ外のフィールドが含まれていないこと
-        expect(keys).not.toContain("areaName");
-        expect(keys).not.toContain("area");
-        expect(keys).not.toContain("regionName");
-        expect(keys).not.toContain("placeName");
-        // 想定するキーのみ存在すること
-        expect(keys.sort()).toEqual(["allowlistStatus", "cellDecimal", "cellHex", "resolution"].sort());
     });
 });

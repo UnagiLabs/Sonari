@@ -466,7 +466,7 @@ KYC / World ID は複数アカウント対策として payout 前に必要だが
 - KYC / World ID はいつでも登録できる任意設定として表示し、初期登録の必須項目として扱わない
 - payout 前には KYC または World ID のどちらかを完了している必要がある
 - H3 cell を直接入力させず、住所・地域検索、現在地、地図選択から選べるUIにする
-- H3 cell 手入力は開発者・テスター向けの Advanced option に限定する
+- H3 cell の手入力欄は設けない（地図・住所/地域検索・現在地のみで選ばせる）
 - nickname は会員ホームやプロフィールで後から設定できる表示用項目とし、Claim eligibility には使わない
 - raw address はオンチェーンに出さない
 - phone はオンチェーンに出さない

@@ -11,25 +11,21 @@ import {
 import type { ResidenceSaveErrorCode } from "../residence-save";
 
 interface ResidenceStepProps {
-    readonly accepted: readonly boolean[];
     readonly canContinue: boolean;
     /** true のとき residence ステップがアクティブ。フルブリード CSS modifier を付与する。 */
     readonly fullbleed?: boolean;
     readonly saveError: ResidenceSaveErrorCode | null;
     readonly selectedCellDecimal: string | null;
-    readonly onToggle: (index: number, checked: boolean) => void;
     readonly onCellSelectionChange: (decimal: string | null) => void;
     readonly onBack: () => void;
     readonly onNext: () => void;
 }
 
 export function ResidenceStep({
-    accepted,
     canContinue,
     fullbleed = false,
     saveError,
     selectedCellDecimal,
-    onToggle,
     onCellSelectionChange,
     onBack,
     onNext,
@@ -90,27 +86,6 @@ export function ResidenceStep({
                             {isExpanded ? t("sheet.collapse") : t("sheet.expand")}
                         </span>
                     </button>
-
-                    <fieldset className="control-group">
-                        <legend>{t("statementsLegend")}</legend>
-                        <div className="terms-list">
-                            {accepted.map((checked, index) => (
-                                <label
-                                    className="terms-row"
-                                    // biome-ignore lint/suspicious/noArrayIndexKey: 配列は固定長・並べ替えなし
-                                    key={index}
-                                >
-                                    <input
-                                        checked={checked}
-                                        name="residenceTerms"
-                                        onChange={(event) => onToggle(index, event.target.checked)}
-                                        type="checkbox"
-                                    />
-                                    <span>{t(`statements.${index}`)}</span>
-                                </label>
-                            ))}
-                        </div>
-                    </fieldset>
 
                     {errorMessage !== null ? (
                         <div className="field-note" role="alert">

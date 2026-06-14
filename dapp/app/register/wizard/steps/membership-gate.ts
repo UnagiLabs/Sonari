@@ -27,8 +27,6 @@ export interface MembershipGateInput {
     readonly owner: string;
     /** 居住セルの H3 セル ID（10進数文字列）。未選択は null */
     readonly selectedCellDecimal: string | null;
-    /** 全同意チェックボックスが ON か */
-    readonly allStatementsAccepted: boolean;
     /** 5 つの env 変数が全て非空か */
     readonly isConfigured: boolean;
     /** セッション内で発行成功フラグが立っているか（ウォレット切替時に false へリセットされる） */
@@ -50,12 +48,11 @@ export type MembershipIssuanceStatus = "issued" | "checking" | "not_issued";
 
 /**
  * primary ボタンが disabled である理由コード。
- * 優先順位順: 未接続 → セル未選択 → 同意未完 → 送信中 → 照会中 → 複数保有 → 照会エラー → 未設定
+ * 優先順位順: 未接続 → セル未選択 → 送信中 → 照会中 → 複数保有 → 照会エラー → 未設定
  */
 export type MembershipDisabledReason =
     | "wallet_disconnected"
     | "residence_unselected"
-    | "statements_unaccepted"
     | "submitting"
     | "checking"
     | "multiple"
@@ -84,8 +81,6 @@ export function disabledReasonMessageKey(reason: MembershipDisabledReason): stri
             return "issue.connectWallet";
         case "residence_unselected":
             return "issue.residenceRequired";
-        case "statements_unaccepted":
-            return "nextHint";
         case "submitting":
             return "issue.submitting";
         case "checking":
@@ -144,13 +139,12 @@ export function deriveIssuanceStatus(input: MembershipGateInput): MembershipIssu
  * 未発行の場合は以下の優先順位で最初に該当した理由を返す:
  *  1. owner 未接続 → wallet_disconnected
  *  2. selectedCellDecimal === null → residence_unselected
- *  3. !allStatementsAccepted → statements_unaccepted
- *  4. isSubmitting → submitting
- *  5. lookup が idle/loading → checking
- *  6. lookup が multiple → multiple
- *  7. lookup が error → lookup_error
- *  8. !isConfigured → not_configured
- *  9. lookup が none 以外（フォールバック） → checking
+ *  3. isSubmitting → submitting
+ *  4. lookup が idle/loading → checking
+ *  5. lookup が multiple → multiple
+ *  6. lookup が error → lookup_error
+ *  7. !isConfigured → not_configured
+ *  8. lookup が none 以外（フォールバック） → checking
  *
  * 全条件充足かつ lookup === "none" のときのみ disabled:false を返す。
  */
@@ -172,32 +166,27 @@ export function deriveMembershipActionState(input: MembershipGateInput): Members
         return { disabled: true, reason: "residence_unselected" };
     }
 
-    // 優先順位 3: 同意未完
-    if (!input.allStatementsAccepted) {
-        return { disabled: true, reason: "statements_unaccepted" };
-    }
-
-    // 優先順位 4: 送信中
+    // 優先順位 3: 送信中
     if (input.isSubmitting) {
         return { disabled: true, reason: "submitting" };
     }
 
-    // 優先順位 5: 照会中（idle/loading）
+    // 優先順位 4: 照会中（idle/loading）
     if (input.lookup.kind === "idle" || input.lookup.kind === "loading") {
         return { disabled: true, reason: "checking" };
     }
 
-    // 優先順位 6: 複数保有
+    // 優先順位 5: 複数保有
     if (input.lookup.kind === "multiple") {
         return { disabled: true, reason: "multiple" };
     }
 
-    // 優先順位 7: 照会エラー
+    // 優先順位 6: 照会エラー
     if (input.lookup.kind === "error") {
         return { disabled: true, reason: "lookup_error" };
     }
 
-    // 優先順位 8: 未設定
+    // 優先順位 7: 未設定
     if (!input.isConfigured) {
         return { disabled: true, reason: "not_configured" };
     }
