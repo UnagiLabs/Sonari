@@ -3,6 +3,9 @@
 .codex/*
 !.codex/config.toml
 !.codex/hooks.json
+!.codex/agents/
+.codex/agents/*
+!.codex/agents/commit-worker.toml
 .cache/
 .build/
 node_modules/
