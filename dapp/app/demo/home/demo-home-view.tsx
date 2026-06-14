@@ -17,6 +17,8 @@ import { buildTohokuEmergencyCampaign } from "../_data/tohoku-emergency-campaign
  */
 export function DemoHomeView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("demo.donate");
+    // 「受け取る」ボタンの文言は本番バナーと同じ home.emergencyClaimCta を再利用する。
+    const tHome = useTranslations("home");
 
     const emergencyCampaign = buildTohokuEmergencyCampaign(
         {
@@ -32,5 +34,14 @@ export function DemoHomeView({ locale }: { readonly locale: SonariLocale }) {
         TOHOKU_2011_DEMO_EARTHQUAKE,
     );
 
-    return <HomeView locale={locale} demo={{ emergencyCampaign }} />;
+    // デモでは登録済みの被災者を想定し、受け取り導線をデモ用 My Page へ向ける。
+    return (
+        <HomeView
+            locale={locale}
+            demo={{
+                emergencyCampaign,
+                primaryAction: { href: "/demo/mypage", label: tHome("emergencyClaimCta") },
+            }}
+        />
+    );
 }

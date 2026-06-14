@@ -151,9 +151,6 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                             <a className="btn btn-primary" href="/donate">
                                 {t("actions.donate")}
                             </a>
-                            <a className="btn btn-secondary" href="/claim">
-                                {t("actions.claimRelief")}
-                            </a>
                             <button
                                 className="btn btn-ghost"
                                 disabled={state.status === "loading"}
@@ -281,12 +278,7 @@ function DashboardContent({ view }: { readonly view: DashboardViewModel }) {
                     items={view.donations}
                     title={t("donations.title")}
                 />
-                <ActivityPanel
-                    actionHref="/claim"
-                    actionLabel={t("claims.action")}
-                    items={view.claims}
-                    title={t("claims.title")}
-                />
+                <ActivityPanel items={view.claims} title={t("claims.title")} />
                 <ActivityPanel
                     actionHref="/receipts"
                     actionLabel={t("receiptsPanel.action")}
@@ -399,8 +391,8 @@ function ActivityPanel({
     items,
     title,
 }: {
-    actionHref: string;
-    actionLabel: string;
+    actionHref?: string;
+    actionLabel?: string;
     items: readonly DashboardActivityItem[];
     title: string;
 }) {
@@ -408,7 +400,12 @@ function ActivityPanel({
 
     return (
         <section className="dash-panel">
-            <PanelHeader actionHref={actionHref} actionLabel={actionLabel} title={title} />
+            <PanelHeader
+                title={title}
+                {...(actionHref !== undefined && actionLabel !== undefined
+                    ? { actionHref, actionLabel }
+                    : {})}
+            />
             <div className="activity-list">
                 {items.length === 0 ? <p className="muted">{t("states.noItems")}</p> : null}
                 {items.map((item) => (

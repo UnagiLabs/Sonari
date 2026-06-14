@@ -213,6 +213,11 @@
     "mypage": {
         "title": "My Page",
         "subtitle": "Review the contents of your MembershipPass.",
+        "claim": {
+            "heading": "Receive relief",
+            "body": "When relief is active for a disaster you may be affected by, you can check your eligibility and receive it here.",
+            "cta": "Go to claim"
+        },
         "states": {
             "disconnectedTitle": "Connect your wallet",
             "disconnectedBody": "Connect a wallet to read your membership details.",
@@ -482,11 +487,10 @@
             "sub": "Sonari verifies who should receive aid after a disaster using public source data, privacy-preserving residence proofs, and transparent receipts.",
             "ctaDonate": "Donate now",
             "ctaMember": "Become a member",
-            "ctaClaim": "Claim relief",
-            "ctaDashboard": "View dashboard",
             "notePrivate": "Residence data stays private",
             "noteVerified": "Verified disaster events"
         },
+        "emergencyClaimCta": "Claim relief",
         "sponsors": {
             "title": "Supported by transparent partners"
         },
@@ -582,7 +586,6 @@
         },
         "actions": {
             "donate": "Donate",
-            "claimRelief": "Claim relief",
             "refresh": "Refresh data"
         },
         "statusBar": {
@@ -655,8 +658,7 @@
             "action": "Donation history"
         },
         "claims": {
-            "title": "Recent claims",
-            "action": "Claim flow"
+            "title": "Recent claims"
         },
         "receiptsPanel": {
             "title": "Impact receipts",

@@ -213,6 +213,11 @@
     "mypage": {
         "title": "マイページ",
         "subtitle": "あなたの会員証（MembershipPass）の内容を確認できます。",
+        "claim": {
+            "heading": "救済を受け取る",
+            "body": "あなたが対象となりうる災害支援が実施されているとき、ここから受け取り資格を確認して救済を受け取れます。",
+            "cta": "受け取りへ進む"
+        },
         "states": {
             "disconnectedTitle": "ウォレットを接続してください",
             "disconnectedBody": "会員証の内容を読み取るには、ウォレットの接続が必要です。",
@@ -482,11 +487,10 @@
             "sub": "Sonari は災害後、公開された情報源・プライバシーを守る居住証明・透明なレシートを使って、支援を受け取るべき人を検証します。",
             "ctaDonate": "今すぐ寄付",
             "ctaMember": "メンバーになる",
-            "ctaClaim": "支援を申請",
-            "ctaDashboard": "ダッシュボードを見る",
             "notePrivate": "居住データは非公開のまま",
             "noteVerified": "検証済みの災害イベント"
         },
+        "emergencyClaimCta": "救済を受け取る",
         "sponsors": {
             "title": "透明なパートナーに支えられて"
         },
@@ -582,7 +586,6 @@
         },
         "actions": {
             "donate": "寄付",
-            "claimRelief": "支援を申請",
             "refresh": "データを更新"
         },
         "statusBar": {
@@ -655,8 +658,7 @@
             "action": "寄付履歴"
         },
         "claims": {
-            "title": "最近の申請",
-            "action": "申請フロー"
+            "title": "最近の申請"
         },
         "receiptsPanel": {
             "title": "インパクトレシート",

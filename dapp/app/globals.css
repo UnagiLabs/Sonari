@@ -3559,6 +3559,21 @@ h4 {
   cursor: pointer;
 }
 
+/* 受け取る（主）と寄付する（副）を 1 枠の中で横並びにする。狭い画面では折り返す。 */
+.donate-emergency-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+/* 受け取る導線は主ボタンとして塗りつぶしで強調し、寄付ボタンより目立たせる。 */
+.donate-emergency-banner-cta-primary {
+  background: oklch(0.62 0.18 25);
+  border-color: oklch(0.62 0.18 25);
+  color: oklch(0.99 0.005 25);
+}
+
 .donate-emergency-banner-status {
   display: inline-flex;
   align-items: center;

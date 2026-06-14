@@ -20,6 +20,7 @@ import {
 } from "./donate/donate-view-state";
 import { EmergencyBanner } from "./donate/emergency-banner";
 import type { EmergencyBannerCampaign } from "./donate/emergency-banner-state";
+import { useClaimBannerCta } from "./home-claim-banner";
 import { SiteTopbar } from "./i18n/site-topbar";
 import type { SonariLocale } from "./register/wizard/locale";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "./wallet/wallet-network";
@@ -107,6 +108,11 @@ const footerColumns = [
  */
 export interface HomeDemoConfig {
     readonly emergencyCampaign: EmergencyBannerCampaign;
+    /**
+     * 任意。指定するとバナーに「受け取る」主ボタンを出す。デモでは接続や登録の判定を
+     * せず固定で見せるため、本番の useClaimBannerCta は使わずここで遷移先を渡す。
+     */
+    readonly primaryAction?: { readonly href: string; readonly label: string };
 }
 
 export function HomeView({
@@ -129,6 +135,9 @@ export function HomeView({
                         <HomeEmergencyBannerView
                             campaign={demo.emergencyCampaign}
                             donateHref="/demo/donate"
+                            {...(demo.primaryAction !== undefined
+                                ? { primaryAction: demo.primaryAction }
+                                : {})}
                         />
                     ) : (
                         <HomeEmergencyBanner />
@@ -156,12 +165,6 @@ export function HomeView({
                                     <a className="btn btn-secondary btn-lg" href="/register">
                                         {t("hero.ctaMember")}
                                         <Icon name="arrowRight" size={16} />
-                                    </a>
-                                    <a className="btn btn-ghost btn-lg" href="/claim">
-                                        {t("hero.ctaClaim")}
-                                    </a>
-                                    <a className="btn btn-ghost btn-lg" href="/dashboard">
-                                        {t("hero.ctaDashboard")}
                                     </a>
                                 </nav>
                                 <div className="hero-notes">
@@ -304,9 +307,11 @@ export function HomeView({
 function HomeEmergencyBannerView({
     campaign,
     donateHref,
+    primaryAction,
 }: {
     campaign: EmergencyBannerCampaign | null;
     donateHref: string;
+    primaryAction?: { readonly href: string; readonly label: string };
 }) {
     const router = useRouter();
     return (
@@ -315,6 +320,7 @@ function HomeEmergencyBannerView({
             onDonate={() => {
                 router.push(donateHref);
             }}
+            {...(primaryAction !== undefined ? { primaryAction } : {})}
         />
     );
 }
@@ -323,7 +329,11 @@ function HomeEmergencyBannerView({
 // 取得は donate ページと同じ readDonateDestinations を使う。読み込み中・失敗・
 // 該当なしのときは selectEmergencyBannerCampaign が null を返し、バナーは出ない（fail-close）。
 function HomeEmergencyBanner() {
+    const t = useTranslations("home");
     const network = readWalletNetwork();
+    // 受け取り導線の判定は寄付バナーの取得とは独立。接続済み・登録済み・claim window
+    // 開のキャンペーンがあるときだけ「受け取る」主ボタンを足す（バナーは 1 枠のまま）。
+    const claimCta = useClaimBannerCta();
     const [state, setState] = useState<DonateDestinationReadState>({
         status: "loading",
         campaigns: [],
@@ -393,7 +403,17 @@ function HomeEmergencyBanner() {
 
     // 現在時刻で実施中判定する。該当が無ければ null になりバナーは非表示。
     const campaign = selectEmergencyBannerCampaign(state, BigInt(Date.now()));
-    return <HomeEmergencyBannerView campaign={campaign} donateHref="/donate" />;
+    const primaryAction =
+        claimCta !== null
+            ? { href: `/claim?campaign=${claimCta.campaignId}`, label: t("emergencyClaimCta") }
+            : undefined;
+    return (
+        <HomeEmergencyBannerView
+            campaign={campaign}
+            donateHref="/donate"
+            {...(primaryAction !== undefined ? { primaryAction } : {})}
+        />
+    );
 }
 
 function SectionHeader({

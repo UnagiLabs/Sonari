@@ -16,17 +16,12 @@ export const NAV_DEFS: Record<NavKey, { readonly href: string }> = {
 };
 
 /**
- * 全ページ共通のプライマリ nav。home / donate / dashboard / register / claim の
- * 5 項目を正典として持つ。mypage はアカウント導線としてヘッダー右側に固定するため
- * ここには含めない。
+ * 全ページ共通のプライマリ nav。home / donate / dashboard / register の 4 項目を
+ * 正典として持つ。mypage はアカウント導線としてヘッダー右側に固定するためここには
+ * 含めない。claim は受け取り導線を Mypage と災害バナーへ寄せたため共通ナビからは
+ * 外す（issue #379）。NAV_DEFS.claim の href は深リンク用に残す。
  */
-export const DEFAULT_NAV_ITEMS: readonly NavKey[] = [
-    "home",
-    "donate",
-    "dashboard",
-    "register",
-    "claim",
-];
+export const DEFAULT_NAV_ITEMS: readonly NavKey[] = ["home", "donate", "dashboard", "register"];
 
 /** 表示用に解決した nav 項目（キーと遷移先のペア）。 */
 export interface ResolvedNavItem {
