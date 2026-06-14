@@ -400,7 +400,12 @@ function ActivityPanel({
 
     return (
         <section className="dash-panel">
-            <PanelHeader actionHref={actionHref} actionLabel={actionLabel} title={title} />
+            <PanelHeader
+                title={title}
+                {...(actionHref !== undefined && actionLabel !== undefined
+                    ? { actionHref, actionLabel }
+                    : {})}
+            />
             <div className="activity-list">
                 {items.length === 0 ? <p className="muted">{t("states.noItems")}</p> : null}
                 {items.map((item) => (
