@@ -1,7 +1,5 @@
 # Sonari System Architecture
 
-![Sonari system overview](assets/Sonari_SystemFlow_en.svg)
-
 > **Purpose**: Provide a single-page overview of how the dapp / Sui / TEE / runner / external services are wired together, and of the **trust boundaries**.
 > For details on each domain, see the individual specs: on-chain contracts = [`./contracts_spec.md`](./contracts_spec.md) / contracts overview = [`contracts_overview.md`](contracts_overview.md) / verifier overview = [`verifiers/overview.md`](verifiers/overview.md).
 >
@@ -9,75 +7,7 @@
 
 ## 1. Overall Wiring Diagram
 
-```mermaid
-flowchart TB
-    subgraph EXT["External services (not a root of trust; public data)"]
-        USGS["USGS<br/>earthquake data"]
-        WORLD["World ID<br/>Orb / IDKit v4"]
-    end
-
-    subgraph CLIENT["Client (not trusted; all verification is downstream)"]
-        DAPP["dapp (Next.js)<br/>sonari.help<br/>Cloudflare Workers/OpenNext"]
-        subgraph WORKERS["Cloudflare Workers + R2"]
-            ACPW["affected-cells-proof-worker"]
-            RPW["residence-proof-worker"]
-        end
-        DAPP --> WORKERS
-    end
-
-    subgraph TEE["🔒 TEE / Nitro Enclave (trust boundary: attested by PCR; keys live inside the enclave)"]
-        EQV["earthquake verifier<br/>USGS→affected-cell root + payload signature"]
-        MIV["membership / identity verifier<br/>World ID→identity check→signature"]
-        CENSUS["census worker (planned #304)<br/>per-band count→signature"]
-    end
-
-    subgraph AWS["AWS infrastructure (orchestration; holds no keys)"]
-        WATCHER["earthquake watcher (Lambda)"]
-        RUNNER["sonari-verifier-runner<br/>driven by DynamoDB Streams"]
-        RELAYER["relayer<br/>on-chain submission"]
-        DDB[("DynamoDB<br/>job state / streams")]
-        WATCHER --> RUNNER
-        RUNNER <--> DDB
-        RUNNER --> RELAYER
-    end
-
-    subgraph STORE["Distributed storage"]
-        WALRUS[("Walrus<br/>affected-cell archive / evidence manifest")]
-        R2[("Cloudflare R2<br/>proof artifacts")]
-    end
-
-    subgraph CHAIN["⛓️ Sui (testnet) — Move package (public state = third-party re-verifiable)"]
-        MV["metadata_verifier<br/>TEE signature verification (verifier family)"]
-        MEM["membership / identity_registry"]
-        DE["disaster_event / affected_cell"]
-        RES["allowed_residence_cell"]
-        FUND["donation / claim / pools<br/>payout・campaign・category_pool (under rework #300)"]
-        MV -.signature verification.-> MEM & DE & FUND
-    end
-
-    USGS --> WATCHER
-    WATCHER --> EQV
-    EQV --> WALRUS
-    EQV --> RELAYER
-    RELAYER --> DE
-
-    WORLD --> DAPP
-    DAPP -->|forward idkit_response| RUNNER
-    RUNNER --> MIV
-    MIV --> RELAYER
-    RELAYER --> MEM
-
-    RELAYER -.downstream trigger (planned #304).-> CENSUS
-    WALRUS -.affected-cell leaves.-> CENSUS
-    MEM -.RPC: multiGetObjects.-> CENSUS
-    CENSUS -.set_floor_census (planned).-> FUND
-
-    DAPP -->|read public state| CHAIN
-    ACPW --> R2
-    RPW --> R2
-    DAPP -->|claim/register with Merkle proof| FUND
-    DAPP --> RES
-```
+![Sonari system overview](assets/Sonari_SystemFlow_en.svg)
 
 ## 2. Trust Boundaries (the core of this system)
 
@@ -124,75 +54,7 @@ flowchart TB
 
 ## 1. 全体配線図
 
-```mermaid
-flowchart TB
-    subgraph EXT["外部サービス（信頼の起点ではない・公開データ）"]
-        USGS["USGS<br/>地震データ"]
-        WORLD["World ID<br/>Orb / IDKit v4"]
-    end
-
-    subgraph CLIENT["クライアント（信頼しない / 検証は全て下流）"]
-        DAPP["dapp (Next.js)<br/>sonari.help<br/>Cloudflare Workers/OpenNext"]
-        subgraph WORKERS["Cloudflare Workers + R2"]
-            ACPW["affected-cells-proof-worker"]
-            RPW["residence-proof-worker"]
-        end
-        DAPP --> WORKERS
-    end
-
-    subgraph TEE["🔒 TEE / Nitro Enclave（信頼境界：PCR でアテスト・鍵は enclave 内）"]
-        EQV["earthquake verifier<br/>USGS→被災セル root+payload 署名"]
-        MIV["membership / identity verifier<br/>World ID→本人確認→署名"]
-        CENSUS["census worker (計画 #304)<br/>band別カウント→署名"]
-    end
-
-    subgraph AWS["AWS インフラ（オーケストレーション・鍵は持たない）"]
-        WATCHER["earthquake watcher (Lambda)"]
-        RUNNER["sonari-verifier-runner<br/>DynamoDB Streams 駆動"]
-        RELAYER["relayer<br/>on-chain 投入"]
-        DDB[("DynamoDB<br/>job state / streams")]
-        WATCHER --> RUNNER
-        RUNNER <--> DDB
-        RUNNER --> RELAYER
-    end
-
-    subgraph STORE["分散ストレージ"]
-        WALRUS[("Walrus<br/>被災セルアーカイブ / evidence manifest")]
-        R2[("Cloudflare R2<br/>proof artifacts")]
-    end
-
-    subgraph CHAIN["⛓️ Sui (testnet) — Move package（公開状態 = 第三者検算可能）"]
-        MV["metadata_verifier<br/>TEE署名検証 (verifier family)"]
-        MEM["membership / identity_registry"]
-        DE["disaster_event / affected_cell"]
-        RES["allowed_residence_cell"]
-        FUND["donation / claim / pools<br/>payout・campaign・category_pool (改修中 #300)"]
-        MV -.署名検証.-> MEM & DE & FUND
-    end
-
-    USGS --> WATCHER
-    WATCHER --> EQV
-    EQV --> WALRUS
-    EQV --> RELAYER
-    RELAYER --> DE
-
-    WORLD --> DAPP
-    DAPP -->|idkit_response 転送| RUNNER
-    RUNNER --> MIV
-    MIV --> RELAYER
-    RELAYER --> MEM
-
-    RELAYER -.後段トリガ (計画 #304).-> CENSUS
-    WALRUS -.被災セル leaves.-> CENSUS
-    MEM -.RPC: multiGetObjects.-> CENSUS
-    CENSUS -.set_floor_census (計画).-> FUND
-
-    DAPP -->|read 公開状態| CHAIN
-    ACPW --> R2
-    RPW --> R2
-    DAPP -->|Merkle proof で claim/register| FUND
-    DAPP --> RES
-```
+![Sonari システム全体図](assets/Sonari_SystemFlow_en.svg)
 
 ## 2. 信頼境界（このシステムの核）
 
