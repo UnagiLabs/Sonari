@@ -2,9 +2,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const membershipReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/README.md");
-const teeReadmePath = path.join(process.cwd(), "nautilus/verifiers/membership/tee/README.md");
-const awsReadmePath = path.join(process.cwd(), "infra/aws/membership-identity-runner/README.md");
+// Detail content was relocated (verbatim) into docs/ as part of the docs
+// centralization: the membership verifier overview/TEE docs now live under
+// docs/verifiers/, and the AWS runner runbook under docs/internal/operations/. The
+// code-adjacent READMEs are slim pointers into these.
+const membershipReadmePath = path.join(process.cwd(), "docs/verifiers/identity.md");
+const teeReadmePath = path.join(process.cwd(), "docs/verifiers/identity_tee.md");
+const awsReadmePath = path.join(process.cwd(), "docs/internal/operations/membership_runner.md");
 const awsEvidenceTemplatePath = path.join(
     process.cwd(),
     "infra/aws/membership-identity-runner/evidence-template.md",

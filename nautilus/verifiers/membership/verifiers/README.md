@@ -22,3 +22,8 @@ Residence や student verifier は、membership に紐づく追加 metadata や 
 Membership verifier は個人または membership metadata を扱います。地震 verifier の affected cells や disaster event root は作りません。
 
 どちらも signed payload を contract に渡しますが、source、rejection rule、field order、署名対象 bytes は別契約です。
+
+---
+
+**Parent docs**: [../../../../docs/verifiers/identity.md](../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

@@ -92,3 +92,8 @@ JSON、binary set、Merkle tree、hash commitment などの候補を残す。
 
 MVP では、Natural Earth の粒度で陸地に含まれる cell を許容する。
 小さな無人島や海岸線の厳密な補正は MVP の要件ではない。
+
+---
+
+**Parent docs**: [../../../../../docs/verifiers/identity.md](../../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

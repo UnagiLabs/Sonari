@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const readmePath = path.join(process.cwd(), "infra/aws/sonari-verifier-runner/README.md");
+// Detail content was relocated to docs/internal/operations/verifier_runner.md (verbatim) as
+// part of the docs centralization; the in-place focused runbooks under
+// infra/aws/sonari-verifier-runner/docs/ stay where they are.
+const readmePath = path.join(process.cwd(), "docs/internal/operations/verifier_runner.md");
 const docsPaths = [
     readmePath,
     path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/deploy.md"),
@@ -39,7 +42,7 @@ function expectAdminCallIncludesSender(source: string, functionName: string): vo
 }
 
 describe("AWS Sonari verifier runner README", () => {
-    it("keeps the top-level README as a short index into focused runbooks", async () => {
+    it("keeps the verifier-runner operations doc as a short index into focused runbooks", async () => {
         const readme = await readReadme();
 
         expect(readme.split("\n").length).toBeLessThanOrEqual(120);

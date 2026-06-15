@@ -23,3 +23,8 @@
 pnpm --filter @sonari/verifier-contracts test
 pnpm --filter @sonari/verifier-contracts typecheck
 ```
+
+---
+
+**Parent docs**: [../../../../docs/verifiers/overview.md](../../../../docs/verifiers/overview.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

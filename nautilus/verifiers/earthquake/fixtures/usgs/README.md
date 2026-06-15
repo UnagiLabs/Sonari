@@ -35,3 +35,8 @@
 python3 nautilus/verifiers/earthquake/fixtures/verify_fixtures.py
 cargo test --manifest-path nautilus/verifiers/earthquake/tee/Cargo.toml
 ```
+
+---
+
+**Parent docs**: [../../../../../docs/verifiers/earthquake.md](../../../../../docs/verifiers/earthquake.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

@@ -108,3 +108,8 @@ python3 nautilus/verifiers/earthquake/fixtures/verify_fixtures.py
 4. `verify_fixtures.py` の `CASES` 辞書に新ケースを追加
 5. `python3 verify_fixtures.py` でPython側の独立検証がパスすることを確認
 6. `cargo test` でRust側のテストがパスすることを確認
+
+---
+
+**Parent docs**: [../../../../docs/verifiers/earthquake.md](../../../../docs/verifiers/earthquake.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

@@ -7,15 +7,10 @@
   floor_ratio 確定）は本書を正とする。
 - 本人確認・災害イベント検証・Merkle proof などの認証/検証まわりは、
   現行実装をそのまま仕様として記述する（変更しない）。
-- 寄付者・受給者向けの平易な説明は [docs/donation_flow.md](./donation_flow.md)、
-  事業前提は [docs/business_logic.md](./business_logic.md) を参照する。
+- 寄付者・受給者向けの平易な説明は [docs/donation_flow.md](../donation_flow.md) を参照する。
 - **対象地域の災害前登録メンバー数の off-chain 集計（後置センサス）** は本書の §床払い と
   GitHub issue **#296** を正とする。コントラクトは署名済みセンサス結果を検証・消費するだけで、
   集計自体は行わない。
-
-> **注意（旧文書との関係）**: [docs/fund_flow_spec.md](./fund_flow_spec.md) は本書より前の
-> 設計イテレーション（補填を Round 1 に畳み込む方式・床払いと後置センサス未導入）を含む。
-> 支払いモデルについては**本書が正**であり、fund_flow_spec.md は本書に合わせて要再整合（別途）。
 
 **用語対応**: ユーザー向けガイドの「用途Pool」は本書では **Category Pool**、
 「特設募金箱」は **Campaign Pool（`Campaign`）**、「最低ラインの支援金」は **床払い（Floor / Round 0）**、
@@ -611,7 +606,7 @@ claim（本払い経路）:
 本人確認の種類で支給率を変えない（KYC / World ID どちらも満額）。
 初回資格確立と床払いでは有効な本人確認記録を要求し、本払いのみの経路では
 すでに検証済みの `ClaimApplication` と `verified_in_round` を支払い条件にする。
-受給資格判定（business_logic.md §3）は床払い・本払いとも同一。
+受給資格判定（本書 §9）は床払い・本払いとも同一。
 
 ### 9.1 受給単一入口 `claim`（初回申請・本人確認・床払い・本払いを内包）
 
@@ -1004,8 +999,5 @@ target 仕様として残っていないことを確認する。
 | 文書 | 内容 |
 | --- | --- |
 | **GitHub issue #296** | 後置センサス（対象地域の災害前登録メンバー数の off-chain 集計→署名→on-chain 投入）の実装 |
-| [docs/donation_flow.md](./donation_flow.md) | 寄付者・受給者向けの公開ガイド（床払い = 最低ラインの支援金 / 本払い = 寄付の分配） |
-| [docs/business_logic.md](./business_logic.md) | 事業・資金設計メモ（§3 Claim 条件・§6 duplicate key は本仕様の前提。§4/§8/§9 は旧設計で本書が正） |
-| [docs/fund_flow_spec.md](./fund_flow_spec.md) | 資金フロー設計の旧イテレーション。支払いモデルは本書が正（要再整合） |
-| [docs/tech_stack.md](./tech_stack.md) | モノレポ構成と contracts 方針 |
+| [docs/donation_flow.md](../donation_flow.md) | 寄付者・受給者向けの公開ガイド（床払い = 最低ラインの支援金 / 本払い = 寄付の分配） |
 | `schemas/` | Payload・Merkle leaf・manifest・**センサス result** の言語横断契約 |

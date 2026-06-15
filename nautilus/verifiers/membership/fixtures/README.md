@@ -17,3 +17,8 @@
 Fixture は検証ロジックの入力や期待出力を固定するために使います。worker や relayer の都合で、fixture の意味を変えないでください。
 
 新しい verifier result field、provider enum、BCS field order、署名対象 bytes を変える場合は、対応する fixture と golden test も一緒に更新します。
+
+---
+
+**Parent docs**: [../../../../docs/verifiers/identity.md](../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

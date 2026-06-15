@@ -25,3 +25,8 @@ Student verifier を追加する場合も、本人確認済みかどうかの状
 - BCS field order と enum 値。
 - expiry と revocation の扱い。
 - fixture / golden vector の形式。
+
+---
+
+**Parent docs**: [../../../../../docs/verifiers/identity.md](../../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

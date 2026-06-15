@@ -75,8 +75,8 @@ export function buildIdentitySubmitRequest(
  * Note: the enclave (`uniqueness_proof()` in
  * nautilus/verifiers/membership/tee/src/core/types.rs) currently still expects
  * the placeholder `identifier == "orb"`; aligning the enclave to the real
- * `proof_of_human` identifier is the declared World ID v4 follow-up (#212,
- * docs/webapp.md:506). The dapp forwards the real IDKit identifier faithfully.
+ * `proof_of_human` identifier is the declared World ID v4 follow-up (#212).
+ * The dapp forwards the real IDKit identifier faithfully.
  */
 export function parseIdkitResponse(value: unknown): Record<string, unknown> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
