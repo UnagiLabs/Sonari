@@ -19,3 +19,8 @@
 - `intent`、`verifier_family`、`verifier_version`、provider enum、hash fields は contract-facing な値として扱う。
 - `verified: true` の result だけが署名済み payload の対象になる。
 - reject fixture は rejection rule の確認用であり、on-chain 提出用 payload ではない。
+
+---
+
+**Parent docs**: [../../../../../docs/verifiers/identity.md](../../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

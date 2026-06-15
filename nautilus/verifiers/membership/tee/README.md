@@ -1,158 +1,23 @@
 # Membership TEE
 
-Membership TEE は、Membership SBT の本人確認結果を作る Rust crate です。
+Membership SBT の本人確認結果を作る Rust crate。World ID proof を検証し、verified な結果だけを BCS payload にして署名します。
 
-TEE は外部の World ID API を確認し、結果を payload（受け渡すデータ本体）として組み立てます。確認済みの結果だけを BCS payload（Move に渡すための binary 形式）へ変換し、その bytes に署名します。
+- **Role**: World ID proof を検証し、verified result の payload BCS bytes に署名する TEE 境界。
+- **Trust boundary**: 署名できるのは `verified` のみ。worker / relayer は結果の意味を変えず、Move は署名済み payload だけを信頼する。
 
-## 何を担当するか
+## Where to Read More
+- [../../../../docs/verifiers/identity_tee.md](../../../../docs/verifiers/identity_tee.md) — full design / spec
+- [../../../../docs/verifiers/overview.md](../../../../docs/verifiers/overview.md) — verifier system overview
 
-この crate は、本人確認の TEE 側境界を担当します。
+---
 
-- stdin から本人確認 request を受け取る。
-- World ID proof（本人確認に使う検証データ）を確認する。
-- 成功時だけ contract 向け payload を作る。
-- 成功時だけ payload BCS bytes に署名する。
-- 拒否、外部サービス待ち、未対応の場合は署名を出さない。
+# Membership TEE（日本語）
 
-Relayer や worker は、この crate が返した結果の意味を変えてはいけません。Move contract は、署名された payload だけを信頼します。
+Membership SBT の本人確認結果を作る Rust crate。World ID proof を検証し、verified な結果だけを BCS payload にして署名します。
 
-## CLI の入口
+- **役割**: World ID proof を検証し、verified result の payload BCS bytes に署名する TEE 境界。
+- **信頼境界**: 署名できるのは `verified` のみ。worker / relayer は結果の意味を変えず、Move は署名済み payload だけを信頼する。
 
-`membership-tee` には 3 つの入口があります。
-
-| 入口 | 用途 | 署名 seed |
-| --- | --- | --- |
-| `fixture` | test や fixture 用の deterministic 実行 | dev fallback を許す |
-| `server` | AWS / Nautilus production entrypoint | enclave-local ephemeral key |
-| `production` | legacy/local stdin/stdout 互換 | env または file が必須 |
-| `--encode-only` | TS/Rust の BCS bytes 一致を確認する | 署名しない |
-
-`server` は VSOCK HTTP server として動きます。
-AWS / Nautilus production path は `membership-tee server` です。
-`server` は起動時に enclave-local ephemeral key を作り、`/get_attestation` でその public key を Nitro attestation に含めます。
-worker はその attestation を登録し、registration metadata を受け取ります。
-submit-capable relayer 設定がない default / dry-run smoke では、worker は `/process_data` envelope 用の local registration metadata を作ります。
-その後、worker は `/process_data` に `IdentityVerifyRequest` と registration metadata を送ります。
-`server` は verified result の BCS payload を ephemeral key で署名し、registration metadata を result に注入します。
-
-World ID API base は canonical value を使い、egress は `egress_proxy_url` / `SONARI_WORLD_ID_EGRESS_PROXY_URL` で渡す。
-`server` は canonical base として `https://developer.world.org` を使います。
-bootstrap JSON の `world_id_api_base` は互換のため受け取りますが、server path はこの値を production source of truth として使いません。
-host が渡せる World ID network 設定は `egress_proxy_url` だけです。
-
-`membership-tee production` は legacy/local stdin/stdout route です。
-AWS / Nautilus production の source of truth ではありません。
-`fixture` と legacy/local `production` は、stdin から `IdentityVerifyRequest` JSON を 1 つ読みます。stdout には status 付き JSON を 1 つだけ返します。
-AWS interface では 1 request = 1 JSON in / 1 JSON out として固定します。
-TEE は stateless です。前の job 状態は持ちません。
-
-## 入力 request
-
-request は次の field を受け取ります。
-
-```text
-registry_id
-membership_id
-owner
-provider
-issued_at_ms
-validity_ms
-terms_version
-signed_statement_hash
-world_id.idkit_response
-```
-
-未知の field は拒否します。top-level の field も、`world_id` の中の field も同じです。`idkit_response` の中身は World ID v4 の Uniqueness proof として厳格に検査します。
-
-## 出力 status
-
-stdout の `status` は 4 種類です。
-
-| status | 意味 | 署名 |
-| --- | --- | --- |
-| `verified` | 本人確認済み | あり |
-| `rejected` | proof や信頼境界の確認に失敗 | なし |
-| `pending_source` | World ID API など外部 source を確認できない | なし |
-| `unsupported` | provider が未対応 | なし |
-
-`verified` の場合だけ、次を返します。
-
-```text
-IdentityTeeResult fields
-payload_bcs_hex
-signature
-public_key
-```
-
-`rejected`、`pending_source`、`unsupported` の場合は `error_code` だけを返します。payload、signature、public_key は返しません。
-verified stdout は bare `IdentityTeeResult` ではありません。
-`status: "verified"` と `IdentityTeeResult` fields に加えて、署名 fields を返します。
-非 verified stdout は `status` と `error_code` だけを返します。
-`pending_source` は earthquake と同じ再試行用の語です。
-
-## 署名のルール
-
-署名対象は payload BCS bytes そのものです。
-
-Sui intent prefix は付けません。payload の field order や enum 値は、Move / Rust / TypeScript をまたぐ契約です。変更する場合は、schema、golden vector、Rust test、TypeScript test を一緒に更新してください。
-
-## server と legacy/local production の安全境界
-
-`server` は signing seed を command line argument、env、file から受け取りません。
-AWS / Nautilus production path は enclave-local ephemeral key だけを使います。
-
-`production` は legacy/local 互換 route です。
-`production` は signing seed を command line argument から受け取りません。
-
-次のどちらかを使います。
-
-```text
-SONARI_TEE_SIGNING_KEY_SEED
-SONARI_TEE_SIGNING_KEY_SEED_FILE
-```
-
-legacy/local stdin/stdout 互換の AWS 境界 interface として残る env は次の 3 つです。
-
-```text
-SONARI_TEE_SIGNING_KEY_SEED
-SONARI_TEE_SIGNING_KEY_SEED_FILE
-SONARI_WORLD_ID_API_BASE
-```
-
-`SONARI_WORLD_ID_APP_ID` は production の runtime config として必須です。
-ただし AWS 境界 interface の固定対象とは分けて扱います。
-#74 では deploy config から TEE process env に注入します。
-本番では KMS や Nitro attestation へ差し替える場合があります。
-その場合も stdin/stdout の JSON 契約は変えないでください。
-
-request 由来の `issued_at_ms` と `validity_ms` は server path と legacy/local production では信頼しません。TEE 側の現在時刻と既定 TTL を使います。これは、caller が長すぎる有効期限を持つ署名済み payload を作らせないためです。
-
-## fixture の使い方
-
-`fixture` は test 用です。`issued_at_ms` を request に入れると、同じ入力から同じ時刻の payload を作れます。
-
-World ID の結果は flag で切り替えられます。
-
-```bash
-membership-tee fixture --world-id-status verified
-membership-tee fixture --world-id-status rejected
-membership-tee fixture --world-id-status pending-source
-```
-
-`provider` が `kyc` の場合は、現在は未対応として `unsupported` を返します。error code は `KYC_UNSUPPORTED` です。
-
-## encode-only
-
-`--encode-only` は、完成済みの `IdentityTeeResult` JSON を stdin から読みます。署名はせず、BCS hex だけを返します。
-
-```json
-{"payload_bcs_hex":"0x..."}
-```
-
-`verified` が `true` でない payload は拒否します。これは、reject payload を on-chain 提出用 bytes として扱わないためです。
-
-## 失敗時の考え方
-
-この crate は fail-closed を優先します。入力が壊れている、unknown field がある、seed がない、外部 source を確認できない、という場合は安全側に倒します。
-
-特に、署名できるのは `verified` のみです。`rejected`、`pending_source`、`unsupported` に署名を付けてはいけません。
+## 詳細資料
+- [../../../../docs/verifiers/identity_tee.md](../../../../docs/verifiers/identity_tee.md) — 完全な設計 / 仕様
+- [../../../../docs/verifiers/overview.md](../../../../docs/verifiers/overview.md) — verifier 全体概要

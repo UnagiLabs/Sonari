@@ -1,40 +1,23 @@
 # Membership Runner
 
-`membership/runner` は、Membership identity verification job を受け付け、AWS workflow に流す TypeScript package です。
+Membership identity verification job を受け付け、AWS workflow に流す TypeScript package。proof の意味は検証せず、job 永続化と状態管理だけを担当します。
 
-この package は本人確認 proof の意味を検証しません。request を parse し、DynamoDB に job として保存し、due job を Step Functions に渡し、TEE result を受け取って job state を更新します。本人確認の最終判断と署名は `membership/tee/` の責務です。
+- **Role**: HTTP request を job 化し、DynamoDB 永続化・Step Functions 起動・TEE result 後の状態遷移を行う配送 / 状態管理層。
+- **Trust boundary**: HTTP body / DynamoDB / Step Functions input / transport metadata を信頼しない。本人確認の最終判断と署名は TEE の責務。
 
-## 何を担当するか
+## Where to Read More
+- [../../../../docs/verifiers/identity_runner.md](../../../../docs/verifiers/identity_runner.md) — full design / spec
+- [../../../../docs/verifiers/overview.md](../../../../docs/verifiers/overview.md) — verifier system overview
 
-- SubmitVerification Lambda の request parse と job idempotency。
-- Verification job の DynamoDB 永続化。
-- Batch verifier Lambda による due job の claim。
-- Membership Step Functions execution の開始。
-- shared runner capacity に渡す workflow input の組み立て。
-- TEE result 後の retry / failed / completed state transition。
-- 明示設定がある場合の Sui submission helper。
+---
 
-## 信頼境界
+# Membership Runner（日本語）
 
-Runner は配送と状態管理の層です。次の値を信頼して payload の意味を決めてはいけません。
+Membership identity verification job を受け付け、AWS workflow に流す TypeScript package。proof の意味は検証せず、job 永続化と状態管理だけを担当します。
 
-- caller から来た HTTP body。
-- DynamoDB に保存された request JSON。
-- Step Functions input。
-- EC2 / SSM / S3 の transport metadata。
+- **役割**: HTTP request を job 化し、DynamoDB 永続化・Step Functions 起動・TEE result 後の状態遷移を行う配送 / 状態管理層。
+- **信頼境界**: HTTP body / DynamoDB / Step Functions input / transport metadata を信頼しない。本人確認の最終判断と署名は TEE の責務。
 
-Contract-facing な本人確認 result は、TEE が source を確認し、BCS payload bytes を作り、その bytes に署名したものだけを使います。
-
-## 主な入口
-
-- `createSubmitVerificationHandler`: HTTP request を job にする Lambda handler。
-- `createBatchVerifierHandler`: due job を Step Functions に渡す batch Lambda handler。
-- `StepFunctionsWorkflowStarter`: membership workflow execution の開始。
-- `DynamoDbVerificationJobRepository`: AWS 上の job repository。
-
-## 検証
-
-```bash
-pnpm --filter @sonari/membership-verifier-runner test
-pnpm --filter @sonari/membership-verifier-runner typecheck
-```
+## 詳細資料
+- [../../../../docs/verifiers/identity_runner.md](../../../../docs/verifiers/identity_runner.md) — 完全な設計 / 仕様
+- [../../../../docs/verifiers/overview.md](../../../../docs/verifiers/overview.md) — verifier 全体概要

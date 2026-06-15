@@ -18,3 +18,8 @@ Student verifier は、membership に紐づく学生 eligibility を検証する
 - 地震 verifier の source artifact。
 
 実装前に source policy、issuer trust model、payload field order を明示してから fixture を追加します。
+
+---
+
+**Parent docs**: [../../../../../docs/verifiers/identity.md](../../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

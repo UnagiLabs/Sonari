@@ -24,3 +24,8 @@ Domain-specific な payload の意味は、呼び出し側 crate が決めます
 ```bash
 cargo test --manifest-path nautilus/verifiers/shared-tee/Cargo.toml
 ```
+
+---
+
+**Parent docs**: [../../../docs/verifiers/overview.md](../../../docs/verifiers/overview.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。

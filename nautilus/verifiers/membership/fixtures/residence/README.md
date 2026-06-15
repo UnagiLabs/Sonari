@@ -18,3 +18,8 @@ Residence verifier は、ユーザーが申告した H3 resolution 7 の居住 c
 - KYC / World ID の proof body。
 
 実装を追加する時は、`membership/verifiers/residence/README.md` の信頼境界と rejection rule に合わせて fixture を作ります。
+
+---
+
+**Parent docs**: [../../../../../docs/verifiers/identity.md](../../../../../docs/verifiers/identity.md) — component overview & full spec.
+**親資料**: 同上（上位コンポーネントの概要・完全仕様）。
