@@ -32,7 +32,7 @@ The first MVP is **parametric disaster support** for earthquake relief. Donors a
 
 ## How Sonari Works
 
-![Sonari system overview](docs/assets/Sonari_SystemFlow_en.svg)
+![Sonari system overview](docs/assets/Sonari_Overview.svg)
 
 Sonari turns donation-backed aid into a clear, verifiable flow:
 
