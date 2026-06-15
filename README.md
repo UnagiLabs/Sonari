@@ -75,7 +75,6 @@ All detailed documentation lives under `docs/`. A good reading order is Architec
 | --- | --- |
 | System architecture | [docs/architecture.md](docs/architecture.md) |
 | Sui Move contract overview | [docs/contracts_overview.md](docs/contracts_overview.md) |
-| Sui Move contract design spec | [docs/contracts_spec.md](docs/contracts_spec.md) |
 | Donation flow | [docs/donation_flow.md](docs/donation_flow.md) |
 | Nautilus verifier overview | [docs/verifiers/overview.md](docs/verifiers/overview.md) |
 | Earthquake verifier | [docs/verifiers/earthquake.md](docs/verifiers/earthquake.md) |
@@ -149,7 +148,6 @@ Sonari は寄付に裏付けられた支援を、明快で検証可能なフロ�
 | --- | --- |
 | システムアーキテクチャ | [docs/architecture.md](docs/architecture.md) |
 | Sui Move コントラクト概要 | [docs/contracts_overview.md](docs/contracts_overview.md) |
-| Sui Move コントラクト設計仕様 | [docs/contracts_spec.md](docs/contracts_spec.md) |
 | 寄付フロー | [docs/donation_flow.md](docs/donation_flow.md) |
 | Nautilus verifier 概要 | [docs/verifiers/overview.md](docs/verifiers/overview.md) |
 | 地震 verifier | [docs/verifiers/earthquake.md](docs/verifiers/earthquake.md) |

@@ -1,7 +1,7 @@
 # Sonari System Architecture
 
 > **Purpose**: Provide a single-page overview of how the dapp / Sui / TEE / runner / external services are wired together, and of the **trust boundaries**.
-> For details on each domain, see the individual specs: on-chain contracts = [`./contracts_spec.md`](./contracts_spec.md) / contracts overview = [`contracts_overview.md`](contracts_overview.md) / verifier overview = [`verifiers/overview.md`](verifiers/overview.md).
+> For details on each domain, see the individual specs: on-chain contracts = [`internal/contracts_spec.md`](internal/contracts_spec.md) / contracts overview = [`contracts_overview.md`](contracts_overview.md) / verifier overview = [`verifiers/overview.md`](verifiers/overview.md).
 >
 > ⚠️ **Draft**: This is continuously updated against the implementation. Items marked `(planned)` are not yet implemented (issue in progress).
 
@@ -48,7 +48,7 @@
 # Sonari システム全体アーキテクチャ（日本語）
 
 > **目的**: dapp / Sui / TEE / runner / 外部サービスの配線と **信頼境界** を1枚で俯瞰する。
-> 個別ドメインの詳細は各仕様へ: オンチェーン契約=[`./contracts_spec.md`](./contracts_spec.md) / コントラクト概要=[`contracts_overview.md`](contracts_overview.md) / verifier 概要=[`verifiers/overview.md`](verifiers/overview.md)。
+> 個別ドメインの詳細は各仕様へ: オンチェーン契約=[`internal/contracts_spec.md`](internal/contracts_spec.md) / コントラクト概要=[`contracts_overview.md`](contracts_overview.md) / verifier 概要=[`verifiers/overview.md`](verifiers/overview.md)。
 >
 > ⚠️ **ドラフト**: 実装と突合して継続更新する。`(計画)` 注記は未実装（issue 進行中）。
 

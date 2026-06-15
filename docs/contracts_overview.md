@@ -25,7 +25,7 @@ There are four things a person can do, in plain terms:
    - **Floor payout** — an immediate minimum amount, available as soon as identity is confirmed.
    - **Main payout** — a larger, pro-rata share paid out after the donation window closes, so everyone in the same band receives the same ratio.
 
-The exact amounts, pool math, and timing live in the design spec — see [docs/contracts_spec.md](contracts_spec.md).
+The exact amounts, pool math, and timing live in the design spec — see [docs/internal/contracts_spec.md](internal/contracts_spec.md).
 
 ## How Verification Works — the Nautilus Pattern
 
@@ -85,7 +85,7 @@ flowchart TB
   class gate boundary;
 ```
 
-Donations flow into the pools right away. Disaster and identity facts only become real after the **highlighted gate** re-checks their signatures. A survivor's claim then draws on the pools — first the **floor payout** (immediate minimum), and after the donation window closes the **main payout** (a pro-rata share of the campaign). The precise split ratios, escrow rules, and round math are in [docs/contracts_spec.md](contracts_spec.md).
+Donations flow into the pools right away. Disaster and identity facts only become real after the **highlighted gate** re-checks their signatures. A survivor's claim then draws on the pools — first the **floor payout** (immediate minimum), and after the donation window closes the **main payout** (a pro-rata share of the campaign). The precise split ratios, escrow rules, and round math are in [docs/internal/contracts_spec.md](internal/contracts_spec.md).
 
 ## Module Map
 
@@ -125,7 +125,7 @@ Next:
 
 ## Where to Read More
 
-- [docs/contracts_spec.md](contracts_spec.md) — the full design spec: pools, object layouts, exact amounts and constants, security requirements, test requirements, and open questions.
+- [docs/internal/contracts_spec.md](internal/contracts_spec.md) — the full design spec: pools, object layouts, exact amounts and constants, security requirements, test requirements, and open questions.
 - [docs/verifiers/overview.md](verifiers/overview.md) — the TEE / Nautilus side that *produces* the signed results these contracts verify.
 - [docs/donation_flow.md](donation_flow.md) — the donor / recipient guide.
 - `schemas/` — the cross-language contract for payloads, Merkle leaves, and the census result.
@@ -159,7 +159,7 @@ Next:
    - **床払い** — 本人確認が済みしだい受け取れる、即時の最低額。
    - **本払い** — 寄付の募集締切後に支払われる、より大きい按分の取り分。同じ band の全員が同じ比率で受け取ります。
 
-正確な金額・Pool の計算・タイミングは設計仕様書にあります — [docs/contracts_spec.md](contracts_spec.md) を参照してください。
+正確な金額・Pool の計算・タイミングは設計仕様書にあります — [docs/internal/contracts_spec.md](internal/contracts_spec.md) を参照してください。
 
 ## 検証の仕組み — Nautilus パターン
 
@@ -219,7 +219,7 @@ flowchart TB
   class gate boundary;
 ```
 
-寄付はすぐ Pool に入ります。災害と本人確認の事実は、**強調されたゲート**が署名を再検証して初めて本物になります。被災者の claim はそこから Pool を引き当てます — まず **床払い**（即時の最低額）、寄付の募集締切後に **本払い**（Campaign の按分の取り分）です。正確な分割比率・escrow ルール・ラウンド計算は [docs/contracts_spec.md](contracts_spec.md) にあります。
+寄付はすぐ Pool に入ります。災害と本人確認の事実は、**強調されたゲート**が署名を再検証して初めて本物になります。被災者の claim はそこから Pool を引き当てます — まず **床払い**（即時の最低額）、寄付の募集締切後に **本払い**（Campaign の按分の取り分）です。正確な分割比率・escrow ルール・ラウンド計算は [docs/internal/contracts_spec.md](internal/contracts_spec.md) にあります。
 
 ## モジュール一覧
 
@@ -259,7 +259,7 @@ flowchart TB
 
 ## 詳細資料
 
-- [docs/contracts_spec.md](contracts_spec.md) — 完全な設計仕様: Pool・オブジェクト設計・正確な金額と定数・セキュリティ要件・テスト要件・Open Questions。
+- [docs/internal/contracts_spec.md](internal/contracts_spec.md) — 完全な設計仕様: Pool・オブジェクト設計・正確な金額と定数・セキュリティ要件・テスト要件・Open Questions。
 - [docs/verifiers/overview.md](verifiers/overview.md) — これらのコントラクトが検証する署名済み結果を *作る* 側（TEE / Nautilus）。
 - [docs/donation_flow.md](donation_flow.md) — 寄付者 / 受給者向けガイド。
 - `schemas/` — payload・Merkle leaf・センサス result の言語横断契約。

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const CONTENT_FILES = [
     "dapp/messages/en.json",
     "dapp/public/sonari_overview.html",
-    "docs/contracts_spec.md",
+    "docs/internal/contracts_spec.md",
 ] as const;
 
 function readRepoFile(filePath: string): string {
@@ -24,7 +24,7 @@ describe("MVP identity gate content", () => {
 
     it("keeps the overview and smoke plan aligned with SBT-owner payout", () => {
         const overview = readRepoFile("dapp/public/sonari_overview.html");
-        const contractsSpec = readRepoFile("docs/contracts_spec.md");
+        const contractsSpec = readRepoFile("docs/internal/contracts_spec.md");
 
         expect(overview).toContain("KYC verified");
         expect(overview).toContain("World ID verified");

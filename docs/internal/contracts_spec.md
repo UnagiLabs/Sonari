@@ -7,7 +7,7 @@
   floor_ratio 確定）は本書を正とする。
 - 本人確認・災害イベント検証・Merkle proof などの認証/検証まわりは、
   現行実装をそのまま仕様として記述する（変更しない）。
-- 寄付者・受給者向けの平易な説明は [docs/donation_flow.md](./donation_flow.md) を参照する。
+- 寄付者・受給者向けの平易な説明は [docs/donation_flow.md](../donation_flow.md) を参照する。
 - **対象地域の災害前登録メンバー数の off-chain 集計（後置センサス）** は本書の §床払い と
   GitHub issue **#296** を正とする。コントラクトは署名済みセンサス結果を検証・消費するだけで、
   集計自体は行わない。
@@ -999,5 +999,5 @@ target 仕様として残っていないことを確認する。
 | 文書 | 内容 |
 | --- | --- |
 | **GitHub issue #296** | 後置センサス（対象地域の災害前登録メンバー数の off-chain 集計→署名→on-chain 投入）の実装 |
-| [docs/donation_flow.md](./donation_flow.md) | 寄付者・受給者向けの公開ガイド（床払い = 最低ラインの支援金 / 本払い = 寄付の分配） |
+| [docs/donation_flow.md](../donation_flow.md) | 寄付者・受給者向けの公開ガイド（床払い = 最低ラインの支援金 / 本払い = 寄付の分配） |
 | `schemas/` | Payload・Merkle leaf・manifest・**センサス result** の言語横断契約 |
