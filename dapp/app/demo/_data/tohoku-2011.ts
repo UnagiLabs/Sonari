@@ -6,7 +6,7 @@
  *   - nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json
  *   - nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/result.json
  *
- * 18,429 セルの影響範囲データはブラウザに載せず、イベント概要のみを定数で持つ。
+ * 39,221 セルの影響範囲データはブラウザに載せず、イベント概要のみを定数で持つ。
  * H3 セルの地図表示は本 issue の範囲外(別 issue)。将来の地図表示で出どころを
  * 辿れるよう、このコメントにフィクスチャパスを残す。
  */
@@ -47,7 +47,7 @@ export const TOHOKU_2011_DEMO_EARTHQUAKE: TohokuDemoEarthquake = {
     magnitude: 9.1,
     mmi: 8.18,
     severityBand: 3,
-    affectedCellCount: 18429,
+    affectedCellCount: 39221,
     h3Resolution: 7,
     epicenter: { latitude: 38.297, longitude: 142.373, depthKm: 29 },
     usgsEventId: "official20110311054624120_30",

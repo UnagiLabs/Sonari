@@ -18,7 +18,7 @@
  *     never here.
  *   - This asset is intended for lazy fetch by the map component (issue #383),
  *     so that large cell data is NOT statically imported into the JS bundle.
- *   - h3_index values are 10-digit decimal u64 strings (not hex).
+ *   - h3_index values are decimal u64 strings (not hex).
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";

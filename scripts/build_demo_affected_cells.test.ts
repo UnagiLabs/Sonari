@@ -109,14 +109,14 @@ describe("real fixture integration", () => {
 
         const result = extractAffectedCells(input);
 
-        expect(result).toHaveLength(18429);
+        expect(result).toHaveLength(39221);
 
         const band1 = result.filter(([, band]) => band === 1).length;
         const band2 = result.filter(([, band]) => band === 2).length;
         const band3 = result.filter(([, band]) => band === 3).length;
-        expect(band1).toBe(4984);
-        expect(band2).toBe(7203);
-        expect(band3).toBe(6242);
+        expect(band1).toBe(10692);
+        expect(band2).toBe(15650);
+        expect(band3).toBe(12879);
     });
 
     it("includes representative cells in correct positions", async () => {
@@ -150,7 +150,7 @@ describe("generated asset", () => {
 
         expect(Array.isArray(data)).toBe(true);
         const arr = data as unknown[];
-        expect(arr).toHaveLength(18429);
+        expect(arr).toHaveLength(39221);
 
         // Each element must be [string, 1|2|3]
         for (const item of arr) {
@@ -165,8 +165,8 @@ describe("generated asset", () => {
         const band1 = arr.filter((item) => (item as [string, number])[1] === 1).length;
         const band2 = arr.filter((item) => (item as [string, number])[1] === 2).length;
         const band3 = arr.filter((item) => (item as [string, number])[1] === 3).length;
-        expect(band1).toBe(4984);
-        expect(band2).toBe(7203);
-        expect(band3).toBe(6242);
+        expect(band1).toBe(10692);
+        expect(band2).toBe(15650);
+        expect(band3).toBe(12879);
     });
 });

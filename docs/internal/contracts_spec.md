@@ -646,6 +646,8 @@ SBT precheck（active / sender = owner / registry record 整合）。
 | Area | `pass.home_cell == leaf.h3_index` | `EResidenceCellMismatch` |
 | Identity | 有効な本人確認記録・provider bit・duplicate key 束縛 | `EIdentity*` |
 
+`AffectedCellLeaf.cells_generation_method` は `SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1 = 1`、`SHAKEMAP_HDF_H3_AREA_WEIGHTED_P90_V1 = 2`、`SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1 = 3` を固定値として扱う。現行 grid.xml path の leaf は value `3` で、ShakeMap 実データ軸に対するH3セル中心の bilinear interpolation に由来する。
+
   - 検証を通すと `ClaimApplication { band, verified: true, verified_in_round: current_round, ... }`
     を登録し、`ClaimSubmitted` と `ClaimVerified` を発行する。
   - 申請受付は Day 21 で締切済みのため、後から `claim` を呼んでも申請者集合は増えない。

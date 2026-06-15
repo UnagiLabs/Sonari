@@ -80,6 +80,22 @@ describe("serializeAffectedCellLeaf", () => {
         expect(bytes2[49]).toBe(1);
     });
 
+    it("pins cells_generation_method numeric values", () => {
+        const oldBytes = serializeAffectedCellLeaf(CELL_1);
+        const weightedBytes = serializeAffectedCellLeaf({
+            ...CELL_1,
+            cells_generation_method: CellsGenerationMethod.shakemap_hdf_h3_area_weighted_p90_v1,
+        });
+        const bilinearBytes = serializeAffectedCellLeaf({
+            ...CELL_1,
+            cells_generation_method: CellsGenerationMethod.shakemap_gridxml_h3_center_bilinear_v1,
+        });
+
+        expect(oldBytes[50]).toBe(1);
+        expect(weightedBytes[50]).toBe(2);
+        expect(bilinearBytes[50]).toBe(3);
+    });
+
     it("two distinct cells produce different byte sequences", () => {
         const bytes1 = serializeAffectedCellLeaf(CELL_1);
         const bytes2 = serializeAffectedCellLeaf(CELL_2);

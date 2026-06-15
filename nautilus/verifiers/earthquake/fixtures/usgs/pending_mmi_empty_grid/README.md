@@ -21,6 +21,6 @@ Source:
 - テストに必要なネットワークアクセス: いいえ
 -->
 
-この人工フィクスチャは、ShakeMap ソースと取得済みグリッドを含むものの、グリッドに利用可能な MMI 値がない USGS 詳細レスポンスを表します。Oracle は確定してはならず、`pending_mmi` と `MMI_NOT_AVAILABLE` を返す必要があります。
+この人工フィクスチャは、ShakeMap ソースと取得済みグリッドを含むものの、グリッドに利用可能な MMI 値がない USGS 詳細レスポンスを表します。grid XML 自体は取得済みなので再試行待ちにはせず、入力不正として `rejected` と `SHAKEMAP_PARSE_FAILED` を返す必要があります。
 
 USGS 詳細 JSON は、Oracle ワークフローテストに必要なフィールドまで最小化されています。

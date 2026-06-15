@@ -5,10 +5,12 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use tee::{
-    CELL_AGGREGATION_GRID_POINT_P90, CELL_METRIC_USGS_MMI,
-    CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1, GEO_RESOLUTION,
+    CELL_AGGREGATION_GRID_POINT_P90, CELL_AGGREGATION_H3_CENTER_BILINEAR, CELL_METRIC_USGS_MMI,
+    CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1,
+    CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
+    CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_WEIGHTED_P90_V1, GEO_RESOLUTION,
     HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
-    LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleStatus,
+    LocalEd25519Signer, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION, OracleError, OracleStatus,
     PRIMARY_SOURCE_USGS, PayloadSigner, SignatureArtifact, SourceArchive, SourceArchiveError,
     StoredSourceRef, UsgsOracleInput, WorkerToTeeRequest, canonical_json_bytes, cell_band,
     grid_xml_from_artifact, merkle_root_from_leaf_hashes, mmi_decimal_to_x100, p90_x100,
@@ -96,8 +98,14 @@ fn pins_bcs_numeric_enums_to_typescript_contract() {
         CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
         1
     );
+    assert_eq!(CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_WEIGHTED_P90_V1, 2);
+    assert_eq!(
+        CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1,
+        3
+    );
     assert_eq!(CELL_METRIC_USGS_MMI, 1);
     assert_eq!(CELL_AGGREGATION_GRID_POINT_P90, 1);
+    assert_eq!(CELL_AGGREGATION_H3_CENTER_BILINEAR, 2);
     assert_eq!(INTENSITY_SCALE_MMI_X100, 1);
 }
 
@@ -622,7 +630,7 @@ fn source_archive_entrypoint_preserves_non_finalized_status_without_archive_or_s
             "usgs/pending_source_no_shakemap",
             OracleStatus::PendingSource,
         ),
-        ("usgs/pending_mmi_empty_grid", OracleStatus::PendingMmi),
+        ("usgs/pending_mmi_empty_grid", OracleStatus::Rejected),
         ("usgs/rejected_cancelled_shakemap", OracleStatus::Rejected),
         ("usgs/rejected_no_affected_cells", OracleStatus::Rejected),
     ] {
@@ -673,8 +681,8 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
         ),
         (
             "usgs/pending_mmi_empty_grid",
-            OracleStatus::PendingMmi,
-            Some("MMI_NOT_AVAILABLE"),
+            OracleStatus::Rejected,
+            Some("SHAKEMAP_PARSE_FAILED"),
         ),
         (
             "usgs/rejected_cancelled_shakemap",
@@ -717,6 +725,36 @@ fn non_finalized_fixtures_do_not_emit_payloads_or_signatures() {
         assert!(output.raw_data_manifest.is_none());
         assert!(output.affected_cells.is_none());
     }
+}
+
+#[test]
+fn finalized_shakemap_without_grid_xml_stays_pending_mmi() {
+    let mut input = finalized_input();
+    input.grid_xml = None;
+    input.raw_grid_bytes = None;
+    input.raw_grid_uri = None;
+
+    let output = process_usgs(input).expect("missing grid XML is retryable");
+
+    assert_eq!(output.result.status, OracleStatus::PendingMmi);
+    assert_eq!(
+        output.result.error_code.as_deref(),
+        Some("MMI_NOT_AVAILABLE")
+    );
+    assert!(output.affected_cells.is_none());
+    assert!(output.signature.is_none());
+}
+
+#[test]
+fn malformed_grid_xml_fails_closed() {
+    let mut input = finalized_input();
+    input.grid_xml =
+        Some(b"<shakemap_grid><grid_data>139.0 35.0 bad</grid_data></shakemap_grid>".to_vec());
+    input.raw_grid_bytes = input.grid_xml.clone();
+
+    let error = process_usgs(input).expect_err("malformed MMI must fail closed");
+
+    assert!(matches!(error, OracleError::InvalidMmi(value) if value == "bad"));
 }
 
 #[test]

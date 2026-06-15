@@ -1,4 +1,4 @@
-use crate::compute::geo::affected_cells_from_points;
+use crate::compute::geo::affected_cells_from_grid_centers;
 use crate::compute::merkle::{merkle_root_from_leaf_hashes, sample_proof};
 use crate::core::artifacts::{
     AffectedCellsArtifact, EarthquakeEvidence, EvidenceAffectedCells, EvidenceManifest,
@@ -14,7 +14,7 @@ use crate::encoding::bcs_payload::{event_uid_bytes, leaf_hashes, payload_bcs_byt
 use crate::encoding::json::canonical_json_bytes;
 use crate::source::usgs::{
     UsgsDetail, UsgsShakeMapProduct, detail_matches_source_event_id, grid_xml_from_artifact,
-    parse_detail, parse_grid_points,
+    parse_detail, parse_grid_points, structured_grid_from_points,
 };
 use crate::{
     CELL_AGGREGATION_NAME, CELL_METRIC_NAME, CELLS_GENERATION_METHOD_NAME, FRESHNESS_WINDOW_MS,
@@ -185,18 +185,17 @@ fn process_usgs_inner(
             None,
         )));
     };
-    let points = match parse_grid_points(grid_xml) {
-        Ok(points) if !points.is_empty() => points,
-        _ => {
-            return Ok(status_only(base_result(
-                OracleStatus::PendingMmi,
-                Some("MMI_NOT_AVAILABLE"),
-                None,
-            )));
-        }
-    };
+    let points = parse_grid_points(grid_xml)?;
+    if points.is_empty() {
+        return Ok(status_only(base_result(
+            OracleStatus::Rejected,
+            Some("SHAKEMAP_PARSE_FAILED"),
+            None,
+        )));
+    }
 
-    let affected_cells = affected_cells_from_points(&points)?;
+    let structured_grid = structured_grid_from_points(&points)?;
+    let affected_cells = affected_cells_from_grid_centers(&structured_grid)?;
     if affected_cells.is_empty() {
         return Ok(status_only(base_result(
             OracleStatus::Rejected,

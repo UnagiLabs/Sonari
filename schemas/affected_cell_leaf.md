@@ -46,4 +46,4 @@ MVP中の破壊的変更として、`oracle_version = 1` のleaf / internal node
 - JSON artifact内の `h3_index` はdecimal stringです。`u64` へ変換する際はleading zeroを禁止します。ただし `"0"` のみ許可します。
 - `intensity_value` は `intensity_scale` とセットで解釈します。MMI 7.23は `MMI_X100` で `723` です。
 - `cell_band` は `MMI_X100` の値で決定します: `band0` は `< 700`、`band1` は `700..=749`、`band2` は `750..=799`、`band3` は `>= 800` です。`band0` はClaim対象外で、leaf / Merkle rootには含めません。
-- `cells_generation_method` のMVP値は `SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1` です。
+- `cells_generation_method` の値は、`SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1 = 1`、`SHAKEMAP_HDF_H3_AREA_WEIGHTED_P90_V1 = 2`、`SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1 = 3` です。既存値 `1` / `2` は固定です。

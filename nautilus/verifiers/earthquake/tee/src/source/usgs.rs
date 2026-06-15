@@ -79,6 +79,41 @@ pub(crate) struct GridPoint {
     pub(crate) mmi_x100: u16,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
+pub(crate) struct StructuredGrid {
+    pub(crate) lon_axis: Vec<f64>,
+    pub(crate) lat_axis: Vec<f64>,
+    pub(crate) bbox: GridBbox,
+    mmi_by_coordinate: HashMap<(u64, u64), u16>,
+}
+
+impl StructuredGrid {
+    #[allow(dead_code)]
+    pub(crate) fn mmi_x100_at(&self, lon: f64, lat: f64) -> Option<u16> {
+        self.mmi_by_coordinate
+            .get(&(coordinate_key(lon), coordinate_key(lat)))
+            .copied()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn contains(&self, lon: f64, lat: f64) -> bool {
+        self.bbox.min_lon <= lon
+            && lon <= self.bbox.max_lon
+            && self.bbox.min_lat <= lat
+            && lat <= self.bbox.max_lat
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
+pub(crate) struct GridBbox {
+    pub(crate) min_lon: f64,
+    pub(crate) max_lon: f64,
+    pub(crate) min_lat: f64,
+    pub(crate) max_lat: f64,
+}
+
 fn deserialize_optional_magnitude_x100<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
 where
     D: Deserializer<'de>,
@@ -302,6 +337,62 @@ pub(crate) fn parse_grid_points(grid_xml: &[u8]) -> Result<Vec<GridPoint>, Oracl
         .collect()
 }
 
+#[allow(dead_code)]
+pub(crate) fn structured_grid_from_points(
+    points: &[GridPoint],
+) -> Result<StructuredGrid, OracleError> {
+    let first = points
+        .first()
+        .ok_or_else(|| OracleError::InvalidGridPoint("grid_data contains no points".to_owned()))?;
+    let first_lon = parse_grid_lon(&first.lon)?;
+    let first_lat = parse_grid_lat(&first.lat)?;
+    let mut lon_axis = vec![first_lon];
+    let mut lat_axis = vec![first_lat];
+    let mut bbox = GridBbox {
+        min_lon: first_lon,
+        max_lon: first_lon,
+        min_lat: first_lat,
+        max_lat: first_lat,
+    };
+    let mut mmi_by_coordinate = HashMap::<(u64, u64), u16>::new();
+
+    for point in points {
+        let lon = parse_grid_lon(&point.lon)?;
+        let lat = parse_grid_lat(&point.lat)?;
+        lon_axis.push(lon);
+        lat_axis.push(lat);
+        bbox.min_lon = bbox.min_lon.min(lon);
+        bbox.max_lon = bbox.max_lon.max(lon);
+        bbox.min_lat = bbox.min_lat.min(lat);
+        bbox.max_lat = bbox.max_lat.max(lat);
+        mmi_by_coordinate
+            .entry((coordinate_key(lon), coordinate_key(lat)))
+            .and_modify(|current| *current = (*current).max(point.mmi_x100))
+            .or_insert(point.mmi_x100);
+    }
+
+    sort_unique_f64(&mut lon_axis);
+    sort_unique_f64(&mut lat_axis);
+
+    Ok(StructuredGrid {
+        lon_axis,
+        lat_axis,
+        bbox,
+        mmi_by_coordinate,
+    })
+}
+
+#[allow(dead_code)]
+fn sort_unique_f64(values: &mut Vec<f64>) {
+    values.sort_by(|left, right| left.total_cmp(right));
+    values.dedup_by(|left, right| coordinate_key(*left) == coordinate_key(*right));
+}
+
+#[allow(dead_code)]
+fn coordinate_key(value: f64) -> u64 {
+    value.to_bits()
+}
+
 #[derive(Debug, Default)]
 struct GridColumns {
     lon: Option<usize>,
@@ -401,17 +492,8 @@ fn grid_point_from_fields(
     lat_raw: &str,
     mmi_raw: &str,
 ) -> Result<GridPoint, OracleError> {
-    let lon = lon_raw
-        .parse::<f64>()
-        .map_err(|_| OracleError::InvalidGridPoint(format!("invalid longitude {lon_raw}")))?;
-    let lat = lat_raw
-        .parse::<f64>()
-        .map_err(|_| OracleError::InvalidGridPoint(format!("invalid latitude {lat_raw}")))?;
-    if !lon.is_finite() || !lat.is_finite() {
-        return Err(OracleError::InvalidGridPoint(
-            "coordinates must be finite".to_owned(),
-        ));
-    }
+    parse_grid_lon(lon_raw)?;
+    parse_grid_lat(lat_raw)?;
     Ok(GridPoint {
         lon: lon_raw.to_owned(),
         lat: lat_raw.to_owned(),
@@ -419,10 +501,31 @@ fn grid_point_from_fields(
     })
 }
 
+fn parse_grid_lon(lon_raw: &str) -> Result<f64, OracleError> {
+    parse_grid_coordinate(lon_raw, "longitude")
+}
+
+fn parse_grid_lat(lat_raw: &str) -> Result<f64, OracleError> {
+    parse_grid_coordinate(lat_raw, "latitude")
+}
+
+fn parse_grid_coordinate(raw: &str, label: &str) -> Result<f64, OracleError> {
+    let value = raw
+        .parse::<f64>()
+        .map_err(|_| OracleError::InvalidGridPoint(format!("invalid {label} {raw}")))?;
+    if !value.is_finite() {
+        return Err(OracleError::InvalidGridPoint(
+            "coordinates must be finite".to_owned(),
+        ));
+    }
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         MAX_GRID_XML_BYTES, MAX_GRID_ZIP_BYTES, grid_xml_from_artifact, parse_grid_points,
+        structured_grid_from_points,
     };
 
     const MIB: usize = 1024 * 1024;
@@ -477,5 +580,101 @@ mod tests {
         assert_eq!(points[1].lon, "134.7667");
         assert_eq!(points[1].lat, "45.1000");
         assert_eq!(points[1].mmi_x100, 240);
+    }
+
+    #[test]
+    fn parse_grid_structured_grid_uses_unique_sorted_axes_bbox_and_max_duplicate_mmi() {
+        let grid_xml = br#"
+            <shakemap_grid>
+              <grid_field index="1" name="LON" units="dd" />
+              <grid_field index="2" name="LAT" units="dd" />
+              <grid_field index="3" name="MMI" units="intensity" />
+              <grid_data>
+                134.80 45.20 2.1
+                134.70 45.10 2.2
+                134.80 45.10 2.3
+                134.70 45.10 2.9
+              </grid_data>
+            </shakemap_grid>
+        "#;
+
+        let points = parse_grid_points(grid_xml).expect("grid points should parse");
+        let grid = structured_grid_from_points(&points).expect("grid should be structured");
+
+        assert_eq!(grid.lon_axis, vec![134.70, 134.80]);
+        assert_eq!(grid.lat_axis, vec![45.10, 45.20]);
+        assert_eq!(grid.bbox.min_lon, 134.70);
+        assert_eq!(grid.bbox.max_lon, 134.80);
+        assert_eq!(grid.bbox.min_lat, 45.10);
+        assert_eq!(grid.bbox.max_lat, 45.20);
+        assert_eq!(grid.mmi_x100_at(134.70, 45.10), Some(290));
+        assert_eq!(grid.mmi_x100_at(134.80, 45.10), Some(230));
+        assert_eq!(grid.mmi_x100_at(134.70, 45.20), None);
+    }
+
+    #[test]
+    fn parse_grid_structured_grid_accepts_nonuniform_spacing_and_missing_edge_points() {
+        let grid_xml = br#"
+            <shakemap_grid>
+              <grid_field index="1" name="LON" units="dd" />
+              <grid_field index="2" name="LAT" units="dd" />
+              <grid_field index="3" name="MMI" units="intensity" />
+              <grid_data>
+                134.70 45.10 2.1
+                134.83 45.10 2.2
+                135.40 45.90 2.4
+              </grid_data>
+            </shakemap_grid>
+        "#;
+
+        let points = parse_grid_points(grid_xml).expect("grid points should parse");
+        let grid = structured_grid_from_points(&points)
+            .expect("nonuniform sparse grid should be accepted");
+
+        assert_eq!(grid.lon_axis, vec![134.70, 134.83, 135.40]);
+        assert_eq!(grid.lat_axis, vec![45.10, 45.90]);
+        assert_eq!(grid.mmi_x100_at(134.83, 45.90), None);
+    }
+
+    #[test]
+    fn parse_grid_structured_grid_rejects_empty_points() {
+        let error = structured_grid_from_points(&[]).expect_err("empty grid must fail");
+
+        assert!(error.to_string().contains("grid_data contains no points"));
+    }
+
+    #[test]
+    fn parse_grid_points_rejects_non_numeric_mmi() {
+        let grid_xml = br#"
+            <shakemap_grid>
+              <grid_field index="1" name="LON" units="dd" />
+              <grid_field index="2" name="LAT" units="dd" />
+              <grid_field index="3" name="MMI" units="intensity" />
+              <grid_data>134.70 45.10 not-a-number</grid_data>
+            </shakemap_grid>
+        "#;
+
+        let error = parse_grid_points(grid_xml).expect_err("non-numeric MMI must fail");
+
+        assert!(error.to_string().contains("invalid MMI"));
+    }
+
+    #[test]
+    fn parse_grid_points_rejects_missing_required_grid_fields() {
+        let grid_xml = br#"
+            <shakemap_grid>
+              <grid_field index="1" name="LON" units="dd" />
+              <grid_field index="2" name="LAT" units="dd" />
+              <grid_data>134.70 45.10</grid_data>
+            </shakemap_grid>
+        "#;
+
+        let error = parse_grid_points(grid_xml).expect_err("missing MMI field must fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("grid_field MMI column is required")
+        );
     }
 }

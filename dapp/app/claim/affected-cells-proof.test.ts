@@ -12,9 +12,9 @@ import {
 const EVENT_UID =
     "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
 const EVENT_REVISION = 1;
-const HOME_CELL = "608819013597790207";
+const HOME_CELL = "608819013614567423";
 const AFFECTED_CELLS_ROOT =
-    "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f";
+    "0xa7242156cf099521ac01790b775f32003ca571a7ef30a88e2e5034c71547a642";
 const PACKAGE_ID = "0x00000000000000000000000000000000000000000000000000000000000000aa";
 const SENDER = "0x00000000000000000000000000000000000000000000000000000000000000ff";
 const MOVE_STD_PACKAGE_ID = "0x0000000000000000000000000000000000000000000000000000000000000001";
@@ -29,18 +29,18 @@ const workerProofResponse = {
         event_revision: EVENT_REVISION,
         h3_index: HOME_CELL,
         geo_resolution: 7,
-        cell_band: 1,
-        intensity_value: 723,
+        cell_band: 2,
+        intensity_value: 791,
         cell_metric: "USGS_MMI",
         intensity_scale: "MMI_X100",
-        cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1",
+        cells_generation_method: "shakemap_gridxml_h3_center_bilinear_v1",
         oracle_version: "1",
     },
     proof: [
         {
             sibling_on_left: true,
             sibling_hash:
-                "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                "0xd70aa6ea6ea477da0563464bd56111d5711d0fdb4bd769d5ffa73bff92ebfaa5",
         },
     ],
 };
@@ -53,13 +53,13 @@ describe("parseAffectedCellsProofResponse", () => {
         expect(proof.event_revision).toBe(EVENT_REVISION);
         expect(proof.h3_index).toBe(HOME_CELL);
         expect(proof.affected_cells_root).toBe(AFFECTED_CELLS_ROOT);
-        expect(proof.leaf.h3_index).toBe(608819013597790207n);
+        expect(proof.leaf.h3_index).toBe(608819013614567423n);
         expect(proof.leaf.oracle_version).toBe(1n);
         expect(proof.proof).toEqual([
             {
                 sibling_on_left: true,
                 sibling_hash:
-                    "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                    "0xd70aa6ea6ea477da0563464bd56111d5711d0fdb4bd769d5ffa73bff92ebfaa5",
             },
         ]);
     });
@@ -191,15 +191,23 @@ describe("claim transaction arguments", () => {
                 200, 170, 249, 55, 182, 101, 208, 73, 49, 1, 140, 49, 213, 207, 105, 189,
             ],
             eventRevision: 1,
-            h3Index: "608819013597790207",
+            h3Index: "608819013614567423",
             geoResolution: 7,
             cellMetric: 1,
-            intensityValue: 723,
+            intensityValue: 791,
             intensityScale: 1,
-            cellBand: 1,
-            cellsGenerationMethod: 1,
+            cellBand: 2,
+            cellsGenerationMethod: 3,
             oracleVersion: "1",
         });
+    });
+
+    it("accepts H3 center bilinear leaves and maps the method to Move enum value 3", async () => {
+        const proof = await parseAffectedCellsProofResponse(workerProofResponse);
+
+        const args = buildAffectedCellLeafMoveArgs(proof.leaf);
+
+        expect(args.cellsGenerationMethod).toBe(3);
     });
 
     it("maps proof step directions to accessor constructors", async () => {

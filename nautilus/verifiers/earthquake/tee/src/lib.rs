@@ -34,8 +34,10 @@ pub const ONCHAIN_STATUS_FINALIZED: u8 = 3;
 pub const PRIMARY_SOURCE_USGS: u8 = 1;
 pub const CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1: u8 = 1;
 pub const CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_WEIGHTED_P90_V1: u8 = 2;
+pub const CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1: u8 = 3;
 pub const CELL_METRIC_USGS_MMI: u8 = 1;
 pub const CELL_AGGREGATION_GRID_POINT_P90: u8 = 1;
+pub const CELL_AGGREGATION_H3_CENTER_BILINEAR: u8 = 2;
 pub const INTENSITY_SCALE_MMI_X100: u8 = 1;
 
 pub const ORACLE_VERSION: u64 = 1;
@@ -43,7 +45,7 @@ pub const GEO_RESOLUTION: u8 = 7;
 pub const MIN_CLAIM_BAND: u8 = 1;
 pub const FRESHNESS_WINDOW_MS: u64 = 21_600_000;
 
-pub(crate) const CELLS_GENERATION_METHOD_NAME: &str = "shakemap_gridxml_h3_grid_point_p90_v1";
+pub(crate) const CELLS_GENERATION_METHOD_NAME: &str = "shakemap_gridxml_h3_center_bilinear_v1";
 pub(crate) const CELL_METRIC_NAME: &str = "USGS_MMI";
-pub(crate) const CELL_AGGREGATION_NAME: &str = "GRID_POINT_P90";
+pub(crate) const CELL_AGGREGATION_NAME: &str = "H3_CENTER_BILINEAR";
 pub(crate) const INTENSITY_SCALE_NAME: &str = "MMI_X100";

@@ -110,7 +110,7 @@ describe("Nautilus local oracle E2E", () => {
 
     it.each([
         ["usgs/pending_source_no_shakemap", "pending_source", "SHAKEMAP_PRODUCT_MISSING"],
-        ["usgs/pending_mmi_empty_grid", "pending_mmi", "MMI_NOT_AVAILABLE"],
+        ["usgs/pending_mmi_empty_grid", "rejected", "SHAKEMAP_PARSE_FAILED"],
         ["usgs/rejected_cancelled_shakemap", "rejected", "SHAKEMAP_CANCELLED"],
         ["usgs/rejected_no_affected_cells", "rejected", "NO_AFFECTED_CELLS"],
     ] as const)(

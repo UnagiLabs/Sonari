@@ -311,4 +311,6 @@ const KNOWN_CELL_METRICS: ReadonlySet<string> = new Set(["USGS_MMI"]);
 const KNOWN_INTENSITY_SCALES: ReadonlySet<string> = new Set(["MMI_X100"]);
 const KNOWN_CELLS_GENERATION_METHODS: ReadonlySet<string> = new Set([
     "shakemap_gridxml_h3_grid_point_p90_v1",
+    "shakemap_hdf_h3_area_weighted_p90_v1",
+    "shakemap_gridxml_h3_center_bilinear_v1",
 ]);

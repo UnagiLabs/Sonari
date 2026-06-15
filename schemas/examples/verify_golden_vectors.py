@@ -82,7 +82,11 @@ EVIDENCE_AFFECTED_ORDER = [
     "geo_resolution",
 ]
 
-CELLS_GENERATION_METHOD = {"shakemap_gridxml_h3_grid_point_p90_v1": 1}
+CELLS_GENERATION_METHOD = {
+    "shakemap_gridxml_h3_grid_point_p90_v1": 1,
+    "shakemap_hdf_h3_area_weighted_p90_v1": 2,
+    "shakemap_gridxml_h3_center_bilinear_v1": 3,
+}
 CELL_METRIC = {"USGS_MMI": 1}
 INTENSITY_SCALE = {"MMI_X100": 1}
 FRESHNESS_WINDOW_MS = 21_600_000

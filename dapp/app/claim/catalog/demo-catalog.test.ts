@@ -55,7 +55,7 @@ describe("disaster entry (tohoku-2011)", () => {
 
     it("affectedCellsRoot matches fixture value from unsigned_payload.json", () => {
         expect(entry?.affectedCellsRoot).toBe(
-            "0xa1aec0d65af57c5e5df7d22bede61fa5fdbe41580d412114acec7866b533359c",
+            "0x51cd4a4ddc99acbad52b6e5b0003827f9a5b27501f3fc902c8e025a1a92a59ee",
         );
     });
 
@@ -70,8 +70,8 @@ describe("disaster entry (tohoku-2011)", () => {
         expect(entry?.severityBand).toBe(3);
     });
 
-    it("affectedCellCount is 18429", () => {
-        expect(entry?.affectedCellCount).toBe(18429);
+    it("affectedCellCount is 39221", () => {
+        expect(entry?.affectedCellCount).toBe(39221);
     });
 
     it("amountSummary is range with min=bandAmount(1) and max=bandAmount(3)", () => {

@@ -1,9 +1,9 @@
 {
   "case_id": "usgs/pending_mmi_empty_grid",
-  "status": "pending_mmi",
+  "status": "rejected",
   "source_event_id": "us7000pending-mmi",
   "hazard_type": "EARTHQUAKE",
   "primary_source": "USGS",
   "geo_resolution": 7,
-  "error_code": "MMI_NOT_AVAILABLE"
+  "error_code": "SHAKEMAP_PARSE_FAILED"
 }

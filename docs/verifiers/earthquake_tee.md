@@ -27,7 +27,7 @@ tee/
 │   │   ├── source_archive.rs     ← Walrus blob id/source hash 参照の生成
 │   │   └── types.rs              ← OracleInput/Output/Error の型定義
 │   ├── compute/
-│   │   ├── geo.rs                ← グリッドポイント → H3セル変換
+│   │   ├── geo.rs                ← ShakeMapグリッド → H3セル中心補間
 │   │   ├── intensity.rs          ← MMI計算・P90・バンド分類
 │   │   └── merkle.rs             ← Merkleツリー構築・証明生成
 │   ├── source/
@@ -63,7 +63,7 @@ flowchart TD
 
   hasGrid{グリッドポイントがある?}
 
-  cells["ステップ 4: H3セル変換・P90集計<br/>affected_cells_from_points(points)<br/>H3解像度7 / P90 / バンド分類"]
+  cells["ステップ 4: H3セル中心補間<br/>structured_grid_from_points(points)<br/>affected_cells_from_grid_centers(grid)<br/>H3解像度7 / bilinear / バンド分類"]
 
   hasAffectedCells{影響セルがある?}
 
@@ -144,17 +144,23 @@ tee production --input worker_request.json
 
 ```mermaid
 flowchart TD
-  point[
-    GridPoint<br/>
-    lat / lon / mmi_x100
+  grid[
+    StructuredGrid<br/>
+    lon軸 / lat軸 / (lon, lat) → mmi_x100
   ]
-  h3["H3セルID（u64）<br/>LatLng::new(lat, lon).to_cell(Resolution::Seven)"]
-  group[
-    同じセルのMMI値をグループ化<br/>
-    BTreeMap
+  center[
+    H3セル中心<br/>
+    lat / lon
   ]
-  values["[mmi_x100, mmi_x100, ...]"]
-  p90["P90 MMI値<br/>p90_x100(&values)"]
+  corners[
+    左右のlon・上下のlat<br/>
+    実データ軸から隣接点を探索
+  ]
+  interp[
+    MMI値<br/>
+    4点あり: 実距離比でbilinear<br/>
+    欠けあり: 利用可能点の最大値
+  ]
   band["バンド（0-3）<br/>cell_band(mmi_x100)"]
   filter[
     MIN_CLAIM_BAND 以上でフィルタ
@@ -164,8 +170,10 @@ flowchart TD
     h3_index / intensity_value / cell_band
   ]
 
-  point --> h3 --> group --> values --> p90 --> band --> filter --> affected
+  grid --> center --> corners --> interp --> band --> filter --> affected
 ```
+
+`grid.xml` は完全な等間隔格子として扱いません。実データから unique な lon / lat 軸を作り、H3セル中心を含む左右上下の隣接点を探します。4点が揃う場合は実際の距離比で bilinear interpolation を行い、bbox端や一部欠損で4点が揃わない場合は利用可能な周辺点の最大 MMI を使います。全データ bbox 外のH3セル中心は評価対象外です。
 
 ### `compute/intensity.rs` — MMI計算
 
@@ -262,8 +270,8 @@ finalized（正常完了）時に生成される主要ファイル：
 | 状態 | 意味 | 再試行 |
 |---|---|---|
 | `pending_source` | ShakeMapが準備されていない | あり（ShakeMap公開後） |
-| `pending_mmi` | グリッドXMLが空/未取得 | あり（データ更新後） |
-| `rejected` | 処理上の問題（キャンセル、被害なし、締切超過） | なし |
+| `pending_mmi` | グリッドXMLが未取得 | あり（データ更新後） |
+| `rejected` | 処理上の問題（キャンセル、被害なし、空グリッド、締切超過） | なし |
 
 ---
 

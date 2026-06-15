@@ -28,7 +28,7 @@ POST /events/:event_uid/revisions/:event_revision/affected-cells
   "event_uid": "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd",
   "event_revision": 1,
   "affected_cells_hash": "0xc3bb6d3a...",
-  "affected_cells_root": "0x526e9824...",
+  "affected_cells_root": "0xa7242156...",
   "affected_cell_count": 2,
   "geo_resolution": 7,
   "affected_cells_uri": "walrus://blob/<blob-id>"
@@ -40,7 +40,7 @@ POST /events/:event_uid/revisions/:event_revision/affected-cells
 {
   "event_uid": "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd",
   "event_revision": 1,
-  "affected_cells_root": "0x526e9824...",
+  "affected_cells_root": "0xa7242156...",
   "shard_count": 1,
   "stored": true
 }
@@ -60,18 +60,18 @@ GET /events/:event_uid/revisions/:event_revision/proof?h3_index=<decimal>
 {
   "event_uid": "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd",
   "event_revision": 1,
-  "h3_index": "608819013513904127",
-  "affected_cells_root": "0x526e9824...",
+  "h3_index": "608819013614567423",
+  "affected_cells_root": "0xa7242156...",
   "leaf": {
     "event_uid": "0xab131dd...",
     "event_revision": 1,
-    "h3_index": "608819013513904127",
+    "h3_index": "608819013614567423",
     "geo_resolution": 7,
-    "cell_band": 3,
-    "intensity_value": 831,
+    "cell_band": 2,
+    "intensity_value": 791,
     "cell_metric": "USGS_MMI",
     "intensity_scale": "MMI_X100",
-    "cells_generation_method": "shakemap_gridxml_h3_grid_point_p90_v1",
+    "cells_generation_method": "shakemap_gridxml_h3_center_bilinear_v1",
     "oracle_version": "1"
   },
   "proof": [
