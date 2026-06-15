@@ -5,8 +5,8 @@ Local generation tooling for the residence-cell allowlist: produces the H3 res7 
 - **Role**: Residence-cell generation pipeline (allowlist, proofs, tiles).
 
 ## Where to Read More
-- [../../docs/operations/residence_cells_pipeline.md](../../docs/operations/residence_cells_pipeline.md) — full runbook / setup
-- [../../docs/operations/README.md](../../docs/operations/README.md) — operations index
+- [../../docs/internal/operations/residence_cells_pipeline.md](../../docs/internal/operations/residence_cells_pipeline.md) — full runbook / setup
+- [../../docs/internal/operations/README.md](../../docs/internal/operations/README.md) — operations index
 
 ---
 
@@ -17,5 +17,5 @@ residence-cell allowlist のローカル生成ツールです。pin 留めした
 - **役割**: residence-cell 生成パイプライン（allowlist、proof、tile）。
 
 ## 詳細資料
-- [../../docs/operations/residence_cells_pipeline.md](../../docs/operations/residence_cells_pipeline.md) — 完全な runbook / セットアップ
-- [../../docs/operations/README.md](../../docs/operations/README.md) — 運用インデックス
+- [../../docs/internal/operations/residence_cells_pipeline.md](../../docs/internal/operations/residence_cells_pipeline.md) — 完全な runbook / セットアップ
+- [../../docs/internal/operations/README.md](../../docs/internal/operations/README.md) — 運用インデックス

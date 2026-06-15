@@ -5,8 +5,8 @@ Admin / genesis setup for Sonari: manual contract publish, admin wallet handling
 - **Role**: Entry point for admins running contract publish and infra updates.
 
 ## Where to Read More
-- [../docs/operations/admin_setup.md](../docs/operations/admin_setup.md) — full runbook / setup
-- [../docs/operations/README.md](../docs/operations/README.md) — operations index
+- [../docs/internal/operations/admin_setup.md](../docs/internal/operations/admin_setup.md) — full runbook / setup
+- [../docs/internal/operations/README.md](../docs/internal/operations/README.md) — operations index
 
 ---
 
@@ -17,5 +17,5 @@ Sonari の admin / genesis セットアップ。手動 contract publish、admin 
 - **役割**: 管理者が contract publish と infra 更新を行う入口。
 
 ## 詳細資料
-- [../docs/operations/admin_setup.md](../docs/operations/admin_setup.md) — 完全な runbook / セットアップ
-- [../docs/operations/README.md](../docs/operations/README.md) — 運用インデックス
+- [../docs/internal/operations/admin_setup.md](../docs/internal/operations/admin_setup.md) — 完全な runbook / セットアップ
+- [../docs/internal/operations/README.md](../docs/internal/operations/README.md) — 運用インデックス

@@ -2,10 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Detail content was relocated to docs/operations/verifier_runner.md (verbatim) as
+// Detail content was relocated to docs/internal/operations/verifier_runner.md (verbatim) as
 // part of the docs centralization; the in-place focused runbooks under
 // infra/aws/sonari-verifier-runner/docs/ stay where they are.
-const readmePath = path.join(process.cwd(), "docs/operations/verifier_runner.md");
+const readmePath = path.join(process.cwd(), "docs/internal/operations/verifier_runner.md");
 const docsPaths = [
     readmePath,
     path.join(process.cwd(), "infra/aws/sonari-verifier-runner/docs/deploy.md"),

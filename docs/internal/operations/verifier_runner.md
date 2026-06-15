@@ -24,11 +24,11 @@ test "$ACTUAL_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID"
 
 | 目的 | 参照先 |
 | --- | --- |
-| GitHub Actions dev environment、artifact set、手動 deploy | [`docs/deploy.md`](../../infra/aws/sonari-verifier-runner/docs/deploy.md) |
-| Earthquake / membership identity の PCR config、AdminCap transaction、PCR3 | [`docs/pcr-config.md`](../../infra/aws/sonari-verifier-runner/docs/pcr-config.md) |
-| runtime smoke、一気通貫 smoke、詰まりどころ、証跡保存 | [`docs/smoke-runbook.md`](../../infra/aws/sonari-verifier-runner/docs/smoke-runbook.md) |
-| 古い AWS file cleanup、cost/resource 確認、rollback | [`docs/maintenance.md`](../../infra/aws/sonari-verifier-runner/docs/maintenance.md) |
-| 3 例目の `verifier_kind` 追加、earthquake 経路の非回帰制約 | [`docs/extending-verifier-kind.md`](../../infra/aws/sonari-verifier-runner/docs/extending-verifier-kind.md) |
+| GitHub Actions dev environment、artifact set、手動 deploy | [`docs/deploy.md`](../../../infra/aws/sonari-verifier-runner/docs/deploy.md) |
+| Earthquake / membership identity の PCR config、AdminCap transaction、PCR3 | [`docs/pcr-config.md`](../../../infra/aws/sonari-verifier-runner/docs/pcr-config.md) |
+| runtime smoke、一気通貫 smoke、詰まりどころ、証跡保存 | [`docs/smoke-runbook.md`](../../../infra/aws/sonari-verifier-runner/docs/smoke-runbook.md) |
+| 古い AWS file cleanup、cost/resource 確認、rollback | [`docs/maintenance.md`](../../../infra/aws/sonari-verifier-runner/docs/maintenance.md) |
+| 3 例目の `verifier_kind` 追加、earthquake 経路の非回帰制約 | [`docs/extending-verifier-kind.md`](../../../infra/aws/sonari-verifier-runner/docs/extending-verifier-kind.md) |
 
 ## 通常の確認順
 
