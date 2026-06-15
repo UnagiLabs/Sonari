@@ -11,6 +11,7 @@ const H3_BBOX_SCAN_STEP_DEGREES: f64 = 0.01;
 #[allow(dead_code)]
 const H3_BBOX_SCAN_PADDING_DEGREES: f64 = 0.05;
 
+#[allow(dead_code)]
 pub(crate) fn affected_cells_from_points(
     points: &[GridPoint],
 ) -> Result<Vec<AffectedCellJson>, OracleError> {

@@ -45,7 +45,7 @@ pub const GEO_RESOLUTION: u8 = 7;
 pub const MIN_CLAIM_BAND: u8 = 1;
 pub const FRESHNESS_WINDOW_MS: u64 = 21_600_000;
 
-pub(crate) const CELLS_GENERATION_METHOD_NAME: &str = "shakemap_gridxml_h3_grid_point_p90_v1";
+pub(crate) const CELLS_GENERATION_METHOD_NAME: &str = "shakemap_gridxml_h3_center_bilinear_v1";
 pub(crate) const CELL_METRIC_NAME: &str = "USGS_MMI";
-pub(crate) const CELL_AGGREGATION_NAME: &str = "GRID_POINT_P90";
+pub(crate) const CELL_AGGREGATION_NAME: &str = "H3_CENTER_BILINEAR";
 pub(crate) const INTENSITY_SCALE_NAME: &str = "MMI_X100";
