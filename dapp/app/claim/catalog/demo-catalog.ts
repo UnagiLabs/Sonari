@@ -14,19 +14,18 @@ import { TOHOKU_2011_DEMO_EARTHQUAKE } from "../../../app/demo/_data/tohoku-2011
 // 代表居住セル定数
 //
 // 東日本大震災の実被災セット内のセル（res7・10進 H3）。
-// 現行デモの 608548532898168831 は被災セット外のため、差し替え用に公開する。
-// 実際の差し替えは後続 issue で demo-mypage-view.tsx を更新する。
+// デモ会員証 DEMO_PASS とデモ請求詳細で使う。
 // ---------------------------------------------------------------------------
 
 /**
  * 実被災セット内の Band3 セル（10進 H3 res7）。
- * 後続 issue でデモ会員証の homeCell をこの値に差し替える。
+ * デモ会員証の homeCell として使い、地図に自宅が被災エリア内として強調される。
  */
 export const DEMO_AFFECTED_HOME_CELL_BAND3 = "608795190286614527";
 
 /**
  * 実被災セット内の Band1 セル（10進 H3 res7）。
- * 後続 issue でデモ会員証の homeCell をこの値に差し替える。
+ * デモ請求詳細で Band1 の例示として使う。
  */
 export const DEMO_AFFECTED_HOME_CELL_BAND1 = "608795262395088895";
 

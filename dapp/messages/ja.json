@@ -875,6 +875,20 @@
                 "h3Resolution": "H3 解像度",
                 "epicenter": "震源"
             }
+        },
+        "claim": {
+            "list": {
+                "eyebrow": "デモ",
+                "title": "請求できるプログラム（デモ）",
+                "sub": "災害救援・学生支援・医療支援のデモ表示です。表示専用で、実際の請求は行いません。"
+            },
+            "detail": {
+                "backToList": "一覧へ戻る",
+                "mapNote": "東日本大震災（2011）の実データを表示しています。",
+                "eligibilityLabel": "対象条件",
+                "applyButton": "申請する",
+                "displayOnlyNote": "これはデモです。ボタンは表示専用で、実際の申請は行いません。"
+            }
         }
     }
 }
