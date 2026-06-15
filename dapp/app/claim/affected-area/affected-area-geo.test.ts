@@ -2,7 +2,12 @@ import { latLngToCell } from "h3-js";
 import { describe, expect, it } from "vitest";
 import { h3HexToDecimal } from "../../register/residence/h3-geo";
 import { parseAffectedCells } from "./affected-cells";
-import { computeAffectedAreaBounds, selectMapMode } from "./affected-area-geo";
+import {
+    MAX_AFFECTED_VIEWPORT_CELLS,
+    computeAffectedAreaBounds,
+    selectMapMode,
+    selectVisibleCells,
+} from "./affected-area-geo";
 
 // ---------------------------------------------------------------------------
 // テスト用アンカーセル（STEP 1 テストと同じ実データ）
@@ -169,5 +174,276 @@ describe("computeAffectedAreaBounds: 複数セル", () => {
         expect(bounds?.south).toBeCloseTo(39.40296976134385, 5);
         expect(bounds?.east).toBeCloseTo(143.60919843298643, 5);
         expect(bounds?.west).toBeCloseTo(142.1271107685466, 5);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// selectVisibleCells (STEP 3)
+// ---------------------------------------------------------------------------
+// テスト用定数
+// CELL1: lat 39.542..., lng 143.609... (太平洋沖)
+// CELL2: lat 39.402..., lng 142.127... (三陸沖)
+//
+// bounds 設計メモ:
+// - "CELL1 のみ包含" bounds: south=39.5, north=39.6, west=143.5, east=143.7
+// - "CELL2 のみ包含" bounds: south=39.3, north=39.5, west=142.0, east=142.3
+// - "両方包含" bounds: south=39.3, north=39.6, west=142.0, east=143.7
+// - "どちらも包含しない" bounds: south=35.0, north=36.0, west=138.0, east=139.0
+
+const BOUNDS_CELL1_ONLY = { north: 39.6, south: 39.5, east: 143.7, west: 143.5 };
+const BOUNDS_CELL2_ONLY = { north: 39.5, south: 39.3, east: 142.3, west: 142.0 };
+const BOUNDS_BOTH = { north: 39.6, south: 39.3, east: 143.7, west: 142.0 };
+const BOUNDS_NONE = { north: 36.0, south: 35.0, east: 139.0, west: 138.0 };
+
+describe("selectVisibleCells: MAX_AFFECTED_VIEWPORT_CELLS 定数", () => {
+    it("MAX_AFFECTED_VIEWPORT_CELLS は 600 である", () => {
+        expect(MAX_AFFECTED_VIEWPORT_CELLS).toBe(600);
+    });
+});
+
+describe("selectVisibleCells: bounds 内外の混在", () => {
+    it("bounds 内のセルのみ返し、bounds 外は除外する（順序保持）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_CELL1_ONLY });
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+    });
+
+    it("CELL2 のみ bounds 内 → CELL2 だけ返る", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_CELL2_ONLY });
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL2_DECIMAL);
+    });
+
+    it("両方 bounds 内 → 両方返る（入力順）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_BOTH });
+        expect(result).toHaveLength(2);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+        expect(result[1]?.decimal).toBe(CELL2_DECIMAL);
+    });
+
+    it("どちらも bounds 外 → 空配列", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_NONE });
+        expect(result).toHaveLength(0);
+    });
+
+    it("cells が空配列 → 空配列", () => {
+        const result = selectVisibleCells({ cells: [], bounds: BOUNDS_BOTH });
+        expect(result).toHaveLength(0);
+    });
+});
+
+describe("selectVisibleCells: limit（cap）", () => {
+    it("limit 未指定時は MAX_AFFECTED_VIEWPORT_CELLS がデフォルト（2件全件返る）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_BOTH });
+        expect(result).toHaveLength(2);
+    });
+
+    it("limit=1 かつ 2件 bounds 内 → 先頭 1 件のみ（入力順で cap）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_BOTH, limit: 1 });
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+    });
+
+    it("limit=2 かつ 2件 bounds 内 → 全件返る（cap に引っかからない）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_BOTH, limit: 2 });
+        expect(result).toHaveLength(2);
+    });
+
+    it("limit=0 かつ 2件 bounds 内 → 空配列（ただし highlighted は除く）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({ cells, bounds: BOUNDS_BOTH, limit: 0 });
+        expect(result).toHaveLength(0);
+    });
+
+    it("入力配列を破壊しない（元の cells は変更されない）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const originalLength = cells.length;
+        selectVisibleCells({ cells, bounds: BOUNDS_BOTH, limit: 1 });
+        expect(cells).toHaveLength(originalLength);
+    });
+});
+
+describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
+    it("強調セルが bounds 内かつ cap 内 → 重複追加されない（1 件のみ）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        // 両方 bounds 内、limit=2、強調=CELL1 → 重複なし
+        const result = selectVisibleCells({
+            cells,
+            bounds: BOUNDS_BOTH,
+            limit: 2,
+            highlightedDecimal: CELL1_DECIMAL,
+        });
+        expect(result).toHaveLength(2);
+        const cell1Entries = result.filter((c) => c.decimal === CELL1_DECIMAL);
+        expect(cell1Entries).toHaveLength(1);
+    });
+
+    it("強調セルが bounds 外 → cap 後結果の末尾に追加される", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        // CELL1 bounds 内（1件）、CELL2 bounds 外、強調=CELL2
+        // → cap 後: [CELL1]、末尾追加: [CELL1, CELL2]
+        const result = selectVisibleCells({
+            cells,
+            bounds: BOUNDS_CELL1_ONLY,
+            highlightedDecimal: CELL2_DECIMAL,
+        });
+        expect(result).toHaveLength(2);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+        expect(result[1]?.decimal).toBe(CELL2_DECIMAL);
+    });
+
+    it("強調セルが cap で溢れた（bounds 内だが limit 超）→ 末尾に追加される", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        // 両方 bounds 内、limit=1（CELL1 のみ cap 内）、強調=CELL2
+        // → cap 後: [CELL1]、CELL2 は cap で溢れたので末尾追加: [CELL1, CELL2]
+        const result = selectVisibleCells({
+            cells,
+            bounds: BOUNDS_BOTH,
+            limit: 1,
+            highlightedDecimal: CELL2_DECIMAL,
+        });
+        expect(result).toHaveLength(2);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+        expect(result[1]?.decimal).toBe(CELL2_DECIMAL);
+    });
+
+    it("強調セル指定が cells に存在しない無効値 → 無視（追加されない）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+        ]);
+        const result = selectVisibleCells({
+            cells,
+            bounds: BOUNDS_CELL1_ONLY,
+            highlightedDecimal: "9999999999999999999", // 存在しない
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+    });
+
+    it("highlightedDecimal が null → 強調処理なし（通常 cap のみ）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({
+            cells,
+            bounds: BOUNDS_BOTH,
+            limit: 1,
+            highlightedDecimal: null,
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+    });
+
+    it("highlightedDecimal 未指定 → 強調処理なし（通常 cap のみ）", () => {
+        const cells = parseAffectedCells([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+        const result = selectVisibleCells({
+            cells,
+            bounds: BOUNDS_BOTH,
+            limit: 1,
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+    });
+});
+
+describe("selectVisibleCells: 境界線上のセル（境界包含）", () => {
+    it("セル中心が bounds の north 境界上 → 含む（<=）", () => {
+        // CELL1 の lat = 39.54213437644575
+        // north をその lat に設定 → 境界上で含む
+        const boundsExact: { north: number; south: number; east: number; west: number } = {
+            north: 39.54213437644575,
+            south: 39.3,
+            east: 143.7,
+            west: 142.0,
+        };
+        const cells = parseAffectedCells([[CELL1_DECIMAL, 3]]);
+        const result = selectVisibleCells({ cells, bounds: boundsExact });
+        expect(result).toHaveLength(1);
+    });
+
+    it("セル中心が bounds の south 境界上 → 含む（>=）", () => {
+        // CELL2 の lat = 39.40296976134385
+        const boundsExact: { north: number; south: number; east: number; west: number } = {
+            north: 39.6,
+            south: 39.40296976134385,
+            east: 143.7,
+            west: 142.0,
+        };
+        const cells = parseAffectedCells([[CELL2_DECIMAL, 1]]);
+        const result = selectVisibleCells({ cells, bounds: boundsExact });
+        expect(result).toHaveLength(1);
+    });
+
+    it("セル中心が bounds の east 境界上 → 含む（<=）", () => {
+        // CELL1 の lng = 143.60919843298643
+        const boundsExact: { north: number; south: number; east: number; west: number } = {
+            north: 39.6,
+            south: 39.3,
+            east: 143.60919843298643,
+            west: 142.0,
+        };
+        const cells = parseAffectedCells([[CELL1_DECIMAL, 3]]);
+        const result = selectVisibleCells({ cells, bounds: boundsExact });
+        expect(result).toHaveLength(1);
+    });
+
+    it("セル中心が bounds の west 境界上 → 含む（>=）", () => {
+        // CELL2 の lng = 142.1271107685466
+        const boundsExact: { north: number; south: number; east: number; west: number } = {
+            north: 39.6,
+            south: 39.3,
+            east: 143.7,
+            west: 142.1271107685466,
+        };
+        const cells = parseAffectedCells([[CELL2_DECIMAL, 1]]);
+        const result = selectVisibleCells({ cells, bounds: boundsExact });
+        expect(result).toHaveLength(1);
     });
 });
