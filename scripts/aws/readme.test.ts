@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const readmePath = path.join(process.cwd(), "scripts/aws/README.md");
+// Detail content was relocated to docs/operations/aws_smoke.md (verbatim) as part of
+// the docs centralization; scripts/aws/README.md is now a slim pointer to it.
+const readmePath = path.join(process.cwd(), "docs/operations/aws_smoke.md");
 const agentsPath = path.join(process.cwd(), "AGENTS.md");
 
 describe("AWS scripts documentation", () => {
