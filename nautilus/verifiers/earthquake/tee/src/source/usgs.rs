@@ -95,6 +95,14 @@ impl StructuredGrid {
             .get(&(coordinate_key(lon), coordinate_key(lat)))
             .copied()
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn contains(&self, lon: f64, lat: f64) -> bool {
+        self.bbox.min_lon <= lon
+            && lon <= self.bbox.max_lon
+            && self.bbox.min_lat <= lat
+            && lat <= self.bbox.max_lat
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
