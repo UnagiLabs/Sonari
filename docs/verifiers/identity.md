@@ -3,7 +3,7 @@
 ## 概要
 
 Membership verifier は、Membership SBT の本人確認状態を更新する。
-本人確認 provider は KYC と World ID の 2 つを想定するが、現状の MVP で実際に署名 payload を生成できるのは World ID のみであり、KYC は未対応（`KYC_UNSUPPORTED`）の将来 provider である。
+本人確認 provider は KYC と World ID の 2 つを想定する。現状の MVP で実際に署名 payload を生成できるのは World ID のみで、KYC は今後実装予定の provider だが MVP では未実装（`KYC_UNSUPPORTED`）である。
 
 地震 verifier は災害 event と affected cells を検証する。
 identity verifier は、受取者が本人確認済みかを検証する。
@@ -36,9 +36,9 @@ OSM land polygons は将来候補である。
 | Provider | 役割 | MVP 実装状況 |
 | --- | --- | --- |
 | World ID | Sonari 専用 action の proof を検証する | ✅ 実装済み（live） |
-| KYC | provider response と署名を検証する | ❌ 未対応（`KYC_UNSUPPORTED`）・将来 provider |
+| KYC | provider response と署名を検証する | 🚧 実装予定（MVP 未実装・`KYC_UNSUPPORTED`） |
 
-オンチェーン設計上は KYC と World ID のどちらも満額 Claim ルートで provider による減額はない。ただし現状の MVP で有効に動く Claim ルートは World ID のみで、KYC は未実装の将来 provider である。
+オンチェーン設計上は KYC と World ID のどちらも満額 Claim ルートで provider による減額はない。ただし現状の MVP で有効に動く Claim ルートは World ID のみで、KYC は今後実装予定だが MVP ではまだ未実装である。
 未認証の Membership SBT は Claim できない。
 
 World ID action は Sonari 専用にする。
