@@ -63,7 +63,8 @@ Detailed component documentation lives in focused docs and package READMEs:
 | --- | --- |
 | Product and web app | [docs/webapp.md](docs/webapp.md) |
 | Business logic | [docs/business_logic.md](docs/business_logic.md) |
-| Sui Move contract design spec | [contracts/README.md](contracts/README.md) |
+| Sui Move contract overview | [contracts/README.md](contracts/README.md) |
+| Sui Move contract design spec | [docs/contracts_spec.md](docs/contracts_spec.md) |
 | Nautilus verifier overview | [nautilus/verifiers/README.md](nautilus/verifiers/README.md) |
 | Earthquake verifier | [nautilus/verifiers/earthquake/README.md](nautilus/verifiers/earthquake/README.md) |
 | Identity verifier | [nautilus/verifiers/membership/README.md](nautilus/verifiers/membership/README.md) |

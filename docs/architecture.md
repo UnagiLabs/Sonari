@@ -1,7 +1,7 @@
 # Sonari システム全体アーキテクチャ
 
 > **目的**: dapp / Sui / TEE / runner / 外部サービスの配線と **信頼境界** を1枚で俯瞰する。
-> 個別ドメインの詳細は各仕様へ: 資金フロー=[`fund_flow_spec.md`](./fund_flow_spec.md) / オンチェーン契約=[`../contracts/README.md`](../contracts/README.md) / Web App=[`webapp.md`](./webapp.md) / 技術スタック=[`tech_stack.md`](./tech_stack.md)。
+> 個別ドメインの詳細は各仕様へ: 資金フロー=[`fund_flow_spec.md`](./fund_flow_spec.md) / オンチェーン契約=[`./contracts_spec.md`](./contracts_spec.md) / Web App=[`webapp.md`](./webapp.md) / 技術スタック=[`tech_stack.md`](./tech_stack.md)。
 >
 > ⚠️ **ドラフト**: 実装と突合して継続更新する。`(計画)` 注記は未実装（issue 進行中）。
 
