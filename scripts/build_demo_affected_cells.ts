@@ -45,7 +45,7 @@ export function extractAffectedCells(input: unknown): [string, number][] {
         throw new Error("input is missing required field: affected_cells");
     }
 
-    const raw = record["affected_cells"];
+    const raw = record.affected_cells;
     if (!Array.isArray(raw)) {
         throw new Error(`affected_cells must be an array, got ${typeof raw}`);
     }
@@ -62,7 +62,7 @@ export function extractAffectedCells(input: unknown): [string, number][] {
         const cell = element as Record<string, unknown>;
 
         // Validate h3_index
-        const h3Index = cell["h3_index"];
+        const h3Index = cell.h3_index;
         if (typeof h3Index !== "string") {
             throw new Error(
                 `affected_cells[${i}].h3_index must be a string, got ${typeof h3Index}`,
@@ -75,7 +75,7 @@ export function extractAffectedCells(input: unknown): [string, number][] {
         }
 
         // Validate cell_band
-        const cellBand = cell["cell_band"];
+        const cellBand = cell.cell_band;
         if (typeof cellBand !== "number") {
             throw new Error(
                 `affected_cells[${i}].cell_band must be a number, got ${typeof cellBand}`,
