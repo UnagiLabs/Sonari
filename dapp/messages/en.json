@@ -826,6 +826,17 @@
                 "nothingToClaim": "There is no relief available to claim right now.",
                 "detail": "The claim transaction was not completed."
             }
+        },
+        "detail": {
+            "loading": "Loading campaign information…",
+            "notFoundTitle": "Claim not found",
+            "notFoundBody": "The specified claim campaign does not exist or has not loaded yet.",
+            "mapTitle": "Affected area map",
+            "mapPreviewLabel": "Preview (demo data)",
+            "summaryRegion": "Region",
+            "summaryBand": "Severity band",
+            "summaryAffectedCells": "Affected cells",
+            "summaryDeadline": "Claim deadline"
         }
     },
     "notFound": {

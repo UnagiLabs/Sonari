@@ -826,6 +826,17 @@
                 "nothingToClaim": "現在受け取れる支援金はありません。",
                 "detail": "申請トランザクションは完了しませんでした。"
             }
+        },
+        "detail": {
+            "loading": "キャンペーン情報を読み込んでいます…",
+            "notFoundTitle": "該当する請求が見つかりません",
+            "notFoundBody": "指定された申請キャンペーンは存在しないか、まだ読み込まれていません。",
+            "mapTitle": "被災エリアの地図",
+            "mapPreviewLabel": "プレビュー（デモデータ）",
+            "summaryRegion": "地域",
+            "summaryBand": "被災バンド",
+            "summaryAffectedCells": "影響セル数",
+            "summaryDeadline": "申請締切"
         }
     },
     "notFound": {
