@@ -1,6 +1,6 @@
 "use client";
 
-import { DEMO_AFFECTED_HOME_CELL_BAND3 } from "../../claim/catalog/demo-catalog";
+import { DEMO_RESIDENCE_HOME_CELL } from "../../claim/catalog/demo-catalog";
 import type { MembershipPassData } from "../../mypage/membership-pass-read";
 import { MypageView } from "../../mypage/mypage-view";
 import type { SonariLocale } from "../../register/wizard/locale";
@@ -15,8 +15,9 @@ import { TOHOKU_2011_DEMO_EARTHQUAKE } from "../_data/tohoku-2011";
  * 「救済を受け取る」入口を含む登録済み画面を確認できる。
  *
  * 値は東日本大震災(2011) のデモ世界観に合わせた固定値。homeCell は実被災セット内の
- * セル（DEMO_AFFECTED_HOME_CELL_BAND3）を使い、地図に自宅セルが被災エリア内として
- * 強調される。地図 API key が無い環境ではセル値のテキストにフォールバックする。
+ * 陸地セル（DEMO_RESIDENCE_HOME_CELL ＝ 仙台付近・band2）を使い、地図が陸地（市街地）を
+ * 中心に表示され、自宅セルが被災エリア内として強調される。地図 API key が無い環境では
+ * セル値のテキストにフォールバックする。
  */
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -25,7 +26,7 @@ const DEMO_PASS: MembershipPassData = {
     passLineageId: "0xdemo000000000000000000000000000000000000000000000000000000000002",
     status: 1, // active
     issuedAtMs: TOHOKU_2011_DEMO_EARTHQUAKE.occurredAtMs,
-    homeCell: DEMO_AFFECTED_HOME_CELL_BAND3,
+    homeCell: DEMO_RESIDENCE_HOME_CELL,
     homeCellRegisteredAtMs: TOHOKU_2011_DEMO_EARTHQUAKE.occurredAtMs,
     identityVerified: true,
     identityProviderMask: 3, // KYC + World ID
