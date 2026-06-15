@@ -1,4 +1,87 @@
-# Sonari 技術スタックとモノレポ構成
+# Sonari Tech Stack and Monorepo Layout
+
+The Sonari MVP uses a monorepo that separates the frontend, the Nautilus verifier family, and the Sui Move package into feature units directly under the root. In early development we prioritize clear separation of responsibilities and clarity as a submission over backward compatibility.
+
+## Root Directory Policy
+
+```txt
+dapp/
+nautilus/verifiers/earthquake/
+nautilus/verifiers/membership/
+contracts/
+packages/
+docs/
+schemas/
+scripts/
+infra/
+```
+
+`docs/` holds only project-wide documents for Sonari as a whole — architecture / product / privacy / roadmap / business logic and the like. Verifier-specific specs, operational design, AWS configuration, and development notes go in the README under each implementation directory.
+
+## Package Manager / Workspace Policy
+
+The TypeScript package manager is `pnpm@10.27.0`. The root `package.json` holds only the workspace aggregation commands, and the implementation units are targeted via `pnpm-workspace.yaml` covering `dapp/*`, `packages/*`, and `nautilus/verifiers/*/*`.
+
+The Earthquake verifier TypeScript packages are split into `@sonari/earthquake-shared`, `@sonari/earthquake-watcher`, `@sonari/earthquake-relayer`, and `@sonari/earthquake-runner`. The Membership verifier packages use membership-specific names.
+
+The runner / relayer / shared utilities that are common across multiple verifier families are extracted under `nautilus/` once the implementation duplication becomes visible. In the early stage we avoid premature abstraction and keep the responsibilities of the earthquake verifier and the membership verifier separate.
+
+## Nautilus Verifiers
+
+Verifier-specific details live with each verifier implementation.
+
+- Earthquake verifier: `nautilus/verifiers/earthquake/README.md`
+- Membership verifier: `nautilus/verifiers/membership/README.md`
+- Sonari verifier AWS runner: `infra/aws/sonari-verifier-runner/README.md`
+
+## Role by Directory
+
+| Directory | Role | Main technologies |
+| --- | --- | --- |
+| `dapp/` | Dashboard, Donation, Membership Pass, Claim, Program / Campaign display, Wallet connection. | React / Next.js, TypeScript, Sui dApp Kit |
+| `nautilus/verifiers/earthquake/` | The earthquake verifier for the Sonari MVP. Generates earthquake events, the target-cell root, and the signed payload. | Rust, TypeScript, Nautilus, AWS Lambda |
+| `nautilus/verifiers/membership/` | The Membership Pass metadata verifier family. Holds the docs, shared types, fixtures, and implementation for the residence / student / migration verifiers. | TypeScript, Rust future, Nautilus |
+| `contracts/` | The Sui Move package. Holds the generic Program / Pool / Membership / Claim / Nautilus result verification foundation. | Sui Move |
+| `packages/` | Holds only the UI and config shared across Sonari as a whole. No verifier-specific code. | TypeScript |
+| `docs/` | Project-wide specs, explanatory materials, and submission documents. | Markdown, HTML |
+| `schemas/` | The shared spec at the repository root. Defines the cross-language contract for payload, Merkle leaf, manifest, and affected cells. | Markdown, JSON Schema |
+| `scripts/` | Scripts for local execution, deployment, registration, and auxiliary work. | shell, TypeScript |
+| `infra/` | Shared infrastructure templates such as AWS. The verifier runner goes in a directory named after the unified runner. | CloudFormation |
+
+## Adoption Policy
+
+- Prioritize a feature-unit root layout; do not use generic intermediate directories.
+- Manage the TypeScript workspace with pnpm, and keep it in a state where `pnpm typecheck`, `pnpm test`, and `pnpm test:oracle` can be run from the root.
+- Manage the Rust root quality gate via `pnpm check:rust`, which runs `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings`. This treats Clippy warnings in test targets including `#[cfg(test)]` as failures, not just in ordinary code.
+- Place the dApp in `dapp/`, treating Dashboard, Donation, Membership Pass, Claim, Program / Campaign display, and Wallet connection as one and the same product surface.
+- Confine earthquake-verifier-specific code to `nautilus/verifiers/earthquake/`.
+- Confine membership-verifier-specific code to `nautilus/verifiers/membership/`.
+- Place shared types / constants / validators internal to a verifier in each verifier family's `shared/`, and do not leak them into `packages/`.
+- Treat `schemas/` as the root-shared spec, referenced from both the verifier implementations and the Move package.
+- Place the Move package directly under `contracts/` and do not create additional layers.
+- Limit `packages/` to globally shared UI / config, and do not make it a home for domain-specific logic.
+
+## Key Technologies of the Sonari MVP
+
+| Area | Technology | Use |
+| --- | --- | --- |
+| Frontend | React / Next.js, TypeScript, Sui dApp Kit | Dashboard, Donation, Membership Pass, Claim UI, Program / Campaign display, Wallet connection |
+| Earthquake Watcher | AWS Lambda, Lambda local test, DynamoDB / Step Functions | USGS candidate detection, DynamoDB primary state management, TEE startup |
+| Earthquake TEE | Rust, Nautilus, AWS Nitro Enclaves | External source re-verification, target-cell root generation, payload generation, private-key isolation, signing |
+| Earthquake Relayer | Sui SDK, TypeScript | Preview / dry-run / explicit submit of the signed Earthquake payload |
+| Membership Verifiers | TypeScript dummy first, Nautilus / Rust future | Residence / Student / Migration metadata update generation |
+| Contracts | Sui Move | Program, Campaign, Pool, Membership Pass, Nautilus result verification, Claim / Payout, DisasterEvent connection |
+| Fixtures / Tests | JSON fixture, Rust / TypeScript test runner | Reproduction of USGS / residence / student inputs, verification of verifier decisions |
+
+## Contracts Policy
+
+The Contracts are implemented not as a DisasterEvent-specific package, but as a generic Program / Pool / Membership / Claim foundation.
+
+`DisasterEvent`, `disaster_event`, and `DisasterRegistry` are kept as general terms that can also accommodate multiple future disaster types. The MVP verifier implementation name, package name, AWS runner name, and the implementation designation in the README are unified to `earthquake`.
+
+---
+
+# Sonari 技術スタックとモノレポ構成（日本語）
 
 Sonari MVP は、フロントエンド、Nautilus verifier family、Sui Move package をルート直下の機能単位で分けるモノレポ構成にする。初期開発では後方互換性よりも、責任分界の明確さと提出物としての分かりやすさを優先する。
 

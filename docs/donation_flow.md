@@ -1,4 +1,155 @@
-# Sonari のお金の流れ — 寄付する人・受け取る人のためのガイド
+# How Money Flows in Sonari — A Guide for Donors and Recipients
+
+Sonari is a system that gathers disaster-relief donations on the blockchain and delivers them directly to affected people.
+Every flow of money is recorded and anyone can verify it.
+
+---
+
+## 1. There Are 4 Places to Hold Money
+
+| Pool | Role |
+|---|---|
+| Category Pool | The receiver for **everyday donations**. A permanent pool per purpose you want to support, such as "earthquake relief." We start with earthquake relief and plan to expand to floods, typhoons, student support, and more |
+| Special Donation Box (Campaign) | The receiver for **donations after a disaster occurs**. A time-limited donation box created automatically — one per disaster, dedicated to that disaster |
+| Main Support Pool | The receiver for donations with no specified purpose. Shared money used to underpin everything as a whole |
+| Operations Pool | Money to run the platform (server costs, audit fees, etc.) |
+
+The Category Pool is for "everyday (normal times)," and the Special Donation Box is for "after a disaster occurs" — so **the timing of when you donate is different**. For both, you can verify the destination and how the money is used on the blockchain at any time.
+
+---
+
+## 2. [For Donors] Everyday Donations — Choose a Purpose and Prepare
+
+For every donation, the contract automatically splits it the moment you donate.
+**It is structurally impossible for operators to later withdraw money from a support Pool.**
+
+For donations in normal times, you can choose the **purpose** you want to support (e.g., earthquake relief). You can direct money that you used to give to relief organizations toward disaster relief in a form where **the destination is fully visible**. If you have no particular preference, "unspecified" is fine. In that case it goes into the Main Support Pool.
+
+```mermaid
+flowchart TD
+    A[Donation with a chosen purpose<br>e.g., earthquake relief] -->|90%| B[Earthquake-relief Category Pool]
+    A -->|5%| C[Main Support Pool]
+    A -->|5%| D[Operations Pool]
+    E[Unspecified donation] -->|95%| C
+    E -->|5%| D
+```
+
+The money accumulated in the Category Pool is used, when a disaster occurs, to **deliver a minimum line of relief (up to half the target amount) to affected people right away, without waiting for the Special Donation Box to finish collecting donations**. It guarantees a floor for every disaster — a **stable funding source that reaches victims even of disasters that never make the news**.
+
+---
+
+## 3. [For Donors] Donations When a Disaster Occurs — To the Special Donation Box
+
+When a large disaster occurs, the news spreads worldwide and people who think "I want to donate to this disaster" surge all at once. The receiver for them is the Special Donation Box.
+
+- When the occurrence of a disaster is confirmed by the verification system, **a dedicated donation box opens automatically at that very moment.** By the time the news reaches the world, the donation destination already exists.
+- No human judgment is involved. **Both major disasters and unreported disasters open under the same rules, equally.**
+- The rules (the recipient target amount, how donations are split, the period) are fixed the moment it opens, and **never change again for that disaster.**
+- It is **time-limited**. Donations are accepted for **30 days**, and applications from affected people for **21 days**. The collected donations are distributed to everyone together **after the donation period ends** (emergency relief in the meantime is handled by the minimum-line payout from the Category Pool).
+
+```mermaid
+flowchart TD
+    A[Donation specifying a disaster] -->|90%| B[That disaster's Special Donation Box]
+    A -->|5%| C[Main Support Pool]
+    A -->|5%| D[Operations Pool]
+```
+
+- The donation box always shows "**how much has been collected so far**" and "**roughly how much will reach each affected person**," so you can check the effect of your donation in real time.
+- There is an **upper limit** on how much operations can receive from a single disaster. Any excess goes into the Main Support Pool.
+- Donations that arrive after the donation period ends go into the Main Support Pool and are used for the next relief effort.
+
+---
+
+## 4. [For Recipients] To Receive Support
+
+**The most important thing: you must complete registration before a disaster occurs.**
+If you register after a disaster occurs, you cannot receive support for that disaster (this prevents fraudulent last-minute registration).
+
+**◆ What to do before a disaster occurs**
+
+1. Do member registration (Membership Pass) and register **the area where you live**
+2. Complete **identity verification** (either KYC or World ID)
+
+Registration is **completely free**. There is **one membership per person**, and personal information itself such as identity documents or your address is never put on the blockchain.
+
+**◆ When a disaster occurs: support is delivered in 2 stages**
+
+```mermaid
+flowchart TD
+    A[① Apply<br>within 21 days of the disaster] --> B[② Automatic check<br>registered before the disaster, in the target area, identity verified]
+    B --> C[③ Minimum-line relief<br>delivered right away once the check is done]
+    P2[Category Pool e.g., earthquake relief] -->|first from here| C
+    P3[Main Support Pool] -.->|covers the shortfall| C
+    C --> D[④ Donation distribution<br>after the 30-day donation period ends, same ratio for everyone]
+    P1[That disaster's Special Donation Box] -->|collected donations| D
+    D --> E[⑤ Everything sent directly to your own wallet]
+```
+
+1. **Apply**: If your registered area is included in the target, apply **within 21 days**.
+2. **Automatic check**: The system automatically confirms "whether you registered before the disaster," "whether your residence is in the target area," and "whether you are identity-verified." No human review is involved.
+3. **Minimum-line relief (delivered right away)**: As soon as the check is done, **relief up to a maximum of half the target amount** is delivered first. The payment source is the **Category Pool and the Main Support Pool**. The Special Donation Box is still in the middle of collecting donations, so it is not used here. The per-person amount is fixed first based on "the number of members who registered to that area before the disaster," so **the amount is the same whether you apply early or late**.
+4. **Donation distribution (after the period ends)**: Once the 30-day collection ends, the **donations collected in the Special Donation Box** are distributed to all applicants at the same ratio. If money remains, this repeats every 90 days.
+5. **Receipt**: Every payment passes through no one's hands along the way and is sent **directly to your wallet** from the contract.
+
+You apply only once, the first time. Second-stage and subsequent payments are also received through the same flow.
+
+Receiving from multiple memberships for the same disaster is prohibited, and if fraud is found, you become subject to payment suspension or a clawback claim.
+
+---
+
+## 5. How Much Relief Can You Receive?
+
+There are 3 levels of **target amount** depending on the scale of the damage.
+
+| Band | Target amount | Per-distribution cap |
+|---|---|---|
+| Band 1 (light damage) | 50 USDC | 150 USDC |
+| Band 2 (medium damage) | 150 USDC | 450 USDC |
+| Band 3 (heavy damage) | 300 USDC | 900 USDC |
+
+The target amount is not a guaranteed amount. The donation distribution amount is determined by:
+
+> Distribution amount = target amount × (collected donations ÷ total money needed)
+
+Because everyone's share is computed together after the donation period ends,
+**applying early gives no advantage, and everyone receives at the same ratio.**
+
+If many donations are collected, the distribution amount exceeds the target amount (the per-distribution cap is 3× the target amount).
+Even for a disaster where few donations are collected, the **minimum-line relief arrives first from the Category Pool and the Main Support Pool**, so support is never zero. So that a single disaster does not exhaust the Category Pool, payouts have a per-disaster cap, and **money for the next disaster always remains**.
+
+---
+
+## 6. The Money in the Special Donation Box Ultimately Goes Entirely to That Disaster's Affected People
+
+If a lot accumulates in the Special Donation Box and cannot be fully distributed in one round, the remainder does not disappear or get diverted elsewhere.
+**It is distributed repeatedly to the same affected people every 90 days.**
+
+```mermaid
+flowchart LR
+    A[Disaster occurs / confirmed] --> B[Special Donation Box opens automatically<br>donations 30 days / applications 21 days]
+    B --> C[Meanwhile: minimum-line relief<br>from Category Pool and Main Support Pool as needed]
+    C --> D[After collection ends: donation distribution round 1<br>from the Special Donation Box, same ratio for everyone]
+    D --> E[Redistribute the remainder every 90 days<br>repeat until exhausted]
+    E --> F[Only the final leftover remainder<br>to the Main Support Pool]
+```
+
+- Both the "rescue money" (minimum-line relief) right after the disaster and the subsequent "rebuilding money" (donation distribution) are delivered.
+- Because there is a per-round cap, no one can aim to fraudulently grab a large sum.
+
+---
+
+## 7. Sonari's Promises
+
+1. **The Special Donation Box is created automatically at the same time the disaster is confirmed** (every disaster is equal; no human discretion)
+2. **A donation's destination is decided automatically at the moment of donation** (operators cannot touch the money in a support Pool)
+3. **The amount received is not first-come-first-served** (the minimum line fixes the amount first; the donation distribution is apportioned at the same ratio to everyone after the deadline)
+4. **The money in the Special Donation Box goes entirely to that disaster's affected people** (distributed fully over time; leftovers are not confiscated)
+
+Every movement of money is recorded on the blockchain, and anyone can verify it at any time.
+
+---
+
+# Sonari のお金の流れ — 寄付する人・受け取る人のためのガイド（日本語）
 
 Sonari は、災害支援の寄付をブロックチェーン上で集めて、被災した人に直接届ける仕組みです。
 お金の流れはすべて記録され、誰でも確認できます。
