@@ -465,10 +465,7 @@ function parseAffectedCellLeaf(value: unknown): AffectedCellLeaf {
         "cells_generation_method",
         record.cells_generation_method,
     );
-    if (
-        cellsGenerationMethod !==
-        CellsGenerationMethod.shakemap_gridxml_h3_grid_point_p90_v1
-    ) {
+    if (!isKnownCellsGenerationMethod(cellsGenerationMethod)) {
         throw new Error(`cells_generation_method has unknown value: ${cellsGenerationMethod}`);
     }
 
@@ -557,8 +554,22 @@ function cellsGenerationMethodToMoveValue(
     if (value === CellsGenerationMethod.shakemap_gridxml_h3_grid_point_p90_v1) {
         return 1;
     }
+    if (value === CellsGenerationMethod.shakemap_hdf_h3_area_weighted_p90_v1) {
+        return 2;
+    }
+    if (value === CellsGenerationMethod.shakemap_gridxml_h3_center_bilinear_v1) {
+        return 3;
+    }
     throw new ClaimProofError(
         "invalid_proof_response",
         `Unknown cells_generation_method: ${value}`,
+    );
+}
+
+function isKnownCellsGenerationMethod(
+    value: string,
+): value is AffectedCellLeaf["cells_generation_method"] {
+    return Object.values(CellsGenerationMethod).includes(
+        value as AffectedCellLeaf["cells_generation_method"],
     );
 }

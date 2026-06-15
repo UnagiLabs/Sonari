@@ -50,9 +50,9 @@ describe("parseAffectedCellsFile", () => {
         expect(input.event_revision).toBe(1);
         expect(input.oracle_version).toBe(1);
         expect(input.geo_resolution).toBe(7);
-        expect(input.cells_generation_method).toBe("shakemap_gridxml_h3_grid_point_p90_v1");
+        expect(input.cells_generation_method).toBe("shakemap_gridxml_h3_center_bilinear_v1");
         expect(input.cell_metric).toBe("USGS_MMI");
-        expect(input.cell_aggregation).toBe("GRID_POINT_P90");
+        expect(input.cell_aggregation).toBe("H3_CENTER_BILINEAR");
         expect(input.intensity_scale).toBe("MMI_X100");
         expect(input.affected_cells).toHaveLength(2);
     });
@@ -199,8 +199,8 @@ describe("affectedCellLeavesFromInput", () => {
         const input = parseAffectedCellsFile(affectedJson);
         const leaves = affectedCellLeavesFromInput(input);
         expect(leaves).toHaveLength(2);
-        expect(leaves[0]?.h3_index).toBe(608819013513904127n);
-        expect(leaves[1]?.h3_index).toBe(608819013597790207n);
+        expect(leaves[0]?.h3_index).toBe(608819013547458559n);
+        expect(leaves[1]?.h3_index).toBe(608819013614567423n);
     });
 });
 
@@ -229,8 +229,7 @@ describe("affectedCellsRoot", () => {
         const input = parseAffectedCellsFile(affectedJson);
         const root = affectedCellsRoot(input);
         expect(root).toBe(expectedHashes.affected_cells_root);
-        // Explicitly: 0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f
-        expect(root).toBe("0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f");
+        expect(root).toBe("0xa7242156cf099521ac01790b775f32003ca571a7ef30a88e2e5034c71547a642");
     });
 });
 

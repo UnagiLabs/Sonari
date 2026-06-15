@@ -134,7 +134,7 @@ describe("buildProofManifest", () => {
         const manifest = buildProofManifest(input, SHARD_COUNT);
         expect(manifest.merkle_root).toBe(expectedHashes.affected_cells_root);
         expect(manifest.merkle_root).toBe(
-            "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f",
+            "0xa7242156cf099521ac01790b775f32003ca571a7ef30a88e2e5034c71547a642",
         );
     });
 
@@ -301,24 +301,24 @@ describe("buildProofEntries – characterization (STEP 3 安全網)", () => {
 
         expect(entries).toEqual([
             {
-                h3_index: "608819013513904127",
-                leaf_hash: "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                h3_index: "608819013547458559",
+                leaf_hash: "0xd70aa6ea6ea477da0563464bd56111d5711d0fdb4bd769d5ffa73bff92ebfaa5",
                 proof: [
                     {
                         sibling_on_left: false,
                         sibling_hash:
-                            "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
+                            "0xa52fea29a73e5c0aff5f2f209f446d9b4e1e3ccfd4df5688f6991e7e485631d1",
                     },
                 ],
             },
             {
-                h3_index: "608819013597790207",
-                leaf_hash: "0xbc6630b4dcc0a7aab256c84b90d30d6d8eefbf6b8712767917ccbe6c603a303f",
+                h3_index: "608819013614567423",
+                leaf_hash: "0xa52fea29a73e5c0aff5f2f209f446d9b4e1e3ccfd4df5688f6991e7e485631d1",
                 proof: [
                     {
                         sibling_on_left: true,
                         sibling_hash:
-                            "0x83bc299c544edc5bff30176c8840ae2b3c001f8a10ea28c158761a5793c79b2f",
+                            "0xd70aa6ea6ea477da0563464bd56111d5711d0fdb4bd769d5ffa73bff92ebfaa5",
                     },
                 ],
             },
@@ -342,7 +342,7 @@ describe("buildProofEntries – characterization (STEP 3 安全網)", () => {
     it("2-cell fixture: each proof replays to the same merkle root (golden root)", () => {
         const input = parseAffectedCellsFile(affectedJson);
         const entries = buildProofEntries(input);
-        const GOLDEN_ROOT = "0x526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f";
+        const GOLDEN_ROOT = "0xa7242156cf099521ac01790b775f32003ca571a7ef30a88e2e5034c71547a642";
         for (const entry of entries) {
             expect(replayProof(entry.leaf_hash, entry.proof)).toBe(GOLDEN_ROOT);
         }

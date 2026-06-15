@@ -206,6 +206,17 @@ describe("parseShardEntry", () => {
                 sibling_hash: VALID_SHARD_HASH,
             });
         });
+
+        it("H3 center bilinear の cells_generation_method を受け入れる", () => {
+            const raw = makeValidShardEntry();
+            raw.cells_generation_method = "shakemap_gridxml_h3_center_bilinear_v1";
+
+            const result = parseShardEntry(raw);
+
+            expect(result.cells_generation_method).toBe(
+                "shakemap_gridxml_h3_center_bilinear_v1",
+            );
+        });
     });
 
     describe("leaf フィールド欠落 → throw", () => {
