@@ -7,7 +7,7 @@ Next.js (App Router) web app for Sonari — the donation, registration, and clai
 
 ## Where to Read More
 - [../docs/webapp.md](../docs/webapp.md) — UI design and flows
-- [../docs/README.md](../docs/README.md) — documentation index
+- [../README.md](../README.md) — project overview & documentation index
 
 ---
 
@@ -20,4 +20,4 @@ Sonari の Next.js（App Router）Web アプリ。寄付・登録・claim の UI
 
 ## 詳細資料
 - [../docs/webapp.md](../docs/webapp.md) — UI 設計とフロー
-- [../docs/README.md](../docs/README.md) — ドキュメントインデックス
+- [../README.md](../README.md) — プロジェクト概要・ドキュメント索引
