@@ -697,9 +697,7 @@
         },
         "event": {
             "eyebrow": "DisasterEvent",
-            "title": "Claimable events",
-            "viewEvents": "View events",
-            "selectLegend": "Select event"
+            "viewEvents": "View events"
         },
         "eligibility": {
             "eyebrow": "Eligibility",

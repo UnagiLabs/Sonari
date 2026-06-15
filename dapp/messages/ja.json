@@ -697,9 +697,7 @@
         },
         "event": {
             "eyebrow": "DisasterEvent",
-            "title": "申請できるイベント",
-            "viewEvents": "イベントを見る",
-            "selectLegend": "イベントを選択"
+            "viewEvents": "イベントを見る"
         },
         "eligibility": {
             "eyebrow": "受給資格",
