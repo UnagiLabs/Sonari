@@ -21,17 +21,12 @@ const network = "testnet";
 const grpcUrl = "https://fullnode.testnet.sui.io:443";
 
 const fixtureInput = loadFixtureRelayerSubmitInput("usgs/finalized_minimal");
-const fixturePayloadBytes = hexToBytes(
-    "0x010100000000000000ab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd010000000c757337303030736f6e617269214d20372e31202d20536f6e61726920466978747572652045617274687175616b6515536f6e617269204669787475726520526567696f6e00f451c28c010000010303526e982479c985a009227facabf22c6d7633110fb1a15a743b453218f7f1890f02000000000000003a697066733a2f2f736f6e6172692f6578616d706c65732f757337303030736f6e6172692f65766964656e63655f6d616e69666573742e6a736f6e4c06a8a90a6c079fae70eb08b2a3cef95e14677186c3cc1cc3581896017cd18300b153c78c01000000489dc88c010000",
-);
-const fixtureSignatureBytes = hexToBytes(
-    "0x5bd4504c0d7f235c44dbc32ae631ea2a9b3def90079b7806f5846e942b25e38757cb3b8b5c7b07d629a7051f325708602d333a3944cead1fa9b4747fe5c13c01",
-);
-const fixturePublicKeyBytes = hexToBytes(
-    "0xea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c",
-);
-const fixtureVerifierConfigKey = 1;
-const fixtureVerifierConfigVersion = 1;
+const fixturePayloadBytes = hexToBytes(fixtureInput.payload_bcs_hex);
+const fixtureSignatureBytes = hexToBytes(fixtureInput.signature);
+const fixturePublicKeyBytes = hexToBytes(fixtureInput.public_key);
+const fixtureVerifierConfigKey = fixtureInput.verifier_config_key;
+const fixtureVerifierConfigVersion = fixtureInput.verifier_config_version;
+const fixtureEnclaveInstancePublicKey = fixtureInput.enclave_instance_public_key;
 
 function hexToBytes(hex: string): number[] {
     const normalized = hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -95,7 +90,7 @@ describe("relayer request preview", () => {
                 clock,
                 verifierConfigKey: fixtureVerifierConfigKey,
                 verifierConfigVersion: fixtureVerifierConfigVersion,
-                enclaveInstancePublicKey: fixtureInput.public_key,
+                enclaveInstancePublicKey: fixtureEnclaveInstancePublicKey,
                 arguments: [
                     registry,
                     verifierRegistry,
@@ -111,7 +106,7 @@ describe("relayer request preview", () => {
                     clock,
                     verifierConfigKey: fixtureVerifierConfigKey,
                     verifierConfigVersion: fixtureVerifierConfigVersion,
-                    enclaveInstancePublicKey: fixtureInput.public_key,
+                    enclaveInstancePublicKey: fixtureEnclaveInstancePublicKey,
                     arguments: [
                         registry,
                         verifierRegistry,
