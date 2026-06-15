@@ -96,10 +96,10 @@ flowchart TB
 | family | input | output (signed) | status |
 |---|---|---|---|
 | earthquake | USGS event | affected-cell root + payload | ✅ Implemented; verified on dev hardware |
-| membership | World ID proof | identity-check record | ✅ Implemented |
-| identity | World ID (Orb) | IdentityVerificationRecord | ✅ Implemented |
-| residence | H3 residence cell + Merkle | (proof is in client/worker) | ✅ Implemented |
-| **census (=5)** | affected-cell leaves + membership snapshot | per-band count | ❌ Planned #302/#303/#304 |
+| identity | World ID (Orb) proof | IdentityVerificationRecord | ✅ Implemented |
+| census | affected-cell leaves + membership snapshot | per-band count | ❌ Planned #302/#303/#304 |
+
+> The on-chain `metadata_verifier` signing families are **`earthquake` / `identity` / `census`**. The identity verifier lives in the `membership/` folder and its runner kind is `membership_identity`, but its signing family / intent is `identity`. `residence` is enforced by a Merkle proof (client/worker → re-checked by Move), not by a TEE signing family.
 
 ## 4. Main Data Flows (3 paths)
 
@@ -111,7 +111,7 @@ flowchart TB
 
 - ✅ **Implemented**: dapp production (sonari.help), earthquake/membership/identity/residence verifier, runner, relayer, proof worker, current Move package.
 - ⚠️ **Under rework (#300)**: fund flow (4 Pools, floor/main payout, version guard). The legacy `program`/`payout_policy` are slated for removal.
-- ❌ **Not yet implemented**: census worker (#304), `schemas/`(#302), indexer (avoided for now with the RPC-based MVP).
+- ❌ **Not yet implemented**: census worker (#304), indexer (avoided for now with the RPC-based MVP). (`schemas/` already exists as the cross-language contract — JSON Schemas, BCS layout docs, and golden vectors.)
 
 ---
 
@@ -211,10 +211,10 @@ flowchart TB
 | family | 入力 | 出力（署名） | 状況 |
 |---|---|---|---|
 | earthquake | USGS イベント | 被災セル root + payload | ✅ 実装・dev実機検証済 |
-| membership | World ID proof | 本人確認レコード | ✅ 実装 |
-| identity | World ID (Orb) | IdentityVerificationRecord | ✅ 実装 |
-| residence | H3 居住セル + Merkle | （proof は client/worker） | ✅ 実装 |
-| **census (=5)** | 被災セル leaves + membership snapshot | band別カウント | ❌ 計画 #302/#303/#304 |
+| identity | World ID (Orb) proof | IdentityVerificationRecord | ✅ 実装 |
+| census | 被災セル leaves + membership snapshot | band別カウント | ❌ 計画 #302/#303/#304 |
+
+> on-chain `metadata_verifier` の署名 family は **`earthquake` / `identity` / `census`** の3つ。identity verifier は `membership/` フォルダにあり runner kind は `membership_identity` だが、署名 family / intent は `identity`。`residence` は TEE 署名 family ではなく Merkle proof（client/worker が生成し Move が再検証）で担保する。
 
 ## 4. 主要データフロー（3経路）
 
@@ -226,4 +226,4 @@ flowchart TB
 
 - ✅ **実装済**: dapp 本番(sonari.help)、earthquake/membership/identity/residence verifier、runner、relayer、proof worker、現行 Move package。
 - ⚠️ **改修中 (#300)**: 資金フロー（4 Pool・床払い/本払い・version ガード）。旧 `program`/`payout_policy` は廃止予定。
-- ❌ **未実装**: census worker (#304)、`schemas/`(#302)、indexer（RPC版 MVP で当面回避）。
+- ❌ **未実装**: census worker (#304)、indexer（RPC版 MVP で当面回避）。（`schemas/` は JSON Schema・BCS layout docs・golden vector を含む cross-language 契約として既に存在する。）

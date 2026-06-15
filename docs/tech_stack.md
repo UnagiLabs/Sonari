@@ -16,7 +16,7 @@ scripts/
 infra/
 ```
 
-`docs/` holds only project-wide documents for Sonari as a whole — architecture / product / privacy / roadmap / business logic and the like. Verifier-specific specs, operational design, AWS configuration, and development notes go in the README under each implementation directory.
+`docs/` is the single entry point for Sonari documentation. Beyond the project-wide concept docs (architecture / product / business logic and the like), the detailed verifier specs now live under `docs/verifiers/` and the operational / AWS runbooks under `docs/operations/`. The README in each implementation directory is a slim pointer into the matching `docs/` page.
 
 ## Package Manager / Workspace Policy
 
@@ -28,11 +28,11 @@ The runner / relayer / shared utilities that are common across multiple verifier
 
 ## Nautilus Verifiers
 
-Verifier-specific details live with each verifier implementation.
+Verifier and operations details are centralized under `docs/`; the implementation-directory READMEs are slim pointers into them.
 
-- Earthquake verifier: `nautilus/verifiers/earthquake/README.md`
-- Membership verifier: `nautilus/verifiers/membership/README.md`
-- Sonari verifier AWS runner: `infra/aws/sonari-verifier-runner/README.md`
+- Earthquake verifier: `docs/verifiers/earthquake.md`
+- Membership / identity verifier: `docs/verifiers/identity.md`
+- Sonari verifier AWS runner: `docs/operations/verifier_runner.md`
 
 ## Role by Directory
 
@@ -99,7 +99,7 @@ scripts/
 infra/
 ```
 
-`docs/` は Sonari 全体の architecture / product / privacy / roadmap / business logic など、プロジェクト横断の文書だけを置く。Verifier 固有の仕様、運用設計、AWS 構成、開発メモは実装ディレクトリ配下の README に置く。
+`docs/` は Sonari ドキュメントの単一入口。プロジェクト横断の概念資料（architecture / product / business logic など）に加え、verifier の詳細仕様は `docs/verifiers/`、運用・AWS runbook は `docs/operations/` に集約する。各実装ディレクトリ配下の README は、対応する `docs/` ページへの slim pointer とする。
 
 ## Package Manager / Workspace 方針
 
@@ -111,11 +111,11 @@ Earthquake verifier の TypeScript package は `@sonari/earthquake-shared`、`@s
 
 ## Nautilus Verifiers
 
-Verifier-specific details live with each verifier implementation.
+Verifier and operations details are centralized under `docs/`; the implementation-directory READMEs are slim pointers into them.
 
-- Earthquake verifier: `nautilus/verifiers/earthquake/README.md`
-- Membership verifier: `nautilus/verifiers/membership/README.md`
-- Sonari verifier AWS runner: `infra/aws/sonari-verifier-runner/README.md`
+- Earthquake verifier: `docs/verifiers/earthquake.md`
+- Membership / identity verifier: `docs/verifiers/identity.md`
+- Sonari verifier AWS runner: `docs/operations/verifier_runner.md`
 
 ## ディレクトリ別役割
 

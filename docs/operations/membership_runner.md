@@ -72,7 +72,7 @@ legacy/local route は stdin に `IdentityVerifyRequest` JSON value を 1 つ受
 
 World ID API base は canonical value を使い、egress は `egress_proxy_url` / `SONARI_WORLD_ID_EGRESS_PROXY_URL` で渡す。
 server path の canonical World ID API base は `https://developer.world.org` です。
-bootstrap JSON は `world_id_app_id` と `egress_proxy_url` を渡します。
+bootstrap JSON は World ID v4 の canonical 識別子である `world_id_rp_id` を渡し、あわせて `world_id_api_base` / `world_id_environment` / `egress_proxy_url` / `network` / `proof_mode` を渡します（legacy の `world_id_app_id` は bootstrap JSON では渡しません。`SONARI_WORLD_ID_APP_ID` は互換のため runtime env にのみ残ります）。
 `world_id_api_base` は互換のため wire 上に残りますが、server path はこの値を production source of truth として使いません。
 runner env は `SONARI_WORLD_ID_EGRESS_PROXY_URL` を TEE process env に入れます。
 
