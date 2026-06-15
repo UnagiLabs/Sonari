@@ -88,8 +88,7 @@ describe("serializeAffectedCellLeaf", () => {
         });
         const bilinearBytes = serializeAffectedCellLeaf({
             ...CELL_1,
-            cells_generation_method:
-                CellsGenerationMethod.shakemap_gridxml_h3_center_bilinear_v1,
+            cells_generation_method: CellsGenerationMethod.shakemap_gridxml_h3_center_bilinear_v1,
         });
 
         expect(oldBytes[50]).toBe(1);
