@@ -875,6 +875,20 @@
                 "h3Resolution": "H3 resolution",
                 "epicenter": "Epicenter"
             }
+        },
+        "claim": {
+            "list": {
+                "eyebrow": "Demo",
+                "title": "Claimable programs (demo)",
+                "sub": "A demo of disaster, student, and medical relief programs. Display only — no real claim is made."
+            },
+            "detail": {
+                "backToList": "Back to list",
+                "mapNote": "Showing real data from the 2011 Tōhoku earthquake.",
+                "eligibilityLabel": "Eligibility",
+                "applyButton": "Apply",
+                "displayOnlyNote": "This is a demo. The button is display-only and does not submit a real claim."
+            }
         }
     }
 }
