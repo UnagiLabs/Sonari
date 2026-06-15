@@ -127,7 +127,7 @@ Next:
 
 - [docs/contracts_spec.md](contracts_spec.md) — the full design spec: pools, object layouts, exact amounts and constants, security requirements, test requirements, and open questions.
 - [docs/verifiers/overview.md](verifiers/overview.md) — the TEE / Nautilus side that *produces* the signed results these contracts verify.
-- [docs/donation_flow.md](donation_flow.md) and [docs/business_logic.md](business_logic.md) — donor / recipient guide and the business assumptions.
+- [docs/donation_flow.md](donation_flow.md) — the donor / recipient guide.
 - `schemas/` — the cross-language contract for payloads, Merkle leaves, and the census result.
 
 ---
@@ -261,5 +261,5 @@ flowchart TB
 
 - [docs/contracts_spec.md](contracts_spec.md) — 完全な設計仕様: Pool・オブジェクト設計・正確な金額と定数・セキュリティ要件・テスト要件・Open Questions。
 - [docs/verifiers/overview.md](verifiers/overview.md) — これらのコントラクトが検証する署名済み結果を *作る* 側（TEE / Nautilus）。
-- [docs/donation_flow.md](donation_flow.md) と [docs/business_logic.md](business_logic.md) — 寄付者 / 受給者向けガイドと事業前提。
+- [docs/donation_flow.md](donation_flow.md) — 寄付者 / 受給者向けガイド。
 - `schemas/` — payload・Merkle leaf・センサス result の言語横断契約。
