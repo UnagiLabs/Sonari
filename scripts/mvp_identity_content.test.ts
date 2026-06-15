@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const CONTENT_FILES = [
     "dapp/messages/en.json",
     "dapp/public/sonari_overview.html",
-    "contracts/smoke.md",
+    "docs/contracts_spec.md",
 ] as const;
 
 function readRepoFile(filePath: string): string {
@@ -24,13 +24,13 @@ describe("MVP identity gate content", () => {
 
     it("keeps the overview and smoke plan aligned with SBT-owner payout", () => {
         const overview = readRepoFile("dapp/public/sonari_overview.html");
-        const smoke = readRepoFile("contracts/smoke.md");
+        const contractsSpec = readRepoFile("docs/contracts_spec.md");
 
         expect(overview).toContain("KYC verified");
         expect(overview).toContain("World ID verified");
         expect(overview).toContain("SBT owner");
-        expect(smoke).toContain("SBT owner");
-        expect(smoke).toContain("KYC / World ID はどちらも満額 route");
+        expect(contractsSpec).toContain("SBT owner");
+        expect(contractsSpec).toContain("KYC / World ID どちらも満額");
     });
 
     it("does not reintroduce legacy identity-flow terms", () => {
