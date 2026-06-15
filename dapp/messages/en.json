@@ -771,6 +771,24 @@
             "receipt": "Receipt",
             "receiptValue": "Public, recipient reference anonymized"
         },
+        "affectedAreaMap": {
+            "ariaLabel": "Map of the affected area",
+            "loading": "Loading map…",
+            "legendTitle": "Severity and payout",
+            "legendItem": "Band {band} ({amount} USDC)",
+            "homeCellLabel": "Your cell",
+            "detailTitle": "Cell details",
+            "detailBand": "Band: {band}",
+            "detailAmount": "Payout: {amount} USDC",
+            "detailCellId": "Cell ID: {id}",
+            "detailClose": "Close",
+            "unconfiguredTitle": "Map unavailable",
+            "unconfiguredBody": "The map API key is not configured.",
+            "errorBody": "Failed to load the map.",
+            "deferredTitle": "Affected area coming soon",
+            "deferredBody": "Affected-area data for this program is not available yet.",
+            "emptyBody": "No affected cells to display."
+        },
         "claimButton": "Claim relief",
         "claimButtonInFlight": "Processing…",
         "actions": {

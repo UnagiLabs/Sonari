@@ -771,6 +771,24 @@
             "receipt": "レシート",
             "receiptValue": "公開・受給者の参照は匿名化されます"
         },
+        "affectedAreaMap": {
+            "ariaLabel": "被災エリアの地図",
+            "loading": "地図を読み込んでいます…",
+            "legendTitle": "被災度と支給額",
+            "legendItem": "バンド{band}（{amount} USDC）",
+            "homeCellLabel": "あなたのセル",
+            "detailTitle": "セルの詳細",
+            "detailBand": "バンド: {band}",
+            "detailAmount": "支給額: {amount} USDC",
+            "detailCellId": "セルID: {id}",
+            "detailClose": "閉じる",
+            "unconfiguredTitle": "地図を表示できません",
+            "unconfiguredBody": "地図APIキーが未設定です。",
+            "errorBody": "地図の読み込みに失敗しました。",
+            "deferredTitle": "被災エリアは準備中です",
+            "deferredBody": "このプログラムの被災エリアデータはまだ用意されていません。",
+            "emptyBody": "表示できる被災セルがありません。"
+        },
         "claimButton": "支援を申請",
         "claimButtonInFlight": "処理中…",
         "actions": {
