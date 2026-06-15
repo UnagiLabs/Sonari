@@ -77,7 +77,7 @@ const TOHOKU_2011_PROGRAM: DisasterClaimableProgram = {
     // affectedCellsRoot: nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json 由来
     // 表示・受け渡し用に持つだけで検証ロジックは作らない。
     affectedCellsRoot:
-        "0xa1aec0d65af57c5e5df7d22bede61fa5fdbe41580d412114acec7866b533359c",
+        "0x51cd4a4ddc99acbad52b6e5b0003827f9a5b27501f3fc902c8e025a1a92a59ee",
 };
 
 // ---------------------------------------------------------------------------

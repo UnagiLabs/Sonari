@@ -36,7 +36,7 @@ describe("buildTohokuEmergencyCampaign", () => {
         expect(byLabel.get("MMI")).toBe("8.18");
         expect(byLabel.get("REGION")).toBe("2011 Great Tohoku Earthquake, Japan");
         expect(byLabel.get("DATE")).toBe("2011-03-11");
-        expect(byLabel.get("AFFECTED_CELLS")).toBe("18,429");
+        expect(byLabel.get("AFFECTED_CELLS")).toBe("39,221");
         expect(byLabel.get("H3_RESOLUTION")).toBe("7");
         expect(byLabel.get("EPICENTER")).toBe("38.297°N, 142.373°E, 29 km");
     });

@@ -44,8 +44,8 @@ describe("TOHOKU_2011_DEMO_EARTHQUAKE", () => {
         expect(TOHOKU_2011_DEMO_EARTHQUAKE.severityBand).toBe(3);
     });
 
-    it("affectedCellCount is 18429", () => {
-        expect(TOHOKU_2011_DEMO_EARTHQUAKE.affectedCellCount).toBe(18429);
+    it("affectedCellCount is 39221", () => {
+        expect(TOHOKU_2011_DEMO_EARTHQUAKE.affectedCellCount).toBe(39221);
     });
 
     it("h3Resolution is 7", () => {

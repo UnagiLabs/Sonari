@@ -85,13 +85,15 @@ primarySource:
 
 cellsGenerationMethod:
   SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1 → 1
-  SHAKEMAP_HDF_H3_WEIGHTED_P90_V1 → 2
+  SHAKEMAP_HDF_H3_AREA_WEIGHTED_P90_V1 → 2
+  SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1 → 3
 
 cellMetric:
   USGS_MMI → 1
 
 cellAggregation:
   GRID_POINT_P90 → 1
+  H3_CENTER_BILINEAR → 2
 
 intensityScale:
   MMI_X100 → 1

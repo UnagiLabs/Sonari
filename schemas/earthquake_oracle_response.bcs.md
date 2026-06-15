@@ -61,5 +61,6 @@ event_uid = SHA-256(
 - `event_uid` 生成時の `source_name` はsource name文字列です。MVPでは `USGS` を使います。
 - `evidence_manifest_hash = SHA-256(canonical_evidence_manifest_bytes)` です。canonical evidence manifestは、source manifest、raw data manifest、affected cells data、affected cells root/countへのURIとhashをまとめます。
 - `affected_cells_root` とMerkle leaf / internal node hashはすべて `SHA-256` です。詳細は `schemas/affected_cell_leaf.md` に従います。
+- 現行の grid.xml path では、ShakeMap の実データ lon / lat 軸からH3セル中心のMMIを補間し、`cells_generation_method = SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1` のleafでMerkle rootを作ります。grid間隔の完全な等間隔性や `nlon * nlat` との完全一致はroot生成の前提にしません。
 - `freshness_deadline_ms` はDynamoDB上の72時間finalization deadlineとは別物です。
 - finalized Payloadでは `status = FINALIZED`、`evidence_manifest_uri` non-empty、`affected_cell_count = 1..1_000_000`、`freshness_deadline_ms = verified_at_ms + FRESHNESS_WINDOW_MS` を必須とします。
