@@ -7,7 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appDir = resolve(here, "..");
 const donateViewSource = readFileSync(resolve(here, "donate-view.tsx"), "utf8");
 const siteTopbarSource = readFileSync(resolve(appDir, "i18n/site-topbar.tsx"), "utf8");
-const claimViewSource = readFileSync(resolve(appDir, "claim/claim-view.tsx"), "utf8");
+const claimViewSource = readFileSync(resolve(appDir, "claim/claim-list-view.tsx"), "utf8");
 const globalsSource = readFileSync(resolve(appDir, "globals.css"), "utf8");
 
 type JsonRecord = Record<string, unknown>;

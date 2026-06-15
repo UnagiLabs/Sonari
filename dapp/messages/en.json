@@ -697,9 +697,7 @@
         },
         "event": {
             "eyebrow": "DisasterEvent",
-            "title": "Claimable events",
-            "viewEvents": "View events",
-            "selectLegend": "Select event"
+            "viewEvents": "View events"
         },
         "eligibility": {
             "eyebrow": "Eligibility",
@@ -826,6 +824,28 @@
                 "nothingToClaim": "There is no relief available to claim right now.",
                 "detail": "The claim transaction was not completed."
             }
+        },
+        "detail": {
+            "loading": "Loading campaign information…",
+            "notFoundTitle": "Claim not found",
+            "notFoundBody": "The specified claim campaign does not exist or has not loaded yet.",
+            "mapTitle": "Affected area map",
+            "mapPreviewLabel": "Preview (demo data)",
+            "summaryRegion": "Region",
+            "summaryBand": "Severity band",
+            "summaryAffectedCells": "Affected cells",
+            "summaryDeadline": "Claim deadline"
+        },
+        "list": {
+            "eyebrow": "Claim relief",
+            "title": "Claimable programs",
+            "sub": "A list of disaster relief programs currently accepting claims. Select a program to review eligibility and submit your claim.",
+            "empty": "No claimable programs are available right now.",
+            "amountLabel": "Amount",
+            "amount": "{amount} USDC",
+            "deadlineLabel": "Claim deadline",
+            "deadline": "Deadline: {date}",
+            "viewDetail": "View detail"
         }
     },
     "notFound": {

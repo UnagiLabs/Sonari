@@ -1,53 +1,65 @@
 "use client";
 
+// ---------------------------------------------------------------------------
+// ClaimDetailView – /claim/[campaignId] 詳細ビュー
+//
+// 現行 claim-view.tsx（一覧ページ用）の請求フローを campaignId 駆動で移植。
+// 選択の置換:
+//   - 旧: selectedEventId state + ラジオ選択 UI
+//   - 新: URL の campaignId から selectCampaignById で1件を特定
+// 地図: AffectedAreaMap を resolvePreviewCellSource 経由で表示（デモデータ）。
+//       地図データは請求の被災セル証明（fetchAffectedCellsProof）とは別経路。
+// ロジック: 引数・分岐・トランザクション構築は claim-view.tsx の意味を保つ。
+// ---------------------------------------------------------------------------
+
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoadingIndicator } from "../components/loading-indicator";
-import { SiteTopbar } from "../i18n/site-topbar";
-import {
-    type MembershipPassData,
-    type MembershipPassReadClient,
-    readMembershipPass,
-} from "../mypage/membership-pass-read";
-import { MEMBERSHIP_TERMS_VERSION } from "../register/terms-version";
-import type { SonariLocale } from "../register/wizard/locale";
-import { dAppKit } from "../wallet/dapp-kit";
-import { WalletConnect } from "../wallet/wallet-connect";
-import { readWalletNetwork } from "../wallet/wallet-network";
-import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
+import { LoadingIndicator } from "../../components/loading-indicator";
+import { SiteTopbar } from "../../i18n/site-topbar";
+import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
+import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
+import type { SonariLocale } from "../../register/wizard/locale";
+import { dAppKit } from "../../wallet/dapp-kit";
+import { WalletConnect } from "../../wallet/wallet-connect";
+import { readWalletNetwork } from "../../wallet/wallet-network";
+import { executeWalletTransaction } from "../../wallet/wallet-transaction-adapter";
+import { AffectedAreaMap } from "../affected-area/affected-area-map";
+import { resolvePreviewCellSource } from "../affected-area/preview-cell-source";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
     buildClaimTransaction,
     type ClaimTransactionObjectConfig,
     fetchAffectedCellsProof,
-} from "./affected-cells-proof";
+} from "../affected-cells-proof";
+import { claimCampaignToProgram } from "../catalog/claim-campaign-adapter";
 import {
-    type ClaimCampaignReadClient,
     type ClaimCampaignState,
     type ClaimEligibility,
     readClaimCampaigns,
     readClaimEligibility,
-} from "./claim-campaigns";
-import { type ClaimConfig, readClaimConfig } from "./claim-config";
-import { buildClaimFlowActions, type ClaimFlowAction } from "./claim-flow";
-import { resolveWorldIdClaimIdentity } from "./claim-identity";
-import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "./claim-messages";
+} from "../claim-campaigns";
+import { type ClaimConfig, readClaimConfig } from "../claim-config";
+import { buildClaimFlowActions, type ClaimFlowAction } from "../claim-flow";
+import { resolveWorldIdClaimIdentity } from "../claim-identity";
+import { type ClaimMessage, resolveClaimProofError, resolveClaimTxError } from "../claim-messages";
 import {
     buildCampaignNotice,
     buildConfigNotice,
     buildPassNotice,
     buildWorldIdNotice,
     type ClaimNotice,
-} from "./claim-notices";
-import { buildClaimResultView, type TxState } from "./claim-result";
+} from "../claim-notices";
+import { createClaimReadClient } from "../claim-read-client";
+import { buildClaimResultView, type TxState } from "../claim-result";
+import { selectCampaignById } from "../select-campaign";
 
 const WorldIdVerifyButton = dynamic(
     () =>
-        import("../register/identity/world-id-verify-button").then(
+        import("../../register/identity/world-id-verify-button").then(
             (module) => module.WorldIdVerifyButton,
         ),
     { ssr: false },
@@ -101,20 +113,26 @@ type EligibilityState =
     | { readonly status: "ready"; readonly eligibility: ClaimEligibility }
     | { readonly status: "failed"; readonly message: string };
 
-type ClaimViewReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
-
 const EMPTY_DUPLICATE_KEY_HASH =
     "0x0000000000000000000000000000000000000000000000000000000000000000";
 const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
 
-export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
+export function ClaimDetailView({
+    locale,
+    campaignId,
+}: {
+    readonly locale: SonariLocale;
+    readonly campaignId: string;
+}) {
     const t = useTranslations("claim");
     const account = useCurrentAccount();
     const suiClient = useCurrentClient();
-    const client = useMemo(() => toClaimViewReadClient(suiClient), [suiClient]);
+    // 読み取りは createClaimReadClient 経由。queryEvents は JSON-RPC、object 読み取りは
+    // gRPC（dApp Kit クライアント）へ委譲する（gRPC にイベント検索が無いため）。
+    const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
     const claimConfigResult = useMemo(() => readClaimConfig(), []);
     const claimConfig = claimConfigResult.kind === "ok" ? claimConfigResult.config : null;
-    const [selectedEventId, setSelectedEventId] = useState("");
+
     const [proofState, setProofState] = useState<ProofState>({ status: "idle" });
     const [txState, setTxState] = useState<TxState>({ status: "idle" });
     const [txAction, setTxAction] = useState<ClaimFlowAction | null>(null);
@@ -130,6 +148,7 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
     const [eligibilityState, setEligibilityState] = useState<EligibilityState>({
         status: "idle",
     });
+
     const resetClaimProgress = useCallback(() => {
         setProofState({ status: "idle" });
         setTxState({ status: "idle" });
@@ -137,10 +156,16 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         setWorldIdResponse(null);
         setEligibilityState({ status: "idle" });
     }, []);
+
     const network = readWalletNetwork();
     const resultView = buildClaimResultView(txState, network);
+
+    // URL の campaignId から1件を特定する（ラジオ選択は不要）。
     const selectedEvent =
-        campaignState.campaigns.find((event) => event.campaignId === selectedEventId) ?? null;
+        campaignState.status === "loading"
+            ? null
+            : selectCampaignById(campaignState.campaigns, campaignId);
+
     const isWalletConnected = account !== null;
     const membershipPass = passState.status === "ready" ? passState.pass : null;
     const identityMaterial =
@@ -184,6 +209,12 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         worldIdRequired && identityMaterial.kind === "missing" ? identityMaterial.reason : null,
     );
 
+    // 地図プレビュー用の CellSource（被災セル証明とは別経路）。
+    // selectedEvent → DisasterClaimableProgram → resolvePreviewCellSource の流れ。
+    const previewProgram = selectedEvent !== null ? claimCampaignToProgram(selectedEvent) : null;
+    const previewCellSource =
+        previewProgram !== null ? resolvePreviewCellSource(previewProgram) : null;
+
     // biome-ignore lint/correctness/useExhaustiveDependencies: campaignReadNonce is a retry trigger.
     useEffect(() => {
         if (claimConfig === null) {
@@ -223,16 +254,6 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
             cancelled = true;
         };
     }, [campaignReadNonce, claimConfig, client]);
-
-    useEffect(() => {
-        if (campaignState.status !== "ready") {
-            return;
-        }
-        if (!campaignState.campaigns.some((event) => event.campaignId === selectedEventId)) {
-            setSelectedEventId(campaignState.campaigns[0]?.campaignId ?? "");
-            resetClaimProgress();
-        }
-    }, [campaignState, resetClaimProgress, selectedEventId]);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: passReadNonce is a retry trigger.
     useEffect(() => {
@@ -535,6 +556,44 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
         }
     }
 
+    // ローディング中
+    if (campaignState.status === "loading") {
+        return (
+            <>
+                <div className="watercolor-bg" />
+                <div className="app">
+                    <SiteTopbar active="claim" locale={locale} />
+                    <main className="page claim-page">
+                        <div className="claim-loading" role="status">
+                            <LoadingIndicator label={t("detail.loading")} />
+                        </div>
+                    </main>
+                </div>
+            </>
+        );
+    }
+
+    // 取得完了かつ campaignId 不一致（not found）
+    if (selectedEvent === null) {
+        return (
+            <>
+                <div className="watercolor-bg" />
+                <div className="app">
+                    <SiteTopbar active="claim" locale={locale} />
+                    <main className="page claim-page">
+                        <div className="claim-not-found">
+                            <h1>{t("detail.notFoundTitle")}</h1>
+                            <p>{t("detail.notFoundBody")}</p>
+                            <a className="btn btn-secondary" href="/claim">
+                                {t("event.viewEvents")}
+                            </a>
+                        </div>
+                    </main>
+                </div>
+            </>
+        );
+    }
+
     return (
         <>
             <div className="watercolor-bg" />
@@ -554,6 +613,59 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                             <WalletConnect />
                         </div>
                     </header>
+
+                    {/* 選択キャンペーンの概要ヘッダ（ラジオ選択の代わり） */}
+                    <section className="claim-event-panel" aria-labelledby="campaign-summary-title">
+                        <div className="form-heading">
+                            <div>
+                                <div className="eyebrow">{t("event.eyebrow")}</div>
+                                <h2 id="campaign-summary-title">{selectedEvent.title}</h2>
+                            </div>
+                            <a className="text-action" href="/claim">
+                                {t("event.viewEvents")}
+                            </a>
+                        </div>
+                        {renderNotice(configNotice)}
+                        {renderNotice(campaignNotice, () =>
+                            setCampaignReadNonce((value) => value + 1),
+                        )}
+                        <dl className="pass-grid">
+                            <div>
+                                <dt>{t("detail.summaryRegion")}</dt>
+                                <dd>{selectedEvent.region}</dd>
+                            </div>
+                            <div>
+                                <dt>{t("detail.summaryBand")}</dt>
+                                <dd>Band {selectedEvent.severityBand}</dd>
+                            </div>
+                            <div>
+                                <dt>{t("detail.summaryAffectedCells")}</dt>
+                                <dd>{selectedEvent.affectedCellCount}</dd>
+                            </div>
+                            <div>
+                                <dt>{t("detail.summaryDeadline")}</dt>
+                                <dd>{formatClaimWindow(selectedEvent.claimEndMs)}</dd>
+                            </div>
+                        </dl>
+                    </section>
+
+                    {/* 被災エリア地図プレビュー（デモデータ・証明とは別経路） */}
+                    {previewCellSource !== null ? (
+                        <section className="claim-map-section" aria-labelledby="map-section-title">
+                            <div className="panel-header">
+                                <div>
+                                    <h2 id="map-section-title">{t("detail.mapTitle")}</h2>
+                                </div>
+                                <span className="tag tag-neutral">
+                                    {t("detail.mapPreviewLabel")}
+                                </span>
+                            </div>
+                            <AffectedAreaMap
+                                cellSource={previewCellSource}
+                                residenceCell={membershipPass?.homeCell ?? null}
+                            />
+                        </section>
+                    ) : null}
 
                     <section className="claim-layout" aria-label={t("hero.eyebrow")}>
                         <div className="claim-main">
@@ -597,73 +709,6 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                             </section>
 
                             <section
-                                className="claim-event-panel"
-                                aria-labelledby="event-select-title"
-                            >
-                                <div className="form-heading">
-                                    <div>
-                                        <div className="eyebrow">{t("event.eyebrow")}</div>
-                                        <h2 id="event-select-title">{t("event.title")}</h2>
-                                    </div>
-                                    <a className="text-action" href="/events">
-                                        {t("event.viewEvents")}
-                                    </a>
-                                </div>
-                                {renderNotice(configNotice)}
-                                {renderNotice(campaignNotice, () =>
-                                    setCampaignReadNonce((value) => value + 1),
-                                )}
-                                {renderNotice(
-                                    eligibilityState.status === "failed"
-                                        ? {
-                                              key: "status.eligibilityFailed",
-                                              level: "error",
-                                              retryable: true,
-                                          }
-                                        : null,
-                                    () => setEligibilityReadNonce((value) => value + 1),
-                                )}
-
-                                <fieldset className="control-group">
-                                    <legend>{t("event.selectLegend")}</legend>
-                                    <div className="claim-event-list">
-                                        {campaignState.campaigns.map((event) => (
-                                            <label
-                                                className="claim-event-option"
-                                                key={event.campaignId}
-                                            >
-                                                <input
-                                                    checked={
-                                                        selectedEvent?.campaignId ===
-                                                        event.campaignId
-                                                    }
-                                                    name="claimEvent"
-                                                    onChange={() => {
-                                                        setSelectedEventId(event.campaignId);
-                                                        resetClaimProgress();
-                                                    }}
-                                                    type="radio"
-                                                    value={event.campaignId}
-                                                />
-                                                <span className="event-badge">USGS</span>
-                                                <span>
-                                                    <strong>{event.region}</strong>
-                                                    <small>{shortObjectId(event.campaignId)}</small>
-                                                </span>
-                                                <span>
-                                                    <b>Band {event.severityBand}</b>
-                                                    <small>
-                                                        {event.affectedCellCount} affected cells
-                                                    </small>
-                                                </span>
-                                                <em>{formatClaimWindow(event.claimEndMs)}</em>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </fieldset>
-                            </section>
-
-                            <section
                                 className="claim-check-panel"
                                 aria-labelledby="eligibility-title"
                             >
@@ -683,6 +728,16 @@ export function ClaimView({ locale }: { readonly locale: SonariLocale }) {
                                         {t("eligibility.checkButton")}
                                     </button>
                                 </div>
+                                {renderNotice(
+                                    eligibilityState.status === "failed"
+                                        ? {
+                                              key: "status.eligibilityFailed",
+                                              level: "error",
+                                              retryable: true,
+                                          }
+                                        : null,
+                                    () => setEligibilityReadNonce((value) => value + 1),
+                                )}
                                 <div className="check-list">
                                     {checks.map((check) => (
                                         <div className="check-row" key={check.key}>
@@ -806,32 +861,6 @@ function buildClaimTransactionObjects(
         identityRegistry: config.identityRegistryId,
         pass: pass.objectId,
     };
-}
-
-function toClaimViewReadClient(client: unknown): ClaimViewReadClient {
-    if (!isRecord(client)) {
-        throw new Error("Sui client is not available.");
-    }
-    const queryEvents = client.queryEvents;
-    const getObjects = client.getObjects;
-    const listOwnedObjects = client.listOwnedObjects;
-    if (
-        typeof queryEvents !== "function" ||
-        typeof getObjects !== "function" ||
-        typeof listOwnedObjects !== "function"
-    ) {
-        throw new Error("Sui client does not support required claim reads.");
-    }
-
-    return {
-        queryEvents: (input) => queryEvents.call(client, input),
-        getObjects: (input) => getObjects.call(client, input),
-        listOwnedObjects: (input) => listOwnedObjects.call(client, input),
-    };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function shortObjectId(value: string): string {

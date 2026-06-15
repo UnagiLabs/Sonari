@@ -697,9 +697,7 @@
         },
         "event": {
             "eyebrow": "DisasterEvent",
-            "title": "申請できるイベント",
-            "viewEvents": "イベントを見る",
-            "selectLegend": "イベントを選択"
+            "viewEvents": "イベントを見る"
         },
         "eligibility": {
             "eyebrow": "受給資格",
@@ -826,6 +824,28 @@
                 "nothingToClaim": "現在受け取れる支援金はありません。",
                 "detail": "申請トランザクションは完了しませんでした。"
             }
+        },
+        "detail": {
+            "loading": "キャンペーン情報を読み込んでいます…",
+            "notFoundTitle": "該当する請求が見つかりません",
+            "notFoundBody": "指定された申請キャンペーンは存在しないか、まだ読み込まれていません。",
+            "mapTitle": "被災エリアの地図",
+            "mapPreviewLabel": "プレビュー（デモデータ）",
+            "summaryRegion": "地域",
+            "summaryBand": "被災バンド",
+            "summaryAffectedCells": "影響セル数",
+            "summaryDeadline": "申請締切"
+        },
+        "list": {
+            "eyebrow": "支援を申請",
+            "title": "申請できるプログラム",
+            "sub": "現在申請受付中の災害支援プログラムの一覧です。各プログラムの詳細から申請を進めてください。",
+            "empty": "現在申請できるプログラムはありません。",
+            "amountLabel": "支給額",
+            "amount": "{amount} USDC",
+            "deadlineLabel": "申請締切",
+            "deadline": "締切: {date}",
+            "viewDetail": "詳細を見る"
         }
     },
     "notFound": {

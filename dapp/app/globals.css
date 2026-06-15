@@ -1903,6 +1903,72 @@ h4 {
   gap: 10px;
 }
 
+/* 一覧ページ（/claim）の請求可能プログラムカード。詳細(/claim/[id])への導線。 */
+.claim-list-section {
+  display: grid;
+  gap: 16px;
+}
+
+.claim-list-cards {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.claim-list-card {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+}
+
+.claim-list-card-header {
+  display: grid;
+  gap: 4px;
+}
+
+.claim-list-card-title {
+  font-size: 1.05rem;
+}
+
+.claim-list-card-scope {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+.claim-list-card-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.claim-list-card-meta div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.claim-list-card-meta dt {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+.claim-list-card-meta dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.claim-list-card .btn {
+  justify-self: start;
+}
+
 .claim-event-option {
   display: grid;
   align-items: center;

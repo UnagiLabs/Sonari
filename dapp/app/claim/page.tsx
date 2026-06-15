@@ -4,7 +4,7 @@ import jaMessages from "../../messages/ja.json";
 import { SonariIntlProvider } from "../i18n/intl-provider";
 import { canonicalMetadata } from "../i18n/site-metadata";
 import { parseLocale, SONARI_LOCALE_COOKIE, type SonariLocale } from "../register/wizard/locale";
-import { ClaimView } from "./claim-view";
+import { ClaimListView } from "./claim-list-view";
 
 export const metadata = canonicalMetadata("/claim");
 
@@ -21,7 +21,7 @@ export default async function ClaimPage() {
 
     return (
         <SonariIntlProvider locale={locale} messages={messagesByLocale[locale]}>
-            <ClaimView locale={locale} />
+            <ClaimListView locale={locale} />
         </SonariIntlProvider>
     );
 }
