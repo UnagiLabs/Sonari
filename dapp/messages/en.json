@@ -295,9 +295,7 @@
         "hero": {
             "eyebrow": "Donate",
             "title": "Send support with a clear trail.",
-            "sub": "A front-end donation flow for USDC support, pool selection, public display preferences, and receipt previews.",
-            "walletTag": "Wallet",
-            "walletBody": "Connect a wallet to prepare a donation transaction."
+            "sub": "A front-end donation flow for USDC support, pool selection, public display preferences, and receipt previews."
         },
         "form": {
             "eyebrow": "Contribution",

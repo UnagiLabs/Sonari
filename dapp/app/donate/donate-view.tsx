@@ -15,7 +15,6 @@ import { formatAmount } from "../i18n/format";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
 import { dAppKit } from "../wallet/dapp-kit";
-import { WalletConnect } from "../wallet/wallet-connect";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
 import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
 import { validateDonationAmount } from "./donate-amount";
@@ -569,11 +568,6 @@ export function DonateView({
                             <div className="eyebrow">{t("hero.eyebrow")}</div>
                             <h1>{t("hero.title")}</h1>
                             <p className="muted donate-sub">{t("hero.sub")}</p>
-                        </div>
-                        <div className="donate-wallet-panel">
-                            <span className="tag tag-neutral">{t("hero.walletTag")}</span>
-                            <p>{t("hero.walletBody")}</p>
-                            <WalletConnect />
                         </div>
                     </header>
 
