@@ -837,6 +837,17 @@
             "summaryBand": "Severity band",
             "summaryAffectedCells": "Affected cells",
             "summaryDeadline": "Claim deadline"
+        },
+        "list": {
+            "eyebrow": "Claim relief",
+            "title": "Claimable programs",
+            "sub": "A list of disaster relief programs currently accepting claims. Select a program to review eligibility and submit your claim.",
+            "empty": "No claimable programs are available right now.",
+            "amountLabel": "Amount",
+            "amount": "{amount} USDC",
+            "deadlineLabel": "Claim deadline",
+            "deadline": "Deadline: {date}",
+            "viewDetail": "View detail"
         }
     },
     "notFound": {

@@ -837,6 +837,17 @@
             "summaryBand": "被災バンド",
             "summaryAffectedCells": "影響セル数",
             "summaryDeadline": "申請締切"
+        },
+        "list": {
+            "eyebrow": "支援を申請",
+            "title": "申請できるプログラム",
+            "sub": "現在申請受付中の災害支援プログラムの一覧です。各プログラムの詳細から申請を進めてください。",
+            "empty": "現在申請できるプログラムはありません。",
+            "amountLabel": "支給額",
+            "amount": "{amount} USDC",
+            "deadlineLabel": "申請締切",
+            "deadline": "締切: {date}",
+            "viewDetail": "詳細を見る"
         }
     },
     "notFound": {
