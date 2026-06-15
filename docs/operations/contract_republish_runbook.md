@@ -18,11 +18,11 @@
 
 関連資料:
 
-- [PCR config runbook](../infra/aws/sonari-verifier-runner/docs/pcr-config.md)
-- [Deploy runbook](../infra/aws/sonari-verifier-runner/docs/deploy.md)
-- [Smoke runbook](../infra/aws/sonari-verifier-runner/docs/smoke-runbook.md)
-- [republish bootstrap script](../scripts/republish_contracts_bootstrap.ts)
-- [Published.toml](../contracts/Published.toml)
+- [PCR config runbook](../../infra/aws/sonari-verifier-runner/docs/pcr-config.md)
+- [Deploy runbook](../../infra/aws/sonari-verifier-runner/docs/deploy.md)
+- [Smoke runbook](../../infra/aws/sonari-verifier-runner/docs/smoke-runbook.md)
+- [republish bootstrap script](../../scripts/republish_contracts_bootstrap.ts)
+- [Published.toml](../../contracts/Published.toml)
 
 `scripts/republish_contracts_bootstrap.ts` が存在しない checkout では、bootstrap automation の実装または復元を先に行う。手作業で転記する場合も、この runbook の対応表と完了条件を gate として使う。
 
