@@ -22,36 +22,10 @@ import type { SonariLocale } from "../register/wizard/locale";
 import { WalletConnect } from "../wallet/wallet-connect";
 import { claimCampaignsToPrograms } from "./catalog/claim-campaign-adapter";
 import { buildClaimListCard, type ClaimListCardView } from "./catalog/claim-list-card";
-import { type ClaimCampaignReadClient, readClaimCampaigns } from "./claim-campaigns";
+import { readClaimCampaigns } from "./claim-campaigns";
 import { readClaimConfig } from "./claim-config";
 import { buildCampaignNotice, buildConfigNotice, type ClaimNotice } from "./claim-notices";
-
-// ---------------------------------------------------------------------------
-// 一覧用の read client 型。campaign 読み取りに必要なメソッドのみ。
-// ClaimCampaignReadClient は queryEvents と getObjects を要求するため、
-// listOwnedObjects は不要（MembershipPass 読み取り不要）。
-// ---------------------------------------------------------------------------
-
-type ClaimListReadClient = ClaimCampaignReadClient;
-
-function toClaimListReadClient(client: unknown): ClaimListReadClient {
-    if (!isRecord(client)) {
-        throw new Error("Sui client is not available.");
-    }
-    const queryEvents = client.queryEvents;
-    const getObjects = client.getObjects;
-    if (typeof queryEvents !== "function" || typeof getObjects !== "function") {
-        throw new Error("Sui client does not support required claim reads.");
-    }
-    return {
-        queryEvents: (input) => queryEvents.call(client, input),
-        getObjects: (input) => getObjects.call(client, input),
-    };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { createClaimReadClient } from "./claim-read-client";
 
 // ---------------------------------------------------------------------------
 // キャンペーン取得状態
@@ -69,7 +43,9 @@ type CampaignListState =
 export function ClaimListView({ locale }: { readonly locale: SonariLocale }) {
     const t = useTranslations("claim");
     const suiClient = useCurrentClient();
-    const client = useMemo(() => toClaimListReadClient(suiClient), [suiClient]);
+    // 読み取りは createClaimReadClient 経由。queryEvents は JSON-RPC、object 読み取りは
+    // gRPC（dApp Kit クライアント）へ委譲する（gRPC にイベント検索が無いため）。
+    const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
     const claimConfigResult = useMemo(() => readClaimConfig(), []);
     const claimConfig = claimConfigResult.kind === "ok" ? claimConfigResult.config : null;
 

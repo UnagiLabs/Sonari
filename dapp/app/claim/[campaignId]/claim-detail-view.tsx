@@ -19,11 +19,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../../components/loading-indicator";
 import { SiteTopbar } from "../../i18n/site-topbar";
-import {
-    type MembershipPassData,
-    type MembershipPassReadClient,
-    readMembershipPass,
-} from "../../mypage/membership-pass-read";
+import { type MembershipPassData, readMembershipPass } from "../../mypage/membership-pass-read";
 import { MEMBERSHIP_TERMS_VERSION } from "../../register/terms-version";
 import type { SonariLocale } from "../../register/wizard/locale";
 import { dAppKit } from "../../wallet/dapp-kit";
@@ -41,7 +37,6 @@ import {
 } from "../affected-cells-proof";
 import { claimCampaignToProgram } from "../catalog/claim-campaign-adapter";
 import {
-    type ClaimCampaignReadClient,
     type ClaimCampaignState,
     type ClaimEligibility,
     readClaimCampaigns,
@@ -58,6 +53,7 @@ import {
     buildWorldIdNotice,
     type ClaimNotice,
 } from "../claim-notices";
+import { createClaimReadClient } from "../claim-read-client";
 import { buildClaimResultView, type TxState } from "../claim-result";
 import { selectCampaignById } from "../select-campaign";
 
@@ -117,8 +113,6 @@ type EligibilityState =
     | { readonly status: "ready"; readonly eligibility: ClaimEligibility }
     | { readonly status: "failed"; readonly message: string };
 
-type ClaimDetailReadClient = ClaimCampaignReadClient & MembershipPassReadClient;
-
 const EMPTY_DUPLICATE_KEY_HASH =
     "0x0000000000000000000000000000000000000000000000000000000000000000";
 const ELIGIBILITY_REFRESH_INTERVAL_MS = 30_000;
@@ -133,7 +127,9 @@ export function ClaimDetailView({
     const t = useTranslations("claim");
     const account = useCurrentAccount();
     const suiClient = useCurrentClient();
-    const client = useMemo(() => toClaimDetailReadClient(suiClient), [suiClient]);
+    // 読み取りは createClaimReadClient 経由。queryEvents は JSON-RPC、object 読み取りは
+    // gRPC（dApp Kit クライアント）へ委譲する（gRPC にイベント検索が無いため）。
+    const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
     const claimConfigResult = useMemo(() => readClaimConfig(), []);
     const claimConfig = claimConfigResult.kind === "ok" ? claimConfigResult.config : null;
 
@@ -865,32 +861,6 @@ function buildClaimTransactionObjects(
         identityRegistry: config.identityRegistryId,
         pass: pass.objectId,
     };
-}
-
-function toClaimDetailReadClient(client: unknown): ClaimDetailReadClient {
-    if (!isRecord(client)) {
-        throw new Error("Sui client is not available.");
-    }
-    const queryEvents = client.queryEvents;
-    const getObjects = client.getObjects;
-    const listOwnedObjects = client.listOwnedObjects;
-    if (
-        typeof queryEvents !== "function" ||
-        typeof getObjects !== "function" ||
-        typeof listOwnedObjects !== "function"
-    ) {
-        throw new Error("Sui client does not support required claim reads.");
-    }
-
-    return {
-        queryEvents: (input) => queryEvents.call(client, input),
-        getObjects: (input) => getObjects.call(client, input),
-        listOwnedObjects: (input) => listOwnedObjects.call(client, input),
-    };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function shortObjectId(value: string): string {
