@@ -1,6 +1,6 @@
 # Technical Architecture
 
-This document explains the full Sonari system using the system-flow diagram. It is the technical companion to the shorter product documents.
+This document explains how the Sonari dapp, Nautilus verifiers, storage services, relayers, and Sui Move contracts work together.
 
 ![Sonari technical system flow](assets/Sonari_SystemFlow_en.svg)
 
@@ -74,9 +74,9 @@ Sonari intentionally separates responsibilities.
 
 Failure should be fail-closed. If a signature is wrong, a key is unknown, a proof does not match, a payload is malformed, or a result is expired, the transaction stops instead of writing a false result or moving funds.
 
-## 6. Technical References
+## 6. Related Documents
 
-For deeper implementation details:
+For additional details:
 
 - [Disaster Oracle](disaster_oracle.md)
 - [Identity Verification](identity_verification.md)
@@ -91,7 +91,7 @@ For deeper implementation details:
 
 # 技術アーキテクチャ（日本語）
 
-この文書は、system-flow diagram を使って Sonari 全体の技術構成を説明します。短い product documents を補足する技術資料です。
+この文書は、Sonari の dapp、Nautilus verifier、storage service、relayer、Sui Move contract がどのようにつながるかを説明します。
 
 ![Sonari technical system flow](assets/Sonari_SystemFlow_en.svg)
 
@@ -165,9 +165,9 @@ Sonari は責務を意図的に分けています。
 
 失敗時は fail-closed です。signature が不正、key が未知、proof が root と合わない、payload が malformed、result が expired の場合、誤った result を書いたり資金を動かしたりせず、transaction を止めます。
 
-## 6. Technical References
+## 6. 関連資料
 
-詳細:
+補足資料:
 
 - [Disaster Oracle](disaster_oracle.md)
 - [Identity Verification](identity_verification.md)
