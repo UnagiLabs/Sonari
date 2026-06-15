@@ -95,6 +95,11 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     const parsedHome = residenceCell != null ? parseHomeCell(residenceCell) : null;
     const mode = selectMapMode(residenceCell ?? null);
 
+    // cellSource はオブジェクト参照が呼び出し側で不安定でも、effect の再実行
+    // （地図の作り直し・再 fetch）が暴発しないよう、依存にはプリミティブを使う。
+    const cellSourceKind = cellSource.kind;
+    const cellSourcePath = cellSource.kind === "static-asset" ? cellSource.path : null;
+
     // ---------------------------------------------------------------------------
     // State / Ref
     // ---------------------------------------------------------------------------
@@ -103,7 +108,7 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     // 初回描画でサーバー/クライアントを一致させるため、env に依存する初期化は
     // マウント後の useEffect で行う。ただし deferred は最優先でフォールバックする。
     const [status, setStatus] = useState<MapsLoaderStatus>(() => {
-        if (cellSource.kind === "deferred") {
+        if (cellSourceKind === "deferred") {
             return "unconfigured";
         }
         return resolveInitialMapsStatus(mapsApiKey);
@@ -144,14 +149,19 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     // ---------------------------------------------------------------------------
 
     useEffect(() => {
-        if (cellSource.kind !== "static-asset") {
+        if (cellSourcePath === null) {
             return;
         }
-        const { path } = cellSource;
         let cancelled = false;
 
-        fetch(path)
-            .then((res) => res.json())
+        fetch(cellSourcePath)
+            .then((res) => {
+                // 非 2xx（例: JSON ボディ付き 404）は空集合ではなくエラー扱いにする。
+                if (!res.ok) {
+                    throw new Error(`affected cells fetch failed: HTTP ${res.status}`);
+                }
+                return res.json();
+            })
             .then((json: unknown) => {
                 if (!cancelled) {
                     setCells(parseAffectedCells(json));
@@ -168,7 +178,7 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
         return () => {
             cancelled = true;
         };
-    }, [cellSource]);
+    }, [cellSourcePath]);
 
     // ---------------------------------------------------------------------------
     // ポリゴン差分 sync
@@ -288,7 +298,7 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
 
     useEffect(() => {
         // deferred は地図を出さない
-        if (cellSource.kind === "deferred") {
+        if (cellSourceKind === "deferred") {
             return;
         }
 
@@ -421,7 +431,7 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
             }
             mapRef.current = null;
         };
-    }, [cellSource, mode, scheduleRebuild]);
+    }, [cellSourceKind, mode, scheduleRebuild]);
 
     // ---------------------------------------------------------------------------
     // 凡例エントリ（固定。renders ごとに再生成しない）
@@ -438,7 +448,7 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     // ---------------------------------------------------------------------------
 
     // deferred フォールバック
-    if (cellSource.kind === "deferred") {
+    if (cellSourceKind === "deferred") {
         return (
             <div className="affected-area-map-fallback">
                 <p className="affected-area-map-fallback-title">{t("deferredTitle")}</p>
