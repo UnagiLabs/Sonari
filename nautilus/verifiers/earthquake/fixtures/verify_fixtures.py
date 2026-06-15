@@ -36,8 +36,8 @@ CASES = {
         "grid_required": False,
     },
     "usgs/pending_mmi_empty_grid": {
-        "status": "pending_mmi",
-        "error_code": "MMI_NOT_AVAILABLE",
+        "status": "rejected",
+        "error_code": "SHAKEMAP_PARSE_FAILED",
         "grid_required": True,
     },
     "usgs/rejected_cancelled_shakemap": {

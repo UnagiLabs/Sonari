@@ -185,16 +185,14 @@ fn process_usgs_inner(
             None,
         )));
     };
-    let points = match parse_grid_points(grid_xml) {
-        Ok(points) if !points.is_empty() => points,
-        _ => {
-            return Ok(status_only(base_result(
-                OracleStatus::PendingMmi,
-                Some("MMI_NOT_AVAILABLE"),
-                None,
-            )));
-        }
-    };
+    let points = parse_grid_points(grid_xml)?;
+    if points.is_empty() {
+        return Ok(status_only(base_result(
+            OracleStatus::Rejected,
+            Some("SHAKEMAP_PARSE_FAILED"),
+            None,
+        )));
+    }
 
     let structured_grid = structured_grid_from_points(&points)?;
     let affected_cells = affected_cells_from_grid_centers(&structured_grid)?;

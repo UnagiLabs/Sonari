@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const H3_BBOX_SCAN_STEP_DEGREES: f64 = 0.01;
 #[allow(dead_code)]
 const H3_BBOX_SCAN_PADDING_DEGREES: f64 = 0.05;
+const MAX_H3_BBOX_SCAN_POINTS: u64 = 5_000_000;
 
 #[allow(dead_code)]
 pub(crate) fn affected_cells_from_points(
@@ -88,6 +89,16 @@ fn h3_cells_covering_grid_bbox(grid: &StructuredGrid) -> Result<BTreeSet<CellInd
             "invalid ShakeMap grid bbox".to_owned(),
         ));
     }
+    let lon_steps = scan_steps(min_lon, max_lon)?;
+    let lat_steps = scan_steps(min_lat, max_lat)?;
+    let scan_points = lon_steps.checked_mul(lat_steps).ok_or_else(|| {
+        OracleError::InvalidGridPoint("ShakeMap grid bbox scan count overflow".to_owned())
+    })?;
+    if scan_points > MAX_H3_BBOX_SCAN_POINTS {
+        return Err(OracleError::InvalidGridPoint(format!(
+            "ShakeMap grid bbox scan count {scan_points} exceeds limit {MAX_H3_BBOX_SCAN_POINTS}"
+        )));
+    }
 
     let mut cells = BTreeSet::new();
     let mut lat = min_lat;
@@ -108,6 +119,16 @@ fn h3_cells_covering_grid_bbox(grid: &StructuredGrid) -> Result<BTreeSet<CellInd
         ));
     }
     Ok(cells)
+}
+
+fn scan_steps(min: f64, max: f64) -> Result<u64, OracleError> {
+    let span = max - min;
+    if !(span.is_finite() && span >= 0.0) {
+        return Err(OracleError::InvalidGridPoint(
+            "invalid ShakeMap grid bbox span".to_owned(),
+        ));
+    }
+    Ok((span / H3_BBOX_SCAN_STEP_DEGREES).floor() as u64 + 1)
 }
 
 #[allow(dead_code)]
@@ -235,6 +256,23 @@ mod tests {
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(h3_indexes, sorted);
+    }
+
+    #[test]
+    fn affected_cells_rejects_sparse_grid_with_huge_bbox_scan() {
+        let grid = grid(vec![
+            point("0.0", "0.0", 800),
+            point("100.0", "0.0", 800),
+            point("0.0", "50.0", 800),
+            point("100.0", "50.0", 800),
+        ]);
+
+        let error = affected_cells_from_grid_centers(&grid)
+            .expect_err("huge sparse bbox must fail closed before scanning");
+
+        assert!(
+            matches!(error, OracleError::InvalidGridPoint(message) if message.contains("bbox scan count"))
+        );
     }
 
     #[test]

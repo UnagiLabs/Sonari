@@ -12,7 +12,7 @@
 | `great_tohoku_2011` | 東日本大震災の USGS 実データを使う finalized case |
 | `noto_peninsula_2024` | 能登半島地震の USGS 実データを使う finalized case |
 | `pending_source_no_shakemap` | ShakeMap product がまだ存在しないため再試行対象になる case |
-| `pending_mmi_empty_grid` | grid はあるが MMI point がなく、MMI 待ちになる case |
+| `pending_mmi_empty_grid` | grid はあるが MMI point がなく、入力不正として reject する case |
 | `rejected_cancelled_shakemap` | ShakeMap が cancelled のため reject する case |
 | `rejected_no_affected_cells` | grid はあるが claimable affected cells がない case |
 
