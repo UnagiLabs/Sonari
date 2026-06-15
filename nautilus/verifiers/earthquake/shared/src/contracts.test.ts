@@ -178,6 +178,11 @@ describe("oracle schema contracts", () => {
         expect(BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE).toBe(currentPayload.intent);
         expect(BCS_ENUMS.hazardType.EARTHQUAKE).toBe(currentPayload.hazard_type);
         expect(BCS_ENUMS.onchainStatus.FINALIZED).toBe(currentPayload.status);
+        expect(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1).toBe(1);
+        expect(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_HDF_H3_WEIGHTED_P90_V1).toBe(2);
+        expect(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1).toBe(3);
+        expect(BCS_ENUMS.cellAggregation.GRID_POINT_P90).toBe(1);
+        expect(BCS_ENUMS.cellAggregation.H3_CENTER_BILINEAR).toBe(2);
 
         expect(DEFAULT_ORACLE_CONTRACT.oracle_version).toBe(1);
         expect(DEFAULT_ORACLE_CONTRACT.geo_resolution).toBe(7);

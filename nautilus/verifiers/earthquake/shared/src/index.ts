@@ -49,12 +49,14 @@ export const BCS_ENUMS = {
     cellsGenerationMethod: {
         SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1: 1,
         SHAKEMAP_HDF_H3_WEIGHTED_P90_V1: 2,
+        SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1: 3,
     },
     cellMetric: {
         USGS_MMI: 1,
     },
     cellAggregation: {
         GRID_POINT_P90: 1,
+        H3_CENTER_BILINEAR: 2,
     },
     intensityScale: {
         MMI_X100: 1,
@@ -607,6 +609,10 @@ export function encodeEarthquakeOraclePayloadBcsBytes(
 export function computeAffectedCellsRootHex(affected: AffectedCellsArtifact): string | null {
     const leafHashes: Uint8Array[] = [];
     let previousH3: bigint | null = null;
+    const cellsGenerationMethod = cellsGenerationMethodId(affected.cells_generation_method);
+    if (cellsGenerationMethod === null) {
+        return null;
+    }
     for (const cell of affected.affected_cells) {
         const h3Index = parseCanonicalU64Decimal(cell.h3_index);
         if (h3Index === null || (previousH3 !== null && h3Index <= previousH3)) {
@@ -625,7 +631,7 @@ export function computeAffectedCellsRootHex(affected: AffectedCellsArtifact): st
                     u16(cell.intensity_value),
                     u8(BCS_ENUMS.intensityScale.MMI_X100),
                     u8(cell.cell_band),
-                    u8(BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1),
+                    u8(cellsGenerationMethod),
                     u64(affected.oracle_version),
                 ]),
             ),
@@ -656,6 +662,19 @@ export function computeAffectedCellsRootHex(affected: AffectedCellsArtifact): st
 
     const root = level[0];
     return root === undefined ? null : `0x${bytesToHex(root)}`;
+}
+
+function cellsGenerationMethodId(value: string): number | null {
+    switch (value) {
+        case "shakemap_gridxml_h3_grid_point_p90_v1":
+            return BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1;
+        case "shakemap_hdf_h3_area_weighted_p90_v1":
+            return BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_HDF_H3_WEIGHTED_P90_V1;
+        case "shakemap_gridxml_h3_center_bilinear_v1":
+            return BCS_ENUMS.cellsGenerationMethod.SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1;
+        default:
+            return null;
+    }
 }
 
 export function validateRelayerSubmitInput(input: unknown): ValidationResult<RelayerSubmitInput> {

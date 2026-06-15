@@ -87,9 +87,25 @@ describe("parseAffectedCellsFile", () => {
         expect(() => parseAffectedCellsFile(bad)).toThrow();
     });
 
+    it("accepts the H3 center bilinear cells_generation_method", () => {
+        const input = parseAffectedCellsFile({
+            ...(affectedJson as object),
+            cells_generation_method: "shakemap_gridxml_h3_center_bilinear_v1",
+        });
+        expect(input.cells_generation_method).toBe("shakemap_gridxml_h3_center_bilinear_v1");
+    });
+
     it("throws for unknown cell_metric", () => {
         const bad = { ...(affectedJson as object), cell_metric: "UNKNOWN" };
         expect(() => parseAffectedCellsFile(bad)).toThrow();
+    });
+
+    it("accepts the H3_CENTER_BILINEAR cell_aggregation", () => {
+        const input = parseAffectedCellsFile({
+            ...(affectedJson as object),
+            cell_aggregation: "H3_CENTER_BILINEAR",
+        });
+        expect(input.cell_aggregation).toBe("H3_CENTER_BILINEAR");
     });
 
     it("throws for unknown intensity_scale", () => {

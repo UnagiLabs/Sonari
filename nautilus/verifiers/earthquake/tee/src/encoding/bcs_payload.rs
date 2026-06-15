@@ -2,9 +2,11 @@ use crate::core::artifacts::{AffectedCellsArtifact, UnsignedPayload};
 use crate::core::types::OracleError;
 use crate::crypto::{hex_to_32, sha256_bytes};
 use crate::{
-    CELL_METRIC_USGS_MMI, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
-    FRESHNESS_WINDOW_MS, HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100,
-    INTENT_SONARI_EARTHQUAKE_ORACLE, ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION,
+    CELL_METRIC_USGS_MMI, CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1,
+    CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
+    CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_WEIGHTED_P90_V1, FRESHNESS_WINDOW_MS,
+    HAZARD_TYPE_EARTHQUAKE, INTENSITY_SCALE_MMI_X100, INTENT_SONARI_EARTHQUAKE_ORACLE,
+    ONCHAIN_STATUS_FINALIZED, ORACLE_VERSION,
 };
 use serde::Serialize;
 
@@ -144,6 +146,7 @@ pub(crate) fn leaf_hashes(
     affected: &AffectedCellsArtifact,
     event_uid: [u8; 32],
 ) -> Result<Vec<(u64, [u8; 32])>, OracleError> {
+    let cells_generation_method = cells_generation_method_id(&affected.cells_generation_method)?;
     affected
         .affected_cells
         .iter()
@@ -160,8 +163,7 @@ pub(crate) fn leaf_hashes(
                 intensity_value: cell.intensity_value,
                 intensity_scale: INTENSITY_SCALE_MMI_X100,
                 cell_band: cell.cell_band,
-                cells_generation_method:
-                    CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1,
+                cells_generation_method,
                 oracle_version: affected.oracle_version,
             };
             let mut data = Vec::with_capacity(1);
@@ -170,4 +172,74 @@ pub(crate) fn leaf_hashes(
             Ok((h3_index, sha256_bytes(&data)))
         })
         .collect()
+}
+
+fn cells_generation_method_id(value: &str) -> Result<u8, OracleError> {
+    match value {
+        "shakemap_gridxml_h3_grid_point_p90_v1" => {
+            Ok(CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1)
+        }
+        "shakemap_hdf_h3_area_weighted_p90_v1" => {
+            Ok(CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_WEIGHTED_P90_V1)
+        }
+        "shakemap_gridxml_h3_center_bilinear_v1" => {
+            Ok(CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1)
+        }
+        _ => Err(OracleError::InvalidGridPoint(format!(
+            "unknown cells_generation_method {value}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::artifacts::AffectedCellJson;
+
+    fn affected(method: &str) -> AffectedCellsArtifact {
+        AffectedCellsArtifact {
+            event_uid: "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd"
+                .to_owned(),
+            event_revision: 1,
+            oracle_version: 1,
+            geo_resolution: 7,
+            cells_generation_method: method.to_owned(),
+            cell_metric: "USGS_MMI".to_owned(),
+            cell_aggregation: "GRID_POINT_P90".to_owned(),
+            intensity_scale: "MMI_X100".to_owned(),
+            affected_cells: vec![AffectedCellJson {
+                h3_index: "608819013513904127".to_owned(),
+                intensity_value: 831,
+                cell_band: 3,
+            }],
+        }
+    }
+
+    #[test]
+    fn leaf_hashes_uses_artifact_cells_generation_method() {
+        let event_uid =
+            hex_to_32("0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd")
+                .unwrap();
+        let old_hash = leaf_hashes(
+            &affected("shakemap_gridxml_h3_grid_point_p90_v1"),
+            event_uid,
+        )
+        .unwrap();
+        let new_hash = leaf_hashes(
+            &affected("shakemap_gridxml_h3_center_bilinear_v1"),
+            event_uid,
+        )
+        .unwrap();
+
+        assert_ne!(old_hash, new_hash);
+    }
+
+    #[test]
+    fn leaf_hashes_rejects_unknown_cells_generation_method() {
+        let event_uid =
+            hex_to_32("0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd")
+                .unwrap();
+
+        assert!(leaf_hashes(&affected("unknown_method"), event_uid).is_err());
+    }
 }

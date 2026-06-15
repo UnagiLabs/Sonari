@@ -25,6 +25,8 @@ export type CellsGenerationMethod =
     (typeof CellsGenerationMethod)[keyof typeof CellsGenerationMethod];
 export const CellsGenerationMethod = {
     shakemap_gridxml_h3_grid_point_p90_v1: "shakemap_gridxml_h3_grid_point_p90_v1",
+    shakemap_hdf_h3_area_weighted_p90_v1: "shakemap_hdf_h3_area_weighted_p90_v1",
+    shakemap_gridxml_h3_center_bilinear_v1: "shakemap_gridxml_h3_center_bilinear_v1",
 } as const;
 
 // ---------- enum -> integer maps (must match Python verify_golden_vectors.py) ----------
@@ -39,6 +41,8 @@ const INTENSITY_SCALE_INT: Record<string, number> = {
 
 const CELLS_GENERATION_METHOD_INT: Record<string, number> = {
     shakemap_gridxml_h3_grid_point_p90_v1: 1,
+    shakemap_hdf_h3_area_weighted_p90_v1: 2,
+    shakemap_gridxml_h3_center_bilinear_v1: 3,
 };
 
 // ---------- leaf type ----------

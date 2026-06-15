@@ -60,7 +60,10 @@ const KNOWN_CELLS_GENERATION_METHODS: ReadonlySet<string> = new Set(
 );
 const KNOWN_CELL_METRICS: ReadonlySet<string> = new Set(Object.values(CellMetric));
 const KNOWN_INTENSITY_SCALES: ReadonlySet<string> = new Set(Object.values(IntensityScale));
-const KNOWN_CELL_AGGREGATIONS: ReadonlySet<string> = new Set(["GRID_POINT_P90"]);
+const KNOWN_CELL_AGGREGATIONS: ReadonlySet<string> = new Set([
+    "GRID_POINT_P90",
+    "H3_CENTER_BILINEAR",
+]);
 
 // ---------------------------------------------------------------------------
 // Validation helpers
