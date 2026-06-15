@@ -24,8 +24,8 @@ import { AffectedAreaMap } from "../../../claim/affected-area/affected-area-map"
 import { buildClaimListCard } from "../../../claim/catalog/claim-list-card";
 import { isDisasterProgram } from "../../../claim/catalog/claimable-program";
 import {
-    DEMO_AFFECTED_HOME_CELL_BAND3,
     DEMO_CLAIMABLE_PROGRAMS,
+    DEMO_RESIDENCE_HOME_CELL,
 } from "../../../claim/catalog/demo-catalog";
 import { selectDemoProgramById } from "../../../claim/catalog/select-demo-program";
 import { SiteTopbar } from "../../../i18n/site-topbar";
@@ -151,39 +151,35 @@ export function DemoClaimDetailView({
                             {/*
                              * cellSource: program.cellSource をそのまま渡す。
                              * resolvePreviewCellSource は使わない → 本物のバンド色が出る。
-                             * residenceCell: DEMO_AFFECTED_HOME_CELL_BAND3（実被災セット内の Band3 セル）。
-                             * → デモ居住セルが被災エリア内として強調される。
+                             * residenceCell: DEMO_RESIDENCE_HOME_CELL（仙台付近・band2・陸地）。
+                             * → 地図が陸地（市街地）を中心に表示され、自宅セルが強調される。
                              */}
                             <AffectedAreaMap
                                 cellSource={program.cellSource}
-                                residenceCell={DEMO_AFFECTED_HOME_CELL_BAND3}
+                                residenceCell={DEMO_RESIDENCE_HOME_CELL}
                             />
                         </section>
                     ) : null}
 
-                    {/* 非災害カテゴリ: 表示専用申請ボタン */}
-                    {!isDisasterProgram(program) ? (
-                        <section className="claim-layout" aria-label={program.title}>
-                            <div className="claim-main">
-                                <section className="claim-summary-panel">
-                                    <div className="claim-action-list">
-                                        {/* 申請ボタン: disabled の表示専用。押下しても何もしない。 */}
-                                        <button
-                                            className="btn btn-primary btn-lg"
-                                            disabled
-                                            type="button"
-                                        >
-                                            {tDemo("detail.applyButton")}
-                                        </button>
-                                    </div>
-                                    {/* 表示専用注記 */}
-                                    <p className="muted claim-sub">
-                                        {tDemo("detail.displayOnlyNote")}
-                                    </p>
-                                </section>
-                            </div>
-                        </section>
-                    ) : null}
+                    {/* 申請ボタン（全カテゴリ共通・表示専用）。災害も学生/医療も同じ導線を出す。 */}
+                    <section className="claim-layout" aria-label={program.title}>
+                        <div className="claim-main">
+                            <section className="claim-summary-panel">
+                                <div className="claim-action-list">
+                                    {/* 申請ボタン: disabled の表示専用。押下しても何もしない。 */}
+                                    <button
+                                        className="btn btn-primary btn-lg"
+                                        disabled
+                                        type="button"
+                                    >
+                                        {tDemo("detail.applyButton")}
+                                    </button>
+                                </div>
+                                {/* 表示専用注記 */}
+                                <p className="muted claim-sub">{tDemo("detail.displayOnlyNote")}</p>
+                            </section>
+                        </div>
+                    </section>
                 </main>
             </div>
         </>
