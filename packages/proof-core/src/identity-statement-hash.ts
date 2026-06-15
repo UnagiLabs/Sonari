@@ -6,7 +6,7 @@ import { hashToFieldBytes } from "./world-id-signal.js";
  * `signed_statement_hash`.
  *
  * For World ID registration the dapp does not let the member hand-enter a
- * statement hash (see docs/webapp.md). Instead it derives a deterministic
+ * statement hash. Instead it derives a deterministic
  * `signed_statement_hash` from this fixed declaration plus the terms version.
  * The enclave never inspects the statement contents — it only feeds
  * `signed_statement_hash` into the World ID `signal_hash` binding

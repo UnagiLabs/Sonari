@@ -6,7 +6,6 @@ Next.js (App Router) web app for Sonari — the donation, registration, and clai
 - **Trust boundary**: untrusted client; forwards proofs, never reinterprets results
 
 ## Where to Read More
-- [../docs/webapp.md](../docs/webapp.md) — UI design and flows
 - [../README.md](../README.md) — project overview & documentation index
 
 ---
@@ -19,5 +18,4 @@ Sonari の Next.js（App Router）Web アプリ。寄付・登録・claim の UI
 - **信頼境界**: 信頼しないクライアント。proof を転送するだけで結果を再解釈しない
 
 ## 詳細資料
-- [../docs/webapp.md](../docs/webapp.md) — UI 設計とフロー
 - [../README.md](../README.md) — プロジェクト概要・ドキュメント索引

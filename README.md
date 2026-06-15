@@ -69,7 +69,6 @@ All detailed documentation lives under `docs/`. This table is the full index —
 | Sui Move contract design spec | [docs/contracts_spec.md](docs/contracts_spec.md) |
 | Fund flow spec | [docs/fund_flow_spec.md](docs/fund_flow_spec.md) |
 | Donation flow | [docs/donation_flow.md](docs/donation_flow.md) |
-| Product and web app | [docs/webapp.md](docs/webapp.md) |
 | Nautilus verifier overview | [docs/verifiers/overview.md](docs/verifiers/overview.md) |
 | Earthquake verifier | [docs/verifiers/earthquake.md](docs/verifiers/earthquake.md) |
 | Identity verifier | [docs/verifiers/identity.md](docs/verifiers/identity.md) |
@@ -137,7 +136,6 @@ Sonari は寄付に裏付けられた支援を、明快で検証可能なフロ�
 | Sui Move コントラクト設計仕様 | [docs/contracts_spec.md](docs/contracts_spec.md) |
 | 資金フロー仕様 | [docs/fund_flow_spec.md](docs/fund_flow_spec.md) |
 | 寄付フロー | [docs/donation_flow.md](docs/donation_flow.md) |
-| プロダクトと Web アプリ | [docs/webapp.md](docs/webapp.md) |
 | Nautilus verifier 概要 | [docs/verifiers/overview.md](docs/verifiers/overview.md) |
 | 地震 verifier | [docs/verifiers/earthquake.md](docs/verifiers/earthquake.md) |
 | identity verifier | [docs/verifiers/identity.md](docs/verifiers/identity.md) |
