@@ -4,152 +4,178 @@
 
 # Sonari
 
-**Transparent donation infrastructure that verifies who should receive aid.**
+**A transparent donation platform for verified aid on Sui.**
 
-Sonari is building a donation platform where sponsors, donors, and communities can create transparent funding pools, define support programs, and verify who should receive aid through Nautilus-backed decisioning.
+Sonari helps donations move to people who are eligible for support, while keeping both the money flow and the eligibility decision verifiable. Donors can see where funds are held. Recipients can see why they qualify. Sui Move contracts enforce the final rules, and Nautilus-backed verifiers turn real-world facts into signed results that the contracts can check.
+
+The MVP focuses on earthquake relief:
+
+1. Official earthquake data is verified inside a Nautilus TEE.
+2. A verified disaster creates an on-chain relief campaign.
+3. A recipient proves membership, residence, and identity.
+4. Sui Move checks the signed disaster result, the identity result, the affected-area proof, duplicate-claim state, and pool balances before paying relief.
+
+Sonari is **not insurance**. Donations do not guarantee payouts. Relief depends on pool balances, program rules, verification requirements, fraud controls, and claim timing.
 
 ## Why Sonari
 
-Donation is one of the most important ways society moves money toward people and communities in need. But trust often breaks after funds are collected: donors may not know whether aid reached the right people, recipients may not know why they were selected or excluded, and communities may not be able to explain how money was reserved, routed, or spent.
+Donation programs often become hard to audit after funds are collected. Donors may not know whether funds reached the intended people. Recipients may not know why they were selected or excluded. Operators may need to coordinate disaster facts, identity checks, payment rules, and reports across systems that are not publicly verifiable.
 
-The problem becomes sharper in urgent support programs such as disaster relief. Funds can move through multiple organizations, manual approvals, and reporting workflows before reaching recipients. Each intermediary step can add delay, administrative cost, and opacity at the exact moment when direct support matters most.
+Sonari is a donation platform that makes aid programmable and publicly verifiable:
 
-Sonari is built for donation programs where both funding and recipient selection need to be transparent. It treats aid as programmable infrastructure: donated funds sit in visible pools, support programs define explicit eligibility rules, Nautilus verifies real-world facts, and Sui Move enforces how funds can be paid.
+- Funds are held in visible Sui pools.
+- Support programs define explicit payout and eligibility rules.
+- Nautilus verifiers re-check external facts in a TEE and sign only verified results.
+- Sui Move contracts re-check signatures, proofs, ownership, timing, and balances before money moves.
 
-## Market Opportunity
+The result is a donation-backed aid flow where the important decisions are inspectable instead of being hidden inside a server or manual process.
 
-Charitable giving is a large real-world capital flow, not a niche behavior. In the United States alone, [Giving USA 2025](https://givingusa.org/giving-usa-2025-u-s-charitable-giving-grew-to-592-50-billion-in-2024-lifted-by-stock-market-gains/) estimates that charitable giving reached **$592.50 billion in 2024**. Globally, the [CAF World Giving Index / World Giving Report](https://www.cafonline.org/insights/research/world-giving-index) tracks giving as a broad international behavior across countries, cultures, and income levels.
+## MVP
 
-For Sui, this creates an opportunity beyond crypto-native DeFi liquidity: real-world donation capital can become transparent, programmable, and auditable on-chain TVL. Sonari is designed to make that capital useful for sponsors, donors, communities, and recipients without weakening the trust boundaries that aid programs require.
+| Area | MVP behavior |
+| --- | --- |
+| Disaster source | USGS earthquake detail data and ShakeMap data |
+| Disaster verification | Nautilus TEE re-fetches source data, computes affected H3 cells, signs a finalized payload |
+| Identity route | World ID is the live MVP route |
+| Planned identity providers | KYC, student ID, university account, and similar provider checks can be added later |
+| Chain | Sui Move contracts hold funds, verify signed results, and enforce claim rules |
+| Currency | USDC |
+| Aid model | Two-stage relief: immediate floor payout and later pro-rata campaign payout |
 
-## Product Overview
+## Extension Direction
 
-Sonari is a donation platform first. Its edge is that it makes both sides of an aid program inspectable: where donated funds are held, and why a recipient is eligible to receive support.
+The earthquake MVP is the first use case, not the limit of the design.
 
-The first MVP is **parametric disaster support** for earthquake relief. Donors and sponsors fund transparent pools, support programs define payout rules, Nautilus verifies real-world earthquake and identity facts, and Sui Move enforces the final claim conditions before funds move.
+**Other disasters.** Sonari can extend to floods, typhoons, tsunami, wildfire, evacuation orders, or other public emergencies when an official source policy is defined. Each new disaster type needs clear source data, payload meaning, fixtures, verifier logic, and Move checks. The key rule stays the same: the official data is re-fetched and verified inside Nautilus, then Sui accepts only the signed result.
 
-> Sonari is donation-backed support infrastructure, not insurance. Donations do not create guaranteed payouts. Aid depends on pool balances, eligibility rules, program policy, fraud controls, and any verification requirements for the support program.
+**Student and community support.** The same pattern can support non-disaster programs. A verifier can check a student ID, university email, university SSO account, enrollment API, or other eligibility proof, then produce a signed result for Sui. The contract can then route donations to student support, scholarships, tuition assistance, emergency grants, or other community aid programs without storing raw personal data on-chain.
 
-## How Sonari Works
+## How It Works
 
 ![Sonari system overview](docs/assets/Sonari_Overview.svg)
 
-Sonari turns donation-backed aid into a clear, verifiable flow:
+1. **Donors fund pools.** Donations are split by the contract into campaign, category, main support, and operations pools.
+2. **Nautilus verifies facts.** External facts such as earthquake data or identity proof are checked inside a TEE and signed.
+3. **Sui verifies the signed results.** Move contracts verify the enclave key, signature, payload bytes, status, and proof roots.
+4. **Recipients claim relief.** A valid claim combines identity, membership, residence timing, affected-area proof, and duplicate-claim protection.
+5. **Receipts make the flow inspectable.** Donations, payouts, and claim receipts connect funds to the campaign and verification results.
 
-1. **Funds enter pools.** General donations go to the Main Pool. Designated donations can fund a relief pool while also keeping the Main Pool available as a policy-controlled backstop.
-2. **Programs define the rules.** A support program connects a funding policy, claim window, payout policy, and eligibility requirements.
-3. **Nautilus verifies external facts.** Verifiers re-fetch source data inside a TEE, normalize it, and produce signed payloads that Move can verify.
-4. **Proof services distribute inclusion proofs.** Workers can serve Merkle proofs, but they are not trusted. Move replays proofs against signed roots before accepting a claim.
-5. **Move enforces the claim.** The contract checks membership, identity, residence timing, affected-cell proof, duplicate-claim state, pool balances, and campaign budget.
-6. **Aid and receipts are created.** Eligible recipients receive Relief Cash, and ClaimReceipt / Impact Receipt records connect the payout to the program, event, funding source, and verification result.
+## Judge Reading Order
 
-## MVP Claim Model
+These four documents are the intended review path:
 
-The earthquake MVP is intentionally narrow. A recipient cannot claim only because an earthquake happened near them. A valid claim combines three things:
-
-| Layer | What it proves |
+| Document | Purpose |
 | --- | --- |
-| **Disaster proof** | Nautilus verified the earthquake source data and signed a DisasterEvent with an `affected_cells_root`. |
-| **Membership and identity** | The claimant has an active Membership SBT and a valid World ID verification result. (KYC support is planned and on the roadmap, but not yet implemented in the MVP — for now, World ID is the only live claim route.) |
-| **Residence and inclusion** | The claimant registered a valid `home_cell` before the earthquake cutoff, and that cell is included in the affected cells Merkle root. |
+| [Disaster Oracle](docs/disaster_oracle.md) | How official disaster information becomes a signed Sui result |
+| [Identity Verification](docs/identity_verification.md) | How World ID works today, and how KYC / student credentials can be added |
+| [Donation Flow](docs/donation_flow.md) | How money moves, how payouts are calculated, and why payouts are not first-come-first-served |
+| [Technical Architecture](docs/technical_architecture.md) | How the dapp, Nautilus, relayers, storage, and Sui contracts fit together |
 
-Move performs the final decision. It does not trust the frontend, worker, relayer, or storage layer to decide eligibility.
+Technical references remain available in [`docs/verifiers/`](docs/verifiers/), [`docs/internal/contracts_spec.md`](docs/internal/contracts_spec.md), and [`schemas/`](schemas/).
 
-## Tech Stack
+## Status
 
-| Area | Technology | Use |
-| --- | --- | --- |
-| Frontend | React / Next.js, TypeScript, Sui dApp Kit | Dashboard, Donation, Membership Pass, Claim UI, Program / Campaign display, wallet connection |
-| Earthquake Watcher | AWS Lambda, DynamoDB / Step Functions | USGS candidate detection, primary state management, TEE startup |
-| Earthquake TEE | Rust, Nautilus, AWS Nitro Enclaves | External source re-verification, affected-cell root generation, payload generation, private-key isolation, signing |
-| Earthquake Relayer | Sui SDK, TypeScript | Preview / dry-run / explicit submit of the signed Earthquake payload |
-| Identity Verifier | TypeScript, Nautilus / Rust, World ID | Membership / residence / World ID verification result generation |
-| Contracts | Sui Move | Program, Campaign, Pool, Membership Pass, Nautilus result verification, Claim / Payout, DisasterEvent connection |
-| Fixtures / Tests | JSON fixtures, Rust / TypeScript test runners | Reproduce USGS / residence inputs, verify verifier decisions |
+Implemented in the MVP:
 
-## Reference Links
+- Earthquake verifier for USGS and ShakeMap data.
+- Affected-cell Merkle root generation and proof distribution.
+- World ID based identity verification.
+- Membership SBT and residence-cell based claim checks.
+- Sui Move contracts for pools, campaigns, disaster events, identity records, claims, payouts, and receipts.
 
-All detailed documentation lives under `docs/`. A good reading order is Architecture → Contracts → Verifiers, with Donation flow as a plain-language product walkthrough.
+Planned extensions:
 
-| Area | Details |
-| --- | --- |
-| System architecture | [docs/architecture.md](docs/architecture.md) |
-| Sui Move contract overview | [docs/contracts_overview.md](docs/contracts_overview.md) |
-| Donation flow | [docs/donation_flow.md](docs/donation_flow.md) |
-| Nautilus verifier overview | [docs/verifiers/overview.md](docs/verifiers/overview.md) |
-| Earthquake verifier | [docs/verifiers/earthquake.md](docs/verifiers/earthquake.md) |
-| Identity verifier | [docs/verifiers/identity.md](docs/verifiers/identity.md) |
-| Proof workers | [docs/verifiers/proof_workers.md](docs/verifiers/proof_workers.md) |
+- KYC provider support.
+- Student ID / university account provider support.
+- Additional official disaster sources and disaster categories.
+- Additional dashboards for operational state and review.
 
 ---
 
 # Sonari（日本語）
 
-**誰が支援を受け取るべきかを検証する、透明な寄付インフラ。**
+**Sui 上で、寄付資金と受給資格を検証可能にする寄付プラットフォーム。**
 
-Sonari は、スポンサー・寄付者・コミュニティが透明な資金 Pool を作り、支援プログラムを定義し、誰が支援を受け取るべきかを Nautilus による判定で検証できる寄付プラットフォームを構築しています。
+Sonari は、寄付されたお金がどこにあり、誰がなぜ支援を受け取れるのかを検証可能にする仕組みです。資金の流れは Sui Move コントラクトが管理し、現実世界の事実は Nautilus を使った verifier が TEE 内で検証して署名します。
+
+MVP は地震支援に絞っています。
+
+1. 公式地震データを Nautilus TEE 内で検証する。
+2. 検証済み災害から on-chain の支援 Campaign を作る。
+3. 受給者は membership、居住地域、本人確認を示す。
+4. Sui Move が署名済み災害結果、本人確認結果、被災地域 proof、重複 claim、Pool 残高を検証してから支払う。
+
+Sonari は **保険ではありません**。寄付は保証された支払いを生みません。支援は Pool 残高、プログラムルール、検証要件、不正対策、申請タイミングに依存します。
 
 ## なぜ Sonari か
 
-寄付は、社会が困っている人々やコミュニティへお金を動かす最も重要な手段の一つです。しかし資金が集まったあと、信頼はしばしば壊れます。寄付者は支援が正しい人に届いたか分からず、受給者は自分が選ばれた／外された理由を知らず、コミュニティはお金がどう確保・分配・支出されたかを説明できないことがあります。
+寄付プログラムでは、資金を集めた後の透明性が失われがちです。寄付者は資金が意図した人に届いたか分からず、受給者は自分が選ばれた理由や外された理由を把握しにくく、運営者は災害情報、本人確認、支払いルール、報告を複数システムで調整する必要があります。
 
-この問題は災害支援のような緊急プログラムでより深刻になります。資金は受給者に届くまでに複数の組織・手作業の承認・報告ワークフローを経由しえます。各中間ステップが、直接支援が最も重要なまさにその瞬間に、遅延・管理コスト・不透明さを足していきます。
+Sonari は、支援をプログラム可能で公開検証できる形にする寄付プラットフォームです。
 
-Sonari は、資金と受給者選定の両方の透明性が必要な寄付プログラムのために作られています。支援をプログラム可能なインフラとして扱います。寄付された資金は可視の Pool に置かれ、支援プログラムは明示的な受給資格ルールを定義し、Nautilus は現実世界の事実を検証し、Sui Move は資金の支払い条件を強制します。
+- 資金は Sui 上の可視な Pool に置かれる。
+- 支援プログラムは明示的な支払い条件と受給資格を持つ。
+- Nautilus verifier は外部事実を TEE 内で再確認し、検証済み結果だけに署名する。
+- Sui Move は署名、proof、所有者、時刻、残高を検証してから資金を動かす。
 
-## プロダクト概要
+重要な判断をサーバーや手作業の中に隠さず、検証可能にすることが Sonari の目的です。
 
-Sonari はまず寄付プラットフォームです。その強みは、支援プログラムの両面を検査可能にすることです。寄付資金がどこに保持されているか、そしてなぜ受給者が支援を受ける資格があるか、の両方です。
+## MVP
 
-最初の MVP は地震支援向けの **パラメトリック災害支援** です。寄付者とスポンサーが透明な Pool に資金を入れ、支援プログラムが支払いルールを定義し、Nautilus が現実世界の地震・本人確認の事実を検証し、Sui Move が資金が動く前の最終的な claim 条件を強制します。
+| 領域 | MVP の内容 |
+| --- | --- |
+| 災害 source | USGS earthquake detail data と ShakeMap data |
+| 災害検証 | Nautilus TEE が source data を再取得し、被災 H3 cell を計算し、finalized payload に署名 |
+| 本人確認 | World ID が MVP の live route |
+| 将来 provider | KYC、学生証、大学アカウントなどを後から追加可能 |
+| Chain | Sui Move が資金を保持し、署名済み結果を検証し、claim rules を強制 |
+| 通貨 | USDC |
+| 支援モデル | 即時の床払いと、後日の Campaign 按分払いの2段階 |
 
-> Sonari は寄付に裏付けられた支援インフラであり、保険ではありません。寄付は保証された支払いを生みません。支援は Pool 残高・受給資格ルール・プログラム方針・不正対策・各支援プログラムの検証要件に依存します。
+## 今後の拡張
+
+地震 MVP は最初のユースケースであり、設計の上限ではありません。
+
+**他の災害。** 公式 source policy を定義すれば、洪水、台風、津波、火災、避難情報などにも拡張できます。新しい災害種別ごとに、source data、payload の意味、fixture、verifier logic、Move checks を定義します。基本は同じです。公式情報を Nautilus 内で再取得・検証し、Sui は署名済み結果だけを受け入れます。
+
+**学生・コミュニティ支援。** 同じ仕組みは災害以外にも使えます。学生証、大学メール、大学 SSO、在学証明 API などを verifier provider として追加すれば、学生支援、奨学金型支援、授業料補助、緊急給付などに応用できます。raw personal data を on-chain に保存せず、検証済み result だけを使う設計です。
 
 ## 仕組み
 
-Sonari は寄付に裏付けられた支援を、明快で検証可能なフローに変えます。
+![Sonari system overview](docs/assets/Sonari_Overview.svg)
 
-1. **資金が Pool に入る。** 一般寄付は Main Pool に入ります。指定寄付は relief Pool に資金を入れつつ、Main Pool を方針制御のバックストップとして残せます。
-2. **プログラムがルールを定義する。** 支援プログラムは資金方針・claim 期間・支払い方針・受給資格要件を結びつけます。
-3. **Nautilus が外部事実を検証する。** verifier は TEE の中で source データを再取得し、正規化し、Move が検証できる署名済み payload を生成します。
-4. **proof サービスが inclusion proof を配布する。** Worker は Merkle proof を配れますが、信頼されません。Move は claim を受理する前に、署名済み root に対して proof を再検証します。
-5. **Move が claim を強制する。** コントラクトは membership・identity・居住タイミング・被災セル proof・重複 claim 状態・Pool 残高・Campaign 予算を確認します。
-6. **支援と receipt が作られる。** 資格ある受給者は Relief Cash を受け取り、ClaimReceipt / Impact Receipt 記録が支払いをプログラム・イベント・資金源・検証結果に結びつけます。
+1. **寄付者が Pool に資金を入れる。** コントラクトが寄付を Campaign、Category、Main support、Operations Pool に分割します。
+2. **Nautilus が事実を検証する。** 地震データや本人確認 proof などの外部事実を TEE 内で確認し、署名します。
+3. **Sui が署名済み結果を検証する。** Move が enclave key、signature、payload bytes、status、proof root を検証します。
+4. **受給者が claim する。** 有効な claim には identity、membership、居住登録時刻、被災地域 proof、重複 claim 防止が必要です。
+5. **receipt で追跡できる。** 寄付、支払い、claim receipt が Campaign と検証結果に結び付きます。
 
-## MVP の claim モデル
+## 審査員向けの読む順序
 
-地震 MVP は意図的に狭く設計されています。近くで地震が起きたというだけでは claim できません。有効な claim は3つを組み合わせます。
+以下の4本が主なレビュー導線です。
 
-| レイヤー | 何を証明するか |
+| Document | Purpose |
 | --- | --- |
-| **災害 proof** | Nautilus が地震の source データを検証し、`affected_cells_root` 付きの DisasterEvent に署名した。 |
-| **membership と identity** | 申請者が有効な Membership SBT と、有効な World ID 検証結果を持つ。（KYC は今後実装予定の provider だが MVP では未実装で、現状は World ID のみが有効な claim 経路。） |
-| **居住と inclusion** | 申請者が地震の cutoff より前に有効な `home_cell` を登録し、そのセルが被災セル Merkle root に含まれる。 |
+| [Disaster Oracle](docs/disaster_oracle.md) | 公式災害情報を署名済み Sui result にする仕組み |
+| [Identity Verification](docs/identity_verification.md) | World ID の現状と、KYC / 学生 credential への拡張 |
+| [Donation Flow](docs/donation_flow.md) | お金の流れ、計算式、早い者勝ちにならない理由 |
+| [Technical Architecture](docs/technical_architecture.md) | dapp、Nautilus、relayer、storage、Sui contract の全体像 |
 
-最終判断は Move が行います。frontend・worker・relayer・storage 層に受給資格の判断を委ねません。
+技術補足は [`docs/verifiers/`](docs/verifiers/)、[`docs/internal/contracts_spec.md`](docs/internal/contracts_spec.md)、[`schemas/`](schemas/) に残しています。
 
-## 技術スタック
+## 状況
 
-| 領域 | 技術 | 用途 |
-| --- | --- | --- |
-| Frontend | React / Next.js、TypeScript、Sui dApp Kit | Dashboard、Donation、Membership Pass、Claim UI、Program / Campaign 表示、Wallet 接続 |
-| Earthquake Watcher | AWS Lambda、DynamoDB / Step Functions | USGS 候補検出、primary state 管理、TEE 起動 |
-| Earthquake TEE | Rust、Nautilus、AWS Nitro Enclaves | 外部 source 再検証、被災セル root 生成、Payload 生成、秘密鍵隔離、署名 |
-| Earthquake Relayer | Sui SDK、TypeScript | 署名済み Earthquake payload の preview / dry-run / 明示 submit |
-| Identity Verifier | TypeScript、Nautilus / Rust、World ID | Membership / 居住 / World ID 検証結果の生成 |
-| Contracts | Sui Move | Program、Campaign、Pool、Membership Pass、Nautilus result verification、Claim / Payout、DisasterEvent 接続 |
-| Fixtures / Tests | JSON fixture、Rust / TypeScript test runner | USGS / 居住入力の再現、verifier 判定の検証 |
+MVP で実装済み:
 
-## 参照リンク
+- USGS / ShakeMap data 向け地震 verifier。
+- affected-cell Merkle root 生成と proof 配布。
+- World ID による本人確認。
+- Membership SBT と residence cell に基づく claim checks。
+- Pool、Campaign、DisasterEvent、IdentityRecord、Claim、Payout、Receipt 向け Sui Move contracts。
 
-詳細なドキュメントはすべて `docs/` 配下にあります。推奨の読む順序は アーキテクチャ → コントラクト → Verifier。Donation flow は平易なプロダクト解説として併読してください。
+今後の拡張:
 
-| 領域 | 資料 |
-| --- | --- |
-| システムアーキテクチャ | [docs/architecture.md](docs/architecture.md) |
-| Sui Move コントラクト概要 | [docs/contracts_overview.md](docs/contracts_overview.md) |
-| 寄付フロー | [docs/donation_flow.md](docs/donation_flow.md) |
-| Nautilus verifier 概要 | [docs/verifiers/overview.md](docs/verifiers/overview.md) |
-| 地震 verifier | [docs/verifiers/earthquake.md](docs/verifiers/earthquake.md) |
-| identity verifier | [docs/verifiers/identity.md](docs/verifiers/identity.md) |
-| proof worker | [docs/verifiers/proof_workers.md](docs/verifiers/proof_workers.md) |
+- KYC provider support。
+- 学生証 / 大学アカウント provider support。
+- 追加の公式災害 source と災害カテゴリ。
+- 運用状態や review 用 dashboard。

@@ -1,299 +1,321 @@
-# How Money Flows in Sonari — A Guide for Donors and Recipients
+# Donation Flow
 
-Sonari is a system that gathers disaster-relief donations on the blockchain and delivers them directly to affected people.
-Every flow of money is recorded and anyone can verify it.
+Sonari is a donation-backed aid system. It does not promise insurance-like payouts. Instead, Sui Move contracts hold donated USDC in transparent pools and apply fixed rules when a verified person claims support for a verified campaign.
 
----
+This document explains where money goes, how payout amounts are calculated, and why recipients are not rewarded for applying earlier than others.
 
-## 1. There Are 4 Places to Hold Money
+## 1. The Four Pools
 
 | Pool | Role |
-|---|---|
-| Category Pool | The receiver for **everyday donations**. A permanent pool per purpose you want to support, such as "earthquake relief." We start with earthquake relief and plan to expand to floods, typhoons, student support, and more |
-| Special Donation Box (Campaign) | The receiver for **donations after a disaster occurs**. A time-limited donation box created automatically — one per disaster, dedicated to that disaster |
-| Main Support Pool | The receiver for donations with no specified purpose. Shared money used to underpin everything as a whole |
-| Operations Pool | Money to run the platform (server costs, audit fees, etc.) |
+| --- | --- |
+| Category Pool | A permanent pool for a support category, such as earthquake relief. It receives everyday donations and is the first source for immediate floor payouts. |
+| Campaign Pool | A disaster-specific pool created automatically when a verified disaster becomes claimable. It receives donations for that disaster and funds later pro-rata payouts. |
+| Main Pool | A platform-wide support pool. It receives unspecified donations, provides backup funding for floor payouts, and receives late or residual campaign funds. |
+| Operations Pool | A pool for platform costs such as infrastructure, audits, and operations. It is funded only by the operations share of donations. |
 
-The Category Pool is for "everyday (normal times)," and the Special Donation Box is for "after a disaster occurs" — so **the timing of when you donate is different**. For both, you can verify the destination and how the money is used on the blockchain at any time.
+The important separation is this:
 
----
+- **Category Pool and Main Pool** fund the immediate minimum line of aid.
+- **Campaign Pool** funds later distribution after the campaign donation window closes.
+- **Operations Pool** is separated from support pools. There is no function for operators to withdraw from Main, Category, or Campaign pools for operations.
 
-## 2. [For Donors] Everyday Donations — Choose a Purpose and Prepare
+## 2. Donation Splits
 
-For every donation, the contract automatically splits it the moment you donate.
-**It is structurally impossible for operators to later withdraw money from a support Pool.**
+Every donation is split by the contract at the moment of donation. The split is recorded in on-chain events.
 
-For donations in normal times, you can choose the **purpose** you want to support (e.g., earthquake relief). You can direct money that you used to give to relief organizations toward disaster relief in a form where **the destination is fully visible**. If you have no particular preference, "unspecified" is fine. In that case it goes into the Main Support Pool.
+| Donation target | Split |
+| --- | --- |
+| Specific disaster campaign | 90% Campaign / 5% Main / 5% Operations |
+| Support category, such as earthquake relief | 90% Category / 5% Main / 5% Operations |
+| Unspecified donation | 95% Main / 5% Operations |
 
-```mermaid
-flowchart TD
-    A[Donation with a chosen purpose<br>e.g., earthquake relief] -->|90%| B[Earthquake-relief Category Pool]
-    A -->|5%| C[Main Support Pool]
-    A -->|5%| D[Operations Pool]
-    E[Unspecified donation] -->|95%| C
-    E -->|5%| D
+Campaign donations also have an operations cap per campaign. After that cap is reached, the 5% operations share that would have gone to Operations is routed to Main instead. This prevents a single high-profile disaster from becoming an unlimited operations-fee source.
+
+If a donation arrives for a campaign after the campaign donation window has ended, the campaign share is routed to Main. This keeps late money available for future aid instead of changing the rules of a campaign that has already closed.
+
+## 3. Campaign Timeline
+
+When a verified disaster is finalized, a Campaign is created automatically with fixed terms.
+
+| Time | What happens |
+| --- | --- |
+| Day 0 | DisasterEvent and Campaign are created from a signed Nautilus result. |
+| Day 0-21 | Eligible recipients can apply. |
+| Day 0-30 | Donors can donate to the campaign. |
+| Before Day 30 | Floor payout can be paid after the floor census is set. |
+| Day 30+ | Unused floor budget is returned, and Round 1 campaign payout can be finalized lazily during claim. |
+| Every 90 days after that | Additional campaign payout rounds can distribute remaining campaign funds. |
+
+The terms are snapshotted when the Campaign is created. A later governance or operator decision cannot quietly change the payout ratio, claim window, or target amounts for that campaign.
+
+## 4. Recipient Requirements
+
+A recipient cannot claim only because a disaster happened nearby. A valid claim combines several checks:
+
+| Requirement | Meaning |
+| --- | --- |
+| Membership | The claimant has an active Membership SBT. |
+| Residence timing | The claimant registered a home cell before the disaster cutoff. |
+| Affected area | The home cell is included in the disaster's affected-cells Merkle root. |
+| Identity | The claimant has a verified identity result. The MVP live route is World ID. |
+| Duplicate protection | The same membership lineage cannot claim twice for the same campaign/round. |
+
+Raw personal data, identity documents, and addresses are not stored on-chain. The contract stores verification state, hashes, timestamps, and claim records.
+
+## 5. Two-Stage Payout
+
+Sonari pays relief in two stages.
+
+### Stage 1: Floor Payout
+
+The floor payout is an immediate minimum line of aid. It does **not** use the Campaign Pool because campaign donations are still being collected during the first 30 days.
+
+Funding source:
+
+```text
+Category Pool first, then Main Pool as backup
 ```
 
-The money accumulated in the Category Pool is used, when a disaster occurs, to **deliver a minimum line of relief (up to half the target amount) to affected people right away, without waiting for the Special Donation Box to finish collecting donations**. It guarantees a floor for every disaster — a **stable funding source that reaches victims even of disasters that never make the news**.
+The floor amount is fixed from a signed census result. The census counts how many pre-registered members are in each affected band. The contract verifies the signed census result but does not perform the full off-chain aggregation itself.
 
----
+Core floor formulas:
 
-## 3. [For Donors] Donations When a Disaster Occurs — To the Special Donation Box
+```text
+max_liability = sum(registered_count[band] * band_target[band])
 
-When a large disaster occurs, the news spreads worldwide and people who think "I want to donate to this disaster" surge all at once. The receiver for them is the Special Donation Box.
+floor_target = max_liability * floor_target_ratio_bps / 10_000
 
-- When the occurrence of a disaster is confirmed by the verification system, **a dedicated donation box opens automatically at that very moment.** By the time the news reaches the world, the donation destination already exists.
-- No human judgment is involved. **Both major disasters and unreported disasters open under the same rules, equally.**
-- The rules (the recipient target amount, how donations are split, the period) are fixed the moment it opens, and **never change again for that disaster.**
-- It is **time-limited**. Donations are accepted for **30 days**, and applications from affected people for **21 days**. The collected donations are distributed to everyone together **after the donation period ends** (emergency relief in the meantime is handled by the minimum-line payout from the Category Pool).
+draw_category = min(floor_target, category_disposable / category_annual_event_divisor)
 
-```mermaid
-flowchart TD
-    A[Donation specifying a disaster] -->|90%| B[That disaster's Special Donation Box]
-    A -->|5%| C[Main Support Pool]
-    A -->|5%| D[Operations Pool]
+remaining = floor_target - draw_category
+
+draw_main = min(remaining, main_disposable * floor_main_share_bps / 10_000)
+
+floor_budget = draw_category + draw_main
+
+floor_ratio_bps = min(floor_target_ratio_bps, floor_budget * 10_000 / max_liability)
+
+floor_amount[band] = band_target[band] * floor_ratio_bps / 10_000
 ```
 
-- The donation box always shows "**how much has been collected so far**" and "**roughly how much will reach each affected person**," so you can check the effect of your donation in real time.
-- There is an **upper limit** on how much operations can receive from a single disaster. Any excess goes into the Main Support Pool.
-- Donations that arrive after the donation period ends go into the Main Support Pool and are used for the next relief effort.
+MVP constants from the contract design:
 
----
+| Parameter | Value |
+| --- | --- |
+| `floor_target_ratio_bps` | 5000, meaning 50% of target |
+| `category_annual_event_divisor` | 5 |
+| `floor_main_share_bps` | 2000, meaning up to 20% of Main disposable balance |
 
-## 4. [For Recipients] To Receive Support
+Because `floor_amount[band]` is fixed after the signed census is accepted, the floor payout is not first-come-first-served.
 
-**The most important thing: you must complete registration before a disaster occurs.**
-If you register after a disaster occurs, you cannot receive support for that disaster (this prevents fraudulent last-minute registration).
+### Stage 2: Campaign Payout
 
-**◆ What to do before a disaster occurs**
+The campaign payout distributes the Campaign Pool after the 30-day donation window closes.
 
-1. Do member registration (Membership Pass) and register **the area where you live**
-2. Complete **identity verification** (either KYC or World ID)
+Funding source:
 
-Registration is **completely free**. There is **one membership per person**, and personal information itself such as identity documents or your address is never put on the blockchain.
-
-**◆ When a disaster occurs: support is delivered in 2 stages**
-
-```mermaid
-flowchart TD
-    A[① Apply<br>within 21 days of the disaster] --> B[② Automatic check<br>registered before the disaster, in the target area, identity verified]
-    B --> C[③ Minimum-line relief<br>delivered right away once the check is done]
-    P2[Category Pool e.g., earthquake relief] -->|first from here| C
-    P3[Main Support Pool] -.->|covers the shortfall| C
-    C --> D[④ Donation distribution<br>after the 30-day donation period ends, same ratio for everyone]
-    P1[That disaster's Special Donation Box] -->|collected donations| D
-    D --> E[⑤ Everything sent directly to your own wallet]
+```text
+Campaign Pool only
 ```
 
-1. **Apply**: If your registered area is included in the target, apply **within 21 days**.
-2. **Automatic check**: The system automatically confirms "whether you registered before the disaster," "whether your residence is in the target area," and "whether you are identity-verified." No human review is involved.
-3. **Minimum-line relief (delivered right away)**: As soon as the check is done, **relief up to a maximum of half the target amount** is delivered first. The payment source is the **Category Pool and the Main Support Pool**. The Special Donation Box is still in the middle of collecting donations, so it is not used here. The per-person amount is fixed first based on "the number of members who registered to that area before the disaster," so **the amount is the same whether you apply early or late**.
-4. **Donation distribution (after the period ends)**: Once the 30-day collection ends, the **donations collected in the Special Donation Box** are distributed to all applicants at the same ratio. If money remains, this repeats every 90 days.
-5. **Receipt**: Every payment passes through no one's hands along the way and is sent **directly to your wallet** from the contract.
+Category and Main do not top up campaign payout rounds. They are used for the immediate floor layer, not for later campaign distribution.
 
-You apply only once, the first time. Second-stage and subsequent payments are also received through the same flow.
+Core campaign round formulas:
 
-Receiving from multiple memberships for the same disaster is prohibited, and if fraud is found, you become subject to payment suspension or a clawback claim.
+```text
+liability = sum(eligible_count[band] * band_target[band])
 
----
+ratio = min(campaign_balance / liability, round_cap_multiplier)
 
-## 5. How Much Relief Can You Receive?
-
-There are 3 levels of **target amount** depending on the scale of the damage.
-
-| Band | Target amount | Per-distribution cap |
-|---|---|---|
-| Band 1 (light damage) | 50 USDC | 150 USDC |
-| Band 2 (medium damage) | 150 USDC | 450 USDC |
-| Band 3 (heavy damage) | 300 USDC | 900 USDC |
-
-The target amount is not a guaranteed amount. The donation distribution amount is determined by:
-
-> Distribution amount = target amount × (collected donations ÷ total money needed)
-
-Because everyone's share is computed together after the donation period ends,
-**applying early gives no advantage, and everyone receives at the same ratio.**
-
-If many donations are collected, the distribution amount exceeds the target amount (the per-distribution cap is 3× the target amount).
-Even for a disaster where few donations are collected, the **minimum-line relief arrives first from the Category Pool and the Main Support Pool**, so support is never zero. So that a single disaster does not exhaust the Category Pool, payouts have a per-disaster cap, and **money for the next disaster always remains**.
-
----
-
-## 6. The Money in the Special Donation Box Ultimately Goes Entirely to That Disaster's Affected People
-
-If a lot accumulates in the Special Donation Box and cannot be fully distributed in one round, the remainder does not disappear or get diverted elsewhere.
-**It is distributed repeatedly to the same affected people every 90 days.**
-
-```mermaid
-flowchart LR
-    A[Disaster occurs / confirmed] --> B[Special Donation Box opens automatically<br>donations 30 days / applications 21 days]
-    B --> C[Meanwhile: minimum-line relief<br>from Category Pool and Main Support Pool as needed]
-    C --> D[After collection ends: donation distribution round 1<br>from the Special Donation Box, same ratio for everyone]
-    D --> E[Redistribute the remainder every 90 days<br>repeat until exhausted]
-    E --> F[Only the final leftover remainder<br>to the Main Support Pool]
+payout[band] = band_target[band] * ratio
 ```
 
-- Both the "rescue money" (minimum-line relief) right after the disaster and the subsequent "rebuilding money" (donation distribution) are delivered.
-- Because there is a per-round cap, no one can aim to fraudulently grab a large sum.
+The round is finalized once for the time boundary, then every claimant in the same band receives the same saved payout amount for that round. If funds remain, another round can be finalized after the next 90-day interval.
+
+## 6. Band Targets
+
+The MVP uses three affected-area bands.
+
+| Band | Target amount | Per-round cap |
+| --- | --- | --- |
+| Band 1 | 50 USDC | 150 USDC |
+| Band 2 | 150 USDC | 450 USDC |
+| Band 3 | 300 USDC | 900 USDC |
+
+The target amount is not guaranteed. It is the reference amount used for proportional distribution.
+
+If campaign donations are lower than total need, everyone in the same band receives the same percentage of the target. If campaign donations are high, each round is capped at three times the band target. Remaining funds can be distributed in later rounds.
+
+## 7. Why This Is Fairer Than First-Come-First-Served
+
+Sonari separates application timing from payout calculation:
+
+- The floor amount is fixed from the signed affected-population census.
+- The main payout amount is fixed at round finalization after the campaign donation window closes.
+- Claiming earlier does not let one recipient drain the pool ahead of others in the same band.
+- Duplicate membership claims are blocked.
+- Payout events and receipts make every money movement inspectable.
+
+This makes the system suitable for donation-backed aid, where trust depends on both transparent funding and transparent eligibility.
 
 ---
 
-## 7. Sonari's Promises
+# 寄付と支援金の流れ（日本語）
 
-1. **The Special Donation Box is created automatically at the same time the disaster is confirmed** (every disaster is equal; no human discretion)
-2. **A donation's destination is decided automatically at the moment of donation** (operators cannot touch the money in a support Pool)
-3. **The amount received is not first-come-first-served** (the minimum line fixes the amount first; the donation distribution is apportioned at the same ratio to everyone after the deadline)
-4. **The money in the Special Donation Box goes entirely to that disaster's affected people** (distributed fully over time; leftovers are not confiscated)
+Sonari は、寄付を原資とする支援システムです。保険のように支払いを保証するものではありません。Sui Move コントラクトが寄付された USDC を透明な Pool に保持し、検証済みの人が検証済み Campaign に対して claim した時に、固定ルールで支援金を支払います。
 
-Every movement of money is recorded on the blockchain, and anyone can verify it at any time.
+この文書では、お金がどこに入り、支払額がどう計算され、なぜ早い者勝ちにならないのかを説明します。
 
----
-
-# Sonari のお金の流れ — 寄付する人・受け取る人のためのガイド（日本語）
-
-Sonari は、災害支援の寄付をブロックチェーン上で集めて、被災した人に直接届ける仕組みです。
-お金の流れはすべて記録され、誰でも確認できます。
-
----
-
-## 1. お金の置き場所は4種類
+## 1. 4つの Pool
 
 | Pool | 役割 |
-|---|---|
-| 用途Pool | **ふだんの寄付**の受け皿。「地震支援」のように、支援したい用途ごとに常設。まずは地震支援から始め、洪水・台風・学生支援などへ広げていく予定 |
-| 特設募金箱 | **災害が起きたあとの寄付**の受け皿。災害ごとに、その災害専用に1つずつ自動で作られる期間限定の募金箱 |
-| 共通支援Pool | 用途を決めない寄付の受け皿。全体の下支えに使う共通のお金 |
-| 運営Pool | プラットフォームを動かすためのお金（サーバー代・監査費用など） |
+| --- | --- |
+| Category Pool | 地震支援など、支援カテゴリごとの常設 Pool。平常時寄付を受け取り、即時の床払いの第1財源になる。 |
+| Campaign Pool | 検証済み災害ごとに自動作成される Pool。その災害向け寄付を受け取り、後日の按分払いに使う。 |
+| Main Pool | プラットフォーム共通の支援 Pool。指定なし寄付、床払いの不足補填、遅延・残余資金の受け皿になる。 |
+| Operations Pool | インフラ、監査、運用などの費用に使う Pool。寄付時の運営分だけが入る。 |
 
-用途Poolは「ふだん（平常時）」、特設募金箱は「災害が起きたあと」と、**寄付するタイミングが違います**。どちらも行き先と使われ方を、いつでもブロックチェーン上で確認できます。
+重要な分離は次の通りです。
 
----
+- **Category Pool と Main Pool** は、即時の最低ライン支援に使う。
+- **Campaign Pool** は、寄付期間終了後の按分払いに使う。
+- **Operations Pool** は支援 Pool から分離する。運営が Main、Category、Campaign Pool から運営費を引き出す関数はない。
 
-## 2. 【寄付する人へ】ふだんの寄付 — 用途を選んで備える
+## 2. 寄付の分割
 
-どの寄付も、寄付した瞬間にコントラクトが自動で分割します。
-**運営が後から支援Poolのお金を引き出すことは、仕組み上できません。**
+寄付は、寄付した瞬間にコントラクトで分割されます。分割結果は on-chain event に記録されます。
 
-平常時の寄付では、支援したい**用途**を選べます（例：地震支援）。これまで支援団体に寄付していたお金を、**行き先が完全に見える形**で災害支援に向けられます。特にこだわりがなければ「指定なし」でかまいません。その場合は共通支援Poolに入ります。
+| 寄付先 | 分割 |
+| --- | --- |
+| 特定の災害 Campaign | 90% Campaign / 5% Main / 5% Operations |
+| 地震支援などの Category | 90% Category / 5% Main / 5% Operations |
+| 指定なし | 95% Main / 5% Operations |
 
-```mermaid
-flowchart TD
-    A[用途を選んだ寄付<br>例：地震支援] -->|90%| B[地震支援の用途Pool]
-    A -->|5%| C[共通支援Pool]
-    A -->|5%| D[運営Pool]
-    E[指定なしの寄付] -->|95%| C
-    E -->|5%| D
+Campaign 宛て寄付には、Campaign ごとの operations cap があります。上限到達後、本来 Operations に入る 5% は Main に送られます。これにより、1つの大きな災害が無制限の運営費源になることを防ぎます。
+
+Campaign 寄付期間終了後にその Campaign 宛てに届いた寄付は、Campaign 取り分を Main に送ります。すでに閉じた Campaign のルールを後から変えず、次の支援に使える資金として残すためです。
+
+## 3. Campaign のタイムライン
+
+検証済み災害が finalized になると、固定条件を持つ Campaign が自動作成されます。
+
+| 時期 | 内容 |
+| --- | --- |
+| Day 0 | 署名済み Nautilus result から DisasterEvent と Campaign が作られる。 |
+| Day 0-21 | 資格ある受給者が申請できる。 |
+| Day 0-30 | 寄付者が Campaign に寄付できる。 |
+| Day 30 前 | floor census 確定後、床払いを受け取れる。 |
+| Day 30 以降 | 未使用の床予算を返還し、claim 時に Round 1 の本払いを lazy finalize できる。 |
+| 以後90日ごと | Campaign 残高があれば、追加 round を分配できる。 |
+
+条件は Campaign 作成時に固定されます。後から governance や運営判断で、その Campaign の支払い比率、申請期間、目標額をこっそり変えることはできません。
+
+## 4. 受給者の条件
+
+近くで災害が起きただけでは claim できません。有効な claim には複数の検証が必要です。
+
+| 条件 | 意味 |
+| --- | --- |
+| Membership | 申請者が active な Membership SBT を持つ。 |
+| 居住登録時刻 | 災害 cutoff より前に home cell を登録している。 |
+| 被災地域 | home cell が災害の affected-cells Merkle root に含まれる。 |
+| 本人確認 | verified identity result を持つ。MVP の live route は World ID。 |
+| 重複防止 | 同じ membership lineage は同じ campaign/round で二重 claim できない。 |
+
+本人確認書類、住所、raw personal data は on-chain に保存しません。保存されるのは verification state、hash、timestamp、claim record です。
+
+## 5. 2段階の支払い
+
+Sonari の支援金は2段階で支払われます。
+
+### Stage 1: 床払い
+
+床払いは、即時の最低ライン支援です。Campaign Pool は最初の30日間まだ寄付を集めている途中なので使いません。
+
+財源:
+
+```text
+まず Category Pool、足りなければ Main Pool
 ```
 
-用途Poolに貯まったお金は、災害が起きたとき、**特設募金箱が寄付を集め終わるのを待たずに、被災者へ最低ラインの支援金（目標額の半分まで）をすぐ届ける**ために使われます。どの災害にも床を保証する、**ニュースにならない災害の被災者にも届く安定した財源**です。
+床払い額は署名済み census result から固定されます。census は、災害前に登録済みの member が各 affected band に何人いるかを数えます。コントラクトは署名済み census result を検証しますが、全件集計自体は on-chain では行いません。
 
----
+主要な床払い計算式:
 
-## 3. 【寄付する人へ】災害が起きたときの寄付 — 特設募金箱へ
+```text
+max_liability = sum(registered_count[band] * band_target[band])
 
-大きな災害が起きるとニュースで世界中に伝わり、「この災害に寄付したい」という人が一気に増えます。その受け皿が特設募金箱です。
+floor_target = max_liability * floor_target_ratio_bps / 10_000
 
-- 災害の発生が検証システムで確認されると、**その瞬間に専用の募金箱が自動で開きます。** ニュースが世界に届くころには、寄付先がすでに存在しています。
-- 人間の判断は入りません。**大災害も、報道されない災害も、同じルールで平等に**開きます。
-- ルール（受取の目標額・寄付の分け方・期間）は開いた瞬間に固定され、**その災害では二度と変わりません。**
-- **期間限定**です。寄付の受付は**30日間**、被災者の申請受付は**21日間**。集まった寄付は、**募集期間が終わってから**全員にまとめて分配されます（その間の緊急支援は、用途Poolからの最低ラインの支払いが担います）。
+draw_category = min(floor_target, category_disposable / category_annual_event_divisor)
 
-```mermaid
-flowchart TD
-    A[災害を指定した寄付] -->|90%| B[その災害の特設募金箱]
-    A -->|5%| C[共通支援Pool]
-    A -->|5%| D[運営Pool]
+remaining = floor_target - draw_category
+
+draw_main = min(remaining, main_disposable * floor_main_share_bps / 10_000)
+
+floor_budget = draw_category + draw_main
+
+floor_ratio_bps = min(floor_target_ratio_bps, floor_budget * 10_000 / max_liability)
+
+floor_amount[band] = band_target[band] * floor_ratio_bps / 10_000
 ```
 
-- 募金箱には「**今いくら集まっているか**」「**被災者1人あたりいくら届きそうか**」が常に公開され、自分の寄付の効果をリアルタイムで確認できます。
-- 運営費が1つの災害から受け取れる金額には**上限**があります。超過分は共通支援Poolに入ります。
-- 寄付期間が終わったあとに届いた寄付は、共通支援Poolに入って次の支援に使われます。
+MVP の contract design 上の主な定数:
 
----
+| Parameter | Value |
+| --- | --- |
+| `floor_target_ratio_bps` | 5000、つまり目標額の50% |
+| `category_annual_event_divisor` | 5 |
+| `floor_main_share_bps` | 2000、つまり Main 可処分残高の最大20% |
 
-## 4. 【受け取る人へ】支援を受け取るには
+`floor_amount[band]` は署名済み census が受理された後に固定されるため、床払いは早い者勝ちになりません。
 
-**いちばん大切なこと：登録は、災害が起きる前に済ませておく必要があります。**
-災害が起きたあとに登録しても、その災害の支援は受けられません（不正な駆け込み登録を防ぐためです）。
+### Stage 2: Campaign 按分払い
 
-**◆ 災害が起きる前にやっておくこと**
+Campaign 按分払いは、30日の寄付期間が終わった後に Campaign Pool を分配します。
 
-1. メンバー登録（Membership Pass）をして、**住んでいる地域**を登録する
-2. **本人確認**を済ませる（KYC または World ID のどちらか）
+財源:
 
-登録は**完全無料**です。メンバーシップは**1人1つ**で、本人確認書類や住所などの個人情報そのものがブロックチェーンに載ることはありません。
-
-**◆ 災害が起きたら：支援は2段階で届きます**
-
-```mermaid
-flowchart TD
-    A[① 申請<br>災害発生から21日以内] --> B[② 自動チェック<br>災害前に登録済みか・対象地域か・本人確認済みか]
-    B --> C[③ 最低ラインの支援金<br>チェックが済みしだい、すぐ届く]
-    P2[用途Pool 例：地震支援] -->|まずここから| C
-    P3[共通支援Pool] -.->|足りない分を補う| C
-    C --> D[④ 寄付の分配<br>募集期間30日の終了後・全員同じ比率]
-    P1[その災害の特設募金箱] -->|集まった寄付| D
-    D --> E[⑤ すべて自分のウォレットへ直接]
+```text
+Campaign Pool のみ
 ```
 
-1. **申請**：自分の登録地域が対象になっていたら、**21日以内**に申請します。
-2. **自動チェック**：「災害の前に登録していたか」「住まいが対象地域か」「本人確認済みか」をシステムが自動で確認します。人の審査は挟みません。
-3. **最低ラインの支援金（すぐ届く）**：チェックが済みしだい、**目標額の半分を上限とする支援金**がまず届きます。支払い元は**用途Poolと共通支援Pool**です。特設募金箱はまだ寄付を募集している途中なので、ここでは使いません。1人あたりの金額は「災害の前にその地域へ登録していたメンバー数」をもとに最初に確定するため、**申請が早くても遅くても同じ金額**です。
-4. **寄付の分配（募集終了後）**：30日間の募集が終わると、**特設募金箱に集まった寄付**を申請者全員に同じ比率で分配します。お金が残っていれば90日ごとに繰り返します。
-5. **受け取り**：どの支払いも途中で誰の手も経由せず、コントラクトから**あなたのウォレットへ直接**送られます。
+Category と Main は Campaign payout round を補填しません。これらは即時の床払いのために使います。
 
-申請は最初の1回だけです。2段階目以降の支払いも、同じ流れで受け取れます。
+主要な Campaign round 計算式:
 
-同じ災害で複数のメンバーシップから受け取ることは禁止されており、不正が見つかった場合は支払い停止や返還請求の対象になります。
+```text
+liability = sum(eligible_count[band] * band_target[band])
 
----
+ratio = min(campaign_balance / liability, round_cap_multiplier)
 
-## 5. 支援金はいくらもらえる？
-
-被害の大きさに応じて、3段階の**目標額**があります。
-
-| 区分 | 目標額 | 1回の分配の上限 |
-|---|---|---|
-| Band 1（軽い被害） | 50 USDC | 150 USDC |
-| Band 2（中くらいの被害） | 150 USDC | 450 USDC |
-| Band 3（大きな被害） | 300 USDC | 900 USDC |
-
-目標額は保証額ではありません。寄付の分配額は、
-
-> 分配額 ＝ 目標額 ×（集まった寄付 ÷ 必要なお金の合計）
-
-で決まります。募集期間が終わってから全員分まとめて計算するので、
-**早く申請した人が得をすることはなく、全員が同じ比率で受け取れます。**
-
-寄付がたくさん集まれば、分配額は目標額より増えます（1回の分配の上限は目標額の3倍）。
-寄付があまり集まらない災害でも、**最低ラインの支援金が用途Poolと共通支援Poolから先に届いている**ので、支援がゼロになることはありません。1つの災害が用途Poolを使い切らないよう支払いには1災害ごとの上限があり、**次に起こる災害のためのお金が必ず残ります**。
-
----
-
-## 6. 特設募金箱のお金は、最終的に全額その災害の被災者へ
-
-特設募金箱にたくさん集まり、1回の分配で配りきれなかった分は、消えたり他に回されたりしません。
-**90日ごとに、同じ被災者へ繰り返し配られます。**
-
-```mermaid
-flowchart LR
-    A[災害発生・確認] --> B[特設募金箱が自動で開く<br>寄付30日 / 申請21日]
-    B --> C[その間：最低ラインの支援金<br>用途Pool・共通支援Poolから随時]
-    C --> D[募集終了後：寄付の分配 第1回<br>特設募金箱から・全員同じ比率]
-    D --> E[90日ごとに残りを再分配<br>なくなるまで繰り返す]
-    E --> F[最後に残った端数だけ<br>共通支援Poolへ]
+payout[band] = band_target[band] * ratio
 ```
 
-- 災害直後の「救援のお金」（最低ラインの支援金）と、その後の「生活再建のお金」（寄付の分配）の両方が届きます。
-- 1回ごとの上限があるため、不正に大金を狙うことはできません。
+round は時間境界ごとに1度だけ finalize され、同じ band の claimant はその round で同じ保存済み支払額を受け取ります。資金が残る場合は、90日後以降に次の round を分配できます。
 
----
+## 6. Band 目標額
 
-## 7. Sonari の約束
+MVP は3つの affected-area band を使います。
 
-1. **特設募金箱は、災害の確認と同時に自動でできる**（どの災害も平等。人の裁量なし）
-2. **寄付の行き先は、寄付の瞬間に自動で決まる**（運営は支援Poolのお金に触れられない）
-3. **受取額は早い者勝ちにならない**（最低ラインは最初に金額を確定、寄付の分配は締切後に全員同じ比率で按分）
-4. **特設募金箱のお金は全額、その災害の被災者へ**（時間をかけて配りきる。余りの没収はない）
+| Band | 目標額 | 1 round の上限 |
+| --- | --- | --- |
+| Band 1 | 50 USDC | 150 USDC |
+| Band 2 | 150 USDC | 450 USDC |
+| Band 3 | 300 USDC | 900 USDC |
 
-すべてのお金の動きはブロックチェーンに記録され、誰でもいつでも確認できます。
+目標額は保証額ではありません。比例分配の基準額です。
+
+Campaign 寄付が必要額より少ない場合、同じ band の全員が同じ割合で受け取ります。Campaign 寄付が多い場合でも、1 round あたり band 目標額の3倍を上限にします。残りは後続 round で分配できます。
+
+## 7. なぜ早い者勝ちではないか
+
+Sonari は申請タイミングと支払額計算を分離しています。
+
+- 床払い額は署名済み affected-population census から固定される。
+- 本払い額は Campaign 寄付期間終了後、round finalize で固定される。
+- 早く claim した人が同じ band の他の人より先に Pool を取り切ることはできない。
+- membership の重複 claim は防止される。
+- payout event と receipt により、すべてのお金の動きを検査できる。
+
+これにより Sonari は、資金の透明性と受給資格の透明性が同時に必要な寄付型支援に適した仕組みになります。

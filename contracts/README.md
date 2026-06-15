@@ -7,7 +7,7 @@ The Move package that holds donated funds and enforces every payout rule on Sui.
 
 ## Where to Read More
 
-- [docs/contracts_overview.md](../docs/contracts_overview.md) — plain-language overview: what the contracts do, the Nautilus pattern, trust model, and module map
+- [docs/technical_architecture.md](../docs/technical_architecture.md) — judge-facing technical overview: dapp, Nautilus, relayers, storage, and Sui contract boundaries
 - [docs/internal/contracts_spec.md](../docs/internal/contracts_spec.md) — full Move design spec: pools, object layouts, exact amounts, security and test requirements
 - [docs/verifiers/overview.md](../docs/verifiers/overview.md) — the TEE / Nautilus side that produces the signed results these contracts verify
 
@@ -22,6 +22,6 @@ The Move package that holds donated funds and enforces every payout rule on Sui.
 
 ## 詳細資料
 
-- [docs/contracts_overview.md](../docs/contracts_overview.md) — 平易な概要: コントラクトの役割、Nautilus パターン、信頼モデル、モジュール一覧
+- [docs/technical_architecture.md](../docs/technical_architecture.md) — 審査員向け技術概要: dapp、Nautilus、relayer、storage、Sui contract の境界
 - [docs/internal/contracts_spec.md](../docs/internal/contracts_spec.md) — 完全な Move 設計仕様: Pool・オブジェクト設計・正確な金額・セキュリティ / テスト要件
 - [docs/verifiers/overview.md](../docs/verifiers/overview.md) — これらのコントラクトが検証する署名済み結果を作る側（TEE / Nautilus）
