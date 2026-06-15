@@ -3607,3 +3607,159 @@ h4 {
   font-weight: 600;
   text-align: right;
 }
+
+/* -------------------------------------------------------------------------
+ * AffectedAreaMap – 被災エリア表示専用地図コンポーネント
+ * mypage-map / residence-map と同じ流儀で最小限のスタイルを定義する。
+ * consumer はこのクラスを上書きしてレイアウトを変更できる。
+ * ---------------------------------------------------------------------- */
+
+.affected-area-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 地図 canvas。高さはここで固定し、consumer が必要に応じて上書きする。 */
+.affected-area-map-canvas {
+  width: 100%;
+  height: 360px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* フォールバック（deferred・未設定・エラー・空集合）の共通枠。 */
+.affected-area-map-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--sage-50);
+}
+
+.affected-area-map-fallback-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.affected-area-map-fallback p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 地図 canvas 内のオーバーレイ通知（loading / error）。 */
+.affected-area-map-overlay-note {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--cream-50);
+  color: var(--sage-900);
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateX(-50%);
+  box-shadow: 0 6px 16px oklch(0.35 0.04 145 / 0.12);
+  white-space: nowrap;
+}
+
+/* 地図ステージ: canvas と overlay を重ねるための相対位置コンテナ。 */
+.affected-area-map-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
+
+/* 凡例パネル（地図下部に重ねるか外側に置く）。 */
+.affected-area-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--cream-50, #fafaf7);
+  font-size: 12px;
+}
+
+.affected-area-map-legend-title {
+  width: 100%;
+  margin: 0 0 2px;
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.affected-area-map-legend-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.affected-area-map-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-muted);
+}
+
+/* 凡例の色スウォッチ（バンド色を inline style で付与する）。 */
+.affected-area-map-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1px solid oklch(0.4 0 0 / 0.25);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* タップ詳細パネル。 */
+.affected-area-map-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--cream-50, #fafaf7);
+  font-size: 13px;
+}
+
+.affected-area-map-detail-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.affected-area-map-detail p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.affected-area-map-detail-close {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.affected-area-map-detail-close:hover {
+  background: var(--surface-soft);
+}
