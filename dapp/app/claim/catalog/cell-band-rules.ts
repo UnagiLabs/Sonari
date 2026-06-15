@@ -107,8 +107,16 @@ export interface BandLegendEntry {
  *
  * UI 側はこのエントリを使って「バンド名＋金額」をテキスト表示できる。
  * 色だけに頼らない凡例表現を可能にする。
+ *
+ * 戻り値は常に Band1→Band2→Band3 の3要素タプル。固定長にすることで、
+ * 呼び出し側が index 参照しても `undefined` 合成（noUncheckedIndexedAccess）を
+ * 受けずに済む。
  */
-export function buildBandLegendEntries(): readonly BandLegendEntry[] {
+export function buildBandLegendEntries(): readonly [
+    BandLegendEntry,
+    BandLegendEntry,
+    BandLegendEntry,
+] {
     return [
         { band: 1, amount: bandAmount(1), color: bandColor(1) },
         { band: 2, amount: bandAmount(2), color: bandColor(2) },
