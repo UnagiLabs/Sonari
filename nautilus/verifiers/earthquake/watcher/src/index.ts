@@ -37,6 +37,19 @@ export {
     HOUR_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
+export type {
+    DynamicFieldLatestRevisionClient,
+    GraphqlLatestRevisionClient,
+    OnchainLatestRevisionInput,
+    OnchainLatestRevisionResult,
+    OnchainRevisionSourceName,
+} from "./onchain_revision.js";
+export {
+    decodeDynamicFieldRevision,
+    getLatestOnchainEventRevision,
+    parseDisasterEventCreatedRevision,
+    parseGraphqlLatestRevision,
+} from "./onchain_revision.js";
 export {
     screenUsgsCandidate,
     WATCHER_ALERT_LEVELS,
