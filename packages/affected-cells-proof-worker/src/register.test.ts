@@ -22,7 +22,10 @@ import { describe, expect, it } from "vitest";
 import { handleRegisterRequest } from "./register.js";
 import type { Env } from "./walrus.js";
 import type { AffectedProofR2Bucket } from "./r2.js";
-import type { AffectedAreaWorkflowBinding } from "./affected_area_workflow_trigger.js";
+import {
+    type AffectedAreaWorkflowBinding,
+    affectedAreaWorkflowInstanceId,
+} from "./affected_area_workflow_trigger.js";
 
 // ---------------------------------------------------------------------------
 // Golden values (schemas/examples/affected_cells.json と expected_hashes.json より)
@@ -56,6 +59,7 @@ const GOLDEN_EVENT_REVISION = 1;
 
 const VALID_REGISTER_TOKEN = "test-secret-token";
 const WALRUS_BLOB_URI = "walrus://blob/test-blob-id-001";
+const FAKE_WORKFLOW_INSTANCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 
 // ---------------------------------------------------------------------------
 // Fake R2 Bucket
@@ -150,6 +154,9 @@ class FakeAffectedAreaWorkflow implements AffectedAreaWorkflowBinding {
         for (const item of batch) {
             if (item.id === undefined || this.instances.has(item.id)) {
                 continue;
+            }
+            if (!FAKE_WORKFLOW_INSTANCE_ID_PATTERN.test(item.id)) {
+                throw new Error("(instance.invalid_id) Instance ID is invalid");
             }
             const instance = new FakeWorkflowInstance(item.id);
             this.instances.set(item.id, instance);
@@ -286,7 +293,15 @@ function affectedAreaManifestKey(eventUid: string, eventRevision: number): strin
 }
 
 function workflowId(eventUid: string, eventRevision: number, root: string): string {
-    return `affected-area-${eventUid.slice(2)}-${eventRevision}-${root.slice(2)}`;
+    return affectedAreaWorkflowInstanceId({
+        event_uid: eventUid,
+        event_revision: eventRevision,
+        affected_cells_hash: GOLDEN_HASH,
+        affected_cells_root: root,
+        affected_cell_count: 2,
+        geo_resolution: 7,
+        affected_cells_uri: WALRUS_BLOB_URI,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +337,7 @@ describe("handleRegisterRequest", () => {
         const shardKeys = storedKeys.filter((k) => k.includes("/shards/"));
         expect(shardKeys.length).toBeGreaterThan(0);
         expect(workflow.getCreateBatchCount()).toBe(1);
+        expect(workflow.createBatchCalls[0]?.[0]?.id?.length).toBeLessThanOrEqual(64);
         expect(workflow.createBatchCalls[0]?.[0]).toMatchObject({
             id: workflowId(GOLDEN_EVENT_UID, GOLDEN_EVENT_REVISION, GOLDEN_ROOT),
             params: {
