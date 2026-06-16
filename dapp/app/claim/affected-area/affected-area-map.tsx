@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseHomeCell } from "../../mypage/home-cell";
 import {
     isGoogleMapsConfigured,
@@ -24,8 +24,15 @@ import {
     type ViewportBounds,
 } from "../../register/residence/h3-geo";
 import { buildBandLegendEntries } from "../catalog/cell-band-rules";
-import type { CellSource } from "../catalog/claimable-program";
-import { computeAffectedAreaBounds, selectMapMode, selectVisibleCells } from "./affected-area-geo";
+import type { CellSource, DisasterOverviewOverlay } from "../catalog/claimable-program";
+import {
+    buildAffectedCellGeometries,
+    computeAffectedAreaBounds,
+    MAX_AFFECTED_VIEWPORT_CELLS,
+    selectAffectedAreaLayerMode,
+    selectMapMode,
+    selectVisibleCells,
+} from "./affected-area-geo";
 import {
     type AffectedCellDetail,
     buildCellDetail,
@@ -39,9 +46,6 @@ import { type AffectedCell, parseAffectedCells } from "./affected-cells";
 
 // NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
 const mapsApiKey = readGoogleMapsApiKey();
-
-// pan/zoom 後のポリゴン再構築をまとめる debounce(ms)。
-const REBUILD_DEBOUNCE_MS = 150;
 
 // 被災エリアが空または null のときに使う固定初期中心（東北地方付近）。
 const DEFAULT_CENTER: google.maps.LatLngLiteral = { lat: 38.0, lng: 140.9 };
@@ -60,6 +64,31 @@ const HOME_CELL_OUTLINE_STYLE = {
     zIndex: 5,
 } as const;
 
+async function fetchJson(path: string): Promise<unknown> {
+    const res = await fetch(path);
+    // 非 2xx（例: JSON ボディ付き 404）は空集合ではなくエラー扱いにする。
+    if (!res.ok) {
+        throw new Error(`affected cells fetch failed: HTTP ${res.status}`);
+    }
+    return res.json();
+}
+
+function mapBoundsToViewportBounds(
+    bounds: google.maps.LatLngBounds | undefined,
+): ViewportBounds | null {
+    if (bounds === undefined) {
+        return null;
+    }
+    const ne = bounds.getNorthEast();
+    const sw = bounds.getSouthWest();
+    return {
+        north: ne.lat(),
+        south: sw.lat(),
+        east: ne.lng(),
+        west: sw.lng(),
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -67,6 +96,8 @@ const HOME_CELL_OUTLINE_STYLE = {
 export interface AffectedAreaMapProps {
     /** 被災セルの取得元（#382 で定義した形）。 */
     readonly cellSource: CellSource;
+    /** 俯瞰時に使う band-colored 画像 overlay。任意。 */
+    readonly overviewOverlay?: DisasterOverviewOverlay;
     /**
      * 居住セル（10進）。任意。
      * 有効な res7 セルなら自宅中心モード＋強調、なければ俯瞰モード。
@@ -84,11 +115,16 @@ export interface AffectedAreaMapProps {
  * - cellSource が "static-asset" のとき、マウント後に fetch して被災セルを取得する。
  * - residenceCell が有効な res7 セルなら home モード（自宅中心・強調）、
  *   なければ overview モード（全体 fitBounds）を使う。
- * - 地図 idle 時に debounce して viewport 内のセルだけポリゴンを描く（差分 sync）。
- * - 各ポリゴンをクリックすると詳細パネルに buildCellDetail の内容を表示する。
+ * - overviewOverlay がある場合、低倍率では band-colored 画像を GroundOverlay で表示し、
+ *   viewport 内セルが少ないときだけ raw res7 セルを描く。
+ * - 各セルポリゴンをクリックすると詳細パネルに buildCellDetail の内容を表示する。
  * - deferred / API 未設定 / fetch 失敗 / 空集合のときはテキストフォールバック。
  */
-export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapProps) {
+export function AffectedAreaMap({
+    cellSource,
+    overviewOverlay,
+    residenceCell,
+}: AffectedAreaMapProps) {
     const t = useTranslations("claim.affectedAreaMap");
 
     // 居住セルの検証済み情報
@@ -99,6 +135,9 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     // （地図の作り直し・再 fetch）が暴発しないよう、依存にはプリミティブを使う。
     const cellSourceKind = cellSource.kind;
     const cellSourcePath = cellSource.kind === "static-asset" ? cellSource.path : null;
+    const overviewOverlayUrl = overviewOverlay?.url ?? null;
+    const overviewOverlayOpacity = overviewOverlay?.opacity ?? 1;
+    const overviewOverlayBounds = overviewOverlay?.bounds ?? null;
 
     // ---------------------------------------------------------------------------
     // State / Ref
@@ -118,6 +157,7 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     const [cells, setCells] = useState<AffectedCell[]>([]);
     const [fetchError, setFetchError] = useState<boolean>(false);
     const [fetchDone, setFetchDone] = useState<boolean>(false);
+    const cellGeometries = useMemo(() => buildAffectedCellGeometries(cells), [cells]);
 
     // タップ詳細パネル
     const [selectedDetail, setSelectedDetail] = useState<AffectedCellDetail | null>(null);
@@ -129,16 +169,17 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
     const polygonsRef = useRef<Map<string, google.maps.Polygon>>(new Map());
     // 自宅アウトライン用の専用ポリゴン（被災集合外の自宅セルに使う）
     const homeCellPolyRef = useRef<google.maps.Polygon | null>(null);
-    const rebuildTimerRef = useRef<number | null>(null);
+    const overviewOverlayRef = useRef<google.maps.GroundOverlay | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
-    // 最新 cells を rebuild 内で参照するための ref（useCallback を再生成しないため）
     const cellsRef = useRef<AffectedCell[]>([]);
+    const cellGeometriesRef = useRef(cellGeometries);
     const parsedHomeRef = useRef(parsedHome);
 
     // ref を最新に同期する
     useEffect(() => {
         cellsRef.current = cells;
-    }, [cells]);
+        cellGeometriesRef.current = cellGeometries;
+    }, [cells, cellGeometries]);
 
     useEffect(() => {
         parsedHomeRef.current = parsedHome;
@@ -154,15 +195,12 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
         }
         let cancelled = false;
 
-        fetch(cellSourcePath)
-            .then((res) => {
-                // 非 2xx（例: JSON ボディ付き 404）は空集合ではなくエラー扱いにする。
-                if (!res.ok) {
-                    throw new Error(`affected cells fetch failed: HTTP ${res.status}`);
-                }
-                return res.json();
-            })
-            .then((json: unknown) => {
+        setFetchError(false);
+        setFetchDone(false);
+        setCells([]);
+
+        fetchJson(cellSourcePath)
+            .then((json) => {
                 if (!cancelled) {
                     setCells(parseAffectedCells(json));
                     setFetchDone(true);
@@ -180,18 +218,62 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
         };
     }, [cellSourcePath]);
 
-    // ---------------------------------------------------------------------------
-    // ポリゴン差分 sync
-    // ---------------------------------------------------------------------------
+    const clearCellPolygons = useCallback(() => {
+        for (const poly of polygonsRef.current.values()) {
+            google.maps.event.clearInstanceListeners(poly);
+            poly.setMap(null);
+        }
+        polygonsRef.current.clear();
+
+        if (homeCellPolyRef.current !== null) {
+            google.maps.event.clearInstanceListeners(homeCellPolyRef.current);
+            homeCellPolyRef.current.setMap(null);
+            homeCellPolyRef.current = null;
+        }
+    }, []);
+
+    const resetOverviewOverlay = useCallback(
+        (map: google.maps.Map) => {
+            if (overviewOverlayRef.current !== null) {
+                overviewOverlayRef.current.setMap(null);
+                overviewOverlayRef.current = null;
+            }
+            if (overviewOverlayUrl === null || overviewOverlayBounds === null) {
+                return null;
+            }
+            const overlay = new google.maps.GroundOverlay(
+                overviewOverlayUrl,
+                overviewOverlayBounds,
+                { opacity: overviewOverlayOpacity },
+            );
+            overviewOverlayRef.current = overlay;
+            overlay.setMap(map);
+            return overlay;
+        },
+        [overviewOverlayBounds, overviewOverlayOpacity, overviewOverlayUrl],
+    );
+
+    const setOverviewOverlayVisible = useCallback(
+        (visible: boolean) => {
+            const map = mapRef.current;
+            if (map === null) {
+                return;
+            }
+            const overlay = overviewOverlayRef.current ?? resetOverviewOverlay(map);
+            if (overlay === null) {
+                return;
+            }
+            overlay.setMap(visible ? map : null);
+        },
+        [resetOverviewOverlay],
+    );
 
     const syncPolygons = useCallback((visibleCells: AffectedCell[], map: google.maps.Map) => {
         const home = parsedHomeRef.current;
         const homeDecimal = home?.decimal ?? null;
 
-        // 次の描画対象 decimal セット
         const nextDecimals = new Set(visibleCells.map((c) => c.decimal));
 
-        // viewport から外れたポリゴンを除去する
         for (const [decimal, poly] of polygonsRef.current) {
             if (!nextDecimals.has(decimal)) {
                 google.maps.event.clearInstanceListeners(poly);
@@ -200,14 +282,16 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
             }
         }
 
-        // 追加・スタイル更新
         for (const cell of visibleCells) {
             const highlighted = cell.decimal === homeDecimal;
             const style = polygonStyleForBand(cell.band, highlighted);
             const existing = polygonsRef.current.get(cell.decimal);
             if (existing === undefined) {
+                const geometry = cellGeometriesRef.current.find(
+                    (candidate) => candidate.cell.decimal === cell.decimal,
+                );
                 const poly = new google.maps.Polygon({
-                    paths: residenceCellBoundary(cell.hex),
+                    paths: geometry?.boundary ?? residenceCellBoundary(cell.hex),
                     ...style,
                 });
                 poly.setMap(map);
@@ -220,7 +304,6 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
             }
         }
 
-        // 自宅セルが被災集合に含まれない場合は中立アウトラインで描く
         if (home !== null) {
             const inAffected = cellsRef.current.some((c) => c.decimal === home.decimal);
             if (!inAffected) {
@@ -232,65 +315,76 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
                     homePoly.setMap(map);
                     homeCellPolyRef.current = homePoly;
                 }
-            } else {
-                // 被災集合に含まれる → 中立アウトラインは不要
-                if (homeCellPolyRef.current !== null) {
-                    homeCellPolyRef.current.setMap(null);
-                    homeCellPolyRef.current = null;
-                }
+            } else if (homeCellPolyRef.current !== null) {
+                homeCellPolyRef.current.setMap(null);
+                homeCellPolyRef.current = null;
             }
         }
     }, []);
 
-    // ---------------------------------------------------------------------------
-    // overlay 再構築（viewport 絞り込み→差分 sync）
-    // ---------------------------------------------------------------------------
-
-    const rebuildOverlay = useCallback(() => {
+    const syncOverlay = useCallback(() => {
         const map = mapRef.current;
         if (map === null) {
             return;
         }
-        const bounds = map.getBounds();
-        if (bounds === undefined) {
+        const bounds = mapBoundsToViewportBounds(map.getBounds());
+        if (bounds === null) {
+            setOverviewOverlayVisible(true);
             return;
         }
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
-        const viewport: ViewportBounds = {
-            north: ne.lat(),
-            south: sw.lat(),
-            east: ne.lng(),
-            west: sw.lng(),
-        };
 
+        const sourceGeometries = cellGeometriesRef.current;
+        if (sourceGeometries.length === 0) {
+            clearCellPolygons();
+            setOverviewOverlayVisible(true);
+            return;
+        }
+
+        const layerMode =
+            overviewOverlayUrl === null
+                ? "cells"
+                : selectAffectedAreaLayerMode({
+                      cells: sourceGeometries,
+                      bounds,
+                      threshold: MAX_AFFECTED_VIEWPORT_CELLS,
+                  });
+
+        if (layerMode === "overview-overlay") {
+            clearCellPolygons();
+            setOverviewOverlayVisible(true);
+            return;
+        }
+
+        setOverviewOverlayVisible(false);
         const home = parsedHomeRef.current;
         const visibleCells = selectVisibleCells({
-            cells: cellsRef.current,
-            bounds: viewport,
+            cells: sourceGeometries,
+            bounds,
+            limit: MAX_AFFECTED_VIEWPORT_CELLS,
             highlightedDecimal: home?.decimal ?? null,
         });
-
         syncPolygons(visibleCells, map);
-    }, [syncPolygons]);
+    }, [clearCellPolygons, overviewOverlayUrl, setOverviewOverlayVisible, syncPolygons]);
 
-    const scheduleRebuild = useCallback(() => {
-        if (rebuildTimerRef.current !== null) {
-            window.clearTimeout(rebuildTimerRef.current);
-        }
-        rebuildTimerRef.current = window.setTimeout(() => {
-            rebuildOverlay();
-        }, REBUILD_DEBOUNCE_MS);
-    }, [rebuildOverlay]);
-
-    // cells が変化したら overlay を再構築する（fetch 完了後など）。
-    // cells は cellsRef に同期済みのため直接依存に含めず、scheduleRebuild のみを依存とする。
-    // biome-ignore lint/correctness/useExhaustiveDependencies: cells は cellsRef 経由で参照するため依存不要
+    // cells / overlay が変化したら表示レイヤーを同期する。
     useEffect(() => {
-        if (mapRef.current !== null) {
-            scheduleRebuild();
+        const map = mapRef.current;
+        if (map === null) {
+            return;
         }
-    }, [cells, scheduleRebuild]);
+        resetOverviewOverlay(map);
+        if (mode === "overview") {
+            if (overviewOverlayBounds !== null) {
+                map.fitBounds(overviewOverlayBounds);
+            } else {
+                const bounds = computeAffectedAreaBounds(cellGeometries);
+                if (bounds !== null) {
+                    map.fitBounds(bounds);
+                }
+            }
+        }
+        syncOverlay();
+    }, [cellGeometries, mode, overviewOverlayBounds, resetOverviewOverlay, syncOverlay]);
 
     // ---------------------------------------------------------------------------
     // 地図初期化 effect（マウント時に一度だけ）
@@ -330,7 +424,9 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
                     initialCenter = { lat: center.lat, lng: center.lng };
                     initialZoom = HOME_ZOOM;
                 } else {
-                    const bounds = computeAffectedAreaBounds(cellsRef.current);
+                    const bounds =
+                        overviewOverlayBounds ??
+                        computeAffectedAreaBounds(cellGeometriesRef.current);
                     if (bounds !== null) {
                         // fitBounds は後で呼ぶ。初期値は bounds 中心に仮置き
                         initialCenter = {
@@ -352,9 +448,13 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
                 });
                 mapRef.current = map;
 
-                // overview モードで cells がある場合は fitBounds で全体表示する
+                resetOverviewOverlay(map);
+
+                // overview モードでは band overlay または affected cells の範囲へ合わせる
                 if (mode === "overview") {
-                    const bounds = computeAffectedAreaBounds(cellsRef.current);
+                    const bounds =
+                        overviewOverlayBounds ??
+                        computeAffectedAreaBounds(cellGeometriesRef.current);
                     if (bounds !== null) {
                         map.fitBounds({
                             north: bounds.north,
@@ -365,13 +465,12 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
                     }
                 }
 
-                // idle リスナ: pan/zoom 後に debounce して再構築する
                 map.addListener("idle", () => {
-                    scheduleRebuild();
+                    syncOverlay();
                 });
 
                 setStatus("ready");
-                scheduleRebuild();
+                syncOverlay();
 
                 // コンテナサイズ変更時に地図中心を保持する
                 if (typeof ResizeObserver !== "undefined") {
@@ -405,23 +504,11 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
                 resizeObserverRef.current = null;
             }
 
-            // debounce タイマの解除
-            if (rebuildTimerRef.current !== null) {
-                window.clearTimeout(rebuildTimerRef.current);
-                rebuildTimerRef.current = null;
-            }
-
-            // 全ポリゴンの cleanup
-            for (const poly of polygonsRef.current.values()) {
-                google.maps.event.clearInstanceListeners(poly);
-                poly.setMap(null);
-            }
-            polygonsRef.current.clear();
-
-            // 自宅アウトラインの cleanup
-            if (homeCellPolyRef.current !== null) {
-                homeCellPolyRef.current.setMap(null);
-                homeCellPolyRef.current = null;
+            // overlay cleanup
+            clearCellPolygons();
+            if (overviewOverlayRef.current !== null) {
+                overviewOverlayRef.current.setMap(null);
+                overviewOverlayRef.current = null;
             }
 
             // map リスナの解除
@@ -431,7 +518,14 @@ export function AffectedAreaMap({ cellSource, residenceCell }: AffectedAreaMapPr
             }
             mapRef.current = null;
         };
-    }, [cellSourceKind, mode, scheduleRebuild]);
+    }, [
+        cellSourceKind,
+        clearCellPolygons,
+        mode,
+        overviewOverlayBounds,
+        resetOverviewOverlay,
+        syncOverlay,
+    ]);
 
     // ---------------------------------------------------------------------------
     // 凡例エントリ（固定。renders ごとに再生成しない）

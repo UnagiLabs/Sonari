@@ -156,6 +156,7 @@ export function DemoClaimDetailView({
                              */}
                             <AffectedAreaMap
                                 cellSource={program.cellSource}
+                                overviewOverlay={program.overviewOverlay}
                                 residenceCell={DEMO_RESIDENCE_HOME_CELL}
                             />
                         </section>

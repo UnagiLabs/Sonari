@@ -75,6 +75,58 @@ describe("parseClaimableProgram — disaster", () => {
         });
     });
 
+    it("parsed disaster program accepts optional overviewOverlay", () => {
+        const input = {
+            ...(validDisasterInput as Record<string, unknown>),
+            overviewOverlay: {
+                kind: "band-overlay-image",
+                url: "/demo/tohoku-2011-band-overlay.svg",
+                bounds: {
+                    north: 45.1,
+                    south: 30.133,
+                    east: 152.25,
+                    west: 134.733,
+                },
+                opacity: 0.8,
+            },
+        };
+
+        const result = parseClaimableProgram(input);
+
+        expect(result).not.toBeNull();
+        if (result?.category === "disaster") {
+            expect(result.overviewOverlay).toEqual({
+                kind: "band-overlay-image",
+                url: "/demo/tohoku-2011-band-overlay.svg",
+                bounds: {
+                    north: 45.1,
+                    south: 30.133,
+                    east: 152.25,
+                    west: 134.733,
+                },
+                opacity: 0.8,
+            });
+        }
+    });
+
+    it("returns null when overviewOverlay bounds are invalid", () => {
+        const input = {
+            ...(validDisasterInput as Record<string, unknown>),
+            overviewOverlay: {
+                kind: "band-overlay-image",
+                url: "/demo/tohoku-2011-band-overlay.svg",
+                bounds: {
+                    north: 30.133,
+                    south: 45.1,
+                    east: 152.25,
+                    west: 134.733,
+                },
+            },
+        };
+
+        expect(parseClaimableProgram(input)).toBeNull();
+    });
+
     it("parsed disaster program accepts deferred cellSource", () => {
         const input = { ...validDisasterInput as Record<string, unknown>, cellSource: { kind: "deferred" } };
         const result = parseClaimableProgram(input);

@@ -32,6 +32,20 @@ export type CellSource =
     | { readonly kind: "static-asset"; readonly path: string }
     | { readonly kind: "deferred" };
 
+export interface MapBounds {
+    readonly north: number;
+    readonly south: number;
+    readonly east: number;
+    readonly west: number;
+}
+
+export interface DisasterOverviewOverlay {
+    readonly kind: "band-overlay-image";
+    readonly url: string;
+    readonly bounds: MapBounds;
+    readonly opacity?: number;
+}
+
 // ---------------------------------------------------------------------------
 // カテゴリ別型
 // ---------------------------------------------------------------------------
@@ -69,6 +83,8 @@ export interface DisasterClaimableProgram extends ClaimableProgramBase {
     readonly affectedCellCount: number;
     /** 地図セルの取得元。 */
     readonly cellSource: CellSource;
+    /** 俯瞰表示で使う band-colored 画像 overlay。 */
+    readonly overviewOverlay?: DisasterOverviewOverlay;
     /**
      * セルルート（任意）。表示・受け渡し用のみ。
      * 検証しない。
@@ -204,6 +220,9 @@ function parseDisaster(
     const cellSource = parseCellSource(value["cellSource"]);
     if (cellSource === null) return null;
 
+    const overviewOverlay = parseDisasterOverviewOverlay(value["overviewOverlay"]);
+    if (overviewOverlay === undefined) return null;
+
     // affectedCellsRoot は任意
     const affectedCellsRoot =
         typeof value["affectedCellsRoot"] === "string" && value["affectedCellsRoot"].trim().length > 0
@@ -222,6 +241,7 @@ function parseDisaster(
         severityBand,
         affectedCellCount,
         cellSource,
+        ...(overviewOverlay !== null ? { overviewOverlay } : {}),
         ...(affectedCellsRoot !== undefined ? { affectedCellsRoot } : {}),
     };
 
@@ -276,6 +296,54 @@ function parseCellSource(value: unknown): CellSource | null {
     }
 
     return null;
+}
+
+function parseDisasterOverviewOverlay(value: unknown): DisasterOverviewOverlay | null | undefined {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (!isRecord(value) || value["kind"] !== "band-overlay-image") {
+        return undefined;
+    }
+
+    const url = parseNonEmptyString(value["url"]);
+    if (url === null) return undefined;
+
+    const bounds = parseMapBounds(value["bounds"]);
+    if (bounds === null) return undefined;
+
+    const opacity =
+        value["opacity"] === undefined ? undefined : parseOpacity(value["opacity"]);
+    if (opacity === null) return undefined;
+
+    return {
+        kind: "band-overlay-image",
+        url,
+        bounds,
+        ...(opacity !== undefined ? { opacity } : {}),
+    };
+}
+
+function parseMapBounds(value: unknown): MapBounds | null {
+    if (!isRecord(value)) return null;
+
+    const north = parseFiniteNumber(value["north"]);
+    const south = parseFiniteNumber(value["south"]);
+    const east = parseFiniteNumber(value["east"]);
+    const west = parseFiniteNumber(value["west"]);
+    if (north === null || south === null || east === null || west === null) {
+        return null;
+    }
+    if (north < south || east < west) {
+        return null;
+    }
+    return { north, south, east, west };
+}
+
+function parseOpacity(value: unknown): number | null | undefined {
+    const opacity = parseFiniteNumber(value);
+    if (opacity === null) return null;
+    return opacity >= 0 && opacity <= 1 ? opacity : null;
 }
 
 /**

@@ -74,6 +74,17 @@ const TOHOKU_2011_PROGRAM: DisasterClaimableProgram = {
         kind: "static-asset",
         path: "/demo/tohoku-2011-affected-cells.json",
     },
+    overviewOverlay: {
+        kind: "band-overlay-image",
+        url: "/demo/tohoku-2011-band-overlay.svg",
+        bounds: {
+            north: 40.613588,
+            south: 35.152779,
+            east: 145.350259,
+            west: 139.679236,
+        },
+        opacity: 1,
+    },
     // affectedCellsRoot: nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json 由来
     // 表示・受け渡し用に持つだけで検証ロジックは作らない。
     affectedCellsRoot:

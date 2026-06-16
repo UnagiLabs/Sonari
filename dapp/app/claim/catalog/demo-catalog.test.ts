@@ -66,6 +66,20 @@ describe("disaster entry (tohoku-2011)", () => {
         });
     });
 
+    it("overviewOverlay uses the generated Sonari band overlay", () => {
+        expect(entry?.overviewOverlay).toStrictEqual({
+            kind: "band-overlay-image",
+            url: "/demo/tohoku-2011-band-overlay.svg",
+            bounds: {
+                north: 40.613588,
+                south: 35.152779,
+                east: 145.350259,
+                west: 139.679236,
+            },
+            opacity: 1,
+        });
+    });
+
     it("severityBand is 3", () => {
         expect(entry?.severityBand).toBe(3);
     });

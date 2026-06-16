@@ -2,13 +2,28 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { extractAffectedCells } from "./build_demo_affected_cells.js";
+import { bandColor } from "../dapp/app/claim/catalog/cell-band-rules.js";
+import {
+    computeAffectedCellsBounds,
+    extractAffectedCells,
+    generateBandOverlaySvg,
+} from "./build_demo_affected_cells.js";
 
 const FIXTURE_PATH = path.join(
     process.cwd(),
     "nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/affected_cells.json",
 );
 const OUTPUT_PATH = path.join(process.cwd(), "dapp/public/demo/tohoku-2011-affected-cells.json");
+const OVERLAY_OUTPUT_PATH = path.join(
+    process.cwd(),
+    "dapp/public/demo/tohoku-2011-band-overlay.svg",
+);
+
+async function loadFixtureCells(): Promise<[string, number][]> {
+    const raw = await readFile(FIXTURE_PATH, "utf8");
+    const input: unknown = JSON.parse(raw);
+    return extractAffectedCells(input);
+}
 
 describe("extractAffectedCells", () => {
     it("extracts [h3_index, cell_band] tuples in input order", () => {
@@ -104,10 +119,7 @@ describe("extractAffectedCells", () => {
 
 describe("real fixture integration", () => {
     it("transforms affected_cells.json with correct total count and band distribution", async () => {
-        const raw = await readFile(FIXTURE_PATH, "utf8");
-        const input: unknown = JSON.parse(raw);
-
-        const result = extractAffectedCells(input);
+        const result = await loadFixtureCells();
 
         expect(result).toHaveLength(39221);
 
@@ -120,10 +132,7 @@ describe("real fixture integration", () => {
     });
 
     it("includes representative cells in correct positions", async () => {
-        const raw = await readFile(FIXTURE_PATH, "utf8");
-        const input: unknown = JSON.parse(raw);
-
-        const result = extractAffectedCells(input);
+        const result = await loadFixtureCells();
 
         expect(result).toContainEqual(["608795190286614527", 3]);
         expect(result).toContainEqual(["608795262395088895", 1]);
@@ -138,9 +147,7 @@ describe("generated asset", () => {
             rawOutput = await readFile(OUTPUT_PATH, "utf8");
         } catch {
             // File not yet generated — generate it now for test validation
-            const rawInput = await readFile(FIXTURE_PATH, "utf8");
-            const input: unknown = JSON.parse(rawInput);
-            const cells = extractAffectedCells(input);
+            const cells = await loadFixtureCells();
             await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
             await writeFile(OUTPUT_PATH, JSON.stringify(cells), "utf8");
             rawOutput = await readFile(OUTPUT_PATH, "utf8");
@@ -168,5 +175,41 @@ describe("generated asset", () => {
         expect(band1).toBe(10692);
         expect(band2).toBe(15650);
         expect(band3).toBe(12879);
+    });
+
+    it("dapp/public/demo/tohoku-2011-band-overlay.svg exists and matches generated content", async () => {
+        const cells = await loadFixtureCells();
+        const generated = generateBandOverlaySvg(cells);
+
+        let rawOutput: string;
+        try {
+            rawOutput = await readFile(OVERLAY_OUTPUT_PATH, "utf8");
+        } catch {
+            await mkdir(path.dirname(OVERLAY_OUTPUT_PATH), { recursive: true });
+            await writeFile(OVERLAY_OUTPUT_PATH, generated.svg, "utf8");
+            rawOutput = await readFile(OVERLAY_OUTPUT_PATH, "utf8");
+        }
+
+        expect(rawOutput).toBe(generated.svg);
+    });
+
+    it("overlay bounds are computed from affected cell boundaries", async () => {
+        const cells = await loadFixtureCells();
+
+        expect(computeAffectedCellsBounds(cells)).toStrictEqual({
+            north: 40.613588,
+            south: 35.152779,
+            east: 145.350259,
+            west: 139.679236,
+        });
+    });
+
+    it("overlay uses bandColor() for Band1, Band2, and Band3", async () => {
+        const cells = await loadFixtureCells();
+        const { svg } = generateBandOverlaySvg(cells);
+
+        expect(svg).toContain(`data-band="1" fill="${bandColor(1)}" fill-opacity="0.55"`);
+        expect(svg).toContain(`data-band="2" fill="${bandColor(2)}" fill-opacity="0.55"`);
+        expect(svg).toContain(`data-band="3" fill="${bandColor(3)}" fill-opacity="0.55"`);
     });
 });
