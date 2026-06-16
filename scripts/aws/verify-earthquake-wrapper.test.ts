@@ -58,6 +58,7 @@ describe("AWS earthquake wrapper verification script", () => {
         const processDataCommand = cli.ssmCommands.get("process_data");
         expect(processDataCommand).toContain("aws s3 cp --only-show-errors");
         expect(processDataCommand).toContain("results/earthquake-wrapper-results/");
+        expect(processDataCommand).toContain('"event_revision":1');
 
         const s3GetObject = cli.operations.find(
             (operation) => operation.label === "s3api:get-object",

@@ -49,11 +49,13 @@ describe("on-chain revision reader", () => {
 
     it("queries the full DisasterEventCreated type and paginates GraphQL data", async () => {
         const variables: Record<string, unknown>[] = [];
+        const queries: string[] = [];
         const result = await getLatestOnchainEventRevision({
             eventUid,
             disasterEventType,
             graphql: {
                 query: async (_query, inputVariables) => {
+                    queries.push(_query);
                     variables.push(inputVariables);
                     if (inputVariables.cursor === null) {
                         return {
@@ -92,6 +94,8 @@ describe("on-chain revision reader", () => {
         });
 
         expect(result).toEqual({ latestRevision: 5, sources: ["graphql"] });
+        expect(queries[0]).toContain("contents");
+        expect(queries[0]).not.toContain("parsedJson");
         expect(variables).toEqual([
             { eventType: disasterEventType, cursor: null },
             { eventType: disasterEventType, cursor: "cursor-1" },

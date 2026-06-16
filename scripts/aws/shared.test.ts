@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
     assertDirectEarthquakeWrapperResult,
+    buildEarthquakeWrapperInput,
     buildSsmParametersPayload,
     parseStackOutputs,
     writeSsmParametersFile,
@@ -96,6 +97,48 @@ describe("AWS script shared helpers", () => {
                 "public-key-1",
             ),
         ).toThrow("payload.evidence_manifest_uri");
+    });
+
+    it("builds earthquake wrapper process_data input with event_revision", () => {
+        expect(
+            buildEarthquakeWrapperInput({
+                sourceEventId: "us6000m0xl",
+                eventRevision: 2,
+                hazardType: 1,
+                primarySource: 1,
+                geoResolution: 7,
+                verifierConfigKey: 1,
+                verifierConfigVersion: 7,
+                enclaveInstancePublicKey: "public-key-1",
+            }),
+        ).toEqual({
+            action: "process_data",
+            payload: {
+                source_event_id: "us6000m0xl",
+                event_revision: 2,
+                hazard_type: 1,
+                primary_source: 1,
+                geo_resolution: 7,
+            },
+            registration_metadata: {
+                verifier_config_key: 1,
+                verifier_config_version: 7,
+                enclave_instance_public_key: "public-key-1",
+            },
+        });
+
+        expect(() =>
+            buildEarthquakeWrapperInput({
+                sourceEventId: "us6000m0xl",
+                eventRevision: 0,
+                hazardType: 1,
+                primarySource: 1,
+                geoResolution: 7,
+                verifierConfigKey: 1,
+                verifierConfigVersion: 7,
+                enclaveInstancePublicKey: "public-key-1",
+            }),
+        ).toThrow("eventRevision must be an integer");
     });
 });
 

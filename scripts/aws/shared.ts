@@ -404,6 +404,7 @@ export async function runSsmShellCommand(
 
 export function buildEarthquakeWrapperInput(input: {
     sourceEventId: string;
+    eventRevision: number;
     hazardType: number;
     primarySource: number;
     geoResolution: number;
@@ -411,10 +412,18 @@ export function buildEarthquakeWrapperInput(input: {
     verifierConfigVersion: number;
     enclaveInstancePublicKey: string;
 }): unknown {
+    if (
+        !Number.isSafeInteger(input.eventRevision) ||
+        input.eventRevision < 1 ||
+        input.eventRevision > 0xffff_ffff
+    ) {
+        throw new Error("eventRevision must be an integer in the u32 range");
+    }
     return {
         action: "process_data",
         payload: {
             source_event_id: input.sourceEventId,
+            event_revision: input.eventRevision,
             hazard_type: input.hazardType,
             primary_source: input.primarySource,
             geo_resolution: input.geoResolution,

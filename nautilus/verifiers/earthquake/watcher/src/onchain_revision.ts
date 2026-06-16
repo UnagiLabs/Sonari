@@ -29,7 +29,6 @@ query SonariDisasterEventCreatedRevisions($eventType: String!, $cursor: String) 
       contents {
         json
       }
-      parsedJson
     }
     pageInfo {
       hasNextPage

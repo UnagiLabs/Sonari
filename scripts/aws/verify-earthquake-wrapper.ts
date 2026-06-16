@@ -35,6 +35,7 @@ const DEFAULT_SOURCE_EVENT_ID = "us6000m0xl";
 const DEFAULT_HAZARD_TYPE = 1;
 const DEFAULT_PRIMARY_SOURCE = 1;
 const DEFAULT_GEO_RESOLUTION = 7;
+const DEFAULT_EVENT_REVISION = 1;
 const DEFAULT_VERIFIER_CONFIG_KEY = 1;
 const DEFAULT_VERIFIER_CONFIG_VERSION = 7;
 const EARTHQUAKE_WRAPPER_RESULT_PREFIX = "results/earthquake-wrapper-results/";
@@ -47,6 +48,7 @@ export type VerifyEarthquakeWrapperOptions = {
     region?: string;
     expectedCommit?: string;
     sourceEventId?: string;
+    eventRevision?: number;
     hazardType?: number;
     primarySource?: number;
     geoResolution?: number;
@@ -181,6 +183,7 @@ export async function runVerifyEarthquakeWrapper(
         const attestationPublicKey = readAttestationPublicKey(attestation);
         const processDataInput = buildEarthquakeWrapperInput({
             sourceEventId,
+            eventRevision: options.eventRevision ?? DEFAULT_EVENT_REVISION,
             hazardType: options.hazardType ?? DEFAULT_HAZARD_TYPE,
             primarySource: options.primarySource ?? DEFAULT_PRIMARY_SOURCE,
             geoResolution: options.geoResolution ?? DEFAULT_GEO_RESOLUTION,
@@ -242,7 +245,7 @@ async function main(): Promise<void> {
     const options = parseArgs(process.argv.slice(2));
     if (options.help === true) {
         process.stdout.write(
-            "Usage: pnpm aws:verify:earthquake-wrapper -- [--stack <name>] [--expected-account <id>] [--commit <sha>] [--source-event-id <id>]\n",
+            "Usage: pnpm aws:verify:earthquake-wrapper -- [--stack <name>] [--expected-account <id>] [--commit <sha>] [--source-event-id <id>] [--event-revision <n>]\n",
         );
         return;
     }
@@ -256,6 +259,7 @@ async function main(): Promise<void> {
         region: readStringOption(options, "region", DEFAULT_REGION),
         ...(expectedCommit === undefined ? {} : { expectedCommit }),
         sourceEventId: readStringOption(options, "source-event-id", DEFAULT_SOURCE_EVENT_ID),
+        eventRevision: readIntegerOption(options, "event-revision", DEFAULT_EVENT_REVISION),
     });
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
@@ -308,6 +312,25 @@ function readSocatTimeoutSeconds(output: string): number {
         throw new Error(`Invalid socat timeout verification output: ${output}`);
     }
     return value;
+}
+
+function readIntegerOption(
+    options: Record<string, string | boolean>,
+    key: string,
+    fallback: number,
+): number {
+    const value = options[key];
+    if (value === undefined) {
+        return fallback;
+    }
+    if (typeof value !== "string") {
+        throw new Error(`--${key} must be a number`);
+    }
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) {
+        throw new Error(`--${key} must be an integer`);
+    }
+    return parsed;
 }
 
 function readProcessDataS3Reference(value: unknown): {
