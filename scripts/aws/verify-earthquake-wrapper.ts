@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -132,6 +132,7 @@ export async function runVerifyEarthquakeWrapper(
     await assertSchedulesDisabled(aws, outputs);
 
     const asgName = requireOutput(outputs, "RunnerAutoScalingGroupName");
+    const resultBucket = requireOutput(outputs, "RunnerResultBucketName");
     let cleanupNeeded = false;
 
     try {
@@ -188,16 +189,28 @@ export async function runVerifyEarthquakeWrapper(
             verifierConfigVersion: options.verifierConfigVersion ?? DEFAULT_VERIFIER_CONFIG_VERSION,
             enclaveInstancePublicKey: attestationPublicKey,
         });
+        const runId = randomUUID();
+        const processDataReference = parseJsonText(
+            await runSsmShellCommand(aws, {
+                instanceId,
+                comment: "process_data",
+                commands: [
+                    buildProcessDataS3UploadCommand({
+                        input: processDataInput,
+                        bucket: resultBucket,
+                        runId,
+                    }),
+                ],
+                poll,
+            }),
+            "process_data S3 reference",
+        );
         const finalizedResult = assertDirectEarthquakeWrapperResult(
-            parseJsonText(
-                await runSsmShellCommand(aws, {
-                    instanceId,
-                    comment: "process_data",
-                    commands: [shellPipeJsonToEarthquakeWrapper(processDataInput)],
-                    poll,
-                }),
-                "process_data",
-            ),
+            await readEarthquakeWrapperS3Result({
+                aws,
+                expectedBucket: resultBucket,
+                reference: processDataReference,
+            }),
             attestationPublicKey,
         );
 
