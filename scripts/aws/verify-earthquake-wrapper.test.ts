@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { AwsCli } from "./shared.js";
 import {
+    buildProcessDataS3UploadCommand,
     readEarthquakeWrapperS3Result,
     runVerifyEarthquakeWrapper,
 } from "./verify-earthquake-wrapper.js";
@@ -110,6 +111,30 @@ describe("AWS earthquake wrapper verification script", () => {
         const outputPath = cli.operations[0]?.at(-1);
         expect(typeof outputPath).toBe("string");
         expect(outputPath).not.toBe("-");
+    });
+
+    it("builds a process_data command that uploads wrapper stdout to S3 and prints only a reference JSON", () => {
+        const command = buildProcessDataS3UploadCommand({
+            input: { action: "process_data", payload: { source_event_id: "us6000m0xl" } },
+            bucket: "runner-results",
+            runId: "run-123",
+        });
+
+        expect(command).toContain("/opt/sonari/bin/run-earthquake-enclave > \"$result_file\"");
+        expect(command).toContain(
+            'result_key="results/earthquake-wrapper-results/run-123.json"',
+        );
+        expect(command).toContain(
+            'aws s3 cp --only-show-errors "$result_file" "s3://runner-results/$result_key"',
+        );
+        expect(command).toContain('sha256="$(sha256sum "$result_file" | awk \'{ print $1 }\')"');
+        expect(command).toContain('bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"');
+        expect(command).toContain("JSON.stringify({");
+        expect(command).toContain('status: "ok"');
+        expect(command).toContain("result_s3_uri: process.env.RESULT_S3_URI");
+        expect(command).toContain("sha256: process.env.RESULT_SHA256");
+        expect(command).toContain("bytes: Number(process.env.RESULT_BYTES)");
+        expect(command).not.toContain("CommandId");
     });
 
     it("rejects S3 result references with invalid metadata or downloaded bytes", async () => {

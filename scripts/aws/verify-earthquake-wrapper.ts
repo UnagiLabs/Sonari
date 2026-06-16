@@ -260,6 +260,29 @@ function buildSocatTimeoutVerificationCommand(): string {
     ].join("\n");
 }
 
+export function buildProcessDataS3UploadCommand(input: {
+    input: unknown;
+    bucket: string;
+    runId: string;
+}): string {
+    const resultKey = `${EARTHQUAKE_WRAPPER_RESULT_PREFIX}${input.runId}.json`;
+    return [
+        "set -euo pipefail",
+        'result_file="$(mktemp /tmp/sonari-earthquake-wrapper-result.XXXXXX.json)"',
+        'trap \'rm -f "$result_file"\' EXIT',
+        `result_key="${resultKey}"`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(input.input))} | /opt/sonari/bin/run-earthquake-enclave > "$result_file"`,
+        `aws s3 cp --only-show-errors "$result_file" "s3://${input.bucket}/$result_key"`,
+        'sha256="$(sha256sum "$result_file" | awk \'{ print $1 }\')"',
+        'bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"',
+        `RESULT_S3_URI="s3://${input.bucket}/$result_key" RESULT_SHA256="$sha256" RESULT_BYTES="$bytes" node -e ${shellSingleQuote('process.stdout.write(JSON.stringify({ status: "ok", result_s3_uri: process.env.RESULT_S3_URI, sha256: process.env.RESULT_SHA256, bytes: Number(process.env.RESULT_BYTES) }))')}`,
+    ].join("\n");
+}
+
+function shellSingleQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function readSocatTimeoutSeconds(output: string): number {
     const value = Number(output.trim());
     if (!Number.isSafeInteger(value) || value < 180) {
