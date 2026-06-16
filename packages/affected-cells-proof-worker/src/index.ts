@@ -18,12 +18,12 @@ import {
     errorResponse,
     toAffectedCellsProofError,
 } from "./errors.js";
-import { AffectedAreaArtifactWorkflow } from "./affected_area_workflow.js";
+import { AffectedAreaArtifactWorkflow as AffectedAreaArtifactWorkflowBase } from "./affected_area_workflow.js";
 import { handleProofRequest } from "./http.js";
 import type { RegisterEnv } from "./register.js";
 import { handleRegisterRequest } from "./register.js";
 
-export { AffectedAreaArtifactWorkflow };
+export class AffectedAreaArtifactWorkflow extends AffectedAreaArtifactWorkflowBase {}
 
 // ---------------------------------------------------------------------------
 // Route patterns
