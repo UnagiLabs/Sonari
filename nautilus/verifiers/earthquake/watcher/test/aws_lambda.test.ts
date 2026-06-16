@@ -424,6 +424,7 @@ describe("AWS Lambda watcher handlers", () => {
             return Response.json({
                 id: "official20110311054624120_30",
                 properties: {
+                    time: baseNow,
                     ids: ",usc0001xgp,official20110311054624120_30,",
                 },
             });

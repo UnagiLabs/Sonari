@@ -258,6 +258,7 @@ export async function scanCandidates(
         const canonicalCandidate = {
             ...candidate,
             source_event_id: resolution.source_event_id,
+            occurred_at_ms: resolution.occurred_at_ms ?? candidate.occurred_at_ms,
             ...(resolution.requested_source_event_id === undefined
                 ? {}
                 : { requested_source_event_id: resolution.requested_source_event_id }),

@@ -9,6 +9,7 @@ import {
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
+    BCS_ENUMS,
     type EarthquakeOraclePayload,
     type OffchainStatus,
     type OracleErrorCode,
@@ -20,6 +21,7 @@ import {
     FINALIZATION_WINDOW_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
+import { computeEventUid } from "./event_uid.js";
 import type {
     RelayerErrorCode,
     RelayerMode,
@@ -362,7 +364,7 @@ export class InMemoryStateRepository implements StateRepository {
         const retryCount = existing?.retry_count ?? 0;
         const row = baseRow(candidate.source_event_id, nowMs, {
             requested_source_event_id: candidate.requested_source_event_id ?? null,
-            event_uid: existing?.event_uid ?? candidate.source_event_id,
+            event_uid: existing?.event_uid ?? candidateEventUid(candidate),
             status,
             retry_count: retryCount,
             next_retry_at_ms: status === "new" ? null : (existing?.next_retry_at_ms ?? null),
@@ -1812,7 +1814,7 @@ export class DynamoDbStateRepository implements StateRepository {
                 : { ":new_status": "new", ":ignored_small_status": "ignored_small" };
         const row = baseRow(candidate.source_event_id, nowMs, {
             requested_source_event_id: candidate.requested_source_event_id ?? null,
-            event_uid: candidate.source_event_id,
+            event_uid: candidateEventUid(candidate),
             status: screening.status,
             retry_count: 0,
             next_retry_at_ms: null,
@@ -2465,6 +2467,15 @@ function applyRunnerWorkflowProgress(
     if (input.lastPollAtMs !== undefined) {
         row.runner_last_poll_at_ms = input.lastPollAtMs;
     }
+}
+
+function candidateEventUid(candidate: UsgsEarthquakeCandidate): string {
+    return computeEventUid({
+        hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+        primary_source: "USGS",
+        source_event_id: candidate.source_event_id,
+        occurred_at_ms: candidate.occurred_at_ms,
+    });
 }
 
 function finalizedPayloadMetadata(result: Extract<TeeCoreResult, { status: "finalized" }>): {
