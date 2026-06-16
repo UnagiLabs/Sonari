@@ -244,6 +244,13 @@ export function tileBounds(coord: TileCoord): ViewportBounds {
 }
 
 export function tileRangeForBounds(bounds: ViewportBounds, zoom: number): readonly TileCoord[] {
+    if (bounds.west > bounds.east) {
+        return [
+            ...tileRangeForBounds({ ...bounds, east: 180 }, zoom),
+            ...tileRangeForBounds({ ...bounds, west: -180 }, zoom),
+        ];
+    }
+
     const scale = 2 ** zoom;
     const minX = Math.max(0, Math.min(scale - 1, lngToTileX(bounds.west, zoom)));
     const maxX = Math.max(0, Math.min(scale - 1, lngToTileX(bounds.east, zoom)));
