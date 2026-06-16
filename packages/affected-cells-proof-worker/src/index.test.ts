@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import worker from "./index.js";
+import worker, { AffectedAreaArtifactWorkflow } from "./index.js";
 import type { RegisterEnv } from "./register.js";
 import type { AffectedProofR2Bucket, AffectedProofR2Object } from "./r2.js";
 
@@ -241,6 +241,10 @@ async function expectErrorCode(response: Response, status: number, code: string)
 // ---------------------------------------------------------------------------
 
 describe("affected-cells-proof-worker (index.ts) E2E", () => {
+    it("exports the affected-area Workflow class named by wrangler.toml", () => {
+        expect(AffectedAreaArtifactWorkflow.name).toBe("AffectedAreaArtifactWorkflow");
+    });
+
     // -------------------------------------------------------------------------
     // E2E: POST 登録 → GET 配信 → golden root 到達
     // -------------------------------------------------------------------------

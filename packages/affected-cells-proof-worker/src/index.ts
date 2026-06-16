@@ -18,12 +18,54 @@ import {
     errorResponse,
     toAffectedCellsProofError,
 } from "./errors.js";
-import { AffectedAreaArtifactWorkflow as AffectedAreaArtifactWorkflowBase } from "./affected_area_workflow.js";
+import {
+    type AffectedAreaWorkflowEnv,
+    type AffectedAreaWorkflowPublishSummary,
+    runAffectedAreaArtifactWorkflow,
+} from "./affected_area_workflow.js";
+import {
+    type AffectedAreaWorkflowInput,
+    validateAffectedAreaWorkflowInput,
+} from "./affected_area_workflow_input.js";
 import { handleProofRequest } from "./http.js";
 import type { RegisterEnv } from "./register.js";
 import { handleRegisterRequest } from "./register.js";
 
-export class AffectedAreaArtifactWorkflow extends AffectedAreaArtifactWorkflowBase {}
+const PUBLISH_STEP_CONFIG: WorkflowStepConfig = {
+    retries: {
+        limit: 5,
+        delay: "10 seconds",
+        backoff: "exponential",
+    },
+    timeout: "5 minutes",
+};
+
+function nonRetryableWorkflowError(cause: unknown): Error {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    const Constructor = globalThis.NonRetryableError;
+    return typeof Constructor === "function" ? new Constructor(message) : new Error(message);
+}
+
+export class AffectedAreaArtifactWorkflow extends WorkflowEntrypoint<
+    AffectedAreaWorkflowEnv,
+    AffectedAreaWorkflowInput
+> {
+    async run(
+        event: WorkflowEvent<AffectedAreaWorkflowInput>,
+        step: WorkflowStep,
+    ): Promise<AffectedAreaWorkflowPublishSummary> {
+        let input: AffectedAreaWorkflowInput;
+        try {
+            input = validateAffectedAreaWorkflowInput(event.payload);
+        } catch (cause) {
+            throw nonRetryableWorkflowError(cause);
+        }
+
+        return step.do("publish affected-area artifacts", PUBLISH_STEP_CONFIG, () =>
+            runAffectedAreaArtifactWorkflow(input, this.env),
+        );
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Route patterns
