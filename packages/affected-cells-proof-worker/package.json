@@ -12,6 +12,7 @@
         "typecheck": "tsc -b --noEmit"
     },
     "dependencies": {
-        "@sonari/proof-core": "workspace:*"
+        "@sonari/proof-core": "workspace:*",
+        "h3-js": "^4.4.0"
     }
 }

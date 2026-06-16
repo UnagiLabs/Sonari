@@ -18,6 +18,11 @@
  */
 
 import { verifyRegisterToken } from "./auth.js";
+import type { AffectedAreaR2Bucket } from "./affected_area_r2.js";
+import {
+    type AffectedAreaWorkflowBinding,
+    startAffectedAreaArtifactWorkflow,
+} from "./affected_area_workflow_trigger.js";
 import { AffectedCellsProofError } from "./errors.js";
 import type { AffectedCellsProofManifest } from "./proof_artifacts.js";
 import { buildAndSaveProofArtifacts } from "./proof_builder.js";
@@ -32,6 +37,10 @@ import { fetchWalrusBlob } from "./walrus.js";
 
 export interface RegisterEnv extends Env {
     AFFECTED_PROOF_SHARDS: AffectedProofR2Bucket;
+    AFFECTED_AREA_ARTIFACTS: AffectedAreaR2Bucket & {
+        get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
+    };
+    AFFECTED_AREA_ARTIFACT_WORKFLOW: AffectedAreaWorkflowBinding;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,7 +67,7 @@ interface ValidatedRegisterBody {
     affected_cells_hash: string;
     affected_cells_root: string;
     affected_cell_count: number;
-    geo_resolution: number;
+    geo_resolution: 7;
     affected_cells_uri: string;
 }
 
@@ -128,6 +137,12 @@ async function handleRegisterRequestUnchecked(
     );
     if (existingManifest !== null) {
         if (existingManifest.affected_cells_root === body.affected_cells_root) {
+            assertExistingManifestMetadataMatches(existingManifest, body);
+            await startAffectedAreaArtifactWorkflow({
+                bucket: env.AFFECTED_AREA_ARTIFACTS,
+                workflow: env.AFFECTED_AREA_ARTIFACT_WORKFLOW,
+                input: body,
+            });
             // 同一 root → 200 no-op
             return jsonResponse({
                 event_uid: body.event_uid,
@@ -164,6 +179,12 @@ async function handleRegisterRequestUnchecked(
         bucket,
     });
 
+    await startAffectedAreaArtifactWorkflow({
+        bucket: env.AFFECTED_AREA_ARTIFACTS,
+        workflow: env.AFFECTED_AREA_ARTIFACT_WORKFLOW,
+        input: body,
+    });
+
     return jsonResponse({
         event_uid: body.event_uid,
         event_revision: body.event_revision,
@@ -171,6 +192,32 @@ async function handleRegisterRequestUnchecked(
         shard_count: manifest.shards.length,
         stored: true,
     });
+}
+
+function assertExistingManifestMetadataMatches(
+    existingManifest: AffectedCellsProofManifest,
+    body: ValidatedRegisterBody,
+): void {
+    const mismatches = [
+        existingManifest.affected_cells_hash === body.affected_cells_hash
+            ? null
+            : "affected_cells_hash",
+        existingManifest.affected_cells_uri === body.affected_cells_uri
+            ? null
+            : "affected_cells_uri",
+        existingManifest.affected_cell_count === body.affected_cell_count
+            ? null
+            : "affected_cell_count",
+        existingManifest.geo_resolution === body.geo_resolution ? null : "geo_resolution",
+    ].filter((field): field is string => field !== null);
+
+    if (mismatches.length > 0) {
+        throw new AffectedCellsProofError(
+            "affected_cells_root_mismatch",
+            `Existing manifest has same root but different metadata: ${mismatches.join(", ")}`,
+            409,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +315,7 @@ async function parseRequestBody(req: Request, env: RegisterEnv): Promise<Validat
         affected_cells_hash,
         affected_cells_root,
         affected_cell_count,
-        geo_resolution,
+        geo_resolution: geo_resolution as 7,
         affected_cells_uri,
     };
 }

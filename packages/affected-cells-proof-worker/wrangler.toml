@@ -6,16 +6,26 @@ compatibility_date = "2026-06-01"
 binding = "AFFECTED_PROOF_SHARDS"
 bucket_name = "sonari-affected-proofs-v1"
 
+[[r2_buckets]]
+binding = "AFFECTED_AREA_ARTIFACTS"
+bucket_name = "sonari-affected-area-tiles-v1"
+
+[[workflows]]
+binding = "AFFECTED_AREA_ARTIFACT_WORKFLOW"
+name = "sonari-affected-area-artifact-workflow"
+class_name = "AffectedAreaArtifactWorkflow"
+
 # ---------------------------------------------------------------------------
-# Vars（GEO_RESOLUTION / WALRUS_AGGREGATOR_URL）はここにハードコードしない。
+# Vars（GEO_RESOLUTION / WALRUS_AGGREGATOR_URL / SONARI_AFFECTED_AREA_BASE_URL）はここにハードコードしない。
 # ---------------------------------------------------------------------------
 #
-# これらは repo-level GitHub Variables（SONARI_GEO_RESOLUTION / SONARI_WALRUS_AGGREGATOR_URL）を
+# これらは repo-level GitHub Variables（SONARI_GEO_RESOLUTION / SONARI_WALRUS_AGGREGATOR_URL /
+# SONARI_AFFECTED_AREA_BASE_URL）を
 # 単一情報源とし、deploy workflow が `wrangler deploy --var KEY:VALUE` で注入する。
 # 1 箇所更新で dapp / 各 worker / AWS に反映する方針のため、toml には値を置かない。
 #
 # ローカルで手動 deploy するときは同じ --var を付けるか、`.dev.vars` を使うこと:
-#   wrangler deploy --var GEO_RESOLUTION:7 --var WALRUS_AGGREGATOR_URL:https://aggregator.walrus-testnet.walrus.space
+#   wrangler deploy --var GEO_RESOLUTION:7 --var WALRUS_AGGREGATOR_URL:https://aggregator.walrus-testnet.walrus.space --var SONARI_AFFECTED_AREA_BASE_URL:https://<public-r2-domain>
 # プライベート aggregator を使う場合は --var ではなく `wrangler secret put WALRUS_AGGREGATOR_URL`。
 
 # ---------------------------------------------------------------------------

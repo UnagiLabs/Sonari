@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import { handleRegisterRequest } from "./register.js";
 import type { Env } from "./walrus.js";
 import type { AffectedProofR2Bucket } from "./r2.js";
+import type { AffectedAreaWorkflowBinding } from "./affected_area_workflow_trigger.js";
 
 // ---------------------------------------------------------------------------
 // Golden values (schemas/examples/affected_cells.json と expected_hashes.json より)
@@ -113,6 +114,67 @@ class FakeR2Bucket implements AffectedProofR2Bucket {
     }
 }
 
+class FakeWorkflowInstance {
+    restartCount = 0;
+
+    constructor(
+        readonly id: string,
+        private statusValue: InstanceStatus["status"] = "queued",
+    ) {}
+
+    async status(): Promise<InstanceStatus> {
+        return { status: this.statusValue, rollback: null };
+    }
+
+    async restart(): Promise<void> {
+        this.restartCount += 1;
+        this.statusValue = "queued";
+    }
+}
+
+class FakeAffectedAreaWorkflow implements AffectedAreaWorkflowBinding {
+    readonly createBatchCalls: Array<readonly WorkflowInstanceCreateOptions[]> = [];
+    private readonly instances = new Map<string, FakeWorkflowInstance>();
+
+    constructor(seed: Array<[string, InstanceStatus["status"]]> = []) {
+        for (const [id, status] of seed) {
+            this.instances.set(id, new FakeWorkflowInstance(id, status));
+        }
+    }
+
+    async createBatch(
+        batch: readonly WorkflowInstanceCreateOptions[],
+    ): Promise<WorkflowInstance[]> {
+        this.createBatchCalls.push(batch);
+        const created: WorkflowInstance[] = [];
+        for (const item of batch) {
+            if (item.id === undefined || this.instances.has(item.id)) {
+                continue;
+            }
+            const instance = new FakeWorkflowInstance(item.id);
+            this.instances.set(item.id, instance);
+            created.push(instance);
+        }
+        return created;
+    }
+
+    async get(id: string): Promise<WorkflowInstance> {
+        const instance = this.instances.get(id);
+        if (instance === undefined) {
+            throw new Error(`Workflow instance not found: ${id}`);
+        }
+        return instance;
+    }
+
+    getCreateBatchCount(): number {
+        return this.createBatchCalls.length;
+    }
+
+    getInstance(id: string): FakeWorkflowInstance | undefined {
+        return this.instances.get(id);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Fake fetch（Walrus blob を返す）
 // ---------------------------------------------------------------------------
@@ -138,8 +200,15 @@ function buildEnv(options: {
     token?: string;
     geoResolution?: string;
     bucket?: FakeR2Bucket;
+    affectedAreaBucket?: FakeR2Bucket;
+    affectedAreaWorkflow?: FakeAffectedAreaWorkflow;
     fetchImpl?: typeof fetch;
-} = {}): Env & { AFFECTED_PROOF_SHARDS: FakeR2Bucket; fetchImpl?: typeof fetch } {
+} = {}): Env & {
+    AFFECTED_PROOF_SHARDS: FakeR2Bucket;
+    AFFECTED_AREA_ARTIFACTS: FakeR2Bucket;
+    AFFECTED_AREA_ARTIFACT_WORKFLOW: FakeAffectedAreaWorkflow;
+    fetchImpl?: typeof fetch;
+} {
     const goldenBytes = new TextEncoder().encode(GOLDEN_AFFECTED_CELLS_JSON);
     const defaultFetch = makeFakeWalrusFetch("test-blob-id-001", goldenBytes);
 
@@ -148,6 +217,9 @@ function buildEnv(options: {
         WALRUS_AGGREGATOR_URL: "https://walrus.example",
         GEO_RESOLUTION: options.geoResolution ?? "7",
         AFFECTED_PROOF_SHARDS: options.bucket ?? new FakeR2Bucket(),
+        AFFECTED_AREA_ARTIFACTS: options.affectedAreaBucket ?? new FakeR2Bucket(),
+        AFFECTED_AREA_ARTIFACT_WORKFLOW:
+            options.affectedAreaWorkflow ?? new FakeAffectedAreaWorkflow(),
         fetchImpl: options.fetchImpl ?? defaultFetch,
     };
 }
@@ -209,6 +281,14 @@ function manifestKey(eventUid: string, eventRevision: number): string {
     return `affected-proofs/events/${eventUid}/revisions/${eventRevision}/manifest.json`;
 }
 
+function affectedAreaManifestKey(eventUid: string, eventRevision: number): string {
+    return `affected-area/events/${eventUid}/revisions/${eventRevision}/affected-area-manifest.json`;
+}
+
+function workflowId(eventUid: string, eventRevision: number, root: string): string {
+    return `affected-area-${eventUid.slice(2)}-${eventRevision}-${root.slice(2)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -220,7 +300,8 @@ describe("handleRegisterRequest", () => {
 
     it("正常系: golden 例の登録で manifest と shard が R2 に put される", async () => {
         const bucket = new FakeR2Bucket();
-        const env = buildEnv({ bucket });
+        const workflow = new FakeAffectedAreaWorkflow();
+        const env = buildEnv({ bucket, affectedAreaWorkflow: workflow });
         const req = buildRegisterRequest();
 
         const res = await handleRegisterRequest(req, env, env.fetchImpl);
@@ -240,6 +321,15 @@ describe("handleRegisterRequest", () => {
         const storedKeys = bucket.getStoredKeys();
         const shardKeys = storedKeys.filter((k) => k.includes("/shards/"));
         expect(shardKeys.length).toBeGreaterThan(0);
+        expect(workflow.getCreateBatchCount()).toBe(1);
+        expect(workflow.createBatchCalls[0]?.[0]).toMatchObject({
+            id: workflowId(GOLDEN_EVENT_UID, GOLDEN_EVENT_REVISION, GOLDEN_ROOT),
+            params: {
+                event_uid: GOLDEN_EVENT_UID,
+                event_revision: GOLDEN_EVENT_REVISION,
+                affected_cells_root: GOLDEN_ROOT,
+            },
+        });
     });
 
     it("正常系: 成功レスポンスに shard_count=1 が含まれる", async () => {
@@ -467,7 +557,8 @@ describe("handleRegisterRequest", () => {
 
     it("冪等: 同一登録を2回 → 2回目は 200 no-op（R2 への put は初回のみ）", async () => {
         const bucket = new FakeR2Bucket();
-        const env = buildEnv({ bucket });
+        const workflow = new FakeAffectedAreaWorkflow();
+        const env = buildEnv({ bucket, affectedAreaWorkflow: workflow });
         const req1 = buildRegisterRequest();
         const req2 = buildRegisterRequest();
 
@@ -486,6 +577,77 @@ describe("handleRegisterRequest", () => {
         // 両方 stored: true または 2回目は stored: false でも OK
         expect(body1.event_uid).toBe(GOLDEN_EVENT_UID);
         expect(body2.event_uid).toBe(GOLDEN_EVENT_UID);
+        expect(workflow.getCreateBatchCount()).toBe(2);
+    });
+
+    it("冪等: affected-area manifest が既にある no-op では Workflow を再起動しない", async () => {
+        const bucket = new FakeR2Bucket();
+        const affectedAreaBucket = new FakeR2Bucket([
+            [
+                affectedAreaManifestKey(GOLDEN_EVENT_UID, GOLDEN_EVENT_REVISION),
+                new TextEncoder().encode("{}"),
+            ],
+        ]);
+        const workflow = new FakeAffectedAreaWorkflow();
+        const env = buildEnv({ bucket, affectedAreaBucket, affectedAreaWorkflow: workflow });
+
+        const res1 = await handleRegisterRequest(buildRegisterRequest(), env, env.fetchImpl);
+        const res2 = await handleRegisterRequest(buildRegisterRequest(), env, env.fetchImpl);
+
+        expect(res1.status).toBe(200);
+        expect(res2.status).toBe(200);
+        expect(workflow.getCreateBatchCount()).toBe(0);
+    });
+
+    it("fail-closed: 既存 manifest と request metadata が違う no-op は Workflow を起動しない", async () => {
+        const bucket = new FakeR2Bucket();
+        const workflow = new FakeAffectedAreaWorkflow();
+        const env = buildEnv({ bucket, affectedAreaWorkflow: workflow });
+
+        const res1 = await handleRegisterRequest(buildRegisterRequest(), env, env.fetchImpl);
+        const res2 = await handleRegisterRequest(
+            buildRegisterRequest({ hash: `0x${"ab".repeat(32)}` }),
+            env,
+            env.fetchImpl,
+        );
+
+        expect(res1.status).toBe(200);
+        expect(res2.status).toBe(409);
+        const body = await res2.json() as { error: { code: string } };
+        expect(body.error.code).toBe("affected_cells_root_mismatch");
+        expect(workflow.getCreateBatchCount()).toBe(1);
+    });
+
+    it("冪等: 既存 Workflow が errored なら manifest 未作成時に restart する", async () => {
+        const id = workflowId(GOLDEN_EVENT_UID, GOLDEN_EVENT_REVISION, GOLDEN_ROOT);
+        const workflow = new FakeAffectedAreaWorkflow([[id, "errored"]]);
+        const env = buildEnv({ affectedAreaWorkflow: workflow });
+
+        const res = await handleRegisterRequest(buildRegisterRequest(), env, env.fetchImpl);
+
+        expect(res.status).toBe(200);
+        expect(workflow.getCreateBatchCount()).toBe(1);
+        expect(workflow.getInstance(id)?.restartCount).toBe(1);
+    });
+
+    it("fail-closed: Workflow 起動に失敗したら登録 API も失敗する", async () => {
+        const failingWorkflow: AffectedAreaWorkflowBinding = {
+            async createBatch(): Promise<WorkflowInstance[]> {
+                throw new Error("workflow create failed");
+            },
+            async get(): Promise<WorkflowInstance> {
+                throw new Error("not called");
+            },
+        };
+        const env = buildEnv({
+            affectedAreaWorkflow: failingWorkflow as FakeAffectedAreaWorkflow,
+        });
+
+        const res = await handleRegisterRequest(buildRegisterRequest(), env, env.fetchImpl);
+
+        expect(res.status).toBe(500);
+        const body = await res.json() as { error: { code: string } };
+        expect(body.error.code).toBe("internal");
     });
 
     // -------------------------------------------------------------------------
@@ -519,7 +681,8 @@ describe("handleRegisterRequest", () => {
 
     it("fail-closed: affected_cells_uri が walrus:// 形式でない → invalid_request", async () => {
         const bucket = new FakeR2Bucket();
-        const env = buildEnv({ bucket });
+        const workflow = new FakeAffectedAreaWorkflow();
+        const env = buildEnv({ bucket, affectedAreaWorkflow: workflow });
         const req = buildRegisterRequest({ uri: "https://example.com/file.json" });
 
         const res = await handleRegisterRequest(req, env, env.fetchImpl);
@@ -528,5 +691,6 @@ describe("handleRegisterRequest", () => {
         const body = await res.json() as { error: { code: string } };
         expect(body.error.code).toBe("invalid_request");
         expect(bucket.getTotalPutCount()).toBe(0);
+        expect(workflow.getCreateBatchCount()).toBe(0);
     });
 });

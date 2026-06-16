@@ -22,6 +22,8 @@ import { handleProofRequest } from "./http.js";
 import type { RegisterEnv } from "./register.js";
 import { handleRegisterRequest } from "./register.js";
 
+export { AffectedAreaArtifactWorkflow } from "./affected_area_workflow.js";
+
 // ---------------------------------------------------------------------------
 // Route patterns
 // ---------------------------------------------------------------------------

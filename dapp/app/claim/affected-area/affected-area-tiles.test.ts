@@ -125,6 +125,22 @@ describe("cell tile selection and feature dedupe", () => {
         expect(keys).toEqual(["11/1832/787", "11/1833/787"]);
     });
 
+    it("calculates cell tile keys for cross-dateline viewports", () => {
+        const manifest: AffectedAreaTileManifest = {
+            ...VALID_MANIFEST,
+            cellTileKeys: ["11/2047/1023", "11/0/1023"],
+        };
+
+        const keys = cellTileKeysForViewport(manifest, {
+            north: 0.2,
+            south: -0.2,
+            west: 179.6,
+            east: -179.6,
+        });
+
+        expect(keys).toEqual(["11/2047/1023", "11/0/1023"]);
+    });
+
     it("deduplicates duplicated features by decimal", () => {
         expect(dedupeCellTileFeatures([FEATURE_A, FEATURE_B, FEATURE_A])).toEqual([
             FEATURE_A,

@@ -112,6 +112,43 @@ class FakeR2Bucket implements AffectedProofR2Bucket {
     }
 }
 
+class FakeWorkflowInstance implements WorkflowInstance {
+    constructor(readonly id: string) {}
+
+    async status(): Promise<InstanceStatus> {
+        return { status: "queued", rollback: null };
+    }
+
+    async restart(): Promise<void> {}
+}
+
+class FakeAffectedAreaWorkflow implements Workflow {
+    private readonly instances = new Map<string, FakeWorkflowInstance>();
+
+    async createBatch(
+        batch: readonly WorkflowInstanceCreateOptions[],
+    ): Promise<WorkflowInstance[]> {
+        const created: WorkflowInstance[] = [];
+        for (const item of batch) {
+            if (item.id === undefined || this.instances.has(item.id)) {
+                continue;
+            }
+            const instance = new FakeWorkflowInstance(item.id);
+            this.instances.set(item.id, instance);
+            created.push(instance);
+        }
+        return created;
+    }
+
+    async get(id: string): Promise<WorkflowInstance> {
+        const instance = this.instances.get(id);
+        if (instance === undefined) {
+            throw new Error(`Workflow instance not found: ${id}`);
+        }
+        return instance;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Fake fetch（Walrus blob を返す）
 // ---------------------------------------------------------------------------
@@ -148,6 +185,8 @@ function buildEnv(options: { bucket?: FakeR2Bucket; fetchImpl?: typeof fetch } =
         WALRUS_AGGREGATOR_URL: "https://walrus.example",
         GEO_RESOLUTION: "7",
         AFFECTED_PROOF_SHARDS: options.bucket ?? new FakeR2Bucket(),
+        AFFECTED_AREA_ARTIFACTS: new FakeR2Bucket(),
+        AFFECTED_AREA_ARTIFACT_WORKFLOW: new FakeAffectedAreaWorkflow(),
         fetchImpl: options.fetchImpl ?? defaultFetch,
     };
 }

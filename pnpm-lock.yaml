@@ -212,6 +212,9 @@ importers:
       '@sonari/proof-core':
         specifier: workspace:*
         version: link:../proof-core
+      h3-js:
+        specifier: ^4.4.0
+        version: 4.4.0
 
   packages/proof-core:
     dependencies:
