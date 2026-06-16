@@ -10,7 +10,7 @@ Earthquake verifier と membership identity verifier の PCR config は、既存
 
 - workflow は EIF measurement から `EARTHQUAKE_EIF_PCR0/1/2` と `MEMBERSHIP_IDENTITY_EIF_PCR0/1/2` を読み、スクリプトの env fallback 経由で渡します。`register-verifier-configs.sh` は idempotent（create→abort9→update fallback）なので再実行は安全です。
 - 再登録後に on-chain config の PCR が新 EIF と一致するかを read-only（AdminCap 不要）で検証し、不一致なら fail します。サイレントな部分失敗を検出するためです。
-- CI に投入する admin 鍵は **dev/testnet 専用の使い捨て鍵**（GitHub Secret `SONARI_DEV_ADMIN_PRIVATE_KEY`、環境 `aws-sonari-verifier-runner-dev` スコープ）で、本番 AdminCap とは別物です。漏洩時の被害は testnet に限定されます。AdminCap object id は repo-level Variable `SONARI_ADMIN_CAP_ID` で渡します。
+- CI に投入する admin 鍵は **dev/testnet 専用の使い捨て鍵**（GitHub Secret `SONARI_DEV_ADMIN_PRIVATE_KEY`、環境 `aws-sonari-verifier-runner-dev` スコープ）で、本番 AdminCap とは別物です。漏洩時の被害は testnet に限定されます。AdminCap object id は `contracts/Published.toml` の package id と Sui events から workflow が導出します。
 - secret は環境スコープ＋手動 `workflow_dispatch` 限定（GitHub Actions コスト削減のため push トリガーは持たない）で、fork PR からは読めません。鍵は workflow ログに出しません（`set +x` / `::add-mask::` / 後始末の `rm -rf`）。
 - **本番（mainnet）では本方式を使いません。** 本番 AdminCap の秘密鍵や wallet config は CI／AWS（Runner、EC2、Lambda、SSM、AWS Secrets Manager）に絶対に置かず、下記「共通ルール」の手動手順に従ってください。
 - 自動再登録が失敗した場合は、後述の手動 `sui client call` 手順を fallback として使います。
