@@ -31,6 +31,51 @@ declare global {
         do<T>(name: string, callback: () => Promise<T> | T): Promise<T>;
     }
 
+    interface WorkflowInstanceCreateOptions<Params = unknown> {
+        readonly id?: string;
+        readonly params?: Params;
+    }
+
+    type InstanceStatus = {
+        readonly status:
+            | "queued"
+            | "running"
+            | "paused"
+            | "errored"
+            | "terminated"
+            | "complete"
+            | "waiting"
+            | "waitingForPause"
+            | "unknown";
+        readonly error?: {
+            readonly name: string;
+            readonly message: string;
+        };
+        readonly output?: unknown;
+        readonly rollback:
+            | {
+                  readonly outcome: "complete" | "failed";
+                  readonly error: {
+                      readonly name: string;
+                      readonly message: string;
+                  } | null;
+              }
+            | null;
+    };
+
+    interface WorkflowInstance {
+        readonly id: string;
+        status(): Promise<InstanceStatus>;
+        restart(): Promise<void>;
+    }
+
+    interface Workflow<Params = unknown> {
+        createBatch(
+            batch: readonly WorkflowInstanceCreateOptions<Params>[],
+        ): Promise<WorkflowInstance[]>;
+        get(id: string): Promise<WorkflowInstance>;
+    }
+
     var WorkflowEntrypoint:
         | {
               new <Env = unknown, Params = unknown>(): WorkflowEntrypoint<Env, Params>;

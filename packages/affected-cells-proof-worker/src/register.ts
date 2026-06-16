@@ -18,6 +18,11 @@
  */
 
 import { verifyRegisterToken } from "./auth.js";
+import type { AffectedAreaR2Bucket } from "./affected_area_r2.js";
+import {
+    type AffectedAreaWorkflowBinding,
+    startAffectedAreaArtifactWorkflow,
+} from "./affected_area_workflow_trigger.js";
 import { AffectedCellsProofError } from "./errors.js";
 import type { AffectedCellsProofManifest } from "./proof_artifacts.js";
 import { buildAndSaveProofArtifacts } from "./proof_builder.js";
@@ -32,6 +37,10 @@ import { fetchWalrusBlob } from "./walrus.js";
 
 export interface RegisterEnv extends Env {
     AFFECTED_PROOF_SHARDS: AffectedProofR2Bucket;
+    AFFECTED_AREA_ARTIFACTS: AffectedAreaR2Bucket & {
+        get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
+    };
+    AFFECTED_AREA_ARTIFACT_WORKFLOW: AffectedAreaWorkflowBinding;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,7 +67,7 @@ interface ValidatedRegisterBody {
     affected_cells_hash: string;
     affected_cells_root: string;
     affected_cell_count: number;
-    geo_resolution: number;
+    geo_resolution: 7;
     affected_cells_uri: string;
 }
 
@@ -128,6 +137,11 @@ async function handleRegisterRequestUnchecked(
     );
     if (existingManifest !== null) {
         if (existingManifest.affected_cells_root === body.affected_cells_root) {
+            await startAffectedAreaArtifactWorkflow({
+                bucket: env.AFFECTED_AREA_ARTIFACTS,
+                workflow: env.AFFECTED_AREA_ARTIFACT_WORKFLOW,
+                input: body,
+            });
             // 同一 root → 200 no-op
             return jsonResponse({
                 event_uid: body.event_uid,
@@ -162,6 +176,12 @@ async function handleRegisterRequestUnchecked(
         affectedCellCount: body.affected_cell_count,
         geoResolution: body.geo_resolution,
         bucket,
+    });
+
+    await startAffectedAreaArtifactWorkflow({
+        bucket: env.AFFECTED_AREA_ARTIFACTS,
+        workflow: env.AFFECTED_AREA_ARTIFACT_WORKFLOW,
+        input: body,
     });
 
     return jsonResponse({
@@ -268,7 +288,7 @@ async function parseRequestBody(req: Request, env: RegisterEnv): Promise<Validat
         affected_cells_hash,
         affected_cells_root,
         affected_cell_count,
-        geo_resolution,
+        geo_resolution: geo_resolution as 7,
         affected_cells_uri,
     };
 }
