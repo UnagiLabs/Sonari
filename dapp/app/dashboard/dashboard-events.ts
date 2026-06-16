@@ -51,6 +51,7 @@ export interface DashboardClaimEvent {
 export interface DashboardDisasterEvent {
     readonly id: string;
     readonly sourceEventId: string;
+    readonly eventRevision: number;
     readonly title: string;
     readonly region: string;
     readonly hazardLabel: string;
@@ -118,7 +119,7 @@ export async function readDashboardEvents(
         const claims = allClaims.slice(0, limit);
         const aidDeliveredUsdc = allClaims.reduce((sum, item) => sum + item.amountUsdc, 0n);
         const totalClaimsCount = allClaims.length;
-        const latestEvent = uniqueDisasters(disasterEvents).sort(compareNewestFirst)[0] ?? null;
+        const latestEvent = selectLatestDisasterEvent(disasterEvents);
 
         return { kind: "ok", donations, claims, aidDeliveredUsdc, totalClaimsCount, latestEvent };
     } catch (error) {
@@ -206,6 +207,7 @@ export function parseDashboardDisasterEvent(raw: unknown): DashboardDisasterEven
 
     const id = parseObjectId(event.parsedJson.disaster_event_id);
     const sourceEventId = parseNonEmptyString(event.parsedJson.source_event_id);
+    const eventRevision = parseU32(event.parsedJson.event_revision);
     const title = parseNonEmptyString(event.parsedJson.title);
     const region = parseNonEmptyString(event.parsedJson.region);
     const hazardLabel = parseNonEmptyString(event.parsedJson.hazard_label);
@@ -215,6 +217,7 @@ export function parseDashboardDisasterEvent(raw: unknown): DashboardDisasterEven
     if (
         id === null ||
         sourceEventId === null ||
+        eventRevision === null ||
         title === null ||
         region === null ||
         hazardLabel === null ||
@@ -226,6 +229,7 @@ export function parseDashboardDisasterEvent(raw: unknown): DashboardDisasterEven
     return {
         id,
         sourceEventId,
+        eventRevision,
         title,
         region,
         hazardLabel,
@@ -313,6 +317,23 @@ function uniqueDisasters(items: readonly DashboardDisasterEvent[]): DashboardDis
     return result;
 }
 
+function selectLatestDisasterEvent(
+    items: readonly DashboardDisasterEvent[],
+): DashboardDisasterEvent | null {
+    const bySourceEventId = new Map<string, DashboardDisasterEvent>();
+    for (const item of uniqueDisasters(items)) {
+        const existing = bySourceEventId.get(item.sourceEventId);
+        if (
+            existing === undefined ||
+            item.eventRevision > existing.eventRevision ||
+            (item.eventRevision === existing.eventRevision && item.occurredAtMs > existing.occurredAtMs)
+        ) {
+            bySourceEventId.set(item.sourceEventId, item);
+        }
+    }
+    return [...bySourceEventId.values()].sort(compareNewestFirst)[0] ?? null;
+}
+
 function compareNewestFirst(a: { readonly occurredAtMs: number }, b: { readonly occurredAtMs: number }): number {
     return b.occurredAtMs - a.occurredAtMs;
 }
@@ -339,6 +360,14 @@ function parseU64Number(raw: unknown): number | null {
         return null;
     }
     return Number(parsed);
+}
+
+function parseU32(raw: unknown): number | null {
+    const parsed = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 4_294_967_295) {
+        return null;
+    }
+    return parsed;
 }
 
 function parseU64(raw: unknown): bigint | null {

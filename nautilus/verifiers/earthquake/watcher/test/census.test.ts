@@ -2,11 +2,19 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
     computeFloorCensusCounts,
+    DirectFloorCensusAdapter,
     encodeFloorCensusResultBcs,
+    type FloorCensusOnchainReader,
+    type FloorCensusSubmitClient,
     JsonRpcFloorCensusReader,
     signFloorCensusResult,
     type HomeCellRegisteredEvent,
 } from "../src/census.js";
+import {
+    BCS_ENUMS,
+    encodeEarthquakeOraclePayloadBcsHex,
+    type EarthquakeOraclePayload,
+} from "@sonari/earthquake-shared";
 import type { RelayerSigner } from "@sonari/earthquake-relayer";
 
 const eventUid = `0x${"aa".repeat(32)}`;
@@ -175,6 +183,49 @@ describe("JsonRpcFloorCensusReader", () => {
     });
 });
 
+describe("DirectFloorCensusAdapter", () => {
+    it("looks up the campaign and signs census with the payload revision", async () => {
+        const result = finalizedResultForCensus();
+        const reader = new RecordingFloorCensusReader();
+        const signer = new RecordingSigner();
+        const client = new RecordingFloorCensusSubmitClient();
+        const adapter = new DirectFloorCensusAdapter({
+            target: "0xabc::accessor::set_floor_census",
+            pauseState: "0xpause",
+            verifierRegistry: "0xverifier",
+            categoryPool: "0xcategory",
+            mainPool: "0xmain",
+            membershipRegistry: "0xmembership",
+            signer: signer.asSigner(),
+            reader,
+            client,
+            now: () => 1_800_000_001_000,
+        });
+
+        await expect(
+            adapter.run({
+                sourceEventId: "us7000sonari",
+                result,
+                relayerDigest: "tx-digest",
+                disasterEventId: "0xdisaster",
+            }),
+        ).resolves.toMatchObject({
+            status: "succeeded",
+            campaignId: "0xcampaign-revision-7",
+        });
+
+        expect(reader.campaignLookups).toEqual([
+            {
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            },
+        ]);
+        expect(Buffer.from(signer.signedBytes ?? []).toString("hex")).toContain("07000000");
+        expect(client.submissions).toHaveLength(1);
+    });
+});
+
 function expectedRoot(): string {
     const root = computeAffectedCellsRootForTest(affectedCells);
     if (root === null) {
@@ -289,4 +340,75 @@ class RecordingSigner {
     toSuiAddress(): string {
         return "0xsender";
     }
+}
+
+class RecordingFloorCensusReader implements FloorCensusOnchainReader {
+    readonly campaignLookups: Array<{ digest: string; eventUid: string; eventRevision: number }> =
+        [];
+
+    async listHomeCellRegisteredEvents(): Promise<HomeCellRegisteredEvent[]> {
+        return [{ lineage: "0xlineage", homeCell: "20", registeredAtMs: 900 }];
+    }
+
+    async listActiveLineages(): Promise<ReadonlySet<string>> {
+        return new Set(["0xlineage"]);
+    }
+
+    async findCampaignId(input: {
+        digest: string;
+        eventUid: string;
+        eventRevision: number;
+    }): Promise<string | undefined> {
+        this.campaignLookups.push(input);
+        return input.eventRevision === 7 ? "0xcampaign-revision-7" : undefined;
+    }
+}
+
+class RecordingFloorCensusSubmitClient implements FloorCensusSubmitClient {
+    readonly submissions: unknown[] = [];
+
+    async signAndExecuteTransaction(input: unknown) {
+        this.submissions.push(input);
+        return {
+            $kind: "Transaction" as const,
+            Transaction: {
+                digest: "census-digest",
+                status: { success: true },
+            },
+        };
+    }
+}
+
+function finalizedResultForCensus() {
+    const root = expectedRoot();
+    const payload: EarthquakeOraclePayload = {
+        intent: BCS_ENUMS.intent.SONARI_EARTHQUAKE_ORACLE,
+        oracle_version: 1,
+        event_uid: eventUid,
+        event_revision: 7,
+        source_event_id: "us7000sonari",
+        title: "M 7.1 - Sonari Fixture Earthquake",
+        region: "Sonari Fixture Region",
+        occurred_at_ms: 1_000,
+        hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+        status: BCS_ENUMS.onchainStatus.FINALIZED,
+        severity_band: 2,
+        affected_cells_root: root,
+        affected_cell_count: 3,
+        evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
+        evidence_manifest_hash: `0x${"55".repeat(32)}`,
+        verified_at_ms: 1_000,
+        freshness_deadline_ms: 21_601_000,
+    };
+    return {
+        status: "finalized" as const,
+        payload,
+        payload_bcs_hex: encodeEarthquakeOraclePayloadBcsHex(payload),
+        signature: `0x${"11".repeat(64)}`,
+        public_key: `0x${"22".repeat(32)}`,
+        verifier_config_key: 1,
+        verifier_config_version: 1,
+        enclave_instance_public_key: `0x${"22".repeat(32)}`,
+        affected_cells: { ...affectedCells, event_revision: 7 },
+    };
 }

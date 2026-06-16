@@ -95,6 +95,7 @@ describe("dashboard event parsers", () => {
                 eventEnvelope({
                     disaster_event_id: EVENT_ID,
                     source_event_id: "usgs-1",
+                    event_revision: 2,
                     title: "M6.8 earthquake",
                     region: "Offshore Iwate, Japan",
                     hazard_label: "earthquake",
@@ -105,6 +106,7 @@ describe("dashboard event parsers", () => {
         ).toEqual({
             id: EVENT_ID,
             sourceEventId: "usgs-1",
+            eventRevision: 2,
             title: "M6.8 earthquake",
             region: "Offshore Iwate, Japan",
             hazardLabel: "earthquake",
@@ -174,6 +176,7 @@ describe("readDashboardEvents", () => {
                             {
                                 disaster_event_id: EVENT_ID,
                                 source_event_id: "usgs-1",
+                                event_revision: 2,
                                 title: "M6.8 earthquake",
                                 region: "Offshore Iwate, Japan",
                                 hazard_label: "earthquake",
@@ -225,6 +228,7 @@ describe("readDashboardEvents", () => {
             latestEvent: {
                 id: EVENT_ID,
                 sourceEventId: "usgs-1",
+                eventRevision: 2,
                 title: "M6.8 earthquake",
                 region: "Offshore Iwate, Japan",
                 hazardLabel: "earthquake",
@@ -323,6 +327,58 @@ describe("readDashboardEvents", () => {
         }
         expect(result.claims).toHaveLength(10);
         expect(result.totalClaimsCount).toBe(12);
+    });
+
+    it("prefers the latest revision when one source event has multiple disaster events", async () => {
+        const disasterType = `${PACKAGE_ID}::disaster_event::DisasterEventCreated`;
+        const queryEvents = vi.fn(async (input: { query: { MoveEventType: string } }) => {
+            if (input.query.MoveEventType !== disasterType) {
+                return { data: [], hasNextPage: false };
+            }
+            return {
+                data: [
+                    eventEnvelope(
+                        {
+                            disaster_event_id: EVENT_ID,
+                            source_event_id: "usgs-1",
+                            event_revision: 1,
+                            title: "Old revision",
+                            region: "Old Region",
+                            hazard_label: "earthquake",
+                            affected_cell_count: "100",
+                            created_at_ms: "3000",
+                        },
+                        { id: { txDigest: "old-revision", eventSeq: "1" } },
+                    ),
+                    eventEnvelope(
+                        {
+                            disaster_event_id: `0x${"66".repeat(32)}`,
+                            source_event_id: "usgs-1",
+                            event_revision: 2,
+                            title: "Latest revision",
+                            region: "Latest Region",
+                            hazard_label: "earthquake",
+                            affected_cell_count: "120",
+                            created_at_ms: "2000",
+                        },
+                        { id: { txDigest: "latest-revision", eventSeq: "1" } },
+                    ),
+                ],
+                hasNextPage: false,
+            };
+        });
+
+        const result = await readDashboardEvents({ queryEvents }, { packageId: PACKAGE_ID });
+
+        expect(result.kind).toBe("ok");
+        if (result.kind !== "ok") {
+            return;
+        }
+        expect(result.latestEvent).toMatchObject({
+            sourceEventId: "usgs-1",
+            eventRevision: 2,
+            title: "Latest revision",
+        });
     });
 
     it("returns error for missing package id or RPC failure", async () => {

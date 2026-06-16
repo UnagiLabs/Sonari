@@ -1002,7 +1002,9 @@ describe("AWS runner workflow helper", () => {
     });
 
     it("keeps full TEE result bodies out of workflow task results", async () => {
-        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"), {
+            eventRevision: 2,
+        });
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -1813,7 +1815,7 @@ describe("AWS runner workflow helper", () => {
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         await repository.markSourceArchiveResult(
             "us7000sonari",
-            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/affected_cells.json"] },
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/2/affected_cells.json"] },
             1_800_000_001_500,
             1,
         );
@@ -2490,7 +2492,9 @@ describe("AWS runner workflow helper", () => {
 
     it("runs floor census once after recorded relayer success", async () => {
         const repository = new InMemoryStateRepository();
-        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }));
+        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }), {
+            eventRevision: 2,
+        });
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000, {
             requestedSourceEventId: "us7000sonari",
         });
@@ -2584,6 +2588,9 @@ describe("AWS runner workflow helper", () => {
             floor_census: "skipped",
         });
         expect(floorCensus.inputs).toHaveLength(1);
+        expect(floorCensus.inputs[0]).toMatchObject({
+            result: { payload: { event_revision: 2 } },
+        });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             floor_census_status: "succeeded",
             floor_census_digest: "census-digest",
@@ -2642,8 +2649,9 @@ function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
 
 function finalizedResultWithRawManifest(
     bytes: Uint8Array,
-    options: { sourceUri?: string } = {},
+    options: { sourceUri?: string; eventRevision?: number } = {},
 ): Extract<TeeCoreResult, { status: "finalized" }> {
+    const eventRevision = options.eventRevision ?? 1;
     const hash = `0x${sha256Hex(bytes)}`;
     const manifest: RawDataManifest = {
         entries: [
@@ -2665,7 +2673,7 @@ function finalizedResultWithRawManifest(
     };
     const affectedCells = {
         event_uid: `0x${"aa".repeat(32)}`,
-        event_revision: 1,
+        event_revision: eventRevision,
         oracle_version: 1,
         geo_resolution: 7,
         cells_generation_method: "shakemap_gridxml_h3_center_bilinear_v1",
@@ -2690,7 +2698,7 @@ function finalizedResultWithRawManifest(
         schema_version: 1,
         oracle_version: 1,
         event_uid: `0x${"aa".repeat(32)}`,
-        event_revision: 1,
+        event_revision: eventRevision,
         hazard_type: "EARTHQUAKE",
         source_event_id: "us7000sonari",
         sources: manifest.entries.map((entry) => ({
@@ -2728,6 +2736,7 @@ function finalizedResultWithRawManifest(
     const result = finalizedResult();
     const payload: EarthquakeOraclePayload = {
         ...(result.payload as EarthquakeOraclePayload),
+        event_revision: eventRevision,
         affected_cells_root: affectedCellsRoot,
         evidence_manifest_uri: evidenceManifestRef.uri,
         evidence_manifest_hash: evidenceManifestHash,

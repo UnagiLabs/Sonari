@@ -1,4 +1,5 @@
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import {
     assertExpectedAccount,
     DEFAULT_EXPECTED_ACCOUNT,
@@ -75,6 +76,9 @@ async function main(): Promise<void> {
     const sourceArchiveSummary = {
         source_archive_status: readDynamoString(item, "source_archive_status"),
         source_archive_error_code: readDynamoString(item, "source_archive_error_code"),
+        event_uid: teeResultSummary.event_uid,
+        event_revision: teeResultSummary.event_revision,
+        latest_source: teeResultSummary.latest_source,
         evidence_manifest_uri: teeResultSummary.evidence_manifest_uri,
         evidence_manifest_hash: teeResultSummary.evidence_manifest_hash,
         evidence_manifest_artifact_s3_key:
@@ -127,22 +131,27 @@ function readDynamoString(item: Record<string, unknown>, key: string): string | 
     return typeof stringValue === "string" && stringValue.length > 0 ? stringValue : null;
 }
 
-function readTeeResultSummary(item: Record<string, unknown>): {
+export function readTeeResultSummary(item: Record<string, unknown>): {
+    event_uid: string | null;
+    event_revision: number | null;
+    latest_source: string | null;
     evidence_manifest_uri: string | null;
     evidence_manifest_hash: string | null;
 } {
     const raw = readDynamoString(item, "tee_result_json");
     if (raw === null) {
-        return { evidence_manifest_uri: null, evidence_manifest_hash: null };
+        return emptyTeeResultSummary();
     }
     const parsed = JSON.parse(raw) as unknown;
     if (!isRecord(parsed) || parsed.status !== "finalized") {
-        return { evidence_manifest_uri: null, evidence_manifest_hash: null };
+        return emptyTeeResultSummary();
     }
     const payload = parsed.payload;
     if (!isRecord(payload)) {
         throw new Error("Finalized Dynamo tee_result_json is missing payload");
     }
+    const eventUid = payload.event_uid;
+    const eventRevision = payload.event_revision;
     const evidenceManifestUri = payload.evidence_manifest_uri;
     const evidenceManifestHash = payload.evidence_manifest_hash;
     if (typeof evidenceManifestUri !== "string" || evidenceManifestUri.length === 0) {
@@ -156,9 +165,49 @@ function readTeeResultSummary(item: Record<string, unknown>): {
         );
     }
     return {
+        event_uid: typeof eventUid === "string" && eventUid.length > 0 ? eventUid : null,
+        event_revision: typeof eventRevision === "number" ? eventRevision : null,
+        latest_source: readLatestSource(parsed),
         evidence_manifest_uri: evidenceManifestUri,
         evidence_manifest_hash: evidenceManifestHash,
     };
+}
+
+function emptyTeeResultSummary(): {
+    event_uid: null;
+    event_revision: null;
+    latest_source: null;
+    evidence_manifest_uri: null;
+    evidence_manifest_hash: null;
+} {
+    return {
+        event_uid: null,
+        event_revision: null,
+        latest_source: null,
+        evidence_manifest_uri: null,
+        evidence_manifest_hash: null,
+    };
+}
+
+function readLatestSource(result: Record<string, unknown>): string | null {
+    const evidenceManifest = result.evidence_manifest;
+    if (!isRecord(evidenceManifest) || !Array.isArray(evidenceManifest.sources)) {
+        return null;
+    }
+    let latest: { source: string; updatedAtMs: number } | null = null;
+    for (const item of evidenceManifest.sources) {
+        if (!isRecord(item) || typeof item.source !== "string") {
+            continue;
+        }
+        const updatedAtMs = item.source_updated_at_ms;
+        if (typeof updatedAtMs !== "number" || !Number.isSafeInteger(updatedAtMs)) {
+            continue;
+        }
+        if (latest === null || updatedAtMs > latest.updatedAtMs) {
+            latest = { source: item.source, updatedAtMs };
+        }
+    }
+    return latest?.source ?? null;
 }
 
 function readDynamoJsonStringArray(item: Record<string, unknown>, key: string): string[] {
@@ -173,7 +222,9 @@ function readDynamoJsonStringArray(item: Record<string, unknown>, key: string): 
     return parsed;
 }
 
-main().catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.exitCode = 1;
-});
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    main().catch((error: unknown) => {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+    });
+}
