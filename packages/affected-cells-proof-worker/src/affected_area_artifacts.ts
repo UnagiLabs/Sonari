@@ -216,21 +216,22 @@ function computeAffectedCellsBounds(cells: readonly CanonicalCell[]): AffectedAr
         throw new Error("affected cells must not be empty");
     }
 
-    const bounds = cells.reduce(
+    const latBounds = cells.reduce(
         (acc, cell) => ({
             north: Math.max(acc.north, cell.bounds.north),
             south: Math.min(acc.south, cell.bounds.south),
-            east: Math.max(acc.east, cell.bounds.east),
-            west: Math.min(acc.west, cell.bounds.west),
         }),
-        { north: -90, south: 90, east: -180, west: 180 },
+        { north: -90, south: 90 },
+    );
+    const lngBounds = minimalLongitudeSpan(
+        cells.flatMap((cell) => cell.boundary.map((point) => point.lng)),
     );
 
     return {
-        north: round(bounds.north, BOUNDS_DECIMAL_PLACES),
-        south: round(bounds.south, BOUNDS_DECIMAL_PLACES),
-        east: round(bounds.east, BOUNDS_DECIMAL_PLACES),
-        west: round(bounds.west, BOUNDS_DECIMAL_PLACES),
+        north: round(latBounds.north, BOUNDS_DECIMAL_PLACES),
+        south: round(latBounds.south, BOUNDS_DECIMAL_PLACES),
+        east: round(lngBounds.east, BOUNDS_DECIMAL_PLACES),
+        west: round(lngBounds.west, BOUNDS_DECIMAL_PLACES),
     };
 }
 
