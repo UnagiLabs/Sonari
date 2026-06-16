@@ -1,7 +1,7 @@
 export {};
 
 declare global {
-    interface WorkflowEntrypoint<Env = unknown, Params = unknown> {
+    class WorkflowEntrypoint<Env = unknown, Params = unknown> {
         readonly env: Env;
         run(event: WorkflowEvent<Params>, step: WorkflowStep): Promise<unknown>;
     }
@@ -76,10 +76,5 @@ declare global {
         get(id: string): Promise<WorkflowInstance>;
     }
 
-    var WorkflowEntrypoint:
-        | {
-              new <Env = unknown, Params = unknown>(): WorkflowEntrypoint<Env, Params>;
-          }
-        | undefined;
     var NonRetryableError: (new (message?: string) => Error) | undefined;
 }

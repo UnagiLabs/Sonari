@@ -14,6 +14,7 @@ bucket_name = "sonari-affected-area-tiles-v1"
 binding = "AFFECTED_AREA_ARTIFACT_WORKFLOW"
 name = "sonari-affected-area-artifact-workflow"
 class_name = "AffectedAreaArtifactWorkflow"
+script_name = "sonari-affected-cells-proof-worker"
 
 # ---------------------------------------------------------------------------
 # Vars（GEO_RESOLUTION / WALRUS_AGGREGATOR_URL / SONARI_AFFECTED_AREA_BASE_URL）はここにハードコードしない。
