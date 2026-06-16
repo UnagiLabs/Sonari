@@ -16,6 +16,7 @@ import {
 
 const request = {
     source_event_id: "us7000sonari",
+    event_revision: 1,
     hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
     primary_source: BCS_ENUMS.primarySource.USGS,
     geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
@@ -70,6 +71,23 @@ describe("runner HTTP service", () => {
                     affected_cells_root: "0xdeadbeef",
                 },
             }),
+        });
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({
+            ok: false,
+            error_code: "AWS_RUNNER_CONTRACT_INVALID",
+        });
+    });
+
+    it("requires event_revision on /process payloads", async () => {
+        const server = await listen(new RecordingTeeAdapter());
+        const runnerId = await startRunner(server.url);
+        const { event_revision: _eventRevision, ...payload } = request;
+        const response = await fetch(`${server.url}/process`, {
+            method: "POST",
+            headers: authHeaders(runnerId),
+            body: JSON.stringify({ payload }),
         });
 
         expect(response.status).toBe(400);

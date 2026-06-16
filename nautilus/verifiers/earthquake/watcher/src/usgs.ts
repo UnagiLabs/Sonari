@@ -14,6 +14,7 @@ export type UsgsAlertLevel = "green" | "yellow" | "orange" | "red";
 export interface UsgsSourceEventIdResolution {
     source_event_id: string;
     requested_source_event_id?: string;
+    occurred_at_ms?: number;
 }
 
 export interface UsgsSourceEventIdUnavailableResolution {
@@ -76,17 +77,21 @@ export async function resolveUsgsSourceEventId(
     } catch {
         return unavailable;
     }
-    const identity = parseUsgsDetailIdentity(detail);
+    const identity = parseUsgsDetailEventIdentity(detail);
     if (identity === null) {
         return unavailable;
     }
-    if (identity.id === input.sourceEventId) {
-        return { source_event_id: identity.id };
+    if (identity.source_event_id === input.sourceEventId) {
+        return {
+            source_event_id: identity.source_event_id,
+            occurred_at_ms: identity.occurred_at_ms,
+        };
     }
     if (usgsIdsContains(identity.ids, input.sourceEventId)) {
         return {
-            source_event_id: identity.id,
+            source_event_id: identity.source_event_id,
             requested_source_event_id: input.sourceEventId,
+            occurred_at_ms: identity.occurred_at_ms,
         };
     }
     return null;
@@ -134,12 +139,18 @@ function parseFeature(feature: unknown): UsgsEarthquakeCandidate | null {
     return candidate;
 }
 
-function parseUsgsDetailIdentity(input: unknown): { id: string; ids: string | undefined } | null {
+export function parseUsgsDetailEventIdentity(
+    input: unknown,
+): { source_event_id: string; occurred_at_ms: number; ids: string | undefined } | null {
     if (!isRecord(input) || typeof input.id !== "string" || !isRecord(input.properties)) {
         return null;
     }
+    if (!isUnixMs(input.properties.time)) {
+        return null;
+    }
     return {
-        id: input.id,
+        source_event_id: input.id,
+        occurred_at_ms: input.properties.time,
         ids: typeof input.properties.ids === "string" ? input.properties.ids : undefined,
     };
 }

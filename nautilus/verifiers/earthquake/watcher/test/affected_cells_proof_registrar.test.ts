@@ -10,7 +10,7 @@ import {
 
 const input: AffectedCellsProofRegistrationInput = {
     event_uid: `0x${"12".repeat(32)}`,
-    event_revision: 1,
+    event_revision: 2,
     affected_cells_uri: "walrus://blob/cellsBlob_123456",
     affected_cells_hash: `0x${"34".repeat(32)}`,
     affected_cells_root: `0x${"56".repeat(32)}`,
@@ -55,7 +55,7 @@ describe("HttpAffectedCellsProofRegistrar", () => {
 
         expect(fetchCalls).toEqual([
             {
-                url: `https://proof-worker.test/events/${encodeURIComponent(input.event_uid)}/revisions/1/affected-cells`,
+                url: `https://proof-worker.test/events/${encodeURIComponent(input.event_uid)}/revisions/2/affected-cells`,
                 headers: {
                     "content-type": "application/json",
                     "x-sonari-affected-proof-register-token": "registrar-token",

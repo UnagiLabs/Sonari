@@ -17,7 +17,7 @@ import {
     encodeEarthquakeOraclePayloadBcsHex,
 } from "@sonari/earthquake-shared";
 import { FAILED_RETRY_BACKOFF_MS } from "../src/constants.js";
-import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
+import type { RelayerAdapter, RelayerErrorCode, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
@@ -298,6 +298,32 @@ describe("AWS runner workflow helper", () => {
         expect(earthquakeStateMachine).toContain('"action": "relayer_preview_or_dry_run"');
         expect(earthquakeStateMachine).toContain('"action": "record_relayer_success"');
         expect(earthquakeStateMachine).toContain('"result_s3_key.$": "$.result_s3_key"');
+        for (const action of [
+            "poll_command",
+            "read_health_check_result",
+            "read_attestation_result",
+            "register_enclave_instance",
+            "read_result",
+            "apply_result",
+            "archive_sources",
+            "register_affected_cells_proof",
+            "relayer_preview_or_dry_run",
+            "record_relayer_success",
+            "run_floor_census",
+            "mark_failed",
+            "stop_instance",
+        ]) {
+            const actionIndex = earthquakeStateMachine.indexOf(`"action": "${action}"`);
+            expect(actionIndex, `missing action ${action}`).toBeGreaterThanOrEqual(0);
+            const nextActionIndex = earthquakeStateMachine.indexOf('"action":', actionIndex + 1);
+            const actionBlock = earthquakeStateMachine.slice(
+                actionIndex,
+                nextActionIndex === -1 ? undefined : nextActionIndex,
+            );
+            expect(actionBlock, `${action} must preserve event_revision`).toContain(
+                '"event_revision.$": "$.event_revision"',
+            );
+        }
         expect(earthquakeStateMachine).not.toContain('"result.$": "$.result"');
         expect(template).toContain("RunnerControlLambda:");
         expect(template).toContain("Handler: dist/src/runner_workflow.handler");
@@ -1002,7 +1028,9 @@ describe("AWS runner workflow helper", () => {
     });
 
     it("keeps full TEE result bodies out of workflow task results", async () => {
-        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"), {
+            eventRevision: 2,
+        });
         const handler = createRunnerControlHandler({
             autoscaling: new RecordingAutoScalingClient(),
             ec2: new RecordingEc2Client(),
@@ -1813,7 +1841,7 @@ describe("AWS runner workflow helper", () => {
         await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
         await repository.markSourceArchiveResult(
             "us7000sonari",
-            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/affected_cells.json"] },
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/2/affected_cells.json"] },
             1_800_000_001_500,
             1,
         );
@@ -2035,6 +2063,110 @@ describe("AWS runner workflow helper", () => {
             relayer_status: "failed",
             relayer_error_code: "RELAYER_SUBMIT_FAILED",
             relayer_error_message: "RELAYER_NETWORK is required",
+        });
+    });
+
+    it("marks duplicate or stale Move relayer rejections terminal", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+            0,
+            1,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/0.bin"] },
+            1_800_000_001_500,
+            1,
+        );
+        const relayer = new FailingRelayerAdapter(
+            "MOVE_REJECTED",
+            "MoveAbort EDuplicateDisasterEvent while creating disaster event",
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ relayer: "failed" });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            next_retry_at_ms: null,
+            error_code: "MOVE_REJECTED",
+            planned_event_revision: 1,
+            relayer_mode: "preview",
+            relayer_status: "failed",
+            relayer_error_code: "MOVE_REJECTED",
+            relayer_error_message: "MoveAbort EDuplicateDisasterEvent while creating disaster event",
+        });
+        await expect(repository.listDue(1_800_000_003_000, 10)).resolves.toEqual([]);
+    });
+
+    it("keeps generic Move relayer rejections on the current path", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+            0,
+            1,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/0.bin"] },
+            1_800_000_001_500,
+            1,
+        );
+        const relayer = new FailingRelayerAdapter("MOVE_REJECTED", "MoveAbort EVerifierPaused");
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ relayer: "failed" });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            error_code: null,
+            planned_event_revision: 1,
+            relayer_status: "failed",
+            relayer_error_code: "MOVE_REJECTED",
+            relayer_error_message: "MoveAbort EVerifierPaused",
         });
     });
 
@@ -2386,7 +2518,9 @@ describe("AWS runner workflow helper", () => {
 
     it("runs floor census once after recorded relayer success", async () => {
         const repository = new InMemoryStateRepository();
-        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }));
+        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }), {
+            eventRevision: 2,
+        });
         await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000, {
             requestedSourceEventId: "us7000sonari",
         });
@@ -2480,6 +2614,9 @@ describe("AWS runner workflow helper", () => {
             floor_census: "skipped",
         });
         expect(floorCensus.inputs).toHaveLength(1);
+        expect(floorCensus.inputs[0]).toMatchObject({
+            result: { payload: { event_revision: 2 } },
+        });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
             floor_census_status: "succeeded",
             floor_census_digest: "census-digest",
@@ -2538,8 +2675,9 @@ function finalizedResult(): Extract<TeeCoreResult, { status: "finalized" }> {
 
 function finalizedResultWithRawManifest(
     bytes: Uint8Array,
-    options: { sourceUri?: string } = {},
+    options: { sourceUri?: string; eventRevision?: number } = {},
 ): Extract<TeeCoreResult, { status: "finalized" }> {
+    const eventRevision = options.eventRevision ?? 1;
     const hash = `0x${sha256Hex(bytes)}`;
     const manifest: RawDataManifest = {
         entries: [
@@ -2561,7 +2699,7 @@ function finalizedResultWithRawManifest(
     };
     const affectedCells = {
         event_uid: `0x${"aa".repeat(32)}`,
-        event_revision: 1,
+        event_revision: eventRevision,
         oracle_version: 1,
         geo_resolution: 7,
         cells_generation_method: "shakemap_gridxml_h3_center_bilinear_v1",
@@ -2586,7 +2724,7 @@ function finalizedResultWithRawManifest(
         schema_version: 1,
         oracle_version: 1,
         event_uid: `0x${"aa".repeat(32)}`,
-        event_revision: 1,
+        event_revision: eventRevision,
         hazard_type: "EARTHQUAKE",
         source_event_id: "us7000sonari",
         sources: manifest.entries.map((entry) => ({
@@ -2624,6 +2762,7 @@ function finalizedResultWithRawManifest(
     const result = finalizedResult();
     const payload: EarthquakeOraclePayload = {
         ...(result.payload as EarthquakeOraclePayload),
+        event_revision: eventRevision,
         affected_cells_root: affectedCellsRoot,
         evidence_manifest_uri: evidenceManifestRef.uri,
         evidence_manifest_hash: evidenceManifestHash,
@@ -2963,6 +3102,21 @@ class RecordingRelayerAdapter implements RelayerAdapter {
                 },
             },
         };
+    }
+}
+
+class FailingRelayerAdapter implements RelayerAdapter {
+    readonly mode = "preview" as const;
+    readonly inputs: TeeCoreResult[] = [];
+
+    constructor(
+        private readonly errorCode: RelayerErrorCode,
+        private readonly message: string,
+    ) {}
+
+    async relay(input: TeeCoreResult) {
+        this.inputs.push(input);
+        return { ok: false as const, error_code: this.errorCode, message: this.message };
     }
 }
 

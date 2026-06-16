@@ -44,6 +44,7 @@ jobs:
       WORLD_ID_ACTION: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_ACTION }}
       WORLD_ID_API_BASE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_API_BASE }}
       WORLD_ID_PROOF_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_WORLD_ID_PROOF_MODE }}
+      RELAYER_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
       NITRO_CLI_TAG: v1.4.4
       S3_PREFIX: sonari-verifier-runner
       # testnet 互換の pinned Sui CLI（PCR 自動再登録で sui client / keytool を使う）。
@@ -78,6 +79,7 @@ jobs:
             NITRO_ENCLAVE_PCR3
             WORLD_ID_APP_ID
             WORLD_ID_ACTION
+            RELAYER_SUI_GRAPHQL_URL
           )
           for name in "${required_names[@]}"; do
             if [[ -z "${!name}" ]]; then
@@ -696,6 +698,7 @@ jobs:
           RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}
           RELAYER_NETWORK: ${{ vars.SONARI_SUI_NETWORK }}
           RELAYER_GRPC_URL: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_GRPC_URL }}
+          RELAYER_SUI_GRAPHQL_URL: ${{ vars.SONARI_SUI_GRAPHQL_URL }}
           RELAYER_SENDER_ADDRESS: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SENDER_ADDRESS }}
           RELAYER_SIGNER_SECRET_ARN: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_SIGNER_SECRET_ARN }}
           RELAYER_ALLOW_SUBMIT: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_ALLOW_SUBMIT }}
@@ -760,6 +763,7 @@ jobs:
           if [[ -n "${RELAYER_GRPC_URL:-}" ]]; then
             extra_parameter_overrides+=("RelayerGrpcUrl=$RELAYER_GRPC_URL")
           fi
+          extra_parameter_overrides+=("SonariSuiGraphqlUrl=$RELAYER_SUI_GRAPHQL_URL")
           if [[ -n "${RELAYER_SENDER_ADDRESS:-}" ]]; then
             extra_parameter_overrides+=("RelayerSenderAddress=$RELAYER_SENDER_ADDRESS")
           fi

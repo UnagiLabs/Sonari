@@ -16,6 +16,7 @@ import {
     DynamoDbStateRepository,
     InMemoryStateRepository,
     parseUsgsRecentFeed,
+    processDueEventsInlineForTests,
     scanCandidates,
     startDueAffectedCellsProofRegistrationRetries,
     startDueWorkflows,
@@ -86,7 +87,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000eligible",
-                executionName: "earthquake-us7000eligible-1",
+                executionName: "earthquake-us7000eligible-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -117,7 +118,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000eligible",
-                executionName: "earthquake-us7000eligible-1",
+                executionName: "earthquake-us7000eligible-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -161,7 +162,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "official20110311054624120_30",
-                executionName: "earthquake-official20110311054624120_30-1",
+                executionName: "earthquake-official20110311054624120_30-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -322,11 +323,12 @@ describe("AWS Lambda watcher handlers", () => {
         expect(commands).toHaveLength(1);
         expect(readCommandInput(commands[0])).toMatchObject({
             stateMachineArn: "arn:aws:states:runner",
-            name: "earthquake-us7000default-1",
+            name: "earthquake-us7000default-r1-a1",
         });
         expect(JSON.parse(String(readCommandInput(commands[0]).input))).toEqual({
             verifier_kind: "earthquake",
             source_event_id: "us7000default",
+            event_revision: 1,
             attempt: 1,
         });
     });
@@ -367,7 +369,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000manual",
-                executionName: "earthquake-us7000manual-1",
+                executionName: "earthquake-us7000manual-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -403,7 +405,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "official20110311054624120_30",
-                executionName: "earthquake-official20110311054624120_30-1",
+                executionName: "earthquake-official20110311054624120_30-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -424,6 +426,7 @@ describe("AWS Lambda watcher handlers", () => {
             return Response.json({
                 id: "official20110311054624120_30",
                 properties: {
+                    time: baseNow,
                     ids: ",usc0001xgp,official20110311054624120_30,",
                 },
             });
@@ -452,7 +455,7 @@ describe("AWS Lambda watcher handlers", () => {
             expect(workflow.starts).toEqual([
                 {
                     sourceEventId: "official20110311054624120_30",
-                    executionName: "earthquake-official20110311054624120_30-1",
+                    executionName: "earthquake-official20110311054624120_30-r1-a1",
                     attempt: 1,
                 },
             ]);
@@ -531,7 +534,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000failed",
-                executionName: "earthquake-us7000failed-2",
+                executionName: "earthquake-us7000failed-r1-a2",
                 attempt: 2,
             },
         ]);
@@ -549,7 +552,7 @@ describe("AWS Lambda watcher handlers", () => {
         await pendingRepository.upsertManualEvent("us7000pending", baseNow);
         await pendingRepository.markWorkflowStarted(
             "us7000pending",
-            "earthquake-us7000pending-1",
+            "earthquake-us7000pending-r1-a1",
             baseNow + 1_000,
         );
         await pendingRepository.applyRunnerResult(
@@ -571,7 +574,7 @@ describe("AWS Lambda watcher handlers", () => {
         expect(pendingWorkflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "earthquake-us7000pending-2",
+                executionName: "earthquake-us7000pending-r1-a2",
                 attempt: 2,
             },
         ]);
@@ -599,8 +602,9 @@ describe("AWS Lambda watcher handlers", () => {
     });
 
     it("builds the minimal TEE request without trusting summary fields", () => {
-        expect(buildEarthquakeVerifierRequest("us7000sonari")).toEqual({
+        expect(buildEarthquakeVerifierRequest("us7000sonari", 7)).toEqual({
             source_event_id: "us7000sonari",
+            event_revision: 7,
             hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
             primary_source: BCS_ENUMS.primarySource.USGS,
             geo_resolution: 7,
@@ -725,6 +729,307 @@ describe("DynamoDB-compatible repository behavior", () => {
                 source_updated_at_ms: baseNow + 4_000,
             });
         }
+    });
+
+    it("manual rerun of a finalized row clears old results and starts a fresh latest+1 attempt", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const latestReads: string[] = [];
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 5_000,
+            token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
+            readLatestOnchainEventRevision: {
+                async readLatestEventRevision(eventUid) {
+                    latestReads.push(eventUid);
+                    return 1;
+                },
+            },
+        });
+
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-r1-a1",
+            baseNow + 500,
+            0,
+            1,
+        );
+        await repository.updateRunnerWorkflowProgress({
+            sourceEventId: "us7000sonari",
+            attempt: 1,
+            phase: "reading_result",
+            instanceId: "i-old",
+            commandId: "cmd-old",
+            resultS3Key: "results/us7000sonari/finalized.json",
+            lastPollAtMs: baseNow + 750,
+            nowMs: baseNow + 750,
+        });
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            finalizedResult(),
+            baseNow + 1_000,
+            undefined,
+            1,
+        );
+        await repository.markRelayerSucceeded(
+            "us7000sonari",
+            {
+                mode: "submit",
+                request: relayerRequestPreview(),
+                digest: "0xdigest",
+                objectId: "0xobject",
+            },
+            baseNow + 2_000,
+            1,
+        );
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/raw.json"] },
+            baseNow + 2_500,
+            1,
+        );
+        await repository.markAffectedCellsProofRegistrationResult(
+            "us7000sonari",
+            { status: "retryable_failed", retryableNextRetryAtMs: baseNow + HOUR_MS },
+            baseNow + 3_000,
+            1,
+        );
+        await repository.markFloorCensusProcessing("us7000sonari", baseNow + 3_500, 1);
+        await repository.markFloorCensusResult(
+            "us7000sonari",
+            { status: "succeeded", digest: "0xcensus", counts: [1n, 2n, 3n] },
+            baseNow + 4_000,
+            1,
+        );
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000sonari" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(latestReads).toEqual([
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ]);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000sonari",
+                executionName: "earthquake-us7000sonari-r2-a1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            latest_revision: 1,
+            planned_event_revision: 2,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
+            tee_result_json: null,
+            relayer_status: null,
+            relayer_request_json: null,
+            relayer_digest: null,
+            relayer_object_id: null,
+            relayer_submitted_at_ms: null,
+            source_archive_status: null,
+            source_artifact_s3_keys_json: null,
+            affected_cells_proof_registration_status: null,
+            affected_cells_proof_registration_next_retry_at_ms: null,
+            floor_census_status: null,
+            floor_census_digest: null,
+            runner_instance_id: null,
+            runner_command_id: null,
+            runner_result_s3_key: null,
+        });
+    });
+
+    it("manual rerun after terminal duplicate relayer rejection plans a newer latest+1 revision", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const latestReads: string[] = [];
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 5_000,
+            token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
+            readLatestOnchainEventRevision: {
+                async readLatestEventRevision(eventUid) {
+                    latestReads.push(eventUid);
+                    return 2;
+                },
+            },
+        });
+
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-r1-a1",
+            baseNow + 500,
+            0,
+            1,
+        );
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            finalizedResult(),
+            baseNow + 1_000,
+            undefined,
+            1,
+        );
+        await repository.markRelayerFailed(
+            "us7000sonari",
+            "submit",
+            "MOVE_REJECTED",
+            "MoveAbort EStaleDisasterEventRevision",
+            baseNow + 2_000,
+            1,
+        );
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000sonari" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(latestReads).toEqual([
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ]);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000sonari",
+                executionName: "earthquake-us7000sonari-r3-a1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            latest_revision: 1,
+            planned_event_revision: 3,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            error_code: null,
+            relayer_status: null,
+            relayer_error_code: null,
+            relayer_error_message: null,
+        });
+    });
+
+    it("DynamoDB manual rerun resets terminal result rows without dropping stable identity", async () => {
+        const terminalRow = await eventRow("us7000sonari", {
+            requested_source_event_id: "usc0001xgp",
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            planned_event_revision: 1,
+            status: "submitted",
+            latest_revision: 1,
+            retry_count: 3,
+            next_retry_at_ms: baseNow + HOUR_MS,
+            tee_result_json: JSON.stringify(finalizedResult()),
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
+            finalized_at_ms: baseNow + 1_000,
+            relayer_status: "succeeded",
+            relayer_request_json: JSON.stringify({
+                payload_bcs_hex: finalizedPayloadBcsHex,
+                signature: finalizedSignature,
+            }),
+            relayer_digest: "0xdigest",
+            relayer_object_id: "0xobject",
+            relayer_submitted_at_ms: baseNow + 2_000,
+            source_archive_status: "success",
+            source_artifact_s3_keys_json: JSON.stringify([
+                "source-artifacts/us7000sonari/1/raw.json",
+            ]),
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_next_retry_at_ms: baseNow + HOUR_MS,
+            floor_census_status: "succeeded",
+            floor_census_digest: "0xcensus",
+            runner_job_id: "earthquake-us7000sonari-r1-a1",
+            runner_attempt: 1,
+            runner_phase: "complete",
+            runner_instance_id: "i-old",
+            runner_command_id: "cmd-old",
+            runner_result_s3_key: "results/us7000sonari/finalized.json",
+            created_at_ms: baseNow,
+        });
+        const client = new StaleReadRaceClient(terminalRow, terminalRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await repository.upsertManualEvent("us7000sonari", baseNow + 5_000, {
+            requestedSourceEventId: "usc0001xgp",
+        });
+
+        expect(client.currentRow).toMatchObject({
+            source_event_id: "us7000sonari",
+            requested_source_event_id: "usc0001xgp",
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            created_at_ms: baseNow,
+            status: "new",
+            latest_revision: 1,
+            planned_event_revision: null,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            tee_result_json: null,
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
+            relayer_status: null,
+            relayer_request_json: null,
+            relayer_digest: null,
+            relayer_object_id: null,
+            relayer_submitted_at_ms: null,
+            source_archive_status: null,
+            source_artifact_s3_keys_json: null,
+            affected_cells_proof_registration_status: null,
+            affected_cells_proof_registration_next_retry_at_ms: null,
+            floor_census_status: null,
+            floor_census_digest: null,
+            runner_job_id: null,
+            runner_attempt: null,
+            runner_phase: null,
+            runner_instance_id: null,
+            runner_command_id: null,
+            runner_result_s3_key: null,
+        });
+    });
+
+    it("scheduled scans still preserve terminal rows", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+        await repository.applyRunnerResult("us7000sonari", finalizedResult(), baseNow + 1_000);
+        await repository.markRelayerSucceeded(
+            "us7000sonari",
+            {
+                mode: "submit",
+                request: relayerRequestPreview(),
+                digest: "0xdigest",
+                objectId: "0xobject",
+            },
+            baseNow + 2_000,
+        );
+
+        await repository.upsertCandidate(
+            candidate("us7000sonari", { source_updated_at_ms: baseNow + 3_000 }),
+            baseNow + 3_000,
+        );
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "submitted",
+            latest_revision: 1,
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            relayer_status: "succeeded",
+            relayer_digest: "0xdigest",
+            source_updated_at_ms: baseNow,
+        });
     });
 
     it("paginates DynamoDB scans before filtering and applying the due limit", async () => {
@@ -1101,6 +1406,96 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("plans revision 1 when no on-chain event exists and passes it to workflow start", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const calls: string[] = [];
+        await repository.upsertManualEvent("us7000revision1", baseNow);
+
+        const started = await startDueWorkflows(repository, workflow, baseNow + 1_000, 1, {
+            readLatestOnchainEventRevision: {
+                async readLatestEventRevision(eventUid) {
+                    calls.push(eventUid);
+                    return 0;
+                },
+            },
+        });
+
+        expect(started).toBe(1);
+        expect(calls).toHaveLength(1);
+        expect(workflow.starts[0]?.eventRevision).toBe(1);
+        expect(workflow.starts[0]).toMatchObject({
+            sourceEventId: "us7000revision1",
+            executionName: "earthquake-us7000revision1-r1-a1",
+            attempt: 1,
+        });
+        await expect(repository.get("us7000revision1")).resolves.toMatchObject({
+            planned_event_revision: 1,
+        });
+    });
+
+    it("plans latest on-chain revision plus one and reuses it on retry", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        let latestReads = 0;
+        await repository.upsertManualEvent("us7000revision5", baseNow);
+        const revisionReader = {
+            async readLatestEventRevision() {
+                latestReads += 1;
+                return 4;
+            },
+        };
+
+        await startDueWorkflows(repository, workflow, baseNow + 1_000, 1, {
+            readLatestOnchainEventRevision: revisionReader,
+        });
+        await repository.markFailed(
+            "us7000revision5",
+            "AWS_RUNNER_PROCESS_FAILED",
+            baseNow + 2_000,
+            baseNow + 3_000,
+            "retry",
+            1,
+        );
+        await repository.markWorkflowStopped("us7000revision5", 1, baseNow + 2_000);
+        const restarted = await startDueWorkflows(repository, workflow, baseNow + 3_000, 1, {
+            readLatestOnchainEventRevision: revisionReader,
+        });
+
+        expect(restarted).toBe(1);
+        expect(latestReads).toBe(1);
+        expect(workflow.starts.map((start) => start.eventRevision)).toEqual([5, 5]);
+        expect(workflow.starts.map((start) => start.executionName)).toEqual([
+            "earthquake-us7000revision5-r5-a1",
+            "earthquake-us7000revision5-r5-a2",
+        ]);
+    });
+
+    it("passes queued job revision into inline runner requests", async () => {
+        const repository = new InMemoryStateRepository();
+        const requests: unknown[] = [];
+        await repository.upsertManualEvent("us7000inline", baseNow);
+
+        await processDueEventsInlineForTests(
+            repository,
+            {
+                async run(request) {
+                    requests.push(request);
+                    return pendingSourceResult("us7000inline");
+                },
+            },
+            baseNow + 1_000,
+            1,
+        );
+
+        expect(requests).toEqual([
+            expect.objectContaining({
+                source_event_id: "us7000inline",
+                event_revision: 1,
+            }),
+        ]);
+    });
+
     it("starts at most one workflow for each scheduler invocation", async () => {
         const repository = new InMemoryStateRepository();
         const workflow = new RecordingWorkflowStarter();
@@ -1113,7 +1508,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000first",
-                executionName: "earthquake-us7000first-1",
+                executionName: "earthquake-us7000first-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -1127,7 +1522,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         await repository.upsertManualEvent("us7000second", baseNow + 1);
         await repository.tryStartRunnerWorkflowExclusively(
             "us7000first",
-            "earthquake-us7000first-1",
+            "earthquake-us7000first-r1-a1",
             baseNow + 1_000,
             0,
         );
@@ -1160,12 +1555,12 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000first",
-                executionName: "earthquake-us7000first-1",
+                executionName: "earthquake-us7000first-r1-a1",
                 attempt: 1,
             },
             {
                 sourceEventId: "us7000second",
-                executionName: "earthquake-us7000second-1",
+                executionName: "earthquake-us7000second-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -1190,7 +1585,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000second",
-                executionName: "earthquake-us7000second-1",
+                executionName: "earthquake-us7000second-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -1471,7 +1866,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000dead",
-                executionName: "earthquake-us7000dead-1",
+                executionName: "earthquake-us7000dead-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -1508,12 +1903,12 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "earthquake-us7000pending-1",
+                executionName: "earthquake-us7000pending-r1-a1",
                 attempt: 1,
             },
             {
                 sourceEventId: "us7000pending",
-                executionName: "earthquake-us7000pending-2",
+                executionName: "earthquake-us7000pending-r1-a2",
                 attempt: 2,
             },
         ]);
@@ -1541,7 +1936,7 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "earthquake-us7000pending-1",
+                executionName: "earthquake-us7000pending-r1-a1",
                 attempt: 1,
             },
         ]);
@@ -1572,12 +1967,12 @@ describe("DynamoDB-compatible repository behavior", () => {
         expect(workflow.starts).toEqual([
             {
                 sourceEventId: "us7000pending",
-                executionName: "earthquake-us7000pending-1",
+                executionName: "earthquake-us7000pending-r1-a1",
                 attempt: 1,
             },
             {
                 sourceEventId: "us7000pending",
-                executionName: "earthquake-us7000pending-2",
+                executionName: "earthquake-us7000pending-r1-a2",
                 attempt: 2,
             },
         ]);
@@ -1666,6 +2061,7 @@ describe("DynamoDB-compatible repository behavior", () => {
             sourceEventId: "us7000race",
             executionName: "earthquake-us7000race-1",
             attempt: 1,
+            eventRevision: 1,
         });
         expect(stopped).toBe(true);
         expect(client.currentRow).toMatchObject({
@@ -2350,6 +2746,29 @@ function pendingSourceResult(sourceEventId: string): TeeCoreResult {
         source_event_id: sourceEventId,
         error_code: "SHAKEMAP_PRODUCT_MISSING",
     };
+}
+
+function relayerRequestPreview() {
+    const args: [string, string, string, string, string, number[], number[], number[]] = [
+        "0xregistry",
+        "0xverifier",
+        "0xcategory",
+        "0xpool",
+        "0xclock",
+        [1],
+        [2],
+        [3],
+    ];
+    const request = {
+        target: "0xtarget",
+        registry: "0xregistry",
+        verifierRegistry: "0xverifier",
+        categoryRegistry: "0xcategory",
+        categoryPool: "0xpool",
+        clock: "0xclock",
+        arguments: args,
+    };
+    return { ...request, submitRequest: { ...request } };
 }
 
 /**

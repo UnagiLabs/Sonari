@@ -140,6 +140,7 @@ export interface EarthquakeOraclePayload {
 
 export interface WorkerToTeeRequest {
     source_event_id: string;
+    event_revision: number;
     hazard_type: typeof BCS_ENUMS.hazardType.EARTHQUAKE;
     primary_source: typeof BCS_ENUMS.primarySource.USGS;
     geo_resolution: typeof DEFAULT_ORACLE_CONTRACT.geo_resolution;
@@ -271,6 +272,7 @@ type ValidationResult<T> =
 
 const WORKER_TO_TEE_KEYS = [
     "source_event_id",
+    "event_revision",
     "hazard_type",
     "primary_source",
     "geo_resolution",
@@ -552,6 +554,7 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
         input.hazard_type !== BCS_ENUMS.hazardType.EARTHQUAKE ||
         input.primary_source !== BCS_ENUMS.primarySource.USGS ||
         input.geo_resolution !== DEFAULT_ORACLE_CONTRACT.geo_resolution ||
+        !isSafeIntegerInRange(input.event_revision, 1, U32_MAX) ||
         !isNonEmptyString(input.source_event_id)
     ) {
         return {
@@ -565,6 +568,7 @@ export function validateWorkerToTeeRequest(input: unknown): ValidationResult<Wor
         ok: true,
         value: {
             source_event_id: input.source_event_id,
+            event_revision: input.event_revision,
             hazard_type: input.hazard_type,
             primary_source: input.primary_source,
             geo_resolution: input.geo_resolution,

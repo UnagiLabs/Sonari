@@ -60,6 +60,7 @@ const claim: DashboardClaimEvent = {
 const latestEvent: DashboardDisasterEvent = {
     id: `0x${"77".repeat(32)}`,
     sourceEventId: "usgs-1",
+    eventRevision: 2,
     title: "M6.8 earthquake",
     region: "Offshore Iwate, Japan",
     hazardLabel: "earthquake",

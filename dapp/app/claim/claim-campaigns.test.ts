@@ -176,6 +176,19 @@ describe("deriveClaimCampaignState", () => {
         expect(state?.floorClaimAvailable).toBe(false);
         expect(state?.payoutFinalized).toBe(false);
     });
+
+    it("excludes campaign state when campaign and disaster revisions do not match", () => {
+        const campaign = parseCampaignObject(CAMPAIGN_ID, campaignObjectJson({ event_revision: "2" }));
+        const disaster = parseDisasterEventObject(
+            DISASTER_EVENT_ID,
+            disasterEventObjectJson({ event_revision: "3" }),
+        );
+        if (campaign === null || disaster === null) {
+            throw new Error("fixtures must parse");
+        }
+
+        expect(deriveClaimCampaignState(campaign, disaster, "1900")).toBeNull();
+    });
 });
 
 describe("deriveClaimEligibility", () => {

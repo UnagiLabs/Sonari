@@ -913,6 +913,7 @@ mod tests {
             "action": "process_data",
             "payload": {
                 "source_event_id": "us7000sonari",
+                "event_revision": 1,
                 "hazard_type": 1,
                 "primary_source": 1,
                 "geo_resolution": 7,

@@ -236,6 +236,7 @@ describe("oracle boundary validators", () => {
         expect(
             validateWorkerToTeeRequest({
                 source_event_id: "us7000sonari",
+                event_revision: 1,
                 hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
                 primary_source: BCS_ENUMS.primarySource.USGS,
                 geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
@@ -244,10 +245,32 @@ describe("oracle boundary validators", () => {
             ok: true,
             value: {
                 source_event_id: "us7000sonari",
+                event_revision: 1,
                 hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
                 primary_source: BCS_ENUMS.primarySource.USGS,
                 geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
             },
+        });
+    });
+
+    it("validates Worker event revisions as required u32 values", () => {
+        const valid = {
+            source_event_id: "us7000sonari",
+            event_revision: 1,
+            hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+            primary_source: BCS_ENUMS.primarySource.USGS,
+            geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
+        };
+
+        for (const event_revision of [undefined, 0, 1.5, 0x1_0000_0000]) {
+            expect(validateWorkerToTeeRequest({ ...valid, event_revision })).toMatchObject({
+                ok: false,
+                error_code: "INVALID_WORKER_TEE_REQUEST",
+            });
+        }
+        expect(validateWorkerToTeeRequest({ ...valid, event_revision: 0xffff_ffff })).toEqual({
+            ok: true,
+            value: { ...valid, event_revision: 0xffff_ffff },
         });
     });
 
@@ -282,6 +305,7 @@ describe("oracle boundary validators", () => {
                 primary_source: BCS_ENUMS.primarySource.USGS,
                 geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
                 [forbiddenKey]: "untrusted",
+                event_revision: 1,
             });
 
             expect(result).toEqual({

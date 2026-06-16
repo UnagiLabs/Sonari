@@ -23,7 +23,7 @@ use crate::{
 };
 
 pub fn process_usgs(input: UsgsOracleInput) -> Result<OracleOutput, OracleError> {
-    process_usgs_inner(input, None)
+    process_usgs_inner(input, 1, None)
 }
 
 pub fn process_usgs_with_source_archive(
@@ -48,7 +48,15 @@ pub fn process_usgs_archived(
     input: UsgsOracleInput,
     archive: &impl SourceArchive,
 ) -> Result<OracleOutput, SourceArchiveError> {
-    let output = process_usgs_inner(input.clone(), None)?;
+    process_usgs_archived_with_event_revision(input, 1, archive)
+}
+
+pub fn process_usgs_archived_with_event_revision(
+    input: UsgsOracleInput,
+    event_revision: u32,
+    archive: &impl SourceArchive,
+) -> Result<OracleOutput, SourceArchiveError> {
+    let output = process_usgs_inner(input.clone(), event_revision, None)?;
     if output.result.status != OracleStatus::Finalized {
         return Ok(output);
     }
@@ -136,13 +144,23 @@ pub fn process_usgs_archived(
         affected_cells_ref,
         evidence_manifest_ref,
     };
-    Ok(process_usgs_inner(input, Some(archive_refs))?)
+    Ok(process_usgs_inner(
+        input,
+        event_revision,
+        Some(archive_refs),
+    )?)
 }
 
 fn process_usgs_inner(
     input: UsgsOracleInput,
+    event_revision: u32,
     archive_refs: Option<UsgsArchiveRefs>,
 ) -> Result<OracleOutput, OracleError> {
+    if event_revision == 0 {
+        return Err(OracleError::WorkerRequest(
+            "event_revision must be at least 1".to_owned(),
+        ));
+    }
     let detail = parse_detail(&input.detail_json)?;
     let base_result =
         |status, error_code: Option<&str>, expected_payload: Option<&str>| ResultSummary {
@@ -204,7 +222,6 @@ fn process_usgs_inner(
         )));
     }
 
-    let event_revision = 1;
     let verified_at_ms = input.observed_at_ms;
     let event_uid_bytes = event_uid_bytes(
         HAZARD_TYPE_EARTHQUAKE,
@@ -381,7 +398,7 @@ pub fn process_usgs_from_worker_request(
         )));
     }
 
-    process_usgs(input)
+    process_usgs_inner(input, request.event_revision, None)
 }
 
 pub fn process_usgs_with_signer(

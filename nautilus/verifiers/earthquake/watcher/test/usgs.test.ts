@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import { BCS_ENUMS } from "@sonari/earthquake-shared";
+import { computeEventUid } from "../src/event_uid.js";
 import { screenUsgsCandidate } from "../src/screening.js";
 import {
+    parseUsgsDetailEventIdentity,
     parseUsgsRecentFeed,
     resolveUsgsSourceEventId,
     USGS_RECENT_FEED_URL,
@@ -191,6 +195,7 @@ describe("USGS source event ID resolver", () => {
             return responseJson({
                 id: "usc0001xgp",
                 properties: {
+                    time: 1_704_067_200_000,
                     ids: ",usc0001xgp,",
                 },
             });
@@ -198,7 +203,10 @@ describe("USGS source event ID resolver", () => {
 
         await expect(
             resolveUsgsSourceEventId({ sourceEventId: "usc0001xgp" }, fetcher),
-        ).resolves.toEqual({ source_event_id: "usc0001xgp" });
+        ).resolves.toEqual({
+            source_event_id: "usc0001xgp",
+            occurred_at_ms: 1_704_067_200_000,
+        });
         expect(requestedUrls).toEqual([usgsDetailUrl("usc0001xgp")]);
     });
 
@@ -207,6 +215,7 @@ describe("USGS source event ID resolver", () => {
             responseJson({
                 id: "official20110311054624120_30",
                 properties: {
+                    time: 1_704_067_200_000,
                     ids: ",usc0001xgp,official20110311054624120_30,",
                 },
             });
@@ -216,6 +225,7 @@ describe("USGS source event ID resolver", () => {
         ).resolves.toEqual({
             source_event_id: "official20110311054624120_30",
             requested_source_event_id: "usc0001xgp",
+            occurred_at_ms: 1_704_067_200_000,
         });
     });
 
@@ -224,6 +234,7 @@ describe("USGS source event ID resolver", () => {
             responseJson({
                 id: "official20110311054624120_30",
                 properties: {
+                    time: 1_704_067_200_000,
                     ids: ",usc0001xgp-extra,official20110311054624120_30,",
                 },
             });
@@ -250,6 +261,53 @@ describe("USGS source event ID resolver", () => {
             });
         },
     );
+});
+
+describe("USGS detail event identity", () => {
+    it("computes the finalized_minimal fixture event_uid exactly like the TEE", async () => {
+        const detail = JSON.parse(
+            await readFile(
+                new URL(
+                    "../../fixtures/usgs/finalized_minimal/input/usgs_detail.json",
+                    import.meta.url,
+                ),
+                "utf8",
+            ),
+        ) as unknown;
+        const expectedPayload = JSON.parse(
+            await readFile(
+                new URL(
+                    "../../fixtures/usgs/finalized_minimal/expected/unsigned_payload.json",
+                    import.meta.url,
+                ),
+                "utf8",
+            ),
+        ) as { event_uid: string; source_event_id: string; occurred_at_ms: number };
+
+        const identity = parseUsgsDetailEventIdentity(detail);
+
+        expect(identity).toEqual({
+            source_event_id: expectedPayload.source_event_id,
+            occurred_at_ms: expectedPayload.occurred_at_ms,
+        });
+        expect(
+            computeEventUid({
+                hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+                primary_source: "USGS",
+                source_event_id: identity!.source_event_id,
+                occurred_at_ms: identity!.occurred_at_ms,
+            }),
+        ).toBe(expectedPayload.event_uid);
+    });
+
+    it.each([
+        ["missing id", { properties: { time: 1_704_067_200_000 } }],
+        ["missing properties", { id: "us7000sonari" }],
+        ["missing time", { id: "us7000sonari", properties: {} }],
+        ["invalid time", { id: "us7000sonari", properties: { time: "1704067200000" } }],
+    ] as const)("rejects malformed detail: %s", (_name, detail) => {
+        expect(parseUsgsDetailEventIdentity(detail)).toBeNull();
+    });
 });
 
 function responseJson(body: unknown, ok = true): Response {

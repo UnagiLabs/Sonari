@@ -9,6 +9,7 @@ import {
     UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import {
+    BCS_ENUMS,
     type EarthquakeOraclePayload,
     type OffchainStatus,
     type OracleErrorCode,
@@ -20,6 +21,7 @@ import {
     FINALIZATION_WINDOW_MS,
     PROCESSING_STALE_AFTER_MS,
 } from "./constants.js";
+import { computeEventUid } from "./event_uid.js";
 import type {
     RelayerErrorCode,
     RelayerMode,
@@ -33,6 +35,7 @@ export interface EarthquakeEventRow {
     source_event_id: string;
     requested_source_event_id?: string | null;
     event_uid: string | null;
+    planned_event_revision: number | null;
     status: OffchainStatus;
     retry_count: number;
     next_retry_at_ms: number | null;
@@ -141,6 +144,7 @@ export interface RunnerQueueJob {
     runner_job_id: string;
     source_event_id: string;
     attempt: number;
+    event_revision: number;
     enqueued_at_ms: number;
 }
 
@@ -156,6 +160,7 @@ export interface WorkflowStartInput {
     sourceEventId: string;
     executionName: string;
     attempt: number;
+    eventRevision: number;
 }
 
 interface RunnerWorkflowLockRow {
@@ -207,12 +212,14 @@ export interface StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null>;
     markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null>;
     markWorkflowStopped(sourceEventId: string, attempt: number, nowMs: number): Promise<boolean>;
     updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean>;
@@ -275,6 +282,7 @@ export interface StateRepository {
         attempt: number,
         runnerJobId: string,
         nowMs: number,
+        eventRevision?: number,
     ): Promise<RunnerQueueJob | null>;
     markQueueEnqueueFailed(
         sourceEventId: string,
@@ -362,7 +370,7 @@ export class InMemoryStateRepository implements StateRepository {
         const retryCount = existing?.retry_count ?? 0;
         const row = baseRow(candidate.source_event_id, nowMs, {
             requested_source_event_id: candidate.requested_source_event_id ?? null,
-            event_uid: existing?.event_uid ?? candidate.source_event_id,
+            event_uid: existing?.event_uid ?? candidateEventUid(candidate),
             status,
             retry_count: retryCount,
             next_retry_at_ms: status === "new" ? null : (existing?.next_retry_at_ms ?? null),
@@ -403,9 +411,15 @@ export class InMemoryStateRepository implements StateRepository {
             { bypassScreening: true },
         );
         const row = this.rows.get(sourceEventId);
-        if (row !== undefined && DUE_STATUSES.has(row.status)) {
-            row.next_retry_at_ms = null;
-            row.updated_at_ms = nowMs;
+        if (row !== undefined) {
+            if (RESULT_TERMINAL_STATUSES.has(row.status)) {
+                resetTerminalResultForManualRerun(row, nowMs);
+                return;
+            }
+            if (DUE_STATUSES.has(row.status)) {
+                row.next_retry_at_ms = null;
+                row.updated_at_ms = nowMs;
+            }
         }
     }
 
@@ -467,6 +481,7 @@ export class InMemoryStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         if (
             this.runnerWorkflowLock !== undefined &&
@@ -479,6 +494,7 @@ export class InMemoryStateRepository implements StateRepository {
             executionName,
             nowMs,
             expectedRetryCount,
+            eventRevision,
         );
         if (started === null) {
             return null;
@@ -499,6 +515,7 @@ export class InMemoryStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         const row = this.rows.get(sourceEventId);
         if (
@@ -511,6 +528,8 @@ export class InMemoryStateRepository implements StateRepository {
         }
         const attempt = row.retry_count + 1;
         row.status = "processing";
+        const plannedEventRevision = eventRevision ?? row.planned_event_revision ?? 1;
+        row.planned_event_revision = plannedEventRevision;
         row.runner_job_id = executionName;
         row.runner_queued_at_ms = null;
         row.runner_attempt = attempt;
@@ -528,7 +547,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.tee_result_json = null;
         row.error_code = null;
         row.updated_at_ms = nowMs;
-        return { sourceEventId, executionName, attempt };
+        return { sourceEventId, executionName, attempt, eventRevision: plannedEventRevision };
     }
 
     async markWorkflowStopped(
@@ -658,6 +677,11 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_error_code = errorCode;
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
+        if (isDuplicateOrStaleMoveRejection(errorCode, message)) {
+            row.status = "rejected";
+            row.next_retry_at_ms = null;
+            row.error_code = errorCode;
+        }
         row.updated_at_ms = nowMs;
         return true;
     }
@@ -737,12 +761,15 @@ export class InMemoryStateRepository implements StateRepository {
         attempt: number,
         runnerJobId: string,
         nowMs: number,
+        eventRevision?: number,
     ): Promise<RunnerQueueJob | null> {
         const row = this.rows.get(sourceEventId);
         if (row === undefined || !DUE_STATUSES.has(row.status) || row.retry_count !== attempt - 1) {
             return null;
         }
         row.status = "queued";
+        const plannedEventRevision = eventRevision ?? row.planned_event_revision ?? 1;
+        row.planned_event_revision = plannedEventRevision;
         row.runner_job_id = runnerJobId;
         row.runner_queued_at_ms = nowMs;
         row.runner_attempt = attempt;
@@ -754,6 +781,7 @@ export class InMemoryStateRepository implements StateRepository {
             runner_job_id: runnerJobId,
             source_event_id: sourceEventId,
             attempt,
+            event_revision: plannedEventRevision,
             enqueued_at_ms: nowMs,
         };
     }
@@ -975,6 +1003,7 @@ export class DynamoDbStateRepository implements StateRepository {
             { bypassScreening: true },
         );
         await this.clearManualRetryBackoff(sourceEventId, nowMs);
+        await this.resetManualTerminalResult(sourceEventId, nowMs);
     }
 
     private async clearManualRetryBackoff(sourceEventId: string, nowMs: number): Promise<void> {
@@ -1008,6 +1037,15 @@ export class DynamoDbStateRepository implements StateRepository {
                 throw error;
             }
         }
+    }
+
+    private async resetManualTerminalResult(sourceEventId: string, nowMs: number): Promise<void> {
+        const row = await this.get(sourceEventId);
+        if (row === null || !RESULT_TERMINAL_STATUSES.has(row.status)) {
+            return;
+        }
+        resetTerminalResultForManualRerun(row, nowMs);
+        await this.put(row);
     }
 
     async get(sourceEventId: string): Promise<EarthquakeEventRow | null> {
@@ -1106,6 +1144,7 @@ export class DynamoDbStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         const retryCount = expectedRetryCount ?? (await this.get(sourceEventId))?.retry_count;
         if (retryCount === undefined) {
@@ -1127,6 +1166,7 @@ export class DynamoDbStateRepository implements StateRepository {
                                     retryCount,
                                     executionName,
                                     attempt,
+                                    eventRevision,
                                     nowMs,
                                 }),
                             },
@@ -1162,7 +1202,7 @@ export class DynamoDbStateRepository implements StateRepository {
             }
             throw error;
         }
-        return { sourceEventId, executionName, attempt };
+        return { sourceEventId, executionName, attempt, eventRevision: eventRevision ?? 1 };
     }
 
     async markWorkflowStarted(
@@ -1170,6 +1210,7 @@ export class DynamoDbStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         const retryCount = expectedRetryCount ?? (await this.get(sourceEventId))?.retry_count;
         if (retryCount === undefined) {
@@ -1188,6 +1229,7 @@ export class DynamoDbStateRepository implements StateRepository {
                         retryCount,
                         executionName,
                         attempt,
+                        eventRevision,
                         nowMs,
                     }),
                 }),
@@ -1198,7 +1240,7 @@ export class DynamoDbStateRepository implements StateRepository {
             }
             throw error;
         }
-        return { sourceEventId, executionName, attempt };
+        return { sourceEventId, executionName, attempt, eventRevision: eventRevision ?? 1 };
     }
 
     async markWorkflowStopped(
@@ -1389,6 +1431,11 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_error_code = errorCode;
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
+        if (isDuplicateOrStaleMoveRejection(errorCode, message)) {
+            row.status = "rejected";
+            row.next_retry_at_ms = null;
+            row.error_code = errorCode;
+        }
         row.updated_at_ms = nowMs;
         return this.put(row, expectedAttempt, true);
     }
@@ -1468,12 +1515,15 @@ export class DynamoDbStateRepository implements StateRepository {
         attempt: number,
         runnerJobId: string,
         nowMs: number,
+        eventRevision?: number,
     ): Promise<RunnerQueueJob | null> {
         const row = await this.get(sourceEventId);
         if (row === null || !DUE_STATUSES.has(row.status) || row.retry_count !== attempt - 1) {
             return null;
         }
         row.status = "queued";
+        const plannedEventRevision = eventRevision ?? row.planned_event_revision ?? 1;
+        row.planned_event_revision = plannedEventRevision;
         row.runner_job_id = runnerJobId;
         row.runner_queued_at_ms = nowMs;
         row.runner_attempt = attempt;
@@ -1486,6 +1536,7 @@ export class DynamoDbStateRepository implements StateRepository {
             runner_job_id: runnerJobId,
             source_event_id: sourceEventId,
             attempt,
+            event_revision: plannedEventRevision,
             enqueued_at_ms: nowMs,
         };
     }
@@ -1812,7 +1863,7 @@ export class DynamoDbStateRepository implements StateRepository {
                 : { ":new_status": "new", ":ignored_small_status": "ignored_small" };
         const row = baseRow(candidate.source_event_id, nowMs, {
             requested_source_event_id: candidate.requested_source_event_id ?? null,
-            event_uid: candidate.source_event_id,
+            event_uid: candidateEventUid(candidate),
             status: screening.status,
             retry_count: 0,
             next_retry_at_ms: null,
@@ -1869,6 +1920,7 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#floor_census_counts_json = :floor_census_counts_json",
                     "#floor_census_error_message = :floor_census_error_message",
                     "#floor_census_updated_at_ms = :floor_census_updated_at_ms",
+                    "#planned_event_revision = :planned_event_revision",
                     "#runner_job_id = :runner_job_id",
                     "#runner_queued_at_ms = :runner_queued_at_ms",
                     "#runner_attempt = :runner_attempt",
@@ -2036,6 +2088,7 @@ function workflowStartUpdateExpression(): string {
     return [
         "SET #status = :processing_status",
         "#runner_job_id = :runner_job_id",
+        "#planned_event_revision = :planned_event_revision",
         "#runner_queued_at_ms = :null_value",
         "#runner_attempt = :runner_attempt",
         "#runner_id = :null_value",
@@ -2062,6 +2115,7 @@ function workflowStartExpressionNames(): Record<string, string> {
         "#next_retry_at_ms": "next_retry_at_ms",
         "#finalization_deadline_at_ms": "finalization_deadline_at_ms",
         "#runner_job_id": "runner_job_id",
+        "#planned_event_revision": "planned_event_revision",
         "#runner_queued_at_ms": "runner_queued_at_ms",
         "#runner_attempt": "runner_attempt",
         "#runner_id": "runner_id",
@@ -2085,6 +2139,7 @@ function workflowStartExpressionValues(input: {
     retryCount: number;
     executionName: string;
     attempt: number;
+    eventRevision: number | undefined;
     nowMs: number;
 }): Record<string, unknown> {
     return {
@@ -2095,6 +2150,7 @@ function workflowStartExpressionValues(input: {
         ":failed_status": "failed",
         ":processing_status": "processing",
         ":runner_job_id": input.executionName,
+        ":planned_event_revision": input.eventRevision ?? 1,
         ":runner_attempt": input.attempt,
         ":runner_phase": "starting_instance",
         ":runner_timeout_at_ms": input.nowMs + FAILED_RETRY_BACKOFF_MS,
@@ -2162,6 +2218,7 @@ function baseRow(
         source_event_id: sourceEventId,
         requested_source_event_id: null,
         event_uid: null,
+        planned_event_revision: null,
         status: "new",
         retry_count: 0,
         next_retry_at_ms: null,
@@ -2253,6 +2310,61 @@ function mergePreservingResult(
     };
 }
 
+function resetTerminalResultForManualRerun(row: EarthquakeEventRow, nowMs: number): void {
+    row.status = "new";
+    row.retry_count = 0;
+    row.next_retry_at_ms = null;
+    row.planned_event_revision = null;
+    row.error_code = null;
+    row.relayer_mode = null;
+    row.relayer_status = null;
+    row.relayer_request_json = null;
+    row.relayer_digest = null;
+    row.relayer_object_id = null;
+    row.relayer_error_code = null;
+    row.relayer_error_message = null;
+    row.relayer_updated_at_ms = null;
+    row.relayer_submitted_at_ms = null;
+    row.source_archive_status = null;
+    row.source_archive_error_code = null;
+    row.source_archive_attempt = null;
+    row.source_artifact_s3_keys_json = null;
+    row.walrus_archive_updated_at_ms = null;
+    row.affected_cells_proof_registration_status = null;
+    row.affected_cells_proof_registration_error_code = null;
+    row.affected_cells_proof_registration_attempt = null;
+    row.affected_cells_proof_registration_next_retry_at_ms = null;
+    row.affected_cells_proof_registration_error_message = null;
+    row.affected_cells_proof_registration_updated_at_ms = null;
+    row.floor_census_status = null;
+    row.floor_census_attempt = null;
+    row.floor_census_retry_count = 0;
+    row.floor_census_digest = null;
+    row.floor_census_counts_json = null;
+    row.floor_census_error_message = null;
+    row.floor_census_updated_at_ms = null;
+    row.runner_job_id = null;
+    row.runner_queued_at_ms = null;
+    row.runner_attempt = null;
+    row.runner_id = null;
+    row.runner_started_at_ms = null;
+    row.runner_stopped_at_ms = null;
+    row.runner_timeout_at_ms = null;
+    row.runner_error_message = null;
+    row.runner_stop_error = null;
+    row.runner_phase = null;
+    row.runner_instance_id = null;
+    row.runner_command_id = null;
+    row.runner_result_s3_key = null;
+    row.runner_last_poll_at_ms = null;
+    row.tee_result_json = null;
+    row.payload_bcs_hex = null;
+    row.signature = null;
+    row.public_key = null;
+    row.finalized_at_ms = null;
+    row.updated_at_ms = nowMs;
+}
+
 function isReadyForRetryOrDeadline(row: EarthquakeEventRow, nowMs: number): boolean {
     if (
         (row.status === "pending_source" || row.status === "pending_mmi") &&
@@ -2271,6 +2383,19 @@ function isDueAffectedCellsProofRegistration(row: EarthquakeEventRow, nowMs: num
         row.source_archive_status === "success" &&
         row.runner_result_s3_key !== null &&
         row.runner_attempt !== null
+    );
+}
+
+function isDuplicateOrStaleMoveRejection(errorCode: RelayerErrorCode, message: string): boolean {
+    if (errorCode !== "MOVE_REJECTED") {
+        return false;
+    }
+    const normalized = message.toLowerCase();
+    return (
+        normalized.includes("eduplicatedisasterevent") ||
+        normalized.includes("estaledisastereventrevision") ||
+        normalized.includes("duplicatedisasterevent") ||
+        normalized.includes("staledisastereventrevision")
     );
 }
 
@@ -2465,6 +2590,15 @@ function applyRunnerWorkflowProgress(
     if (input.lastPollAtMs !== undefined) {
         row.runner_last_poll_at_ms = input.lastPollAtMs;
     }
+}
+
+function candidateEventUid(candidate: UsgsEarthquakeCandidate): string {
+    return computeEventUid({
+        hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
+        primary_source: "USGS",
+        source_event_id: candidate.source_event_id,
+        occurred_at_ms: candidate.occurred_at_ms,
+    });
 }
 
 function finalizedPayloadMetadata(result: Extract<TeeCoreResult, { status: "finalized" }>): {
