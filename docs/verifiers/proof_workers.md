@@ -133,7 +133,30 @@ pnpm check:ts
 
 ```bash
 wrangler r2 bucket create sonari-affected-proofs-v1
+wrangler r2 bucket create sonari-affected-area-tiles-v1
 ```
+
+`sonari-affected-proofs-v1` は claim proof 用です。
+`sonari-affected-area-tiles-v1` は表示用の affected-area tile 専用です。
+AWS / watcher は R2 credential を持ちません。
+watcher は登録 API に Walrus URI、hash、root を送るだけです。
+
+affected-area tile の生成は Worker の HTTP request 内では行いません。
+登録 API が proof 保存に成功した後、Cloudflare Workflows を起動します。
+Workflow は Walrus から `affected_cells` を再取得し、hash、root、schema を再検証します。
+その後、`affected-cells.json`、raster tile、cell tile を R2 に保存します。
+最後に `affected-area-manifest.json` を保存します。
+manifest が最後なので、frontend は途中までの artifact を complete と扱いません。
+
+object prefix は次で固定です。
+
+```text
+affected-area/events/{event_uid}/revisions/{event_revision}
+```
+
+公開 base URL は GitHub variable `SONARI_AFFECTED_AREA_BASE_URL` を単一情報源にします。
+dapp では同じ値を `NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL` として使います。
+Worker deploy では `SONARI_AFFECTED_AREA_BASE_URL` として注入します。
 
 #### 2. Secret を登録する
 
@@ -169,6 +192,12 @@ wrangler deploy
 自動デプロイで CI に渡すのは **Cloudflare API token のみ** です。GitHub の environment
 `cloudflare-affected-cells-proof-worker` に `CLOUDFLARE_API_TOKEN`（必要なら
 `CLOUDFLARE_ACCOUNT_ID`）を secret として登録します。
+
+同じ environment または repo variables に次も登録します。
+
+- `SONARI_GEO_RESOLUTION`
+- `SONARI_WALRUS_AGGREGATOR_URL`
+- `SONARI_AFFECTED_AREA_BASE_URL`
 
 `AFFECTED_PROOF_REGISTER_TOKEN` などのアプリ secret は CI に渡しません。これらは従来どおり
 上記「2. Secret を登録する」の `wrangler secret put` で Cloudflare 側に別管理します。

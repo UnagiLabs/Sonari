@@ -73,6 +73,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SONARI_GEO_RESOLUTION: ${{ vars.SONARI_GEO_RESOLUTION }}
+          SONARI_WALRUS_AGGREGATOR_URL: ${{ vars.SONARI_WALRUS_AGGREGATOR_URL }}
+          SONARI_AFFECTED_AREA_BASE_URL: ${{ vars.SONARI_AFFECTED_AREA_BASE_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -80,6 +83,21 @@ jobs:
           if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
             echo "Missing required GitHub Environment secret: CLOUDFLARE_API_TOKEN"
             echo "Set it in environment: cloudflare-affected-cells-proof-worker"
+            exit 1
+          fi
+
+          if [[ -z "${SONARI_GEO_RESOLUTION:-}" ]]; then
+            echo "Missing required GitHub variable: SONARI_GEO_RESOLUTION"
+            exit 1
+          fi
+
+          if [[ -z "${SONARI_WALRUS_AGGREGATOR_URL:-}" ]]; then
+            echo "Missing required GitHub variable: SONARI_WALRUS_AGGREGATOR_URL"
+            exit 1
+          fi
+
+          if [[ -z "${SONARI_AFFECTED_AREA_BASE_URL:-}" ]]; then
+            echo "Missing required GitHub variable: SONARI_AFFECTED_AREA_BASE_URL"
             exit 1
           fi
 
@@ -100,7 +118,8 @@ jobs:
       # それらは `wrangler secret put` で Cloudflare 側に別管理する。CI に渡すのは
       # Cloudflare API token（と必要なら account id）のみ。
       #
-      # GEO_RESOLUTION / WALRUS_AGGREGATOR_URL は repo-level Variables（SONARI_*）を単一情報源とし、
+      # GEO_RESOLUTION / WALRUS_AGGREGATOR_URL / SONARI_AFFECTED_AREA_BASE_URL は repo-level
+      # Variables（SONARI_*）を単一情報源とし、
       # deploy 時に `--var KEY:VALUE` で注入する。wrangler.toml [vars] にはハードコードしない
       # （1 箇所更新で dapp / 各 worker / AWS へ反映する方針）。`--var` は最初の `:` で KEY と VALUE を
       # 分けるため、`https://...` を含む URL もそのまま渡せる。
@@ -112,4 +131,4 @@ jobs:
           wranglerVersion: "4.85.0"
           packageManager: pnpm
           workingDirectory: packages/affected-cells-proof-worker
-          command: deploy --var GEO_RESOLUTION:${{ vars.SONARI_GEO_RESOLUTION }} --var WALRUS_AGGREGATOR_URL:${{ vars.SONARI_WALRUS_AGGREGATOR_URL }}
+          command: deploy --var GEO_RESOLUTION:${{ vars.SONARI_GEO_RESOLUTION }} --var WALRUS_AGGREGATOR_URL:${{ vars.SONARI_WALRUS_AGGREGATOR_URL }} --var SONARI_AFFECTED_AREA_BASE_URL:${{ vars.SONARI_AFFECTED_AREA_BASE_URL }}

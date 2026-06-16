@@ -33,6 +33,15 @@ describe("affected area R2 artifact helpers", () => {
         );
     });
 
+    it("keeps the public manifest path aligned with Worker R2 object keys", () => {
+        const artifact = affectedAreaArtifactFromBaseUrl("https://assets.example.com///", LOCATION);
+
+        expect(artifact).toEqual({
+            kind: "tiled-affected-cells",
+            manifestPath: `https://assets.example.com/affected-area/events/${LOCATION.eventUid}/revisions/3/affected-area-manifest.json`,
+        });
+    });
+
     it("builds raster and cell tile URL templates", () => {
         expect(affectedAreaTileUrlTemplate("https://assets.example.com", LOCATION, "raster")).toBe(
             `https://assets.example.com/affected-area/events/${LOCATION.eventUid}/revisions/3/raster/{z}/{x}/{y}.svg`,
