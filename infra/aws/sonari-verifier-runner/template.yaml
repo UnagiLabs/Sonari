@@ -1135,6 +1135,7 @@ Resources:
           EVENTS_TABLE_NAME: !Ref EventsTable
           RUNNER_STATE_MACHINE_ARN: !Ref EarthquakeRunnerStateMachine
           RUNNER_TOKEN_SECRET_ARN: !Ref RunnerTokenSecretArn
+          RELAYER_TARGET: !Ref RelayerTarget
           SONARI_SUI_GRAPHQL_URL: !Ref SonariSuiGraphqlUrl
 
   ManualWatcherLambda:
@@ -1153,6 +1154,7 @@ Resources:
           EVENTS_TABLE_NAME: !Ref EventsTable
           RUNNER_STATE_MACHINE_ARN: !Ref EarthquakeRunnerStateMachine
           RUNNER_TOKEN_SECRET_ARN: !Ref RunnerTokenSecretArn
+          RELAYER_TARGET: !Ref RelayerTarget
           SONARI_SUI_GRAPHQL_URL: !Ref SonariSuiGraphqlUrl
 
   ManualWatcherFunctionUrl:

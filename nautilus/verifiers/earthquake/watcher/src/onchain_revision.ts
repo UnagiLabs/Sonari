@@ -17,18 +17,23 @@ export interface DynamicFieldLatestRevisionClient {
 
 export interface OnchainLatestRevisionInput {
     eventUid: string;
+    disasterEventType?: string | undefined;
     graphql?: GraphqlLatestRevisionClient | undefined;
     dynamicField?: DynamicFieldLatestRevisionClient | undefined;
 }
 
 const DISASTER_EVENT_CREATED_QUERY = `
-query SonariDisasterEventCreatedRevisions($eventType: String!) {
-  events(filter: { eventType: $eventType }) {
+query SonariDisasterEventCreatedRevisions($eventType: String!, $cursor: String) {
+  events(filter: { type: $eventType }, after: $cursor) {
     nodes {
       contents {
         json
       }
       parsedJson
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
     }
   }
 }
@@ -49,10 +54,25 @@ export async function getLatestOnchainEventRevision(
     }
 
     if (input.graphql !== undefined) {
-        const response = await input.graphql.query(DISASTER_EVENT_CREATED_QUERY, {
-            eventType: "DisasterEventCreated",
-        });
-        revisions.push(parseGraphqlLatestRevision(response, input.eventUid));
+        const eventType = readDisasterEventType(input.disasterEventType);
+        let latestRevision = 0;
+        let cursor: string | null = null;
+        while (true) {
+            const response = await input.graphql.query(DISASTER_EVENT_CREATED_QUERY, {
+                eventType,
+                cursor,
+            });
+            const page = readGraphqlEventsPage(response);
+            const pageLatestRevision = parseGraphqlLatestRevision(response, input.eventUid);
+            if (pageLatestRevision > latestRevision) {
+                latestRevision = pageLatestRevision;
+            }
+            cursor = page.endCursor;
+            if (!page.hasNextPage || cursor === null) {
+                break;
+            }
+        }
+        revisions.push(latestRevision);
         sources.push("graphql");
     }
 
@@ -116,13 +136,30 @@ export function decodeDynamicFieldRevision(response: unknown): number {
 }
 
 function readGraphqlEventNodes(response: unknown): unknown[] {
-    const data = readRecordField(response, "data");
-    const events = readRecordField(data, "events");
+    const events = readGraphqlEventsPage(response).events;
     const nodes = readUnknownField(events, "nodes");
     if (!Array.isArray(nodes)) {
         throw new Error("GraphQL event nodes must be an array");
     }
     return nodes;
+}
+
+function readGraphqlEventsPage(response: unknown): {
+    events: Record<string, unknown>;
+    hasNextPage: boolean;
+    endCursor: string | null;
+} {
+    const data = readRecordField(response, "data");
+    const events = readRecordField(data, "events");
+    if (events === undefined || events === null) {
+        throw new Error("GraphQL events page is missing or malformed");
+    }
+    const pageInfo = readRecordField(events, "pageInfo");
+    const hasNextPage = readBooleanField(pageInfo, "hasNextPage") === true;
+    const endCursorValue = readUnknownField(pageInfo, "endCursor");
+    const endCursor =
+        typeof endCursorValue === "string" && endCursorValue.length > 0 ? endCursorValue : null;
+    return { events, hasNextPage, endCursor };
 }
 
 function readEventJson(event: unknown): Record<string, unknown> | undefined {
@@ -198,6 +235,11 @@ function readStringField(input: unknown, field: string): string | undefined {
     return typeof value === "string" ? value : undefined;
 }
 
+function readBooleanField(input: unknown, field: string): boolean | undefined {
+    const value = readUnknownField(input, field);
+    return typeof value === "boolean" ? value : undefined;
+}
+
 function readSafeInteger(input: unknown): number | undefined {
     if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
         return input;
@@ -211,4 +253,14 @@ function readSafeInteger(input: unknown): number | undefined {
 
 function normalizeHex(value: string): string {
     return value.startsWith("0x") ? value.slice(2).toLowerCase() : value.toLowerCase();
+}
+
+function readDisasterEventType(value: string | undefined): string {
+    if (
+        value !== undefined &&
+        /^0x[0-9a-fA-F]+::disaster_event::DisasterEventCreated$/.test(value)
+    ) {
+        return value;
+    }
+    throw new Error("disasterEventType must be <PACKAGE_ID>::disaster_event::DisasterEventCreated");
 }

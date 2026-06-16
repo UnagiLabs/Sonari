@@ -7,11 +7,13 @@ import {
 
 const eventUid = `0x${"ab".repeat(32)}`;
 const otherEventUid = `0x${"cd".repeat(32)}`;
+const disasterEventType = `0x${"12".repeat(32)}::disaster_event::DisasterEventCreated`;
 
 describe("on-chain revision reader", () => {
     it("returns 0 with source info when configured sources find no matching revision", async () => {
         const result = await getLatestOnchainEventRevision({
             eventUid,
+            disasterEventType,
             graphql: { query: async () => ({ data: { events: { nodes: [] } } }) },
         });
 
@@ -21,6 +23,7 @@ describe("on-chain revision reader", () => {
     it("parses DisasterEventCreated-like GraphQL data and returns the max matching revision", async () => {
         const result = await getLatestOnchainEventRevision({
             eventUid,
+            disasterEventType,
             graphql: {
                 query: async () => ({
                     data: {
@@ -44,9 +47,61 @@ describe("on-chain revision reader", () => {
         expect(result).toEqual({ latestRevision: 3, sources: ["graphql"] });
     });
 
+    it("queries the full DisasterEventCreated type and paginates GraphQL data", async () => {
+        const variables: Record<string, unknown>[] = [];
+        const result = await getLatestOnchainEventRevision({
+            eventUid,
+            disasterEventType,
+            graphql: {
+                query: async (_query, inputVariables) => {
+                    variables.push(inputVariables);
+                    if (inputVariables.cursor === null) {
+                        return {
+                            data: {
+                                events: {
+                                    nodes: [
+                                        {
+                                            parsedJson: {
+                                                event_uid: eventUid,
+                                                event_revision: 2,
+                                            },
+                                        },
+                                    ],
+                                    pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+                                },
+                            },
+                        };
+                    }
+                    return {
+                        data: {
+                            events: {
+                                nodes: [
+                                    {
+                                        parsedJson: {
+                                            event_uid: eventUid,
+                                            event_revision: 5,
+                                        },
+                                    },
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    };
+                },
+            },
+        });
+
+        expect(result).toEqual({ latestRevision: 5, sources: ["graphql"] });
+        expect(variables).toEqual([
+            { eventType: disasterEventType, cursor: null },
+            { eventType: disasterEventType, cursor: "cursor-1" },
+        ]);
+    });
+
     it("uses the max revision when both dynamic-field and GraphQL sources are available", async () => {
         const result = await getLatestOnchainEventRevision({
             eventUid,
+            disasterEventType,
             graphql: {
                 query: async () => ({
                     data: {
@@ -74,6 +129,7 @@ describe("on-chain revision reader", () => {
         await expect(
             getLatestOnchainEventRevision({
                 eventUid,
+                disasterEventType,
                 graphql: {
                     query: async () => {
                         throw new Error("graphql unavailable");
@@ -87,6 +143,7 @@ describe("on-chain revision reader", () => {
         await expect(
             getLatestOnchainEventRevision({
                 eventUid,
+                disasterEventType,
                 graphql: { query: async () => ({ data: { events: { nodes: "bad" } } }) },
             }),
         ).rejects.toThrow("GraphQL event nodes must be an array");
