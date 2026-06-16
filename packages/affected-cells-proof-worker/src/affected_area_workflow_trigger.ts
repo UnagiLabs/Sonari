@@ -1,4 +1,5 @@
 import "./workflow_runtime_types.js";
+import { sha256Hex } from "@sonari/proof-core";
 import type { AffectedAreaWorkflowInput } from "./affected_area_workflow_input.js";
 import { affectedAreaManifestR2Key } from "./affected_area_r2.js";
 
@@ -30,7 +31,16 @@ export interface StartAffectedAreaWorkflowResult {
 }
 
 export function affectedAreaWorkflowInstanceId(input: AffectedAreaWorkflowInput): string {
-    return `affected-area-${input.event_uid.slice(2)}-${input.event_revision}-${input.affected_cells_root.slice(2)}`;
+    const digest = sha256Hex(
+        new TextEncoder().encode(
+            [
+                `event_uid=${input.event_uid}`,
+                `event_revision=${input.event_revision}`,
+                `affected_cells_root=${input.affected_cells_root}`,
+            ].join("\n"),
+        ),
+    ).slice(2, 34);
+    return `affected-area-r${input.event_revision}-${digest}`;
 }
 
 async function affectedAreaManifestExists(
