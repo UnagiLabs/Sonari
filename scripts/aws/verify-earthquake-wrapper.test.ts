@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { AwsCli } from "./shared.js";
-import { runVerifyEarthquakeWrapper } from "./verify-earthquake-wrapper.js";
+import {
+    readEarthquakeWrapperS3Result,
+    runVerifyEarthquakeWrapper,
+} from "./verify-earthquake-wrapper.js";
 
 describe("AWS earthquake wrapper verification script", () => {
     it("waits for ASG InService, SSM Online, and bootstrap marker before wrapper calls", async () => {
@@ -74,6 +78,111 @@ describe("AWS earthquake wrapper verification script", () => {
                 "scheduler:get-schedule:batch-schedule",
             ]),
         );
+    });
+
+    it("downloads and validates process_data result JSON from an S3 reference", async () => {
+        const resultText = JSON.stringify(finalizedWrapperResult());
+        const cli = new S3ObjectAwsCli(resultText);
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: cli,
+                expectedBucket: "runner-results",
+                reference: {
+                    status: "ok",
+                    result_s3_uri:
+                        "s3://runner-results/results/earthquake-wrapper-results/result.json",
+                    sha256: createHash("sha256").update(resultText).digest("hex"),
+                    bytes: Buffer.byteLength(resultText, "utf8"),
+                },
+            }),
+        ).resolves.toEqual(finalizedWrapperResult());
+
+        expect(cli.operations).toHaveLength(1);
+        expect(cli.operations[0]?.slice(0, 6)).toEqual([
+            "s3api",
+            "get-object",
+            "--bucket",
+            "runner-results",
+            "--key",
+            "results/earthquake-wrapper-results/result.json",
+        ]);
+        const outputPath = cli.operations[0]?.at(-1);
+        expect(typeof outputPath).toBe("string");
+        expect(outputPath).not.toBe("-");
+    });
+
+    it("rejects S3 result references with invalid metadata or downloaded bytes", async () => {
+        const resultText = JSON.stringify(finalizedWrapperResult());
+        const sha256 = createHash("sha256").update(resultText).digest("hex");
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: new S3ObjectAwsCli(resultText),
+                expectedBucket: "runner-results",
+                reference: {
+                    status: "failed",
+                    result_s3_uri:
+                        "s3://runner-results/results/earthquake-wrapper-results/result.json",
+                    sha256,
+                    bytes: Buffer.byteLength(resultText, "utf8"),
+                },
+            }),
+        ).rejects.toThrow('Expected process_data S3 reference status "ok"');
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: new S3ObjectAwsCli(resultText),
+                expectedBucket: "runner-results",
+                reference: {
+                    status: "ok",
+                    result_s3_uri: "s3://other/results/earthquake-wrapper-results/result.json",
+                    sha256,
+                    bytes: Buffer.byteLength(resultText, "utf8"),
+                },
+            }),
+        ).rejects.toThrow("process_data result bucket mismatch");
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: new S3ObjectAwsCli(resultText),
+                expectedBucket: "runner-results",
+                reference: {
+                    status: "ok",
+                    result_s3_uri: "s3://runner-results/results/other/result.json",
+                    sha256,
+                    bytes: Buffer.byteLength(resultText, "utf8"),
+                },
+            }),
+        ).rejects.toThrow("process_data result key must be under");
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: new S3ObjectAwsCli(resultText),
+                expectedBucket: "runner-results",
+                reference: {
+                    status: "ok",
+                    result_s3_uri:
+                        "s3://runner-results/results/earthquake-wrapper-results/result.json",
+                    sha256: "0".repeat(64),
+                    bytes: Buffer.byteLength(resultText, "utf8"),
+                },
+            }),
+        ).rejects.toThrow("process_data result sha256 mismatch");
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: new S3ObjectAwsCli(resultText),
+                expectedBucket: "runner-results",
+                reference: {
+                    status: "ok",
+                    result_s3_uri:
+                        "s3://runner-results/results/earthquake-wrapper-results/result.json",
+                    sha256,
+                    bytes: Buffer.byteLength(resultText, "utf8") + 1,
+                },
+            }),
+        ).rejects.toThrow("process_data result byte length mismatch");
     });
 });
 
@@ -200,6 +309,28 @@ class RecordingAwsCli implements AwsCli {
             return "ec2:describe-instances:empty";
         }
         return `${service}:${operation}`;
+    }
+}
+
+class S3ObjectAwsCli implements AwsCli {
+    readonly operations: readonly string[][] = [];
+    private readonly body: string;
+
+    constructor(body: string) {
+        this.body = body;
+    }
+
+    async json(args: readonly string[]): Promise<unknown> {
+        if (args[0] !== "s3api" || args[1] !== "get-object") {
+            throw new Error(`unexpected AWS call: ${args.join(" ")}`);
+        }
+        (this.operations as string[][]).push([...args]);
+        const destination = args.at(-1);
+        if (typeof destination !== "string" || destination === "-") {
+            throw new Error("s3api get-object must write to a local file");
+        }
+        await writeFile(destination, this.body);
+        return {};
     }
 }
 
