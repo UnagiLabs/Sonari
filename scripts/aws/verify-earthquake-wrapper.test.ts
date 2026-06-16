@@ -104,7 +104,8 @@ describe("AWS earthquake wrapper verification script", () => {
         const cli = new RecordingAwsCli({
             processDataReference: {
                 status: "ok",
-                result_s3_uri: "s3://runner-results/results/earthquake-wrapper-results/test-run.json",
+                result_s3_uri:
+                    "s3://runner-results/results/earthquake-wrapper-results/test-run.json",
                 sha256: "not-a-sha",
                 bytes: 1,
             },
@@ -142,7 +143,8 @@ describe("AWS earthquake wrapper verification script", () => {
             s3Body: resultText,
             processDataReference: {
                 status: "ok",
-                result_s3_uri: "s3://runner-results/results/earthquake-wrapper-results/test-run.json",
+                result_s3_uri:
+                    "s3://runner-results/results/earthquake-wrapper-results/test-run.json",
                 sha256: "0".repeat(64),
                 bytes: Buffer.byteLength(resultText, "utf8"),
             },
@@ -213,10 +215,8 @@ describe("AWS earthquake wrapper verification script", () => {
             runId: "run-123",
         });
 
-        expect(command).toContain("/opt/sonari/bin/run-earthquake-enclave > \"$result_file\"");
-        expect(command).toContain(
-            'result_key="results/earthquake-wrapper-results/run-123.json"',
-        );
+        expect(command).toContain('/opt/sonari/bin/run-earthquake-enclave > "$result_file"');
+        expect(command).toContain('result_key="results/earthquake-wrapper-results/run-123.json"');
         expect(command).toContain(
             'aws s3 cp --only-show-errors "$result_file" "s3://runner-results/$result_key"',
         );

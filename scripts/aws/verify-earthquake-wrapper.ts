@@ -84,15 +84,7 @@ export async function readEarthquakeWrapperS3Result(input: {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "sonari-earthquake-wrapper-result-"));
     try {
         const outputPath = path.join(tempDir, "process-data-result.json");
-        await input.aws.json([
-            "s3api",
-            "get-object",
-            "--bucket",
-            bucket,
-            "--key",
-            key,
-            outputPath,
-        ]);
+        await input.aws.json(["s3api", "get-object", "--bucket", bucket, "--key", key, outputPath]);
         const bytes = await readFile(outputPath);
         const actualSha256 = createHash("sha256").update(bytes).digest("hex");
         if (actualSha256 !== reference.sha256) {
@@ -282,7 +274,7 @@ export function buildProcessDataS3UploadCommand(input: {
     return [
         "set -euo pipefail",
         'result_file="$(mktemp /tmp/sonari-earthquake-wrapper-result.XXXXXX.json)"',
-        'trap \'rm -f "$result_file"\' EXIT',
+        "trap 'rm -f \"$result_file\"' EXIT",
         `result_key="${resultKey}"`,
         `printf '%s' ${shellSingleQuote(JSON.stringify(input.input))} | /opt/sonari/bin/run-earthquake-enclave > "$result_file"`,
         `aws s3 cp --only-show-errors "$result_file" "s3://${input.bucket}/$result_key"`,
@@ -321,11 +313,7 @@ function readProcessDataS3Reference(value: unknown): {
     if (typeof value.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.sha256)) {
         throw new Error("process_data S3 reference sha256 must be 64 lowercase hex characters");
     }
-    if (
-        typeof value.bytes !== "number" ||
-        !Number.isSafeInteger(value.bytes) ||
-        value.bytes < 0
-    ) {
+    if (typeof value.bytes !== "number" || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
         throw new Error("process_data S3 reference bytes must be a non-negative safe integer");
     }
     return {
