@@ -36,6 +36,17 @@ describe("on-chain revision reader", () => {
                                         event_revision: "3",
                                     },
                                 },
+                                {
+                                    contents: {
+                                        json: {
+                                            event_uid: Buffer.from(
+                                                eventUid.slice(2),
+                                                "hex",
+                                            ).toString("base64"),
+                                            event_revision: 6,
+                                        },
+                                    },
+                                },
                                 { contents: { json: { event_uid: otherEventUid, event_revision: 9 } } },
                             ],
                         },
@@ -44,7 +55,7 @@ describe("on-chain revision reader", () => {
             },
         });
 
-        expect(result).toEqual({ latestRevision: 3, sources: ["graphql"] });
+        expect(result).toEqual({ latestRevision: 6, sources: ["graphql"] });
     });
 
     it("queries the full DisasterEventCreated type and paginates GraphQL data", async () => {

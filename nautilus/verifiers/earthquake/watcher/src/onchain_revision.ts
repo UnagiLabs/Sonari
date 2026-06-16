@@ -181,6 +181,17 @@ function readPositiveU32(input: unknown, fieldName: string): number {
 
 function readEventUid(input: unknown): string | undefined {
     if (typeof input === "string") {
+        if (/^0x[0-9a-fA-F]{64}$/.test(input)) {
+            return input;
+        }
+        try {
+            const decoded = Buffer.from(input, "base64");
+            if (decoded.byteLength === 32 && decoded.toString("base64") === input) {
+                return `0x${decoded.toString("hex")}`;
+            }
+        } catch {
+            return undefined;
+        }
         return input;
     }
     if (

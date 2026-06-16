@@ -921,6 +921,59 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("manual rerun after execution-name collision replans from latest known revision", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const failedRow = await eventRow("us7000sonari", {
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            latest_revision: 1,
+            planned_event_revision: 1,
+            status: "failed",
+            retry_count: 1,
+            next_retry_at_ms: baseNow + HOUR_MS,
+            error_code: "AWS_RUNNER_START_FAILED",
+            runner_error_message: "Execution Already Exists: earthquake-us7000sonari-r1-a1",
+            runner_job_id: "earthquake-us7000sonari-r1-a1",
+            runner_attempt: 1,
+        });
+        (
+            repository as unknown as { rows: Map<string, EarthquakeEventRow> }
+        ).rows.set("us7000sonari", failedRow);
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 5_000,
+            token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
+            readLatestOnchainEventRevision: {
+                async readLatestEventRevision() {
+                    return 0;
+                },
+            },
+        });
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000sonari" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000sonari",
+                executionName: "earthquake-us7000sonari-r2-a2",
+                attempt: 2,
+            },
+        ]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            latest_revision: 1,
+            planned_event_revision: 2,
+            retry_count: 1,
+            error_code: null,
+        });
+    });
+
     it("DynamoDB manual rerun resets terminal result rows without dropping stable identity", async () => {
         const terminalRow = await eventRow("us7000sonari", {
             requested_source_event_id: "usc0001xgp",

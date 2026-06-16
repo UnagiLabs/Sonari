@@ -644,7 +644,7 @@ async function plannedEventRevision(
     row: EarthquakeEventRow,
     options: RunnerRevisionOptions,
 ): Promise<number> {
-    if (row.planned_event_revision !== null) {
+    if (row.planned_event_revision !== null && !isExecutionNameCollisionFailure(row)) {
         return row.planned_event_revision;
     }
     if (row.event_uid === null || !/^0x[0-9a-fA-F]{64}$/.test(row.event_uid)) {
@@ -661,7 +661,15 @@ async function plannedEventRevision(
     ) {
         throw new Error("latest on-chain event revision must be a non-negative u32 below max");
     }
-    return latestRevision + 1;
+    return Math.max(latestRevision, row.latest_revision) + 1;
+}
+
+function isExecutionNameCollisionFailure(row: EarthquakeEventRow): boolean {
+    return (
+        row.status === "failed" &&
+        row.error_code === "AWS_RUNNER_START_FAILED" &&
+        row.runner_error_message?.includes("Execution Already Exists") === true
+    );
 }
 
 async function runRelayer(
