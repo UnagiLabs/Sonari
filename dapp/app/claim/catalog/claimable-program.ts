@@ -39,11 +39,9 @@ export interface MapBounds {
     readonly west: number;
 }
 
-export interface DisasterOverviewOverlay {
-    readonly kind: "band-overlay-image";
-    readonly url: string;
-    readonly bounds: MapBounds;
-    readonly opacity?: number;
+export interface AffectedAreaArtifactSource {
+    readonly kind: "tiled-affected-cells";
+    readonly manifestPath: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,8 +81,8 @@ export interface DisasterClaimableProgram extends ClaimableProgramBase {
     readonly affectedCellCount: number;
     /** 地図セルの取得元。 */
     readonly cellSource: CellSource;
-    /** 俯瞰表示で使う band-colored 画像 overlay。 */
-    readonly overviewOverlay?: DisasterOverviewOverlay;
+    /** 表示用 affected-area artifact の取得元。 */
+    readonly affectedAreaArtifact?: AffectedAreaArtifactSource;
     /**
      * セルルート（任意）。表示・受け渡し用のみ。
      * 検証しない。
@@ -220,8 +218,8 @@ function parseDisaster(
     const cellSource = parseCellSource(value["cellSource"]);
     if (cellSource === null) return null;
 
-    const overviewOverlay = parseDisasterOverviewOverlay(value["overviewOverlay"]);
-    if (overviewOverlay === undefined) return null;
+    const affectedAreaArtifact = parseAffectedAreaArtifactSource(value["affectedAreaArtifact"]);
+    if (affectedAreaArtifact === undefined) return null;
 
     // affectedCellsRoot は任意
     const affectedCellsRoot =
@@ -241,7 +239,7 @@ function parseDisaster(
         severityBand,
         affectedCellCount,
         cellSource,
-        ...(overviewOverlay !== null ? { overviewOverlay } : {}),
+        ...(affectedAreaArtifact !== null ? { affectedAreaArtifact } : {}),
         ...(affectedCellsRoot !== undefined ? { affectedCellsRoot } : {}),
     };
 
@@ -298,52 +296,23 @@ function parseCellSource(value: unknown): CellSource | null {
     return null;
 }
 
-function parseDisasterOverviewOverlay(value: unknown): DisasterOverviewOverlay | null | undefined {
+function parseAffectedAreaArtifactSource(
+    value: unknown,
+): AffectedAreaArtifactSource | null | undefined {
     if (value === undefined || value === null) {
         return null;
     }
-    if (!isRecord(value) || value["kind"] !== "band-overlay-image") {
+    if (!isRecord(value) || value["kind"] !== "tiled-affected-cells") {
         return undefined;
     }
 
-    const url = parseNonEmptyString(value["url"]);
-    if (url === null) return undefined;
-
-    const bounds = parseMapBounds(value["bounds"]);
-    if (bounds === null) return undefined;
-
-    const opacity =
-        value["opacity"] === undefined ? undefined : parseOpacity(value["opacity"]);
-    if (opacity === null) return undefined;
+    const manifestPath = parseNonEmptyString(value["manifestPath"]);
+    if (manifestPath === null) return undefined;
 
     return {
-        kind: "band-overlay-image",
-        url,
-        bounds,
-        ...(opacity !== undefined ? { opacity } : {}),
+        kind: "tiled-affected-cells",
+        manifestPath,
     };
-}
-
-function parseMapBounds(value: unknown): MapBounds | null {
-    if (!isRecord(value)) return null;
-
-    const north = parseFiniteNumber(value["north"]);
-    const south = parseFiniteNumber(value["south"]);
-    const east = parseFiniteNumber(value["east"]);
-    const west = parseFiniteNumber(value["west"]);
-    if (north === null || south === null || east === null || west === null) {
-        return null;
-    }
-    if (north < south || east < west) {
-        return null;
-    }
-    return { north, south, east, west };
-}
-
-function parseOpacity(value: unknown): number | null | undefined {
-    const opacity = parseFiniteNumber(value);
-    if (opacity === null) return null;
-    return opacity >= 0 && opacity <= 1 ? opacity : null;
 }
 
 /**

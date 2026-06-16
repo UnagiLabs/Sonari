@@ -46,8 +46,8 @@ export const DEMO_AFFECTED_HOME_CELL_BAND1 = "608795262395088895";
 //   nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json
 // 表示・受け渡し用に持つだけで検証ロジックは作らない。
 //
-// cellSource の path は STEP 5 が dapp/public/demo/tohoku-2011-affected-cells.json
-// に生成する静的アセットの URL パスと一致させる（実体は STEP 5 で生成）。
+// cellSource は claim 判定など既存のセル参照用に残す。
+// 地図表示は affectedAreaArtifact の manifest から tile artifact を参照する。
 // ---------------------------------------------------------------------------
 
 const TOHOKU_2011_PROGRAM: DisasterClaimableProgram = {
@@ -72,18 +72,11 @@ const TOHOKU_2011_PROGRAM: DisasterClaimableProgram = {
     // cellSource: 実体は STEP 5 で生成する静的アセット
     cellSource: {
         kind: "static-asset",
-        path: "/demo/tohoku-2011-affected-cells.json",
+        path: "/demo/tohoku-2011/affected-cells.json",
     },
-    overviewOverlay: {
-        kind: "band-overlay-image",
-        url: "/demo/tohoku-2011-band-overlay.svg",
-        bounds: {
-            north: 40.613588,
-            south: 35.152779,
-            east: 145.350259,
-            west: 139.679236,
-        },
-        opacity: 1,
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
     },
     // affectedCellsRoot: nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json 由来
     // 表示・受け渡し用に持つだけで検証ロジックは作らない。

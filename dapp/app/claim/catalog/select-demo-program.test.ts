@@ -18,7 +18,11 @@ const PROGRAM_DISASTER: ClaimableProgram = {
     eventUid: "0x0000000000000000000000000000000000000000000000000000000000000001",
     severityBand: 3,
     affectedCellCount: 42,
-    cellSource: { kind: "static-asset", path: "/demo/tohoku-2011-affected-cells.json" },
+    cellSource: { kind: "static-asset", path: "/demo/tohoku-2011/affected-cells.json" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+    },
 };
 
 const PROGRAM_STUDENT: ClaimableProgram = {

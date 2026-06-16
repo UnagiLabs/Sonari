@@ -62,21 +62,14 @@ describe("disaster entry (tohoku-2011)", () => {
     it("cellSource is static-asset with correct path (STEP 5 static asset)", () => {
         expect(entry?.cellSource).toStrictEqual({
             kind: "static-asset",
-            path: "/demo/tohoku-2011-affected-cells.json",
+            path: "/demo/tohoku-2011/affected-cells.json",
         });
     });
 
-    it("overviewOverlay uses the generated Sonari band overlay", () => {
-        expect(entry?.overviewOverlay).toStrictEqual({
-            kind: "band-overlay-image",
-            url: "/demo/tohoku-2011-band-overlay.svg",
-            bounds: {
-                north: 40.613588,
-                south: 35.152779,
-                east: 145.350259,
-                west: 139.679236,
-            },
-            opacity: 1,
+    it("affectedAreaArtifact uses the generated tile manifest", () => {
+        expect(entry?.affectedAreaArtifact).toStrictEqual({
+            kind: "tiled-affected-cells",
+            manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
         });
     });
 

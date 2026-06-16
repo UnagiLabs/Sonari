@@ -11,6 +11,7 @@
 
 import { DEMO_CLAIMABLE_PROGRAMS } from "../catalog/demo-catalog";
 import {
+    type AffectedAreaArtifactSource,
     type CellSource,
     type ClaimableProgram,
     type DisasterClaimableProgram,
@@ -39,6 +40,17 @@ export function pickPreviewCellSource(catalog: readonly ClaimableProgram[]): Cel
     return { kind: "deferred" };
 }
 
+export function pickPreviewAffectedAreaArtifact(
+    catalog: readonly ClaimableProgram[],
+): AffectedAreaArtifactSource | null {
+    for (const p of catalog) {
+        if (isDisasterProgram(p) && p.affectedAreaArtifact?.kind === "tiled-affected-cells") {
+            return p.affectedAreaArtifact;
+        }
+    }
+    return null;
+}
+
 // ---------------------------------------------------------------------------
 // resolvePreviewCellSource
 // ---------------------------------------------------------------------------
@@ -58,4 +70,10 @@ export function resolvePreviewCellSource(
 ): CellSource {
     // 現状はデモカタログの static-asset 源を返す
     return pickPreviewCellSource(DEMO_CLAIMABLE_PROGRAMS);
+}
+
+export function resolvePreviewAffectedAreaArtifact(
+    _program: DisasterClaimableProgram,
+): AffectedAreaArtifactSource | null {
+    return pickPreviewAffectedAreaArtifact(DEMO_CLAIMABLE_PROGRAMS);
 }

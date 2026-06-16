@@ -31,6 +31,10 @@ const STATIC_ASSET_DISASTER: DisasterClaimableProgram = {
     severityBand: 2,
     affectedCellCount: 100,
     cellSource: { kind: "static-asset", path: "/demo/test-affected-cells.json" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/test-affected-area-manifest.json",
+    },
 };
 
 /** 最小限の DisasterClaimableProgram（deferred 源） */
@@ -46,6 +50,10 @@ const DEFERRED_DISASTER: DisasterClaimableProgram = {
     severityBand: 1,
     affectedCellCount: 50,
     cellSource: { kind: "deferred" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/test-affected-area-manifest.json",
+    },
 };
 
 /** 最小限の非災害プログラム（student-fund） */
@@ -144,13 +152,13 @@ describe("resolvePreviewCellSource", () => {
         }
     });
 
-    it("東日本大震災 2011 の path /demo/tohoku-2011-affected-cells.json を返す", () => {
+    it("東日本大震災 2011 の path /demo/tohoku-2011/affected-cells.json を返す", () => {
         // デモ源のパスは demo-catalog の TOHOKU_2011_PROGRAM に定義されている
         // ここではそれを DEMO_CLAIMABLE_PROGRAMS から導出し、リテラル一致も確認する
         const result = resolvePreviewCellSource(STATIC_ASSET_DISASTER);
         expect(result.kind).toBe("static-asset");
         if (result.kind === "static-asset") {
-            expect(result.path).toBe("/demo/tohoku-2011-affected-cells.json");
+            expect(result.path).toBe("/demo/tohoku-2011/affected-cells.json");
         }
     });
 

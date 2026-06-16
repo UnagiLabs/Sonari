@@ -136,7 +136,7 @@ export function DemoClaimDetailView({
                     </section>
 
                     {/* 災害カテゴリ: 被災エリア地図セクション */}
-                    {isDisasterProgram(program) ? (
+                    {isDisasterProgram(program) && program.affectedAreaArtifact !== undefined ? (
                         <section
                             className="claim-map-section"
                             aria-labelledby="demo-map-section-title"
@@ -155,8 +155,8 @@ export function DemoClaimDetailView({
                              * → 地図が陸地（市街地）を中心に表示され、自宅セルが強調される。
                              */}
                             <AffectedAreaMap
+                                affectedAreaArtifact={program.affectedAreaArtifact}
                                 cellSource={program.cellSource}
-                                overviewOverlay={program.overviewOverlay}
                                 residenceCell={DEMO_RESIDENCE_HOME_CELL}
                             />
                         </section>

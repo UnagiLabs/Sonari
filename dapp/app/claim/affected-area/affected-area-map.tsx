@@ -3,13 +3,13 @@
 // ---------------------------------------------------------------------------
 // AffectedAreaMap – 被災エリア表示専用地図コンポーネント
 //
-// 被災セルをバンド色のポリゴンで描画し、凡例・タップ詳細・モード自動切替・
-// フォールバックを備える表示専用コンポーネント。
-// 請求・セル選択・親通知・hidden input は一切持たない。
+// 被災セルを affected_cells 由来の事前生成 tile artifact から表示する。
+// 低倍率では SVG raster tile、高倍率では visible viewport の cell tile JSON
+// だけを取得して Google Maps Polygon として描画する。
 // ---------------------------------------------------------------------------
 
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { parseHomeCell } from "../../mypage/home-cell";
 import {
     isGoogleMapsConfigured,
@@ -24,37 +24,31 @@ import {
     type ViewportBounds,
 } from "../../register/residence/h3-geo";
 import { buildBandLegendEntries } from "../catalog/cell-band-rules";
-import type { CellSource, DisasterOverviewOverlay } from "../catalog/claimable-program";
-import {
-    buildAffectedCellGeometries,
-    computeAffectedAreaBounds,
-    MAX_AFFECTED_VIEWPORT_CELLS,
-    selectAffectedAreaLayerMode,
-    selectMapMode,
-    selectVisibleCells,
-} from "./affected-area-geo";
+import type { AffectedAreaArtifactSource, CellSource } from "../catalog/claimable-program";
 import {
     type AffectedCellDetail,
     buildCellDetail,
     polygonStyleForBand,
 } from "./affected-area-style";
-import { type AffectedCell, parseAffectedCells } from "./affected-cells";
+import {
+    type AffectedAreaTileManifest,
+    type AffectedCellTileFeature,
+    cellTileKeysForViewport,
+    dedupeCellTileFeatures,
+    featureToAffectedCell,
+    parseAffectedAreaTileManifest,
+    parseAffectedCellTile,
+    rasterTileUrlForManifest,
+    selectAffectedAreaLayerModeForZoom,
+    tileUrlFromTemplate,
+} from "./affected-area-tiles";
 
-// ---------------------------------------------------------------------------
-// 定数
-// ---------------------------------------------------------------------------
-
-// NEXT_PUBLIC_* はビルド時にインライン化される（output: "export"）。
 const mapsApiKey = readGoogleMapsApiKey();
 
-// 被災エリアが空または null のときに使う固定初期中心（東北地方付近）。
 const DEFAULT_CENTER: google.maps.LatLngLiteral = { lat: 38.0, lng: 140.9 };
-// home モードのズーム。
 const HOME_ZOOM = 13;
-// overview モードのデフォルトズーム（fitBounds 失敗時）。
 const OVERVIEW_ZOOM = 8;
 
-// 自宅セルが被災集合に含まれないときに使う中立アウトラインスタイル。
 const HOME_CELL_OUTLINE_STYLE = {
     strokeColor: "#1e40af",
     strokeOpacity: 0.85,
@@ -66,9 +60,8 @@ const HOME_CELL_OUTLINE_STYLE = {
 
 async function fetchJson(path: string): Promise<unknown> {
     const res = await fetch(path);
-    // 非 2xx（例: JSON ボディ付き 404）は空集合ではなくエラー扱いにする。
     if (!res.ok) {
-        throw new Error(`affected cells fetch failed: HTTP ${res.status}`);
+        throw new Error(`affected area fetch failed: HTTP ${res.status}`);
     }
     return res.json();
 }
@@ -89,15 +82,27 @@ function mapBoundsToViewportBounds(
     };
 }
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
+function centerOfBounds(bounds: ViewportBounds): google.maps.LatLngLiteral {
+    return {
+        lat: (bounds.north + bounds.south) / 2,
+        lng: (bounds.east + bounds.west) / 2,
+    };
+}
+
+function removeOverlayMapType(map: google.maps.Map, imageMapType: google.maps.ImageMapType): void {
+    const overlays = map.overlayMapTypes;
+    for (let i = overlays.getLength() - 1; i >= 0; i -= 1) {
+        if (overlays.getAt(i) === imageMapType) {
+            overlays.removeAt(i);
+        }
+    }
+}
 
 export interface AffectedAreaMapProps {
-    /** 被災セルの取得元（#382 で定義した形）。 */
+    /** 被災セルの取得元。deferred の fallback 判定に使う。 */
     readonly cellSource: CellSource;
-    /** 俯瞰時に使う band-colored 画像 overlay。任意。 */
-    readonly overviewOverlay?: DisasterOverviewOverlay;
+    /** 表示用 affected-area artifact の取得元。 */
+    readonly affectedAreaArtifact: AffectedAreaArtifactSource;
     /**
      * 居住セル（10進）。任意。
      * 有効な res7 セルなら自宅中心モード＋強調、なければ俯瞰モード。
@@ -105,104 +110,78 @@ export interface AffectedAreaMapProps {
     readonly residenceCell?: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// コンポーネント
-// ---------------------------------------------------------------------------
-
 /**
  * 被災エリアを地図上に表示する読み取り専用コンポーネント。
  *
- * - cellSource が "static-asset" のとき、マウント後に fetch して被災セルを取得する。
- * - residenceCell が有効な res7 セルなら home モード（自宅中心・強調）、
- *   なければ overview モード（全体 fitBounds）を使う。
- * - overviewOverlay がある場合、低倍率では band-colored 画像を GroundOverlay で表示し、
- *   viewport 内セルが少ないときだけ raw res7 セルを描く。
- * - 各セルポリゴンをクリックすると詳細パネルに buildCellDetail の内容を表示する。
- * - deferred / API 未設定 / fetch 失敗 / 空集合のときはテキストフォールバック。
+ * - manifestPath から tile manifest を取得する。
+ * - zoom < minCellZoom では SVG raster tile overlay を ImageMapType で表示する。
+ * - zoom >= minCellZoom では visible viewport の cell tile JSON だけを取得し、
+ *   decimal で dedupe して Polygon を差分同期する。
+ * - 通常表示では全件 affected-cells.json を fetch しない。
  */
 export function AffectedAreaMap({
     cellSource,
-    overviewOverlay,
+    affectedAreaArtifact,
     residenceCell,
 }: AffectedAreaMapProps) {
     const t = useTranslations("claim.affectedAreaMap");
 
-    // 居住セルの検証済み情報
     const parsedHome = residenceCell != null ? parseHomeCell(residenceCell) : null;
-    const mode = selectMapMode(residenceCell ?? null);
-
-    // cellSource はオブジェクト参照が呼び出し側で不安定でも、effect の再実行
-    // （地図の作り直し・再 fetch）が暴発しないよう、依存にはプリミティブを使う。
+    const isHomeMode = parsedHome !== null;
     const cellSourceKind = cellSource.kind;
-    const cellSourcePath = cellSource.kind === "static-asset" ? cellSource.path : null;
-    const overviewOverlayUrl = overviewOverlay?.url ?? null;
-    const overviewOverlayOpacity = overviewOverlay?.opacity ?? 1;
-    const overviewOverlayBounds = overviewOverlay?.bounds ?? null;
+    const manifestPath = affectedAreaArtifact.manifestPath;
 
-    // ---------------------------------------------------------------------------
-    // State / Ref
-    // ---------------------------------------------------------------------------
-
-    // deferred の場合は地図を出さないため最初から "unconfigured" 扱いにする。
-    // 初回描画でサーバー/クライアントを一致させるため、env に依存する初期化は
-    // マウント後の useEffect で行う。ただし deferred は最優先でフォールバックする。
     const [status, setStatus] = useState<MapsLoaderStatus>(() => {
         if (cellSourceKind === "deferred") {
             return "unconfigured";
         }
         return resolveInitialMapsStatus(mapsApiKey);
     });
-
-    // 被災セルの取得状態
-    const [cells, setCells] = useState<AffectedCell[]>([]);
+    const [manifest, setManifest] = useState<AffectedAreaTileManifest | null>(null);
     const [fetchError, setFetchError] = useState<boolean>(false);
     const [fetchDone, setFetchDone] = useState<boolean>(false);
-    const cellGeometries = useMemo(() => buildAffectedCellGeometries(cells), [cells]);
-
-    // タップ詳細パネル
     const [selectedDetail, setSelectedDetail] = useState<AffectedCellDetail | null>(null);
 
-    // Refs
     const mapElRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
-    // 被災セル polygon map: decimal → Polygon
     const polygonsRef = useRef<Map<string, google.maps.Polygon>>(new Map());
-    // 自宅アウトライン用の専用ポリゴン（被災集合外の自宅セルに使う）
     const homeCellPolyRef = useRef<google.maps.Polygon | null>(null);
-    const overviewOverlayRef = useRef<google.maps.GroundOverlay | null>(null);
+    const rasterOverlayRef = useRef<google.maps.ImageMapType | null>(null);
+    const rasterOverlaySourceRef = useRef<string | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
-    const cellsRef = useRef<AffectedCell[]>([]);
-    const cellGeometriesRef = useRef(cellGeometries);
+    const manifestRef = useRef<AffectedAreaTileManifest | null>(manifest);
     const parsedHomeRef = useRef(parsedHome);
+    const tileCacheRef = useRef<Map<string, readonly AffectedCellTileFeature[]>>(new Map());
+    const tileFetchSeqRef = useRef(0);
+    const knownAffectedHomeRef = useRef(false);
 
-    // ref を最新に同期する
     useEffect(() => {
-        cellsRef.current = cells;
-        cellGeometriesRef.current = cellGeometries;
-    }, [cells, cellGeometries]);
+        manifestRef.current = manifest;
+    }, [manifest]);
 
     useEffect(() => {
         parsedHomeRef.current = parsedHome;
     });
 
-    // ---------------------------------------------------------------------------
-    // 被災セルの fetch（static-asset のみ）
-    // ---------------------------------------------------------------------------
-
     useEffect(() => {
-        if (cellSourcePath === null) {
+        if (cellSourceKind === "deferred") {
             return;
         }
         let cancelled = false;
 
         setFetchError(false);
         setFetchDone(false);
-        setCells([]);
+        setManifest(null);
+        tileCacheRef.current.clear();
 
-        fetchJson(cellSourcePath)
+        fetchJson(manifestPath)
             .then((json) => {
+                const parsed = parseAffectedAreaTileManifest(json);
+                if (parsed === null) {
+                    throw new Error("invalid affected area manifest");
+                }
                 if (!cancelled) {
-                    setCells(parseAffectedCells(json));
+                    setManifest(parsed);
                     setFetchDone(true);
                 }
             })
@@ -216,7 +195,7 @@ export function AffectedAreaMap({
         return () => {
             cancelled = true;
         };
-    }, [cellSourcePath]);
+    }, [cellSourceKind, manifestPath]);
 
     const clearCellPolygons = useCallback(() => {
         for (const poly of polygonsRef.current.values()) {
@@ -232,81 +211,80 @@ export function AffectedAreaMap({
         }
     }, []);
 
-    const resetOverviewOverlay = useCallback(
-        (map: google.maps.Map) => {
-            if (overviewOverlayRef.current !== null) {
-                overviewOverlayRef.current.setMap(null);
-                overviewOverlayRef.current = null;
+    const setRasterOverlayVisible = useCallback(
+        (map: google.maps.Map, nextManifest: AffectedAreaTileManifest, visible: boolean) => {
+            let overlay = rasterOverlayRef.current;
+            if (overlay !== null && rasterOverlaySourceRef.current !== nextManifest.sourceSha256) {
+                removeOverlayMapType(map, overlay);
+                rasterOverlayRef.current = null;
+                rasterOverlaySourceRef.current = null;
+                overlay = null;
             }
-            if (overviewOverlayUrl === null || overviewOverlayBounds === null) {
-                return null;
-            }
-            const overlay = new google.maps.GroundOverlay(
-                overviewOverlayUrl,
-                overviewOverlayBounds,
-                { opacity: overviewOverlayOpacity },
-            );
-            overviewOverlayRef.current = overlay;
-            overlay.setMap(map);
-            return overlay;
-        },
-        [overviewOverlayBounds, overviewOverlayOpacity, overviewOverlayUrl],
-    );
-
-    const setOverviewOverlayVisible = useCallback(
-        (visible: boolean) => {
-            const map = mapRef.current;
-            if (map === null) {
-                return;
-            }
-            const overlay = overviewOverlayRef.current ?? resetOverviewOverlay(map);
             if (overlay === null) {
-                return;
+                overlay = new google.maps.ImageMapType({
+                    tileSize: new google.maps.Size(nextManifest.tileSize, nextManifest.tileSize),
+                    opacity: 1,
+                    getTileUrl: (coord, zoom) => {
+                        return rasterTileUrlForManifest(nextManifest, {
+                            z: zoom,
+                            x: coord.x,
+                            y: coord.y,
+                        });
+                    },
+                });
+                rasterOverlayRef.current = overlay;
+                rasterOverlaySourceRef.current = nextManifest.sourceSha256;
             }
-            overlay.setMap(visible ? map : null);
+
+            if (visible) {
+                removeOverlayMapType(map, overlay);
+                map.overlayMapTypes.push(overlay);
+            } else {
+                removeOverlayMapType(map, overlay);
+            }
         },
-        [resetOverviewOverlay],
+        [],
     );
 
-    const syncPolygons = useCallback((visibleCells: AffectedCell[], map: google.maps.Map) => {
-        const home = parsedHomeRef.current;
-        const homeDecimal = home?.decimal ?? null;
+    const syncPolygons = useCallback(
+        (features: readonly AffectedCellTileFeature[], map: google.maps.Map) => {
+            const home = parsedHomeRef.current;
+            const homeDecimal = home?.decimal ?? null;
 
-        const nextDecimals = new Set(visibleCells.map((c) => c.decimal));
+            const nextDecimals = new Set(features.map((feature) => feature.decimal));
 
-        for (const [decimal, poly] of polygonsRef.current) {
-            if (!nextDecimals.has(decimal)) {
-                google.maps.event.clearInstanceListeners(poly);
-                poly.setMap(null);
-                polygonsRef.current.delete(decimal);
+            for (const [decimal, poly] of polygonsRef.current) {
+                if (!nextDecimals.has(decimal)) {
+                    google.maps.event.clearInstanceListeners(poly);
+                    poly.setMap(null);
+                    polygonsRef.current.delete(decimal);
+                }
             }
-        }
 
-        for (const cell of visibleCells) {
-            const highlighted = cell.decimal === homeDecimal;
-            const style = polygonStyleForBand(cell.band, highlighted);
-            const existing = polygonsRef.current.get(cell.decimal);
-            if (existing === undefined) {
-                const geometry = cellGeometriesRef.current.find(
-                    (candidate) => candidate.cell.decimal === cell.decimal,
-                );
-                const poly = new google.maps.Polygon({
-                    paths: geometry?.boundary ?? residenceCellBoundary(cell.hex),
-                    ...style,
-                });
-                poly.setMap(map);
-                poly.addListener("click", () => {
-                    setSelectedDetail(buildCellDetail(cell));
-                });
-                polygonsRef.current.set(cell.decimal, poly);
-            } else {
-                existing.setOptions(style);
+            for (const feature of features) {
+                const cell = featureToAffectedCell(feature);
+                const highlighted = cell.decimal === homeDecimal;
+                if (highlighted) {
+                    knownAffectedHomeRef.current = true;
+                }
+                const style = polygonStyleForBand(cell.band, highlighted);
+                const existing = polygonsRef.current.get(cell.decimal);
+                if (existing === undefined) {
+                    const poly = new google.maps.Polygon({
+                        paths: feature.boundary,
+                        ...style,
+                    });
+                    poly.setMap(map);
+                    poly.addListener("click", () => {
+                        setSelectedDetail(buildCellDetail(cell));
+                    });
+                    polygonsRef.current.set(cell.decimal, poly);
+                } else {
+                    existing.setOptions(style);
+                }
             }
-        }
 
-        if (home !== null) {
-            const inAffected = cellsRef.current.some((c) => c.decimal === home.decimal);
-            if (!inAffected) {
+            if (home !== null && !knownAffectedHomeRef.current) {
                 if (homeCellPolyRef.current === null) {
                     const homePoly = new google.maps.Polygon({
                         paths: residenceCellBoundary(home.hex),
@@ -319,79 +297,89 @@ export function AffectedAreaMap({
                 homeCellPolyRef.current.setMap(null);
                 homeCellPolyRef.current = null;
             }
-        }
-    }, []);
+        },
+        [],
+    );
+
+    const syncCellTiles = useCallback(
+        async (
+            map: google.maps.Map,
+            nextManifest: AffectedAreaTileManifest,
+            bounds: ViewportBounds,
+        ): Promise<void> => {
+            tileFetchSeqRef.current += 1;
+            const sequence = tileFetchSeqRef.current;
+            const keys = cellTileKeysForViewport(nextManifest, bounds);
+
+            const fetched = await Promise.all(
+                keys.map(async (key) => {
+                    const cached = tileCacheRef.current.get(key);
+                    if (cached !== undefined) {
+                        return cached;
+                    }
+                    const [z, x, y] = key.split("/").map(Number);
+                    const json = await fetchJson(
+                        tileUrlFromTemplate(nextManifest.cellTileUrlTemplate, { z, x, y }),
+                    );
+                    const tile = parseAffectedCellTile(json);
+                    if (tile === null || tile.z !== z || tile.x !== x || tile.y !== y) {
+                        throw new Error(`invalid affected cell tile: ${key}`);
+                    }
+                    tileCacheRef.current.set(key, tile.features);
+                    return tile.features;
+                }),
+            );
+
+            if (sequence !== tileFetchSeqRef.current || mapRef.current !== map) {
+                return;
+            }
+            const features = dedupeCellTileFeatures(fetched.flat());
+            syncPolygons(features, map);
+        },
+        [syncPolygons],
+    );
 
     const syncOverlay = useCallback(() => {
         const map = mapRef.current;
-        if (map === null) {
+        const nextManifest = manifestRef.current;
+        if (map === null || nextManifest === null) {
             return;
         }
+
+        const zoom = map.getZoom() ?? OVERVIEW_ZOOM;
+        const layerMode = selectAffectedAreaLayerModeForZoom(zoom, nextManifest);
+        if (layerMode === "raster") {
+            tileFetchSeqRef.current += 1;
+            clearCellPolygons();
+            setRasterOverlayVisible(map, nextManifest, true);
+            return;
+        }
+
+        setRasterOverlayVisible(map, nextManifest, false);
         const bounds = mapBoundsToViewportBounds(map.getBounds());
         if (bounds === null) {
-            setOverviewOverlayVisible(true);
-            return;
-        }
-
-        const sourceGeometries = cellGeometriesRef.current;
-        if (sourceGeometries.length === 0) {
             clearCellPolygons();
-            setOverviewOverlayVisible(true);
             return;
         }
 
-        const layerMode =
-            overviewOverlayUrl === null
-                ? "cells"
-                : selectAffectedAreaLayerMode({
-                      cells: sourceGeometries,
-                      bounds,
-                      threshold: MAX_AFFECTED_VIEWPORT_CELLS,
-                  });
-
-        if (layerMode === "overview-overlay") {
+        void syncCellTiles(map, nextManifest, bounds).catch(() => {
             clearCellPolygons();
-            setOverviewOverlayVisible(true);
-            return;
-        }
-
-        setOverviewOverlayVisible(false);
-        const home = parsedHomeRef.current;
-        const visibleCells = selectVisibleCells({
-            cells: sourceGeometries,
-            bounds,
-            limit: MAX_AFFECTED_VIEWPORT_CELLS,
-            highlightedDecimal: home?.decimal ?? null,
+            setFetchError(true);
         });
-        syncPolygons(visibleCells, map);
-    }, [clearCellPolygons, overviewOverlayUrl, setOverviewOverlayVisible, syncPolygons]);
+    }, [clearCellPolygons, setRasterOverlayVisible, syncCellTiles]);
 
-    // cells / overlay が変化したら表示レイヤーを同期する。
     useEffect(() => {
         const map = mapRef.current;
-        if (map === null) {
+        if (map === null || manifest === null) {
             return;
         }
-        resetOverviewOverlay(map);
-        if (mode === "overview") {
-            if (overviewOverlayBounds !== null) {
-                map.fitBounds(overviewOverlayBounds);
-            } else {
-                const bounds = computeAffectedAreaBounds(cellGeometries);
-                if (bounds !== null) {
-                    map.fitBounds(bounds);
-                }
-            }
+        if (!isHomeMode) {
+            map.fitBounds(manifest.bounds);
         }
         syncOverlay();
-    }, [cellGeometries, mode, overviewOverlayBounds, resetOverviewOverlay, syncOverlay]);
-
-    // ---------------------------------------------------------------------------
-    // 地図初期化 effect（マウント時に一度だけ）
-    // ---------------------------------------------------------------------------
+    }, [isHomeMode, manifest, syncOverlay]);
 
     useEffect(() => {
-        // deferred は地図を出さない
         if (cellSourceKind === "deferred") {
             return;
         }
@@ -414,30 +402,14 @@ export function AffectedAreaMap({
                     return;
                 }
 
-                // home モードは自宅中心・固定ズーム
-                // overview モードは全体 fitBounds
-                let initialCenter: google.maps.LatLngLiteral;
-                let initialZoom: number;
-
-                if (mode === "home" && parsedHomeRef.current !== null) {
-                    const center = residenceCellCenter(parsedHomeRef.current.hex);
-                    initialCenter = { lat: center.lat, lng: center.lng };
-                    initialZoom = HOME_ZOOM;
-                } else {
-                    const bounds =
-                        overviewOverlayBounds ??
-                        computeAffectedAreaBounds(cellGeometriesRef.current);
-                    if (bounds !== null) {
-                        // fitBounds は後で呼ぶ。初期値は bounds 中心に仮置き
-                        initialCenter = {
-                            lat: (bounds.north + bounds.south) / 2,
-                            lng: (bounds.east + bounds.west) / 2,
-                        };
-                    } else {
-                        initialCenter = DEFAULT_CENTER;
-                    }
-                    initialZoom = OVERVIEW_ZOOM;
-                }
+                const currentManifest = manifestRef.current;
+                const initialCenter =
+                    isHomeMode && parsedHomeRef.current !== null
+                        ? residenceCellCenter(parsedHomeRef.current.hex)
+                        : currentManifest !== null
+                          ? centerOfBounds(currentManifest.bounds)
+                          : DEFAULT_CENTER;
+                const initialZoom = isHomeMode ? HOME_ZOOM : OVERVIEW_ZOOM;
 
                 const map = new google.maps.Map(element, {
                     center: initialCenter,
@@ -448,21 +420,8 @@ export function AffectedAreaMap({
                 });
                 mapRef.current = map;
 
-                resetOverviewOverlay(map);
-
-                // overview モードでは band overlay または affected cells の範囲へ合わせる
-                if (mode === "overview") {
-                    const bounds =
-                        overviewOverlayBounds ??
-                        computeAffectedAreaBounds(cellGeometriesRef.current);
-                    if (bounds !== null) {
-                        map.fitBounds({
-                            north: bounds.north,
-                            south: bounds.south,
-                            east: bounds.east,
-                            west: bounds.west,
-                        });
-                    }
+                if (!isHomeMode && currentManifest !== null) {
+                    map.fitBounds(currentManifest.bounds);
                 }
 
                 map.addListener("idle", () => {
@@ -472,7 +431,6 @@ export function AffectedAreaMap({
                 setStatus("ready");
                 syncOverlay();
 
-                // コンテナサイズ変更時に地図中心を保持する
                 if (typeof ResizeObserver !== "undefined") {
                     const observer = new ResizeObserver(() => {
                         const currentMap = mapRef.current;
@@ -498,50 +456,28 @@ export function AffectedAreaMap({
         return () => {
             cancelled = true;
 
-            // ResizeObserver の解除
             if (resizeObserverRef.current !== null) {
                 resizeObserverRef.current.disconnect();
                 resizeObserverRef.current = null;
             }
 
-            // overlay cleanup
             clearCellPolygons();
-            if (overviewOverlayRef.current !== null) {
-                overviewOverlayRef.current.setMap(null);
-                overviewOverlayRef.current = null;
-            }
 
-            // map リスナの解除
             const map = mapRef.current;
             if (map !== null) {
+                if (rasterOverlayRef.current !== null) {
+                    removeOverlayMapType(map, rasterOverlayRef.current);
+                    rasterOverlayRef.current = null;
+                    rasterOverlaySourceRef.current = null;
+                }
                 google.maps.event.clearInstanceListeners(map);
             }
             mapRef.current = null;
         };
-    }, [
-        cellSourceKind,
-        clearCellPolygons,
-        mode,
-        overviewOverlayBounds,
-        resetOverviewOverlay,
-        syncOverlay,
-    ]);
-
-    // ---------------------------------------------------------------------------
-    // 凡例エントリ（固定。renders ごとに再生成しない）
-    // ---------------------------------------------------------------------------
+    }, [cellSourceKind, clearCellPolygons, isHomeMode, syncOverlay]);
 
     const legendEntries = buildBandLegendEntries();
 
-    // ---------------------------------------------------------------------------
-    // フォールバック優先順位
-    //
-    // 1. deferred → 「被災エリア準備中」フォールバック
-    // 2. API 未設定 → 「地図表示不可」フォールバック
-    // 3. 地図を描く（その中で loading / error / empty をインライン表示）
-    // ---------------------------------------------------------------------------
-
-    // deferred フォールバック
     if (cellSourceKind === "deferred") {
         return (
             <div className="affected-area-map-fallback">
@@ -551,7 +487,6 @@ export function AffectedAreaMap({
         );
     }
 
-    // API 未設定フォールバック
     if (!isGoogleMapsConfigured(mapsApiKey)) {
         return (
             <div className="affected-area-map-fallback">
@@ -561,10 +496,8 @@ export function AffectedAreaMap({
         );
     }
 
-    // 地図ステージ + 凡例 + 詳細パネル
     return (
         <div className="affected-area-map">
-            {/* 地図ステージ */}
             <div className="affected-area-map-stage">
                 <div
                     aria-label={t("ariaLabel")}
@@ -573,25 +506,27 @@ export function AffectedAreaMap({
                     role="application"
                 />
 
-                {/* ローディング・エラー・空集合をオーバーレイで表示 */}
                 {status === "loading" ? (
                     <div className="affected-area-map-overlay-note" role="status">
                         {t("loading")}
                     </div>
                 ) : null}
-                {status === "error" ? (
+                {status === "error" || fetchError ? (
                     <div className="affected-area-map-overlay-note" role="status">
                         {t("errorBody")}
                     </div>
                 ) : null}
-                {status === "ready" && fetchDone && !fetchError && cells.length === 0 ? (
+                {status === "ready" &&
+                fetchDone &&
+                !fetchError &&
+                manifest !== null &&
+                manifest.cellCount === 0 ? (
                     <div className="affected-area-map-overlay-note" role="status">
                         {t("emptyBody")}
                     </div>
                 ) : null}
             </div>
 
-            {/* 凡例 */}
             <div className="affected-area-map-legend">
                 <p className="affected-area-map-legend-title">{t("legendTitle")}</p>
                 <ul className="affected-area-map-legend-list">
@@ -606,7 +541,6 @@ export function AffectedAreaMap({
                             </span>
                         </li>
                     ))}
-                    {/* 自宅セルが有効な res7 セルならば凡例に「あなたのセル」を出す */}
                     {parsedHome !== null ? (
                         <li className="affected-area-map-legend-item">
                             <span
@@ -619,7 +553,6 @@ export function AffectedAreaMap({
                 </ul>
             </div>
 
-            {/* タップ詳細パネル */}
             {selectedDetail !== null ? (
                 <div className="affected-area-map-detail">
                     <p className="affected-area-map-detail-title">{t("detailTitle")}</p>

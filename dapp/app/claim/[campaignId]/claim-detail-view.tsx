@@ -27,7 +27,10 @@ import { WalletConnect } from "../../wallet/wallet-connect";
 import { readWalletNetwork } from "../../wallet/wallet-network";
 import { executeWalletTransaction } from "../../wallet/wallet-transaction-adapter";
 import { AffectedAreaMap } from "../affected-area/affected-area-map";
-import { resolvePreviewCellSource } from "../affected-area/preview-cell-source";
+import {
+    resolvePreviewAffectedAreaArtifact,
+    resolvePreviewCellSource,
+} from "../affected-area/preview-cell-source";
 import {
     type AffectedCellsProof,
     assertProofMatchesClaimContext,
@@ -214,6 +217,8 @@ export function ClaimDetailView({
     const previewProgram = selectedEvent !== null ? claimCampaignToProgram(selectedEvent) : null;
     const previewCellSource =
         previewProgram !== null ? resolvePreviewCellSource(previewProgram) : null;
+    const previewAffectedAreaArtifact =
+        previewProgram !== null ? resolvePreviewAffectedAreaArtifact(previewProgram) : null;
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: campaignReadNonce is a retry trigger.
     useEffect(() => {
@@ -650,7 +655,7 @@ export function ClaimDetailView({
                     </section>
 
                     {/* 被災エリア地図プレビュー（デモデータ・証明とは別経路） */}
-                    {previewCellSource !== null ? (
+                    {previewCellSource !== null && previewAffectedAreaArtifact !== null ? (
                         <section className="claim-map-section" aria-labelledby="map-section-title">
                             <div className="panel-header">
                                 <div>
@@ -661,6 +666,7 @@ export function ClaimDetailView({
                                 </span>
                             </div>
                             <AffectedAreaMap
+                                affectedAreaArtifact={previewAffectedAreaArtifact}
                                 cellSource={previewCellSource}
                                 residenceCell={membershipPass?.homeCell ?? null}
                             />

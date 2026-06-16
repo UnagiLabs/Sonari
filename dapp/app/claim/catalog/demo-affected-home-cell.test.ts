@@ -12,7 +12,7 @@ import {
 // ---------------------------------------------------------------------------
 // デモ居住セルが被災セット内にあることを静的に担保するテスト。
 //
-// 実アセット dapp/public/demo/tohoku-2011-affected-cells.json を node:fs で
+// 実アセット dapp/public/demo/tohoku-2011/affected-cells.json を node:fs で
 // 読み込み、parseAffectedCells でパースした結果に DEMO_RESIDENCE_HOME_CELL（自宅・陸地）
 // と DEMO_AFFECTED_HOME_CELL_BAND3 / _BAND1（バンド色の例示）が含まれ、期待バンドである
 // ことを確認する。
@@ -22,13 +22,13 @@ import {
 
 const affectedCellsPath = resolve(
     dirname(fileURLToPath(import.meta.url)),
-    "../../../public/demo/tohoku-2011-affected-cells.json",
+    "../../../public/demo/tohoku-2011/affected-cells.json",
 );
 
 const rawJson: unknown = JSON.parse(readFileSync(affectedCellsPath, "utf8"));
 const affectedCells = parseAffectedCells(rawJson);
 
-describe("tohoku-2011-affected-cells.json 読み込み健全性", () => {
+describe("tohoku-2011/affected-cells.json 読み込み健全性", () => {
     it("セル数が正の値である", () => {
         expect(affectedCells.length).toBeGreaterThan(0);
     });

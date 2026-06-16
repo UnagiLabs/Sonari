@@ -27,7 +27,11 @@ const validDisasterInput: unknown = {
     eventUid: EVENT_UID,
     severityBand: 3,
     affectedCellCount: 1200,
-    cellSource: { kind: "static-asset", path: "/demo/tohoku-2011-affected-cells.json" },
+    cellSource: { kind: "static-asset", path: "/demo/tohoku-2011/affected-cells.json" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+    },
     affectedCellsRoot: "0x" + "b".repeat(64),
 };
 
@@ -71,23 +75,20 @@ describe("parseClaimableProgram — disaster", () => {
         expect(result?.affectedCellCount).toBe(1200);
         expect(result?.cellSource).toEqual({
             kind: "static-asset",
-            path: "/demo/tohoku-2011-affected-cells.json",
+            path: "/demo/tohoku-2011/affected-cells.json",
+        });
+        expect(result?.affectedAreaArtifact).toEqual({
+            kind: "tiled-affected-cells",
+            manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
         });
     });
 
-    it("parsed disaster program accepts optional overviewOverlay", () => {
+    it("parsed disaster program accepts tiled affected area artifact", () => {
         const input = {
             ...(validDisasterInput as Record<string, unknown>),
-            overviewOverlay: {
-                kind: "band-overlay-image",
-                url: "/demo/tohoku-2011-band-overlay.svg",
-                bounds: {
-                    north: 45.1,
-                    south: 30.133,
-                    east: 152.25,
-                    west: 134.733,
-                },
-                opacity: 0.8,
+            affectedAreaArtifact: {
+                kind: "tiled-affected-cells",
+                manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
             },
         };
 
@@ -95,36 +96,33 @@ describe("parseClaimableProgram — disaster", () => {
 
         expect(result).not.toBeNull();
         if (result?.category === "disaster") {
-            expect(result.overviewOverlay).toEqual({
-                kind: "band-overlay-image",
-                url: "/demo/tohoku-2011-band-overlay.svg",
-                bounds: {
-                    north: 45.1,
-                    south: 30.133,
-                    east: 152.25,
-                    west: 134.733,
-                },
-                opacity: 0.8,
+            expect(result.affectedAreaArtifact).toEqual({
+                kind: "tiled-affected-cells",
+                manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
             });
         }
     });
 
-    it("returns null when overviewOverlay bounds are invalid", () => {
+    it("returns null when affectedAreaArtifact is invalid", () => {
         const input = {
             ...(validDisasterInput as Record<string, unknown>),
-            overviewOverlay: {
+            affectedAreaArtifact: {
                 kind: "band-overlay-image",
-                url: "/demo/tohoku-2011-band-overlay.svg",
-                bounds: {
-                    north: 30.133,
-                    south: 45.1,
-                    east: 152.25,
-                    west: 134.733,
-                },
+                manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
             },
         };
 
         expect(parseClaimableProgram(input)).toBeNull();
+    });
+
+    it("parses without optional affectedAreaArtifact", () => {
+        const input = { ...(validDisasterInput as Record<string, unknown>) };
+        delete input["affectedAreaArtifact"];
+        const result = parseClaimableProgram(input);
+        expect(result).not.toBeNull();
+        if (result?.category === "disaster") {
+            expect(result.affectedAreaArtifact).toBeUndefined();
+        }
     });
 
     it("parsed disaster program accepts deferred cellSource", () => {
