@@ -298,6 +298,32 @@ describe("AWS runner workflow helper", () => {
         expect(earthquakeStateMachine).toContain('"action": "relayer_preview_or_dry_run"');
         expect(earthquakeStateMachine).toContain('"action": "record_relayer_success"');
         expect(earthquakeStateMachine).toContain('"result_s3_key.$": "$.result_s3_key"');
+        for (const action of [
+            "poll_command",
+            "read_health_check_result",
+            "read_attestation_result",
+            "register_enclave_instance",
+            "read_result",
+            "apply_result",
+            "archive_sources",
+            "register_affected_cells_proof",
+            "relayer_preview_or_dry_run",
+            "record_relayer_success",
+            "run_floor_census",
+            "mark_failed",
+            "stop_instance",
+        ]) {
+            const actionIndex = earthquakeStateMachine.indexOf(`"action": "${action}"`);
+            expect(actionIndex, `missing action ${action}`).toBeGreaterThanOrEqual(0);
+            const nextActionIndex = earthquakeStateMachine.indexOf('"action":', actionIndex + 1);
+            const actionBlock = earthquakeStateMachine.slice(
+                actionIndex,
+                nextActionIndex === -1 ? undefined : nextActionIndex,
+            );
+            expect(actionBlock, `${action} must preserve event_revision`).toContain(
+                '"event_revision.$": "$.event_revision"',
+            );
+        }
         expect(earthquakeStateMachine).not.toContain('"result.$": "$.result"');
         expect(template).toContain("RunnerControlLambda:");
         expect(template).toContain("Handler: dist/src/runner_workflow.handler");

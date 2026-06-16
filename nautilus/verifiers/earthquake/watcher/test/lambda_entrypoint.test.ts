@@ -36,6 +36,7 @@ describe("AWS Lambda entrypoints", () => {
         process.env.RUNNER_TOKEN_SECRET_ARN = "arn:aws:secretsmanager:runner-token";
         process.env.EVENTS_TABLE_NAME = "events";
         process.env.RUNNER_STATE_MACHINE_ARN = "arn:aws:states:runner";
+        process.env.SONARI_SUI_GRAPHQL_URL = "https://graphql.testnet.sui.io/graphql";
         const { manualHandler } = await import("../src/lambda.js");
 
         await expect(

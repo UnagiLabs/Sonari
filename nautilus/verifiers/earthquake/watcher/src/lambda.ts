@@ -4,7 +4,9 @@ import {
     createManualHandler,
     createScheduledHandler,
     DynamoDbStateRepository,
+    getLatestOnchainEventRevision,
     type ManualLambdaEvent,
+    type OnchainEventRevisionReader,
     StepFunctionsWorkflowStarter,
 } from "./index.js";
 
@@ -16,6 +18,7 @@ export async function scheduledHandler(): Promise<unknown> {
     return createScheduledHandler({
         repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
         workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
+        readLatestOnchainEventRevision: readLatestOnchainEventRevisionFromEnv(),
     })();
 }
 
@@ -25,7 +28,37 @@ export async function manualHandler(event: ManualLambdaEvent): Promise<unknown> 
         repository: new DynamoDbStateRepository(requiredEnv("EVENTS_TABLE_NAME")),
         workflow: new StepFunctionsWorkflowStarter(requiredEnv("RUNNER_STATE_MACHINE_ARN"), sfn),
         token,
+        readLatestOnchainEventRevision: readLatestOnchainEventRevisionFromEnv(),
     })(event);
+}
+
+function readLatestOnchainEventRevisionFromEnv(): OnchainEventRevisionReader {
+    const graphqlUrl = requiredEnv("SONARI_SUI_GRAPHQL_URL");
+    return {
+        async readLatestEventRevision(eventUid: string): Promise<number> {
+            const result = await getLatestOnchainEventRevision({
+                eventUid,
+                graphql: {
+                    async query(query, variables) {
+                        const response = await fetch(graphqlUrl, {
+                            method: "POST",
+                            headers: {
+                                "content-type": "application/json",
+                            },
+                            body: JSON.stringify({ query, variables }),
+                        });
+                        if (!response.ok) {
+                            throw new Error(
+                                `Sui GraphQL query failed with HTTP ${response.status}`,
+                            );
+                        }
+                        return response.json() as Promise<unknown>;
+                    },
+                },
+            });
+            return result.latestRevision;
+        },
+    };
 }
 
 async function manualToken(): Promise<string> {
