@@ -219,9 +219,10 @@ describe("AWS earthquake wrapper verification script", () => {
         });
 
         expect(command).toContain('/opt/sonari/bin/run-earthquake-enclave > "$result_file"');
-        expect(command).toContain('result_key="results/earthquake-wrapper-results/run-123.json"');
+        expect(command).toContain("result_bucket='runner-results'");
+        expect(command).toContain("result_key='results/earthquake-wrapper-results/run-123.json'");
         expect(command).toContain(
-            'aws s3 cp --only-show-errors "$result_file" "s3://runner-results/$result_key"',
+            'aws s3 cp --only-show-errors "$result_file" "s3://$result_bucket/$result_key"',
         );
         expect(command).toContain('sha256="$(sha256sum "$result_file" | awk \'{ print $1 }\')"');
         expect(command).toContain('bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"');
