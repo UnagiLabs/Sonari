@@ -1,4 +1,9 @@
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
+import { TextDecoder } from "node:util";
 import {
     type AwsCli,
     assertAsgIdle,
@@ -32,6 +37,8 @@ const DEFAULT_PRIMARY_SOURCE = 1;
 const DEFAULT_GEO_RESOLUTION = 7;
 const DEFAULT_VERIFIER_CONFIG_KEY = 1;
 const DEFAULT_VERIFIER_CONFIG_VERSION = 7;
+const EARTHQUAKE_WRAPPER_RESULT_PREFIX = "results/earthquake-wrapper-results/";
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export type VerifyEarthquakeWrapperOptions = {
     aws?: AwsCli;
@@ -45,6 +52,7 @@ export type VerifyEarthquakeWrapperOptions = {
     geoResolution?: number;
     verifierConfigKey?: number;
     verifierConfigVersion?: number;
+    processDataRunId?: string;
     poll?: PollOptions;
 };
 
@@ -55,6 +63,52 @@ export type VerifyEarthquakeWrapperResult = {
     attestationPublicKey: string;
     finalizedResult: unknown;
 };
+
+export async function readEarthquakeWrapperS3Result(input: {
+    aws: AwsCli;
+    expectedBucket: string;
+    expectedKey?: string;
+    reference: unknown;
+}): Promise<unknown> {
+    const reference = readProcessDataS3Reference(input.reference);
+    const { bucket, key } = parseExpectedResultS3Uri(reference.resultS3Uri);
+    if (bucket !== input.expectedBucket) {
+        throw new Error(
+            `process_data result bucket mismatch: expected ${input.expectedBucket}, got ${bucket}`,
+        );
+    }
+    if (!key.startsWith(EARTHQUAKE_WRAPPER_RESULT_PREFIX)) {
+        throw new Error(
+            `process_data result key must be under ${EARTHQUAKE_WRAPPER_RESULT_PREFIX}`,
+        );
+    }
+    if (input.expectedKey !== undefined && key !== input.expectedKey) {
+        throw new Error(
+            `process_data result key mismatch: expected ${input.expectedKey}, got ${key}`,
+        );
+    }
+
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "sonari-earthquake-wrapper-result-"));
+    try {
+        const outputPath = path.join(tempDir, "process-data-result.json");
+        await input.aws.json(["s3api", "get-object", "--bucket", bucket, "--key", key, outputPath]);
+        const bytes = await readFile(outputPath);
+        const actualSha256 = createHash("sha256").update(bytes).digest("hex");
+        if (actualSha256 !== reference.sha256) {
+            throw new Error("process_data result sha256 mismatch");
+        }
+        if (bytes.byteLength !== reference.bytes) {
+            throw new Error("process_data result byte length mismatch");
+        }
+        const text = UTF8_DECODER.decode(bytes);
+        if (Buffer.byteLength(text, "utf8") !== reference.bytes) {
+            throw new Error("process_data result UTF-8 byte length mismatch");
+        }
+        return parseJsonText(text, "process_data S3 result");
+    } finally {
+        await rm(tempDir, { recursive: true, force: true });
+    }
+}
 
 export async function runVerifyEarthquakeWrapper(
     options: VerifyEarthquakeWrapperOptions = {},
@@ -77,6 +131,7 @@ export async function runVerifyEarthquakeWrapper(
     await assertSchedulesDisabled(aws, outputs);
 
     const asgName = requireOutput(outputs, "RunnerAutoScalingGroupName");
+    const resultBucket = requireOutput(outputs, "RunnerResultBucketName");
     let cleanupNeeded = false;
 
     try {
@@ -133,16 +188,30 @@ export async function runVerifyEarthquakeWrapper(
             verifierConfigVersion: options.verifierConfigVersion ?? DEFAULT_VERIFIER_CONFIG_VERSION,
             enclaveInstancePublicKey: attestationPublicKey,
         });
+        const runId = options.processDataRunId ?? randomUUID();
+        const expectedResultKey = processDataS3ResultKey(runId);
+        const processDataReference = parseJsonText(
+            await runSsmShellCommand(aws, {
+                instanceId,
+                comment: "process_data",
+                commands: [
+                    buildProcessDataS3UploadCommand({
+                        input: processDataInput,
+                        bucket: resultBucket,
+                        runId,
+                    }),
+                ],
+                poll,
+            }),
+            "process_data S3 reference",
+        );
         const finalizedResult = assertDirectEarthquakeWrapperResult(
-            parseJsonText(
-                await runSsmShellCommand(aws, {
-                    instanceId,
-                    comment: "process_data",
-                    commands: [shellPipeJsonToEarthquakeWrapper(processDataInput)],
-                    poll,
-                }),
-                "process_data",
-            ),
+            await readEarthquakeWrapperS3Result({
+                aws,
+                expectedBucket: resultBucket,
+                expectedKey: expectedResultKey,
+                reference: processDataReference,
+            }),
             attestationPublicKey,
         );
 
@@ -205,12 +274,88 @@ function buildSocatTimeoutVerificationCommand(): string {
     ].join("\n");
 }
 
+export function buildProcessDataS3UploadCommand(input: {
+    input: unknown;
+    bucket: string;
+    runId: string;
+}): string {
+    const resultKey = processDataS3ResultKey(input.runId);
+    return [
+        "set -euo pipefail",
+        'result_file="$(mktemp /tmp/sonari-earthquake-wrapper-result.XXXXXX.json)"',
+        "trap 'rm -f \"$result_file\"' EXIT",
+        `result_bucket=${shellSingleQuote(input.bucket)}`,
+        `result_key=${shellSingleQuote(resultKey)}`,
+        `printf '%s' ${shellSingleQuote(JSON.stringify(input.input))} | /opt/sonari/bin/run-earthquake-enclave > "$result_file"`,
+        'aws s3 cp --only-show-errors "$result_file" "s3://$result_bucket/$result_key"',
+        'sha256="$(sha256sum "$result_file" | awk \'{ print $1 }\')"',
+        'bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"',
+        `RESULT_S3_URI="s3://$result_bucket/$result_key" RESULT_SHA256="$sha256" RESULT_BYTES="$bytes" node -e ${shellSingleQuote('process.stdout.write(JSON.stringify({ status: "ok", result_s3_uri: process.env.RESULT_S3_URI, sha256: process.env.RESULT_SHA256, bytes: Number(process.env.RESULT_BYTES) }))')}`,
+    ].join("\n");
+}
+
+function processDataS3ResultKey(runId: string): string {
+    return `${EARTHQUAKE_WRAPPER_RESULT_PREFIX}${runId}.json`;
+}
+
+function shellSingleQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function readSocatTimeoutSeconds(output: string): number {
     const value = Number(output.trim());
     if (!Number.isSafeInteger(value) || value < 180) {
         throw new Error(`Invalid socat timeout verification output: ${output}`);
     }
     return value;
+}
+
+function readProcessDataS3Reference(value: unknown): {
+    resultS3Uri: string;
+    sha256: string;
+    bytes: number;
+} {
+    if (!isRecord(value)) {
+        throw new Error("process_data S3 reference must be an object");
+    }
+    if (value.status !== "ok") {
+        throw new Error('Expected process_data S3 reference status "ok"');
+    }
+    if (typeof value.result_s3_uri !== "string" || value.result_s3_uri.length === 0) {
+        throw new Error("process_data S3 reference result_s3_uri is required");
+    }
+    if (typeof value.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(value.sha256)) {
+        throw new Error("process_data S3 reference sha256 must be 64 lowercase hex characters");
+    }
+    if (typeof value.bytes !== "number" || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
+        throw new Error("process_data S3 reference bytes must be a non-negative safe integer");
+    }
+    return {
+        resultS3Uri: value.result_s3_uri,
+        sha256: value.sha256,
+        bytes: value.bytes,
+    };
+}
+
+function parseExpectedResultS3Uri(uri: string): { bucket: string; key: string } {
+    let parsed: URL;
+    try {
+        parsed = new URL(uri);
+    } catch {
+        throw new Error("process_data result_s3_uri must be an s3 URI");
+    }
+    if (parsed.protocol !== "s3:" || parsed.hostname.length === 0) {
+        throw new Error("process_data result_s3_uri must be an s3 URI");
+    }
+    const key = parsed.pathname.replace(/^\/+/u, "");
+    if (key.length === 0) {
+        throw new Error("process_data result_s3_uri must include an object key");
+    }
+    return { bucket: parsed.hostname, key };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 if (process.argv[1]?.endsWith("verify-earthquake-wrapper.ts")) {
