@@ -40,18 +40,19 @@ function nonRetryableWorkflowError(cause: unknown): Error {
     return typeof Constructor === "function" ? new Constructor(message) : new Error(message);
 }
 
-const WorkflowEntrypointBase: new () => WorkflowEntrypoint<
-    AffectedAreaWorkflowEnv,
-    AffectedAreaWorkflowInput
-> =
-    globalThis.WorkflowEntrypoint ??
-    class {
-        readonly env!: AffectedAreaWorkflowEnv;
+const workflowRuntime = globalThis as typeof globalThis & {
+    WorkflowEntrypoint?: typeof WorkflowEntrypoint;
+};
+
+if (workflowRuntime.WorkflowEntrypoint === undefined) {
+    workflowRuntime.WorkflowEntrypoint = class {
+        readonly env!: unknown;
 
         async run(): Promise<unknown> {
             throw new Error("WorkflowEntrypoint is unavailable outside the Cloudflare runtime");
         }
-    };
+    } as unknown as typeof WorkflowEntrypoint;
+}
 
 function requireAffectedAreaBucket(env: AffectedAreaWorkflowEnv): AffectedAreaR2Bucket {
     const bucket = env.AFFECTED_AREA_ARTIFACTS;
@@ -113,7 +114,10 @@ export async function runAffectedAreaArtifactWorkflow(
     };
 }
 
-export class AffectedAreaArtifactWorkflow extends WorkflowEntrypointBase {
+export class AffectedAreaArtifactWorkflow extends WorkflowEntrypoint<
+    AffectedAreaWorkflowEnv,
+    AffectedAreaWorkflowInput
+> {
     async run(
         event: WorkflowEvent<AffectedAreaWorkflowInput>,
         step: WorkflowStep,
