@@ -850,6 +850,77 @@ describe("DynamoDB-compatible repository behavior", () => {
         });
     });
 
+    it("manual rerun after terminal duplicate relayer rejection plans a newer latest+1 revision", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const latestReads: string[] = [];
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 5_000,
+            token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
+            readLatestOnchainEventRevision: {
+                async readLatestEventRevision(eventUid) {
+                    latestReads.push(eventUid);
+                    return 2;
+                },
+            },
+        });
+
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-r1-a1",
+            baseNow + 500,
+            0,
+            1,
+        );
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            finalizedResult(),
+            baseNow + 1_000,
+            undefined,
+            1,
+        );
+        await repository.markRelayerFailed(
+            "us7000sonari",
+            "submit",
+            "MOVE_REJECTED",
+            "MoveAbort EStaleDisasterEventRevision",
+            baseNow + 2_000,
+            1,
+        );
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000sonari" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(latestReads).toEqual([
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ]);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000sonari",
+                executionName: "earthquake-us7000sonari-r3-a1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            latest_revision: 1,
+            planned_event_revision: 3,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            error_code: null,
+            relayer_status: null,
+            relayer_error_code: null,
+            relayer_error_message: null,
+        });
+    });
+
     it("DynamoDB manual rerun resets terminal result rows without dropping stable identity", async () => {
         const terminalRow = await eventRow("us7000sonari", {
             requested_source_event_id: "usc0001xgp",

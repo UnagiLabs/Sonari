@@ -17,7 +17,7 @@ import {
     encodeEarthquakeOraclePayloadBcsHex,
 } from "@sonari/earthquake-shared";
 import { FAILED_RETRY_BACKOFF_MS } from "../src/constants.js";
-import type { RelayerAdapter, RelayerSuccess } from "../src/relayer_preview.js";
+import type { RelayerAdapter, RelayerErrorCode, RelayerSuccess } from "../src/relayer_preview.js";
 import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
@@ -2038,6 +2038,110 @@ describe("AWS runner workflow helper", () => {
         });
     });
 
+    it("marks duplicate or stale Move relayer rejections terminal", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+            0,
+            1,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/0.bin"] },
+            1_800_000_001_500,
+            1,
+        );
+        const relayer = new FailingRelayerAdapter(
+            "MOVE_REJECTED",
+            "MoveAbort EDuplicateDisasterEvent while creating disaster event",
+        );
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ relayer: "failed" });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "rejected",
+            next_retry_at_ms: null,
+            error_code: "MOVE_REJECTED",
+            planned_event_revision: 1,
+            relayer_mode: "preview",
+            relayer_status: "failed",
+            relayer_error_code: "MOVE_REJECTED",
+            relayer_error_message: "MoveAbort EDuplicateDisasterEvent while creating disaster event",
+        });
+        await expect(repository.listDue(1_800_000_003_000, 10)).resolves.toEqual([]);
+    });
+
+    it("keeps generic Move relayer rejections on the current path", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-1",
+            1_800_000_000_001,
+            0,
+            1,
+        );
+        const result = finalizedResultWithRawManifest(new TextEncoder().encode("source bytes"));
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_001_000, undefined, 1);
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/0.bin"] },
+            1_800_000_001_500,
+            1,
+        );
+        const relayer = new FailingRelayerAdapter("MOVE_REJECTED", "MoveAbort EVerifierPaused");
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client(),
+            repository,
+            relayer,
+            now: () => 1_800_000_002_000,
+            config: baseConfig(),
+        });
+
+        await expect(
+            handler({
+                action: "relayer_preview_or_dry_run",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result,
+            } as never),
+        ).resolves.toMatchObject({ relayer: "failed" });
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "finalized",
+            error_code: null,
+            planned_event_revision: 1,
+            relayer_status: "failed",
+            relayer_error_code: "MOVE_REJECTED",
+            relayer_error_message: "MoveAbort EVerifierPaused",
+        });
+    });
+
     it("fails submit relayer before signer access unless RELAYER_ALLOW_SUBMIT is true", async () => {
         const relayer = readRelayerConfigFromEnv(
             new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
@@ -2963,6 +3067,21 @@ class RecordingRelayerAdapter implements RelayerAdapter {
                 },
             },
         };
+    }
+}
+
+class FailingRelayerAdapter implements RelayerAdapter {
+    readonly mode = "preview" as const;
+    readonly inputs: TeeCoreResult[] = [];
+
+    constructor(
+        private readonly errorCode: RelayerErrorCode,
+        private readonly message: string,
+    ) {}
+
+    async relay(input: TeeCoreResult) {
+        this.inputs.push(input);
+        return { ok: false as const, error_code: this.errorCode, message: this.message };
     }
 }
 

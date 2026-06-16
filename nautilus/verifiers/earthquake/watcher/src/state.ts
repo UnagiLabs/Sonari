@@ -677,6 +677,11 @@ export class InMemoryStateRepository implements StateRepository {
         row.relayer_error_code = errorCode;
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
+        if (isDuplicateOrStaleMoveRejection(errorCode, message)) {
+            row.status = "rejected";
+            row.next_retry_at_ms = null;
+            row.error_code = errorCode;
+        }
         row.updated_at_ms = nowMs;
         return true;
     }
@@ -1426,6 +1431,11 @@ export class DynamoDbStateRepository implements StateRepository {
         row.relayer_error_code = errorCode;
         row.relayer_error_message = message;
         row.relayer_updated_at_ms = nowMs;
+        if (isDuplicateOrStaleMoveRejection(errorCode, message)) {
+            row.status = "rejected";
+            row.next_retry_at_ms = null;
+            row.error_code = errorCode;
+        }
         row.updated_at_ms = nowMs;
         return this.put(row, expectedAttempt, true);
     }
@@ -2373,6 +2383,19 @@ function isDueAffectedCellsProofRegistration(row: EarthquakeEventRow, nowMs: num
         row.source_archive_status === "success" &&
         row.runner_result_s3_key !== null &&
         row.runner_attempt !== null
+    );
+}
+
+function isDuplicateOrStaleMoveRejection(errorCode: RelayerErrorCode, message: string): boolean {
+    if (errorCode !== "MOVE_REJECTED") {
+        return false;
+    }
+    const normalized = message.toLowerCase();
+    return (
+        normalized.includes("eduplicatedisasterevent") ||
+        normalized.includes("estaledisastereventrevision") ||
+        normalized.includes("duplicatedisasterevent") ||
+        normalized.includes("staledisastereventrevision")
     );
 }
 
