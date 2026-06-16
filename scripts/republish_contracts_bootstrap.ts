@@ -46,6 +46,7 @@ export const GENESIS_KIND = {
 
 // ---------------------------------------------------------------------------
 // GitHub 設定の張替え先スコープ。
+// object id 系は Published.toml と Sui events から deploy 時に解決するため、現在は張替え対象にしない。
 // ---------------------------------------------------------------------------
 export const GH_SCOPE = {
     /** repository-level Variables（共有 env の単一情報源）。 */
@@ -56,7 +57,7 @@ export const GH_SCOPE = {
 
 export type GhScope = (typeof GH_SCOPE)[keyof typeof GH_SCOPE];
 
-/** 新しい object ID を 1 つの GitHub 設定へ張替える指示。 */
+/** 新しい値を 1 つの GitHub 設定へ張替える指示。 */
 export interface GhSettingAssignment {
     /** GitHub Variables / Secrets の名前。 */
     readonly name: string;
@@ -70,7 +71,7 @@ export interface GhSettingAssignment {
     readonly source: string;
 }
 
-/** 本 issue では張替えないが、新 publish に存在することを確認する genesis object。 */
+/** GitHub 設定へ保存せず、新 publish に存在することだけを確認する object。 */
 export interface GenesisCrossCheck {
     readonly objectKind: number;
     readonly label: string;
@@ -127,7 +128,7 @@ export function parseGenesisObjectIds(input: unknown): Map<number, string> {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 新しい object id を GitHub 設定へ張替える計画を作る。
+// 2. 新しい object id を GitHub 設定へ保存せず、Published.toml 起点で解決できることを検証する。
 // ---------------------------------------------------------------------------
 export function buildSettingsAssignments(input: RewireInput): SettingsPlan {
     assertHexObjectId(input.packageId, "packageId");
@@ -159,125 +160,79 @@ export function buildSettingsAssignments(input: RewireInput): SettingsPlan {
         throw new Error("AllowedResidenceCellRegistry id does not match genesis kind 13");
     }
 
-    const repo: readonly GhScope[] = [GH_SCOPE.REPO];
-    const repoAndEnv: readonly GhScope[] = [GH_SCOPE.REPO, GH_SCOPE.ENV_AWS_DEV];
-
-    const assignments: GhSettingAssignment[] = [
-        // genesis（init が emit）
-        {
-            name: "SONARI_ADMIN_CAP_ID",
-            value: adminCap,
-            scopes: repo,
-            secret: false,
-            source: "genesis:AdminCap(kind=1)",
-        },
-        {
-            name: "SONARI_IDENTITY_PAUSE_STATE_ID",
-            value: pauseState,
-            scopes: repo,
-            secret: false,
-            source: "genesis:PauseState(kind=2)",
-        },
-        {
-            name: "SONARI_FLOOR_CENSUS_PAUSE_STATE",
-            value: pauseState,
-            scopes: repo,
-            secret: false,
-            source: "genesis:PauseState(kind=2)",
-        },
-        {
-            name: "SONARI_FLOOR_CENSUS_MAIN_POOL",
-            value: mainPool,
-            scopes: repo,
-            secret: false,
-            source: "genesis:MainPool(kind=3)",
-        },
-        {
-            name: "SONARI_MEMBERSHIP_REGISTRY_ID",
-            value: membershipRegistry,
-            scopes: repo,
-            secret: false,
-            source: "genesis:MembershipRegistry(kind=6)",
-        },
-        {
-            name: "SONARI_VERIFIER_REGISTRY_ID",
-            value: verifierRegistry,
-            scopes: repo,
-            secret: false,
-            source: "genesis:VerifierRegistry(kind=7)",
-        },
-        {
-            name: "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY",
-            value: verifierRegistry,
-            scopes: repoAndEnv,
-            secret: false,
-            source: "genesis:VerifierRegistry(kind=7)",
-        },
-        {
-            name: "SONARI_IDENTITY_REGISTRY_ID",
-            value: identityRegistry,
-            scopes: repo,
-            secret: false,
-            source: "genesis:IdentityRegistry(kind=9)",
-        },
-        {
-            name: "SONARI_CATEGORY_REGISTRY_ID",
-            value: categoryRegistry,
-            scopes: repo,
-            secret: false,
-            source: "genesis:CategoryRegistry(kind=10)",
-        },
-        {
-            name: "SONARI_EARTHQUAKE_CATEGORY_POOL_ID",
-            value: earthquakePool,
-            scopes: repo,
-            secret: false,
-            source: "genesis:EarthquakePool(kind=11)",
-        },
-        {
-            name: "SONARI_FLOOR_CENSUS_CATEGORY_POOL",
-            value: earthquakePool,
-            scopes: repo,
-            secret: false,
-            source: "genesis:EarthquakePool(kind=11)",
-        },
-        // init が emit
-        {
-            name: "AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY",
-            value: disasterRegistry,
-            scopes: repoAndEnv,
-            secret: false,
-            source: "genesis:DisasterRegistry(kind=12)",
-        },
-        {
-            name: "SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID",
-            value: allowedResidenceCellRegistry,
-            scopes: repo,
-            secret: false,
-            source: "genesis:AllowedResidenceCellRegistry(kind=13)",
-        },
-        // package id から導出
-        {
-            name: "SONARI_FLOOR_CENSUS_TARGET",
-            value: `${input.packageId}::accessor::set_floor_census`,
-            scopes: repo,
-            secret: false,
-            source: "derived:package",
-        },
-    ];
-
+    const assignments: GhSettingAssignment[] = [];
     const crossChecks: GenesisCrossCheck[] = [
+        {
+            objectKind: GENESIS_KIND.ADMIN_CAP,
+            label: "AdminCap",
+            objectId: adminCap,
+            note: "deploy workflow が Published.toml と GenesisObjectCreated から解決する。",
+        },
+        {
+            objectKind: GENESIS_KIND.PAUSE_STATE,
+            label: "PauseState",
+            objectId: pauseState,
+            note: "identity / floor census 共通。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.MAIN_POOL,
+            label: "MainPool",
+            objectId: mainPool,
+            note: "floor census 用。GitHub Variables には保存しない。",
+        },
         {
             objectKind: GENESIS_KIND.OPERATIONS_POOL,
             label: "OperationsPool",
             objectId: operationsPool,
-            note: "#350 / dapp スコープ。本 issue では張替えない（存在確認のみ）。",
+            note: "#350 / dapp スコープ。存在確認のみ。",
         },
         {
             objectKind: GENESIS_KIND.DONOR_REGISTRY,
             label: "DonorRegistry",
             objectId: donorRegistry,
-            note: "#350 / dapp スコープ。本 issue では張替えない（存在確認のみ）。",
+            note: "#350 / dapp スコープ。存在確認のみ。",
+        },
+        {
+            objectKind: GENESIS_KIND.MEMBERSHIP_REGISTRY,
+            label: "MembershipRegistry",
+            objectId: membershipRegistry,
+            note: "membership identity 用。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.VERIFIER_REGISTRY,
+            label: "VerifierRegistry",
+            objectId: verifierRegistry,
+            note: "PCR 登録と relayer 用。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.IDENTITY_REGISTRY,
+            label: "IdentityRegistry",
+            objectId: identityRegistry,
+            note: "identity submit / dapp 用。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.CATEGORY_REGISTRY,
+            label: "CategoryRegistry",
+            objectId: categoryRegistry,
+            note: "earthquake relayer 用。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.EARTHQUAKE_POOL,
+            label: "EarthquakePool",
+            objectId: earthquakePool,
+            note: "earthquake / floor census 用。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.DISASTER_REGISTRY,
+            label: "DisasterRegistry",
+            objectId: disasterRegistry,
+            note: "relayer 用。GitHub Variables には保存しない。",
+        },
+        {
+            objectKind: GENESIS_KIND.ALLOWED_RESIDENCE_CELL_REGISTRY,
+            label: "AllowedResidenceCellRegistry",
+            objectId: allowedResidenceCellRegistry,
+            note: "residence proof 用。GitHub Variables には保存しない。",
         },
     ];
 

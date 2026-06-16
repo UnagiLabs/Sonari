@@ -137,18 +137,11 @@ CATEGORY_REGISTRY_ID="<CategoryRegistry object id>"
 EARTHQUAKE_CATEGORY_POOL_ID="<EarthquakePool object id>"
 ```
 
-3. GitHub Actions の Variables を更新
+3. object id の参照元を確認
 
-RELAYER_TARGET は deploy workflow が contracts/Published.toml から導出します。以下4つは必須。`testnet` 運用では下記を dev env / repo 変数へ入れます。
+GitHub Actions は `contracts/Published.toml` の package id を読み、Sui events から `AdminCap`、各 registry、pool、floor census target を導出します。object id 系の GitHub Variables は使いません。
 
-```text
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_REGISTRY=$DISASTER_REGISTRY_ID
-AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_VERIFIER_REGISTRY=$VERIFIER_REGISTRY_ID
-SONARI_CATEGORY_REGISTRY_ID=$CATEGORY_REGISTRY_ID
-SONARI_EARTHQUAKE_CATEGORY_POOL_ID=$EARTHQUAKE_CATEGORY_POOL_ID
-```
-
-手元確認や smoke で使うもの:
+手元確認や smoke で使う場合だけ、ローカル shell に値を置きます。
 
 ```text
 SONARI_IDENTITY_PACKAGE_ID=$PACKAGE_ID
