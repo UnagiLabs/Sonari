@@ -6,6 +6,11 @@ compatibility_date = "2026-06-01"
 binding = "AFFECTED_PROOF_SHARDS"
 bucket_name = "sonari-affected-proofs-v1"
 
+[[workflows]]
+binding = "AFFECTED_AREA_ARTIFACT_WORKFLOW"
+name = "sonari-affected-area-artifact-workflow"
+class_name = "AffectedAreaArtifactWorkflow"
+
 # ---------------------------------------------------------------------------
 # Vars（GEO_RESOLUTION / WALRUS_AGGREGATOR_URL）はここにハードコードしない。
 # ---------------------------------------------------------------------------
