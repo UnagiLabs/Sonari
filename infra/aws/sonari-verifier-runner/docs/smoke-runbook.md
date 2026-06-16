@@ -69,6 +69,8 @@ ManualWatcher の smoke は、`pnpm aws:smoke:earthquake-manual` の終了だけ
 9. DynamoDB row と row に記録された S3 object、`source-artifacts/<source_event_id>/` prefix を cleanup する。
 10. 最後に `pnpm aws:check-idle` を再実行する。
 
+`pnpm aws:verify:earthquake-wrapper` の `process_data` 確認では、大きい wrapper 結果を SSM stdout から直接読みません。runner instance は結果本体を `RunnerResultBucketName` の `results/earthquake-wrapper-results/` prefix に保存し、SSM stdout には `result_s3_uri`、`sha256`、`bytes` の参照 JSON だけを出します。script は S3 object を一時ファイルへ取得し、hash と byte 数を確認してから `process_data` 結果として検証します。この artifact は stack の `ResultRetentionDays` に従って削除されます。
+
 成功判定は、対象 execution が terminal status になった後の DynamoDB row で行います。
 
 - Step Functions execution が `SUCCEEDED`
