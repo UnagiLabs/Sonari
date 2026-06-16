@@ -30,5 +30,6 @@ describe("affected cells proof worker deploy workflow", () => {
         expect(wrangler).toContain('bucket_name = "sonari-affected-area-tiles-v1"');
         expect(wrangler).toContain('binding = "AFFECTED_AREA_ARTIFACT_WORKFLOW"');
         expect(wrangler).toContain('class_name = "AffectedAreaArtifactWorkflow"');
+        expect(wrangler).not.toContain("script_name");
     });
 });
