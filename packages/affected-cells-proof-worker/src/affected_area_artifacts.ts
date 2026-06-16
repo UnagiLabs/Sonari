@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
 import {
     affectedCellsRoot,
     parseAffectedCellsFile,
+    sha256Hex,
     type AffectedCellsInput,
 } from "@sonari/proof-core";
 import { cellToBoundary } from "h3-js";
@@ -398,7 +398,7 @@ export function generateAffectedAreaArtifacts(
 
     const canonicalCells = buildCanonicalCells(input);
     const affectedCellsJson = canonicalAffectedCellsJson(input);
-    const sourceSha256 = createHash("sha256").update(affectedCellsJson).digest("hex");
+    const sourceSha256 = sha256Hex(new TextEncoder().encode(affectedCellsJson)).slice(2);
     const bounds = computeAffectedCellsBounds(canonicalCells);
     const rasterTilePaths = new Map<string, ProjectedCellPath[]>();
     const cellTileFeatures = new Map<string, AffectedCellTileFeature[]>();

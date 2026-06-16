@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { sha256Hex } from "@sonari/proof-core";
 import { describe, expect, it } from "vitest";
 import {
     generateAffectedAreaArtifacts,
@@ -95,9 +95,9 @@ describe("generateAffectedAreaArtifacts", () => {
             affectedCellsRoot: AFFECTED_CELLS_ROOT,
             baseUrl: BASE_URL,
         });
-        const expectedSourceSha256 = createHash("sha256")
-            .update(artifacts.affectedCellsJson)
-            .digest("hex");
+        const expectedSourceSha256 = sha256Hex(
+            new TextEncoder().encode(artifacts.affectedCellsJson),
+        ).slice(2);
 
         expect(artifacts.manifest.sourceSha256).toBe(expectedSourceSha256);
         expect(artifacts.manifest.cellCount).toBe(2);
