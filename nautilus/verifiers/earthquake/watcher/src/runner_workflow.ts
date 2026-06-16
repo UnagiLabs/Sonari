@@ -2213,9 +2213,8 @@ function evidenceManifestBindingError(input: {
         input.affectedCells.oracle_version !== input.payload.oracle_version ||
         input.affectedCells.geo_resolution !==
             input.evidenceManifest.affected_cells.geo_resolution ||
-        input.affectedCells.cells_generation_method !== "shakemap_gridxml_h3_grid_point_p90_v1" ||
         input.affectedCells.cell_metric !== "USGS_MMI" ||
-        input.affectedCells.cell_aggregation !== "GRID_POINT_P90" ||
+        !isSupportedAffectedCellsMethodAndAggregation(input.affectedCells) ||
         input.affectedCells.intensity_scale !== "MMI_X100" ||
         input.evidenceManifest.affected_cells.uri !== input.affectedCellsRef.uri ||
         input.evidenceManifest.affected_cells.hash !== input.affectedCellsRef.source_hash ||
@@ -2279,6 +2278,17 @@ function evidenceManifestBindingError(input: {
     }
 
     return null;
+}
+
+function isSupportedAffectedCellsMethodAndAggregation(
+    affectedCells: AffectedCellsArtifact,
+): boolean {
+    return (
+        (affectedCells.cells_generation_method === "shakemap_gridxml_h3_grid_point_p90_v1" &&
+            affectedCells.cell_aggregation === "GRID_POINT_P90") ||
+        (affectedCells.cells_generation_method === "shakemap_gridxml_h3_center_bilinear_v1" &&
+            affectedCells.cell_aggregation === "H3_CENTER_BILINEAR")
+    );
 }
 
 function compareEvidenceSourceBinding(

@@ -2564,9 +2564,9 @@ function finalizedResultWithRawManifest(
         event_revision: 1,
         oracle_version: 1,
         geo_resolution: 7,
-        cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1",
+        cells_generation_method: "shakemap_gridxml_h3_center_bilinear_v1",
         cell_metric: "USGS_MMI",
-        cell_aggregation: "GRID_POINT_P90",
+        cell_aggregation: "H3_CENTER_BILINEAR",
         intensity_scale: "MMI_X100",
         affected_cells: [{ h3_index: "608819013513904127", intensity_value: 831, cell_band: 2 }],
     };
