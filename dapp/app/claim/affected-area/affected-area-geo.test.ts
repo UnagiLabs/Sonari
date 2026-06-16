@@ -4,7 +4,9 @@ import { h3HexToDecimal } from "../../register/residence/h3-geo";
 import { parseAffectedCells } from "./affected-cells";
 import {
     MAX_AFFECTED_VIEWPORT_CELLS,
+    buildAffectedCellGeometries,
     computeAffectedAreaBounds,
+    selectAffectedAreaLayerMode,
     selectMapMode,
     selectVisibleCells,
 } from "./affected-area-geo";
@@ -24,6 +26,10 @@ const CELL2_HEX = "872e010cbffffff";
 function res9Decimal(): string {
     const hex = latLngToCell(38.2688, 140.8721, 9);
     return h3HexToDecimal(hex);
+}
+
+function affectedGeometries(input: unknown) {
+    return buildAffectedCellGeometries(parseAffectedCells(input));
 }
 
 // ---------------------------------------------------------------------------
@@ -81,24 +87,20 @@ describe("computeAffectedAreaBounds: 空配列", () => {
 });
 
 describe("computeAffectedAreaBounds: 1セル", () => {
-    it("1セル → north≈south かつ east≈west（そのセル中心）", () => {
-        const cells = parseAffectedCells([[CELL1_DECIMAL, 3]]);
+    it("1セル → セル境界の bbox を返す", () => {
+        const cells = affectedGeometries([[CELL1_DECIMAL, 3]]);
         const bounds = computeAffectedAreaBounds(cells);
         expect(bounds).not.toBeNull();
-        // lat: 39.542..., lng: 143.609...
-        expect(bounds?.north).toBeCloseTo(39.54213437644575, 5);
-        expect(bounds?.south).toBeCloseTo(39.54213437644575, 5);
-        expect(bounds?.east).toBeCloseTo(143.60919843298643, 5);
-        expect(bounds?.west).toBeCloseTo(143.60919843298643, 5);
-        // north === south（退化）
-        expect(bounds?.north).toBeCloseTo(bounds?.south ?? 0, 10);
-        expect(bounds?.east).toBeCloseTo(bounds?.west ?? 0, 10);
+        expect(bounds?.north).toBeCloseTo(39.55473533344522, 5);
+        expect(bounds?.south).toBeCloseTo(39.52953263566506, 5);
+        expect(bounds?.east).toBeCloseTo(143.6243102034202, 5);
+        expect(bounds?.west).toBeCloseTo(143.59408752647124, 5);
     });
 });
 
 describe("computeAffectedAreaBounds: 複数セル", () => {
     it("2セルで north >= south、east >= west", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -108,50 +110,48 @@ describe("computeAffectedAreaBounds: 複数セル", () => {
         expect(bounds!.east).toBeGreaterThanOrEqual(bounds!.west);
     });
 
-    it("2セルの north がより高緯度セルの中心 lat と一致する", () => {
-        // CELL1: lat 39.542... (高い) / CELL2: lat 39.402... (低い)
-        const cells = parseAffectedCells([
+    it("2セルの north がより高緯度セルの境界 north と一致する", () => {
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
         const bounds = computeAffectedAreaBounds(cells);
-        expect(bounds?.north).toBeCloseTo(39.54213437644575, 5);
+        expect(bounds?.north).toBeCloseTo(39.55473533344522, 5);
     });
 
-    it("2セルの south がより低緯度セルの中心 lat と一致する", () => {
-        const cells = parseAffectedCells([
+    it("2セルの south がより低緯度セルの境界 south と一致する", () => {
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
         const bounds = computeAffectedAreaBounds(cells);
-        expect(bounds?.south).toBeCloseTo(39.40296976134385, 5);
+        expect(bounds?.south).toBeCloseTo(39.390509451222485, 5);
     });
 
-    it("2セルの east がより東経度セルの中心 lng と一致する", () => {
-        // CELL1: lng 143.609... (東) / CELL2: lng 142.127... (西)
-        const cells = parseAffectedCells([
+    it("2セルの east がより東経度セルの境界 east と一致する", () => {
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
         const bounds = computeAffectedAreaBounds(cells);
-        expect(bounds?.east).toBeCloseTo(143.60919843298643, 5);
+        expect(bounds?.east).toBeCloseTo(143.6243102034202, 5);
     });
 
-    it("2セルの west がより西経度セルの中心 lng と一致する", () => {
-        const cells = parseAffectedCells([
+    it("2セルの west がより西経度セルの境界 west と一致する", () => {
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
         const bounds = computeAffectedAreaBounds(cells);
-        expect(bounds?.west).toBeCloseTo(142.1271107685466, 5);
+        expect(bounds?.west).toBeCloseTo(142.11219372932797, 5);
     });
 
     it("セル配列の順序に依存せず同じ bounds を返す（決定的）", () => {
-        const cellsAB = parseAffectedCells([
+        const cellsAB = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
-        const cellsBA = parseAffectedCells([
+        const cellsBA = affectedGeometries([
             [CELL2_DECIMAL, 1],
             [CELL1_DECIMAL, 3],
         ]);
@@ -165,15 +165,15 @@ describe("computeAffectedAreaBounds: 複数セル", () => {
 
     it("CELL1 hex を直接 AffectedCell として渡しても同じ bounds", () => {
         // AffectedCell を手動で組み立てるケース
-        const cells = [
+        const cells = buildAffectedCellGeometries([
             { decimal: CELL1_DECIMAL, hex: CELL1_HEX, band: 3 as const },
             { decimal: CELL2_DECIMAL, hex: CELL2_HEX, band: 1 as const },
-        ];
+        ]);
         const bounds = computeAffectedAreaBounds(cells);
-        expect(bounds?.north).toBeCloseTo(39.54213437644575, 5);
-        expect(bounds?.south).toBeCloseTo(39.40296976134385, 5);
-        expect(bounds?.east).toBeCloseTo(143.60919843298643, 5);
-        expect(bounds?.west).toBeCloseTo(142.1271107685466, 5);
+        expect(bounds?.north).toBeCloseTo(39.55473533344522, 5);
+        expect(bounds?.south).toBeCloseTo(39.390509451222485, 5);
+        expect(bounds?.east).toBeCloseTo(143.6243102034202, 5);
+        expect(bounds?.west).toBeCloseTo(142.11219372932797, 5);
     });
 });
 
@@ -196,14 +196,14 @@ const BOUNDS_BOTH = { north: 39.6, south: 39.3, east: 143.7, west: 142.0 };
 const BOUNDS_NONE = { north: 36.0, south: 35.0, east: 139.0, west: 138.0 };
 
 describe("selectVisibleCells: MAX_AFFECTED_VIEWPORT_CELLS 定数", () => {
-    it("MAX_AFFECTED_VIEWPORT_CELLS は 600 である", () => {
-        expect(MAX_AFFECTED_VIEWPORT_CELLS).toBe(600);
+    it("MAX_AFFECTED_VIEWPORT_CELLS は 50 である", () => {
+        expect(MAX_AFFECTED_VIEWPORT_CELLS).toBe(50);
     });
 });
 
 describe("selectVisibleCells: bounds 内外の混在", () => {
     it("bounds 内のセルのみ返し、bounds 外は除外する（順序保持）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -213,7 +213,7 @@ describe("selectVisibleCells: bounds 内外の混在", () => {
     });
 
     it("CELL2 のみ bounds 内 → CELL2 だけ返る", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -223,7 +223,7 @@ describe("selectVisibleCells: bounds 内外の混在", () => {
     });
 
     it("両方 bounds 内 → 両方返る（入力順）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -234,7 +234,7 @@ describe("selectVisibleCells: bounds 内外の混在", () => {
     });
 
     it("どちらも bounds 外 → 空配列", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -250,7 +250,7 @@ describe("selectVisibleCells: bounds 内外の混在", () => {
 
 describe("selectVisibleCells: limit（cap）", () => {
     it("limit 未指定時は MAX_AFFECTED_VIEWPORT_CELLS がデフォルト（2件全件返る）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -259,7 +259,7 @@ describe("selectVisibleCells: limit（cap）", () => {
     });
 
     it("limit=1 かつ 2件 bounds 内 → 先頭 1 件のみ（入力順で cap）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -269,7 +269,7 @@ describe("selectVisibleCells: limit（cap）", () => {
     });
 
     it("limit=2 かつ 2件 bounds 内 → 全件返る（cap に引っかからない）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -278,7 +278,7 @@ describe("selectVisibleCells: limit（cap）", () => {
     });
 
     it("limit=0 かつ 2件 bounds 内 → 空配列（ただし highlighted は除く）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -287,7 +287,7 @@ describe("selectVisibleCells: limit（cap）", () => {
     });
 
     it("入力配列を破壊しない（元の cells は変更されない）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -299,7 +299,7 @@ describe("selectVisibleCells: limit（cap）", () => {
 
 describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
     it("強調セルが bounds 内かつ cap 内 → 重複追加されない（1 件のみ）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -316,7 +316,7 @@ describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
     });
 
     it("強調セルが bounds 外 → cap 後結果の末尾に追加される", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -333,7 +333,7 @@ describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
     });
 
     it("強調セルが cap で溢れた（bounds 内だが limit 超）→ 末尾に追加される", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -351,7 +351,7 @@ describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
     });
 
     it("強調セル指定が cells に存在しない無効値 → 無視（追加されない）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
         ]);
         const result = selectVisibleCells({
@@ -364,7 +364,7 @@ describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
     });
 
     it("highlightedDecimal が null → 強調処理なし（通常 cap のみ）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -379,7 +379,7 @@ describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
     });
 
     it("highlightedDecimal 未指定 → 強調処理なし（通常 cap のみ）", () => {
-        const cells = parseAffectedCells([
+        const cells = affectedGeometries([
             [CELL1_DECIMAL, 3],
             [CELL2_DECIMAL, 1],
         ]);
@@ -394,56 +394,129 @@ describe("selectVisibleCells: 強調セル（highlightedDecimal）", () => {
 });
 
 describe("selectVisibleCells: 境界線上のセル（境界包含）", () => {
-    it("セル中心が bounds の north 境界上 → 含む（<=）", () => {
-        // CELL1 の lat = 39.54213437644575
-        // north をその lat に設定 → 境界上で含む
+    it("セル中心が viewport 外でもセル境界 bbox が交差すれば含む", () => {
+        const boundsNearCell1NorthEast = {
+            north: 39.56,
+            south: 39.55,
+            east: 143.63,
+            west: 143.62,
+        };
+        const cells = affectedGeometries([[CELL1_DECIMAL, 3]]);
+
+        const result = selectVisibleCells({
+            cells,
+            bounds: boundsNearCell1NorthEast,
+        });
+
+        expect(result).toHaveLength(1);
+        expect(result[0]?.decimal).toBe(CELL1_DECIMAL);
+    });
+
+    it("セル境界 bbox が bounds の north 側で交差 → 含む", () => {
         const boundsExact: { north: number; south: number; east: number; west: number } = {
             north: 39.54213437644575,
             south: 39.3,
             east: 143.7,
             west: 142.0,
         };
-        const cells = parseAffectedCells([[CELL1_DECIMAL, 3]]);
+        const cells = affectedGeometries([[CELL1_DECIMAL, 3]]);
         const result = selectVisibleCells({ cells, bounds: boundsExact });
         expect(result).toHaveLength(1);
     });
 
-    it("セル中心が bounds の south 境界上 → 含む（>=）", () => {
-        // CELL2 の lat = 39.40296976134385
+    it("セル境界 bbox が bounds の south 側で交差 → 含む", () => {
         const boundsExact: { north: number; south: number; east: number; west: number } = {
             north: 39.6,
             south: 39.40296976134385,
             east: 143.7,
             west: 142.0,
         };
-        const cells = parseAffectedCells([[CELL2_DECIMAL, 1]]);
+        const cells = affectedGeometries([[CELL2_DECIMAL, 1]]);
         const result = selectVisibleCells({ cells, bounds: boundsExact });
         expect(result).toHaveLength(1);
     });
 
-    it("セル中心が bounds の east 境界上 → 含む（<=）", () => {
-        // CELL1 の lng = 143.60919843298643
+    it("セル境界 bbox が bounds の east 側で交差 → 含む", () => {
         const boundsExact: { north: number; south: number; east: number; west: number } = {
             north: 39.6,
             south: 39.3,
             east: 143.60919843298643,
             west: 142.0,
         };
-        const cells = parseAffectedCells([[CELL1_DECIMAL, 3]]);
+        const cells = affectedGeometries([[CELL1_DECIMAL, 3]]);
         const result = selectVisibleCells({ cells, bounds: boundsExact });
         expect(result).toHaveLength(1);
     });
 
-    it("セル中心が bounds の west 境界上 → 含む（>=）", () => {
-        // CELL2 の lng = 142.1271107685466
+    it("セル境界 bbox が bounds の west 側で交差 → 含む", () => {
         const boundsExact: { north: number; south: number; east: number; west: number } = {
             north: 39.6,
             south: 39.3,
             east: 143.7,
             west: 142.1271107685466,
         };
-        const cells = parseAffectedCells([[CELL2_DECIMAL, 1]]);
+        const cells = affectedGeometries([[CELL2_DECIMAL, 1]]);
         const result = selectVisibleCells({ cells, bounds: boundsExact });
         expect(result).toHaveLength(1);
+    });
+});
+
+describe("selectAffectedAreaLayerMode", () => {
+    it("viewport 内セル数が 50 以下なら cells を返す", () => {
+        const cells = affectedGeometries(
+            Array.from({ length: 50 }, () => [CELL1_DECIMAL, 3]),
+        );
+
+        expect(
+            selectAffectedAreaLayerMode({
+                cells,
+                bounds: BOUNDS_CELL1_ONLY,
+            }),
+        ).toBe("cells");
+    });
+
+    it("viewport 内セル数が 51 以上なら overview-overlay を返す", () => {
+        const cells = affectedGeometries(
+            Array.from({ length: 51 }, () => [CELL1_DECIMAL, 3]),
+        );
+
+        expect(
+            selectAffectedAreaLayerMode({
+                cells,
+                bounds: BOUNDS_CELL1_ONLY,
+            }),
+        ).toBe("overview-overlay");
+    });
+
+    it("viewport 外セルは件数に含めない", () => {
+        const cells = affectedGeometries([
+            [CELL1_DECIMAL, 3],
+            [CELL2_DECIMAL, 1],
+        ]);
+
+        expect(
+            selectAffectedAreaLayerMode({
+                cells,
+                bounds: BOUNDS_CELL1_ONLY,
+                threshold: 1,
+            }),
+        ).toBe("cells");
+    });
+
+    it("セル中心が viewport 外でもセル境界 bbox が交差すれば件数に含める", () => {
+        const cells = affectedGeometries([[CELL1_DECIMAL, 3]]);
+
+        expect(
+            selectAffectedAreaLayerMode({
+                cells,
+                bounds: {
+                    north: 39.56,
+                    south: 39.55,
+                    east: 143.63,
+                    west: 143.62,
+                },
+                threshold: 0,
+            }),
+        ).toBe("overview-overlay");
     });
 });

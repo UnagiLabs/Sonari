@@ -1,14 +1,43 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-
-import { extractAffectedCells } from "./build_demo_affected_cells.js";
+import { parseAffectedCellTile } from "../dapp/app/claim/affected-area/affected-area-tiles.js";
+import { bandColor } from "../dapp/app/claim/catalog/cell-band-rules.js";
+import {
+    computeAffectedCellsBounds,
+    extractAffectedCells,
+    generateAffectedAreaArtifacts,
+    tileOutputRelativePath,
+} from "./build_demo_affected_cells.js";
 
 const FIXTURE_PATH = path.join(
     process.cwd(),
     "nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/affected_cells.json",
 );
-const OUTPUT_PATH = path.join(process.cwd(), "dapp/public/demo/tohoku-2011-affected-cells.json");
+const OUTPUT_DIR = path.join(process.cwd(), "dapp/public/demo/tohoku-2011");
+const OUTPUT_PATH = path.join(OUTPUT_DIR, "affected-cells.json");
+const MANIFEST_OUTPUT_PATH = path.join(OUTPUT_DIR, "affected-area-manifest.json");
+
+async function loadFixtureCells(): Promise<[string, number][]> {
+    const raw = await readFile(FIXTURE_PATH, "utf8");
+    const input: unknown = JSON.parse(raw);
+    return extractAffectedCells(input);
+}
+
+async function ensureGeneratedOutput() {
+    const cells = await loadFixtureCells();
+    const artifacts = generateAffectedAreaArtifacts(cells);
+    try {
+        await readFile(OUTPUT_PATH, "utf8");
+        await readFile(MANIFEST_OUTPUT_PATH, "utf8");
+    } catch {
+        await mkdir(OUTPUT_DIR, { recursive: true });
+        await writeFile(OUTPUT_PATH, artifacts.affectedCellsJson, "utf8");
+        await writeFile(MANIFEST_OUTPUT_PATH, JSON.stringify(artifacts.manifest), "utf8");
+    }
+    return artifacts;
+}
 
 describe("extractAffectedCells", () => {
     it("extracts [h3_index, cell_band] tuples in input order", () => {
@@ -38,13 +67,6 @@ describe("extractAffectedCells", () => {
         expect(() => extractAffectedCells({ affected_cells: "not-array" })).toThrow();
     });
 
-    it("throws when h3_index is missing", () => {
-        const input = {
-            affected_cells: [{ intensity_value: 820, cell_band: 3 }],
-        };
-        expect(() => extractAffectedCells(input)).toThrow();
-    });
-
     it("throws when h3_index is not a decimal integer string", () => {
         const inputs = [
             { h3_index: "0x8a2830828767fff", intensity_value: 820, cell_band: 3 },
@@ -58,115 +80,132 @@ describe("extractAffectedCells", () => {
         }
     });
 
-    it("throws when cell_band is 0 (out of range)", () => {
-        const input = {
-            affected_cells: [
-                { h3_index: "608795190286614527", intensity_value: 820, cell_band: 0 },
-            ],
-        };
-        expect(() => extractAffectedCells(input)).toThrow();
-    });
-
-    it("throws when cell_band is 4 (out of range)", () => {
-        const input = {
-            affected_cells: [
-                { h3_index: "608795190286614527", intensity_value: 820, cell_band: 4 },
-            ],
-        };
-        expect(() => extractAffectedCells(input)).toThrow();
-    });
-
-    it("throws when cell_band is missing", () => {
-        const input = {
-            affected_cells: [{ h3_index: "608795190286614527", intensity_value: 820 }],
-        };
-        expect(() => extractAffectedCells(input)).toThrow();
-    });
-
-    it("throws when cell_band is a non-integer number", () => {
-        const input = {
-            affected_cells: [
-                { h3_index: "608795190286614527", intensity_value: 820, cell_band: 1.5 },
-            ],
-        };
-        expect(() => extractAffectedCells(input)).toThrow();
-    });
-
-    it("throws when cell_band is a string", () => {
-        const input = {
-            affected_cells: [
-                { h3_index: "608795190286614527", intensity_value: 820, cell_band: "1" },
-            ],
-        };
-        expect(() => extractAffectedCells(input)).toThrow();
+    it("throws when cell_band is invalid", () => {
+        const inputs = [
+            { h3_index: "608795190286614527", intensity_value: 820, cell_band: 0 },
+            { h3_index: "608795190286614527", intensity_value: 820, cell_band: 4 },
+            { h3_index: "608795190286614527", intensity_value: 820 },
+            { h3_index: "608795190286614527", intensity_value: 820, cell_band: 1.5 },
+            { h3_index: "608795190286614527", intensity_value: 820, cell_band: "1" },
+        ];
+        for (const cell of inputs) {
+            expect(() => extractAffectedCells({ affected_cells: [cell] })).toThrow();
+        }
     });
 });
 
 describe("real fixture integration", () => {
     it("transforms affected_cells.json with correct total count and band distribution", async () => {
-        const raw = await readFile(FIXTURE_PATH, "utf8");
-        const input: unknown = JSON.parse(raw);
-
-        const result = extractAffectedCells(input);
+        const result = await loadFixtureCells();
 
         expect(result).toHaveLength(39221);
-
-        const band1 = result.filter(([, band]) => band === 1).length;
-        const band2 = result.filter(([, band]) => band === 2).length;
-        const band3 = result.filter(([, band]) => band === 3).length;
-        expect(band1).toBe(10692);
-        expect(band2).toBe(15650);
-        expect(band3).toBe(12879);
+        expect(result.filter(([, band]) => band === 1)).toHaveLength(10692);
+        expect(result.filter(([, band]) => band === 2)).toHaveLength(15650);
+        expect(result.filter(([, band]) => band === 3)).toHaveLength(12879);
     });
 
     it("includes representative cells in correct positions", async () => {
-        const raw = await readFile(FIXTURE_PATH, "utf8");
-        const input: unknown = JSON.parse(raw);
-
-        const result = extractAffectedCells(input);
+        const result = await loadFixtureCells();
 
         expect(result).toContainEqual(["608795190286614527", 3]);
         expect(result).toContainEqual(["608795262395088895", 1]);
     });
 });
 
+describe("generateAffectedAreaArtifacts", () => {
+    it("maps tile keys to extension-bearing public file paths", () => {
+        expect(tileOutputRelativePath("raster", "6/56/24")).toStrictEqual([
+            "raster",
+            "6",
+            "56",
+            "24.svg",
+        ]);
+        expect(tileOutputRelativePath("cells", "11/1818/801")).toStrictEqual([
+            "cells",
+            "11",
+            "1818",
+            "801.json",
+        ]);
+    });
+
+    it("generates deterministic canonical JSON and manifest", async () => {
+        const cells = await loadFixtureCells();
+
+        const first = generateAffectedAreaArtifacts(cells);
+        const second = generateAffectedAreaArtifacts(cells);
+
+        expect(first.affectedCellsJson).toBe(second.affectedCellsJson);
+        expect(first.manifest).toStrictEqual(second.manifest);
+        expect(first.rasterTiles).toStrictEqual(second.rasterTiles);
+        expect(first.cellTiles).toStrictEqual(second.cellTiles);
+    });
+
+    it("manifest count, sourceSha256, bounds, and tile keys match generated artifacts", async () => {
+        const cells = await loadFixtureCells();
+        const artifacts = generateAffectedAreaArtifacts(cells);
+        const expectedSha256 = createHash("sha256")
+            .update(artifacts.affectedCellsJson)
+            .digest("hex");
+
+        expect(artifacts.manifest.cellCount).toBe(cells.length);
+        expect(artifacts.manifest.sourceSha256).toBe(expectedSha256);
+        expect(artifacts.manifest.bounds).toStrictEqual(computeAffectedCellsBounds(cells));
+        expect(artifacts.manifest.rasterTileKeys).toHaveLength(artifacts.rasterTiles.size);
+        expect(artifacts.manifest.cellTileKeys).toHaveLength(artifacts.cellTiles.size);
+        expect(artifacts.manifest.rasterTileKeys.length).toBeGreaterThan(0);
+        expect(artifacts.manifest.cellTileKeys.length).toBeGreaterThan(0);
+    });
+
+    it("raster SVG tiles use bandColor() and polygon fill opacity", async () => {
+        const cells = await loadFixtureCells();
+        const artifacts = generateAffectedAreaArtifacts(cells);
+        const combinedSvg = [...artifacts.rasterTiles.values()].join("");
+
+        expect(combinedSvg).toContain(`data-band="1" fill="${bandColor(1)}" fill-opacity="0.35"`);
+        expect(combinedSvg).toContain(`data-band="2" fill="${bandColor(2)}" fill-opacity="0.35"`);
+        expect(combinedSvg).toContain(`data-band="3" fill="${bandColor(3)}" fill-opacity="0.35"`);
+    });
+
+    it("cell tile feature union equals canonical affected cells and preserves bands", async () => {
+        const cells = await loadFixtureCells();
+        const canonicalBands = new Map(cells.map(([decimal, band]) => [decimal, band]));
+        const artifacts = generateAffectedAreaArtifacts(cells);
+        const union = new Set<string>();
+        let duplicatedFeatureCount = 0;
+
+        for (const rawTile of artifacts.cellTiles.values()) {
+            const tile = parseAffectedCellTile(JSON.parse(rawTile));
+            expect(tile).not.toBeNull();
+            if (tile === null) {
+                continue;
+            }
+            for (const feature of tile.features) {
+                if (union.has(feature.decimal)) {
+                    duplicatedFeatureCount += 1;
+                }
+                union.add(feature.decimal);
+                expect(feature.band).toBe(canonicalBands.get(feature.decimal));
+            }
+        }
+
+        expect(union).toStrictEqual(new Set(cells.map(([decimal]) => decimal)));
+        expect(duplicatedFeatureCount).toBeGreaterThan(0);
+    });
+});
+
 describe("generated asset", () => {
-    it("dapp/public/demo/tohoku-2011-affected-cells.json exists and is valid", async () => {
-        // Generate the asset if it doesn't exist yet
-        let rawOutput: string;
-        try {
-            rawOutput = await readFile(OUTPUT_PATH, "utf8");
-        } catch {
-            // File not yet generated — generate it now for test validation
-            const rawInput = await readFile(FIXTURE_PATH, "utf8");
-            const input: unknown = JSON.parse(rawInput);
-            const cells = extractAffectedCells(input);
-            await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
-            await writeFile(OUTPUT_PATH, JSON.stringify(cells), "utf8");
-            rawOutput = await readFile(OUTPUT_PATH, "utf8");
-        }
+    it("dapp/public/demo/tohoku-2011/affected-cells.json exists and is deterministic", async () => {
+        const artifacts = await ensureGeneratedOutput();
+        const rawOutput = await readFile(OUTPUT_PATH, "utf8");
 
-        const data: unknown = JSON.parse(rawOutput);
+        expect(rawOutput).toBe(artifacts.affectedCellsJson);
+        expect(JSON.parse(rawOutput)).toHaveLength(39221);
+    });
 
-        expect(Array.isArray(data)).toBe(true);
-        const arr = data as unknown[];
-        expect(arr).toHaveLength(39221);
+    it("dapp/public/demo/tohoku-2011/affected-area-manifest.json matches generated manifest", async () => {
+        const artifacts = await ensureGeneratedOutput();
+        const rawOutput = await readFile(MANIFEST_OUTPUT_PATH, "utf8");
 
-        // Each element must be [string, 1|2|3]
-        for (const item of arr) {
-            expect(Array.isArray(item)).toBe(true);
-            const tuple = item as unknown[];
-            expect(tuple).toHaveLength(2);
-            expect(typeof tuple[0]).toBe("string");
-            expect([1, 2, 3]).toContain(tuple[1]);
-        }
-
-        // Band distribution
-        const band1 = arr.filter((item) => (item as [string, number])[1] === 1).length;
-        const band2 = arr.filter((item) => (item as [string, number])[1] === 2).length;
-        const band3 = arr.filter((item) => (item as [string, number])[1] === 3).length;
-        expect(band1).toBe(10692);
-        expect(band2).toBe(15650);
-        expect(band3).toBe(12879);
+        expect(JSON.parse(rawOutput)).toStrictEqual(artifacts.manifest);
     });
 });

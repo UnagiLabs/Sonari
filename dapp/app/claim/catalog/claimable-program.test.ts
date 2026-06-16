@@ -25,9 +25,14 @@ const validDisasterInput: unknown = {
     deadlineMs: "1893456000000",
     detailHref: "/claim/prog-001",
     eventUid: EVENT_UID,
+    eventRevision: 3,
     severityBand: 3,
     affectedCellCount: 1200,
-    cellSource: { kind: "static-asset", path: "/demo/tohoku-2011-affected-cells.json" },
+    cellSource: { kind: "static-asset", path: "/demo/tohoku-2011/affected-cells.json" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+    },
     affectedCellsRoot: "0x" + "b".repeat(64),
 };
 
@@ -67,12 +72,59 @@ describe("parseClaimableProgram — disaster", () => {
         const result = parseClaimableProgram(validDisasterInput) as DisasterClaimableProgram | null;
         expect(result).not.toBeNull();
         expect(result?.eventUid).toBe(EVENT_UID);
+        expect(result?.eventRevision).toBe(3);
         expect(result?.severityBand).toBe(3);
         expect(result?.affectedCellCount).toBe(1200);
         expect(result?.cellSource).toEqual({
             kind: "static-asset",
-            path: "/demo/tohoku-2011-affected-cells.json",
+            path: "/demo/tohoku-2011/affected-cells.json",
         });
+        expect(result?.affectedAreaArtifact).toEqual({
+            kind: "tiled-affected-cells",
+            manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+        });
+    });
+
+    it("parsed disaster program accepts tiled affected area artifact", () => {
+        const input = {
+            ...(validDisasterInput as Record<string, unknown>),
+            affectedAreaArtifact: {
+                kind: "tiled-affected-cells",
+                manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+            },
+        };
+
+        const result = parseClaimableProgram(input);
+
+        expect(result).not.toBeNull();
+        if (result?.category === "disaster") {
+            expect(result.affectedAreaArtifact).toEqual({
+                kind: "tiled-affected-cells",
+                manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+            });
+        }
+    });
+
+    it("returns null when affectedAreaArtifact is invalid", () => {
+        const input = {
+            ...(validDisasterInput as Record<string, unknown>),
+            affectedAreaArtifact: {
+                kind: "band-overlay-image",
+                manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+            },
+        };
+
+        expect(parseClaimableProgram(input)).toBeNull();
+    });
+
+    it("parses without optional affectedAreaArtifact", () => {
+        const input = { ...(validDisasterInput as Record<string, unknown>) };
+        delete input["affectedAreaArtifact"];
+        const result = parseClaimableProgram(input);
+        expect(result).not.toBeNull();
+        if (result?.category === "disaster") {
+            expect(result.affectedAreaArtifact).toBeUndefined();
+        }
     });
 
     it("parsed disaster program accepts deferred cellSource", () => {
@@ -93,6 +145,12 @@ describe("parseClaimableProgram — disaster", () => {
     it("returns null when disaster is missing eventUid", () => {
         const input = { ...validDisasterInput as Record<string, unknown> };
         delete input["eventUid"];
+        expect(parseClaimableProgram(input)).toBeNull();
+    });
+
+    it("returns null when disaster is missing eventRevision", () => {
+        const input = { ...(validDisasterInput as Record<string, unknown>) };
+        delete input["eventRevision"];
         expect(parseClaimableProgram(input)).toBeNull();
     });
 

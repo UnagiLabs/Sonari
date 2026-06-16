@@ -30,5 +30,18 @@ target/
 # Legacy local AWS/Sonari dev secrets path. Keep ignored during migration.
 infra/aws/earthquake-runner/.local/
 
+# Demo affected-area tile byproducts. Commit generated .svg/.json artifacts,
+# but ignore stale extensionless tiles, compressed copies, and temp files.
+dapp/public/demo/*/raster/**
+!dapp/public/demo/*/raster/**/
+!dapp/public/demo/*/raster/**/*.svg
+dapp/public/demo/*/cells/**
+!dapp/public/demo/*/cells/**/
+!dapp/public/demo/*/cells/**/*.json
+dapp/public/demo/**/*.br
+dapp/public/demo/**/*.gz
+dapp/public/demo/**/*.tmp
+dapp/public/demo/**/*.tmp.*
+
 # gh-issue-implement の worktree は transient なので追跡しない。
 .claude/worktrees/

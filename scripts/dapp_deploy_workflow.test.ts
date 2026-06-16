@@ -45,4 +45,13 @@ describe("dapp deploy workflow", () => {
             "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: $" + "{{ vars.SONARI_FUNDING_PACKAGE_ID }}",
         );
     });
+
+    it("passes affected-area R2 base URL to the dapp build", async () => {
+        const workflow = await readWorkflow();
+
+        expect(workflow).toContain(
+            "NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL: $" +
+                "{{ vars.SONARI_AFFECTED_AREA_BASE_URL }}",
+        );
+    });
 });

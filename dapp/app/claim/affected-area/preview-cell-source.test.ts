@@ -9,6 +9,7 @@ import {
 } from "../catalog/claimable-program";
 import {
     pickPreviewCellSource,
+    resolvePreviewAffectedAreaArtifact,
     resolvePreviewCellSource,
 } from "./preview-cell-source";
 
@@ -28,9 +29,14 @@ const STATIC_ASSET_DISASTER: DisasterClaimableProgram = {
     deadlineMs: "1893456000000",
     detailHref: "/claim/test-disaster-static",
     eventUid: "0x" + "a".repeat(64),
+    eventRevision: 1,
     severityBand: 2,
     affectedCellCount: 100,
     cellSource: { kind: "static-asset", path: "/demo/test-affected-cells.json" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/test-affected-area-manifest.json",
+    },
 };
 
 /** 最小限の DisasterClaimableProgram（deferred 源） */
@@ -43,9 +49,14 @@ const DEFERRED_DISASTER: DisasterClaimableProgram = {
     deadlineMs: "1893456000000",
     detailHref: "/claim/test-disaster-deferred",
     eventUid: "0x" + "b".repeat(64),
+    eventRevision: 2,
     severityBand: 1,
     affectedCellCount: 50,
     cellSource: { kind: "deferred" },
+    affectedAreaArtifact: {
+        kind: "tiled-affected-cells",
+        manifestPath: "/demo/test-affected-area-manifest.json",
+    },
 };
 
 /** 最小限の非災害プログラム（student-fund） */
@@ -144,13 +155,13 @@ describe("resolvePreviewCellSource", () => {
         }
     });
 
-    it("東日本大震災 2011 の path /demo/tohoku-2011-affected-cells.json を返す", () => {
+    it("東日本大震災 2011 の path /demo/tohoku-2011/affected-cells.json を返す", () => {
         // デモ源のパスは demo-catalog の TOHOKU_2011_PROGRAM に定義されている
         // ここではそれを DEMO_CLAIMABLE_PROGRAMS から導出し、リテラル一致も確認する
         const result = resolvePreviewCellSource(STATIC_ASSET_DISASTER);
         expect(result.kind).toBe("static-asset");
         if (result.kind === "static-asset") {
-            expect(result.path).toBe("/demo/tohoku-2011-affected-cells.json");
+            expect(result.path).toBe("/demo/tohoku-2011/affected-cells.json");
         }
     });
 
@@ -164,5 +175,25 @@ describe("resolvePreviewCellSource", () => {
         const result1 = resolvePreviewCellSource(STATIC_ASSET_DISASTER);
         const result2 = resolvePreviewCellSource(STATIC_ASSET_DISASTER);
         expect(result1).toStrictEqual(result2);
+    });
+});
+
+describe("resolvePreviewAffectedAreaArtifact", () => {
+    it("program 自身の affectedAreaArtifact を demo fallback より優先する", () => {
+        const result = resolvePreviewAffectedAreaArtifact(STATIC_ASSET_DISASTER);
+
+        expect(result).toStrictEqual(STATIC_ASSET_DISASTER.affectedAreaArtifact);
+    });
+
+    it("program に affectedAreaArtifact がない場合は demo catalog fallback を返す", () => {
+        const result = resolvePreviewAffectedAreaArtifact({
+            ...STATIC_ASSET_DISASTER,
+            affectedAreaArtifact: undefined,
+        });
+
+        expect(result).toEqual({
+            kind: "tiled-affected-cells",
+            manifestPath: expect.stringContaining("/affected-area-manifest.json"),
+        });
     });
 });

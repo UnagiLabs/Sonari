@@ -32,6 +32,18 @@ export type CellSource =
     | { readonly kind: "static-asset"; readonly path: string }
     | { readonly kind: "deferred" };
 
+export interface MapBounds {
+    readonly north: number;
+    readonly south: number;
+    readonly east: number;
+    readonly west: number;
+}
+
+export interface AffectedAreaArtifactSource {
+    readonly kind: "tiled-affected-cells";
+    readonly manifestPath: string;
+}
+
 // ---------------------------------------------------------------------------
 // カテゴリ別型
 // ---------------------------------------------------------------------------
@@ -63,12 +75,16 @@ export interface DisasterClaimableProgram extends ClaimableProgramBase {
      * 表示・受け渡し用。検証ロジックは持たない。
      */
     readonly eventUid: string;
+    /** イベント revision。表示 artifact path と proof request に使う。 */
+    readonly eventRevision: number;
     /** プログラム全体のバンド。STEP 1 の CellBand 型。 */
     readonly severityBand: CellBand;
     /** 被災セル数（表示用）。 */
     readonly affectedCellCount: number;
     /** 地図セルの取得元。 */
     readonly cellSource: CellSource;
+    /** 表示用 affected-area artifact の取得元。 */
+    readonly affectedAreaArtifact?: AffectedAreaArtifactSource;
     /**
      * セルルート（任意）。表示・受け渡し用のみ。
      * 検証しない。
@@ -195,6 +211,9 @@ function parseDisaster(
     const eventUid = parseNonEmptyString(value["eventUid"]);
     if (eventUid === null) return null;
 
+    const eventRevision = parseNonNegativeInteger(value["eventRevision"]);
+    if (eventRevision === null) return null;
+
     const severityBand = parseCellBand(value["severityBand"]);
     if (severityBand === null) return null;
 
@@ -203,6 +222,9 @@ function parseDisaster(
 
     const cellSource = parseCellSource(value["cellSource"]);
     if (cellSource === null) return null;
+
+    const affectedAreaArtifact = parseAffectedAreaArtifactSource(value["affectedAreaArtifact"]);
+    if (affectedAreaArtifact === undefined) return null;
 
     // affectedCellsRoot は任意
     const affectedCellsRoot =
@@ -219,9 +241,11 @@ function parseDisaster(
         deadlineMs: base.deadlineMs,
         detailHref: base.detailHref,
         eventUid,
+        eventRevision,
         severityBand,
         affectedCellCount,
         cellSource,
+        ...(affectedAreaArtifact !== null ? { affectedAreaArtifact } : {}),
         ...(affectedCellsRoot !== undefined ? { affectedCellsRoot } : {}),
     };
 
@@ -276,6 +300,25 @@ function parseCellSource(value: unknown): CellSource | null {
     }
 
     return null;
+}
+
+function parseAffectedAreaArtifactSource(
+    value: unknown,
+): AffectedAreaArtifactSource | null | undefined {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (!isRecord(value) || value["kind"] !== "tiled-affected-cells") {
+        return undefined;
+    }
+
+    const manifestPath = parseNonEmptyString(value["manifestPath"]);
+    if (manifestPath === null) return undefined;
+
+    return {
+        kind: "tiled-affected-cells",
+        manifestPath,
+    };
 }
 
 /**

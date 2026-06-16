@@ -1,4 +1,8 @@
-import { type ViewportBounds, residenceCellCenter } from "../../register/residence/h3-geo";
+import {
+    type LatLng,
+    type ViewportBounds,
+    residenceCellBoundary,
+} from "../../register/residence/h3-geo";
 import { parseHomeCell } from "../../mypage/home-cell";
 import { type AffectedCell } from "./affected-cells";
 
@@ -9,10 +13,9 @@ import { type AffectedCell } from "./affected-cells";
 /**
  * 1回の描画で扱う被災セルの上限。極端な俯瞰でもポリゴン数を抑えるためのガード。
  *
- * 被災セットは有限・ズーム非依存のため、residence-cell-picker の
- * MAX_VIEWPORT_CELLS=200 より大きめの 600 を採用。
+ * セル境界は詳細確認用に限定し、俯瞰時は band-colored overlay を使う。
  */
-export const MAX_AFFECTED_VIEWPORT_CELLS = 600;
+export const MAX_AFFECTED_VIEWPORT_CELLS = 50;
 
 // ---------------------------------------------------------------------------
 // 型定義
@@ -24,6 +27,14 @@ export const MAX_AFFECTED_VIEWPORT_CELLS = 600;
  * - `"home"`:     ユーザーの居住セルを中心に表示（有効な res7 居住セルがある場合）
  */
 export type AffectedAreaMapMode = "overview" | "home";
+
+export type AffectedAreaLayerMode = "overview-overlay" | "cells";
+
+export interface AffectedCellGeometry {
+    readonly cell: AffectedCell;
+    readonly boundary: readonly LatLng[];
+    readonly bounds: ViewportBounds;
+}
 
 // ---------------------------------------------------------------------------
 // モード判定
@@ -53,22 +64,16 @@ export function selectMapMode(
 /**
  * 被災セル集合から、地図を合わせるための境界矩形（南北東西）を算出する純粋関数。
  *
- * 各セルの中心座標（`residenceCellCenter`）を集約し、
+ * 各セルの境界 bbox を集約し、
  * lat の min → south / max → north、lng の min → west / max → east を返す。
  *
  * - 空配列の場合は `null`（呼び出し側が固定中心へフォールバックする前提）
- * - 1件の場合は north===south、east===west の退化した bounds を返す（null ではない）
  * - 純粋・決定的。地図 SDK には依存しない。
  */
-export function computeAffectedAreaBounds(
-    cells: readonly AffectedCell[],
-): ViewportBounds | null {
-    // 添字アクセスを避け、最初のセルで初期化してから残りを集約する。
-    // 空配列ならループに入らず null のまま返る（固定中心へフォールバックする前提）。
+function computeBoundaryBounds(boundary: readonly LatLng[]): ViewportBounds {
     let bounds: { north: number; south: number; east: number; west: number } | null = null;
 
-    for (const cell of cells) {
-        const { lat, lng } = residenceCellCenter(cell.hex);
+    for (const { lat, lng } of boundary) {
         if (bounds === null) {
             bounds = { north: lat, south: lat, east: lng, west: lng };
             continue;
@@ -77,6 +82,45 @@ export function computeAffectedAreaBounds(
         if (lat < bounds.south) bounds.south = lat;
         if (lng > bounds.east) bounds.east = lng;
         if (lng < bounds.west) bounds.west = lng;
+    }
+
+    if (bounds === null) {
+        throw new Error("cell boundary must not be empty");
+    }
+
+    return bounds;
+}
+
+export function buildAffectedCellGeometries(
+    cells: readonly AffectedCell[],
+): AffectedCellGeometry[] {
+    return cells.map((cell) => {
+        const boundary = residenceCellBoundary(cell.hex);
+        return {
+            cell,
+            boundary,
+            bounds: computeBoundaryBounds(boundary),
+        };
+    });
+}
+
+export function computeAffectedAreaBounds(
+    cells: readonly AffectedCellGeometry[],
+): ViewportBounds | null {
+    let bounds: ViewportBounds | null = null;
+
+    for (const geometry of cells) {
+        const cellBounds = geometry.bounds;
+        if (bounds === null) {
+            bounds = { ...cellBounds };
+            continue;
+        }
+        bounds = {
+            north: Math.max(bounds.north, cellBounds.north),
+            south: Math.min(bounds.south, cellBounds.south),
+            east: Math.max(bounds.east, cellBounds.east),
+            west: Math.min(bounds.west, cellBounds.west),
+        };
     }
 
     return bounds;
@@ -91,7 +135,7 @@ export function computeAffectedAreaBounds(
  */
 export interface SelectVisibleCellsInput {
     /** 絞り込み対象の被災セル集合。 */
-    readonly cells: readonly AffectedCell[];
+    readonly cells: readonly AffectedCellGeometry[];
     /** 表示中の地図範囲（矩形）。west <= east を前提とする（日付変更線跨ぎは非対応）。 */
     readonly bounds: ViewportBounds;
     /** 返却件数の上限。省略時は MAX_AFFECTED_VIEWPORT_CELLS。 */
@@ -101,27 +145,25 @@ export interface SelectVisibleCellsInput {
 }
 
 /**
- * セル中心が bounds の矩形内に含まれるかを判定するヘルパー。
+ * セル境界の bbox が bounds の矩形と交差するかを判定するヘルパー。
  *
- * 判定: lat <= north && lat >= south && lng <= east && lng >= west
- * 境界線上は含む（<=, >= の閉区間）。
+ * 境界線上は含む（閉区間）。
  * 注: west <= east を前提とする。日付変更線を跨ぐ範囲は非対応（東北デモでは発生しない）。
  */
-function isCenterInBounds(hex: string, bounds: ViewportBounds): boolean {
-    const { lat, lng } = residenceCellCenter(hex);
+function intersectsBounds(cellBounds: ViewportBounds, bounds: ViewportBounds): boolean {
     return (
-        lat <= bounds.north &&
-        lat >= bounds.south &&
-        lng <= bounds.east &&
-        lng >= bounds.west
+        cellBounds.south <= bounds.north &&
+        cellBounds.north >= bounds.south &&
+        cellBounds.west <= bounds.east &&
+        cellBounds.east >= bounds.west
     );
 }
 
 /**
- * 被災セル集合のうち「中心が現在の viewport bounds 内」のものだけを返す純粋関数。
+ * 被災セル集合のうち「セル境界 bbox が現在の viewport bounds と交差する」ものだけを返す純粋関数。
  *
  * 挙動:
- * 1. 各セル中心が bounds 内かを判定し、内側のみ入力順で集める。
+ * 1. 各セル境界 bbox が bounds と交差するかを判定し、交差するセルを入力順で集める。
  * 2. 件数が limit を超えたら先頭 limit 件に cap する（決定的）。
  * 3. `highlightedDecimal` が cells に存在するセルを指す場合、
  *    cap 後の結果にそのセルが含まれていなければ末尾に追加する（最大 limit+1 件になりうる）。
@@ -136,9 +178,9 @@ export function selectVisibleCells(input: SelectVisibleCellsInput): AffectedCell
 
     // bounds 内のセルを入力順で収集する
     const inBounds: AffectedCell[] = [];
-    for (const cell of cells) {
-        if (isCenterInBounds(cell.hex, bounds)) {
-            inBounds.push(cell);
+    for (const geometry of cells) {
+        if (intersectsBounds(geometry.bounds, bounds)) {
+            inBounds.push(geometry.cell);
         }
     }
 
@@ -152,9 +194,9 @@ export function selectVisibleCells(input: SelectVisibleCellsInput): AffectedCell
 
     // 強調セルが cells に存在するかを確認する（存在しない場合は無視）
     let highlightedCell: AffectedCell | null = null;
-    for (const cell of cells) {
-        if (cell.decimal === highlightedDecimal) {
-            highlightedCell = cell;
+    for (const geometry of cells) {
+        if (geometry.cell.decimal === highlightedDecimal) {
+            highlightedCell = geometry.cell;
             break;
         }
     }
@@ -176,4 +218,29 @@ export function selectVisibleCells(input: SelectVisibleCellsInput): AffectedCell
 
     // 含まれていなければ（bounds 外 or cap 溢れ）末尾に追加する
     return [...capped, highlightedCell];
+}
+
+export interface SelectAffectedAreaLayerModeInput {
+    readonly cells: readonly AffectedCellGeometry[];
+    readonly bounds: ViewportBounds;
+    readonly threshold?: number;
+}
+
+export function selectAffectedAreaLayerMode(
+    input: SelectAffectedAreaLayerModeInput,
+): AffectedAreaLayerMode {
+    const threshold = input.threshold ?? MAX_AFFECTED_VIEWPORT_CELLS;
+    let visibleCount = 0;
+
+    for (const geometry of input.cells) {
+        if (!intersectsBounds(geometry.bounds, input.bounds)) {
+            continue;
+        }
+        visibleCount += 1;
+        if (visibleCount > threshold) {
+            return "overview-overlay";
+        }
+    }
+
+    return "cells";
 }
