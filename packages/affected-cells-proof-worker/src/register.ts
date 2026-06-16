@@ -137,6 +137,7 @@ async function handleRegisterRequestUnchecked(
     );
     if (existingManifest !== null) {
         if (existingManifest.affected_cells_root === body.affected_cells_root) {
+            assertExistingManifestMetadataMatches(existingManifest, body);
             await startAffectedAreaArtifactWorkflow({
                 bucket: env.AFFECTED_AREA_ARTIFACTS,
                 workflow: env.AFFECTED_AREA_ARTIFACT_WORKFLOW,
@@ -191,6 +192,32 @@ async function handleRegisterRequestUnchecked(
         shard_count: manifest.shards.length,
         stored: true,
     });
+}
+
+function assertExistingManifestMetadataMatches(
+    existingManifest: AffectedCellsProofManifest,
+    body: ValidatedRegisterBody,
+): void {
+    const mismatches = [
+        existingManifest.affected_cells_hash === body.affected_cells_hash
+            ? null
+            : "affected_cells_hash",
+        existingManifest.affected_cells_uri === body.affected_cells_uri
+            ? null
+            : "affected_cells_uri",
+        existingManifest.affected_cell_count === body.affected_cell_count
+            ? null
+            : "affected_cell_count",
+        existingManifest.geo_resolution === body.geo_resolution ? null : "geo_resolution",
+    ].filter((field): field is string => field !== null);
+
+    if (mismatches.length > 0) {
+        throw new AffectedCellsProofError(
+            "affected_cells_root_mismatch",
+            `Existing manifest has same root but different metadata: ${mismatches.join(", ")}`,
+            409,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

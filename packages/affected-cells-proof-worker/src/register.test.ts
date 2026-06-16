@@ -599,6 +599,25 @@ describe("handleRegisterRequest", () => {
         expect(workflow.getCreateBatchCount()).toBe(0);
     });
 
+    it("fail-closed: 既存 manifest と request metadata が違う no-op は Workflow を起動しない", async () => {
+        const bucket = new FakeR2Bucket();
+        const workflow = new FakeAffectedAreaWorkflow();
+        const env = buildEnv({ bucket, affectedAreaWorkflow: workflow });
+
+        const res1 = await handleRegisterRequest(buildRegisterRequest(), env, env.fetchImpl);
+        const res2 = await handleRegisterRequest(
+            buildRegisterRequest({ hash: `0x${"ab".repeat(32)}` }),
+            env,
+            env.fetchImpl,
+        );
+
+        expect(res1.status).toBe(200);
+        expect(res2.status).toBe(409);
+        const body = await res2.json() as { error: { code: string } };
+        expect(body.error.code).toBe("affected_cells_root_mismatch");
+        expect(workflow.getCreateBatchCount()).toBe(1);
+    });
+
     it("冪等: 既存 Workflow が errored なら manifest 未作成時に restart する", async () => {
         const id = workflowId(GOLDEN_EVENT_UID, GOLDEN_EVENT_REVISION, GOLDEN_ROOT);
         const workflow = new FakeAffectedAreaWorkflow([[id, "errored"]]);

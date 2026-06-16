@@ -67,6 +67,7 @@ interface CanonicalCell {
     readonly band: CellBand;
     readonly boundary: readonly AffectedAreaLatLng[];
     readonly bounds: AffectedAreaBounds;
+    readonly tileBounds: readonly AffectedAreaBounds[];
 }
 
 interface TileCoord {
@@ -198,13 +199,14 @@ function buildCanonicalCells(input: AffectedCellsInput): CanonicalCell[] {
         const decimal = cell.h3_index;
         const hex = h3DecimalToHex(decimal);
         const boundary = cellToBoundary(hex).map(([lat, lng]) => ({ lat, lng }));
-        const bounds = cellBoundaryBounds(boundary);
+        const { bounds, tileBounds } = cellBoundaryBounds(boundary);
         return {
             decimal,
             hex,
             band: toCellBand(cell.cell_band),
             boundary,
             bounds,
+            tileBounds,
         };
     });
 }
@@ -232,24 +234,78 @@ function computeAffectedCellsBounds(cells: readonly CanonicalCell[]): AffectedAr
     };
 }
 
-function cellBoundaryBounds(boundary: readonly AffectedAreaLatLng[]): AffectedAreaBounds {
-    let bounds: AffectedAreaBounds | null = null;
-    for (const { lat, lng } of boundary) {
-        if (bounds === null) {
-            bounds = { north: lat, south: lat, east: lng, west: lng };
-            continue;
-        }
-        bounds = {
-            north: Math.max(bounds.north, lat),
-            south: Math.min(bounds.south, lat),
-            east: Math.max(bounds.east, lng),
-            west: Math.min(bounds.west, lng),
-        };
-    }
-    if (bounds === null) {
+function minimalLongitudeSpan(lngs: readonly number[]): { readonly west: number; readonly east: number } {
+    if (lngs.length === 0) {
         throw new Error("cell boundary must not be empty");
     }
-    return bounds;
+    const sorted = [...lngs].sort((a, b) => a - b);
+    const first = sorted[0];
+    if (first === undefined) {
+        throw new Error("cell boundary longitude is missing");
+    }
+    let largestGap = -1;
+    let westIndex = 0;
+
+    for (let i = 0; i < sorted.length; i += 1) {
+        const current = sorted[i];
+        const next = i === sorted.length - 1 ? first + 360 : sorted[i + 1];
+        if (current === undefined || next === undefined) {
+            throw new Error("cell boundary longitude is missing");
+        }
+        const gap = next - current;
+        if (gap > largestGap) {
+            largestGap = gap;
+            westIndex = (i + 1) % sorted.length;
+        }
+    }
+
+    const west = sorted[westIndex];
+    const eastRaw = sorted[(westIndex + sorted.length - 1) % sorted.length];
+    if (west === undefined || eastRaw === undefined) {
+        throw new Error("cell boundary longitude is missing");
+    }
+
+    return { west, east: eastRaw < west ? eastRaw + 360 : eastRaw };
+}
+
+function splitLongitudeBounds(bounds: AffectedAreaBounds): readonly AffectedAreaBounds[] {
+    if (bounds.east <= 180) {
+        return [bounds];
+    }
+    return [
+        { ...bounds, east: 180 },
+        { ...bounds, west: -180, east: bounds.east - 360 },
+    ];
+}
+
+function cellBoundaryBounds(boundary: readonly AffectedAreaLatLng[]): {
+    readonly bounds: AffectedAreaBounds;
+    readonly tileBounds: readonly AffectedAreaBounds[];
+} {
+    let latBounds: Pick<AffectedAreaBounds, "north" | "south"> | null = null;
+    const lngs: number[] = [];
+    for (const { lat, lng } of boundary) {
+        lngs.push(lng);
+        if (latBounds === null) {
+            latBounds = { north: lat, south: lat };
+            continue;
+        }
+        latBounds = {
+            north: Math.max(latBounds.north, lat),
+            south: Math.min(latBounds.south, lat),
+        };
+    }
+    if (latBounds === null) {
+        throw new Error("cell boundary must not be empty");
+    }
+    const lngBounds = minimalLongitudeSpan(lngs);
+    const bounds = {
+        north: latBounds.north,
+        south: latBounds.south,
+        east: lngBounds.east,
+        west: lngBounds.west,
+    };
+    return { bounds, tileBounds: splitLongitudeBounds(bounds) };
 }
 
 function boundsIntersect(a: AffectedAreaBounds, b: AffectedAreaBounds): boolean {
@@ -289,6 +345,18 @@ function latLngToWorldPixel(
     };
 }
 
+function tileCenterLng(tile: TileCoord): number {
+    const scale = 2 ** tile.z;
+    return (((tile.x + 0.5) / scale) * 360) - 180;
+}
+
+function lngClosestToReference(lng: number, reference: number): number {
+    const candidates = [lng - 360, lng, lng + 360];
+    return candidates.reduce((best, candidate) =>
+        Math.abs(candidate - reference) < Math.abs(best - reference) ? candidate : best,
+    );
+}
+
 function tileBounds(coord: TileCoord): AffectedAreaBounds {
     const scale = 2 ** coord.z;
     const west = (coord.x / scale) * 360 - 180;
@@ -326,8 +394,14 @@ function tileKey(coord: TileCoord): string {
 function buildSvgPath(cell: CanonicalCell, tile: TileCoord): string {
     const originX = tile.x * TILE_SIZE;
     const originY = tile.y * TILE_SIZE;
+    const referenceLng = tileCenterLng(tile);
     const [first, ...rest] = cell.boundary.map((point) => {
-        const projected = latLngToWorldPixel(point.lat, point.lng, tile.z, TILE_SIZE);
+        const projected = latLngToWorldPixel(
+            point.lat,
+            lngClosestToReference(point.lng, referenceLng),
+            tile.z,
+            TILE_SIZE,
+        );
         return {
             x: projected.x - originX,
             y: projected.y - originY,
@@ -405,25 +479,29 @@ export function generateAffectedAreaArtifacts(
 
     for (const cell of canonicalCells) {
         for (let zoom = MIN_RASTER_ZOOM; zoom <= MAX_RASTER_ZOOM; zoom += 1) {
-            for (const tile of tileRangeForBounds(cell.bounds, zoom)) {
-                if (!boundsIntersect(cell.bounds, tileBounds(tile))) {
-                    continue;
+            for (const boundsPart of cell.tileBounds) {
+                for (const tile of tileRangeForBounds(boundsPart, zoom)) {
+                    if (!boundsIntersect(boundsPart, tileBounds(tile))) {
+                        continue;
+                    }
+                    const key = tileKey(tile);
+                    const paths = rasterTilePaths.get(key) ?? [];
+                    paths.push({ band: cell.band, path: buildSvgPath(cell, tile) });
+                    rasterTilePaths.set(key, paths);
                 }
-                const key = tileKey(tile);
-                const paths = rasterTilePaths.get(key) ?? [];
-                paths.push({ band: cell.band, path: buildSvgPath(cell, tile) });
-                rasterTilePaths.set(key, paths);
             }
         }
 
-        for (const tile of tileRangeForBounds(cell.bounds, CELL_TILE_ZOOM)) {
-            if (!boundsIntersect(cell.bounds, tileBounds(tile))) {
-                continue;
+        for (const boundsPart of cell.tileBounds) {
+            for (const tile of tileRangeForBounds(boundsPart, CELL_TILE_ZOOM)) {
+                if (!boundsIntersect(boundsPart, tileBounds(tile))) {
+                    continue;
+                }
+                const key = tileKey(tile);
+                const features = cellTileFeatures.get(key) ?? [];
+                features.push(featureFromCell(cell));
+                cellTileFeatures.set(key, features);
             }
-            const key = tileKey(tile);
-            const features = cellTileFeatures.get(key) ?? [];
-            features.push(featureFromCell(cell));
-            cellTileFeatures.set(key, features);
         }
     }
 

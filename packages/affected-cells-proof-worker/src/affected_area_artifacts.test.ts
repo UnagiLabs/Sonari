@@ -13,6 +13,10 @@ const BASE_URL = "https://affected-area-assets.sonari.help/";
 const EVENT_UID = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
 const AFFECTED_CELLS_ROOT =
     "0x44e8c444631ebc5b7183787cf42f42b15dd45c3107cb1daf261c1b58a7e999d5";
+const ANTI_MERIDIAN_EVENT_UID =
+    "0xcd131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
+const ANTI_MERIDIAN_ROOT =
+    "0xc6db0f890d7f3cff0172e1ccd623c6febd302845cfad3bf8ffe44d9e3d2d7cfe";
 
 function smallAffectedCellsJson(): string {
     return JSON.stringify({
@@ -27,6 +31,22 @@ function smallAffectedCellsJson(): string {
         affected_cells: [
             { h3_index: "608819013547458559", intensity_value: 831, cell_band: 3 },
             { h3_index: "608819013614567423", intensity_value: 723, cell_band: 1 },
+        ],
+    });
+}
+
+function antiMeridianAffectedCellsJson(): string {
+    return JSON.stringify({
+        event_uid: ANTI_MERIDIAN_EVENT_UID,
+        event_revision: 1,
+        oracle_version: 1,
+        geo_resolution: 7,
+        cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1",
+        cell_metric: "USGS_MMI",
+        cell_aggregation: "GRID_POINT_P90",
+        intensity_scale: "MMI_X100",
+        affected_cells: [
+            { h3_index: "612270033996873727", intensity_value: 831, cell_band: 3 },
         ],
     });
 }
@@ -118,6 +138,19 @@ describe("generateAffectedAreaArtifacts", () => {
                 baseUrl: BASE_URL,
             }),
         ).toThrow(/affected_cells_root mismatch/u);
+    });
+
+    it("does not expand anti-meridian cells into near-global tile ranges", () => {
+        const artifacts = generateAffectedAreaArtifacts({
+            bytes: new TextEncoder().encode(antiMeridianAffectedCellsJson()),
+            affectedCellsRoot: ANTI_MERIDIAN_ROOT,
+            baseUrl: BASE_URL,
+        });
+
+        expect(artifacts.manifest.rasterTileKeys.length).toBeLessThan(50);
+        expect(artifacts.manifest.cellTileKeys.length).toBeLessThan(20);
+        expect(artifacts.manifest.bounds.east).toBeGreaterThanOrEqual(artifacts.manifest.bounds.west);
+        expect(artifacts.manifest.bounds.east - artifacts.manifest.bounds.west).toBeLessThan(1);
     });
 
     it("rejects malformed canonical source data", () => {
