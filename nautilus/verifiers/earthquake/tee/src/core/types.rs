@@ -50,6 +50,7 @@ pub struct UsgsOracleInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerToTeeRequest {
     pub source_event_id: String,
+    pub event_revision: u32,
     pub hazard_type: u8,
     pub primary_source: u8,
     pub geo_resolution: u8,
@@ -62,6 +63,7 @@ impl WorkerToTeeRequest {
             .ok_or_else(|| OracleError::WorkerRequest("request must be an object".to_owned()))?;
         let allowed = [
             "source_event_id",
+            "event_revision",
             "hazard_type",
             "primary_source",
             "geo_resolution",
@@ -79,17 +81,37 @@ impl WorkerToTeeRequest {
             .ok_or_else(|| {
                 OracleError::WorkerRequest("source_event_id must be a non-empty string".to_owned())
             })?;
+        let event_revision = read_u32_field(object, "event_revision")?;
         let hazard_type = read_u8_field(object, "hazard_type")?;
         let primary_source = read_u8_field(object, "primary_source")?;
         let geo_resolution = read_u8_field(object, "geo_resolution")?;
 
         Ok(Self {
             source_event_id: source_event_id.to_owned(),
+            event_revision,
             hazard_type,
             primary_source,
             geo_resolution,
         })
     }
+}
+
+fn read_u32_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    name: &str,
+) -> Result<u32, OracleError> {
+    let value = object
+        .get(name)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| OracleError::WorkerRequest(format!("{name} must be an integer")))?;
+    let value = u32::try_from(value)
+        .map_err(|_| OracleError::WorkerRequest(format!("{name} is outside u32 range")))?;
+    if value == 0 {
+        return Err(OracleError::WorkerRequest(format!(
+            "{name} must be at least 1"
+        )));
+    }
+    Ok(value)
 }
 
 fn read_u8_field(

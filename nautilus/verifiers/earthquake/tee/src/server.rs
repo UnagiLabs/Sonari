@@ -13,7 +13,7 @@ use crate::core::artifacts::{
 use crate::{
     OracleOutput, OracleStatus, UsgsOracleInput, WalrusCliSourceArchive,
     WalrusCliSourceArchiveConfig, WorkerToTeeRequest, grid_xml_from_artifact,
-    process_usgs_archived, process_usgs_from_worker_request,
+    process_usgs_archived_with_event_revision, process_usgs_from_worker_request,
 };
 use serde::Serialize;
 use sonari_tee_core::{HandlerError, ProcessDataHandler, ProcessOutput, TeeContext};
@@ -179,6 +179,7 @@ fn run_earthquake_pipeline(
         raw_grid_uri: grid.as_ref().map(|item| item.raw_grid_uri.clone()),
     };
     let input = build_production_input(parts, observed_at_ms);
+    let event_revision = request.event_revision;
     let preliminary = process_usgs_from_worker_request(request, input.clone())
         .map_err(|error| process_failed(error.to_string()))?;
     if preliminary.result.status != OracleStatus::Finalized {
@@ -190,7 +191,8 @@ fn run_earthquake_pipeline(
     })?;
     let archive = WalrusCliSourceArchive::new(archive_config)
         .map_err(|error| process_failed(error.to_string()))?;
-    process_usgs_archived(input, &archive).map_err(|error| process_failed(error.to_string()))
+    process_usgs_archived_with_event_revision(input, event_revision, &archive)
+        .map_err(|error| process_failed(error.to_string()))
 }
 
 fn pending_source(source_event_id: &str, error_code: &str) -> Result<OracleOutput, HandlerError> {

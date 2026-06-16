@@ -337,6 +337,7 @@ fn finalized_fixture_rejects_observed_at_ms_that_overflows_freshness_deadline() 
 fn pre_tee_worker_scaffold_matches_pure_core_output_for_fixture_sources() {
     let request = WorkerToTeeRequest {
         source_event_id: "us7000sonari".to_owned(),
+        event_revision: 1,
         hazard_type: HAZARD_TYPE_EARTHQUAKE,
         primary_source: PRIMARY_SOURCE_USGS,
         geo_resolution: GEO_RESOLUTION,
@@ -352,9 +353,28 @@ fn pre_tee_worker_scaffold_matches_pure_core_output_for_fixture_sources() {
 }
 
 #[test]
+fn worker_request_event_revision_propagates_to_finalized_artifacts() {
+    let request = WorkerToTeeRequest {
+        source_event_id: "us7000sonari".to_owned(),
+        event_revision: 2,
+        hazard_type: HAZARD_TYPE_EARTHQUAKE,
+        primary_source: PRIMARY_SOURCE_USGS,
+        geo_resolution: GEO_RESOLUTION,
+    };
+
+    let output =
+        process_usgs_from_worker_request(request, finalized_input()).expect("request should run");
+
+    assert_eq!(output.unsigned_payload.as_ref().unwrap().event_revision, 2);
+    assert_eq!(output.affected_cells.as_ref().unwrap().event_revision, 2);
+    assert_eq!(output.evidence_manifest.as_ref().unwrap().event_revision, 2);
+}
+
+#[test]
 fn worker_request_accepts_usgs_alias_when_detail_ids_list_contains_exact_alias() {
     let request = WorkerToTeeRequest {
         source_event_id: "usc0001xgp".to_owned(),
+        event_revision: 1,
         hazard_type: HAZARD_TYPE_EARTHQUAKE,
         primary_source: PRIMARY_SOURCE_USGS,
         geo_resolution: GEO_RESOLUTION,
@@ -388,6 +408,7 @@ fn worker_request_rejects_alias_substrings_or_unlisted_ids() {
     ] {
         let request = WorkerToTeeRequest {
             source_event_id: "usc0001xgp".to_owned(),
+            event_revision: 1,
             hazard_type: HAZARD_TYPE_EARTHQUAKE,
             primary_source: PRIMARY_SOURCE_USGS,
             geo_resolution: GEO_RESOLUTION,
@@ -409,6 +430,7 @@ fn worker_request_rejects_alias_substrings_or_unlisted_ids() {
 fn pre_tee_worker_scaffold_rejects_untrusted_contract_fields() {
     let mut request = serde_json::json!({
         "source_event_id": "us7000sonari",
+        "event_revision": 1,
         "hazard_type": HAZARD_TYPE_EARTHQUAKE,
         "primary_source": PRIMARY_SOURCE_USGS,
         "geo_resolution": GEO_RESOLUTION,
@@ -423,6 +445,41 @@ fn pre_tee_worker_scaffold_rejects_untrusted_contract_fields() {
         .unwrap()
         .remove("affected_cells_root");
     assert!(WorkerToTeeRequest::from_json_value(request).is_ok());
+}
+
+#[test]
+fn worker_request_rejects_invalid_event_revision() {
+    let valid = serde_json::json!({
+        "source_event_id": "us7000sonari",
+        "event_revision": 1,
+        "hazard_type": HAZARD_TYPE_EARTHQUAKE,
+        "primary_source": PRIMARY_SOURCE_USGS,
+        "geo_resolution": GEO_RESOLUTION,
+    });
+
+    for event_revision in [
+        serde_json::Value::Null,
+        serde_json::json!(0),
+        serde_json::json!(1.5),
+        serde_json::json!(u64::from(u32::MAX) + 1),
+    ] {
+        let mut request = valid.clone();
+        request["event_revision"] = event_revision;
+        assert!(WorkerToTeeRequest::from_json_value(request).is_err());
+    }
+
+    let mut missing = valid.clone();
+    missing.as_object_mut().unwrap().remove("event_revision");
+    assert!(WorkerToTeeRequest::from_json_value(missing).is_err());
+
+    let mut max = valid;
+    max["event_revision"] = serde_json::json!(u32::MAX);
+    assert_eq!(
+        WorkerToTeeRequest::from_json_value(max)
+            .expect("u32 max revision should be accepted")
+            .event_revision,
+        u32::MAX
+    );
 }
 
 #[test]
@@ -989,7 +1046,7 @@ fn production_cli_rejects_missing_signing_key_seed() {
     fs::create_dir_all(&workspace).unwrap();
     fs::write(
         &input_path,
-        r#"{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}"#,
+        r#"{"source_event_id":"us7000sonari","event_revision":1,"hazard_type":1,"primary_source":1,"geo_resolution":7}"#,
     )
     .unwrap();
 
@@ -1029,7 +1086,7 @@ fn production_cli_reads_worker_request_from_stdin_when_input_is_omitted() {
         .as_mut()
         .unwrap()
         .write_all(
-            br#"{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7,"affected_cells_root":"0xdeadbeef"}"#,
+            br#"{"source_event_id":"us7000sonari","event_revision":1,"hazard_type":1,"primary_source":1,"geo_resolution":7,"affected_cells_root":"0xdeadbeef"}"#,
         )
         .unwrap();
     let output = child.wait_with_output().unwrap();
@@ -1182,7 +1239,7 @@ fn production_cli_requires_registration_metadata_for_process_data_action() {
         .as_mut()
         .unwrap()
         .write_all(
-            br#"{"action":"process_data","payload":{"source_event_id":"us7000sonari","hazard_type":1,"primary_source":1,"geo_resolution":7}}"#,
+            br#"{"action":"process_data","payload":{"source_event_id":"us7000sonari","event_revision":1,"hazard_type":1,"primary_source":1,"geo_resolution":7}}"#,
         )
         .unwrap();
     let output = child.wait_with_output().unwrap();

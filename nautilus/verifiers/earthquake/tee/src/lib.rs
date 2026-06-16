@@ -14,8 +14,8 @@ pub use core::artifacts::{
     SourceManifest, StoredSourceRef, UnsignedPayload,
 };
 pub use core::processing::{
-    process_usgs, process_usgs_archived, process_usgs_from_worker_request,
-    process_usgs_with_signer, process_usgs_with_source_archive,
+    process_usgs, process_usgs_archived, process_usgs_archived_with_event_revision,
+    process_usgs_from_worker_request, process_usgs_with_signer, process_usgs_with_source_archive,
 };
 pub use core::source_archive::{
     DEFAULT_WALRUS_CLI_TIMEOUT_MS, SourceArchive, SourceArchiveError, WalrusCliSourceArchive,
