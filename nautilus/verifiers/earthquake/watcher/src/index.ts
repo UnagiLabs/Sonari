@@ -18,7 +18,12 @@ import {
 import type { RelayerAdapter } from "./relayer_preview.js";
 import { screenUsgsCandidate } from "./screening.js";
 import { isValidUsgsSourceEventId } from "./source_event_id.js";
-import { DynamoDbStateRepository, type RunnerQueueJob, type StateRepository } from "./state.js";
+import {
+    DynamoDbStateRepository,
+    type EarthquakeEventRow,
+    type RunnerQueueJob,
+    type StateRepository,
+} from "./state.js";
 import {
     resolveUsgsSourceEventId as defaultResolveUsgsSourceEventId,
     fetchUsgsRecentCandidates,
@@ -77,9 +82,18 @@ export {
 
 const INLINE_TEST_RUNNER_TIMEOUT_MS = 90_000;
 
+export interface OnchainEventRevisionReader {
+    readLatestEventRevision(eventUid: string): Promise<number>;
+}
+
+interface RunnerRevisionOptions {
+    readLatestOnchainEventRevision?: OnchainEventRevisionReader | undefined;
+}
+
 export interface WorkflowStartRequest {
     sourceEventId: string;
     executionName: string;
+    eventRevision?: number;
     attempt?: number;
     action?: "register_affected_cells_proof";
     resultS3Key?: string;
@@ -112,6 +126,7 @@ export class StepFunctionsWorkflowStarter implements WorkflowStarter {
                     verifier_kind: EARTHQUAKE_VERIFIER_KIND,
                     ...(input.action === undefined ? {} : { action: input.action }),
                     source_event_id: input.sourceEventId,
+                    event_revision: input.eventRevision,
                     attempt: input.attempt ?? 1,
                     ...(input.resultS3Key === undefined
                         ? {}
@@ -129,6 +144,7 @@ export interface ScheduledHandlerOptions {
     fetchCandidates?: () => Promise<UsgsEarthquakeCandidate[]>;
     resolveSourceEventId?: UsgsSourceEventIdResolver;
     dueLimit?: number;
+    readLatestOnchainEventRevision?: OnchainEventRevisionReader;
 }
 
 export interface ScheduledHandlerResult {
@@ -148,6 +164,7 @@ export function createScheduledHandler(options: ScheduledHandlerOptions) {
             options.workflow,
             nowMs,
             options.dueLimit ?? DEFAULT_DUE_LIMIT,
+            { readLatestOnchainEventRevision: options.readLatestOnchainEventRevision },
         );
         const proofRegistrationStarted = await startDueAffectedCellsProofRegistrationRetries(
             options.repository,
@@ -225,9 +242,13 @@ export function createManualHandler(options: ManualHandlerOptions) {
     };
 }
 
-export function buildEarthquakeVerifierRequest(sourceEventId: string): EarthquakeVerifierRequest {
+export function buildEarthquakeVerifierRequest(
+    sourceEventId: string,
+    eventRevision: number,
+): EarthquakeVerifierRequest {
     return {
         source_event_id: sourceEventId,
+        event_revision: eventRevision,
         hazard_type: BCS_ENUMS.hazardType.EARTHQUAKE,
         primary_source: BCS_ENUMS.primarySource.USGS,
         geo_resolution: DEFAULT_ORACLE_CONTRACT.geo_resolution,
@@ -322,6 +343,7 @@ export async function startDueWorkflows(
     workflow: WorkflowStarter,
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
+    options: RunnerRevisionOptions = {},
 ): Promise<number> {
     const staleBeforeMs = nowMs - PROCESSING_STALE_AFTER_MS;
     if (await repository.hasActiveRunnerWorkflow(staleBeforeMs)) {
@@ -339,22 +361,29 @@ export async function startDueWorkflows(
             continue;
         }
         const attempt = row.retry_count + 1;
-        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-${attempt}`;
+        const eventRevision = await plannedEventRevision(row, options);
+        const executionName = `earthquake-${sanitizeExecutionName(row.source_event_id)}-r${eventRevision}-a${attempt}`;
         const start = await repository.tryStartRunnerWorkflowExclusively(
             row.source_event_id,
             executionName,
             nowMs,
             row.retry_count,
+            eventRevision,
         );
         if (start === null) {
             break;
         }
         try {
-            await workflow.start({
+            const request = {
                 sourceEventId: row.source_event_id,
                 executionName,
                 attempt: start.attempt,
+            } as WorkflowStartRequest;
+            Object.defineProperty(request, "eventRevision", {
+                value: start.eventRevision,
+                enumerable: false,
             });
+            await workflow.start(request);
         } catch (error) {
             await repository.markFailed(
                 row.source_event_id,
@@ -439,6 +468,7 @@ export async function enqueueDueEvents(
     queue: RunnerJobQueue,
     nowMs: number,
     limit = DEFAULT_DUE_LIMIT,
+    options: RunnerRevisionOptions = {},
 ): Promise<EnqueueSummary> {
     const summary: EnqueueSummary = { enqueued: 0, deferred: 0, recovered: 0, rejected: 0 };
     summary.recovered += await repository.recoverStaleQueued(
@@ -458,12 +488,14 @@ export async function enqueueDueEvents(
             continue;
         }
         const attempt = row.retry_count + 1;
-        const runnerJobId = `${row.source_event_id}:${attempt}`;
+        const eventRevision = await plannedEventRevision(row, options);
+        const runnerJobId = `${row.source_event_id}:r${eventRevision}:a${attempt}`;
         const job = await repository.enqueueRunnerJob(
             row.source_event_id,
             attempt,
             runnerJobId,
             nowMs,
+            eventRevision,
         );
         if (job === null) {
             summary.deferred += 1;
@@ -531,7 +563,9 @@ export async function processDueEventsInlineForTests(
             continue;
         }
         try {
-            const result = await runner.run(buildEarthquakeVerifierRequest(job.source_event_id));
+            const result = await runner.run(
+                buildEarthquakeVerifierRequest(job.source_event_id, job.event_revision),
+            );
             await repository.applyRunnerResult(
                 job.source_event_id,
                 result,
@@ -602,6 +636,30 @@ class InlineQueue implements RunnerJobQueue {
     async send(message: RunnerQueueJob): Promise<void> {
         this.messages.push(message);
     }
+}
+
+async function plannedEventRevision(
+    row: EarthquakeEventRow,
+    options: RunnerRevisionOptions,
+): Promise<number> {
+    if (row.planned_event_revision !== null) {
+        return row.planned_event_revision;
+    }
+    if (row.event_uid === null || !/^0x[0-9a-fA-F]{64}$/.test(row.event_uid)) {
+        throw new Error("event_uid is required to plan event_revision");
+    }
+    const latestRevision =
+        options.readLatestOnchainEventRevision === undefined
+            ? 0
+            : await options.readLatestOnchainEventRevision.readLatestEventRevision(row.event_uid);
+    if (
+        !Number.isSafeInteger(latestRevision) ||
+        latestRevision < 0 ||
+        latestRevision >= 0xffff_ffff
+    ) {
+        throw new Error("latest on-chain event revision must be a non-negative u32 below max");
+    }
+    return latestRevision + 1;
 }
 
 async function runRelayer(

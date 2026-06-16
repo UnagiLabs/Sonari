@@ -267,23 +267,36 @@ type RunnerControlVerifierKind = {
 
 export type RunnerControlEvent = RunnerControlVerifierKind &
     (
-        | { action: "start_instance"; source_event_id: string; attempt?: number | undefined }
-        | { action: "find_ready_instance"; source_event_id: string; attempt?: number | undefined }
+        | {
+              action: "start_instance";
+              source_event_id: string;
+              event_revision?: number | undefined;
+              attempt?: number | undefined;
+          }
+        | {
+              action: "find_ready_instance";
+              source_event_id: string;
+              event_revision?: number | undefined;
+              attempt?: number | undefined;
+          }
         | {
               action: "dispatch_tee_command";
               source_event_id: string;
+              event_revision?: number | undefined;
               attempt?: number | undefined;
               instance_id: string;
           }
         | {
               action: "dispatch_health_check_command";
               source_event_id: string;
+              event_revision?: number | undefined;
               attempt?: number | undefined;
               instance_id: string;
           }
         | {
               action: "dispatch_get_attestation_command";
               source_event_id: string;
+              event_revision?: number | undefined;
               attempt?: number | undefined;
               instance_id: string;
           }
@@ -308,6 +321,7 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
         | {
               action: "dispatch_process_data_command";
               source_event_id: string;
+              event_revision?: number | undefined;
               attempt?: number | undefined;
               instance_id: string;
               registration_metadata: EnclaveVerificationMetadata;
@@ -378,7 +392,12 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               error_code?: string;
               message?: string;
           }
-        | { action: "stop_instance"; source_event_id: string; attempt?: number | undefined }
+        | {
+              action: "stop_instance";
+              source_event_id: string;
+              event_revision?: number | undefined;
+              attempt?: number | undefined;
+          }
     );
 
 export type RunnerControlResult = RunnerControlVerifierKind &
@@ -516,8 +535,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
             (event as { verifier_kind?: unknown }).verifier_kind,
             EARTHQUAKE_VERIFIER_KIND,
         );
-        const retainVerifierKind = (output: RunnerControlResult): RunnerControlResult =>
-            withVerifierKind(verifierKind, output) as RunnerControlResult;
+        const retainVerifierKind = (output: RunnerControlResult): RunnerControlResult => {
+            const eventRevision = (event as { event_revision?: unknown }).event_revision;
+            return withVerifierKind(verifierKind, {
+                ...output,
+                ...(typeof eventRevision === "number" ? { event_revision: eventRevision } : {}),
+            }) as RunnerControlResult;
+        };
         switch (event.action) {
             case "start_instance":
                 await requireCurrentWorkflowAttempt(options, event, {
@@ -585,6 +609,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             sourceEventId: event.source_event_id,
+                            eventRevision: event.event_revision ?? 1,
                             dispatchTimestampMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -622,6 +647,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             sourceEventId: event.source_event_id,
+                            eventRevision: event.event_revision ?? 1,
                             dispatchTimestampMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -660,6 +686,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             sourceEventId: event.source_event_id,
+                            eventRevision: event.event_revision ?? 1,
                             dispatchTimestampMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -733,6 +760,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     buildShellCommand: (resultS3Key) =>
                         buildSsmShellCommand({
                             sourceEventId: event.source_event_id,
+                            eventRevision: event.event_revision ?? 1,
                             dispatchTimestampMs,
                             resultBucket: options.config.resultBucket,
                             resultS3Key,
@@ -1733,6 +1761,7 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
 
 function buildSsmShellCommand(input: {
     sourceEventId: string;
+    eventRevision: number;
     dispatchTimestampMs: number;
     resultBucket: string;
     resultS3Key: string;
@@ -1743,10 +1772,10 @@ function buildSsmShellCommand(input: {
     const teeInput =
         input.teeInput ??
         (input.registrationMetadata === undefined
-            ? buildEarthquakeVerifierRequest(input.sourceEventId)
+            ? buildEarthquakeVerifierRequest(input.sourceEventId, input.eventRevision)
             : {
                   action: "process_data",
-                  payload: buildEarthquakeVerifierRequest(input.sourceEventId),
+                  payload: buildEarthquakeVerifierRequest(input.sourceEventId, input.eventRevision),
                   registration_metadata: input.registrationMetadata,
               });
     const tempResultPath = `/tmp/sonari-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;

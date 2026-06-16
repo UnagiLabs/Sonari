@@ -35,6 +35,7 @@ export interface EarthquakeEventRow {
     source_event_id: string;
     requested_source_event_id?: string | null;
     event_uid: string | null;
+    planned_event_revision: number | null;
     status: OffchainStatus;
     retry_count: number;
     next_retry_at_ms: number | null;
@@ -143,6 +144,7 @@ export interface RunnerQueueJob {
     runner_job_id: string;
     source_event_id: string;
     attempt: number;
+    event_revision: number;
     enqueued_at_ms: number;
 }
 
@@ -158,6 +160,7 @@ export interface WorkflowStartInput {
     sourceEventId: string;
     executionName: string;
     attempt: number;
+    eventRevision: number;
 }
 
 interface RunnerWorkflowLockRow {
@@ -209,12 +212,14 @@ export interface StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null>;
     markWorkflowStarted(
         sourceEventId: string,
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null>;
     markWorkflowStopped(sourceEventId: string, attempt: number, nowMs: number): Promise<boolean>;
     updateRunnerWorkflowProgress(input: RunnerWorkflowProgressUpdate): Promise<boolean>;
@@ -277,6 +282,7 @@ export interface StateRepository {
         attempt: number,
         runnerJobId: string,
         nowMs: number,
+        eventRevision?: number,
     ): Promise<RunnerQueueJob | null>;
     markQueueEnqueueFailed(
         sourceEventId: string,
@@ -469,6 +475,7 @@ export class InMemoryStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         if (
             this.runnerWorkflowLock !== undefined &&
@@ -481,6 +488,7 @@ export class InMemoryStateRepository implements StateRepository {
             executionName,
             nowMs,
             expectedRetryCount,
+            eventRevision,
         );
         if (started === null) {
             return null;
@@ -501,6 +509,7 @@ export class InMemoryStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         const row = this.rows.get(sourceEventId);
         if (
@@ -513,6 +522,8 @@ export class InMemoryStateRepository implements StateRepository {
         }
         const attempt = row.retry_count + 1;
         row.status = "processing";
+        const plannedEventRevision = eventRevision ?? row.planned_event_revision ?? 1;
+        row.planned_event_revision = plannedEventRevision;
         row.runner_job_id = executionName;
         row.runner_queued_at_ms = null;
         row.runner_attempt = attempt;
@@ -530,7 +541,7 @@ export class InMemoryStateRepository implements StateRepository {
         row.tee_result_json = null;
         row.error_code = null;
         row.updated_at_ms = nowMs;
-        return { sourceEventId, executionName, attempt };
+        return { sourceEventId, executionName, attempt, eventRevision: plannedEventRevision };
     }
 
     async markWorkflowStopped(
@@ -739,12 +750,15 @@ export class InMemoryStateRepository implements StateRepository {
         attempt: number,
         runnerJobId: string,
         nowMs: number,
+        eventRevision?: number,
     ): Promise<RunnerQueueJob | null> {
         const row = this.rows.get(sourceEventId);
         if (row === undefined || !DUE_STATUSES.has(row.status) || row.retry_count !== attempt - 1) {
             return null;
         }
         row.status = "queued";
+        const plannedEventRevision = eventRevision ?? row.planned_event_revision ?? 1;
+        row.planned_event_revision = plannedEventRevision;
         row.runner_job_id = runnerJobId;
         row.runner_queued_at_ms = nowMs;
         row.runner_attempt = attempt;
@@ -756,6 +770,7 @@ export class InMemoryStateRepository implements StateRepository {
             runner_job_id: runnerJobId,
             source_event_id: sourceEventId,
             attempt,
+            event_revision: plannedEventRevision,
             enqueued_at_ms: nowMs,
         };
     }
@@ -1108,6 +1123,7 @@ export class DynamoDbStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         const retryCount = expectedRetryCount ?? (await this.get(sourceEventId))?.retry_count;
         if (retryCount === undefined) {
@@ -1129,6 +1145,7 @@ export class DynamoDbStateRepository implements StateRepository {
                                     retryCount,
                                     executionName,
                                     attempt,
+                                    eventRevision,
                                     nowMs,
                                 }),
                             },
@@ -1164,7 +1181,7 @@ export class DynamoDbStateRepository implements StateRepository {
             }
             throw error;
         }
-        return { sourceEventId, executionName, attempt };
+        return { sourceEventId, executionName, attempt, eventRevision: eventRevision ?? 1 };
     }
 
     async markWorkflowStarted(
@@ -1172,6 +1189,7 @@ export class DynamoDbStateRepository implements StateRepository {
         executionName: string,
         nowMs: number,
         expectedRetryCount?: number,
+        eventRevision?: number,
     ): Promise<WorkflowStartInput | null> {
         const retryCount = expectedRetryCount ?? (await this.get(sourceEventId))?.retry_count;
         if (retryCount === undefined) {
@@ -1190,6 +1208,7 @@ export class DynamoDbStateRepository implements StateRepository {
                         retryCount,
                         executionName,
                         attempt,
+                        eventRevision,
                         nowMs,
                     }),
                 }),
@@ -1200,7 +1219,7 @@ export class DynamoDbStateRepository implements StateRepository {
             }
             throw error;
         }
-        return { sourceEventId, executionName, attempt };
+        return { sourceEventId, executionName, attempt, eventRevision: eventRevision ?? 1 };
     }
 
     async markWorkflowStopped(
@@ -1470,12 +1489,15 @@ export class DynamoDbStateRepository implements StateRepository {
         attempt: number,
         runnerJobId: string,
         nowMs: number,
+        eventRevision?: number,
     ): Promise<RunnerQueueJob | null> {
         const row = await this.get(sourceEventId);
         if (row === null || !DUE_STATUSES.has(row.status) || row.retry_count !== attempt - 1) {
             return null;
         }
         row.status = "queued";
+        const plannedEventRevision = eventRevision ?? row.planned_event_revision ?? 1;
+        row.planned_event_revision = plannedEventRevision;
         row.runner_job_id = runnerJobId;
         row.runner_queued_at_ms = nowMs;
         row.runner_attempt = attempt;
@@ -1488,6 +1510,7 @@ export class DynamoDbStateRepository implements StateRepository {
             runner_job_id: runnerJobId,
             source_event_id: sourceEventId,
             attempt,
+            event_revision: plannedEventRevision,
             enqueued_at_ms: nowMs,
         };
     }
@@ -1871,6 +1894,7 @@ export class DynamoDbStateRepository implements StateRepository {
                     "#floor_census_counts_json = :floor_census_counts_json",
                     "#floor_census_error_message = :floor_census_error_message",
                     "#floor_census_updated_at_ms = :floor_census_updated_at_ms",
+                    "#planned_event_revision = :planned_event_revision",
                     "#runner_job_id = :runner_job_id",
                     "#runner_queued_at_ms = :runner_queued_at_ms",
                     "#runner_attempt = :runner_attempt",
@@ -2038,6 +2062,7 @@ function workflowStartUpdateExpression(): string {
     return [
         "SET #status = :processing_status",
         "#runner_job_id = :runner_job_id",
+        "#planned_event_revision = :planned_event_revision",
         "#runner_queued_at_ms = :null_value",
         "#runner_attempt = :runner_attempt",
         "#runner_id = :null_value",
@@ -2064,6 +2089,7 @@ function workflowStartExpressionNames(): Record<string, string> {
         "#next_retry_at_ms": "next_retry_at_ms",
         "#finalization_deadline_at_ms": "finalization_deadline_at_ms",
         "#runner_job_id": "runner_job_id",
+        "#planned_event_revision": "planned_event_revision",
         "#runner_queued_at_ms": "runner_queued_at_ms",
         "#runner_attempt": "runner_attempt",
         "#runner_id": "runner_id",
@@ -2087,6 +2113,7 @@ function workflowStartExpressionValues(input: {
     retryCount: number;
     executionName: string;
     attempt: number;
+    eventRevision: number | undefined;
     nowMs: number;
 }): Record<string, unknown> {
     return {
@@ -2097,6 +2124,7 @@ function workflowStartExpressionValues(input: {
         ":failed_status": "failed",
         ":processing_status": "processing",
         ":runner_job_id": input.executionName,
+        ":planned_event_revision": input.eventRevision ?? 1,
         ":runner_attempt": input.attempt,
         ":runner_phase": "starting_instance",
         ":runner_timeout_at_ms": input.nowMs + FAILED_RETRY_BACKOFF_MS,
@@ -2164,6 +2192,7 @@ function baseRow(
         source_event_id: sourceEventId,
         requested_source_event_id: null,
         event_uid: null,
+        planned_event_revision: null,
         status: "new",
         retry_count: 0,
         next_retry_at_ms: null,

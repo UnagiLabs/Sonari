@@ -1402,7 +1402,7 @@ Resources:
             "StartInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "start_instance", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt" },
               "Next": "RunnerCapacityAvailable",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -1422,7 +1422,7 @@ Resources:
             "FindReadyInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "find_ready_instance", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt" },
               "Next": "DispatchHealthCheckCommand",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 20, "BackoffRate": 1.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -1430,8 +1430,8 @@ Resources:
             "DispatchHealthCheckCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_health_check_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
-              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_health_check_command", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
               "Next": "WaitForHealthCheckCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -1464,8 +1464,8 @@ Resources:
             "DispatchGetAttestationCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_get_attestation_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
-              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_get_attestation_command", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
               "Next": "WaitForAttestationCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -1507,8 +1507,8 @@ Resources:
             "DispatchProcessDataCommand": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_process_data_command", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "registration_metadata.$": "$.registration_result.registration_metadata" },
-              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "dispatch_process_data_command", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "registration_metadata.$": "$.registration_result.registration_metadata" },
+              "ResultSelector": { "verifier_kind.$": "$.verifier_kind", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "command_id.$": "$.command_id", "result_s3_key.$": "$.result_s3_key", "command_poll_count": 0 },
               "Next": "WaitForCommand",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
@@ -1626,7 +1626,7 @@ Resources:
             "StopInstance": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "stop_instance", "source_event_id.$": "$.source_event_id", "attempt.$": "$.attempt" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "stop_instance", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt" },
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.stop_error", "Next": "StopInstanceFailed" }],
               "End": true
