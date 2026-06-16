@@ -101,6 +101,9 @@ export async function resolvePublishedContractIds(
     env.RELAYER_VERIFIER_REGISTRY = requireEnvValue(env, "SONARI_VERIFIER_REGISTRY_ID");
     env.RELAYER_CATEGORY_REGISTRY = requireEnvValue(env, "SONARI_CATEGORY_REGISTRY_ID");
     env.RELAYER_CATEGORY_POOL = requireEnvValue(env, "SONARI_EARTHQUAKE_CATEGORY_POOL_ID");
+    env.FLOOR_CENSUS_PAUSE_STATE = requireEnvValue(env, "SONARI_FLOOR_CENSUS_PAUSE_STATE");
+    env.FLOOR_CENSUS_MAIN_POOL = requireEnvValue(env, "SONARI_FLOOR_CENSUS_MAIN_POOL");
+    env.FLOOR_CENSUS_CATEGORY_POOL = requireEnvValue(env, "SONARI_FLOOR_CENSUS_CATEGORY_POOL");
 
     env.RELAYER_REGISTRY = await readSingleRegistryCreatedEvent(
         input.client,
