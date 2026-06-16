@@ -731,6 +731,236 @@ describe("DynamoDB-compatible repository behavior", () => {
         }
     });
 
+    it("manual rerun of a finalized row clears old results and starts a fresh latest+1 attempt", async () => {
+        const repository = new InMemoryStateRepository();
+        const workflow = new RecordingWorkflowStarter();
+        const latestReads: string[] = [];
+        const handler = createManualHandler({
+            repository,
+            workflow,
+            now: () => baseNow + 5_000,
+            token: manualAuthToken,
+            resolveSourceEventId: passthroughSourceEventIdResolver,
+            readLatestOnchainEventRevision: {
+                async readLatestEventRevision(eventUid) {
+                    latestReads.push(eventUid);
+                    return 1;
+                },
+            },
+        });
+
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+        await repository.markWorkflowStarted(
+            "us7000sonari",
+            "earthquake-us7000sonari-r1-a1",
+            baseNow + 500,
+            0,
+            1,
+        );
+        await repository.updateRunnerWorkflowProgress({
+            sourceEventId: "us7000sonari",
+            attempt: 1,
+            phase: "reading_result",
+            instanceId: "i-old",
+            commandId: "cmd-old",
+            resultS3Key: "results/us7000sonari/finalized.json",
+            lastPollAtMs: baseNow + 750,
+            nowMs: baseNow + 750,
+        });
+        await repository.applyRunnerResult(
+            "us7000sonari",
+            finalizedResult(),
+            baseNow + 1_000,
+            undefined,
+            1,
+        );
+        await repository.markRelayerSucceeded(
+            "us7000sonari",
+            {
+                mode: "submit",
+                request: relayerRequestPreview(),
+                digest: "0xdigest",
+                objectId: "0xobject",
+            },
+            baseNow + 2_000,
+            1,
+        );
+        await repository.markSourceArchiveResult(
+            "us7000sonari",
+            { status: "success", artifactS3Keys: ["source-artifacts/us7000sonari/1/raw.json"] },
+            baseNow + 2_500,
+            1,
+        );
+        await repository.markAffectedCellsProofRegistrationResult(
+            "us7000sonari",
+            { status: "retryable_failed", retryableNextRetryAtMs: baseNow + HOUR_MS },
+            baseNow + 3_000,
+            1,
+        );
+        await repository.markFloorCensusProcessing("us7000sonari", baseNow + 3_500, 1);
+        await repository.markFloorCensusResult(
+            "us7000sonari",
+            { status: "succeeded", digest: "0xcensus", counts: [1n, 2n, 3n] },
+            baseNow + 4_000,
+            1,
+        );
+
+        const response = await handler({
+            headers: { authorization: `Bearer ${manualAuthToken}` },
+            body: JSON.stringify({ source_event_id: "us7000sonari" }),
+        });
+
+        expect(response.statusCode).toBe(200);
+        expect(latestReads).toEqual([
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ]);
+        expect(workflow.starts).toEqual([
+            {
+                sourceEventId: "us7000sonari",
+                executionName: "earthquake-us7000sonari-r2-a1",
+                attempt: 1,
+            },
+        ]);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "processing",
+            latest_revision: 1,
+            planned_event_revision: 2,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
+            tee_result_json: null,
+            relayer_status: null,
+            relayer_request_json: null,
+            relayer_digest: null,
+            relayer_object_id: null,
+            relayer_submitted_at_ms: null,
+            source_archive_status: null,
+            source_artifact_s3_keys_json: null,
+            affected_cells_proof_registration_status: null,
+            affected_cells_proof_registration_next_retry_at_ms: null,
+            floor_census_status: null,
+            floor_census_digest: null,
+            runner_instance_id: null,
+            runner_command_id: null,
+            runner_result_s3_key: null,
+        });
+    });
+
+    it("DynamoDB manual rerun resets terminal result rows without dropping stable identity", async () => {
+        const terminalRow = await eventRow("us7000sonari", {
+            requested_source_event_id: "usc0001xgp",
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            planned_event_revision: 1,
+            status: "submitted",
+            latest_revision: 1,
+            retry_count: 3,
+            next_retry_at_ms: baseNow + HOUR_MS,
+            tee_result_json: JSON.stringify(finalizedResult()),
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            public_key: finalizedPublicKey,
+            finalized_at_ms: baseNow + 1_000,
+            relayer_status: "succeeded",
+            relayer_request_json: JSON.stringify({
+                payload_bcs_hex: finalizedPayloadBcsHex,
+                signature: finalizedSignature,
+            }),
+            relayer_digest: "0xdigest",
+            relayer_object_id: "0xobject",
+            relayer_submitted_at_ms: baseNow + 2_000,
+            source_archive_status: "success",
+            source_artifact_s3_keys_json: JSON.stringify([
+                "source-artifacts/us7000sonari/1/raw.json",
+            ]),
+            affected_cells_proof_registration_status: "retryable_failed",
+            affected_cells_proof_registration_next_retry_at_ms: baseNow + HOUR_MS,
+            floor_census_status: "succeeded",
+            floor_census_digest: "0xcensus",
+            runner_job_id: "earthquake-us7000sonari-r1-a1",
+            runner_attempt: 1,
+            runner_phase: "complete",
+            runner_instance_id: "i-old",
+            runner_command_id: "cmd-old",
+            runner_result_s3_key: "results/us7000sonari/finalized.json",
+            created_at_ms: baseNow,
+        });
+        const client = new StaleReadRaceClient(terminalRow, terminalRow);
+        const repository = new DynamoDbStateRepository("events", client);
+
+        await repository.upsertManualEvent("us7000sonari", baseNow + 5_000, {
+            requestedSourceEventId: "usc0001xgp",
+        });
+
+        expect(client.currentRow).toMatchObject({
+            source_event_id: "us7000sonari",
+            requested_source_event_id: "usc0001xgp",
+            event_uid: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            created_at_ms: baseNow,
+            status: "new",
+            latest_revision: 1,
+            planned_event_revision: null,
+            retry_count: 0,
+            next_retry_at_ms: null,
+            tee_result_json: null,
+            payload_bcs_hex: null,
+            signature: null,
+            public_key: null,
+            finalized_at_ms: null,
+            relayer_status: null,
+            relayer_request_json: null,
+            relayer_digest: null,
+            relayer_object_id: null,
+            relayer_submitted_at_ms: null,
+            source_archive_status: null,
+            source_artifact_s3_keys_json: null,
+            affected_cells_proof_registration_status: null,
+            affected_cells_proof_registration_next_retry_at_ms: null,
+            floor_census_status: null,
+            floor_census_digest: null,
+            runner_job_id: null,
+            runner_attempt: null,
+            runner_phase: null,
+            runner_instance_id: null,
+            runner_command_id: null,
+            runner_result_s3_key: null,
+        });
+    });
+
+    it("scheduled scans still preserve terminal rows", async () => {
+        const repository = new InMemoryStateRepository();
+        await repository.upsertManualEvent("us7000sonari", baseNow);
+        await repository.applyRunnerResult("us7000sonari", finalizedResult(), baseNow + 1_000);
+        await repository.markRelayerSucceeded(
+            "us7000sonari",
+            {
+                mode: "submit",
+                request: relayerRequestPreview(),
+                digest: "0xdigest",
+                objectId: "0xobject",
+            },
+            baseNow + 2_000,
+        );
+
+        await repository.upsertCandidate(
+            candidate("us7000sonari", { source_updated_at_ms: baseNow + 3_000 }),
+            baseNow + 3_000,
+        );
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            status: "submitted",
+            latest_revision: 1,
+            payload_bcs_hex: finalizedPayloadBcsHex,
+            signature: finalizedSignature,
+            relayer_status: "succeeded",
+            relayer_digest: "0xdigest",
+            source_updated_at_ms: baseNow,
+        });
+    });
+
     it("paginates DynamoDB scans before filtering and applying the due limit", async () => {
         const firstPageRows = [
             await eventRow("us7000done", {
@@ -2445,6 +2675,29 @@ function pendingSourceResult(sourceEventId: string): TeeCoreResult {
         source_event_id: sourceEventId,
         error_code: "SHAKEMAP_PRODUCT_MISSING",
     };
+}
+
+function relayerRequestPreview() {
+    const args: [string, string, string, string, string, number[], number[], number[]] = [
+        "0xregistry",
+        "0xverifier",
+        "0xcategory",
+        "0xpool",
+        "0xclock",
+        [1],
+        [2],
+        [3],
+    ];
+    const request = {
+        target: "0xtarget",
+        registry: "0xregistry",
+        verifierRegistry: "0xverifier",
+        categoryRegistry: "0xcategory",
+        categoryPool: "0xpool",
+        clock: "0xclock",
+        arguments: args,
+    };
+    return { ...request, submitRequest: { ...request } };
 }
 
 /**

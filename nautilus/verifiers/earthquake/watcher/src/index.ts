@@ -187,6 +187,7 @@ export interface ManualHandlerOptions {
     token: string;
     now?: () => number;
     resolveSourceEventId?: UsgsSourceEventIdResolver;
+    readLatestOnchainEventRevision?: OnchainEventRevisionReader;
 }
 
 export interface LambdaHttpResponse {
@@ -237,6 +238,7 @@ export function createManualHandler(options: ManualHandlerOptions) {
             options.workflow,
             nowMs,
             1,
+            { readLatestOnchainEventRevision: options.readLatestOnchainEventRevision },
         );
         return jsonResponse(200, manualSubmitResponse(workflowStarted, resolution));
     };

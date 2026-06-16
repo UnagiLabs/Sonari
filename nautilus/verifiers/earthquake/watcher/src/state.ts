@@ -411,9 +411,15 @@ export class InMemoryStateRepository implements StateRepository {
             { bypassScreening: true },
         );
         const row = this.rows.get(sourceEventId);
-        if (row !== undefined && DUE_STATUSES.has(row.status)) {
-            row.next_retry_at_ms = null;
-            row.updated_at_ms = nowMs;
+        if (row !== undefined) {
+            if (RESULT_TERMINAL_STATUSES.has(row.status)) {
+                resetTerminalResultForManualRerun(row, nowMs);
+                return;
+            }
+            if (DUE_STATUSES.has(row.status)) {
+                row.next_retry_at_ms = null;
+                row.updated_at_ms = nowMs;
+            }
         }
     }
 
@@ -992,6 +998,7 @@ export class DynamoDbStateRepository implements StateRepository {
             { bypassScreening: true },
         );
         await this.clearManualRetryBackoff(sourceEventId, nowMs);
+        await this.resetManualTerminalResult(sourceEventId, nowMs);
     }
 
     private async clearManualRetryBackoff(sourceEventId: string, nowMs: number): Promise<void> {
@@ -1025,6 +1032,15 @@ export class DynamoDbStateRepository implements StateRepository {
                 throw error;
             }
         }
+    }
+
+    private async resetManualTerminalResult(sourceEventId: string, nowMs: number): Promise<void> {
+        const row = await this.get(sourceEventId);
+        if (row === null || !RESULT_TERMINAL_STATUSES.has(row.status)) {
+            return;
+        }
+        resetTerminalResultForManualRerun(row, nowMs);
+        await this.put(row);
     }
 
     async get(sourceEventId: string): Promise<EarthquakeEventRow | null> {
@@ -2282,6 +2298,61 @@ function mergePreservingResult(
                   : existing.error_code,
         updated_at_ms: isActiveRunnerWorkflow(existing) ? existing.updated_at_ms : nowMs,
     };
+}
+
+function resetTerminalResultForManualRerun(row: EarthquakeEventRow, nowMs: number): void {
+    row.status = "new";
+    row.retry_count = 0;
+    row.next_retry_at_ms = null;
+    row.planned_event_revision = null;
+    row.error_code = null;
+    row.relayer_mode = null;
+    row.relayer_status = null;
+    row.relayer_request_json = null;
+    row.relayer_digest = null;
+    row.relayer_object_id = null;
+    row.relayer_error_code = null;
+    row.relayer_error_message = null;
+    row.relayer_updated_at_ms = null;
+    row.relayer_submitted_at_ms = null;
+    row.source_archive_status = null;
+    row.source_archive_error_code = null;
+    row.source_archive_attempt = null;
+    row.source_artifact_s3_keys_json = null;
+    row.walrus_archive_updated_at_ms = null;
+    row.affected_cells_proof_registration_status = null;
+    row.affected_cells_proof_registration_error_code = null;
+    row.affected_cells_proof_registration_attempt = null;
+    row.affected_cells_proof_registration_next_retry_at_ms = null;
+    row.affected_cells_proof_registration_error_message = null;
+    row.affected_cells_proof_registration_updated_at_ms = null;
+    row.floor_census_status = null;
+    row.floor_census_attempt = null;
+    row.floor_census_retry_count = 0;
+    row.floor_census_digest = null;
+    row.floor_census_counts_json = null;
+    row.floor_census_error_message = null;
+    row.floor_census_updated_at_ms = null;
+    row.runner_job_id = null;
+    row.runner_queued_at_ms = null;
+    row.runner_attempt = null;
+    row.runner_id = null;
+    row.runner_started_at_ms = null;
+    row.runner_stopped_at_ms = null;
+    row.runner_timeout_at_ms = null;
+    row.runner_error_message = null;
+    row.runner_stop_error = null;
+    row.runner_phase = null;
+    row.runner_instance_id = null;
+    row.runner_command_id = null;
+    row.runner_result_s3_key = null;
+    row.runner_last_poll_at_ms = null;
+    row.tee_result_json = null;
+    row.payload_bcs_hex = null;
+    row.signature = null;
+    row.public_key = null;
+    row.finalized_at_ms = null;
+    row.updated_at_ms = nowMs;
 }
 
 function isReadyForRetryOrDeadline(row: EarthquakeEventRow, nowMs: number): boolean {
