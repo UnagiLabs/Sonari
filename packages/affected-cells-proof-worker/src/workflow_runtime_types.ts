@@ -2,6 +2,7 @@ export {};
 
 declare global {
     interface WorkflowEntrypoint<Env = unknown, Params = unknown> {
+        readonly env: Env;
         run(event: WorkflowEvent<Params>, step: WorkflowStep): Promise<unknown>;
     }
 
