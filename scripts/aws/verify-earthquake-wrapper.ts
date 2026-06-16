@@ -52,6 +52,7 @@ export type VerifyEarthquakeWrapperOptions = {
     geoResolution?: number;
     verifierConfigKey?: number;
     verifierConfigVersion?: number;
+    processDataRunId?: string;
     poll?: PollOptions;
 };
 
@@ -66,6 +67,7 @@ export type VerifyEarthquakeWrapperResult = {
 export async function readEarthquakeWrapperS3Result(input: {
     aws: AwsCli;
     expectedBucket: string;
+    expectedKey?: string;
     reference: unknown;
 }): Promise<unknown> {
     const reference = readProcessDataS3Reference(input.reference);
@@ -78,6 +80,11 @@ export async function readEarthquakeWrapperS3Result(input: {
     if (!key.startsWith(EARTHQUAKE_WRAPPER_RESULT_PREFIX)) {
         throw new Error(
             `process_data result key must be under ${EARTHQUAKE_WRAPPER_RESULT_PREFIX}`,
+        );
+    }
+    if (input.expectedKey !== undefined && key !== input.expectedKey) {
+        throw new Error(
+            `process_data result key mismatch: expected ${input.expectedKey}, got ${key}`,
         );
     }
 
@@ -181,7 +188,8 @@ export async function runVerifyEarthquakeWrapper(
             verifierConfigVersion: options.verifierConfigVersion ?? DEFAULT_VERIFIER_CONFIG_VERSION,
             enclaveInstancePublicKey: attestationPublicKey,
         });
-        const runId = randomUUID();
+        const runId = options.processDataRunId ?? randomUUID();
+        const expectedResultKey = processDataS3ResultKey(runId);
         const processDataReference = parseJsonText(
             await runSsmShellCommand(aws, {
                 instanceId,
@@ -201,6 +209,7 @@ export async function runVerifyEarthquakeWrapper(
             await readEarthquakeWrapperS3Result({
                 aws,
                 expectedBucket: resultBucket,
+                expectedKey: expectedResultKey,
                 reference: processDataReference,
             }),
             attestationPublicKey,
@@ -270,7 +279,7 @@ export function buildProcessDataS3UploadCommand(input: {
     bucket: string;
     runId: string;
 }): string {
-    const resultKey = `${EARTHQUAKE_WRAPPER_RESULT_PREFIX}${input.runId}.json`;
+    const resultKey = processDataS3ResultKey(input.runId);
     return [
         "set -euo pipefail",
         'result_file="$(mktemp /tmp/sonari-earthquake-wrapper-result.XXXXXX.json)"',
@@ -282,6 +291,10 @@ export function buildProcessDataS3UploadCommand(input: {
         'bytes="$(wc -c < "$result_file" | tr -d \'[:space:]\')"',
         `RESULT_S3_URI="s3://${input.bucket}/$result_key" RESULT_SHA256="$sha256" RESULT_BYTES="$bytes" node -e ${shellSingleQuote('process.stdout.write(JSON.stringify({ status: "ok", result_s3_uri: process.env.RESULT_S3_URI, sha256: process.env.RESULT_SHA256, bytes: Number(process.env.RESULT_BYTES) }))')}`,
     ].join("\n");
+}
+
+function processDataS3ResultKey(runId: string): string {
+    return `${EARTHQUAKE_WRAPPER_RESULT_PREFIX}${runId}.json`;
 }
 
 function shellSingleQuote(value: string): string {

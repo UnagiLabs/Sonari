@@ -17,6 +17,7 @@ describe("AWS earthquake wrapper verification script", () => {
             stack: "sonari-verifier-runner-dev",
             expectedAccount: "595103996064",
             sourceEventId: "us6000m0xl",
+            processDataRunId: "test-run",
             poll: { intervalMs: 0, timeoutMs: 1 },
         });
 
@@ -117,6 +118,7 @@ describe("AWS earthquake wrapper verification script", () => {
                 stack: "sonari-verifier-runner-dev",
                 expectedAccount: "595103996064",
                 sourceEventId: "us6000m0xl",
+                processDataRunId: "test-run",
                 poll: { intervalMs: 0, timeoutMs: 1 },
             }),
         ).rejects.toThrow("process_data S3 reference sha256");
@@ -156,6 +158,7 @@ describe("AWS earthquake wrapper verification script", () => {
                 stack: "sonari-verifier-runner-dev",
                 expectedAccount: "595103996064",
                 sourceEventId: "us6000m0xl",
+                processDataRunId: "test-run",
                 poll: { intervalMs: 0, timeoutMs: 1 },
             }),
         ).rejects.toThrow("process_data result sha256 mismatch");
@@ -228,6 +231,25 @@ describe("AWS earthquake wrapper verification script", () => {
         expect(command).toContain("sha256: process.env.RESULT_SHA256");
         expect(command).toContain("bytes: Number(process.env.RESULT_BYTES)");
         expect(command).not.toContain("CommandId");
+    });
+
+    it("rejects process_data S3 references that do not match the expected run object key", async () => {
+        const resultText = JSON.stringify(finalizedWrapperResult());
+
+        await expect(
+            readEarthquakeWrapperS3Result({
+                aws: new S3ObjectAwsCli(resultText),
+                expectedBucket: "runner-results",
+                expectedKey: "results/earthquake-wrapper-results/expected-run.json",
+                reference: {
+                    status: "ok",
+                    result_s3_uri:
+                        "s3://runner-results/results/earthquake-wrapper-results/stale-run.json",
+                    sha256: createHash("sha256").update(resultText).digest("hex"),
+                    bytes: Buffer.byteLength(resultText, "utf8"),
+                },
+            }),
+        ).rejects.toThrow("process_data result key mismatch");
     });
 
     it("rejects S3 result references with invalid metadata or downloaded bytes", async () => {
