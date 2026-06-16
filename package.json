@@ -23,6 +23,8 @@
         "build:aws-earthquake-eif": "tsx scripts/build_aws_earthquake_eif.ts",
         "build:aws-membership-identity-tee-artifact": "tsx scripts/build_aws_membership_identity_tee_artifact.ts",
         "build:aws-membership-identity-eif": "tsx scripts/build_aws_membership_identity_eif.ts",
+        "stage:demo-affected-area-r2": "tsx scripts/stage_demo_affected_area_r2.ts",
+        "upload:demo-affected-area-r2": "tsx scripts/upload_demo_affected_area_r2.ts",
         "aws:preflight": "tsx scripts/aws/preflight.ts",
         "aws:inventory": "tsx scripts/aws/inventory.ts",
         "aws:check-idle": "tsx scripts/aws/check-idle.ts",

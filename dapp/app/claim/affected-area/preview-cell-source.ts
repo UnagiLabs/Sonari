@@ -73,7 +73,10 @@ export function resolvePreviewCellSource(
 }
 
 export function resolvePreviewAffectedAreaArtifact(
-    _program: DisasterClaimableProgram,
+    program: DisasterClaimableProgram,
 ): AffectedAreaArtifactSource | null {
+    if (program.affectedAreaArtifact?.kind === "tiled-affected-cells") {
+        return program.affectedAreaArtifact;
+    }
     return pickPreviewAffectedAreaArtifact(DEMO_CLAIMABLE_PROGRAMS);
 }

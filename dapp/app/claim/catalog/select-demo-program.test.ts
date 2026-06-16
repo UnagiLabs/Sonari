@@ -16,6 +16,7 @@ const PROGRAM_DISASTER: ClaimableProgram = {
     deadlineMs: "1767214799000",
     detailHref: "/demo/claim/tohoku-2011",
     eventUid: "0x0000000000000000000000000000000000000000000000000000000000000001",
+    eventRevision: 1,
     severityBand: 3,
     affectedCellCount: 42,
     cellSource: { kind: "static-asset", path: "/demo/tohoku-2011/affected-cells.json" },

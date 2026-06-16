@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { bandAmount } from "./cell-band-rules";
 import { isDisasterProgram, programHasMap } from "./claimable-program";
 import type { ClaimCampaignState } from "../claim-campaigns";
@@ -15,6 +15,10 @@ const CAMPAIGN_ID = `0x${"11".repeat(32)}`;
 const DISASTER_EVENT_ID = `0x${"22".repeat(32)}`;
 const EVENT_UID = `0x${"cd".repeat(32)}`;
 const AFFECTED_CELLS_ROOT = `0x${"ef".repeat(32)}`;
+
+afterEach(() => {
+    vi.unstubAllEnvs();
+});
 
 /** 有効な ClaimCampaignState のベース（claim-campaigns.test.ts の作り方に合わせる） */
 function makeState(overrides: Partial<ClaimCampaignState> = {}): ClaimCampaignState {
@@ -64,12 +68,14 @@ describe("claimCampaignToProgram: フィールド対応", () => {
         // 災害固有フィールド
         expect(result.category).toBe("disaster");
         expect(result.eventUid).toBe(EVENT_UID);
+        expect(result.eventRevision).toBe(3);
         expect(result.severityBand).toBe(2);
         expect(result.affectedCellCount).toBe(42);
         expect(result.affectedCellsRoot).toBe(AFFECTED_CELLS_ROOT);
 
         // cellSource は deferred
         expect(result.cellSource).toEqual({ kind: "deferred" });
+        expect(result.affectedAreaArtifact).toBeUndefined();
 
         // amountSummary は range（min=bandAmount(1), max=bandAmount(severityBand=2)）
         expect(result.amountSummary).toEqual({
@@ -133,6 +139,27 @@ describe("claimCampaignToProgram: cellSource と detailHref", () => {
     it("detailHref は /claim/<campaignId>", () => {
         const result = claimCampaignToProgram(makeState());
         expect(result?.detailHref).toBe(`/claim/${CAMPAIGN_ID}`);
+    });
+});
+
+describe("claimCampaignToProgram: affectedAreaArtifact", () => {
+    it("R2 base URL が設定されている場合、eventUid/eventRevision から manifest URL を作る", () => {
+        vi.stubEnv("NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL", "https://assets.example.com/");
+
+        const result = claimCampaignToProgram(makeState());
+
+        expect(result?.affectedAreaArtifact).toEqual({
+            kind: "tiled-affected-cells",
+            manifestPath: `https://assets.example.com/affected-area/events/${EVENT_UID}/revisions/3/affected-area-manifest.json`,
+        });
+    });
+
+    it("R2 base URL が空の場合、artifact は付けない", () => {
+        vi.stubEnv("NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL", "");
+
+        const result = claimCampaignToProgram(makeState());
+
+        expect(result?.affectedAreaArtifact).toBeUndefined();
     });
 });
 

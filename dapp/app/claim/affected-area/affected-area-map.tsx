@@ -89,6 +89,27 @@ function centerOfBounds(bounds: ViewportBounds): google.maps.LatLngLiteral {
     };
 }
 
+function toGoogleMapsPath(
+    boundary: readonly { readonly lat: number; readonly lng: number }[],
+): google.maps.LatLngLiteral[] {
+    return boundary.map(({ lat, lng }) => ({ lat, lng }));
+}
+
+function parseTileKey(key: string): { readonly z: number; readonly x: number; readonly y: number } {
+    const parts = key.split("/");
+    if (parts.length !== 3) {
+        throw new Error(`invalid affected cell tile key: ${key}`);
+    }
+    const [rawZ, rawX, rawY] = parts;
+    const z = Number(rawZ);
+    const x = Number(rawX);
+    const y = Number(rawY);
+    if (!Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y)) {
+        throw new Error(`invalid affected cell tile key: ${key}`);
+    }
+    return { z, x, y };
+}
+
 function removeOverlayMapType(map: google.maps.Map, imageMapType: google.maps.ImageMapType): void {
     const overlays = map.overlayMapTypes;
     for (let i = overlays.getLength() - 1; i >= 0; i -= 1) {
@@ -119,24 +140,16 @@ export interface AffectedAreaMapProps {
  *   decimal で dedupe して Polygon を差分同期する。
  * - 通常表示では全件 affected-cells.json を fetch しない。
  */
-export function AffectedAreaMap({
-    cellSource,
-    affectedAreaArtifact,
-    residenceCell,
-}: AffectedAreaMapProps) {
+export function AffectedAreaMap({ affectedAreaArtifact, residenceCell }: AffectedAreaMapProps) {
     const t = useTranslations("claim.affectedAreaMap");
 
     const parsedHome = residenceCell != null ? parseHomeCell(residenceCell) : null;
     const isHomeMode = parsedHome !== null;
-    const cellSourceKind = cellSource.kind;
     const manifestPath = affectedAreaArtifact.manifestPath;
 
-    const [status, setStatus] = useState<MapsLoaderStatus>(() => {
-        if (cellSourceKind === "deferred") {
-            return "unconfigured";
-        }
-        return resolveInitialMapsStatus(mapsApiKey);
-    });
+    const [status, setStatus] = useState<MapsLoaderStatus>(() =>
+        resolveInitialMapsStatus(mapsApiKey),
+    );
     const [manifest, setManifest] = useState<AffectedAreaTileManifest | null>(null);
     const [fetchError, setFetchError] = useState<boolean>(false);
     const [fetchDone, setFetchDone] = useState<boolean>(false);
@@ -164,9 +177,6 @@ export function AffectedAreaMap({
     });
 
     useEffect(() => {
-        if (cellSourceKind === "deferred") {
-            return;
-        }
         let cancelled = false;
 
         setFetchError(false);
@@ -195,7 +205,7 @@ export function AffectedAreaMap({
         return () => {
             cancelled = true;
         };
-    }, [cellSourceKind, manifestPath]);
+    }, [manifestPath]);
 
     const clearCellPolygons = useCallback(() => {
         for (const poly of polygonsRef.current.values()) {
@@ -271,7 +281,7 @@ export function AffectedAreaMap({
                 const existing = polygonsRef.current.get(cell.decimal);
                 if (existing === undefined) {
                     const poly = new google.maps.Polygon({
-                        paths: feature.boundary,
+                        paths: toGoogleMapsPath(feature.boundary),
                         ...style,
                     });
                     poly.setMap(map);
@@ -287,7 +297,7 @@ export function AffectedAreaMap({
             if (home !== null && !knownAffectedHomeRef.current) {
                 if (homeCellPolyRef.current === null) {
                     const homePoly = new google.maps.Polygon({
-                        paths: residenceCellBoundary(home.hex),
+                        paths: toGoogleMapsPath(residenceCellBoundary(home.hex)),
                         ...HOME_CELL_OUTLINE_STYLE,
                     });
                     homePoly.setMap(map);
@@ -317,7 +327,7 @@ export function AffectedAreaMap({
                     if (cached !== undefined) {
                         return cached;
                     }
-                    const [z, x, y] = key.split("/").map(Number);
+                    const { z, x, y } = parseTileKey(key);
                     const json = await fetchJson(
                         tileUrlFromTemplate(nextManifest.cellTileUrlTemplate, { z, x, y }),
                     );
@@ -380,10 +390,6 @@ export function AffectedAreaMap({
     }, [isHomeMode, manifest, syncOverlay]);
 
     useEffect(() => {
-        if (cellSourceKind === "deferred") {
-            return;
-        }
-
         if (!isGoogleMapsConfigured(mapsApiKey)) {
             setStatus("unconfigured");
             return;
@@ -474,18 +480,9 @@ export function AffectedAreaMap({
             }
             mapRef.current = null;
         };
-    }, [cellSourceKind, clearCellPolygons, isHomeMode, syncOverlay]);
+    }, [clearCellPolygons, isHomeMode, syncOverlay]);
 
     const legendEntries = buildBandLegendEntries();
-
-    if (cellSourceKind === "deferred") {
-        return (
-            <div className="affected-area-map-fallback">
-                <p className="affected-area-map-fallback-title">{t("deferredTitle")}</p>
-                <p>{t("deferredBody")}</p>
-            </div>
-        );
-    }
 
     if (!isGoogleMapsConfigured(mapsApiKey)) {
         return (

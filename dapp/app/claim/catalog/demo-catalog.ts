@@ -9,6 +9,7 @@
 import { bandAmount } from "./cell-band-rules";
 import type { ClaimableProgram, DisasterClaimableProgram } from "./claimable-program";
 import { TOHOKU_2011_DEMO_EARTHQUAKE } from "../../../app/demo/_data/tohoku-2011";
+import { affectedAreaArtifactFromBaseUrl } from "../affected-area/affected-area-artifact";
 
 // ---------------------------------------------------------------------------
 // 代表居住セル定数
@@ -39,6 +40,23 @@ export const DEMO_AFFECTED_HOME_CELL_BAND3 = "608795190286614527";
  */
 export const DEMO_AFFECTED_HOME_CELL_BAND1 = "608795262395088895";
 
+export const TOHOKU_2011_EVENT_UID =
+    "0x552d0b5280b31910b6ff306632e05e9f2c0b4e9176d8ddba77d20a5e22d7a622";
+export const TOHOKU_2011_EVENT_REVISION = 1;
+export const TOHOKU_2011_AFFECTED_CELLS_ROOT =
+    "0x51cd4a4ddc99acbad52b6e5b0003827f9a5b27501f3fc902c8e025a1a92a59ee";
+
+const TOHOKU_2011_LOCAL_AFFECTED_AREA_ARTIFACT = {
+    kind: "tiled-affected-cells",
+    manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
+} as const;
+
+const TOHOKU_2011_AFFECTED_AREA_ARTIFACT =
+    affectedAreaArtifactFromBaseUrl(process.env.NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL, {
+        eventUid: TOHOKU_2011_EVENT_UID,
+        eventRevision: TOHOKU_2011_EVENT_REVISION,
+    }) ?? TOHOKU_2011_LOCAL_AFFECTED_AREA_ARTIFACT;
+
 // ---------------------------------------------------------------------------
 // 災害プログラム: 東日本大震災 2011
 //
@@ -66,7 +84,8 @@ const TOHOKU_2011_PROGRAM: DisasterClaimableProgram = {
     detailHref: "/demo/claim/tohoku-2011",
     // eventUid: nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json 由来
     // 表示・受け渡し用に持つだけで検証ロジックは作らない。
-    eventUid: "0x552d0b5280b31910b6ff306632e05e9f2c0b4e9176d8ddba77d20a5e22d7a622",
+    eventUid: TOHOKU_2011_EVENT_UID,
+    eventRevision: TOHOKU_2011_EVENT_REVISION,
     severityBand: TOHOKU_2011_DEMO_EARTHQUAKE.severityBand as 3,
     affectedCellCount: TOHOKU_2011_DEMO_EARTHQUAKE.affectedCellCount,
     // cellSource: 実体は STEP 5 で生成する静的アセット
@@ -74,14 +93,10 @@ const TOHOKU_2011_PROGRAM: DisasterClaimableProgram = {
         kind: "static-asset",
         path: "/demo/tohoku-2011/affected-cells.json",
     },
-    affectedAreaArtifact: {
-        kind: "tiled-affected-cells",
-        manifestPath: "/demo/tohoku-2011/affected-area-manifest.json",
-    },
+    affectedAreaArtifact: TOHOKU_2011_AFFECTED_AREA_ARTIFACT,
     // affectedCellsRoot: nautilus/verifiers/earthquake/fixtures/usgs/great_tohoku_2011/expected/unsigned_payload.json 由来
     // 表示・受け渡し用に持つだけで検証ロジックは作らない。
-    affectedCellsRoot:
-        "0x51cd4a4ddc99acbad52b6e5b0003827f9a5b27501f3fc902c8e025a1a92a59ee",
+    affectedCellsRoot: TOHOKU_2011_AFFECTED_CELLS_ROOT,
 };
 
 // ---------------------------------------------------------------------------

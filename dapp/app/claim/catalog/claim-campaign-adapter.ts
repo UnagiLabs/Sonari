@@ -15,6 +15,7 @@
 import { type CellBand, parseCellBand, bandAmount } from "./cell-band-rules";
 import type { DisasterClaimableProgram } from "./claimable-program";
 import type { ClaimCampaignState } from "../claim-campaigns";
+import { affectedAreaArtifactFromBaseUrl } from "../affected-area/affected-area-artifact";
 
 // ---------------------------------------------------------------------------
 // affectedCellCount のパース
@@ -76,6 +77,14 @@ export function claimCampaignToProgram(
         return null;
     }
 
+    const affectedAreaArtifact = affectedAreaArtifactFromBaseUrl(
+        process.env.NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL,
+        {
+            eventUid: state.eventUid,
+            eventRevision: state.eventRevision,
+        },
+    );
+
     return {
         id: state.campaignId,
         category: "disaster",
@@ -91,10 +100,12 @@ export function claimCampaignToProgram(
         deadlineMs: state.claimEndMs,
         detailHref: `/claim/${state.campaignId}`,
         eventUid: state.eventUid,
+        eventRevision: state.eventRevision,
         severityBand,
         affectedCellCount,
         // cellSource は後続 issue でワーカー取得をつなぐまで常に deferred
         cellSource: { kind: "deferred" },
+        ...(affectedAreaArtifact !== null ? { affectedAreaArtifact } : {}),
         // affectedCellsRoot は表示・受け渡し用のみ。検証ロジックは持たない
         affectedCellsRoot: state.affectedCellsRoot,
     };

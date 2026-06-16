@@ -115,10 +115,12 @@ export function computeAffectedAreaBounds(
             bounds = { ...cellBounds };
             continue;
         }
-        if (cellBounds.north > bounds.north) bounds.north = cellBounds.north;
-        if (cellBounds.south < bounds.south) bounds.south = cellBounds.south;
-        if (cellBounds.east > bounds.east) bounds.east = cellBounds.east;
-        if (cellBounds.west < bounds.west) bounds.west = cellBounds.west;
+        bounds = {
+            north: Math.max(bounds.north, cellBounds.north),
+            south: Math.min(bounds.south, cellBounds.south),
+            east: Math.max(bounds.east, cellBounds.east),
+            west: Math.min(bounds.west, cellBounds.west),
+        };
     }
 
     return bounds;

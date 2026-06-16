@@ -25,6 +25,7 @@ const validDisasterInput: unknown = {
     deadlineMs: "1893456000000",
     detailHref: "/claim/prog-001",
     eventUid: EVENT_UID,
+    eventRevision: 3,
     severityBand: 3,
     affectedCellCount: 1200,
     cellSource: { kind: "static-asset", path: "/demo/tohoku-2011/affected-cells.json" },
@@ -71,6 +72,7 @@ describe("parseClaimableProgram — disaster", () => {
         const result = parseClaimableProgram(validDisasterInput) as DisasterClaimableProgram | null;
         expect(result).not.toBeNull();
         expect(result?.eventUid).toBe(EVENT_UID);
+        expect(result?.eventRevision).toBe(3);
         expect(result?.severityBand).toBe(3);
         expect(result?.affectedCellCount).toBe(1200);
         expect(result?.cellSource).toEqual({
@@ -143,6 +145,12 @@ describe("parseClaimableProgram — disaster", () => {
     it("returns null when disaster is missing eventUid", () => {
         const input = { ...validDisasterInput as Record<string, unknown> };
         delete input["eventUid"];
+        expect(parseClaimableProgram(input)).toBeNull();
+    });
+
+    it("returns null when disaster is missing eventRevision", () => {
+        const input = { ...(validDisasterInput as Record<string, unknown>) };
+        delete input["eventRevision"];
         expect(parseClaimableProgram(input)).toBeNull();
     });
 

@@ -75,6 +75,8 @@ export interface DisasterClaimableProgram extends ClaimableProgramBase {
      * 表示・受け渡し用。検証ロジックは持たない。
      */
     readonly eventUid: string;
+    /** イベント revision。表示 artifact path と proof request に使う。 */
+    readonly eventRevision: number;
     /** プログラム全体のバンド。STEP 1 の CellBand 型。 */
     readonly severityBand: CellBand;
     /** 被災セル数（表示用）。 */
@@ -209,6 +211,9 @@ function parseDisaster(
     const eventUid = parseNonEmptyString(value["eventUid"]);
     if (eventUid === null) return null;
 
+    const eventRevision = parseNonNegativeInteger(value["eventRevision"]);
+    if (eventRevision === null) return null;
+
     const severityBand = parseCellBand(value["severityBand"]);
     if (severityBand === null) return null;
 
@@ -236,6 +241,7 @@ function parseDisaster(
         deadlineMs: base.deadlineMs,
         detailHref: base.detailHref,
         eventUid,
+        eventRevision,
         severityBand,
         affectedCellCount,
         cellSource,
