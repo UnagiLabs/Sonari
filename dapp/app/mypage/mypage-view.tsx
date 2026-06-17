@@ -2,10 +2,10 @@
 
 import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
 import type { SonariLocale } from "../register/wizard/locale";
-import { WalletConnect } from "../wallet/wallet-connect";
+import { LoginEntryPoint, LoginEntryPointFallback } from "../wallet/login-entry-point";
 import { HomeCellMap } from "./home-cell-map";
 import { fetchIdentityJobStatus } from "./identity-job-status";
 import {
@@ -128,7 +128,9 @@ export function MypageView({
                     <div className="mypage-state">
                         <h2>{t("states.disconnectedTitle")}</h2>
                         <p>{t("states.disconnectedBody")}</p>
-                        <WalletConnect />
+                        <Suspense fallback={<LoginEntryPointFallback />}>
+                            <LoginEntryPoint />
+                        </Suspense>
                     </div>
                 )}
 

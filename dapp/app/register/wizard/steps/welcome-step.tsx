@@ -3,8 +3,8 @@
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
-import { WalletConnect } from "../../../wallet/wallet-connect";
+import { Suspense, useEffect, useState } from "react";
+import { LoginEntryPoint, LoginEntryPointFallback } from "../../../wallet/login-entry-point";
 import type { MembershipLookupResult } from "../../identity/membership-lookup";
 import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { deriveMembershipPresenceView, type MembershipPresenceView } from "./membership-presence";
@@ -72,7 +72,9 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
                     <small>{t("walletGoogleBody")}</small>
                     <small>{t("walletSponsorNote")}</small>
                 </div>
-                <WalletConnect />
+                <Suspense fallback={<LoginEntryPointFallback />}>
+                    <LoginEntryPoint />
+                </Suspense>
             </div>
 
             {presenceView.kind === "checking" ? (

@@ -145,6 +145,8 @@ describe("dapp env example", () => {
         expect(envExample).toContain("SONARI_SUI_NETWORK=testnet");
         expect(envExample).toContain("NEXT_PUBLIC_SUI_NETWORK=testnet");
         expect(envExample).toContain("Enoki / zkLogin もこの値を共有");
+        expect(envExample).toContain("Google OAuth の Authorized redirect URIs");
+        expect(envExample).toContain("query 付き URI は登録しません");
         expect(envExample).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
         expect(envExample).not.toContain("ENOKI_PRIVATE_API_KEY=");
     });
@@ -163,6 +165,9 @@ describe("dapp Enoki setup docs", () => {
         expect(readme).toContain("http://localhost:3000/");
         expect(readme).toContain("https://sonari.help");
         expect(readme).toContain("https://sonari.help/");
+        expect(readme).toContain("Do not register query-bearing redirect URIs");
+        expect(readme).toContain("https://sonari.help/?next=/register");
+        expect(readme).toContain("query 付き redirect URI は登録しない");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_API_KEY");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID");
         expect(readme).toContain("NEXT_PUBLIC_SUI_NETWORK");
