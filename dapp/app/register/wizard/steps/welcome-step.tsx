@@ -67,6 +67,11 @@ export function WelcomeStep({ onNext }: { readonly onNext: () => void }) {
 
             <div className="wizard-card wizard-wallet-card">
                 <p className="muted">{t("walletHint")}</p>
+                <div className="field-note" role="note">
+                    <strong>{t("walletGoogleTitle")}</strong>
+                    <small>{t("walletGoogleBody")}</small>
+                    <small>{t("walletSponsorNote")}</small>
+                </div>
                 <WalletConnect />
             </div>
 

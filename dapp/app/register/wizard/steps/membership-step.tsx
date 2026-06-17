@@ -21,6 +21,7 @@ import {
 import { issueMembershipPass, MembershipIssueError } from "./membership-issue";
 import {
     type MembershipIssueViewState,
+    membershipIssueFailureMessageKey,
     membershipSubmittingMessageKey,
 } from "./membership-issue-state";
 import { shortAddress } from "./membership-presence";
@@ -161,7 +162,7 @@ export function MembershipStep({
     }
 
     async function runMembershipIssuance(senderAddress: string, homeCell: string) {
-        setIssueState({ kind: "submitting", phase: "sponsor" });
+        setIssueState({ kind: "submitting", phase: "prepare" });
 
         try {
             await issueMembershipPass({
@@ -211,7 +212,9 @@ export function MembershipStep({
             }
         }
         if (error instanceof SponsoredMembershipTransactionError) {
-            return error.message.length > 0 ? error.message : t("issue.transactionFailed");
+            return t(membershipIssueFailureMessageKey(error.stage), {
+                reason: error.message.length > 0 ? error.message : t("issue.transactionFailed"),
+            });
         }
         return t("issue.transactionFailed");
     }
@@ -325,6 +328,12 @@ export function MembershipStep({
                         ) : null}
                     </strong>
                 </div>
+            </div>
+
+            <div className="field-note" role="note">
+                <strong>{t("issue.sponsorNoteTitle")}</strong>
+                <small>{t("issue.sponsorNoteBody")}</small>
+                <small>{t("issue.signatureNote")}</small>
             </div>
 
             <div

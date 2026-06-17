@@ -24,6 +24,9 @@
                 "title": "Become a Sonari member.",
                 "lead": "Three clear steps: choose your residence area, issue one soulbound Membership SBT, and verify your identity whenever you are ready.",
                 "walletHint": "Connect your Sui wallet to get started.",
+                "walletGoogleTitle": "Google zkLogin creates a Sui address from your Google account.",
+                "walletGoogleBody": "Sonari issues the Membership SBT to the connected Sui address. You can also use another Sui wallet.",
+                "walletSponsorNote": "No SUI is needed for the first Membership SBT issuance because Sonari sponsors the network fee.",
                 "cta": "Get started",
                 "membership": {
                     "checking": "Checking your Membership SBT…",
@@ -117,6 +120,10 @@
                     "checking": "Checking whether this wallet already has a Membership SBT…",
                     "alreadyIssued": "This wallet already has a Membership SBT. Continue to the next step.",
                     "submitting": "Approve the transaction in your wallet.",
+                    "sponsorNoteTitle": "Sonari sponsors the first Membership SBT gas.",
+                    "sponsorNoteBody": "The Membership SBT is issued to the connected Sui address for this residence cell.",
+                    "signatureNote": "You still review and sign the sponsored transaction in your wallet before it is sent.",
+                    "preparing": "Preparing your Membership SBT transaction.",
                     "sponsoring": "Preparing a gasless Membership SBT transaction.",
                     "signing": "Approve the sponsored Membership SBT transaction in your wallet.",
                     "executing": "Issuing your Membership SBT on chain.",
@@ -128,6 +135,10 @@
                     "proofFetchFailed": "Could not fetch the residence proof.",
                     "invalidProofResponse": "The residence proof response is invalid.",
                     "residenceNotAllowed": "The selected residence cell is not in the allowlist.",
+                    "prepareFailed": "Could not prepare the Membership SBT transaction. {reason}",
+                    "sponsorFailed": "Sonari could not sponsor the Membership SBT transaction. {reason}",
+                    "signatureRejected": "The Membership SBT transaction was not signed. {reason}",
+                    "executeFailed": "The sponsored Membership SBT transaction could not be submitted. {reason}",
                     "transactionFailed": "Membership issuance failed."
                 }
             },

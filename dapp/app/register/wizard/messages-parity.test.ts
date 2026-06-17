@@ -16,6 +16,14 @@ const doneStepSource = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "steps/done-step.tsx"),
     "utf8",
 );
+const membershipStepSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "steps/membership-step.tsx"),
+    "utf8",
+);
+const welcomeStepSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "steps/welcome-step.tsx"),
+    "utf8",
+);
 
 function loadCatalog(locale: string): Record<string, unknown> {
     return JSON.parse(readFileSync(resolve(messagesDir, `${locale}.json`), "utf8")) as Record<
@@ -195,5 +203,48 @@ describe("messages catalog parity", () => {
             expect(en.has(key), key).toBe(true);
             expect(ja.has(key), key).toBe(true);
         }
+    });
+
+    it("membership 発行の sponsor 説明と段階別エラー文言を catalog で管理する", () => {
+        const keys = [
+            "register.wizard.membership.issue.sponsorNoteTitle",
+            "register.wizard.membership.issue.sponsorNoteBody",
+            "register.wizard.membership.issue.signatureNote",
+            "register.wizard.membership.issue.preparing",
+            "register.wizard.membership.issue.prepareFailed",
+            "register.wizard.membership.issue.sponsorFailed",
+            "register.wizard.membership.issue.signatureRejected",
+            "register.wizard.membership.issue.executeFailed",
+        ];
+        for (const key of keys) {
+            expect(en.has(key), key).toBe(true);
+            expect(ja.has(key), key).toBe(true);
+        }
+    });
+
+    it("membership step は sponsor 説明と prepare 状態を実際に参照する", () => {
+        expect(membershipStepSource).toContain('t("issue.sponsorNoteTitle")');
+        expect(membershipStepSource).toContain('t("issue.sponsorNoteBody")');
+        expect(membershipStepSource).toContain('t("issue.signatureNote")');
+        expect(membershipStepSource).toContain('phase: "prepare"');
+        expect(membershipStepSource).toContain("membershipIssueFailureMessageKey(error.stage)");
+    });
+
+    it("welcome の connect panel 説明を catalog で管理する", () => {
+        const keys = [
+            "register.wizard.welcome.walletGoogleTitle",
+            "register.wizard.welcome.walletGoogleBody",
+            "register.wizard.welcome.walletSponsorNote",
+        ];
+        for (const key of keys) {
+            expect(en.has(key), key).toBe(true);
+            expect(ja.has(key), key).toBe(true);
+        }
+    });
+
+    it("welcome step は connect panel 説明を実際に参照する", () => {
+        expect(welcomeStepSource).toContain('t("walletGoogleTitle")');
+        expect(welcomeStepSource).toContain('t("walletGoogleBody")');
+        expect(welcomeStepSource).toContain('t("walletSponsorNote")');
     });
 });
