@@ -5,7 +5,9 @@ import {
     type AffectedCellsArtifact,
     computeAffectedCellsRootHex,
     type EarthquakeOraclePayload,
+    type EvidenceManifest,
     type RelayerSubmitInput,
+    type StoredSourceRef,
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
@@ -135,6 +137,35 @@ export interface SignedFloorCensusResult {
     signatureHex: string;
     publicKey: Uint8Array;
     publicKeyHex: string;
+}
+
+export interface FloorCensusInputBundle {
+    event_uid: string;
+    event_revision: number;
+    occurred_at_ms: number;
+    affected_cells_root: string;
+    issued_at_ms: number;
+    campaign_id: string;
+    disaster_event_id: string;
+    census_checkpoint: number;
+    affected_cells: AffectedCellsArtifact;
+    home_cell_events: Array<{
+        lineage: string;
+        home_cell: string;
+        registered_at_ms: number;
+    }>;
+    active_lineages: string[];
+}
+
+export interface FloorCensusAffectedCellsResolver {
+    resolveAffectedCells(input: {
+        affectedCellsRef?: StoredSourceRef | undefined;
+        evidenceManifest?: EvidenceManifest | undefined;
+    }): Promise<AffectedCellsArtifact>;
+}
+
+export interface ParsedFloorCensusTeeOutput extends SignedFloorCensusResult {
+    counts: readonly [bigint, bigint, bigint];
 }
 
 export interface FloorCensusRunInput {
@@ -315,6 +346,77 @@ export async function signFloorCensusResult(
         signatureHex: bytesToHex(signature),
         publicKey,
         publicKeyHex: bytesToHex(publicKey),
+    };
+}
+
+export async function buildFloorCensusInputBundle(input: {
+    result: TeeCoreResult;
+    homeCellEvents: readonly HomeCellRegisteredEvent[];
+    activeLineages: ReadonlySet<string> | readonly string[];
+    campaignId: string;
+    disasterEventId: string;
+    censusCheckpoint: number;
+    issuedAtMs: number;
+    affectedCellsResolver?: FloorCensusAffectedCellsResolver | undefined;
+}): Promise<FloorCensusInputBundle> {
+    const validation = validateRelayerSubmitInput(input.result);
+    if (!validation.ok) {
+        throw new Error(validation.message);
+    }
+    validateObjectId(input.campaignId, "campaign_id");
+    validateObjectId(input.disasterEventId, "disaster_event_id");
+    validateSafeInteger(input.censusCheckpoint, "census_checkpoint");
+    validateSafeInteger(input.issuedAtMs, "issued_at_ms");
+
+    const parsed = validation.value;
+    const payload = parsed.payload as EarthquakeOraclePayload;
+    const affectedCells = await resolveAffectedCellsForCensus(parsed, input.affectedCellsResolver);
+    validateCensusBinding({
+        affectedCells,
+        homeCellEvents: input.homeCellEvents,
+        activeLineages: new Set(activeLineageArray(input.activeLineages)),
+        cutoffMs: payload.occurred_at_ms,
+        expectedAffectedCellsRoot: payload.affected_cells_root,
+        eventUid: payload.event_uid,
+        eventRevision: payload.event_revision,
+    });
+
+    return {
+        event_uid: payload.event_uid,
+        event_revision: payload.event_revision,
+        occurred_at_ms: payload.occurred_at_ms,
+        affected_cells_root: payload.affected_cells_root,
+        issued_at_ms: input.issuedAtMs,
+        campaign_id: input.campaignId,
+        disaster_event_id: input.disasterEventId,
+        census_checkpoint: input.censusCheckpoint,
+        affected_cells: affectedCells,
+        home_cell_events: input.homeCellEvents.map((event) => ({
+            lineage: event.lineage,
+            home_cell: canonicalU64Decimal(event.homeCell),
+            registered_at_ms: event.registeredAtMs,
+        })),
+        active_lineages: activeLineageArray(input.activeLineages),
+    };
+}
+
+export function parseFloorCensusTeeOutput(input: unknown): ParsedFloorCensusTeeOutput {
+    const payload = readRecordField(input, "payload");
+    const counts = readBandCounts(readUnknownField(payload, "registered_members_by_band"));
+    const censusBcsHex = readHexField(input, "payload_bcs_hex", undefined);
+    const signatureHex = readHexField(input, "signature", ED25519_SIGNATURE_BYTES);
+    const publicKeyHex = readHexField(input, "public_key", ED25519_PUBLIC_KEY_BYTES);
+    const censusBcs = hexToBytes(censusBcsHex);
+    const signature = hexToBytes(signatureHex);
+    const publicKey = hexToBytes(publicKeyHex);
+    return {
+        counts,
+        censusBcs,
+        censusBcsHex,
+        signature,
+        signatureHex,
+        publicKey,
+        publicKeyHex,
     };
 }
 
@@ -784,6 +886,25 @@ function requireAffectedCells(input: RelayerSubmitInput): AffectedCellsArtifact 
     return input.affected_cells;
 }
 
+async function resolveAffectedCellsForCensus(
+    input: RelayerSubmitInput,
+    resolver: FloorCensusAffectedCellsResolver | undefined,
+): Promise<AffectedCellsArtifact> {
+    if (input.affected_cells !== undefined) {
+        return input.affected_cells;
+    }
+    if (resolver === undefined) {
+        throw new Error("finalized TEE result is missing affected_cells artifact");
+    }
+    if (input.affected_cells_ref === undefined && input.evidence_manifest === undefined) {
+        throw new Error("finalized TEE result is missing affected_cells artifact reference");
+    }
+    return await resolver.resolveAffectedCells({
+        affectedCellsRef: input.affected_cells_ref,
+        evidenceManifest: input.evidence_manifest,
+    });
+}
+
 function packageIdFromTarget(target: string): string {
     const [packageId, moduleName, functionName] = target.split("::");
     if (
@@ -1056,6 +1177,23 @@ function readStringField(input: unknown, field: string): string | undefined {
     return typeof value === "string" ? value : undefined;
 }
 
+function readHexField(input: unknown, field: string, expectedBytes: number | undefined): string {
+    const value = readStringField(input, field);
+    if (value === undefined) {
+        throw new Error(`Census TEE output ${field} is missing`);
+    }
+    const normalized = value.startsWith("0x") ? value.slice(2) : value;
+    if (
+        normalized.length === 0 ||
+        normalized.length % 2 !== 0 ||
+        !/^[0-9a-fA-F]+$/.test(normalized) ||
+        (expectedBytes !== undefined && normalized.length !== expectedBytes * 2)
+    ) {
+        throw new Error(`Census TEE output ${field} is malformed`);
+    }
+    return `0x${normalized.toLowerCase()}`;
+}
+
 function readBooleanField(input: unknown, field: string): boolean {
     return readUnknownField(input, field) === true;
 }
@@ -1092,6 +1230,25 @@ function readSafeInteger(input: unknown): number | undefined {
     return undefined;
 }
 
+function readBandCounts(input: unknown): [bigint, bigint, bigint] {
+    if (!Array.isArray(input) || input.length !== BAND_COUNT) {
+        throw new Error(
+            `Census TEE output registered_members_by_band must contain ${BAND_COUNT} values`,
+        );
+    }
+    return input.map(readCountValue) as [bigint, bigint, bigint];
+}
+
+function readCountValue(input: unknown): bigint {
+    if (typeof input === "number" && Number.isSafeInteger(input) && input >= 0) {
+        return BigInt(input);
+    }
+    if (typeof input === "string" && /^(0|[1-9][0-9]*)$/.test(input)) {
+        return BigInt(input);
+    }
+    throw new Error("Census TEE output registered_members_by_band is malformed");
+}
+
 function readBytesHex(input: unknown): string | undefined {
     if (typeof input === "string") {
         if (/^0x[0-9a-fA-F]{64}$/.test(input)) {
@@ -1118,6 +1275,10 @@ function readBytesHex(input: unknown): string | undefined {
 
 function unique(values: readonly string[]): string[] {
     return [...new Set(values)];
+}
+
+function activeLineageArray(input: ReadonlySet<string> | readonly string[]): string[] {
+    return Array.isArray(input) ? unique(input) : [...input];
 }
 
 function canonicalU64Decimal(value: string): string {
@@ -1181,6 +1342,28 @@ function hexBytes32(value: string): Uint8Array {
         throw new Error("expected 32-byte hex string");
     }
     return Uint8Array.from(Buffer.from(normalized, "hex"));
+}
+
+function hexToBytes(value: string): Uint8Array {
+    const normalized = normalizeHex(value);
+    if (normalized.length === 0 || normalized.length % 2 !== 0 || !/^[0-9a-f]+$/.test(normalized)) {
+        throw new Error("hex bytes are malformed");
+    }
+    return Uint8Array.from(Buffer.from(normalized, "hex"));
+}
+
+function validateObjectId(value: string, field: string): void {
+    try {
+        objectIdBytes(value);
+    } catch {
+        throw new Error(`${field} must be a 32-byte object ID`);
+    }
+}
+
+function validateSafeInteger(value: number, field: string): void {
+    if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`${field} must be a non-negative safe integer`);
+    }
 }
 
 function normalizeHex(value: string): string {
