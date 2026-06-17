@@ -2,6 +2,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 import type { RelayerSigner, SuiNetwork } from "@sonari/earthquake-relayer";
 import {
+    type AuthenticatedEventProofBundle,
     type AffectedCellsArtifact,
     computeAffectedCellsRootHex,
     type EarthquakeOraclePayload,
@@ -156,6 +157,7 @@ export interface FloorCensusInputBundle {
         registered_at_ms: number;
     }>;
     active_lineages: string[];
+    authenticated_event_proof: AuthenticatedEventProofBundle;
 }
 
 export interface FloorCensusAffectedCellsResolver {
@@ -211,6 +213,11 @@ export interface FloorCensusOnchainReader {
         eventUid: string;
         eventRevision: number;
     }): Promise<{ campaignId: string; checkpoint: number } | undefined>;
+    collectAuthenticatedEventProof?(input: {
+        packageId: string;
+        membershipRegistryId: string;
+        censusCheckpoint: number;
+    }): Promise<AuthenticatedEventProofBundle>;
 }
 
 export interface FloorCensusSubmitClient {
@@ -362,6 +369,7 @@ export async function buildFloorCensusInputBundle(input: {
     disasterEventId: string;
     censusCheckpoint: number;
     issuedAtMs: number;
+    authenticatedEventProof?: AuthenticatedEventProofBundle | undefined;
     affectedCellsResolver?: FloorCensusAffectedCellsResolver | undefined;
 }): Promise<FloorCensusInputBundle> {
     const validation = validateRelayerSubmitInput(input.result);
@@ -372,6 +380,10 @@ export async function buildFloorCensusInputBundle(input: {
     validateObjectId(input.disasterEventId, "disaster_event_id");
     validateSafeInteger(input.censusCheckpoint, "census_checkpoint");
     validateSafeInteger(input.issuedAtMs, "issued_at_ms");
+    if (input.authenticatedEventProof === undefined) {
+        throw new Error("authenticated_event_proof is required for Census TEE input");
+    }
+    validateAuthenticatedEventProof(input.authenticatedEventProof, input.censusCheckpoint);
 
     const parsed = validation.value;
     const payload = parsed.payload as EarthquakeOraclePayload;
@@ -402,6 +414,7 @@ export async function buildFloorCensusInputBundle(input: {
             registered_at_ms: event.registeredAtMs,
         })),
         active_lineages: activeLineageArray(input.activeLineages),
+        authenticated_event_proof: input.authenticatedEventProof,
     };
 }
 
@@ -610,6 +623,14 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             lineages: unique(homeCellEvents.map((event) => event.lineage)),
             checkpoint: campaign.checkpoint,
         });
+        if (reader.collectAuthenticatedEventProof === undefined) {
+            throw new Error("Floor census submit requires an authenticated event proof collector");
+        }
+        const authenticatedEventProof = await reader.collectAuthenticatedEventProof({
+            packageId,
+            membershipRegistryId: this.config.membershipRegistry,
+            censusCheckpoint: campaign.checkpoint,
+        });
         const bundle = await buildFloorCensusInputBundle({
             result: input.result,
             homeCellEvents,
@@ -618,6 +639,7 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             disasterEventId: input.disasterEventId,
             censusCheckpoint: campaign.checkpoint,
             issuedAtMs: this.config.now?.() ?? Date.now(),
+            authenticatedEventProof,
         });
         const signed = parseFloorCensusTeeOutput(
             await this.tee.processData({
@@ -988,6 +1010,96 @@ function validateCensusBinding(input: FloorCensusCountsInput): void {
     }
     if (input.affectedCells.event_revision !== input.eventRevision) {
         throw new Error("affected_cells event_revision does not match census event_revision");
+    }
+}
+
+function validateAuthenticatedEventProof(
+    proof: AuthenticatedEventProofBundle,
+    censusCheckpoint: number,
+): void {
+    if (proof.protocol !== "sui-authenticated-events-v1") {
+        throw new Error("authenticated_event_proof protocol is unsupported");
+    }
+    validateObjectId(proof.stream_id, "authenticated_event_proof.stream_id");
+    validateObjectId(
+        proof.event_stream_head_object_id,
+        "authenticated_event_proof.event_stream_head_object_id",
+    );
+    validateObjectId(
+        proof.event_stream_head.object_id,
+        "authenticated_event_proof.event_stream_head.object_id",
+    );
+    if (
+        normalizeHex(proof.event_stream_head.object_id) !==
+        normalizeHex(proof.event_stream_head_object_id)
+    ) {
+        throw new Error("authenticated_event_proof EventStreamHead object id mismatch");
+    }
+    validateSafeInteger(proof.start_checkpoint, "authenticated_event_proof.start_checkpoint");
+    validateSafeInteger(proof.end_checkpoint, "authenticated_event_proof.end_checkpoint");
+    validateSafeInteger(
+        proof.highest_indexed_checkpoint,
+        "authenticated_event_proof.highest_indexed_checkpoint",
+    );
+    if (proof.start_checkpoint > proof.end_checkpoint) {
+        throw new Error("authenticated_event_proof start_checkpoint must be <= end_checkpoint");
+    }
+    if (proof.end_checkpoint > censusCheckpoint) {
+        throw new Error("authenticated_event_proof end_checkpoint must be <= census_checkpoint");
+    }
+    if (proof.highest_indexed_checkpoint < proof.end_checkpoint) {
+        throw new Error("authenticated_event_proof index is behind end_checkpoint");
+    }
+    validateObjectId(
+        proof.event_stream_head.digest,
+        "authenticated_event_proof.event_stream_head.digest",
+    );
+    validateObjectId(proof.ocs_proof.tree_root, "authenticated_event_proof.ocs_proof.tree_root");
+    if (!/^(0|[1-9][0-9]*)$/.test(proof.event_stream_head.version)) {
+        throw new Error("authenticated_event_proof EventStreamHead version is malformed");
+    }
+    assertBase64(proof.checkpoint_summary_bcs, "authenticated_event_proof.checkpoint_summary_bcs");
+    assertBase64(proof.checkpoint_signature_bcs, "authenticated_event_proof.checkpoint_signature_bcs");
+    assertBase64(proof.event_stream_head.object_bcs, "authenticated_event_proof.event_stream_head.object_bcs");
+    for (const [index, node] of proof.ocs_proof.merkle_proof.entries()) {
+        assertBase64(node, `authenticated_event_proof.ocs_proof.merkle_proof[${index}]`);
+    }
+    let previous: readonly [number, number, number] | undefined;
+    for (const event of proof.events) {
+        validateSafeInteger(event.checkpoint, "authenticated_event_proof event checkpoint");
+        validateSafeInteger(
+            event.transaction_index,
+            "authenticated_event_proof event transaction_index",
+        );
+        validateSafeInteger(event.event_index, "authenticated_event_proof event event_index");
+        if (event.checkpoint < proof.start_checkpoint || event.checkpoint > proof.end_checkpoint) {
+            throw new Error("authenticated_event_proof event checkpoint is outside proof range");
+        }
+        if (event.type.length === 0) {
+            throw new Error("authenticated_event_proof event type is required");
+        }
+        assertBase64(event.event_bcs, "authenticated_event_proof event_bcs");
+        const current = [event.checkpoint, event.transaction_index, event.event_index] as const;
+        if (
+            previous !== undefined &&
+            (previous[0] > current[0] ||
+                (previous[0] === current[0] &&
+                    (previous[1] > current[1] ||
+                        (previous[1] === current[1] && previous[2] >= current[2]))))
+        ) {
+            throw new Error("authenticated_event_proof events must be strictly ordered");
+        }
+        previous = current;
+    }
+}
+
+function assertBase64(value: string, field: string): void {
+    if (
+        value.length === 0 ||
+        value.length % 4 !== 0 ||
+        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+    ) {
+        throw new Error(`${field} must be base64-encoded bytes`);
     }
 }
 

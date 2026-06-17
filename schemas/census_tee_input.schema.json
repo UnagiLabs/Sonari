@@ -16,7 +16,8 @@
     "census_checkpoint",
     "affected_cells",
     "home_cell_events",
-    "active_lineages"
+    "active_lineages",
+    "authenticated_event_proof"
   ],
   "properties": {
     "event_uid": {
@@ -81,6 +82,137 @@
       "items": {
         "type": "string",
         "pattern": "^0x[0-9a-f]{64}$"
+      }
+    },
+    "authenticated_event_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "stream_id",
+        "event_stream_head_object_id",
+        "start_checkpoint",
+        "end_checkpoint",
+        "highest_indexed_checkpoint",
+        "checkpoint_summary_bcs",
+        "checkpoint_signature_bcs",
+        "event_stream_head",
+        "ocs_proof",
+        "events"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "sui-authenticated-events-v1"
+        },
+        "stream_id": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "event_stream_head_object_id": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]{64}$"
+        },
+        "start_checkpoint": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_checkpoint": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "highest_indexed_checkpoint": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checkpoint_summary_bcs": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "checkpoint_signature_bcs": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
+        "event_stream_head": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["object_id", "version", "digest", "object_bcs"],
+          "properties": {
+            "object_id": {
+              "type": "string",
+              "pattern": "^0x[0-9a-f]{64}$"
+            },
+            "version": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^0x[0-9a-f]{64}$"
+            },
+            "object_bcs": {
+              "type": "string",
+              "contentEncoding": "base64"
+            }
+          }
+        },
+        "ocs_proof": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["leaf_index", "tree_root", "merkle_proof"],
+          "properties": {
+            "leaf_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tree_root": {
+              "type": "string",
+              "pattern": "^0x[0-9a-f]{64}$"
+            },
+            "merkle_proof": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "contentEncoding": "base64"
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checkpoint",
+              "transaction_index",
+              "event_index",
+              "type",
+              "event_bcs"
+            ],
+            "properties": {
+              "checkpoint": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "transaction_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "event_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "event_bcs": {
+                "type": "string",
+                "contentEncoding": "base64"
+              }
+            }
+          }
+        }
       }
     }
   }

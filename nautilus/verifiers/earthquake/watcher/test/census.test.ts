@@ -136,6 +136,7 @@ describe("floor census core", () => {
             disasterEventId: `0x${"55".repeat(32)}`,
             censusCheckpoint: 41,
             issuedAtMs: 1_800_000_001_000,
+            authenticatedEventProof: authenticatedEventProof(),
         });
 
         expect(bundle).toMatchObject({
@@ -155,8 +156,23 @@ describe("floor census core", () => {
                 },
             ],
             active_lineages: [`0x${"11".repeat(32)}`],
+            authenticated_event_proof: authenticatedEventProof(),
         });
         expect(bundle.affected_cells).toEqual({ ...affectedCells, event_revision: 7 });
+    });
+
+    it("fails closed when building a Census TEE input without authenticated event proof", async () => {
+        await expect(
+            buildFloorCensusInputBundle({
+                result: finalizedResultForCensus(),
+                homeCellEvents: [],
+                activeLineages: [],
+                campaignId: `0x${"44".repeat(32)}`,
+                disasterEventId: `0x${"55".repeat(32)}`,
+                censusCheckpoint: 41,
+                issuedAtMs: 1_800_000_001_000,
+            }),
+        ).rejects.toThrow("authenticated_event_proof is required");
     });
 
     it("resolves affected cells from stored references when the finalized result omits the inline artifact", async () => {
@@ -180,6 +196,7 @@ describe("floor census core", () => {
             disasterEventId: `0x${"55".repeat(32)}`,
             censusCheckpoint: 41,
             issuedAtMs: 1_800_000_001_000,
+            authenticatedEventProof: authenticatedEventProof(),
             affectedCellsResolver: resolver,
         });
 
@@ -803,6 +820,46 @@ function expectedRoot(): string {
         throw new Error("fixture should produce root");
     }
     return root;
+}
+
+function authenticatedEventProof() {
+    return {
+        protocol: "sui-authenticated-events-v1" as const,
+        stream_id: `0x${"12".repeat(32)}`,
+        event_stream_head_object_id: `0x${"34".repeat(32)}`,
+        start_checkpoint: 0,
+        end_checkpoint: 41,
+        highest_indexed_checkpoint: 41,
+        checkpoint_summary_bcs: "c3VtbWFyeQ==",
+        checkpoint_signature_bcs: "c2lnbmF0dXJl",
+        event_stream_head: {
+            object_id: `0x${"34".repeat(32)}`,
+            version: "7",
+            digest: `0x${"56".repeat(32)}`,
+            object_bcs: "aGVhZA==",
+        },
+        ocs_proof: {
+            leaf_index: 3,
+            tree_root: `0x${"78".repeat(32)}`,
+            merkle_proof: ["cHJvb2YtMQ=="],
+        },
+        events: [
+            {
+                checkpoint: 10,
+                transaction_index: 0,
+                event_index: 0,
+                type: `0x${"12".repeat(32)}::membership::MembershipPassIssued`,
+                event_bcs: "ZXZlbnQtMQ==",
+            },
+            {
+                checkpoint: 11,
+                transaction_index: 0,
+                event_index: 1,
+                type: `0x${"12".repeat(32)}::membership::HomeCellRegistered`,
+                event_bcs: "ZXZlbnQtMg==",
+            },
+        ],
+    };
 }
 
 function jsonResponse(

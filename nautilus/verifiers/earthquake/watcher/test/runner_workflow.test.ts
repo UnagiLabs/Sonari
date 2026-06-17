@@ -3473,6 +3473,39 @@ class RecordingFloorCensusReader implements FloorCensusOnchainReader {
     async listActiveLineages(input: { lineages: readonly string[] }): Promise<ReadonlySet<string>> {
         return new Set(input.lineages);
     }
+
+    async collectAuthenticatedEventProof() {
+        return {
+            protocol: "sui-authenticated-events-v1" as const,
+            stream_id: `0x${"12".repeat(32)}`,
+            event_stream_head_object_id: `0x${"34".repeat(32)}`,
+            start_checkpoint: 0,
+            end_checkpoint: 123,
+            highest_indexed_checkpoint: 123,
+            checkpoint_summary_bcs: "c3VtbWFyeQ==",
+            checkpoint_signature_bcs: "c2lnbmF0dXJl",
+            event_stream_head: {
+                object_id: `0x${"34".repeat(32)}`,
+                version: "7",
+                digest: `0x${"56".repeat(32)}`,
+                object_bcs: "aGVhZA==",
+            },
+            ocs_proof: {
+                leaf_index: 3,
+                tree_root: `0x${"78".repeat(32)}`,
+                merkle_proof: ["cHJvb2YtMQ=="],
+            },
+            events: [
+                {
+                    checkpoint: 100,
+                    transaction_index: 0,
+                    event_index: 0,
+                    type: `0x${"12".repeat(32)}::membership::MembershipPassIssued`,
+                    event_bcs: "ZXZlbnQtMQ==",
+                },
+            ],
+        };
+    }
 }
 
 class RecordingFloorCensusSubmitClient {

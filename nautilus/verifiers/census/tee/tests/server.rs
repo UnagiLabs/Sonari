@@ -53,6 +53,46 @@ fn server_process_data_envelope_rejects_wrong_verifier_config_key() {
 }
 
 #[test]
+fn server_handler_rejects_missing_authenticated_event_proof_bundle() {
+    let handler = CensusProcessHandler;
+    let mut bundle = valid_bundle_json();
+    bundle
+        .as_object_mut()
+        .expect("fixture should be an object")
+        .remove("authenticated_event_proof");
+
+    let error = handler
+        .process(
+            serde_json::to_vec(&bundle).unwrap().as_slice(),
+            &TeeContext::new(),
+        )
+        .expect_err("authenticated_event_proof is required");
+
+    assert!(
+        error
+            .to_string()
+            .contains("missing field `authenticated_event_proof`")
+    );
+}
+
+#[test]
+fn server_handler_rejects_malformed_authenticated_event_proof_bundle() {
+    let handler = CensusProcessHandler;
+    let mut bundle = valid_bundle_json();
+    bundle["authenticated_event_proof"]["event_stream_head"]["unexpected"] =
+        serde_json::json!(true);
+
+    let error = handler
+        .process(
+            serde_json::to_vec(&bundle).unwrap().as_slice(),
+            &TeeContext::new(),
+        )
+        .expect_err("nested authenticated_event_proof fields should be strict");
+
+    assert!(error.to_string().contains("unknown field `unexpected`"));
+}
+
+#[test]
 fn server_finalization_injects_signature_public_key_and_registration_metadata() {
     let handler = CensusProcessHandler;
     let output = handler
@@ -138,6 +178,47 @@ fn valid_bundle_json() -> serde_json::Value {
         "active_lineages": [
             format!("0x{}", "11".repeat(32)),
             format!("0x{}", "22".repeat(32))
+        ],
+        "authenticated_event_proof": authenticated_event_proof_json()
+    })
+}
+
+fn authenticated_event_proof_json() -> serde_json::Value {
+    serde_json::json!({
+        "protocol": "sui-authenticated-events-v1",
+        "stream_id": format!("0x{}", "12".repeat(32)),
+        "event_stream_head_object_id": format!("0x{}", "34".repeat(32)),
+        "start_checkpoint": 0,
+        "end_checkpoint": 345,
+        "highest_indexed_checkpoint": 345,
+        "checkpoint_summary_bcs": "c3VtbWFyeQ==",
+        "checkpoint_signature_bcs": "c2lnbmF0dXJl",
+        "event_stream_head": {
+            "object_id": format!("0x{}", "34".repeat(32)),
+            "version": "7",
+            "digest": format!("0x{}", "56".repeat(32)),
+            "object_bcs": "aGVhZA=="
+        },
+        "ocs_proof": {
+            "leaf_index": 3,
+            "tree_root": format!("0x{}", "78".repeat(32)),
+            "merkle_proof": ["cHJvb2YtMQ=="]
+        },
+        "events": [
+            {
+                "checkpoint": 100,
+                "transaction_index": 0,
+                "event_index": 0,
+                "type": format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
+                "event_bcs": "ZXZlbnQtMQ=="
+            },
+            {
+                "checkpoint": 101,
+                "transaction_index": 0,
+                "event_index": 1,
+                "type": format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
+                "event_bcs": "ZXZlbnQtMg=="
+            }
         ]
     })
 }

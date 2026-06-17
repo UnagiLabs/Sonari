@@ -141,6 +141,47 @@ fn valid_bundle_json() -> serde_json::Value {
             format!("0x{}", "11".repeat(32)),
             format!("0x{}", "22".repeat(32)),
             format!("0x{}", "33".repeat(32))
+        ],
+        "authenticated_event_proof": authenticated_event_proof_json()
+    })
+}
+
+fn authenticated_event_proof_json() -> serde_json::Value {
+    serde_json::json!({
+        "protocol": "sui-authenticated-events-v1",
+        "stream_id": format!("0x{}", "12".repeat(32)),
+        "event_stream_head_object_id": format!("0x{}", "34".repeat(32)),
+        "start_checkpoint": 0,
+        "end_checkpoint": 345,
+        "highest_indexed_checkpoint": 345,
+        "checkpoint_summary_bcs": "c3VtbWFyeQ==",
+        "checkpoint_signature_bcs": "c2lnbmF0dXJl",
+        "event_stream_head": {
+            "object_id": format!("0x{}", "34".repeat(32)),
+            "version": "7",
+            "digest": format!("0x{}", "56".repeat(32)),
+            "object_bcs": "aGVhZA=="
+        },
+        "ocs_proof": {
+            "leaf_index": 3,
+            "tree_root": format!("0x{}", "78".repeat(32)),
+            "merkle_proof": ["cHJvb2YtMQ=="]
+        },
+        "events": [
+            {
+                "checkpoint": 100,
+                "transaction_index": 0,
+                "event_index": 0,
+                "type": format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
+                "event_bcs": "ZXZlbnQtMQ=="
+            },
+            {
+                "checkpoint": 101,
+                "transaction_index": 0,
+                "event_index": 1,
+                "type": format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
+                "event_bcs": "ZXZlbnQtMg=="
+            }
         ]
     })
 }

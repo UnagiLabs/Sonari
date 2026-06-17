@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CensusInputBundle {
     pub event_uid: String,
     pub event_revision: u32,
@@ -18,13 +19,59 @@ pub struct CensusInputBundle {
     pub affected_cells: AffectedCellsArtifact,
     pub home_cell_events: Vec<HomeCellRegisteredEvent>,
     pub active_lineages: Vec<String>,
+    pub authenticated_event_proof: AuthenticatedEventProofBundle,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct HomeCellRegisteredEvent {
     pub lineage: String,
     pub home_cell: String,
     pub registered_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AuthenticatedEventProofBundle {
+    pub protocol: String,
+    pub stream_id: String,
+    pub event_stream_head_object_id: String,
+    pub start_checkpoint: u64,
+    pub end_checkpoint: u64,
+    pub highest_indexed_checkpoint: u64,
+    pub checkpoint_summary_bcs: String,
+    pub checkpoint_signature_bcs: String,
+    pub event_stream_head: EventStreamHeadProofObject,
+    pub ocs_proof: ObjectInclusionProof,
+    pub events: Vec<AuthenticatedStreamEvent>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EventStreamHeadProofObject {
+    pub object_id: String,
+    pub version: String,
+    pub digest: String,
+    pub object_bcs: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectInclusionProof {
+    pub leaf_index: u64,
+    pub tree_root: String,
+    pub merkle_proof: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AuthenticatedStreamEvent {
+    pub checkpoint: u64,
+    pub transaction_index: u64,
+    pub event_index: u64,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub event_bcs: String,
 }
 
 pub fn compute_floor_census_counts(bundle: &CensusInputBundle) -> Result<[u64; 3], CensusError> {
@@ -78,6 +125,106 @@ pub fn process_floor_census_bundle(
 fn validate_census_context(bundle: &CensusInputBundle) -> Result<(), CensusError> {
     validate_object_id(&bundle.campaign_id, "campaign_id")?;
     validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
+    validate_authenticated_event_proof(
+        &bundle.authenticated_event_proof,
+        bundle.census_checkpoint,
+    )?;
+    Ok(())
+}
+
+fn validate_authenticated_event_proof(
+    proof: &AuthenticatedEventProofBundle,
+    census_checkpoint: u64,
+) -> Result<(), CensusError> {
+    if proof.protocol != "sui-authenticated-events-v1" {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof.protocol must be sui-authenticated-events-v1".to_owned(),
+        ));
+    }
+    validate_object_id(&proof.stream_id, "authenticated_event_proof.stream_id")?;
+    validate_object_id(
+        &proof.event_stream_head_object_id,
+        "authenticated_event_proof.event_stream_head_object_id",
+    )?;
+    validate_object_id(
+        &proof.event_stream_head.object_id,
+        "authenticated_event_proof.event_stream_head.object_id",
+    )?;
+    if proof.event_stream_head.object_id != proof.event_stream_head_object_id {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof EventStreamHead object id mismatch".to_owned(),
+        ));
+    }
+    validate_object_id(
+        &proof.event_stream_head.digest,
+        "authenticated_event_proof.event_stream_head.digest",
+    )?;
+    validate_object_id(
+        &proof.ocs_proof.tree_root,
+        "authenticated_event_proof.ocs_proof.tree_root",
+    )?;
+    parse_canonical_u64_decimal(
+        &proof.event_stream_head.version,
+        "authenticated_event_proof.event_stream_head.version",
+    )?;
+    validate_base64(
+        &proof.checkpoint_summary_bcs,
+        "authenticated_event_proof.checkpoint_summary_bcs",
+    )?;
+    validate_base64(
+        &proof.checkpoint_signature_bcs,
+        "authenticated_event_proof.checkpoint_signature_bcs",
+    )?;
+    validate_base64(
+        &proof.event_stream_head.object_bcs,
+        "authenticated_event_proof.event_stream_head.object_bcs",
+    )?;
+    for (index, proof_node) in proof.ocs_proof.merkle_proof.iter().enumerate() {
+        validate_base64(
+            proof_node,
+            &format!("authenticated_event_proof.ocs_proof.merkle_proof[{index}]"),
+        )?;
+    }
+    if proof.start_checkpoint > proof.end_checkpoint {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof.start_checkpoint must be <= end_checkpoint".to_owned(),
+        ));
+    }
+    if proof.end_checkpoint > census_checkpoint {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof.end_checkpoint must be <= census_checkpoint".to_owned(),
+        ));
+    }
+    if proof.highest_indexed_checkpoint < proof.end_checkpoint {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof.highest_indexed_checkpoint is behind end_checkpoint"
+                .to_owned(),
+        ));
+    }
+    let mut last_position: Option<(u64, u64, u64)> = None;
+    for event in &proof.events {
+        if event.checkpoint < proof.start_checkpoint || event.checkpoint > proof.end_checkpoint {
+            return Err(CensusError::InvalidPayload(
+                "authenticated_event_proof event checkpoint is outside proof range".to_owned(),
+            ));
+        }
+        if event.event_type.is_empty() {
+            return Err(CensusError::InvalidPayload(
+                "authenticated_event_proof event type must not be empty".to_owned(),
+            ));
+        }
+        validate_base64(
+            &event.event_bcs,
+            "authenticated_event_proof event event_bcs",
+        )?;
+        let position = (event.checkpoint, event.transaction_index, event.event_index);
+        if last_position.is_some_and(|last| last >= position) {
+            return Err(CensusError::InvalidPayload(
+                "authenticated_event_proof events must be strictly ordered".to_owned(),
+            ));
+        }
+        last_position = Some(position);
+    }
     Ok(())
 }
 
@@ -175,9 +322,29 @@ fn parse_canonical_u64_decimal(value: &str, field: &str) -> Result<u64, CensusEr
         .map_err(|_| CensusError::InvalidPayload(format!("{field} must be a decimal u64 string")))
 }
 
+fn validate_base64(value: &str, field: &str) -> Result<(), CensusError> {
+    if value.is_empty() || value.len() % 4 != 0 {
+        return Err(CensusError::InvalidPayload(format!(
+            "{field} must be base64-encoded bytes"
+        )));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+    {
+        return Err(CensusError::InvalidPayload(format!(
+            "{field} must be base64-encoded bytes"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CensusInputBundle, HomeCellRegisteredEvent};
+    use super::{
+        AuthenticatedEventProofBundle, AuthenticatedStreamEvent, CensusInputBundle,
+        EventStreamHeadProofObject, HomeCellRegisteredEvent, ObjectInclusionProof,
+    };
     use crate::{
         AffectedCell, AffectedCellsArtifact, INTENT, VERIFIER_FAMILY, VERIFIER_VERSION,
         compute_affected_cells_root, compute_floor_census_counts, process_floor_census_bundle,
@@ -239,6 +406,38 @@ mod tests {
                 ACTIVE_2.to_owned(),
                 ACTIVE_3.to_owned(),
             ],
+            authenticated_event_proof: authenticated_event_proof(),
+        }
+    }
+
+    fn authenticated_event_proof() -> AuthenticatedEventProofBundle {
+        AuthenticatedEventProofBundle {
+            protocol: "sui-authenticated-events-v1".to_owned(),
+            stream_id: format!("0x{}", "12".repeat(32)),
+            event_stream_head_object_id: format!("0x{}", "34".repeat(32)),
+            start_checkpoint: 0,
+            end_checkpoint: 345,
+            highest_indexed_checkpoint: 345,
+            checkpoint_summary_bcs: "c3VtbWFyeQ==".to_owned(),
+            checkpoint_signature_bcs: "c2lnbmF0dXJl".to_owned(),
+            event_stream_head: EventStreamHeadProofObject {
+                object_id: format!("0x{}", "34".repeat(32)),
+                version: "7".to_owned(),
+                digest: format!("0x{}", "56".repeat(32)),
+                object_bcs: "aGVhZA==".to_owned(),
+            },
+            ocs_proof: ObjectInclusionProof {
+                leaf_index: 3,
+                tree_root: format!("0x{}", "78".repeat(32)),
+                merkle_proof: vec!["cHJvb2YtMQ==".to_owned()],
+            },
+            events: vec![AuthenticatedStreamEvent {
+                checkpoint: 100,
+                transaction_index: 0,
+                event_index: 0,
+                event_type: format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
+                event_bcs: "ZXZlbnQtMQ==".to_owned(),
+            }],
         }
     }
 
@@ -347,6 +546,31 @@ mod tests {
 
         let mut bundle = valid_bundle();
         bundle.disaster_event_id = "0x1234".to_owned();
+        assert!(process_floor_census_bundle(&bundle).is_err());
+    }
+
+    #[test]
+    fn process_rejects_invalid_authenticated_event_context() {
+        let mut bundle = valid_bundle();
+        bundle.authenticated_event_proof.event_stream_head.object_id =
+            format!("0x{}", "99".repeat(32));
+        assert!(process_floor_census_bundle(&bundle).is_err());
+
+        let mut bundle = valid_bundle();
+        bundle.authenticated_event_proof.highest_indexed_checkpoint = 344;
+        assert!(process_floor_census_bundle(&bundle).is_err());
+
+        let mut bundle = valid_bundle();
+        bundle
+            .authenticated_event_proof
+            .events
+            .push(AuthenticatedStreamEvent {
+                checkpoint: 100,
+                transaction_index: 0,
+                event_index: 0,
+                event_type: format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
+                event_bcs: "ZXZlbnQtMg==".to_owned(),
+            });
         assert!(process_floor_census_bundle(&bundle).is_err());
     }
 }
