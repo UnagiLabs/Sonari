@@ -15,11 +15,11 @@
 
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { LoadingIndicator } from "../components/loading-indicator";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
-import { WalletConnect } from "../wallet/wallet-connect";
+import { LoginEntryPoint, LoginEntryPointFallback } from "../wallet/login-entry-point";
 import { claimCampaignsToPrograms } from "./catalog/claim-campaign-adapter";
 import { buildClaimListCard, type ClaimListCardView } from "./catalog/claim-list-card";
 import { readClaimCampaigns } from "./claim-campaigns";
@@ -175,7 +175,9 @@ export function ClaimListView({ locale }: { readonly locale: SonariLocale }) {
                         <div className="claim-wallet-panel">
                             <span className="tag tag-neutral">{t("hero.walletTag")}</span>
                             <p>{t("hero.walletBody")}</p>
-                            <WalletConnect />
+                            <Suspense fallback={<LoginEntryPointFallback />}>
+                                <LoginEntryPoint />
+                            </Suspense>
                         </div>
                     </header>
 
