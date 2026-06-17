@@ -164,6 +164,5 @@ jobs:
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}
           NEXT_PUBLIC_ENOKI_API_KEY: ${{ vars.NEXT_PUBLIC_ENOKI_API_KEY }}
           NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID }}
-          NEXT_PUBLIC_ENOKI_NETWORK: testnet
         shell: bash
         run: pnpm --filter @sonari/dapp run deploy

@@ -30,8 +30,10 @@ registration and transaction execution stay on the existing Sui dApp Kit path.
 ```env
 NEXT_PUBLIC_ENOKI_API_KEY=
 NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=
-NEXT_PUBLIC_ENOKI_NETWORK=testnet
 ```
+
+Enoki uses the shared `NEXT_PUBLIC_SUI_NETWORK` value. It is enabled only when
+that value is explicitly `testnet`.
 
 `NEXT_PUBLIC_*` values are bundled into the browser. Do not put secrets,
 private API keys, OAuth client secrets, signing keys, or mnemonics there.
@@ -77,8 +79,10 @@ transaction 実行は、既存の Sui dApp Kit 経路から変えません。
 ```env
 NEXT_PUBLIC_ENOKI_API_KEY=
 NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=
-NEXT_PUBLIC_ENOKI_NETWORK=testnet
 ```
+
+Enoki は dapp 共通の `NEXT_PUBLIC_SUI_NETWORK` を使います。
+この値が明示的に `testnet` の時だけ有効になります。
 
 `NEXT_PUBLIC_*` はブラウザの bundle に入ります。NEXT_PUBLIC_* に secret を置かないでください。
 private API key、OAuth client secret、署名鍵、ニーモニックは入れません。
