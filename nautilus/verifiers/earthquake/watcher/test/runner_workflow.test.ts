@@ -2824,11 +2824,30 @@ describe("AWS runner workflow helper", () => {
         ).resolves.toMatchObject({ floor_census: "succeeded" });
 
         expect(ssm.commands).toHaveLength(2);
-        expect(ssm.commands[0]).toContain('"action":"get_attestation"');
+        expect(ssm.commands[0]).toContain(
+            "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004000.json' - |",
+        );
         expect(ssm.commands[0]).toContain("export SONARI_VERIFIER_KIND=census");
-        expect(ssm.commands[1]).toContain('"action":"process_data"');
-        expect(ssm.commands[1]).toContain('"registration_metadata"');
-        expect(ssm.commands[1]).toContain('"verifier_config_key":3');
+        expect(ssm.commands[1]).toContain(
+            "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004001.json' - |",
+        );
+        expect(ssm.commands[1]).not.toContain('"action":"process_data"');
+        expect(s3.puts).toHaveLength(2);
+        expect(s3.puts[0]).toMatchObject({
+            bucket: "sonari-results",
+            key: "source-artifacts/us7000sonari/census-tee-inputs/1800000004000.json",
+        });
+        expect(JSON.parse(Buffer.from(s3.puts[0]?.bytes ?? []).toString("utf8"))).toEqual({
+            action: "get_attestation",
+        });
+        expect(s3.puts[1]).toMatchObject({
+            bucket: "sonari-results",
+            key: "source-artifacts/us7000sonari/census-tee-inputs/1800000004001.json",
+        });
+        expect(JSON.parse(Buffer.from(s3.puts[1]?.bytes ?? []).toString("utf8"))).toMatchObject({
+            action: "process_data",
+            registration_metadata: { verifier_config_key: 3 },
+        });
         expect(registrar.inputs).toEqual([
             {
                 source_event_id: "us7000sonari",

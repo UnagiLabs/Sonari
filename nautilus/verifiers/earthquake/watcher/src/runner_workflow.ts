@@ -97,6 +97,7 @@ const CENSUS_VERIFIER_KIND = "census";
 const CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND = "/opt/sonari/bin/run-census-enclave";
 const CENSUS_RUNNER_COMMAND_MAX_POLLS = 60;
 const CENSUS_RUNNER_COMMAND_POLL_INTERVAL_MS = 5_000;
+const CENSUS_TEE_INPUT_ARTIFACT_PREFIX = "source-artifacts";
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -1908,8 +1909,21 @@ async function dispatchAndReadCensusTeeCommand(
         teeInput: unknown;
     },
 ): Promise<string> {
+    assertValidUsgsSourceEventId(input.sourceEventId);
+    if (options.s3.putObjectBytes === undefined) {
+        throw new Error("census TEE command requires S3 byte staging support");
+    }
     const nitroEnclaveProcessCommand =
         options.config.censusNitroEnclaveProcessCommand ?? CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND;
+    const teeInputS3Key = censusTeeInputArtifactS3Key({
+        sourceEventId: input.sourceEventId,
+        dispatchTimestampMs: input.dispatchTimestampMs,
+    });
+    await options.s3.putObjectBytes({
+        bucket: options.config.resultBucket,
+        key: teeInputS3Key,
+        bytes: new TextEncoder().encode(JSON.stringify(input.teeInput)),
+    });
     const dispatched = await dispatchRunnerCommand(options.ssm, {
         workflowId: `${input.sourceEventId}-census`,
         instanceId: input.instanceId,
@@ -1921,7 +1935,7 @@ async function dispatchAndReadCensusTeeCommand(
                 resultBucket: options.config.resultBucket,
                 resultS3Key,
                 nitroEnclaveProcessCommand,
-                teeInput: input.teeInput,
+                teeInputS3Uri: `s3://${options.config.resultBucket}/${teeInputS3Key}`,
             }),
     });
     await waitForRunnerCommandSuccess(options.ssm, {
@@ -1934,20 +1948,27 @@ async function dispatchAndReadCensusTeeCommand(
     });
 }
 
+function censusTeeInputArtifactS3Key(input: {
+    sourceEventId: string;
+    dispatchTimestampMs: number;
+}): string {
+    return `${CENSUS_TEE_INPUT_ARTIFACT_PREFIX}/${input.sourceEventId}/census-tee-inputs/${input.dispatchTimestampMs}.json`;
+}
+
 function buildCensusSsmShellCommand(input: {
     sourceEventId: string;
     dispatchTimestampMs: number;
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
-    teeInput: unknown;
+    teeInputS3Uri: string;
 }): string {
     const tempResultPath = `/tmp/sonari-census-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
     return buildSharedRunnerSsmShellCommand({
         resultBucket: input.resultBucket,
         resultS3Key: input.resultS3Key,
         nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
-        teeInput: input.teeInput,
+        teeInputS3Uri: input.teeInputS3Uri,
         preEnvCommands: ["systemctl is-active --quiet nitro-enclaves-allocator.service"],
         requiredEnvNames: [
             "SONARI_CENSUS_EIF_PATH",
