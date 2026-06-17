@@ -35,10 +35,10 @@ import {
 } from "./usgs.js";
 
 export {
-    SuiAuthenticatedEventProofCollector,
     type AuthenticatedEventProofBundle,
     type AuthenticatedEventProofCollectorOptions,
     type AuthenticatedStreamEvent,
+    SuiAuthenticatedEventProofCollector,
     type SuiAuthenticatedEventsPage,
     type SuiAuthenticatedEventsTransport,
     type SuiObjectInclusionProofResponse,

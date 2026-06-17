@@ -614,6 +614,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("printf 'SONARI_CENSUS_EIF_PATH=%q");
         expect(template).toContain("SONARI_CENSUS_ENCLAVE_CID=$" + "{NitroEnclaveCid}");
         expect(template).toContain("printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain("printf 'SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST=%q");
         expect(template).toContain("printf 'SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND=%q");
         expect(template).toContain("test -x /opt/sonari/bin/run-census-enclave");
 
@@ -757,12 +758,16 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("FloorCensusCategoryPool:");
         expect(template).toContain("FloorCensusMainPool:");
         expect(template).toContain("FloorCensusGraphqlUrl:");
+        expect(template).toContain("CensusTrustedValidatorCommitteeDigest:");
         expect(template).toContain("FLOOR_CENSUS_MODE: !Ref FloorCensusMode");
         expect(template).toContain("FLOOR_CENSUS_TARGET: !Ref FloorCensusTarget");
         expect(template).toContain("FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState");
         expect(template).toContain("FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool");
         expect(template).toContain("FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool");
         expect(template).toContain("FLOOR_CENSUS_GRAPHQL_URL: !Ref FloorCensusGraphqlUrl");
+        expect(template).toContain(
+            "SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST: !Ref CensusTrustedValidatorCommitteeDigest",
+        );
         expect(template).toContain("SONARI_SUI_GRAPHQL_URL: !Ref SonariSuiGraphqlUrl");
         expect(template).not.toContain("FloorCensusJsonRpcUrl");
         expect(template).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");
@@ -980,6 +985,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             TeeEifS3Bucket: 58,
             TeeEifS3Key: 91,
             TeeEifSha256: 64,
+            CensusTrustedValidatorCommitteeDigest: 44,
             WorldIdAppId: 17,
             WorldIdAction: 29,
             WorldIdProofMode: 5,

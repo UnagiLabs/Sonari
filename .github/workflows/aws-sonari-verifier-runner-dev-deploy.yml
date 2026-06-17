@@ -734,6 +734,7 @@ jobs:
           # FloorCensus mode / GraphQL URL は repo-level Variables のまま。target と object ids は resolver 由来。
           FLOOR_CENSUS_MODE: ${{ vars.SONARI_FLOOR_CENSUS_MODE }}
           FLOOR_CENSUS_GRAPHQL_URL: ${{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}
+          CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST: ${{ vars.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST }}
         run: |
           set -euo pipefail
           mapfile -t deploy_plan_parameter_overrides < <(
@@ -840,6 +841,9 @@ jobs:
           fi
           if [[ -n "${FLOOR_CENSUS_GRAPHQL_URL:-}" ]]; then
             extra_parameter_overrides+=("FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL")
+          fi
+          if [[ -n "${CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST:-}" ]]; then
+            extra_parameter_overrides+=("CensusTrustedValidatorCommitteeDigest=$CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST")
           fi
 
           aws cloudformation deploy \

@@ -543,12 +543,15 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expectContainsAll(workflow, [
             "FLOOR_CENSUS_MODE: $" + "{{ vars.SONARI_FLOOR_CENSUS_MODE }}",
             "FLOOR_CENSUS_GRAPHQL_URL: $" + "{{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}",
+            "CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST: $" +
+                "{{ vars.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST }}",
             "FloorCensusMode=$FLOOR_CENSUS_MODE",
             "FloorCensusTarget=$FLOOR_CENSUS_TARGET",
             "FloorCensusPauseState=$FLOOR_CENSUS_PAUSE_STATE",
             "FloorCensusCategoryPool=$FLOOR_CENSUS_CATEGORY_POOL",
             "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
             "FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL",
+            "CensusTrustedValidatorCommitteeDigest=$CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST",
         ]);
         expect(workflow).not.toContain("SONARI_FLOOR_CENSUS_JSON_RPC_URL");
         expect(workflow).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");

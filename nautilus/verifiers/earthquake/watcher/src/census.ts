@@ -1100,9 +1100,18 @@ function validateAuthenticatedEventProof(
         throw new Error("authenticated_event_proof EventStreamHead version is malformed");
     }
     assertBase64(proof.checkpoint_summary_bcs, "authenticated_event_proof.checkpoint_summary_bcs");
-    assertBase64(proof.checkpoint_signature_bcs, "authenticated_event_proof.checkpoint_signature_bcs");
-    assertBase64(proof.validator_committee_bcs, "authenticated_event_proof.validator_committee_bcs");
-    assertBase64(proof.event_stream_head.object_bcs, "authenticated_event_proof.event_stream_head.object_bcs");
+    assertBase64(
+        proof.checkpoint_signature_bcs,
+        "authenticated_event_proof.checkpoint_signature_bcs",
+    );
+    assertBase64(
+        proof.validator_committee_bcs,
+        "authenticated_event_proof.validator_committee_bcs",
+    );
+    assertBase64(
+        proof.event_stream_head.object_bcs,
+        "authenticated_event_proof.event_stream_head.object_bcs",
+    );
     for (const [index, node] of proof.ocs_proof.merkle_proof.entries()) {
         assertBase64(node, `authenticated_event_proof.ocs_proof.merkle_proof[${index}]`);
     }

@@ -276,6 +276,10 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional Sui GraphQL URL for floor census event and transaction readback.
+  CensusTrustedValidatorCommitteeDigest:
+    Type: String
+    Default: ""
+    Description: Trusted Sui validator committee digest used by the Census TEE authenticated event verifier.
   RelayerAllowSubmit:
     Type: String
     Default: "false"
@@ -805,14 +809,13 @@ Resources:
               printf 'SONARI_CENSUS_EIF_PATH=%q\n' "$census_eif"
               echo "SONARI_CENSUS_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $census_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
+              printf 'SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST=%q\n' "${CensusTrustedValidatorCommitteeDigest}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_ACTION=%q\n' "$world_id_action"
               echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
               echo "RELAYER_NETWORK=${RelayerNetwork}"
               echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
-              echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
-              echo "RELAYER_NETWORK=${RelayerNetwork}"
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
               printf 'SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$membership_command"
@@ -1307,6 +1310,7 @@ Resources:
           FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool
           FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool
           FLOOR_CENSUS_GRAPHQL_URL: !Ref FloorCensusGraphqlUrl
+          SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST: !Ref CensusTrustedValidatorCommitteeDigest
           IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
           SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
           SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId
