@@ -202,6 +202,7 @@ fn valid_bundle_json() -> serde_json::Value {
         "issued_at_ms": 1_234,
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
+        "membership_registry_id": format!("0x{}", "77".repeat(32)),
         "census_checkpoint": 345,
         "affected_cells": affected_cells,
         "home_cell_events": [

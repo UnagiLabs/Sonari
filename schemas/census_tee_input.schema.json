@@ -13,6 +13,7 @@
     "issued_at_ms",
     "campaign_id",
     "disaster_event_id",
+    "membership_registry_id",
     "census_checkpoint",
     "affected_cells",
     "home_cell_events",
@@ -45,6 +46,10 @@
       "pattern": "^0x[0-9a-f]{64}$"
     },
     "disaster_event_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "membership_registry_id": {
       "type": "string",
       "pattern": "^0x[0-9a-f]{64}$"
     },

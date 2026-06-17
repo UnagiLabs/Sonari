@@ -24,6 +24,7 @@ pub struct CensusInputBundle {
     pub issued_at_ms: u64,
     pub campaign_id: String,
     pub disaster_event_id: String,
+    pub membership_registry_id: String,
     pub census_checkpoint: u64,
     pub affected_cells: AffectedCellsArtifact,
     pub home_cell_events: Vec<HomeCellRegisteredEvent>,
@@ -82,6 +83,29 @@ pub struct AuthenticatedStreamEvent {
     #[serde(rename = "type")]
     pub event_type: String,
     pub event_bcs: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+struct MembershipPassIssuedEventBcs {
+    registry_id: Address,
+    pass_id: Address,
+    owner: Address,
+    pass_lineage_id: Address,
+    issued_at_ms: u64,
+    actor: Address,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+struct HomeCellRegisteredEventBcs {
+    lineage: Address,
+    home_cell: u64,
+    registered_at: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ReplayedMembershipEvents {
+    active_lineages: HashSet<String>,
+    home_cell_events: Vec<HomeCellRegisteredEvent>,
 }
 
 pub fn compute_floor_census_counts(bundle: &CensusInputBundle) -> Result<[u64; 3], CensusError> {
@@ -152,11 +176,14 @@ fn validate_census_context(
 ) -> Result<(), CensusError> {
     validate_object_id(&bundle.campaign_id, "campaign_id")?;
     validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
+    let membership_registry_id =
+        parse_sui_address(&bundle.membership_registry_id, "membership_registry_id")?;
     validate_authenticated_event_proof(
         &bundle.authenticated_event_proof,
         bundle.census_checkpoint,
         trusted_validator_committee_digest,
     )?;
+    validate_replayed_membership_events(bundle, membership_registry_id)?;
     Ok(())
 }
 
@@ -271,6 +298,80 @@ fn validate_authenticated_event_proof(
         last_position = Some(position);
     }
     Ok(())
+}
+
+fn validate_replayed_membership_events(
+    bundle: &CensusInputBundle,
+    membership_registry_id: Address,
+) -> Result<(), CensusError> {
+    let replayed =
+        replay_membership_events(&bundle.authenticated_event_proof, membership_registry_id)?;
+    let bundle_active = active_lineage_set(&bundle.active_lineages)?;
+    if bundle_active != replayed.active_lineages {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof replayed active lineages do not match bundle active_lineages"
+                .to_owned(),
+        ));
+    }
+    if bundle.home_cell_events != replayed.home_cell_events {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof replayed home cell events do not match bundle home_cell_events"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn replay_membership_events(
+    proof: &AuthenticatedEventProofBundle,
+    membership_registry_id: Address,
+) -> Result<ReplayedMembershipEvents, CensusError> {
+    let expected_prefix = format!("{}::membership::", proof.stream_id);
+    let issued_type = format!("{expected_prefix}MembershipPassIssued");
+    let home_cell_type = format!("{expected_prefix}HomeCellRegistered");
+    let mut active_lineages = HashSet::new();
+    let mut home_cell_events = Vec::new();
+
+    for event in &proof.events {
+        if !event.event_type.starts_with(&expected_prefix) {
+            return Err(CensusError::InvalidPayload(
+                "authenticated_event_proof event type does not belong to stream package".to_owned(),
+            ));
+        }
+        let event_bcs = decode_base64(
+            &event.event_bcs,
+            "authenticated_event_proof event event_bcs",
+        )?;
+        if event.event_type == issued_type {
+            let issued: MembershipPassIssuedEventBcs = decode_bcs(
+                &event_bcs,
+                "authenticated_event_proof MembershipPassIssued event_bcs",
+            )?;
+            if issued.registry_id == membership_registry_id {
+                active_lineages.insert(issued.pass_lineage_id.to_hex());
+            }
+        } else if event.event_type == home_cell_type {
+            let home_cell: HomeCellRegisteredEventBcs = decode_bcs(
+                &event_bcs,
+                "authenticated_event_proof HomeCellRegistered event_bcs",
+            )?;
+            home_cell_events.push(HomeCellRegisteredEvent {
+                lineage: home_cell.lineage.to_hex(),
+                home_cell: home_cell.home_cell.to_string(),
+                registered_at_ms: home_cell.registered_at,
+            });
+        } else {
+            return Err(CensusError::InvalidPayload(format!(
+                "authenticated_event_proof unsupported authenticated event type `{}`",
+                event.event_type
+            )));
+        }
+    }
+
+    Ok(ReplayedMembershipEvents {
+        active_lineages,
+        home_cell_events,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -504,8 +605,8 @@ fn validate_base64(value: &str, field: &str) -> Result<(), CensusError> {
 mod tests {
     use super::{
         AuthenticatedEventProofBundle, AuthenticatedStreamEvent, CensusInputBundle,
-        EventStreamHeadProofObject, HomeCellRegisteredEvent, ObjectInclusionProof,
-        validator_committee_digest,
+        EventStreamHeadProofObject, HomeCellRegisteredEvent, HomeCellRegisteredEventBcs,
+        MembershipPassIssuedEventBcs, ObjectInclusionProof, validator_committee_digest,
     };
     use crate::{
         AffectedCell, AffectedCellsArtifact, INTENT, VERIFIER_FAMILY, VERIFIER_VERSION,
@@ -525,6 +626,8 @@ mod tests {
     const ACTIVE_2: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
     const ACTIVE_3: &str = "0x3333333333333333333333333333333333333333333333333333333333333333";
     const INACTIVE: &str = "0x4444444444444444444444444444444444444444444444444444444444444444";
+    const MEMBERSHIP_REGISTRY_ID: &str =
+        "0x7777777777777777777777777777777777777777777777777777777777777777";
 
     fn affected_cells() -> AffectedCellsArtifact {
         AffectedCellsArtifact {
@@ -568,6 +671,7 @@ mod tests {
             issued_at_ms: 1_234,
             campaign_id: format!("0x{}", "55".repeat(32)),
             disaster_event_id: format!("0x{}", "66".repeat(32)),
+            membership_registry_id: MEMBERSHIP_REGISTRY_ID.to_owned(),
             census_checkpoint: 345,
             affected_cells,
             home_cell_events: Vec::new(),
@@ -603,14 +707,68 @@ mod tests {
                 tree_root: fixture.tree_root,
                 merkle_proof: vec!["cHJvb2YtMQ==".to_owned()],
             },
-            events: vec![AuthenticatedStreamEvent {
-                checkpoint: 100,
-                transaction_index: 0,
-                event_index: 0,
-                event_type: format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
-                event_bcs: "ZXZlbnQtMQ==".to_owned(),
-            }],
+            events: default_membership_pass_issued_events(),
         }
+    }
+
+    fn default_membership_pass_issued_events() -> Vec<AuthenticatedStreamEvent> {
+        [ACTIVE_1, ACTIVE_2, ACTIVE_3]
+            .into_iter()
+            .enumerate()
+            .map(|(index, lineage)| membership_pass_issued_event(index as u64, lineage))
+            .collect()
+    }
+
+    fn sync_proof_home_cell_events(bundle: &mut CensusInputBundle) {
+        let mut events = default_membership_pass_issued_events();
+        events.extend(
+            bundle
+                .home_cell_events
+                .iter()
+                .enumerate()
+                .map(|(index, event)| home_cell_registered_stream_event(index as u64, event)),
+        );
+        bundle.authenticated_event_proof.events = events;
+    }
+
+    fn membership_pass_issued_event(index: u64, lineage: &str) -> AuthenticatedStreamEvent {
+        let event = MembershipPassIssuedEventBcs {
+            registry_id: address(MEMBERSHIP_REGISTRY_ID),
+            pass_id: Address::new([0x90_u8.saturating_add(index as u8); 32]),
+            owner: Address::new([0xa0_u8.saturating_add(index as u8); 32]),
+            pass_lineage_id: address(lineage),
+            issued_at_ms: 100 + index,
+            actor: Address::new([0xb0_u8.saturating_add(index as u8); 32]),
+        };
+        AuthenticatedStreamEvent {
+            checkpoint: 10 + index,
+            transaction_index: 0,
+            event_index: index,
+            event_type: format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
+            event_bcs: Base64::encode_string(&bcs::to_bytes(&event).unwrap()),
+        }
+    }
+
+    fn home_cell_registered_stream_event(
+        index: u64,
+        event: &HomeCellRegisteredEvent,
+    ) -> AuthenticatedStreamEvent {
+        let event_bcs = HomeCellRegisteredEventBcs {
+            lineage: address(&event.lineage),
+            home_cell: event.home_cell.parse().unwrap(),
+            registered_at: event.registered_at_ms,
+        };
+        AuthenticatedStreamEvent {
+            checkpoint: 100 + index,
+            transaction_index: 0,
+            event_index: index,
+            event_type: format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
+            event_bcs: Base64::encode_string(&bcs::to_bytes(&event_bcs).unwrap()),
+        }
+    }
+
+    fn address(value: &str) -> Address {
+        Address::from_hex(value).unwrap()
     }
 
     struct AuthenticatedCheckpointFixture {
@@ -790,6 +948,7 @@ mod tests {
             event(ACTIVE_2, "20", 900),
             event(ACTIVE_3, "30", 900),
         ];
+        sync_proof_home_cell_events(&mut bundle);
 
         let result = process_floor_census_bundle(&bundle).unwrap();
 
@@ -812,6 +971,79 @@ mod tests {
         let mut bundle = valid_bundle();
         bundle.disaster_event_id = "0x1234".to_owned();
         assert!(process_floor_census_bundle(&bundle).is_err());
+    }
+
+    #[test]
+    fn process_rejects_home_cell_snapshot_not_replayed_from_authenticated_events() {
+        let mut bundle = valid_bundle();
+        bundle.home_cell_events = vec![event(ACTIVE_1, "10", 900)];
+
+        let error = process_floor_census_bundle(&bundle)
+            .expect_err("bundle home cell snapshot must match replayed authenticated events");
+
+        assert!(
+            error
+                .to_string()
+                .contains("replayed home cell events do not match")
+        );
+    }
+
+    #[test]
+    fn process_rejects_active_lineage_snapshot_not_replayed_from_authenticated_events() {
+        let mut bundle = valid_bundle();
+        bundle.active_lineages = vec![ACTIVE_1.to_owned()];
+
+        let error = process_floor_census_bundle(&bundle)
+            .expect_err("bundle active lineages must match replayed authenticated events");
+
+        assert!(
+            error
+                .to_string()
+                .contains("replayed active lineages do not match")
+        );
+    }
+
+    #[test]
+    fn process_rejects_unsupported_authenticated_membership_event_type() {
+        let mut bundle = valid_bundle();
+        bundle.authenticated_event_proof.events[0].event_type =
+            format!("0x{}::membership::UnknownEvent", "12".repeat(32));
+
+        let error = process_floor_census_bundle(&bundle)
+            .expect_err("unknown authenticated event types must fail closed");
+
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported authenticated event type")
+        );
+    }
+
+    #[test]
+    fn process_ignores_passes_issued_for_other_membership_registry() {
+        let mut bundle = valid_bundle();
+        let other = MembershipPassIssuedEventBcs {
+            registry_id: Address::new([0x88; 32]),
+            pass_id: Address::new([0x89; 32]),
+            owner: Address::new([0x8a; 32]),
+            pass_lineage_id: address(INACTIVE),
+            issued_at_ms: 999,
+            actor: Address::new([0x8b; 32]),
+        };
+        bundle
+            .authenticated_event_proof
+            .events
+            .push(AuthenticatedStreamEvent {
+                checkpoint: 200,
+                transaction_index: 0,
+                event_index: 0,
+                event_type: format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
+                event_bcs: Base64::encode_string(&bcs::to_bytes(&other).unwrap()),
+            });
+
+        process_floor_census_bundle(&bundle).expect(
+            "MembershipPassIssued for another registry should not change active lineage set",
+        );
     }
 
     #[test]

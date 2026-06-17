@@ -2794,7 +2794,7 @@ describe("AWS runner workflow helper", () => {
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
                     categoryPool: earthquakeRelayerCategoryPool,
                     mainPool: "0xmainpool",
-                    membershipRegistry: "0xmembership",
+                    membershipRegistry: `0x${"77".repeat(32)}`,
                     signer: createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey),
                     reader: new RecordingFloorCensusReader(),
                     client,
@@ -2887,7 +2887,7 @@ describe("AWS runner workflow helper", () => {
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
                     categoryPool: earthquakeRelayerCategoryPool,
                     mainPool: "0xmainpool",
-                    membershipRegistry: "0xmembership",
+                    membershipRegistry: `0x${"77".repeat(32)}`,
                 },
             },
         });
@@ -3255,7 +3255,7 @@ function setRequiredFloorCensusEnv(): void {
     process.env.FLOOR_CENSUS_PAUSE_STATE = "0xpause";
     process.env.FLOOR_CENSUS_CATEGORY_POOL = earthquakeRelayerCategoryPool;
     process.env.FLOOR_CENSUS_MAIN_POOL = "0xmainpool";
-    process.env.SONARI_MEMBERSHIP_REGISTRY_ID = "0xmembership";
+    process.env.SONARI_MEMBERSHIP_REGISTRY_ID = `0x${"77".repeat(32)}`;
     process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
     process.env.RELAYER_NETWORK = "testnet";
     process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";

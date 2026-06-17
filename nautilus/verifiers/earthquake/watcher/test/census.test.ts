@@ -134,6 +134,7 @@ describe("floor census core", () => {
             activeLineages: new Set([`0x${"11".repeat(32)}`]),
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
+            membershipRegistryId: `0x${"77".repeat(32)}`,
             censusCheckpoint: 41,
             issuedAtMs: 1_800_000_001_000,
             authenticatedEventProof: authenticatedEventProof(),
@@ -147,6 +148,7 @@ describe("floor census core", () => {
             issued_at_ms: 1_800_000_001_000,
             campaign_id: `0x${"44".repeat(32)}`,
             disaster_event_id: `0x${"55".repeat(32)}`,
+            membership_registry_id: `0x${"77".repeat(32)}`,
             census_checkpoint: 41,
             home_cell_events: [
                 {
@@ -169,6 +171,7 @@ describe("floor census core", () => {
                 activeLineages: [],
                 campaignId: `0x${"44".repeat(32)}`,
                 disasterEventId: `0x${"55".repeat(32)}`,
+                membershipRegistryId: `0x${"77".repeat(32)}`,
                 censusCheckpoint: 41,
                 issuedAtMs: 1_800_000_001_000,
             }),
@@ -194,6 +197,7 @@ describe("floor census core", () => {
             activeLineages: [],
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
+            membershipRegistryId: `0x${"77".repeat(32)}`,
             censusCheckpoint: 41,
             issuedAtMs: 1_800_000_001_000,
             authenticatedEventProof: authenticatedEventProof(),

@@ -1,10 +1,31 @@
 use base64ct::{Base64, Encoding};
 use census_tee::validator_committee_digest;
+use serde::Serialize;
 use sui_crypto::bls12381::{Bls12381PrivateKey, ValidatorCommitteeSignatureAggregator};
 use sui_sdk_types::{
     Address, CheckpointCommitment, CheckpointSummary, Digest, GasCostSummary, Identifier,
     MoveStruct, Object, ObjectData, Owner, StructTag, ValidatorCommittee, ValidatorCommitteeMember,
 };
+
+const MEMBERSHIP_REGISTRY_ID: &str =
+    "0x7777777777777777777777777777777777777777777777777777777777777777";
+
+#[derive(Serialize)]
+struct MembershipPassIssuedEventBcs {
+    registry_id: Address,
+    pass_id: Address,
+    owner: Address,
+    pass_lineage_id: Address,
+    issued_at_ms: u64,
+    actor: Address,
+}
+
+#[derive(Serialize)]
+struct HomeCellRegisteredEventBcs {
+    lineage: Address,
+    home_cell: u64,
+    registered_at: u64,
+}
 
 pub struct AuthenticatedProofJson {
     pub proof: serde_json::Value,
@@ -75,6 +96,10 @@ pub fn authenticated_event_proof_json() -> AuthenticatedProofJson {
         .finish()
         .expect("three of four equal stake signatures should meet quorum");
     let committee_bcs = bcs::to_bytes(&committee).expect("committee should BCS encode");
+    let issued_1 = membership_pass_issued_event(0, &format!("0x{}", "11".repeat(32)));
+    let issued_2 = membership_pass_issued_event(1, &format!("0x{}", "22".repeat(32)));
+    let home_1 = home_cell_registered_event(2, &format!("0x{}", "11".repeat(32)), 10, 900);
+    let home_2 = home_cell_registered_event(3, &format!("0x{}", "22".repeat(32)), 20, 901);
 
     AuthenticatedProofJson {
         trusted_validator_committee_digest: validator_committee_digest(&committee_bcs).to_string(),
@@ -105,22 +130,53 @@ pub fn authenticated_event_proof_json() -> AuthenticatedProofJson {
                 "tree_root": tree_root.to_string(),
                 "merkle_proof": ["cHJvb2YtMQ=="]
             },
-            "events": [
-                {
-                    "checkpoint": 100,
-                    "transaction_index": 0,
-                    "event_index": 0,
-                    "type": format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
-                    "event_bcs": "ZXZlbnQtMQ=="
-                },
-                {
-                    "checkpoint": 101,
-                    "transaction_index": 0,
-                    "event_index": 1,
-                    "type": format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
-                    "event_bcs": "ZXZlbnQtMg=="
-                }
-            ]
+            "events": [issued_1, issued_2, home_1, home_2]
         }),
     }
+}
+
+fn membership_pass_issued_event(index: u64, lineage: &str) -> serde_json::Value {
+    let event = MembershipPassIssuedEventBcs {
+        registry_id: address(MEMBERSHIP_REGISTRY_ID),
+        pass_id: Address::new([0x90_u8.saturating_add(index as u8); 32]),
+        owner: Address::new([0xa0_u8.saturating_add(index as u8); 32]),
+        pass_lineage_id: address(lineage),
+        issued_at_ms: 100 + index,
+        actor: Address::new([0xb0_u8.saturating_add(index as u8); 32]),
+    };
+    serde_json::json!({
+        "checkpoint": 10 + index,
+        "transaction_index": 0,
+        "event_index": index,
+        "type": format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
+        "event_bcs": Base64::encode_string(
+            &bcs::to_bytes(&event).expect("MembershipPassIssued should BCS encode"),
+        ),
+    })
+}
+
+fn home_cell_registered_event(
+    index: u64,
+    lineage: &str,
+    home_cell: u64,
+    registered_at: u64,
+) -> serde_json::Value {
+    let event = HomeCellRegisteredEventBcs {
+        lineage: address(lineage),
+        home_cell,
+        registered_at,
+    };
+    serde_json::json!({
+        "checkpoint": 100 + index,
+        "transaction_index": 0,
+        "event_index": index,
+        "type": format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
+        "event_bcs": Base64::encode_string(
+            &bcs::to_bytes(&event).expect("HomeCellRegistered should BCS encode"),
+        ),
+    })
+}
+
+fn address(value: &str) -> Address {
+    Address::from_hex(value).expect("test address should be valid")
 }

@@ -149,6 +149,7 @@ export interface FloorCensusInputBundle {
     issued_at_ms: number;
     campaign_id: string;
     disaster_event_id: string;
+    membership_registry_id: string;
     census_checkpoint: number;
     affected_cells: AffectedCellsArtifact;
     home_cell_events: Array<{
@@ -367,6 +368,7 @@ export async function buildFloorCensusInputBundle(input: {
     activeLineages: ReadonlySet<string> | readonly string[];
     campaignId: string;
     disasterEventId: string;
+    membershipRegistryId: string;
     censusCheckpoint: number;
     issuedAtMs: number;
     authenticatedEventProof?: AuthenticatedEventProofBundle | undefined;
@@ -378,6 +380,7 @@ export async function buildFloorCensusInputBundle(input: {
     }
     validateObjectId(input.campaignId, "campaign_id");
     validateObjectId(input.disasterEventId, "disaster_event_id");
+    validateObjectId(input.membershipRegistryId, "membership_registry_id");
     validateSafeInteger(input.censusCheckpoint, "census_checkpoint");
     validateSafeInteger(input.issuedAtMs, "issued_at_ms");
     if (input.authenticatedEventProof === undefined) {
@@ -406,6 +409,7 @@ export async function buildFloorCensusInputBundle(input: {
         issued_at_ms: input.issuedAtMs,
         campaign_id: input.campaignId,
         disaster_event_id: input.disasterEventId,
+        membership_registry_id: input.membershipRegistryId,
         census_checkpoint: input.censusCheckpoint,
         affected_cells: affectedCells,
         home_cell_events: input.homeCellEvents.map((event) => ({
@@ -637,6 +641,7 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             activeLineages,
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
+            membershipRegistryId: this.config.membershipRegistry,
             censusCheckpoint: campaign.checkpoint,
             issuedAtMs: this.config.now?.() ?? Date.now(),
             authenticatedEventProof,

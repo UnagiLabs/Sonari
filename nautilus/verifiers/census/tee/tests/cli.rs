@@ -126,6 +126,7 @@ fn valid_bundle_json() -> serde_json::Value {
         "issued_at_ms": 1_234,
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
+        "membership_registry_id": format!("0x{}", "77".repeat(32)),
         "census_checkpoint": 345,
         "affected_cells": affected_cells,
         "home_cell_events": [
@@ -138,17 +139,11 @@ fn valid_bundle_json() -> serde_json::Value {
                 "lineage": format!("0x{}", "22".repeat(32)),
                 "home_cell": "20",
                 "registered_at_ms": 901
-            },
-            {
-                "lineage": format!("0x{}", "33".repeat(32)),
-                "home_cell": "10",
-                "registered_at_ms": 1_000
             }
         ],
         "active_lineages": [
             format!("0x{}", "11".repeat(32)),
-            format!("0x{}", "22".repeat(32)),
-            format!("0x{}", "33".repeat(32))
+            format!("0x{}", "22".repeat(32))
         ],
         "authenticated_event_proof": authenticated_event_proof_json().proof
     })
