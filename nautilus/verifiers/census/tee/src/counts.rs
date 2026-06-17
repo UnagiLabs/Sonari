@@ -9,9 +9,12 @@ use std::collections::{HashMap, HashSet};
 pub struct CensusInputBundle {
     pub event_uid: String,
     pub event_revision: u32,
-    pub cutoff_ms: u64,
+    pub occurred_at_ms: u64,
     pub affected_cells_root: String,
     pub issued_at_ms: u64,
+    pub campaign_id: String,
+    pub disaster_event_id: String,
+    pub census_checkpoint: u64,
     pub affected_cells: AffectedCellsArtifact,
     pub home_cell_events: Vec<HomeCellRegisteredEvent>,
     pub active_lineages: Vec<String>,
@@ -34,7 +37,7 @@ pub fn compute_floor_census_counts(bundle: &CensusInputBundle) -> Result<[u64; 3
 
     let active_lineages = active_lineage_set(&bundle.active_lineages)?;
     let affected_cells = affected_cells_by_h3(&bundle.affected_cells)?;
-    let latest_events = latest_pre_cutoff_events(&bundle.home_cell_events, bundle.cutoff_ms)?;
+    let latest_events = latest_pre_cutoff_events(&bundle.home_cell_events, bundle.occurred_at_ms)?;
 
     let mut counts = [0_u64; 3];
     for (lineage, event) in latest_events {
@@ -57,6 +60,7 @@ pub fn compute_floor_census_counts(bundle: &CensusInputBundle) -> Result<[u64; 3
 pub fn process_floor_census_bundle(
     bundle: &CensusInputBundle,
 ) -> Result<FloorCensusResult, CensusError> {
+    validate_census_context(bundle)?;
     let counts = compute_floor_census_counts(bundle)?;
 
     Ok(FloorCensusResult {
@@ -69,6 +73,12 @@ pub fn process_floor_census_bundle(
         registered_members_by_band: counts.to_vec(),
         issued_at_ms: bundle.issued_at_ms,
     })
+}
+
+fn validate_census_context(bundle: &CensusInputBundle) -> Result<(), CensusError> {
+    validate_object_id(&bundle.campaign_id, "campaign_id")?;
+    validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
+    Ok(())
 }
 
 fn active_lineage_set(lineages: &[String]) -> Result<HashSet<String>, CensusError> {
@@ -129,6 +139,16 @@ fn validate_lineage(value: &str) -> Result<(), CensusError> {
         return Err(CensusError::InvalidPayload(
             "lineage must be 0x-prefixed 32-byte hex".to_owned(),
         ));
+    }
+    sonari_tee_core::hex_to_32(value)?;
+    Ok(())
+}
+
+fn validate_object_id(value: &str, field: &str) -> Result<(), CensusError> {
+    if !value.starts_with("0x") {
+        return Err(CensusError::InvalidPayload(format!(
+            "{field} must be 0x-prefixed 32-byte hex"
+        )));
     }
     sonari_tee_core::hex_to_32(value)?;
     Ok(())
@@ -206,9 +226,12 @@ mod tests {
         CensusInputBundle {
             event_uid: EVENT_UID.to_owned(),
             event_revision: 7,
-            cutoff_ms: 1_000,
+            occurred_at_ms: 1_000,
             affected_cells_root,
             issued_at_ms: 1_234,
+            campaign_id: format!("0x{}", "55".repeat(32)),
+            disaster_event_id: format!("0x{}", "66".repeat(32)),
+            census_checkpoint: 345,
             affected_cells,
             home_cell_events: Vec::new(),
             active_lineages: vec![
@@ -314,5 +337,16 @@ mod tests {
         assert_eq!(result.affected_cells_root, bundle.affected_cells_root);
         assert_eq!(result.registered_members_by_band, vec![1, 1, 1]);
         assert_eq!(result.issued_at_ms, 1_234);
+    }
+
+    #[test]
+    fn process_rejects_malformed_campaign_and_disaster_ids() {
+        let mut bundle = valid_bundle();
+        bundle.campaign_id = "0x1234".to_owned();
+        assert!(process_floor_census_bundle(&bundle).is_err());
+
+        let mut bundle = valid_bundle();
+        bundle.disaster_event_id = "0x1234".to_owned();
+        assert!(process_floor_census_bundle(&bundle).is_err());
     }
 }

@@ -66,10 +66,11 @@ import {
     RetryableAffectedCellsProofRegistrationError,
 } from "./affected_cells_proof_registrar.js";
 import {
-    DirectFloorCensusAdapter,
     type FloorCensusAdapter,
     type FloorCensusSubmitConfig,
+    type FloorCensusTeeClient,
     GraphqlFloorCensusReader,
+    TeeFloorCensusAdapter,
 } from "./census.js";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
@@ -90,6 +91,13 @@ import {
 const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
 const SOURCE_FETCH_TIMEOUT_MS = 30_000;
 const SOURCE_ARCHIVER_HTTP_TIMEOUT_MS = 210_000;
+const CENSUS_VERIFIER_CONFIG_KEY = 3;
+const CENSUS_VERIFIER_FAMILY = 5;
+const CENSUS_VERIFIER_KIND = "census";
+const CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND = "/opt/sonari/bin/run-census-enclave";
+const CENSUS_RUNNER_COMMAND_MAX_POLLS = 60;
+const CENSUS_RUNNER_COMMAND_POLL_INTERVAL_MS = 5_000;
+const CENSUS_TEE_INPUT_ARTIFACT_PREFIX = "source-artifacts";
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -115,6 +123,7 @@ export interface RunnerWorkflowConfig {
         ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
     };
     floorCensus?: FloorCensusSubmitConfig;
+    censusNitroEnclaveProcessCommand?: string | undefined;
 }
 
 export interface AutoScalingClientLike {
@@ -208,6 +217,8 @@ export interface EnclaveRegistrationConfig {
     transaction?: unknown;
     loadSigner?: () => Promise<RelayerSigner>;
     instanceTtlMs: number;
+    configKey?: number | undefined;
+    expectedFamily?: number | undefined;
     now?: () => number;
 }
 
@@ -339,24 +350,28 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "read_result";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
               action: "apply_result";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
               action: "archive_sources";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
               action: "register_affected_cells_proof";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
@@ -369,12 +384,14 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "relayer_preview_or_dry_run";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
               action: "record_relayer_success";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
               relayer_success: RelayerRecordSuccessInput;
           }
@@ -382,6 +399,7 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "run_floor_census";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
               relayer_success: RelayerRecordSuccessInput;
           }
@@ -452,6 +470,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               relayer: "skipped" | "failed";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
@@ -489,6 +508,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               relayer: "succeeded";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
@@ -498,6 +518,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               source_event_id: string;
               attempt?: number | undefined;
               relayer: "recorded";
+              instance_id?: string | undefined;
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
               relayer_success: RelayerRecordSuccessInput;
@@ -848,6 +869,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
                 });
@@ -874,6 +896,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     applied: true,
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
@@ -902,6 +925,9 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...(event.instance_id === undefined
+                            ? {}
+                            : { instance_id: event.instance_id }),
                         source_archive: "skipped",
                         source_artifact_s3_keys: [],
                         result_s3_key: event.result_s3_key,
@@ -938,6 +964,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     source_archive: archived.status,
                     source_artifact_s3_keys: archived.artifactS3Keys,
                     result_s3_key: event.result_s3_key,
@@ -974,6 +1001,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    instance_id: event.instance_id,
                     affected_cells_proof_registration: registration.status,
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
@@ -1006,10 +1034,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const repository = requireRepository(options);
                 const relayer = options.relayer ?? buildRelayerFromConfig(options.config);
                 const result = await readTeeResultFromS3(options, event);
+                const instanceContext =
+                    event.instance_id === undefined ? {} : { instance_id: event.instance_id };
                 if (relayer === undefined || result.status !== "finalized") {
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...instanceContext,
                         relayer: "skipped",
                         result_s3_key: event.result_s3_key,
                         result_status: result.status,
@@ -1025,6 +1056,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...instanceContext,
                         relayer: "skipped",
                         result_s3_key: event.result_s3_key,
                         result_status: result.status,
@@ -1036,6 +1068,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...instanceContext,
                         relayer: "succeeded",
                         result_s3_key: event.result_s3_key,
                         result_status: result.status,
@@ -1062,6 +1095,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...instanceContext,
                     relayer: "failed",
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
@@ -1090,6 +1124,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "recorded",
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
                     relayer_success: event.relayer_success,
@@ -1122,25 +1157,26 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!markedProcessing) {
                     throw new Error("stale runner workflow attempt");
                 }
-                const result = await readTeeResultFromS3(options, event);
-                const floorCensus =
-                    options.floorCensus ?? buildFloorCensusFromConfig(options.config);
-                if (floorCensus === undefined) {
-                    await repository.markFloorCensusResult(
-                        event.source_event_id,
-                        { status: "skipped", message: "floor census is not configured" },
-                        nowMs,
-                        event.attempt,
-                    );
-                    return retainVerifierKind({
-                        source_event_id: event.source_event_id,
-                        attempt: event.attempt,
-                        floor_census: "skipped",
-                        result_s3_key: event.result_s3_key,
-                        result_status: result.status,
-                    });
-                }
                 try {
+                    const result = await readTeeResultFromS3(options, event);
+                    const floorCensus =
+                        options.floorCensus ??
+                        (await buildCensusTeeFloorCensusFromConfig(options, event, nowMs));
+                    if (floorCensus === undefined) {
+                        await repository.markFloorCensusResult(
+                            event.source_event_id,
+                            { status: "skipped", message: "floor census is not configured" },
+                            nowMs,
+                            event.attempt,
+                        );
+                        return retainVerifierKind({
+                            source_event_id: event.source_event_id,
+                            attempt: event.attempt,
+                            floor_census: "skipped",
+                            result_s3_key: event.result_s3_key,
+                            result_status: result.status,
+                        });
+                    }
                     const census = await floorCensus.run({
                         sourceEventId: event.source_event_id,
                         result,
@@ -1696,11 +1732,17 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
         const transaction =
             this.config.transaction ??
             createSuiEnclaveRegistrationTransaction({
-                target: this.config.target,
+                target: resolveEnclaveRegistrationTargetForConfig(
+                    this.config.target,
+                    this.config.configKey,
+                ),
                 verifierRegistry: this.config.verifierRegistry,
                 attestationDocumentBytes: parseHexByteVector(input.attestationDocumentHex),
                 expiresAtMs,
                 senderAddress,
+                ...(this.config.configKey === undefined
+                    ? {}
+                    : { configKey: this.config.configKey }),
             });
         const response = await client.signAndExecuteTransaction({
             transaction,
@@ -1709,9 +1751,9 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
         });
         const events = readSuccessfulEnclaveRegistrationEvents(response);
         const metadata = readEnclaveRegistrationMetadata(events, {
-            expectedFamily: 3,
+            expectedFamily: this.config.expectedFamily ?? 3,
             expectedVersion: 1,
-            configKey: EARTHQUAKE_VERIFIER_CONFIG_KEY,
+            configKey: this.config.configKey ?? EARTHQUAKE_VERIFIER_CONFIG_KEY,
         });
         if (normalizeHex(metadata.enclave_instance_public_key) !== normalizeHex(input.publicKey)) {
             throw new Error("registered enclave public key does not match attestation");
@@ -1741,11 +1783,21 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
         if (floorCensus !== undefined) {
             config.floorCensus = floorCensus;
         }
+        config.censusNitroEnclaveProcessCommand = requiredEnv(
+            "CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND",
+        );
     }
     const enclaveRegistration =
-        event.action === "register_enclave_instance"
+        event.action === "register_enclave_instance" || event.action === "run_floor_census"
             ? new SuiEnclaveRegistrationAdapter(
-                  readEnclaveRegistrationConfigFromEnv(new AwsRelayerSignerSecretReader()),
+                  readEnclaveRegistrationConfigFromEnv(new AwsRelayerSignerSecretReader(), {
+                      ...(event.action === "run_floor_census"
+                          ? {
+                                configKey: CENSUS_VERIFIER_CONFIG_KEY,
+                                expectedFamily: CENSUS_VERIFIER_FAMILY,
+                            }
+                          : {}),
+                  }),
               )
             : undefined;
     return createRunnerControlHandler({
@@ -1794,6 +1846,170 @@ function buildSsmShellCommand(input: {
         ],
         tempResultPath,
     });
+}
+
+async function buildCensusTeeFloorCensusFromConfig(
+    options: RunnerControlHandlerOptions,
+    event: Extract<RunnerControlEvent, { action: "run_floor_census" }>,
+    dispatchTimestampMs: number,
+): Promise<FloorCensusAdapter | undefined> {
+    const config = options.config.floorCensus;
+    if (config === undefined) {
+        return undefined;
+    }
+    if (event.instance_id === undefined) {
+        throw new Error("floor census requires a runner instance_id");
+    }
+    const instanceId = event.instance_id;
+    const registrar = options.enclaveRegistration;
+    if (registrar === undefined) {
+        throw new Error("census enclave registration is not configured");
+    }
+    const attestationText = await dispatchAndReadCensusTeeCommand(options, {
+        sourceEventId: event.source_event_id,
+        instanceId,
+        dispatchTimestampMs,
+        teeInput: { action: "get_attestation" },
+    });
+    const attestation = readEnclaveAttestation(JSON.parse(attestationText) as unknown);
+    const registered = requireRegistrationMetadata(
+        await registrar.register({
+            sourceEventId: event.source_event_id,
+            attestationDocumentHex: attestation.attestation_document_hex,
+            publicKey: attestation.public_key,
+        }),
+        CENSUS_VERIFIER_CONFIG_KEY,
+    );
+    if (
+        normalizeHex(registered.enclave_instance_public_key) !==
+        normalizeHex(attestation.public_key)
+    ) {
+        throw new Error("census registration metadata public key does not match attestation");
+    }
+    const tee: FloorCensusTeeClient = {
+        processData: async (teeInput) =>
+            JSON.parse(
+                await dispatchAndReadCensusTeeCommand(options, {
+                    sourceEventId: event.source_event_id,
+                    instanceId,
+                    dispatchTimestampMs: dispatchTimestampMs + 1,
+                    teeInput,
+                }),
+            ) as unknown,
+    };
+    return new TeeFloorCensusAdapter(config, tee, registered);
+}
+
+async function dispatchAndReadCensusTeeCommand(
+    options: RunnerControlHandlerOptions,
+    input: {
+        sourceEventId: string;
+        instanceId: string;
+        dispatchTimestampMs: number;
+        teeInput: unknown;
+    },
+): Promise<string> {
+    assertValidUsgsSourceEventId(input.sourceEventId);
+    if (options.s3.putObjectBytes === undefined) {
+        throw new Error("census TEE command requires S3 byte staging support");
+    }
+    const nitroEnclaveProcessCommand =
+        options.config.censusNitroEnclaveProcessCommand ?? CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND;
+    const teeInputS3Key = censusTeeInputArtifactS3Key({
+        sourceEventId: input.sourceEventId,
+        dispatchTimestampMs: input.dispatchTimestampMs,
+    });
+    await options.s3.putObjectBytes({
+        bucket: options.config.resultBucket,
+        key: teeInputS3Key,
+        bytes: new TextEncoder().encode(JSON.stringify(input.teeInput)),
+    });
+    const dispatched = await dispatchRunnerCommand(options.ssm, {
+        workflowId: `${input.sourceEventId}-census`,
+        instanceId: input.instanceId,
+        dispatchTimestampMs: input.dispatchTimestampMs,
+        buildShellCommand: (resultS3Key) =>
+            buildCensusSsmShellCommand({
+                sourceEventId: input.sourceEventId,
+                dispatchTimestampMs: input.dispatchTimestampMs,
+                resultBucket: options.config.resultBucket,
+                resultS3Key,
+                nitroEnclaveProcessCommand,
+                teeInputS3Uri: `s3://${options.config.resultBucket}/${teeInputS3Key}`,
+            }),
+    });
+    await waitForRunnerCommandSuccess(options.ssm, {
+        instanceId: input.instanceId,
+        commandId: dispatched.commandId,
+    });
+    return readRunnerResultText(options.s3, {
+        bucket: options.config.resultBucket,
+        key: dispatched.resultS3Key,
+    });
+}
+
+function censusTeeInputArtifactS3Key(input: {
+    sourceEventId: string;
+    dispatchTimestampMs: number;
+}): string {
+    return `${CENSUS_TEE_INPUT_ARTIFACT_PREFIX}/${input.sourceEventId}/census-tee-inputs/${input.dispatchTimestampMs}.json`;
+}
+
+function buildCensusSsmShellCommand(input: {
+    sourceEventId: string;
+    dispatchTimestampMs: number;
+    resultBucket: string;
+    resultS3Key: string;
+    nitroEnclaveProcessCommand: string;
+    teeInputS3Uri: string;
+}): string {
+    const tempResultPath = `/tmp/sonari-census-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
+    return buildSharedRunnerSsmShellCommand({
+        resultBucket: input.resultBucket,
+        resultS3Key: input.resultS3Key,
+        nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
+        teeInputS3Uri: input.teeInputS3Uri,
+        preEnvCommands: ["systemctl is-active --quiet nitro-enclaves-allocator.service"],
+        requiredEnvNames: [
+            "SONARI_CENSUS_EIF_PATH",
+            "SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS",
+            "SONARI_CENSUS_ENCLAVE_CID",
+            "NITRO_ENCLAVE_PROCESS_COMMAND",
+        ],
+        postEnvCommands: [
+            'test -s "$SONARI_CENSUS_EIF_PATH"',
+            "export SONARI_CENSUS_EIF_PATH SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS SONARI_CENSUS_ENCLAVE_CID NITRO_ENCLAVE_PROCESS_COMMAND",
+            `export SONARI_VERIFIER_KIND=${CENSUS_VERIFIER_KIND}`,
+        ],
+        tempResultPath,
+    });
+}
+
+async function waitForRunnerCommandSuccess(
+    ssm: SsmClientLike,
+    input: { instanceId: string; commandId: string },
+): Promise<void> {
+    let commandPollCount = 0;
+    for (let attempt = 0; attempt < CENSUS_RUNNER_COMMAND_MAX_POLLS; attempt += 1) {
+        const polled = await pollRunnerCommand(ssm, {
+            instanceId: input.instanceId,
+            commandId: input.commandId,
+            commandPollCount,
+        });
+        commandPollCount = polled.commandPollCount;
+        if (polled.commandStatus === "SUCCEEDED") {
+            return;
+        }
+        if (polled.commandStatus === "FAILED") {
+            throw new Error("census TEE command failed");
+        }
+        await delay(CENSUS_RUNNER_COMMAND_POLL_INTERVAL_MS);
+    }
+    throw new Error("census TEE command did not complete before timeout");
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function buildRunnerBootstrapReadinessShellCommand(): string {
@@ -2532,13 +2748,6 @@ function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | 
     return new DirectRelayerAdapter(config.relayer);
 }
 
-function buildFloorCensusFromConfig(config: RunnerWorkflowConfig): FloorCensusAdapter | undefined {
-    if (config.floorCensus === undefined) {
-        return undefined;
-    }
-    return new DirectFloorCensusAdapter(config.floorCensus);
-}
-
 function compactRelayerSuccess(success: RelayerSuccess): RelayerRecordSuccessInput {
     return {
         mode: success.mode,
@@ -2648,11 +2857,13 @@ export function readRelayerConfigFromEnv(
 
 export function readEnclaveRegistrationConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
+    overrides: Pick<EnclaveRegistrationConfig, "configKey" | "expectedFamily"> = {},
 ): EnclaveRegistrationConfig {
-    const target =
+    const baseTarget =
         process.env.ENCLAVE_REGISTRATION_TARGET ??
         deriveEnclaveRegistrationTarget(process.env.RELAYER_TARGET) ??
         "";
+    const target = resolveEnclaveRegistrationTargetForConfig(baseTarget, overrides.configKey);
     const verifierRegistry = process.env.RELAYER_VERIFIER_REGISTRY ?? "";
     const network = readSuiNetwork(process.env.RELAYER_NETWORK);
     const grpcUrl = process.env.RELAYER_GRPC_URL;
@@ -2691,6 +2902,7 @@ export function readEnclaveRegistrationConfigFromEnv(
             process.env.ENCLAVE_REGISTRATION_ALLOW_SUBMIT === "true" ||
             process.env.RELAYER_ALLOW_SUBMIT === "true",
         instanceTtlMs: instanceTtlMs ?? 0,
+        ...overrides,
     };
     if (network !== undefined) {
         config.network = network;
@@ -2820,6 +3032,17 @@ function deriveEnclaveRegistrationTarget(relayerTarget: string | undefined): str
         return undefined;
     }
     return `${packageId}::metadata_verifier::register_enclave_instance`;
+}
+
+function resolveEnclaveRegistrationTargetForConfig(target: string, configKey: number | undefined) {
+    if (configKey === undefined) {
+        return target;
+    }
+    const [packageId, moduleName, functionName] = target.split("::");
+    if (moduleName === "metadata_verifier" && functionName === "register_enclave_instance") {
+        return `${packageId}::metadata_verifier::register_enclave_instance_for_config`;
+    }
+    return target;
 }
 
 function readPositiveIntegerEnv(name: string, fallback: number): number | undefined {

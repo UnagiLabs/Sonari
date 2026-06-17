@@ -9,6 +9,8 @@ const validEarthquakeTeeSha256 = "a".repeat(64);
 const validEarthquakeEifSha256 = "b".repeat(64);
 const validMembershipTeeSha256 = "c".repeat(64);
 const validMembershipEifSha256 = "d".repeat(64);
+const validCensusTeeSha256 = "e".repeat(64);
+const validCensusEifSha256 = "f".repeat(64);
 
 const validInput = {
     commitSha: validCommitSha,
@@ -21,6 +23,10 @@ const validInput = {
     membershipTeeArtifactSha256: validMembershipTeeSha256,
     membershipEifBucket: "membership-eif-artifacts",
     membershipEifSha256: validMembershipEifSha256,
+    censusTeeBucket: "census-tee-artifacts",
+    censusTeeArtifactSha256: validCensusTeeSha256,
+    censusEifBucket: "census-eif-artifacts",
+    censusEifSha256: validCensusEifSha256,
     sourceArchiverTokenSecretArn:
         "arn:aws:secretsmanager:ap-northeast-1:595103996064:secret:source-archiver-token",
     sourceArchiverPrivateKeySecretArn:
@@ -57,6 +63,12 @@ describe("AWS Sonari verifier runner deploy plan", () => {
         expect(plan.parameterOverrides.TeeEifS3Key).toBe(
             `sonari-verifier-runner/${validCommitSha}/membership-identity-tee.eif`,
         );
+        expect(plan.parameterOverrides.CensusTeeArtifactS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/census-tee-artifact.tar.gz`,
+        );
+        expect(plan.parameterOverrides.CensusTeeEifS3Key).toBe(
+            `sonari-verifier-runner/${validCommitSha}/census-tee.eif`,
+        );
         expect(plan.parameterOverrides.GitCommitSha).toBe(validCommitSha);
     });
 
@@ -85,6 +97,18 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 membershipEifSha256: "not-a-sha",
             }),
         ).toThrow("Invalid membership EIF SHA-256");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                censusTeeArtifactSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid census TEE artifact SHA-256");
+        expect(() =>
+            buildAwsSonariVerifierRunnerDeployPlan({
+                ...validInput,
+                censusEifSha256: "not-a-sha",
+            }),
+        ).toThrow("Invalid census EIF SHA-256");
     });
 
     it("validates source archiver deployment ARNs", () => {
@@ -131,6 +155,15 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 `TeeEifS3Bucket=${validInput.membershipEifBucket}`,
                 `TeeEifS3Key=sonari-verifier-runner/${validCommitSha}/membership-identity-tee.eif`,
                 `TeeEifSha256=${validMembershipEifSha256}`,
+                `CensusTeeArtifactS3Bucket=${validInput.censusTeeBucket}`,
+                [
+                    "CensusTeeArtifactS3Key=sonari-verifier-runner",
+                    `${validCommitSha}/census-tee-artifact.tar.gz`,
+                ].join("/"),
+                `CensusTeeArtifactSha256=${validCensusTeeSha256}`,
+                `CensusTeeEifS3Bucket=${validInput.censusEifBucket}`,
+                `CensusTeeEifS3Key=sonari-verifier-runner/${validCommitSha}/census-tee.eif`,
+                `CensusTeeEifSha256=${validCensusEifSha256}`,
                 `GitCommitSha=${validCommitSha}`,
                 "ScheduleState=DISABLED",
                 "WorldIdProofMode=dummy",
@@ -258,6 +291,14 @@ describe("AWS Sonari verifier runner deploy plan", () => {
                 validInput.membershipEifBucket,
                 "--membership-eif-sha256",
                 validMembershipEifSha256,
+                "--census-tee-bucket",
+                validInput.censusTeeBucket,
+                "--census-tee-sha256",
+                validCensusTeeSha256,
+                "--census-eif-bucket",
+                validInput.censusEifBucket,
+                "--census-eif-sha256",
+                validCensusEifSha256,
                 "--source-archiver-token-secret-arn",
                 validInput.sourceArchiverTokenSecretArn,
                 "--source-archiver-private-key-secret-arn",

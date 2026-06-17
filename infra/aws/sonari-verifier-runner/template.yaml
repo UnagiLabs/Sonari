@@ -98,6 +98,10 @@ Parameters:
     Type: String
     Default: /opt/sonari/bin/run-membership-identity-enclave
     Description: Membership identity verifier command made available to the shared runner environment.
+  CensusNitroEnclaveProcessCommand:
+    Type: String
+    Default: /opt/sonari/bin/run-census-enclave
+    Description: Census verifier command made available to the shared runner environment.
   TeeArtifactS3Bucket:
     Type: String
     Description: S3 bucket containing the earthquake TEE artifact tar.gz.
@@ -134,6 +138,24 @@ Parameters:
   TeeEifSha256:
     Type: String
     Description: SHA-256 hex digest for the membership identity Nitro Enclave EIF.
+  CensusTeeArtifactS3Bucket:
+    Type: String
+    Description: S3 bucket containing the census TEE artifact tar.gz.
+  CensusTeeArtifactS3Key:
+    Type: String
+    Description: S3 object key for the census TEE artifact tar.gz.
+  CensusTeeArtifactSha256:
+    Type: String
+    Description: SHA-256 hex digest for the census TEE artifact tar.gz.
+  CensusTeeEifS3Bucket:
+    Type: String
+    Description: S3 bucket containing the census Nitro Enclave EIF.
+  CensusTeeEifS3Key:
+    Type: String
+    Description: S3 object key for the census Nitro Enclave EIF.
+  CensusTeeEifSha256:
+    Type: String
+    Description: SHA-256 hex digest for the census Nitro Enclave EIF.
   NitroEnclaveCpuCount:
     Type: Number
     Default: 2
@@ -457,7 +479,10 @@ Resources:
                   - !Sub arn:${AWS::Partition}:s3:::${EarthquakeTeeEifS3Bucket}/${EarthquakeTeeEifS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${MembershipTeeArtifactS3Bucket}/${MembershipTeeArtifactS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${TeeEifS3Bucket}/${TeeEifS3Key}
+                  - !Sub arn:${AWS::Partition}:s3:::${CensusTeeArtifactS3Bucket}/${CensusTeeArtifactS3Key}
+                  - !Sub arn:${AWS::Partition}:s3:::${CensusTeeEifS3Bucket}/${CensusTeeEifS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}
+                  - !Sub ${RunnerResultBucket.Arn}/source-artifacts/*
               - Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub ${RunnerResultBucket.Arn}/results/*
@@ -536,138 +561,80 @@ Resources:
             tee_eif=/opt/sonari/membership-identity-tee.eif
             aws s3 cp 's3://${TeeEifS3Bucket}/${TeeEifS3Key}' "$tee_eif"
             printf '%s  %s\n' '${TeeEifSha256}' "$tee_eif" | sha256sum -c -
+            census_artifact_archive=/tmp/sonari-census-tee-artifact.tar.gz
+            aws s3 cp 's3://${CensusTeeArtifactS3Bucket}/${CensusTeeArtifactS3Key}' "$census_artifact_archive"
+            printf '%s  %s\n' '${CensusTeeArtifactSha256}' "$census_artifact_archive" | sha256sum -c -
+            rm -rf /opt/sonari/census-tee-artifact
+            mkdir -p /opt/sonari/census-tee-artifact
+            tar -xzf "$census_artifact_archive" -C /opt/sonari/census-tee-artifact
+            test -x /opt/sonari/census-tee-artifact/bin/census-tee
+            test -x /opt/sonari/census-tee-artifact/bin/vsock-tcp-bridge
+            rm -f "$census_artifact_archive"
+            census_eif=/opt/sonari/census-tee.eif
+            aws s3 cp 's3://${CensusTeeEifS3Bucket}/${CensusTeeEifS3Key}' "$census_eif"
+            printf '%s  %s\n' '${CensusTeeEifSha256}' "$census_eif" | sha256sum -c -
             aws s3 cp 's3://${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}' /opt/sonari/signing-seed.ciphertext
             aws secretsmanager get-secret-value --secret-id '${RunnerTokenSecretArn}' --query SecretString --output text > /opt/sonari/runner-token
-            chown -R ec2-user:ec2-user /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
-            chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact
-            chown ec2-user:ec2-user /opt/sonari/runner-token "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
-            chmod 0400 /opt/sonari/runner-token "$earthquake_eif" "$tee_eif" /opt/sonari/signing-seed.ciphertext
+            chown -R ec2-user:ec2-user /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact /opt/sonari/census-tee-artifact
+            chmod -R u=rwX,go-rwx /opt/sonari/tee-artifact /opt/sonari/membership-tee-artifact /opt/sonari/census-tee-artifact
+            chown ec2-user:ec2-user /opt/sonari/runner-token "$earthquake_eif" "$tee_eif" "$census_eif" /opt/sonari/signing-seed.ciphertext
+            chmod 0400 /opt/sonari/runner-token "$earthquake_eif" "$tee_eif" "$census_eif" /opt/sonari/signing-seed.ciphertext
+            cat >/opt/sonari/bin/run-http-enclave <<'SONARI_HTTP_ENCLAVE'
+            #!/bin/bash
+            set -euo pipefail
+            : "${!E:?}" "${!A:?}" "${!C:?}" "${!M:?}" "${!X:?}" "${!B:?}"
+            i="$(mktemp)"
+            o="$(mktemp)"
+            trap 'rm -f "$i" "$o"' EXIT
+            cat >"$i"
+            if [ ! -f "$M" ]; then
+              test -s "$E"
+              nitro-cli terminate-enclave --all &>/dev/null || true
+              rm -f $X
+              nitro-cli run-enclave $A >/dev/null 2>/tmp/sonari-enclave.err || { cat /tmp/sonari-enclave.err >&2; exit 1; }
+              sleep 2
+              eval "$B"
+              touch "$M"
+            fi
+            action="$(jq -r '.action // empty' "$i")"
+            case "$action" in
+              health_check) method=GET; path=/health_check ;;
+              get_attestation) method=GET; path=/get_attestation ;;
+              process_data) method=POST; path=/process_data ;;
+              *) echo "Unsupported TEE action: $action" >&2; exit 1 ;;
+            esac
+            if [ "$method" = POST ]; then
+              { printf 'POST %s HTTP/1.0\r\nContent-Length:%s\r\n\r\n' "$path" "$(wc -c <"$i")"; cat "$i"; }
+            else
+              printf 'GET %s HTTP/1.0\r\n\r\n' "$path"
+            fi | socat -t "${!T:-180}" - "VSOCK-CONNECT:$C:3000" >"$o"
+            head -n 1 "$o" | tr -d '\r' | grep -Eq '^HTTP/1\.[01] 200 ' || { cat "$o" >&2; exit 1; }
+            sed '1,/^\r\{0,1\}$/d' "$o"
+            SONARI_HTTP_ENCLAVE
+            chmod 0500 /opt/sonari/bin/run-http-enclave
             cat >/opt/sonari/bin/run-earthquake-enclave <<'SONARI_EARTHQUAKE_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            if [ -f /opt/sonari/runner.env ]; then
-              set -a
-              source /opt/sonari/runner.env
-              set +a
-            fi
-            : "${!SONARI_EARTHQUAKE_EIF_PATH:?SONARI_EARTHQUAKE_EIF_PATH is required}"
-            : "${!SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS:?SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS is required}"
-            : "${!SONARI_EARTHQUAKE_ENCLAVE_CID:?SONARI_EARTHQUAKE_ENCLAVE_CID is required}"
-            : "${!SONARI_WALRUS_CLI:?SONARI_WALRUS_CLI is required}"
-            : "${!SONARI_WALRUS_N_SHARDS:?SONARI_WALRUS_N_SHARDS is required}"
-            : "${!SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?SONARI_EARTHQUAKE_EGRESS_PROXY_URL is required}"
-            SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=180
-
-            marker=/tmp/se
-            input_file="$(mktemp)"
-            response_file="$(mktemp)"
-            trap 'rm -f "$input_file" "$response_file"' EXIT
-            cat >"$input_file"
-
-            ensure_earthquake_enclave() {
-              test -s "$SONARI_EARTHQUAKE_EIF_PATH"
-              if [ -f "$marker" ]; then
-                return
-              fi
-
-              nitro-cli terminate-enclave --all &>/dev/null || true
-              nitro-cli run-enclave $SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS >/tmp/sonari-earthquake-run-enclave.json 2>/tmp/sonari-earthquake-run-enclave.err || { cat /tmp/sonari-earthquake-run-enclave.err >&2; exit 1; }
-              rm -f /tmp/sm
-              sleep 2
-
-              jq -n \
-                --arg walrus_cli "$SONARI_WALRUS_CLI" \
-                --argjson walrus_n_shards "$SONARI_WALRUS_N_SHARDS" \
-                --arg egress_proxy_url "$SONARI_EARTHQUAKE_EGRESS_PROXY_URL" \
-                '{
-                  walrus_cli: $walrus_cli,
-                  walrus_n_shards: $walrus_n_shards,
-                  egress_proxy_url: $egress_proxy_url
-                }' | socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777" >/dev/null
-              touch "$marker"
-            }
-
-            call_earthquake_enclave() {
-              local method="$1"
-              local request_path="$2"
-              local body_file="$3"
-              local content_length=0
-
-              if [ "$method" = "POST" ]; then
-                content_length="$(wc -c <"$body_file")"
-                {
-                  printf '%s %s HTTP/1.1\r\nHost: sonari-earthquake\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %s\r\n\r\n' "$method" "$request_path" "$content_length"
-                  cat "$body_file"
-                } | socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
-              else
-                printf '%s %s HTTP/1.1\r\nHost: sonari-earthquake\r\nConnection: close\r\n\r\n' "$method" "$request_path" \
-                  | socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000" >"$response_file"
-              fi
-
-              status_line="$(head -n 1 "$response_file" | tr -d '\r')"
-              case "$status_line" in
-                "HTTP/1.1 200 "*|"HTTP/1.0 200 "*) ;;
-                *)
-                  cat "$response_file" >&2
-                  exit 1
-                  ;;
-              esac
-              awk 'BEGIN { body = 0 } body { print } { line = $0; sub(/\r$/, "", line); if (line == "") body = 1 }' "$response_file"
-            }
-
-            ensure_earthquake_enclave
-            action="$(jq -r '.action // empty' "$input_file")"
-            case "$action" in
-              health_check)
-                call_earthquake_enclave GET /health_check "$input_file"
-                ;;
-              get_attestation)
-                call_earthquake_enclave GET /get_attestation "$input_file"
-                ;;
-              process_data)
-                call_earthquake_enclave POST /process_data "$input_file"
-                ;;
-              *)
-                echo "Unsupported earthquake TEE action: $action" >&2
-                exit 1
-                ;;
-            esac
+            set -a;. /opt/sonari/runner.env;set +a
+            E="$SONARI_EARTHQUAKE_EIF_PATH" A="$SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_EARTHQUAKE_ENCLAVE_CID" M=/tmp/se X="/tmp/sm /tmp/sc" T=180 B='jq -n --arg walrus_cli "$SONARI_WALRUS_CLI" --argjson walrus_n_shards "$SONARI_WALRUS_N_SHARDS" --arg egress_proxy_url "$SONARI_EARTHQUAKE_EGRESS_PROXY_URL" "{walrus_cli:\$walrus_cli,walrus_n_shards:\$walrus_n_shards,egress_proxy_url:\$egress_proxy_url}" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_EARTHQUAKE_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-earthquake-enclave
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            . /opt/sonari/runner.env
+            set -a;. /opt/sonari/runner.env;set +a
             : "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID" "$SONARI_WORLD_ID_ACTION"
-            eif="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH"
-            args="$SONARI_NITRO_RUN_ENCLAVE_ARGS"
-            cid="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID"
-            m=/tmp/sm
-            i="$(mktemp)"
-            o="$(mktemp)"
-            trap 'rm -f "$i" "$o"' EXIT
-            cat >"$i"
-            ensure_membership_enclave() {
-              test -s "$eif"
-              [ -f "$m" ] && return
-              nitro-cli terminate-enclave --all &>/dev/null || true
-              rm -f /tmp/se
-              nitro-cli run-enclave $args >/dev/null 2>/tmp/m.err || { cat /tmp/m.err >&2; exit 1; }
-              sleep 2
-              jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" --arg network "$RELAYER_NETWORK" --arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE" --arg world_id_action "$SONARI_WORLD_ID_ACTION" '{$world_id_api_base,$world_id_app_id,$egress_proxy_url,$network,$proof_mode,$world_id_action}' | socat -t 180 - "VSOCK-CONNECT:$cid:7777" >/dev/null
-              touch "$m"
-            }
-            ensure_membership_enclave
-            action="$(jq -r .action "$i")"
-            case "$action" in
-              get_attestation) printf 'GET /get_attestation HTTP/1.0\r\n\r\n' ;;
-              process_data) printf 'POST /process_data HTTP/1.0\r\nContent-Length:%s\r\n\r\n' "$(wc -c <"$i")"; cat "$i" ;;
-              *) exit 1 ;;
-            esac | socat -t 180 - "VSOCK-CONNECT:$cid:3000" >"$o"
-            head -n 1 "$o" | tr -d '\r' | grep -Eq '^HTTP/1\.[01] 200 ' || { cat "$o" >&2; exit 1; }
-            sed '1,/^\r\{0,1\}$/d' "$o"
+            E="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" A="$SONARI_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" M=/tmp/sm X="/tmp/se /tmp/sc" T=180 B='jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" --arg network "$RELAYER_NETWORK" --arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE" --arg world_id_action "$SONARI_WORLD_ID_ACTION" "{\$world_id_api_base,\$world_id_app_id,\$egress_proxy_url,\$network,\$proof_mode,\$world_id_action}" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-membership-identity-enclave
+            cat >/opt/sonari/bin/run-census-enclave <<'SONARI_CENSUS_ENCLAVE_WRAPPER'
+            #!/bin/bash
+            set -euo pipefail
+            set -a;. /opt/sonari/runner.env;set +a
+            : "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"
+            E="$SONARI_CENSUS_EIF_PATH" A="$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_CENSUS_ENCLAVE_CID" M=/tmp/sc X="/tmp/se /tmp/sm" T=180 B='printf "{}\n" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
+            SONARI_CENSUS_ENCLAVE_WRAPPER
+            chmod 0500 /opt/sonari/bin/run-census-enclave
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
             #!/bin/bash
             set -euo pipefail
@@ -677,6 +644,9 @@ Resources:
               set +a
             fi
             case "${!SONARI_VERIFIER_KIND:-earthquake}" in
+              "census")
+                exec "${!SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-census-enclave}"
+                ;;
               "membership_identity")
                 exec "${!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}"
                 ;;
@@ -697,6 +667,10 @@ Resources:
             membership_command=$(cat <<'SONARI_MEMBERSHIP_COMMAND'
             ${MembershipNitroEnclaveProcessCommand}
             SONARI_MEMBERSHIP_COMMAND
+            )
+            census_command=$(cat <<'SONARI_CENSUS_COMMAND'
+            ${CensusNitroEnclaveProcessCommand}
+            SONARI_CENSUS_COMMAND
             )
             world_id_app_id=$(cat <<'SONARI_WORLD_ID_APP_ID'
             ${WorldIdAppId}
@@ -828,6 +802,9 @@ Resources:
               printf 'SONARI_MEMBERSHIP_IDENTITY_EIF_PATH=%q\n' "$tee_eif"
               echo "SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $tee_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
+              printf 'SONARI_CENSUS_EIF_PATH=%q\n' "$census_eif"
+              echo "SONARI_CENSUS_ENCLAVE_CID=${NitroEnclaveCid}"
+              printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $census_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_ACTION=%q\n' "$world_id_action"
               echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
@@ -839,12 +816,14 @@ Resources:
               printf 'NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$nitro_enclave_process_command"
               printf 'SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$earthquake_command"
               printf 'SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$membership_command"
+              printf 'SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND=%q\n' "$census_command"
             } >/opt/sonari/runner.env
             chown ec2-user:ec2-user /opt/sonari/runner.env
             chmod 0400 /opt/sonari/runner.env
             test -x /opt/sonari/bin/run-sonari-verifier
             test -x /opt/sonari/bin/run-earthquake-enclave
             test -x /opt/sonari/bin/run-membership-identity-enclave
+            test -x /opt/sonari/bin/run-census-enclave
             systemctl is-active --quiet nitro-enclaves-allocator.service
             systemctl is-active --quiet sonari-earthquake-egress-connect-proxy.service
             systemctl is-active --quiet sonari-earthquake-egress-vsock-proxy.service
@@ -1309,6 +1288,7 @@ Resources:
           NITRO_ENCLAVE_PROCESS_COMMAND: !Ref NitroEnclaveProcessCommand
           EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref EarthquakeNitroEnclaveProcessCommand
           MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref MembershipNitroEnclaveProcessCommand
+          CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref CensusNitroEnclaveProcessCommand
           RELAYER_MODE: !Ref RelayerMode
           RELAYER_NETWORK: !Ref RelayerNetwork
           RELAYER_TARGET: !Ref RelayerTarget
@@ -1542,21 +1522,21 @@ Resources:
             "ReadResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ApplyResult",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ApplyResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ArchiveSources",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ArchiveSources": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RegisterAffectedCellsProof",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
@@ -1564,7 +1544,7 @@ Resources:
             "RegisterAffectedCellsProof": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RelayerPreviewOrDryRun",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "RelayerPreviewOrDryRun" }]
@@ -1591,7 +1571,7 @@ Resources:
             "RelayerPreviewOrDryRun": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RelayerResultComplete",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
@@ -1605,7 +1585,7 @@ Resources:
             "RecordRelayerSuccess": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
               "Next": "RunFloorCensus",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
@@ -1613,7 +1593,7 @@ Resources:
             "RunFloorCensus": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "run_floor_census", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "run_floor_census", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
               "Next": "StopInstance",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
@@ -1951,6 +1931,14 @@ Outputs:
     Value: !Ref TeeEifS3Key
   TeeEifSha256Output:
     Value: !Ref TeeEifSha256
+  CensusTeeArtifactS3KeyOutput:
+    Value: !Ref CensusTeeArtifactS3Key
+  CensusTeeArtifactSha256Output:
+    Value: !Ref CensusTeeArtifactSha256
+  CensusTeeEifS3KeyOutput:
+    Value: !Ref CensusTeeEifS3Key
+  CensusTeeEifSha256Output:
+    Value: !Ref CensusTeeEifSha256
   EarthquakeRunnerStateMachineArn:
     Value: !Ref EarthquakeRunnerStateMachine
   MembershipRunnerStateMachineArn:

@@ -7,6 +7,8 @@ const EARTHQUAKE_TEE_ARTIFACT_FILE_NAME = "earthquake-tee-artifact.tar.gz";
 const EARTHQUAKE_EIF_FILE_NAME = "earthquake-tee.eif";
 const MEMBERSHIP_TEE_ARTIFACT_FILE_NAME = "membership-identity-tee-artifact.tar.gz";
 const MEMBERSHIP_EIF_FILE_NAME = "membership-identity-tee.eif";
+const CENSUS_TEE_ARTIFACT_FILE_NAME = "census-tee-artifact.tar.gz";
+const CENSUS_EIF_FILE_NAME = "census-tee.eif";
 const DEFAULT_SOURCE_ARCHIVER_SUI_NETWORK = "testnet";
 const DEFAULT_SOURCE_ARCHIVER_SUI_RPC_URL = "https://fullnode.testnet.sui.io:443";
 const DEFAULT_SOURCE_ARCHIVER_WALRUS_UPLOAD_RELAY_URL = "https://upload-relay.testnet.walrus.space";
@@ -32,6 +34,12 @@ const DEPLOY_PARAMETER_KEYS = [
     "TeeEifS3Bucket",
     "TeeEifS3Key",
     "TeeEifSha256",
+    "CensusTeeArtifactS3Bucket",
+    "CensusTeeArtifactS3Key",
+    "CensusTeeArtifactSha256",
+    "CensusTeeEifS3Bucket",
+    "CensusTeeEifS3Key",
+    "CensusTeeEifSha256",
     "GitCommitSha",
     "ScheduleState",
     "ScheduleExpression",
@@ -64,6 +72,10 @@ export type BuildAwsSonariVerifierRunnerDeployPlanInput = {
     membershipTeeArtifactSha256: string;
     membershipEifBucket: string;
     membershipEifSha256: string;
+    censusTeeBucket: string;
+    censusTeeArtifactSha256: string;
+    censusEifBucket: string;
+    censusEifSha256: string;
     sourceArchiverTokenSecretArn: string;
     sourceArchiverPrivateKeySecretArn: string;
     sourceArchiverSuiNetwork?: SourceArchiverSuiNetwork;
@@ -119,6 +131,15 @@ export function buildAwsSonariVerifierRunnerDeployPlan(
         TeeEifS3Bucket: validateS3Bucket(input.membershipEifBucket, "membership EIF bucket"),
         TeeEifS3Key: `${prefix}/${commitSha}/${MEMBERSHIP_EIF_FILE_NAME}`,
         TeeEifSha256: validateSha256(input.membershipEifSha256, "membership EIF SHA-256"),
+        CensusTeeArtifactS3Bucket: validateS3Bucket(input.censusTeeBucket, "census TEE bucket"),
+        CensusTeeArtifactS3Key: `${prefix}/${commitSha}/${CENSUS_TEE_ARTIFACT_FILE_NAME}`,
+        CensusTeeArtifactSha256: validateSha256(
+            input.censusTeeArtifactSha256,
+            "census TEE artifact SHA-256",
+        ),
+        CensusTeeEifS3Bucket: validateS3Bucket(input.censusEifBucket, "census EIF bucket"),
+        CensusTeeEifS3Key: `${prefix}/${commitSha}/${CENSUS_EIF_FILE_NAME}`,
+        CensusTeeEifSha256: validateSha256(input.censusEifSha256, "census EIF SHA-256"),
         GitCommitSha: commitSha,
         ScheduleState: "DISABLED",
         ScheduleExpression: input.scheduleExpression ?? DEFAULT_SCHEDULE_EXPRESSION,
@@ -271,6 +292,10 @@ type CliOptions = {
     membershipTeeArtifactSha256?: string;
     membershipEifBucket?: string;
     membershipEifSha256?: string;
+    censusTeeBucket?: string;
+    censusTeeArtifactSha256?: string;
+    censusEifBucket?: string;
+    censusEifSha256?: string;
     sourceArchiverTokenSecretArn?: string;
     sourceArchiverPrivateKeySecretArn?: string;
     sourceArchiverSuiNetwork?: SourceArchiverSuiNetwork;
@@ -300,6 +325,10 @@ async function main(): Promise<void> {
         options.membershipTeeArtifactSha256 === undefined ||
         options.membershipEifBucket === undefined ||
         options.membershipEifSha256 === undefined ||
+        options.censusTeeBucket === undefined ||
+        options.censusTeeArtifactSha256 === undefined ||
+        options.censusEifBucket === undefined ||
+        options.censusEifSha256 === undefined ||
         options.sourceArchiverTokenSecretArn === undefined ||
         options.sourceArchiverPrivateKeySecretArn === undefined
     ) {
@@ -316,6 +345,10 @@ async function main(): Promise<void> {
                 "--membership-tee-sha256 <sha256>",
                 "--membership-eif-bucket <bucket>",
                 "--membership-eif-sha256 <sha256>",
+                "--census-tee-bucket <bucket>",
+                "--census-tee-sha256 <sha256>",
+                "--census-eif-bucket <bucket>",
+                "--census-eif-sha256 <sha256>",
                 "--source-archiver-token-secret-arn <arn>",
                 "--source-archiver-private-key-secret-arn <arn>",
                 "[--source-archiver-sui-network <mainnet|testnet>]",
@@ -345,6 +378,10 @@ async function main(): Promise<void> {
         membershipTeeArtifactSha256: options.membershipTeeArtifactSha256,
         membershipEifBucket: options.membershipEifBucket,
         membershipEifSha256: options.membershipEifSha256,
+        censusTeeBucket: options.censusTeeBucket,
+        censusTeeArtifactSha256: options.censusTeeArtifactSha256,
+        censusEifBucket: options.censusEifBucket,
+        censusEifSha256: options.censusEifSha256,
         sourceArchiverTokenSecretArn: options.sourceArchiverTokenSecretArn,
         sourceArchiverPrivateKeySecretArn: options.sourceArchiverPrivateKeySecretArn,
         ...(options.sourceArchiverSuiNetwork === undefined
@@ -430,6 +467,18 @@ function parseArgs(args: string[]): CliOptions {
                 break;
             case "--membership-eif-sha256":
                 options.membershipEifSha256 = next;
+                break;
+            case "--census-tee-bucket":
+                options.censusTeeBucket = next;
+                break;
+            case "--census-tee-sha256":
+                options.censusTeeArtifactSha256 = next;
+                break;
+            case "--census-eif-bucket":
+                options.censusEifBucket = next;
+                break;
+            case "--census-eif-sha256":
+                options.censusEifSha256 = next;
                 break;
             case "--source-archiver-token-secret-arn":
                 options.sourceArchiverTokenSecretArn = next;

@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+    buildFloorCensusInputBundle,
     computeFloorCensusCounts,
     DirectFloorCensusAdapter,
     encodeFloorCensusResultBcs,
+    type FloorCensusAffectedCellsResolver,
     type FloorCensusOnchainReader,
     type FloorCensusSubmitClient,
     GraphqlFloorCensusReader,
     JsonRpcFloorCensusReader,
+    parseFloorCensusTeeOutput,
     signFloorCensusResult,
     type HomeCellRegisteredEvent,
 } from "../src/census.js";
@@ -122,6 +125,99 @@ describe("floor census core", () => {
         expect(signed.publicKey).toHaveLength(32);
         expect(signed.signatureHex).toBe(`0x${"11".repeat(64)}`);
         expect(signed.publicKeyHex).toBe(`0x${"22".repeat(32)}`);
+    });
+
+    it("builds a Census TEE input bundle from the earthquake result and membership snapshot", async () => {
+        const bundle = await buildFloorCensusInputBundle({
+            result: finalizedResultForCensus(),
+            homeCellEvents: [{ lineage: `0x${"11".repeat(32)}`, homeCell: "20", registeredAtMs: 900 }],
+            activeLineages: new Set([`0x${"11".repeat(32)}`]),
+            campaignId: `0x${"44".repeat(32)}`,
+            disasterEventId: `0x${"55".repeat(32)}`,
+            censusCheckpoint: 41,
+            issuedAtMs: 1_800_000_001_000,
+        });
+
+        expect(bundle).toMatchObject({
+            event_uid: eventUid,
+            event_revision: 7,
+            occurred_at_ms: 1_000,
+            affected_cells_root: expectedRoot(),
+            issued_at_ms: 1_800_000_001_000,
+            campaign_id: `0x${"44".repeat(32)}`,
+            disaster_event_id: `0x${"55".repeat(32)}`,
+            census_checkpoint: 41,
+            home_cell_events: [
+                {
+                    lineage: `0x${"11".repeat(32)}`,
+                    home_cell: "20",
+                    registered_at_ms: 900,
+                },
+            ],
+            active_lineages: [`0x${"11".repeat(32)}`],
+        });
+        expect(bundle.affected_cells).toEqual({ ...affectedCells, event_revision: 7 });
+    });
+
+    it("resolves affected cells from stored references when the finalized result omits the inline artifact", async () => {
+        const { affected_cells: _affectedCells, ...baseResult } = finalizedResultForCensus();
+        const result = {
+            ...baseResult,
+            affected_cells_ref: {
+                uri: "walrus://blob/affectedCells_123456",
+                walrus_blob_id: "affectedCells_123456",
+                source_hash: `0x${"66".repeat(32)}`,
+                size_bytes: 123,
+            },
+        };
+        const resolver = new RecordingAffectedCellsResolver();
+
+        const bundle = await buildFloorCensusInputBundle({
+            result,
+            homeCellEvents: [],
+            activeLineages: [],
+            campaignId: `0x${"44".repeat(32)}`,
+            disasterEventId: `0x${"55".repeat(32)}`,
+            censusCheckpoint: 41,
+            issuedAtMs: 1_800_000_001_000,
+            affectedCellsResolver: resolver,
+        });
+
+        expect(bundle.affected_cells).toEqual({ ...affectedCells, event_revision: 7 });
+        expect(resolver.inputs).toEqual([
+            {
+                affectedCellsRef: result.affected_cells_ref,
+                evidenceManifest: undefined,
+            },
+        ]);
+    });
+
+    it("parses Census TEE output into raw submit bytes and counts", () => {
+        const parsed = parseFloorCensusTeeOutput({
+            status: "finalized",
+            payload: {
+                registered_members_by_band: [1, "2", 3],
+            },
+            payload_bcs_hex: `0x${"aa".repeat(8)}`,
+            signature: `0x${"11".repeat(64)}`,
+            public_key: `0x${"22".repeat(32)}`,
+        });
+
+        expect(parsed.counts).toEqual([1n, 2n, 3n]);
+        expect(parsed.censusBcs).toEqual(Uint8Array.from({ length: 8 }, () => 0xaa));
+        expect(parsed.signature).toHaveLength(64);
+        expect(parsed.publicKey).toHaveLength(32);
+    });
+
+    it("fails closed on malformed Census TEE output", () => {
+        expect(() =>
+            parseFloorCensusTeeOutput({
+                payload: { registered_members_by_band: [1, 2] },
+                payload_bcs_hex: "0xaa",
+                signature: `0x${"11".repeat(64)}`,
+                public_key: `0x${"22".repeat(32)}`,
+            }),
+        ).toThrow("registered_members_by_band");
     });
 });
 
@@ -238,6 +334,38 @@ describe("GraphqlFloorCensusReader", () => {
             membershipRegistryId: "0xmembership",
             checkpoint: 41,
         });
+    });
+
+    it("reads active membership status from GraphQL dynamic field value objects", async () => {
+        const activeLineage = `0x${"11".repeat(32)}`;
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [
+                            {
+                                contents: {
+                                    json: {
+                                        id: "0xfield",
+                                        name: activeLineage,
+                                        value: {
+                                            status: 1,
+                                        },
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.listActiveLineages({
+                membershipRegistryId: "0xmembership",
+                lineages: [activeLineage],
+            }),
+        ).resolves.toEqual(new Set([activeLineage]));
     });
 
     it("encodes lineage object IDs as GraphQL dynamic field key BCS bytes", async () => {
@@ -852,6 +980,21 @@ class RecordingFloorCensusSubmitClient implements FloorCensusSubmitClient {
                 status: { success: true },
             },
         };
+    }
+}
+
+class RecordingAffectedCellsResolver implements FloorCensusAffectedCellsResolver {
+    readonly inputs: Array<{
+        affectedCellsRef?: unknown;
+        evidenceManifest?: unknown;
+    }> = [];
+
+    async resolveAffectedCells(input: {
+        affectedCellsRef?: unknown;
+        evidenceManifest?: unknown;
+    }): Promise<typeof affectedCells> {
+        this.inputs.push(input);
+        return { ...affectedCells, event_revision: 7 };
     }
 }
 

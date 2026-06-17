@@ -71,6 +71,48 @@ describe("shell helpers", () => {
         );
     });
 
+    it("builds the SSM command skeleton with S3-staged payload handling", () => {
+        expect(
+            buildRunnerSsmShellCommand({
+                resultBucket: "runner-results",
+                resultS3Key: "results/job-1/1800000000123.json",
+                nitroEnclaveProcessCommand: "/opt/sonari/bin/run-census-enclave --flag",
+                teeInputS3Uri: "s3://runner-results/source-artifacts/job-1/input.json",
+                tempResultPath: "/tmp/sonari-census-tee-result-job-1-1800000000123.json",
+            }),
+        ).toBe(
+            [
+                "set -euo pipefail",
+                "source /opt/sonari/runner.env",
+                "RESULT_S3_KEY='results/job-1/1800000000123.json'",
+                "NITRO_ENCLAVE_PROCESS_COMMAND='/opt/sonari/bin/run-census-enclave --flag'",
+                "export NITRO_ENCLAVE_PROCESS_COMMAND",
+                "aws s3 cp 's3://runner-results/source-artifacts/job-1/input.json' - | '/opt/sonari/bin/run-census-enclave' '--flag' > '/tmp/sonari-census-tee-result-job-1-1800000000123.json'",
+                "aws s3 cp '/tmp/sonari-census-tee-result-job-1-1800000000123.json' 's3://runner-results/results/job-1/1800000000123.json'",
+            ].join("\n"),
+        );
+    });
+
+    it("requires exactly one SSM payload source", () => {
+        const base = {
+            resultBucket: "runner-results",
+            resultS3Key: "results/job-1/1800000000123.json",
+            nitroEnclaveProcessCommand: "/opt/sonari/bin/run-census-enclave",
+            tempResultPath: "/tmp/sonari-census-tee-result-job-1-1800000000123.json",
+        };
+
+        expect(() => buildRunnerSsmShellCommand(base)).toThrow(
+            "exactly one of teeInput or teeInputS3Uri is required",
+        );
+        expect(() =>
+            buildRunnerSsmShellCommand({
+                ...base,
+                teeInput: { status: "verified" },
+                teeInputS3Uri: "s3://runner-results/source-artifacts/job-1/input.json",
+            }),
+        ).toThrow("exactly one of teeInput or teeInputS3Uri is required");
+    });
+
     it.each([
         ["", /command is empty/],
         ["echo 'unterminated", /unterminated quote/],

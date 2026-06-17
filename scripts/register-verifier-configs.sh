@@ -13,11 +13,15 @@ Usage:
     --earthquake-pcr2 <PCR2> \
     --identity-pcr0 <PCR0> \
     --identity-pcr1 <PCR1> \
-    --identity-pcr2 <PCR2>
+    --identity-pcr2 <PCR2> \
+    --census-pcr0 <PCR0> \
+    --census-pcr1 <PCR1> \
+    --census-pcr2 <PCR2>
 
 Required environment fallback (if flags are omitted):
   EARTHQUAKE_EIF_PCR0/1/2
   MEMBERSHIP_IDENTITY_EIF_PCR0/1/2
+  CENSUS_EIF_PCR0/1/2
 
 Optional:
   --sui-config <path>        (default: .local/sonari-dev/sui_wallets/admin/sui_config.yaml)
@@ -25,6 +29,7 @@ Optional:
   --sender <address>         (optional explicit transaction sender)
   --gas-budget <amount>      (default: 100000000)
   --skip-identity            (skip identity config only)
+  --skip-census              (skip census config only)
   --help
 
 Exit status: 0 on success, non-zero on failure.
@@ -139,7 +144,11 @@ EARTHQUAKE_PCR2="${EARTHQUAKE_EIF_PCR2:-}"
 IDENTITY_PCR0="${MEMBERSHIP_IDENTITY_EIF_PCR0:-}"
 IDENTITY_PCR1="${MEMBERSHIP_IDENTITY_EIF_PCR1:-}"
 IDENTITY_PCR2="${MEMBERSHIP_IDENTITY_EIF_PCR2:-}"
+CENSUS_PCR0="${CENSUS_EIF_PCR0:-}"
+CENSUS_PCR1="${CENSUS_EIF_PCR1:-}"
+CENSUS_PCR2="${CENSUS_EIF_PCR2:-}"
 SKIP_IDENTITY=0
+SKIP_CENSUS=0
 
 if [[ $# -eq 0 ]]; then
   usage
@@ -184,6 +193,18 @@ while [[ $# -gt 0 ]]; do
       IDENTITY_PCR2="$2"
       shift 2
       ;;
+    --census-pcr0)
+      CENSUS_PCR0="$2"
+      shift 2
+      ;;
+    --census-pcr1)
+      CENSUS_PCR1="$2"
+      shift 2
+      ;;
+    --census-pcr2)
+      CENSUS_PCR2="$2"
+      shift 2
+      ;;
     --sui-config)
       SUI_CLIENT_CONFIG="$2"
       shift 2
@@ -202,6 +223,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-identity)
       SKIP_IDENTITY=1
+      shift
+      ;;
+    --skip-census)
+      SKIP_CENSUS=1
       shift
       ;;
     --help|-h)
@@ -244,6 +269,11 @@ if [[ "$SKIP_IDENTITY" -ne 1 ]]; then
   IDENTITY_PCR1="$(normalize_hex_48 "$IDENTITY_PCR1" "MEMBERSHIP_IDENTITY_EIF_PCR1")"
   IDENTITY_PCR2="$(normalize_hex_48 "$IDENTITY_PCR2" "MEMBERSHIP_IDENTITY_EIF_PCR2")"
 fi
+if [[ "$SKIP_CENSUS" -ne 1 ]]; then
+  CENSUS_PCR0="$(normalize_hex_48 "$CENSUS_PCR0" "CENSUS_EIF_PCR0")"
+  CENSUS_PCR1="$(normalize_hex_48 "$CENSUS_PCR1" "CENSUS_EIF_PCR1")"
+  CENSUS_PCR2="$(normalize_hex_48 "$CENSUS_PCR2" "CENSUS_EIF_PCR2")"
+fi
 
 if [[ "$SUI_CLIENT_ENV" != "testnet" && "$SUI_CLIENT_ENV" != "devnet" && "$SUI_CLIENT_ENV" != "mainnet" ]]; then
   echo "--sui-env should be testnet, devnet, or mainnet" >&2
@@ -271,6 +301,9 @@ echo "gas budget:        $GAS_BUDGET"
 if [[ "$SKIP_IDENTITY" -eq 1 ]]; then
   echo "identity:          skipped"
 fi
+if [[ "$SKIP_CENSUS" -eq 1 ]]; then
+  echo "census:            skipped"
+fi
 
 echo "start register verifier configs"
 
@@ -287,6 +320,13 @@ if [[ "$SKIP_IDENTITY" -ne 1 ]]; then
     "create_identity_verifier_config" \
     "update_identity_verifier_config_pcrs" \
     "$IDENTITY_PCR0" "$IDENTITY_PCR1" "$IDENTITY_PCR2"
+fi
+
+if [[ "$SKIP_CENSUS" -ne 1 ]]; then
+  register_family "census" \
+    "create_census_verifier_config" \
+    "update_census_verifier_config_pcrs" \
+    "$CENSUS_PCR0" "$CENSUS_PCR1" "$CENSUS_PCR2"
 fi
 
 echo "all requested verifier configs registered"

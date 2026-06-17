@@ -99,6 +99,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain(
             "MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref MembershipNitroEnclaveProcessCommand",
         );
+        expect(template).toContain(
+            "CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND: !Ref CensusNitroEnclaveProcessCommand",
+        );
     });
 
     it("exposes SubmitVerification through a public POST Function URL", async () => {
@@ -207,6 +210,18 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"Next": "RegisterAffectedCellsProof"');
         expect(template).toContain('"RegisterAffectedCellsProof"');
         expect(template).toContain('"Next": "RelayerPreviewOrDryRun"');
+        expect(template).toContain(
+            '"action": "read_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
+        expect(template).toContain(
+            '"action": "apply_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
+        expect(template).toContain(
+            '"action": "archive_sources", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
+        expect(template).toContain(
+            '"action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
         expect(template).toContain('"RegisterAffectedCellsProofRetry"');
         expect(template).toContain('"End": true');
         expect(template).toContain('"Next": "RestoreAffectedCellsProofRegistrationRetry"');
@@ -231,6 +246,13 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(dispatcher).toContain(
             "$" +
                 "{!SONARI_MEMBERSHIP_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-membership-identity-enclave}",
+        );
+
+        // census path selects the census enclave wrapper.
+        expect(dispatcher).toContain('"census"');
+        expect(dispatcher).toContain(
+            "$" +
+                "{!SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-census-enclave}",
         );
 
         // earthquake path remains the earthquake enclave wrapper, unchanged.
@@ -289,6 +311,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(earthquake).toContain('"attestation.$": "$.attestation_result.attestation"');
         expect(earthquake).toContain(
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
+        );
+        expect(earthquake).toContain(
+            '"action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
         );
     });
 
@@ -367,16 +392,18 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
         expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
         expect(template).toContain("source /opt/sonari/runner.env");
-        expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:7777");
-        expect(template).toContain("VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000");
-        expect(template).toContain("call_earthquake_enclave GET /health_check");
-        expect(template).toContain("call_earthquake_enclave GET /get_attestation");
-        expect(template).toContain("call_earthquake_enclave POST /process_data");
+        expect(template).toContain("cat >/opt/sonari/bin/run-http-enclave");
+        expect(template).toContain("set -a;. /opt/sonari/runner.env;set +a");
+        expect(template).toContain("VSOCK-CONNECT:$C:7777");
+        expect(template).toContain("VSOCK-CONNECT:$C:3000");
+        expect(template).toContain("health_check) method=GET; path=/health_check");
+        expect(template).toContain("get_attestation) method=GET; path=/get_attestation");
+        expect(template).toContain("process_data) method=POST; path=/process_data");
         expect(template).toContain("SONARI_WALRUS_CLI=/opt/sonari/tee-artifact/bin/walrus");
         expect(template).toContain("SONARI_EARTHQUAKE_EIF_PATH");
         expect(template).toContain("SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS");
         expect(template).toContain("SONARI_EARTHQUAKE_EGRESS_PROXY_URL");
-        expect(template).toContain("egress_proxy_url: $egress_proxy_url");
+        expect(template).toContain("egress_proxy_url:\\$egress_proxy_url");
         expect(template).toContain(
             'exec "$' +
                 '{!SONARI_EARTHQUAKE_NITRO_ENCLAVE_PROCESS_COMMAND:-/opt/sonari/bin/run-earthquake-enclave}"',
@@ -449,6 +476,14 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         const watcherRoleStart = template.indexOf("WatcherLambdaRole:");
         const runnerRole = template.slice(runnerRoleStart, watcherRoleStart);
         expect(runnerRole).not.toContain("SourceArchiverPrivateKeySecretArn");
+        expect(runnerRole).toContain("Action: s3:GetObject");
+        expect(runnerRole).toContain(
+            "Resource:\n                  - !Sub arn:$" +
+                "{AWS::Partition}:s3:::$" +
+                "{TeeArtifactS3Bucket}/$" +
+                "{TeeArtifactS3Key}",
+        );
+        expect(runnerRole).toContain("- !Sub $" + "{RunnerResultBucket.Arn}/source-artifacts/*");
     });
 
     it("configures earthquake enclave egress through a parent CONNECT proxy and local bridge", async () => {
@@ -552,6 +587,47 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("SONARI_TEE_SIGNING_KEY_SEED=");
     });
 
+    it("retains census TEE artifact, EIF, wrapper, and shared runner environment wiring", async () => {
+        const template = await readTemplate();
+        const censusWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-census-enclave",
+            "SONARI_CENSUS_ENCLAVE_WRAPPER",
+        );
+
+        expect(template).toContain("CensusNitroEnclaveProcessCommand:");
+        expect(template).toContain("Default: /opt/sonari/bin/run-census-enclave");
+        expect(template).toContain("CensusTeeArtifactS3Bucket:");
+        expect(template).toContain("CensusTeeArtifactS3Key:");
+        expect(template).toContain("CensusTeeArtifactSha256:");
+        expect(template).toContain("CensusTeeEifS3Bucket:");
+        expect(template).toContain("CensusTeeEifS3Key:");
+        expect(template).toContain("CensusTeeEifSha256:");
+        expect(template).toContain(
+            "aws s3 cp 's3://$" + "{CensusTeeArtifactS3Bucket}/$" + "{CensusTeeArtifactS3Key}'",
+        );
+        expect(template).toContain(
+            "aws s3 cp 's3://$" + "{CensusTeeEifS3Bucket}/$" + "{CensusTeeEifS3Key}'",
+        );
+        expect(template).toContain("test -x /opt/sonari/census-tee-artifact/bin/census-tee");
+        expect(template).toContain("test -x /opt/sonari/census-tee-artifact/bin/vsock-tcp-bridge");
+        expect(template).toContain("printf 'SONARI_CENSUS_EIF_PATH=%q");
+        expect(template).toContain("SONARI_CENSUS_ENCLAVE_CID=$" + "{NitroEnclaveCid}");
+        expect(template).toContain("printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q");
+        expect(template).toContain("printf 'SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND=%q");
+        expect(template).toContain("test -x /opt/sonari/bin/run-census-enclave");
+
+        expect(censusWrapper).toContain("/opt/sonari/runner.env");
+        expect(censusWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
+        expect(censusWrapper).toContain(
+            ': "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"',
+        );
+        expect(censusWrapper).toContain("M=/tmp/sc");
+        expect(censusWrapper).toContain('X="/tmp/se /tmp/sm"');
+        expect(censusWrapper).toContain("VSOCK-CONNECT:$C:7777");
+        expect(censusWrapper).toContain("exec /opt/sonari/bin/run-http-enclave");
+    });
+
     it("routes membership verifier through server bootstrap and VSOCK HTTP requests", async () => {
         const template = await readTemplate();
         const membershipWrapper = extractHeredoc(
@@ -561,21 +637,18 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
 
         expect(membershipWrapper).toContain("/opt/sonari/runner.env");
+        expect(membershipWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(membershipWrapper).toContain(
             ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID" "$SONARI_WORLD_ID_ACTION"',
         );
-        expect(membershipWrapper).toContain("m=/tmp/sm");
-        expect(membershipWrapper).toContain("nitro-cli terminate-enclave --all");
-        expect(membershipWrapper).toContain("rm -f /tmp/se");
-        expect(membershipWrapper).toContain("nitro-cli run-enclave $args");
+        expect(membershipWrapper).toContain("M=/tmp/sm");
+        expect(membershipWrapper).toContain('X="/tmp/se /tmp/sc"');
         expect(membershipWrapper).toContain(
             '--arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL"',
         );
-        expect(membershipWrapper).toContain("$egress_proxy_url");
-        expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:7777");
-        expect(membershipWrapper).toContain("VSOCK-CONNECT:$cid:3000");
-        expect(membershipWrapper).toContain("GET /get_attestation HTTP/1.0");
-        expect(membershipWrapper).toContain("POST /process_data HTTP/1.0");
+        expect(membershipWrapper).toContain("\\$egress_proxy_url");
+        expect(membershipWrapper).toContain("VSOCK-CONNECT:$C:7777");
+        expect(membershipWrapper).toContain("exec /opt/sonari/bin/run-http-enclave");
         expect(membershipWrapper).not.toContain("SONARI_ENCLAVE_STDIO_BRIDGE");
         expect(membershipWrapper).not.toContain('exec "$SONARI_ENCLAVE_STDIO_BRIDGE"');
     });
@@ -593,11 +666,20 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
             "SONARI_ENCLAVE_WRAPPER",
         );
 
-        expect(earthquakeWrapper).toContain("marker=/tmp/se");
-        expect(earthquakeWrapper).toContain("nitro-cli terminate-enclave --all");
-        expect(earthquakeWrapper).toContain("rm -f /tmp/sm");
-        expect(membershipWrapper).toContain("m=/tmp/sm");
-        expect(membershipWrapper).toContain("rm -f /tmp/se");
+        expect(earthquakeWrapper).toContain("M=/tmp/se");
+        expect(earthquakeWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
+        expect(earthquakeWrapper).toContain('X="/tmp/sm /tmp/sc"');
+        expect(membershipWrapper).toContain("M=/tmp/sm");
+        expect(membershipWrapper).toContain('X="/tmp/se /tmp/sc"');
+        const censusWrapper = extractHeredoc(
+            template,
+            "cat >/opt/sonari/bin/run-census-enclave",
+            "SONARI_CENSUS_ENCLAVE_WRAPPER",
+        );
+        expect(censusWrapper).toContain("M=/tmp/sc");
+        expect(censusWrapper).toContain('X="/tmp/se /tmp/sm"');
+        expect(template).toContain("nitro-cli terminate-enclave --all");
+        expect(template).toContain("rm -f $X");
     });
 
     it("exports the membership enclave CID to runner.env from the shared NitroEnclaveCid", async () => {
@@ -688,6 +770,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(earthquake).toContain('"Next": "RunFloorCensus"');
         expect(earthquake).toContain('"RunFloorCensus"');
         expect(earthquake).toContain('"action": "run_floor_census"');
+        expect(earthquake).toContain(
+            '"action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success"',
+        );
         expect(earthquake.indexOf('"action": "record_relayer_success"')).toBeLessThan(
             earthquake.indexOf('"action": "run_floor_census"'),
         );
@@ -750,6 +835,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("RunnerRoleArn:");
         expect(template).toContain("EarthquakeTeeEifS3KeyOutput:");
         expect(template).toContain("EarthquakeTeeEifSha256Output:");
+        expect(template).toContain("CensusTeeArtifactS3KeyOutput:");
+        expect(template).toContain("CensusTeeArtifactSha256Output:");
+        expect(template).toContain("CensusTeeEifS3KeyOutput:");
+        expect(template).toContain("CensusTeeEifSha256Output:");
         expect(template).toContain("WatcherScheduleName:");
         expect(template).toContain("BatchScheduleName:");
         expect(template).toContain("WatcherLambdaName:");
@@ -818,7 +907,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('--arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE"');
         expect(template).toContain('--arg world_id_action "$SONARI_WORLD_ID_ACTION"');
         // shorthand keys must appear in the jq output object
-        expect(template).toContain(",$network,$proof_mode,$world_id_action}");
+        expect(template).toContain(",\\$network,\\$proof_mode,\\$world_id_action}");
     });
 
     it("escapes bash parameter expansions so every Fn::Sub variable name stays valid", async () => {
@@ -861,6 +950,13 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // UserData !Sub interpolates. Synthetic equal-length strings keep this test
         // free of real infra identifiers while tracking the rendered byte size.
         const representativeLength: Record<string, number> = {
+            CensusNitroEnclaveProcessCommand: 34,
+            CensusTeeArtifactS3Bucket: 58,
+            CensusTeeArtifactS3Key: 91,
+            CensusTeeArtifactSha256: 64,
+            CensusTeeEifS3Bucket: 58,
+            CensusTeeEifS3Key: 78,
+            CensusTeeEifSha256: 64,
             EarthquakeNitroEnclaveProcessCommand: 38,
             EarthquakeTeeEifS3Bucket: 58,
             EarthquakeTeeEifS3Key: 82,

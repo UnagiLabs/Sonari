@@ -36,6 +36,8 @@ devnet / testnet の dummy World ID proof では、任意 variables として Wo
 - `earthquake-tee.eif`
 - `membership-identity-tee-artifact.tar.gz`
 - `membership-identity-tee.eif`
+- `census-tee-artifact.tar.gz`
+- `census-tee.eif`
 - TEE tarball と EIF の checksum file、または取得済み SHA-256 値
 
 `earthquake-tee-artifact.tar.gz` は `bin/tee`、`bin/walrus`、`bin/vsock-tcp-bridge` を含みます。`bin/walrus` は TEE 内で raw source bytes から deterministic blob id を計算するためだけに使い、TEE は `walrus store` を実行しません。Walrus への実保存、pin、retry、aggregator fetch による再検証は TEE 外の archiver が担います。`SONARI_WALRUS_N_SHARDS=1000` は対象 Walrus network の shard count と一致している必要があります。network、protocol、shard count を変える場合は、VerifierConfig version、PCR、source policy を同時に更新してください。runner EC2 は earthquake 用に allowlist 付き HTTPS CONNECT proxy と vsock proxy を systemd で起動し、enclave 側の local proxy URL は `SONARI_EARTHQUAKE_EGRESS_PROXY_URL=http://127.0.0.1:18080` です。allowlist は USGS に限定します。
@@ -54,9 +56,12 @@ pnpm build:aws-earthquake-tee-artifact
 pnpm build:aws-earthquake-eif
 pnpm build:aws-membership-identity-tee-artifact
 pnpm build:aws-membership-identity-eif
+pnpm build:aws-census-tee-artifact
+pnpm build:aws-census-eif
 
 sha256sum -c dist/aws/earthquake-tee-artifact.tar.gz.sha256
 sha256sum -c dist/aws/membership-identity-tee-artifact.tar.gz.sha256
+sha256sum -c dist/aws/census-tee-artifact.tar.gz.sha256
 
 aws s3 cp \
   dist/aws/sonari-verifier-runner-lambda.zip \
@@ -73,6 +78,12 @@ aws s3 cp \
 aws s3 cp \
   dist/aws/membership-identity-tee.eif \
   "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/membership-identity-tee.eif"
+aws s3 cp \
+  dist/aws/census-tee-artifact.tar.gz \
+  "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/census-tee-artifact.tar.gz"
+aws s3 cp \
+  dist/aws/census-tee.eif \
+  "s3://$ARTIFACT_BUCKET/sonari-verifier-runner/$COMMIT_SHA/census-tee.eif"
 ```
 
 ## 手動 deploy
@@ -84,6 +95,8 @@ EARTHQUAKE_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/earthquake-tee-artifact.tar.gz
 EARTHQUAKE_EIF_SHA256="$(sha256sum dist/aws/earthquake-tee.eif | cut -d ' ' -f 1)"
 MEMBERSHIP_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/membership-identity-tee-artifact.tar.gz.sha256)"
 MEMBERSHIP_EIF_SHA256="$(sha256sum dist/aws/membership-identity-tee.eif | cut -d ' ' -f 1)"
+CENSUS_TEE_SHA256="$(cut -d ' ' -f 1 dist/aws/census-tee-artifact.tar.gz.sha256)"
+CENSUS_EIF_SHA256="$(sha256sum dist/aws/census-tee.eif | cut -d ' ' -f 1)"
 
 pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --commit-sha "$COMMIT_SHA" \
@@ -96,6 +109,10 @@ pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
   --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256" \
+  --census-tee-bucket "$ARTIFACT_BUCKET" \
+  --census-tee-sha256 "$CENSUS_TEE_SHA256" \
+  --census-eif-bucket "$ARTIFACT_BUCKET" \
+  --census-eif-sha256 "$CENSUS_EIF_SHA256" \
   --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN" \
   --source-archiver-private-key-secret-arn "$SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN" \
   --relayer-network "${RELAYER_NETWORK:-testnet}" \
@@ -143,6 +160,10 @@ if pnpm tsx scripts/aws_sonari_verifier_runner_deploy_plan.ts \
   --membership-tee-sha256 "$MEMBERSHIP_TEE_SHA256" \
   --membership-eif-bucket "$ARTIFACT_BUCKET" \
   --membership-eif-sha256 "$MEMBERSHIP_EIF_SHA256" \
+  --census-tee-bucket "$ARTIFACT_BUCKET" \
+  --census-tee-sha256 "$CENSUS_TEE_SHA256" \
+  --census-eif-bucket "$ARTIFACT_BUCKET" \
+  --census-eif-sha256 "$CENSUS_EIF_SHA256" \
   --source-archiver-token-secret-arn "$SOURCE_ARCHIVER_TOKEN_SECRET_ARN" \
   --source-archiver-private-key-secret-arn "$SOURCE_ARCHIVER_PRIVATE_KEY_SECRET_ARN" \
   --relayer-network mainnet --world-id-proof-mode dummy \

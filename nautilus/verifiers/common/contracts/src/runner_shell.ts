@@ -8,7 +8,8 @@ interface RunnerSsmShellCommandInput {
     resultBucket: string;
     resultS3Key: string;
     nitroEnclaveProcessCommand: string;
-    teeInput: unknown;
+    teeInput?: unknown;
+    teeInputS3Uri?: string | undefined;
     requiredEnvNames?: readonly string[] | undefined;
     preEnvCommands?: readonly string[] | undefined;
     postEnvCommands?: readonly string[] | undefined;
@@ -33,6 +34,14 @@ export function buildRunnerSsmShellCommand(input: RunnerSsmShellCommandInput): s
     const commandInvocation = parseNitroEnclaveProcessCommand(input.nitroEnclaveProcessCommand)
         .map(shellSingleQuote)
         .join(" ");
+    const hasInlineInput = Object.hasOwn(input, "teeInput");
+    if (hasInlineInput === (input.teeInputS3Uri !== undefined)) {
+        throw new Error("exactly one of teeInput or teeInputS3Uri is required");
+    }
+    const teeInvocation =
+        input.teeInputS3Uri === undefined
+            ? `printf '%s' ${shellSingleQuote(JSON.stringify(input.teeInput))} | ${commandInvocation} > ${shellSingleQuote(input.tempResultPath)}`
+            : `aws s3 cp ${shellSingleQuote(input.teeInputS3Uri)} - | ${commandInvocation} > ${shellSingleQuote(input.tempResultPath)}`;
     return [
         "set -euo pipefail",
         "source /opt/sonari/runner.env",
@@ -42,7 +51,7 @@ export function buildRunnerSsmShellCommand(input: RunnerSsmShellCommandInput): s
         `RESULT_S3_KEY=${shellSingleQuote(input.resultS3Key)}`,
         `NITRO_ENCLAVE_PROCESS_COMMAND=${shellSingleQuote(input.nitroEnclaveProcessCommand)}`,
         "export NITRO_ENCLAVE_PROCESS_COMMAND",
-        `printf '%s' ${shellSingleQuote(JSON.stringify(input.teeInput))} | ${commandInvocation} > ${shellSingleQuote(input.tempResultPath)}`,
+        teeInvocation,
         `aws s3 cp ${shellSingleQuote(input.tempResultPath)} ${shellSingleQuote(`s3://${input.resultBucket}/${input.resultS3Key}`)}`,
     ].join("\n");
 }
