@@ -16,6 +16,7 @@
     "dependencies": {
         "@googlemaps/js-api-loader": "^2.1.0",
         "@mysten/dapp-kit-react": "^2.0.3",
+        "@mysten/enoki": "1.0.8",
         "@mysten/sui": "^2.17.0",
         "@opennextjs/cloudflare": "^1.19.11",
         "@sonari/proof-core": "workspace:*",
