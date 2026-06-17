@@ -47,6 +47,15 @@ export type EnokiMembershipRequestResult =
     | { readonly ok: true; readonly request: EnokiMembershipRequest }
     | { readonly ok: false; readonly error: EnokiMembershipError };
 
+export function readEnokiMembershipPackageId(): EnokiMembershipResult<string> {
+    const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID;
+    if (membershipPackageId === undefined || !isValidSuiAddress(membershipPackageId)) {
+        return err("invalid_membership_package_id", "Membership package id is invalid.");
+    }
+
+    return { ok: true, value: membershipPackageId };
+}
+
 export function readEnokiMembershipConfig(): EnokiMembershipConfigResult {
     const network = process.env.NEXT_PUBLIC_SUI_NETWORK;
     if (network !== "testnet") {
@@ -58,9 +67,9 @@ export function readEnokiMembershipConfig(): EnokiMembershipConfigResult {
         return err("missing_enoki_private_api_key", "Enoki sponsorship is not configured.");
     }
 
-    const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID;
-    if (membershipPackageId === undefined || !isValidSuiAddress(membershipPackageId)) {
-        return err("invalid_membership_package_id", "Membership package id is invalid.");
+    const packageIdResult = readEnokiMembershipPackageId();
+    if (!packageIdResult.ok) {
+        return packageIdResult;
     }
 
     return {
@@ -68,8 +77,8 @@ export function readEnokiMembershipConfig(): EnokiMembershipConfigResult {
         config: {
             enokiPrivateApiKey,
             network,
-            membershipPackageId,
-            allowedMoveCallTargets: membershipAllowlist(membershipPackageId),
+            membershipPackageId: packageIdResult.value,
+            allowedMoveCallTargets: membershipAllowlist(packageIdResult.value),
         },
     };
 }
