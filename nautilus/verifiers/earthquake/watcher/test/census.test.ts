@@ -408,6 +408,211 @@ describe("GraphqlFloorCensusReader", () => {
             "GraphQL events pageInfo is malformed",
         );
     });
+
+    it("reads campaign id and checkpoint from a paginated CampaignCreated GraphQL event", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            if (request.variables.eventsCursor === null) {
+                return jsonResponse({
+                    data: {
+                        transaction: {
+                            effects: {
+                                checkpoint: { sequenceNumber: "41" },
+                                events: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: true, endCursor: "events-1" },
+                                },
+                                objectChanges: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: false, endCursor: null },
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+            return jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: { sequenceNumber: "41" },
+                            events: {
+                                nodes: [
+                                    {
+                                        contents: {
+                                            json: {
+                                                campaign_id: "0xcampaign-event",
+                                                event_uid: eventUid,
+                                                event_revision: 7,
+                                            },
+                                        },
+                                    },
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).resolves.toEqual({ campaignId: "0xcampaign-event", checkpoint: 41 });
+        expect(requests.map((request) => request.variables.eventsCursor)).toEqual([
+            null,
+            "events-1",
+        ]);
+    });
+
+    it("falls back to a unique paginated Campaign object change candidate", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            if (request.variables.objectChangesCursor === null) {
+                return jsonResponse({
+                    data: {
+                        transaction: {
+                            effects: {
+                                checkpoint: { sequenceNumber: 41 },
+                                events: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: false, endCursor: null },
+                                },
+                                objectChanges: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: true, endCursor: "changes-1" },
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+            return jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: { sequenceNumber: 41 },
+                            events: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [
+                                    {
+                                        address: "0xcampaign-object",
+                                        outputState: {
+                                            address: "0xcampaign-object",
+                                            asMoveObject: {
+                                                contents: {
+                                                    type: {
+                                                        repr: "0xabc::campaign::Campaign",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).resolves.toEqual({ campaignId: "0xcampaign-object", checkpoint: 41 });
+        expect(requests.map((request) => request.variables.objectChangesCursor)).toEqual([
+            null,
+            "changes-1",
+        ]);
+    });
+
+    it("fails closed when a campaign transaction has no checkpoint", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: null,
+                            events: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).rejects.toThrow("relayer transaction checkpoint is missing");
+    });
+
+    it("fails closed when multiple Campaign object change candidates exist", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: { sequenceNumber: 41 },
+                            events: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [
+                                    campaignObjectChange("0xcampaign-1"),
+                                    campaignObjectChange("0xcampaign-2"),
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).rejects.toThrow("relayer transaction included multiple Campaign object changes");
+    });
 });
 
 describe("DirectFloorCensusAdapter", () => {
@@ -448,6 +653,14 @@ describe("DirectFloorCensusAdapter", () => {
                 eventRevision: 7,
             },
         ]);
+        expect(reader.homeCellLookups).toEqual([{ packageId: "0xabc", checkpoint: 41 }]);
+        expect(reader.activeLineageLookups).toEqual([
+            {
+                membershipRegistryId: "0xmembership",
+                lineages: ["0xlineage"],
+                checkpoint: 41,
+            },
+        ]);
         expect(Buffer.from(signer.signedBytes ?? []).toString("hex")).toContain("07000000");
         expect(client.submissions).toHaveLength(1);
     });
@@ -469,6 +682,22 @@ function jsonResponse(
         status: init.status ?? 200,
         headers: { "content-type": "application/json", ...init.headers },
     });
+}
+
+function campaignObjectChange(address: string): unknown {
+    return {
+        address,
+        outputState: {
+            address,
+            asMoveObject: {
+                contents: {
+                    type: {
+                        repr: "0xabc::campaign::Campaign",
+                    },
+                },
+            },
+        },
+    };
 }
 
 function computeAffectedCellsRootForTest(input: typeof affectedCells): string | null {
@@ -572,12 +801,27 @@ class RecordingSigner {
 class RecordingFloorCensusReader implements FloorCensusOnchainReader {
     readonly campaignLookups: Array<{ digest: string; eventUid: string; eventRevision: number }> =
         [];
+    readonly homeCellLookups: Array<{ packageId: string; checkpoint?: number | undefined }> = [];
+    readonly activeLineageLookups: Array<{
+        membershipRegistryId: string;
+        lineages: readonly string[];
+        checkpoint?: number | undefined;
+    }> = [];
 
-    async listHomeCellRegisteredEvents(): Promise<HomeCellRegisteredEvent[]> {
+    async listHomeCellRegisteredEvents(input: {
+        packageId: string;
+        checkpoint?: number | undefined;
+    }): Promise<HomeCellRegisteredEvent[]> {
+        this.homeCellLookups.push(input);
         return [{ lineage: "0xlineage", homeCell: "20", registeredAtMs: 900 }];
     }
 
-    async listActiveLineages(): Promise<ReadonlySet<string>> {
+    async listActiveLineages(input: {
+        membershipRegistryId: string;
+        lineages: readonly string[];
+        checkpoint?: number | undefined;
+    }): Promise<ReadonlySet<string>> {
+        this.activeLineageLookups.push(input);
         return new Set(["0xlineage"]);
     }
 
@@ -585,9 +829,11 @@ class RecordingFloorCensusReader implements FloorCensusOnchainReader {
         digest: string;
         eventUid: string;
         eventRevision: number;
-    }): Promise<string | undefined> {
+    }): Promise<{ campaignId: string; checkpoint: number } | undefined> {
         this.campaignLookups.push(input);
-        return input.eventRevision === 7 ? "0xcampaign-revision-7" : undefined;
+        return input.eventRevision === 7
+            ? { campaignId: "0xcampaign-revision-7", checkpoint: 41 }
+            : undefined;
     }
 }
 
