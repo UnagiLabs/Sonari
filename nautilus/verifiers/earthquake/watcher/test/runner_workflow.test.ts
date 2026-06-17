@@ -1873,9 +1873,13 @@ describe("AWS runner workflow helper", () => {
                 action: "register_affected_cells_proof",
                 source_event_id: "us7000sonari",
                 attempt: 1,
+                instance_id: "i-proof",
                 result,
             } as never),
-        ).resolves.toMatchObject({ affected_cells_proof_registration: "success" });
+        ).resolves.toMatchObject({
+            affected_cells_proof_registration: "success",
+            instance_id: "i-proof",
+        });
 
         expect(registrar.inputs).toEqual([
             {

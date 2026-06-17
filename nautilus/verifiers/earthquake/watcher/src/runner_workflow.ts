@@ -367,6 +367,7 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "register_affected_cells_proof";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
@@ -990,6 +991,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    instance_id: event.instance_id,
                     affected_cells_proof_registration: registration.status,
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
