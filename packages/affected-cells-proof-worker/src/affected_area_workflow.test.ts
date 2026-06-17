@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256Hex } from "@sonari/proof-core";
-import { describe, expect, it, vi } from "vitest";
+import { NonRetryableError } from "cloudflare:workers";
+import { describe, expect, it } from "vitest";
 import type { AffectedAreaR2Bucket, AffectedAreaR2PutOptions } from "./affected_area_r2.js";
 import {
     summarizeAffectedAreaWorkflowInput,
@@ -126,8 +127,6 @@ describe("AffectedAreaArtifactWorkflow", () => {
     });
 
     it("uses NonRetryableError for metadata mismatches before any R2 write", async () => {
-        const NonRetryableError = class extends Error {};
-        vi.stubGlobal("NonRetryableError", NonRetryableError);
         const { runAffectedAreaArtifactWorkflow } = await import("./affected_area_workflow.js");
         const bucket = new FakeAffectedAreaR2Bucket();
 
@@ -147,12 +146,9 @@ describe("AffectedAreaArtifactWorkflow", () => {
         ).rejects.toBeInstanceOf(NonRetryableError);
 
         expect(bucket.puts).toHaveLength(0);
-        vi.unstubAllGlobals();
     });
 
     it("keeps R2 failures retryable and does not save the manifest first", async () => {
-        const NonRetryableError = class extends Error {};
-        vi.stubGlobal("NonRetryableError", NonRetryableError);
         const { runAffectedAreaArtifactWorkflow } = await import("./affected_area_workflow.js");
         const bucket = new FakeAffectedAreaR2Bucket("raster/");
 
@@ -171,15 +167,11 @@ describe("AffectedAreaArtifactWorkflow", () => {
         expect(bucket.puts.map((put) => put.key)).not.toContain(
             "affected-area/events/0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd/revisions/1/affected-area-manifest.json",
         );
-        vi.unstubAllGlobals();
     });
 
     it("is exported as the class named by wrangler.toml", async () => {
-        vi.stubGlobal("WorkflowEntrypoint", class {});
-        vi.stubGlobal("NonRetryableError", Error);
-
         const [{ AffectedAreaArtifactWorkflow }, wranglerToml] = await Promise.all([
-            import("./affected_area_workflow.js"),
+            import("./index.js"),
             readFile(path.join(process.cwd(), "wrangler.toml"), "utf8"),
         ]);
 
