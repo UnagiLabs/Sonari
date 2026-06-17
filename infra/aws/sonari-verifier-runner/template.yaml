@@ -1593,7 +1593,7 @@ Resources:
             "RunFloorCensus": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "run_floor_census", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "run_floor_census", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
               "Next": "StopInstance",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 30, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]

@@ -64,6 +64,11 @@ const registrationMetadata: EnclaveVerificationMetadata = {
     verifier_config_version: 7,
     enclave_instance_public_key: finalizedPublicKey,
 };
+const censusRegistrationMetadata: EnclaveVerificationMetadata = {
+    verifier_config_key: 3,
+    verifier_config_version: 7,
+    enclave_instance_public_key: finalizedPublicKey,
+};
 
 describe("AWS runner workflow helper", () => {
     const originalEnv = { ...process.env };
@@ -288,11 +293,10 @@ describe("AWS runner workflow helper", () => {
         );
 
         expect(template).toContain('echo "SONARI_WALRUS_N_SHARDS=1000"');
-        expect(template).toContain("walrus_n_shards: $walrus_n_shards");
-        expect(template).toContain("SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=180");
-        expect(template).toContain(
-            'socat -t "$SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS" - "VSOCK-CONNECT:$SONARI_EARTHQUAKE_ENCLAVE_CID:3000"',
-        );
+        expect(template).toContain("walrus_n_shards:\\$walrus_n_shards");
+        expect(template).toContain("cat >/opt/sonari/bin/run-http-enclave");
+        expect(template).toContain('socat -t "$T" - "VSOCK-CONNECT:$C:7777"');
+        expect(template).toContain('socat -t "${!T:-180}" - "VSOCK-CONNECT:$C:3000"');
         expect(template.indexOf('"ArchiveSources"')).toBeGreaterThan(
             template.indexOf('"ApplyResult"'),
         );
@@ -331,6 +335,7 @@ describe("AWS runner workflow helper", () => {
             );
         }
         expect(earthquakeStateMachine).not.toContain('"result.$": "$.result"');
+        expect(earthquakeStateMachine).toContain('"instance_id.$": "$.instance_id"');
         expect(template).toContain("RunnerControlLambda:");
         expect(template).toContain("Handler: dist/src/runner_workflow.handler");
         expect(template).toContain("Timeout: 900");
@@ -2690,6 +2695,99 @@ describe("AWS runner workflow helper", () => {
             floor_census_counts_json: JSON.stringify(["1", "2", "3"]),
         });
     });
+
+    it("runs configured floor census through Census TEE before submitting", async () => {
+        const repository = new InMemoryStateRepository();
+        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }));
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000, {
+            requestedSourceEventId: "us7000sonari",
+        });
+        await repository.markWorkflowStarted("us7000sonari", "exec", 1_800_000_001_000);
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_002_000, undefined, 1);
+        const ssm = new RecordingSsmClient({ invocationStatus: "Success" });
+        const s3 = new RecordingS3Client({
+            bodies: [
+                JSON.stringify(result),
+                JSON.stringify({
+                    attestation_document_hex: attestationDocumentHex,
+                    public_key: finalizedPublicKey,
+                }),
+                JSON.stringify({
+                    payload: { registered_members_by_band: ["1", "2", "3"] },
+                    payload_bcs_hex: `0x${"aa".repeat(32)}`,
+                    signature: `0x${"11".repeat(64)}`,
+                    public_key: finalizedPublicKey,
+                }),
+            ],
+        });
+        const registrar = new RecordingEnclaveRegistrationAdapter(censusRegistrationMetadata);
+        const client = new RecordingFloorCensusSubmitClient();
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm,
+            s3,
+            repository,
+            enclaveRegistration: registrar,
+            now: () => 1_800_000_004_000,
+            config: {
+                ...baseConfig(),
+                censusNitroEnclaveProcessCommand: "/opt/sonari/bin/run-census-enclave",
+                floorCensus: {
+                    target: "0x123::accessor::set_floor_census",
+                    pauseState: "0xpause",
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
+                    mainPool: "0xmainpool",
+                    membershipRegistry: "0xmembership",
+                    signer: createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey),
+                    reader: new RecordingFloorCensusReader(),
+                    client,
+                    now: () => 1_800_000_004_100,
+                },
+            },
+        });
+
+        await expect(
+            handler({
+                action: "run_floor_census",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                instance_id: "i-123",
+                result_s3_key: "results/us7000sonari/finalized.json",
+                relayer_success: {
+                    mode: "submit",
+                    target: earthquakeRelayerTarget,
+                    registry: earthquakeRelayerRegistry,
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryRegistry: earthquakeRelayerCategoryRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
+                    digest: "tx-digest",
+                    objectId: `0x${"55".repeat(32)}`,
+                },
+            } as never),
+        ).resolves.toMatchObject({ floor_census: "succeeded" });
+
+        expect(ssm.commands).toHaveLength(2);
+        expect(ssm.commands[0]).toContain('"action":"get_attestation"');
+        expect(ssm.commands[0]).toContain("export SONARI_VERIFIER_KIND=census");
+        expect(ssm.commands[1]).toContain('"action":"process_data"');
+        expect(ssm.commands[1]).toContain('"registration_metadata"');
+        expect(ssm.commands[1]).toContain('"verifier_config_key":3');
+        expect(registrar.inputs).toEqual([
+            {
+                source_event_id: "us7000sonari",
+                attestation_document_hex: attestationDocumentHex,
+                public_key: finalizedPublicKey,
+            },
+        ]);
+        expect(client.requests).toHaveLength(1);
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            floor_census_status: "succeeded",
+            floor_census_digest: "census-submit-digest",
+            floor_census_counts_json: JSON.stringify(["1", "2", "3"]),
+        });
+    });
 });
 
 function baseConfig() {
@@ -2939,9 +3037,13 @@ class RecordingSsmClient implements SsmClientLike {
 class RecordingS3Client implements S3ClientLike {
     readonly puts: Array<{ bucket: string; key: string; bytes: Uint8Array }> = [];
 
-    constructor(private readonly options: { body?: string } = {}) {}
+    constructor(private readonly options: { body?: string; bodies?: string[] } = {}) {}
 
     async getObjectText(): Promise<string> {
+        const next = this.options.bodies?.shift();
+        if (next !== undefined) {
+            return next;
+        }
         return (
             this.options.body ??
             JSON.stringify({
@@ -3043,17 +3145,19 @@ class RecordingEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter 
         public_key: string;
     }> = [];
 
+    constructor(private readonly metadata: EnclaveVerificationMetadata = registrationMetadata) {}
+
     async register(input: {
         sourceEventId: string;
         attestationDocumentHex: string;
         publicKey: string;
-    }): Promise<typeof registrationMetadata> {
+    }): Promise<EnclaveVerificationMetadata> {
         this.inputs.push({
             source_event_id: input.sourceEventId,
             attestation_document_hex: input.attestationDocumentHex,
             public_key: input.publicKey,
         });
-        return registrationMetadata;
+        return this.metadata;
     }
 }
 
@@ -3218,6 +3322,51 @@ class RecordingFloorCensusAdapter implements RunnerFloorCensusAdapter {
             censusBcsHex: `0x${"aa".repeat(32)}`,
             signatureHex: `0x${"11".repeat(64)}`,
             publicKeyHex: `0x${"22".repeat(32)}`,
+        };
+    }
+}
+
+class RecordingFloorCensusReader implements FloorCensusOnchainReader {
+    async findCampaignId(): Promise<{ campaignId: string; checkpoint: number }> {
+        return { campaignId: `0x${"66".repeat(32)}`, checkpoint: 123 };
+    }
+
+    async listHomeCellRegisteredEvents() {
+        return [
+            {
+                lineage: `0x${"44".repeat(32)}`,
+                homeCell: "608819013513904127",
+                registeredAtMs: 1_799_999_999_000,
+            },
+        ];
+    }
+
+    async listActiveLineages(input: { lineages: readonly string[] }): Promise<ReadonlySet<string>> {
+        return new Set(input.lineages);
+    }
+}
+
+class RecordingFloorCensusSubmitClient {
+    readonly requests: Array<{
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }> = [];
+
+    async signAndExecuteTransaction(input: {
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }) {
+        this.requests.push(input);
+        return {
+            $kind: "Transaction" as const,
+            Transaction: {
+                digest: "census-submit-digest",
+                status: { success: true, error: null },
+                effects: {},
+                events: [],
+            },
         };
     }
 }

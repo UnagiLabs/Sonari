@@ -5,6 +5,7 @@ import {
     type AffectedCellsArtifact,
     computeAffectedCellsRootHex,
     type EarthquakeOraclePayload,
+    type EnclaveVerificationMetadata,
     type EvidenceManifest,
     type RelayerSubmitInput,
     type StoredSourceRef,
@@ -251,6 +252,10 @@ export interface FloorCensusSubmitConfig {
     reader?: FloorCensusOnchainReader | undefined;
     now?: (() => number) | undefined;
     configurationError?: string | undefined;
+}
+
+export interface FloorCensusTeeClient {
+    processData(input: unknown): Promise<unknown>;
 }
 
 export function computeFloorCensusCounts(input: FloorCensusCountsInput): [bigint, bigint, bigint] {
@@ -544,6 +549,113 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
             counts,
+            censusBcsHex: signed.censusBcsHex,
+            signatureHex: signed.signatureHex,
+            publicKeyHex: signed.publicKeyHex,
+        };
+    }
+}
+
+export class TeeFloorCensusAdapter implements FloorCensusAdapter {
+    constructor(
+        private readonly config: FloorCensusSubmitConfig,
+        private readonly tee: FloorCensusTeeClient,
+        private readonly registrationMetadata: EnclaveVerificationMetadata,
+    ) {}
+
+    async run(input: FloorCensusRunInput): Promise<FloorCensusRunResult> {
+        if (this.config.configurationError !== undefined) {
+            throw new Error(this.config.configurationError);
+        }
+        const validation = validateRelayerSubmitInput(input.result);
+        if (!validation.ok) {
+            return { status: "skipped", reason: validation.message };
+        }
+        if (input.relayerDigest === undefined || input.disasterEventId === undefined) {
+            return {
+                status: "skipped",
+                reason: "relayer submit digest and disaster event id are required",
+            };
+        }
+        const signer = this.config.signer ?? (await this.config.loadSigner?.());
+        if (signer === undefined) {
+            throw new Error("Floor census submit requires a signer");
+        }
+        const reader = this.config.reader;
+        if (reader === undefined) {
+            throw new Error("Floor census submit requires an on-chain reader");
+        }
+        const client = this.config.client;
+        if (client === undefined) {
+            throw new Error("Floor census submit requires a Sui client");
+        }
+
+        const parsed = validation.value;
+        const payload = parsed.payload as EarthquakeOraclePayload;
+        const campaign = await reader.findCampaignId({
+            digest: input.relayerDigest,
+            eventUid: payload.event_uid,
+            eventRevision: payload.event_revision,
+        });
+        if (campaign === undefined) {
+            throw new Error("relayer transaction did not include CampaignCreated for census");
+        }
+        const packageId = packageIdFromTarget(this.config.target);
+        const homeCellEvents = await reader.listHomeCellRegisteredEvents({
+            packageId,
+            checkpoint: campaign.checkpoint,
+        });
+        const activeLineages = await reader.listActiveLineages({
+            membershipRegistryId: this.config.membershipRegistry,
+            lineages: unique(homeCellEvents.map((event) => event.lineage)),
+            checkpoint: campaign.checkpoint,
+        });
+        const bundle = await buildFloorCensusInputBundle({
+            result: input.result,
+            homeCellEvents,
+            activeLineages,
+            campaignId: campaign.campaignId,
+            disasterEventId: input.disasterEventId,
+            censusCheckpoint: campaign.checkpoint,
+            issuedAtMs: this.config.now?.() ?? Date.now(),
+        });
+        const signed = parseFloorCensusTeeOutput(
+            await this.tee.processData({
+                action: "process_data",
+                payload: bundle,
+                registration_metadata: this.registrationMetadata,
+            }),
+        );
+        if (
+            normalizeHex(signed.publicKeyHex) !==
+            normalizeHex(this.registrationMetadata.enclave_instance_public_key)
+        ) {
+            throw new Error("census TEE public key does not match registration metadata");
+        }
+        const response = await client.signAndExecuteTransaction({
+            transaction: createSetFloorCensusTransaction({
+                target: this.config.target,
+                senderAddress: signer.toSuiAddress(),
+                pauseState: this.config.pauseState,
+                campaignId: campaign.campaignId,
+                disasterEventId: input.disasterEventId,
+                verifierRegistry: this.config.verifierRegistry,
+                categoryPool: this.config.categoryPool,
+                mainPool: this.config.mainPool,
+                censusBcs: signed.censusBcs,
+                signature: signed.signature,
+                publicKey: signed.publicKey,
+            }),
+            signer,
+            include: { effects: true, events: true },
+        });
+        const digest = readSuccessfulDigest(response);
+        return {
+            status: "succeeded",
+            digest,
+            campaignId: campaign.campaignId,
+            disasterEventId: input.disasterEventId,
+            counts: signed.counts,
             censusBcsHex: signed.censusBcsHex,
             signatureHex: signed.signatureHex,
             publicKeyHex: signed.publicKeyHex,

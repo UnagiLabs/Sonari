@@ -66,10 +66,11 @@ import {
     RetryableAffectedCellsProofRegistrationError,
 } from "./affected_cells_proof_registrar.js";
 import {
-    DirectFloorCensusAdapter,
     type FloorCensusAdapter,
     type FloorCensusSubmitConfig,
+    type FloorCensusTeeClient,
     GraphqlFloorCensusReader,
+    TeeFloorCensusAdapter,
 } from "./census.js";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
@@ -90,6 +91,12 @@ import {
 const SOURCE_ARCHIVE_RETRY_BACKOFF_MS = FAILED_RETRY_BACKOFF_MS;
 const SOURCE_FETCH_TIMEOUT_MS = 30_000;
 const SOURCE_ARCHIVER_HTTP_TIMEOUT_MS = 210_000;
+const CENSUS_VERIFIER_CONFIG_KEY = 3;
+const CENSUS_VERIFIER_FAMILY = 5;
+const CENSUS_VERIFIER_KIND = "census";
+const CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND = "/opt/sonari/bin/run-census-enclave";
+const CENSUS_RUNNER_COMMAND_MAX_POLLS = 60;
+const CENSUS_RUNNER_COMMAND_POLL_INTERVAL_MS = 5_000;
 
 export interface RunnerWorkflowConfig {
     autoScalingGroupName: string;
@@ -115,6 +122,7 @@ export interface RunnerWorkflowConfig {
         ) => Promise<RelayerResult<RelayerSubmitSuccess>>;
     };
     floorCensus?: FloorCensusSubmitConfig;
+    censusNitroEnclaveProcessCommand?: string | undefined;
 }
 
 export interface AutoScalingClientLike {
@@ -208,6 +216,8 @@ export interface EnclaveRegistrationConfig {
     transaction?: unknown;
     loadSigner?: () => Promise<RelayerSigner>;
     instanceTtlMs: number;
+    configKey?: number | undefined;
+    expectedFamily?: number | undefined;
     now?: () => number;
 }
 
@@ -382,6 +392,7 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "run_floor_census";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
               relayer_success: RelayerRecordSuccessInput;
           }
@@ -1124,7 +1135,8 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 }
                 const result = await readTeeResultFromS3(options, event);
                 const floorCensus =
-                    options.floorCensus ?? buildFloorCensusFromConfig(options.config);
+                    options.floorCensus ??
+                    (await buildCensusTeeFloorCensusFromConfig(options, event, nowMs));
                 if (floorCensus === undefined) {
                     await repository.markFloorCensusResult(
                         event.source_event_id,
@@ -1701,6 +1713,9 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
                 attestationDocumentBytes: parseHexByteVector(input.attestationDocumentHex),
                 expiresAtMs,
                 senderAddress,
+                ...(this.config.configKey === undefined
+                    ? {}
+                    : { configKey: this.config.configKey }),
             });
         const response = await client.signAndExecuteTransaction({
             transaction,
@@ -1709,9 +1724,9 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
         });
         const events = readSuccessfulEnclaveRegistrationEvents(response);
         const metadata = readEnclaveRegistrationMetadata(events, {
-            expectedFamily: 3,
+            expectedFamily: this.config.expectedFamily ?? 3,
             expectedVersion: 1,
-            configKey: EARTHQUAKE_VERIFIER_CONFIG_KEY,
+            configKey: this.config.configKey ?? EARTHQUAKE_VERIFIER_CONFIG_KEY,
         });
         if (normalizeHex(metadata.enclave_instance_public_key) !== normalizeHex(input.publicKey)) {
             throw new Error("registered enclave public key does not match attestation");
@@ -1741,11 +1756,21 @@ export async function handler(event: RunnerControlEvent): Promise<RunnerControlR
         if (floorCensus !== undefined) {
             config.floorCensus = floorCensus;
         }
+        config.censusNitroEnclaveProcessCommand = requiredEnv(
+            "CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND",
+        );
     }
     const enclaveRegistration =
-        event.action === "register_enclave_instance"
+        event.action === "register_enclave_instance" || event.action === "run_floor_census"
             ? new SuiEnclaveRegistrationAdapter(
-                  readEnclaveRegistrationConfigFromEnv(new AwsRelayerSignerSecretReader()),
+                  readEnclaveRegistrationConfigFromEnv(new AwsRelayerSignerSecretReader(), {
+                      ...(event.action === "run_floor_census"
+                          ? {
+                                configKey: CENSUS_VERIFIER_CONFIG_KEY,
+                                expectedFamily: CENSUS_VERIFIER_FAMILY,
+                            }
+                          : {}),
+                  }),
               )
             : undefined;
     return createRunnerControlHandler({
@@ -1794,6 +1819,150 @@ function buildSsmShellCommand(input: {
         ],
         tempResultPath,
     });
+}
+
+async function buildCensusTeeFloorCensusFromConfig(
+    options: RunnerControlHandlerOptions,
+    event: Extract<RunnerControlEvent, { action: "run_floor_census" }>,
+    dispatchTimestampMs: number,
+): Promise<FloorCensusAdapter | undefined> {
+    const config = options.config.floorCensus;
+    if (config === undefined) {
+        return undefined;
+    }
+    if (event.instance_id === undefined) {
+        throw new Error("floor census requires a runner instance_id");
+    }
+    const instanceId = event.instance_id;
+    const registrar = options.enclaveRegistration;
+    if (registrar === undefined) {
+        throw new Error("census enclave registration is not configured");
+    }
+    const attestationText = await dispatchAndReadCensusTeeCommand(options, {
+        sourceEventId: event.source_event_id,
+        instanceId,
+        dispatchTimestampMs,
+        teeInput: { action: "get_attestation" },
+    });
+    const attestation = readEnclaveAttestation(JSON.parse(attestationText) as unknown);
+    const registered = requireRegistrationMetadata(
+        await registrar.register({
+            sourceEventId: event.source_event_id,
+            attestationDocumentHex: attestation.attestation_document_hex,
+            publicKey: attestation.public_key,
+        }),
+        CENSUS_VERIFIER_CONFIG_KEY,
+    );
+    if (
+        normalizeHex(registered.enclave_instance_public_key) !==
+        normalizeHex(attestation.public_key)
+    ) {
+        throw new Error("census registration metadata public key does not match attestation");
+    }
+    const tee: FloorCensusTeeClient = {
+        processData: async (teeInput) =>
+            JSON.parse(
+                await dispatchAndReadCensusTeeCommand(options, {
+                    sourceEventId: event.source_event_id,
+                    instanceId,
+                    dispatchTimestampMs: dispatchTimestampMs + 1,
+                    teeInput,
+                }),
+            ) as unknown,
+    };
+    return new TeeFloorCensusAdapter(config, tee, registered);
+}
+
+async function dispatchAndReadCensusTeeCommand(
+    options: RunnerControlHandlerOptions,
+    input: {
+        sourceEventId: string;
+        instanceId: string;
+        dispatchTimestampMs: number;
+        teeInput: unknown;
+    },
+): Promise<string> {
+    const nitroEnclaveProcessCommand =
+        options.config.censusNitroEnclaveProcessCommand ?? CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND;
+    const dispatched = await dispatchRunnerCommand(options.ssm, {
+        workflowId: `${input.sourceEventId}-census`,
+        instanceId: input.instanceId,
+        dispatchTimestampMs: input.dispatchTimestampMs,
+        buildShellCommand: (resultS3Key) =>
+            buildCensusSsmShellCommand({
+                sourceEventId: input.sourceEventId,
+                dispatchTimestampMs: input.dispatchTimestampMs,
+                resultBucket: options.config.resultBucket,
+                resultS3Key,
+                nitroEnclaveProcessCommand,
+                teeInput: input.teeInput,
+            }),
+    });
+    await waitForRunnerCommandSuccess(options.ssm, {
+        instanceId: input.instanceId,
+        commandId: dispatched.commandId,
+    });
+    return readRunnerResultText(options.s3, {
+        bucket: options.config.resultBucket,
+        key: dispatched.resultS3Key,
+    });
+}
+
+function buildCensusSsmShellCommand(input: {
+    sourceEventId: string;
+    dispatchTimestampMs: number;
+    resultBucket: string;
+    resultS3Key: string;
+    nitroEnclaveProcessCommand: string;
+    teeInput: unknown;
+}): string {
+    const tempResultPath = `/tmp/sonari-census-tee-result-${input.sourceEventId}-${input.dispatchTimestampMs}.json`;
+    return buildSharedRunnerSsmShellCommand({
+        resultBucket: input.resultBucket,
+        resultS3Key: input.resultS3Key,
+        nitroEnclaveProcessCommand: input.nitroEnclaveProcessCommand,
+        teeInput: input.teeInput,
+        preEnvCommands: ["systemctl is-active --quiet nitro-enclaves-allocator.service"],
+        requiredEnvNames: [
+            "SONARI_CENSUS_EIF_PATH",
+            "SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS",
+            "SONARI_CENSUS_ENCLAVE_CID",
+            "NITRO_ENCLAVE_PROCESS_COMMAND",
+        ],
+        postEnvCommands: [
+            'test -s "$SONARI_CENSUS_EIF_PATH"',
+            "export SONARI_CENSUS_EIF_PATH SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS SONARI_CENSUS_ENCLAVE_CID NITRO_ENCLAVE_PROCESS_COMMAND",
+            `export SONARI_VERIFIER_KIND=${CENSUS_VERIFIER_KIND}`,
+        ],
+        tempResultPath,
+    });
+}
+
+async function waitForRunnerCommandSuccess(
+    ssm: SsmClientLike,
+    input: { instanceId: string; commandId: string },
+): Promise<void> {
+    let commandPollCount = 0;
+    for (let attempt = 0; attempt < CENSUS_RUNNER_COMMAND_MAX_POLLS; attempt += 1) {
+        const polled = await pollRunnerCommand(ssm, {
+            instanceId: input.instanceId,
+            commandId: input.commandId,
+            commandPollCount,
+        });
+        commandPollCount = polled.commandPollCount;
+        if (polled.commandStatus === "SUCCEEDED") {
+            return;
+        }
+        if (polled.commandStatus === "FAILED") {
+            throw new Error("census TEE command failed");
+        }
+        await delay(CENSUS_RUNNER_COMMAND_POLL_INTERVAL_MS);
+    }
+    throw new Error("census TEE command did not complete before timeout");
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function buildRunnerBootstrapReadinessShellCommand(): string {
@@ -2532,13 +2701,6 @@ function buildRelayerFromConfig(config: RunnerWorkflowConfig): RelayerAdapter | 
     return new DirectRelayerAdapter(config.relayer);
 }
 
-function buildFloorCensusFromConfig(config: RunnerWorkflowConfig): FloorCensusAdapter | undefined {
-    if (config.floorCensus === undefined) {
-        return undefined;
-    }
-    return new DirectFloorCensusAdapter(config.floorCensus);
-}
-
 function compactRelayerSuccess(success: RelayerSuccess): RelayerRecordSuccessInput {
     return {
         mode: success.mode,
@@ -2648,6 +2810,7 @@ export function readRelayerConfigFromEnv(
 
 export function readEnclaveRegistrationConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
+    overrides: Pick<EnclaveRegistrationConfig, "configKey" | "expectedFamily"> = {},
 ): EnclaveRegistrationConfig {
     const target =
         process.env.ENCLAVE_REGISTRATION_TARGET ??
@@ -2691,6 +2854,7 @@ export function readEnclaveRegistrationConfigFromEnv(
             process.env.ENCLAVE_REGISTRATION_ALLOW_SUBMIT === "true" ||
             process.env.RELAYER_ALLOW_SUBMIT === "true",
         instanceTtlMs: instanceTtlMs ?? 0,
+        ...overrides,
     };
     if (network !== undefined) {
         config.network = network;
