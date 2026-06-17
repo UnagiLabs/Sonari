@@ -1571,7 +1571,7 @@ Resources:
             "RelayerPreviewOrDryRun": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RelayerResultComplete",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]
             },
@@ -1585,7 +1585,7 @@ Resources:
             "RecordRelayerSuccess": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success" },
               "Next": "RunFloorCensus",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 8, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "StopInstance" }]

@@ -379,6 +379,7 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "relayer_preview_or_dry_run";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
@@ -464,6 +465,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               relayer: "skipped" | "failed";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
@@ -501,6 +503,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
         | {
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               relayer: "succeeded";
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
@@ -1019,10 +1022,13 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 const repository = requireRepository(options);
                 const relayer = options.relayer ?? buildRelayerFromConfig(options.config);
                 const result = await readTeeResultFromS3(options, event);
+                const instanceContext =
+                    event.instance_id === undefined ? {} : { instance_id: event.instance_id };
                 if (relayer === undefined || result.status !== "finalized") {
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...instanceContext,
                         relayer: "skipped",
                         result_s3_key: event.result_s3_key,
                         result_status: result.status,
@@ -1038,6 +1044,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...instanceContext,
                         relayer: "skipped",
                         result_s3_key: event.result_s3_key,
                         result_status: result.status,
@@ -1049,6 +1056,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...instanceContext,
                         relayer: "succeeded",
                         result_s3_key: event.result_s3_key,
                         result_status: result.status,
@@ -1075,6 +1083,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...instanceContext,
                     relayer: "failed",
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,

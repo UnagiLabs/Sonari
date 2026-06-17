@@ -300,6 +300,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(earthquake).toContain(
             '"registration_metadata.$": "$.registration_result.registration_metadata"',
         );
+        expect(earthquake).toContain(
+            '"action": "relayer_preview_or_dry_run", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
     });
 
     it("runs membership verifier through attestation registration and process_data", async () => {
@@ -743,6 +746,9 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(earthquake).toContain('"Next": "RunFloorCensus"');
         expect(earthquake).toContain('"RunFloorCensus"');
         expect(earthquake).toContain('"action": "run_floor_census"');
+        expect(earthquake).toContain(
+            '"action": "record_relayer_success", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key", "relayer_success.$": "$.relayer_success"',
+        );
         expect(earthquake.indexOf('"action": "record_relayer_success"')).toBeLessThan(
             earthquake.indexOf('"action": "run_floor_census"'),
         );

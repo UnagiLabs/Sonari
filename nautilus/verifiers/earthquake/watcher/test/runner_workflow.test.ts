@@ -2539,10 +2539,12 @@ describe("AWS runner workflow helper", () => {
             action: "relayer_preview_or_dry_run",
             source_event_id: "us7000sonari",
             attempt: 1,
+            instance_id: "i-123",
             result,
         } as never);
         expect(relayerResult).toMatchObject({
             relayer: "succeeded",
+            instance_id: "i-123",
             relayer_success: {
                 mode: "submit",
                 target: earthquakeRelayerTarget,
