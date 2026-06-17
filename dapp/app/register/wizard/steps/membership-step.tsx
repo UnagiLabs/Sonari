@@ -20,8 +20,8 @@ import {
 } from "./membership-gate";
 import { issueMembershipPass, MembershipIssueError } from "./membership-issue";
 import {
-    membershipIssueFailureMessageKey,
     type MembershipIssueViewState,
+    membershipIssueFailureMessageKey,
     membershipSubmittingMessageKey,
 } from "./membership-issue-state";
 import { shortAddress } from "./membership-presence";
