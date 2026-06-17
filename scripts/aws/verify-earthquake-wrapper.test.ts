@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AwsCli } from "./shared.js";
 import {
     buildProcessDataS3UploadCommand,
+    buildSocatTimeoutVerificationCommand,
     readEarthquakeWrapperS3Result,
     runVerifyEarthquakeWrapper,
 } from "./verify-earthquake-wrapper.js";
@@ -59,6 +60,10 @@ describe("AWS earthquake wrapper verification script", () => {
         expect(processDataCommand).toContain("aws s3 cp --only-show-errors");
         expect(processDataCommand).toContain("results/earthquake-wrapper-results/");
         expect(processDataCommand).toContain('"event_revision":1');
+
+        const socatTimeoutCommand = cli.ssmCommands.get("earthquake-wrapper-socat-timeout");
+        expect(socatTimeoutCommand).toContain("SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS");
+        expect(socatTimeoutCommand).toContain("T=[0-9]+");
 
         const s3GetObject = cli.operations.find(
             (operation) => operation.label === "s3api:get-object",
@@ -233,6 +238,15 @@ describe("AWS earthquake wrapper verification script", () => {
         expect(command).toContain("sha256: process.env.RESULT_SHA256");
         expect(command).toContain("bytes: Number(process.env.RESULT_BYTES)");
         expect(command).not.toContain("CommandId");
+    });
+
+    it("checks the current earthquake wrapper T timeout assignment as well as the legacy env var", () => {
+        const command = buildSocatTimeoutVerificationCommand();
+
+        expect(command).toContain("SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS");
+        expect(command).toContain("T=[0-9]+");
+        expect(command).toContain("socat timeout below 180");
+        expect(command).toContain("socat -t usage missing");
     });
 
     it("rejects process_data S3 references that do not match the expected run object key", async () => {

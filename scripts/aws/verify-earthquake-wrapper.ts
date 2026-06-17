@@ -264,11 +264,12 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-function buildSocatTimeoutVerificationCommand(): string {
+export function buildSocatTimeoutVerificationCommand(): string {
     return [
         "set -euo pipefail",
         "awk '",
         '/^SONARI_EARTHQUAKE_VSOCK_SOCAT_TIMEOUT_SECONDS=/ { split($0, value, "="); timeout = value[2] }',
+        '/(^|[[:space:]])T=[0-9]+([[:space:]]|$)/ { value = $0; sub(/^.*(^|[[:space:]])T=/, "", value); sub(/[^0-9].*$/, "", value); timeout = value }',
         "/socat[[:space:]].*-t[[:space:]]/ { uses_timeout = 1 }",
         "END {",
         '  if (timeout + 0 < 180) { print "socat timeout below 180" > "/dev/stderr"; exit 1 }',
