@@ -1,5 +1,6 @@
 import "./workflow_runtime_types.js";
 import { sha256Hex } from "@sonari/proof-core";
+import { NonRetryableError } from "cloudflare:workers";
 import { generateAffectedAreaArtifacts } from "./affected_area_artifacts.js";
 import {
     affectedAreaManifestR2Key,
@@ -8,7 +9,6 @@ import {
 } from "./affected_area_r2.js";
 import {
     summarizeAffectedAreaWorkflowInput,
-    validateAffectedAreaWorkflowInput,
     type AffectedAreaWorkflowInput,
     type AffectedAreaWorkflowSummary,
 } from "./affected_area_workflow_input.js";
@@ -25,33 +25,9 @@ export interface AffectedAreaWorkflowPublishSummary extends AffectedAreaWorkflow
     readonly manifest_r2_key: string;
 }
 
-const PUBLISH_STEP_CONFIG: WorkflowStepConfig = {
-    retries: {
-        limit: 5,
-        delay: "10 seconds",
-        backoff: "exponential",
-    },
-    timeout: "5 minutes",
-};
-
 function nonRetryableWorkflowError(cause: unknown): Error {
     const message = cause instanceof Error ? cause.message : String(cause);
-    const Constructor = globalThis.NonRetryableError;
-    return typeof Constructor === "function" ? new Constructor(message) : new Error(message);
-}
-
-const workflowRuntime = globalThis as typeof globalThis & {
-    WorkflowEntrypoint?: typeof WorkflowEntrypoint;
-};
-
-if (workflowRuntime.WorkflowEntrypoint === undefined) {
-    workflowRuntime.WorkflowEntrypoint = class {
-        readonly env!: unknown;
-
-        async run(): Promise<unknown> {
-            throw new Error("WorkflowEntrypoint is unavailable outside the Cloudflare runtime");
-        }
-    } as unknown as typeof WorkflowEntrypoint;
+    return new NonRetryableError(message);
 }
 
 function requireAffectedAreaBucket(env: AffectedAreaWorkflowEnv): AffectedAreaR2Bucket {
@@ -112,25 +88,4 @@ export async function runAffectedAreaArtifactWorkflow(
         object_count: objectKeys.length,
         manifest_r2_key: affectedAreaManifestR2Key(input.event_uid, input.event_revision),
     };
-}
-
-export class AffectedAreaArtifactWorkflow extends WorkflowEntrypoint<
-    AffectedAreaWorkflowEnv,
-    AffectedAreaWorkflowInput
-> {
-    async run(
-        event: WorkflowEvent<AffectedAreaWorkflowInput>,
-        step: WorkflowStep,
-    ): Promise<AffectedAreaWorkflowPublishSummary> {
-        let input: AffectedAreaWorkflowInput;
-        try {
-            input = validateAffectedAreaWorkflowInput(event.payload);
-        } catch (cause) {
-            throw nonRetryableWorkflowError(cause);
-        }
-
-        return step.do("publish affected-area artifacts", PUBLISH_STEP_CONFIG, () =>
-            runAffectedAreaArtifactWorkflow(input, this.env),
-        );
-    }
 }

@@ -13,6 +13,8 @@
  * エラー処理: try→unchecked dispatch→catch で errorResponse(toAffectedCellsProofError(e))
  */
 
+import "./workflow_runtime_types.js";
+import { NonRetryableError, WorkflowEntrypoint } from "cloudflare:workers";
 import {
     AffectedCellsProofError,
     errorResponse,
@@ -42,8 +44,7 @@ const PUBLISH_STEP_CONFIG: WorkflowStepConfig = {
 
 function nonRetryableWorkflowError(cause: unknown): Error {
     const message = cause instanceof Error ? cause.message : String(cause);
-    const Constructor = globalThis.NonRetryableError;
-    return typeof Constructor === "function" ? new Constructor(message) : new Error(message);
+    return new NonRetryableError(message);
 }
 
 export class AffectedAreaArtifactWorkflow extends WorkflowEntrypoint<
