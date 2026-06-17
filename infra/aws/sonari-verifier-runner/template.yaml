@@ -1521,21 +1521,21 @@ Resources:
             "ReadResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "read_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ApplyResult",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ApplyResult": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "apply_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "ArchiveSources",
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]
             },
             "ArchiveSources": {
               "Type": "Task",
               "Resource": "${RunnerControlLambda.Arn}",
-              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "result_s3_key.$": "$.result_s3_key" },
+              "Parameters": { "verifier_kind.$": "$.verifier_kind", "action": "archive_sources", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key" },
               "Next": "RegisterAffectedCellsProof",
               "Retry": [{ "ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2.0 }],
               "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "MarkFailed" }]

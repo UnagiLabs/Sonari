@@ -349,18 +349,21 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "read_result";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
               action: "apply_result";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
               action: "archive_sources";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
           }
         | {
@@ -865,6 +868,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
                 });
@@ -891,6 +895,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     applied: true,
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
@@ -919,6 +924,9 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     return retainVerifierKind({
                         source_event_id: event.source_event_id,
                         attempt: event.attempt,
+                        ...(event.instance_id === undefined
+                            ? {}
+                            : { instance_id: event.instance_id }),
                         source_archive: "skipped",
                         source_artifact_s3_keys: [],
                         result_s3_key: event.result_s3_key,
@@ -955,6 +963,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 return retainVerifierKind({
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     source_archive: archived.status,
                     source_artifact_s3_keys: archived.artifactS3Keys,
                     result_s3_key: event.result_s3_key,

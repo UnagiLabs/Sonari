@@ -211,6 +211,15 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain('"RegisterAffectedCellsProof"');
         expect(template).toContain('"Next": "RelayerPreviewOrDryRun"');
         expect(template).toContain(
+            '"action": "read_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
+        expect(template).toContain(
+            '"action": "apply_result", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
+        expect(template).toContain(
+            '"action": "archive_sources", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
+        );
+        expect(template).toContain(
             '"action": "register_affected_cells_proof", "source_event_id.$": "$.source_event_id", "event_revision.$": "$.event_revision", "attempt.$": "$.attempt", "instance_id.$": "$.instance_id", "result_s3_key.$": "$.result_s3_key"',
         );
         expect(template).toContain('"RegisterAffectedCellsProofRetry"');

@@ -1053,11 +1053,13 @@ describe("AWS runner workflow helper", () => {
         const read = await handler({
             action: "read_result",
             source_event_id: "us7000sonari",
+            instance_id: "i-123",
             result_s3_key: "results/us7000sonari/cmd-123.json",
         });
 
         expect(read).toMatchObject({
             source_event_id: "us7000sonari",
+            instance_id: "i-123",
             result_s3_key: "results/us7000sonari/cmd-123.json",
             result_status: "finalized",
         });
@@ -1084,10 +1086,11 @@ describe("AWS runner workflow helper", () => {
             config: baseConfig(),
         });
 
-        await handler({
+        const applied = await handler({
             action: "apply_result",
             source_event_id: "us7000sonari",
             attempt: 1,
+            instance_id: "i-123",
             result_s3_key: "results/us7000sonari/cmd-123.json",
         });
         const relayer = await handler({
@@ -1101,6 +1104,7 @@ describe("AWS runner workflow helper", () => {
             status: "pending_source",
             error_code: "SHAKEMAP_PRODUCT_MISSING",
         });
+        expect(applied).toMatchObject({ instance_id: "i-123" });
         expect(relayer).toMatchObject({ relayer: "skipped" });
     });
 
@@ -1185,6 +1189,7 @@ describe("AWS runner workflow helper", () => {
             action: "archive_sources",
             source_event_id: "us7000sonari",
             attempt: 1,
+            instance_id: "i-123",
             result,
         } as never);
         const relayed = await handler({
@@ -1195,6 +1200,7 @@ describe("AWS runner workflow helper", () => {
         } as never);
 
         expect(archived).toMatchObject({
+            instance_id: "i-123",
             source_archive: "success",
             source_artifact_s3_keys: [
                 `source-artifacts/us7000sonari/1/0-detail_geojson-${sha256Hex(bytes)}.bin`,
