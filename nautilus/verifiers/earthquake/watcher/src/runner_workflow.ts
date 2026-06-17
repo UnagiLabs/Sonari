@@ -1731,7 +1731,10 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
         const transaction =
             this.config.transaction ??
             createSuiEnclaveRegistrationTransaction({
-                target: this.config.target,
+                target: resolveEnclaveRegistrationTargetForConfig(
+                    this.config.target,
+                    this.config.configKey,
+                ),
                 verifierRegistry: this.config.verifierRegistry,
                 attestationDocumentBytes: parseHexByteVector(input.attestationDocumentHex),
                 expiresAtMs,
@@ -2835,10 +2838,11 @@ export function readEnclaveRegistrationConfigFromEnv(
     secretReader: RelayerSignerSecretReader,
     overrides: Pick<EnclaveRegistrationConfig, "configKey" | "expectedFamily"> = {},
 ): EnclaveRegistrationConfig {
-    const target =
+    const baseTarget =
         process.env.ENCLAVE_REGISTRATION_TARGET ??
         deriveEnclaveRegistrationTarget(process.env.RELAYER_TARGET) ??
         "";
+    const target = resolveEnclaveRegistrationTargetForConfig(baseTarget, overrides.configKey);
     const verifierRegistry = process.env.RELAYER_VERIFIER_REGISTRY ?? "";
     const network = readSuiNetwork(process.env.RELAYER_NETWORK);
     const grpcUrl = process.env.RELAYER_GRPC_URL;
@@ -3007,6 +3011,17 @@ function deriveEnclaveRegistrationTarget(relayerTarget: string | undefined): str
         return undefined;
     }
     return `${packageId}::metadata_verifier::register_enclave_instance`;
+}
+
+function resolveEnclaveRegistrationTargetForConfig(target: string, configKey: number | undefined) {
+    if (configKey === undefined) {
+        return target;
+    }
+    const [packageId, moduleName, functionName] = target.split("::");
+    if (moduleName === "metadata_verifier" && functionName === "register_enclave_instance") {
+        return `${packageId}::metadata_verifier::register_enclave_instance_for_config`;
+    }
+    return target;
 }
 
 function readPositiveIntegerEnv(name: string, fallback: number): number | undefined {

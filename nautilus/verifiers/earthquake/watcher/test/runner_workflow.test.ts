@@ -2318,6 +2318,10 @@ describe("AWS runner workflow helper", () => {
         process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
         const reader = new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey);
         const config = readEnclaveRegistrationConfigFromEnv(reader);
+        const censusConfig = readEnclaveRegistrationConfigFromEnv(reader, {
+            configKey: 3,
+            expectedFamily: 5,
+        });
 
         expect(config).toMatchObject({
             target: "0x123::metadata_verifier::register_enclave_instance",
@@ -2333,13 +2337,17 @@ describe("AWS runner workflow helper", () => {
             toSuiAddress: expect.any(Function),
         });
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
+        expect(censusConfig.target).toBe(
+            "0x123::metadata_verifier::register_enclave_instance_for_config",
+        );
+        expect(censusConfig).toMatchObject({ configKey: 3, expectedFamily: 5 });
     });
 
     it("registers an attested enclave on Sui and returns contract metadata", async () => {
         const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
         const client = new RecordingEnclaveRegistrationClient();
         const adapter = new SuiEnclaveRegistrationAdapter({
-            target: "0x123::metadata_verifier::register_enclave_instance",
+            target: `0x${"12".repeat(32)}::metadata_verifier::register_enclave_instance`,
             verifierRegistry: earthquakeRelayerVerifierRegistry,
             network: "testnet",
             grpcUrl: "https://fullnode.testnet.sui.io:443",
@@ -2360,6 +2368,39 @@ describe("AWS runner workflow helper", () => {
         expect(client.requests).toHaveLength(1);
         expect(client.requests[0]?.signer).toBe(signer);
         expect(client.requests[0]?.include).toEqual({ effects: true, events: true });
+    });
+
+    it("uses config-specific enclave registration target when registering census enclaves", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new RecordingEnclaveRegistrationClient(
+            Array.from({ length: 32 }, () => 0x22),
+            5,
+        );
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            configKey: 3,
+            expectedFamily: 5,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toMatchObject({
+            verifier_config_key: 3,
+            verifier_config_version: registrationMetadata.verifier_config_version,
+        });
+        expect(client.requests[0]?.transaction).toBeDefined();
     });
 
     it("accepts base64 encoded enclave public keys in Sui registration events", async () => {
@@ -3238,6 +3279,7 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
 
     constructor(
         private readonly eventPublicKey: unknown = Array.from({ length: 32 }, () => 0x22),
+        private readonly verifierFamily = 3,
     ) {}
 
     async signAndExecuteTransaction(input: {
@@ -3255,7 +3297,7 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
                     {
                         type: "0x123::metadata_verifier::EnclaveInstanceRegistered",
                         json: {
-                            verifier_family: 3,
+                            verifier_family: this.verifierFamily,
                             verifier_version: "1",
                             config_version: String(registrationMetadata.verifier_config_version),
                             public_key: this.eventPublicKey,
