@@ -13,6 +13,7 @@ name = "census-tee"
 path = "src/main.rs"
 
 [dependencies]
+bcs = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sonari-tee-core = { path = "../../shared-tee" }
