@@ -6,6 +6,7 @@ import {
     encodeFloorCensusResultBcs,
     type FloorCensusOnchainReader,
     type FloorCensusSubmitClient,
+    GraphqlFloorCensusReader,
     JsonRpcFloorCensusReader,
     signFloorCensusResult,
     type HomeCellRegisteredEvent,
@@ -180,6 +181,127 @@ describe("JsonRpcFloorCensusReader", () => {
             "Sui RPC suix_queryEvents failed with HTTP 400",
         );
         expect(requests).toBe(1);
+    });
+});
+
+describe("GraphqlFloorCensusReader", () => {
+    it("paginates HomeCellRegistered events and includes the checkpoint boundary", async () => {
+        const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                query: string;
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            if (request.variables.cursor === null) {
+                return jsonResponse({
+                    data: {
+                        events: {
+                            nodes: [
+                                {
+                                    contents: {
+                                        json: {
+                                            lineage: "0xlineage1",
+                                            home_cell: "10",
+                                            registered_at: "900",
+                                        },
+                                    },
+                                },
+                            ],
+                            pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+                        },
+                    },
+                });
+            }
+            return jsonResponse({
+                data: {
+                    events: {
+                        nodes: [
+                            {
+                                contents: {
+                                    json: {
+                                        lineage: { id: "0xlineage2" },
+                                        home_cell: 20,
+                                        registered_at: 950,
+                                    },
+                                },
+                            },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        const events = await reader.listHomeCellRegisteredEvents({
+            packageId: "0xpackage",
+            checkpoint: 41,
+        });
+
+        expect(events).toEqual([
+            { lineage: "0xlineage1", homeCell: "10", registeredAtMs: 900 },
+            { lineage: "0xlineage2", homeCell: "20", registeredAtMs: 950 },
+        ]);
+        expect(requests).toHaveLength(2);
+        expect(requests[0]?.query).toContain("beforeCheckpoint");
+        expect(requests.map((request) => request.variables)).toEqual([
+            {
+                eventType: "0xpackage::membership::HomeCellRegistered",
+                beforeCheckpoint: 42,
+                cursor: null,
+            },
+            {
+                eventType: "0xpackage::membership::HomeCellRegistered",
+                beforeCheckpoint: 42,
+                cursor: "cursor-1",
+            },
+        ]);
+    });
+
+    it("fails closed when a HomeCellRegistered GraphQL event is malformed", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    events: {
+                        nodes: [{ contents: { json: { lineage: "0xlineage1", home_cell: "bad" } } }],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "HomeCellRegistered event is malformed",
+        );
+    });
+
+    it("fails closed on HTTP errors, GraphQL errors, and malformed pages", async () => {
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+
+        globalThis.fetch = async () => jsonResponse({}, { status: 500 });
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "Sui GraphQL query failed with HTTP 500",
+        );
+
+        globalThis.fetch = async () =>
+            jsonResponse({ errors: [{ message: "indexer unavailable" }] });
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "Sui GraphQL query failed: indexer unavailable",
+        );
+
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    events: {
+                        nodes: [],
+                        pageInfo: { hasNextPage: true, endCursor: null },
+                    },
+                },
+            });
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "GraphQL events pageInfo is malformed",
+        );
     });
 });
 

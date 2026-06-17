@@ -24,6 +24,25 @@ const RPC_MAX_ATTEMPTS = 4;
 const RPC_INITIAL_RETRY_DELAY_MS = 500;
 const RPC_RETRY_BACKOFF_FACTOR = 2;
 const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503]);
+const HOME_CELL_REGISTERED_GRAPHQL_QUERY = `
+query SonariHomeCellRegisteredEvents(
+  $eventType: String!
+  $beforeCheckpoint: UInt53
+  $cursor: String
+) {
+  events(filter: { type: $eventType, beforeCheckpoint: $beforeCheckpoint }, after: $cursor) {
+    nodes {
+      contents {
+        json
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
 
 export interface HomeCellRegisteredEvent {
     lineage: string;
@@ -86,7 +105,10 @@ export interface FloorCensusAdapter {
 }
 
 export interface FloorCensusOnchainReader {
-    listHomeCellRegisteredEvents(input: { packageId: string }): Promise<HomeCellRegisteredEvent[]>;
+    listHomeCellRegisteredEvents(input: {
+        packageId: string;
+        checkpoint?: number | undefined;
+    }): Promise<HomeCellRegisteredEvent[]>;
     listActiveLineages(input: {
         membershipRegistryId: string;
         lineages: readonly string[];
@@ -498,6 +520,64 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
     }
 }
 
+export class GraphqlFloorCensusReader implements FloorCensusOnchainReader {
+    constructor(private readonly endpoint: string) {}
+
+    async listHomeCellRegisteredEvents(input: {
+        packageId: string;
+        checkpoint?: number | undefined;
+    }): Promise<HomeCellRegisteredEvent[]> {
+        const eventType = `${input.packageId}::membership::HomeCellRegistered`;
+        const beforeCheckpoint =
+            input.checkpoint === undefined ? undefined : readBeforeCheckpoint(input.checkpoint);
+        const events: HomeCellRegisteredEvent[] = [];
+        let cursor: string | null = null;
+        while (true) {
+            const response = await this.query(HOME_CELL_REGISTERED_GRAPHQL_QUERY, {
+                eventType,
+                beforeCheckpoint,
+                cursor,
+            });
+            const page = readGraphqlEventsPage(response);
+            for (const node of page.nodes) {
+                events.push(parseHomeCellRegisteredEvent(node));
+            }
+            cursor = page.endCursor;
+            if (!page.hasNextPage) {
+                break;
+            }
+        }
+        return events;
+    }
+
+    async listActiveLineages(): Promise<ReadonlySet<string>> {
+        throw new Error("GraphqlFloorCensusReader.listActiveLineages is not implemented");
+    }
+
+    async findCampaignId(): Promise<string | undefined> {
+        throw new Error("GraphqlFloorCensusReader.findCampaignId is not implemented");
+    }
+
+    private async query(query: string, variables: Record<string, unknown>): Promise<unknown> {
+        const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ query, variables }),
+        });
+        if (!response.ok) {
+            throw new Error(`Sui GraphQL query failed with HTTP ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        const errors = readUnknownField(body, "errors");
+        if (Array.isArray(errors) && errors.length > 0) {
+            const firstError = errors[0];
+            const message = readStringField(firstError, "message") ?? JSON.stringify(firstError);
+            throw new Error(`Sui GraphQL query failed: ${message}`);
+        }
+        return body;
+    }
+}
+
 function isRetryableHttpStatus(status: number): boolean {
     return RETRYABLE_HTTP_STATUSES.has(status);
 }
@@ -583,6 +663,74 @@ function readExecutionError(
         return error.message;
     }
     return undefined;
+}
+
+function parseHomeCellRegisteredEvent(event: unknown): HomeCellRegisteredEvent {
+    const parsedJson = readEventJson(event);
+    let lineage: string | undefined;
+    let homeCell: string | undefined;
+    let registeredAtMs: number | undefined;
+    try {
+        lineage = readObjectId(parsedJson?.lineage);
+        homeCell = readU64Decimal(parsedJson?.home_cell);
+        registeredAtMs = readSafeInteger(parsedJson?.registered_at);
+    } catch {
+        throw new Error("HomeCellRegistered event is malformed");
+    }
+    if (lineage === undefined || homeCell === undefined || registeredAtMs === undefined) {
+        throw new Error("HomeCellRegistered event is malformed");
+    }
+    return { lineage, homeCell, registeredAtMs };
+}
+
+function readGraphqlEventsPage(response: unknown): {
+    nodes: unknown[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+} {
+    const data = readRecordField(response, "data");
+    const events = readRecordField(data, "events");
+    if (events === undefined) {
+        throw new Error("GraphQL events page is missing or malformed");
+    }
+    const nodes = readUnknownField(events, "nodes");
+    if (!Array.isArray(nodes)) {
+        throw new Error("GraphQL event nodes must be an array");
+    }
+    const pageInfo = readRecordField(events, "pageInfo");
+    if (pageInfo === undefined) {
+        throw new Error("GraphQL events pageInfo is malformed");
+    }
+    const hasNextPageValue = readUnknownField(pageInfo, "hasNextPage");
+    if (typeof hasNextPageValue !== "boolean") {
+        throw new Error("GraphQL events pageInfo is malformed");
+    }
+    const endCursorValue = readUnknownField(pageInfo, "endCursor");
+    const endCursor =
+        typeof endCursorValue === "string" && endCursorValue.length > 0 ? endCursorValue : null;
+    if (hasNextPageValue && endCursor === null) {
+        throw new Error("GraphQL events pageInfo is malformed");
+    }
+    return { nodes, hasNextPage: hasNextPageValue, endCursor };
+}
+
+function readEventJson(event: unknown): Record<string, unknown> | undefined {
+    const parsedJson = readRecordField(event, "parsedJson");
+    if (parsedJson !== undefined) {
+        return parsedJson;
+    }
+    const contents = readRecordField(event, "contents");
+    return readRecordField(contents, "json");
+}
+
+function readBeforeCheckpoint(checkpoint: number): number {
+    if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) {
+        throw new Error("checkpoint must be a non-negative safe integer");
+    }
+    if (checkpoint >= Number.MAX_SAFE_INTEGER) {
+        throw new Error("beforeCheckpoint must be a safe integer");
+    }
+    return checkpoint + 1;
 }
 
 function readRecordField(input: unknown, field: string): Record<string, unknown> | undefined {
