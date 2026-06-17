@@ -5,7 +5,10 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
-import { executeSponsoredMembershipTransaction } from "../../../wallet/sponsored-membership-transaction";
+import {
+    executeSponsoredMembershipTransaction,
+    SponsoredMembershipTransactionError,
+} from "../../../wallet/sponsored-membership-transaction";
 import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { h3DecimalToHex } from "../../residence/h3-geo";
 import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
@@ -206,6 +209,9 @@ export function MembershipStep({
                 case "residence_cell_not_allowed":
                     return t("issue.residenceNotAllowed");
             }
+        }
+        if (error instanceof SponsoredMembershipTransactionError) {
+            return error.message.length > 0 ? error.message : t("issue.transactionFailed");
         }
         return t("issue.transactionFailed");
     }
