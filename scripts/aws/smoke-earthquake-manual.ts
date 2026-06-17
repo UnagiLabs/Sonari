@@ -89,6 +89,10 @@ async function main(): Promise<void> {
         relayer_mode: readDynamoString(item, "relayer_mode"),
         relayer_digest: readDynamoString(item, "relayer_digest"),
         disaster_event_object_id: readDynamoString(item, "disaster_event_object_id"),
+        floor_census_status: readDynamoString(item, "floor_census_status"),
+        floor_census_digest: readDynamoString(item, "floor_census_digest"),
+        floor_census_counts: readDynamoJsonStringArray(item, "floor_census_counts_json"),
+        floor_census_error_message: readDynamoString(item, "floor_census_error_message"),
     };
 
     process.stdout.write(

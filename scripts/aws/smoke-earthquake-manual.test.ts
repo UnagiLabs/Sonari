@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { readTeeResultSummary } from "./smoke-earthquake-manual.js";
 
@@ -38,5 +39,17 @@ describe("AWS earthquake manual smoke summary", () => {
             evidence_manifest_uri: "walrus://blob/manifestBlob_123456",
             evidence_manifest_hash: `0x${"bb".repeat(32)}`,
         });
+    });
+
+    it("includes Floor Census row fields in the manual smoke summary", () => {
+        const script = readFileSync(
+            new URL("./smoke-earthquake-manual.ts", import.meta.url),
+            "utf8",
+        );
+
+        expect(script).toContain('readDynamoString(item, "floor_census_status")');
+        expect(script).toContain('readDynamoString(item, "floor_census_digest")');
+        expect(script).toContain('readDynamoJsonStringArray(item, "floor_census_counts_json")');
+        expect(script).toContain('readDynamoString(item, "floor_census_error_message")');
     });
 });

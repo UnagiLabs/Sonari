@@ -79,17 +79,23 @@ ManualWatcher の smoke は、`pnpm aws:smoke:earthquake-manual` の終了だけ
 - `relayer_status` が `succeeded`
 - `relayer_digest` が non-null
 - `disaster_event_object_id` または `relayer_object_id` が non-null
+- Floor Census が有効な stack では `floor_census_status=succeeded`
+- Floor Census が有効な stack では `floor_census_digest` が non-null、`floor_census_counts_json` が 3 要素
 - SourceArchiver logs に Walrus store success と `registered` / `uploaded` / `certified` がある
 - logs に token、private key、secret が出ていない
 - 最後に `pnpm aws:check-idle` が通る
 
-証跡は `.local/sonari-dev/aws-test-results/<run-id>/` に保存します。DynamoDB row before/after、Step Functions execution ARN/status/history、runner result S3 key、relayer digest/object id、Walrus blob ids、SourceArchiver log summary を残します。secret、token、private key は保存しません。
+Floor Census が有効な smoke では、`pnpm aws:smoke:earthquake-manual` の `source_archive_summary` に `floor_census_status`、`floor_census_digest`、`floor_census_counts`、`floor_census_error_message` が出ます。Sui 側は `Campaign` object を read-only で確認し、`census_set=true`、`registered_members_by_band`、`floor_ratio_bps` が更新されていることを記録します。
+
+証跡は `.local/sonari-dev/aws-test-results/<run-id>/` に保存します。DynamoDB row before/after、Step Functions execution ARN/status/history、runner result S3 key、relayer digest/object id、Floor Census digest/counts、Walrus blob ids、SourceArchiver log summary を残します。secret、token、private key は保存しません。
 
 ## よくある詰まり
 
 `Execution Already Exists` が出る場合、対象 event の過去 Step Functions execution name と衝突しています。DynamoDB row を削除すると `retry_count` が `0` に戻り、`earthquake-<source_event_id>-1` から再利用しようとします。過去 execution の最大 suffix を確認し、再実行ではそれより大きい attempt になるように row の `retry_count` を調整するか、新しい `source_event_id` を使います。
 
 `AWS_RUNNER_PROCESS_FAILED` と `metadata_verifier::assert_attestation_pcr_matches` abort code 21 が出る場合、deployed EIF の PCR0/1/2 と Sui `VerifierRegistry` の earthquake config が一致していません。GitHub Actions deploy run の `Earthquake EIF PCRs` から PCR0/1/2 を取得し、AdminCap wallet で `admin::update_earthquake_verifier_config_pcrs` を実行します。更新後は config version と transaction digest を記録してから再実行します。
+
+`RunFloorCensus` で同じ abort code 21 が出る場合は、earthquake ではなく Census EIF の PCR0/1/2 と census config key `3` を確認します。deploy run の Census EIF measurement と stack output の `CensusTeeEifS3KeyOutput` / `CensusTeeEifSha256Output` を照合し、AdminCap wallet で census verifier config を更新してから再実行します。
 
 `scripts/register-verifier-configs.sh` は、既存 config abort 表現の `with code 9` も already registered として扱い、create 失敗後に PCR update へ進みます。
 
