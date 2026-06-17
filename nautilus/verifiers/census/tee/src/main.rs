@@ -10,6 +10,7 @@ use census_tee::{
     process_floor_census_bundle_with_trust,
 };
 use clap::{Parser, Subcommand};
+use serde::Deserialize;
 use sonari_tee_core::{
     HttpRequest, LocalEd25519Signer, PayloadSigner, ProcessDataHandler, TeeContext, VsockListener,
     enclave_attestation_response, error_response, generate_ephemeral_signing_key_seed,
@@ -161,5 +162,24 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     let mut stream = listener.accept()?;
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
+    let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
+    set_env_before_server(
+        TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+        &config.trusted_validator_committee_digest,
+    );
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct BootstrapConfig {
+    #[serde(rename = "d")]
+    trusted_validator_committee_digest: String,
+}
+
+fn set_env_before_server(name: &str, value: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap values are installed.
+    unsafe {
+        std::env::set_var(name, value);
+    }
 }

@@ -635,8 +635,8 @@ Resources:
             #!/bin/bash
             set -euo pipefail
             set -a;. /opt/sonari/runner.env;set +a
-            : "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"
-            E="$SONARI_CENSUS_EIF_PATH" A="$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_CENSUS_ENCLAVE_CID" M=/tmp/sc X="/tmp/se /tmp/sm" T=180 B='printf "{}\n" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
+            : "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID" "$SCT"
+            E="$SONARI_CENSUS_EIF_PATH" A="$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_CENSUS_ENCLAVE_CID" M=/tmp/sc X="/tmp/se /tmp/sm" T=180 B='printf "{\"d\":\"%s\"}\n" "$SCT" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_CENSUS_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-census-enclave
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
@@ -809,7 +809,7 @@ Resources:
               printf 'SONARI_CENSUS_EIF_PATH=%q\n' "$census_eif"
               echo "SONARI_CENSUS_ENCLAVE_CID=${NitroEnclaveCid}"
               printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $census_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
-              printf 'SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST=%q\n' "${CensusTrustedValidatorCommitteeDigest}"
+              printf 'SCT=%q\n' "${CensusTrustedValidatorCommitteeDigest}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_ACTION=%q\n' "$world_id_action"
               echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"

@@ -82,7 +82,7 @@ Census TEE は `authenticated_event_proof` を必須 input として扱います
 - `CensusTrustedValidatorCommitteeDigest=<trusted Sui validator committee digest>`
 - `FloorCensusGraphqlUrl=<Sui GraphQL URL>` は任意です。実行時は `FLOOR_CENSUS_GRAPHQL_URL`、`SONARI_SUI_GRAPHQL_URL`、`RelayerNetwork` default の順に GraphQL endpoint を選びます。stack parameter が空で、`SonariSuiGraphqlUrl` も空の場合は `RelayerNetwork` から default GraphQL URL を使います。
 
-GitHub Actions dev deploy では `SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST` repo variable を `CensusTrustedValidatorCommitteeDigest` parameter に渡します。値を更新した場合は runner stack を redeploy し、runner EC2 の `/opt/sonari/runner.env` と `RunnerControlLambda` env の両方に同じ digest が入っていることを確認します。
+GitHub Actions dev deploy では `SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST` repo variable を `CensusTrustedValidatorCommitteeDigest` parameter に渡します。値を更新した場合は runner stack を redeploy し、runner EC2 の `/opt/sonari/runner.env` にある `SCT` alias と `RunnerControlLambda` env の `SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST` に同じ digest が入っていることを確認します。
 
 初回、または Census EIF の PCR0/1/2 が変わったときは、AdminCap を持つ管理者 wallet で census verifier config を作成または更新します。この wallet は AWS に置きません。作業場所は repository の agent instructions で定めた repo-local admin wallet directory を使います。
 

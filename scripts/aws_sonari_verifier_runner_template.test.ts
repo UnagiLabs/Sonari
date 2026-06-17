@@ -614,17 +614,19 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("printf 'SONARI_CENSUS_EIF_PATH=%q");
         expect(template).toContain("SONARI_CENSUS_ENCLAVE_CID=$" + "{NitroEnclaveCid}");
         expect(template).toContain("printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q");
-        expect(template).toContain("printf 'SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST=%q");
+        expect(template).toContain("printf 'SCT=%q");
         expect(template).toContain("printf 'SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND=%q");
         expect(template).toContain("test -x /opt/sonari/bin/run-census-enclave");
 
         expect(censusWrapper).toContain("/opt/sonari/runner.env");
         expect(censusWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(censusWrapper).toContain(
-            ': "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"',
+            ': "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID" "$SCT"',
         );
         expect(censusWrapper).toContain("M=/tmp/sc");
         expect(censusWrapper).toContain('X="/tmp/se /tmp/sm"');
+        expect(censusWrapper).toContain('printf "{\\"d\\":\\"%s\\"}\\n"');
+        expect(censusWrapper).toContain('"$SCT"');
         expect(censusWrapper).toContain("VSOCK-CONNECT:$C:7777");
         expect(censusWrapper).toContain("exec /opt/sonari/bin/run-http-enclave");
     });
