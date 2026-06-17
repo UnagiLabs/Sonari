@@ -3,9 +3,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const workflowPath = path.join(process.cwd(), ".github/workflows/dapp-deploy.yml");
+const dappEnvExamplePath = path.join(process.cwd(), "dapp/.env.example");
 
 async function readWorkflow(): Promise<string> {
     return readFile(workflowPath, "utf8");
+}
+
+async function readDappEnvExample(): Promise<string> {
+    return readFile(dappEnvExamplePath, "utf8");
 }
 
 describe("dapp deploy workflow", () => {
@@ -53,5 +58,30 @@ describe("dapp deploy workflow", () => {
             "NEXT_PUBLIC_SONARI_AFFECTED_AREA_BASE_URL: $" +
                 "{{ vars.SONARI_AFFECTED_AREA_BASE_URL }}",
         );
+    });
+
+    it("passes Enoki public configuration to the dapp build", async () => {
+        const workflow = await readWorkflow();
+
+        expect(workflow).toContain(
+            "NEXT_PUBLIC_ENOKI_API_KEY: $" + "{{ vars.NEXT_PUBLIC_ENOKI_API_KEY }}",
+        );
+        expect(workflow).toContain(
+            "NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID: $" +
+                "{{ vars.NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID }}",
+        );
+        expect(workflow).toContain("NEXT_PUBLIC_ENOKI_NETWORK: testnet");
+        expect(workflow).not.toContain("ENOKI_PRIVATE_API_KEY:");
+    });
+});
+
+describe("dapp env example", () => {
+    it("documents Enoki public configuration without client secrets", async () => {
+        const envExample = await readDappEnvExample();
+
+        expect(envExample).toContain("NEXT_PUBLIC_ENOKI_API_KEY=");
+        expect(envExample).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=");
+        expect(envExample).toContain("NEXT_PUBLIC_ENOKI_NETWORK=testnet");
+        expect(envExample).not.toContain("ENOKI_PRIVATE_API_KEY=");
     });
 });
