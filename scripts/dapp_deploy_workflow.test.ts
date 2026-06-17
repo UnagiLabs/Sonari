@@ -85,7 +85,8 @@ describe("dapp deploy workflow", () => {
             "NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID: $" +
                 "{{ vars.NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID }}",
         );
-        expect(workflow).toContain("NEXT_PUBLIC_ENOKI_NETWORK: testnet");
+        expect(workflow).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
+        expect(workflow).toContain("NEXT_PUBLIC_SUI_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}");
         expect(workflow).not.toContain("ENOKI_PRIVATE_API_KEY:");
     });
 });
@@ -96,7 +97,9 @@ describe("dapp env example", () => {
 
         expect(envExample).toContain("NEXT_PUBLIC_ENOKI_API_KEY=");
         expect(envExample).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=");
-        expect(envExample).toContain("NEXT_PUBLIC_ENOKI_NETWORK=testnet");
+        expect(envExample).toContain("NEXT_PUBLIC_SUI_NETWORK=testnet");
+        expect(envExample).toContain("Enoki / zkLogin もこの値を共有");
+        expect(envExample).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
         expect(envExample).not.toContain("ENOKI_PRIVATE_API_KEY=");
     });
 });
@@ -116,7 +119,9 @@ describe("dapp Enoki setup docs", () => {
         expect(readme).toContain("https://sonari.help/");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_API_KEY");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID");
-        expect(readme).toContain("NEXT_PUBLIC_ENOKI_NETWORK=testnet");
+        expect(readme).toContain("NEXT_PUBLIC_SUI_NETWORK");
+        expect(readme).toContain("Enoki uses the shared `NEXT_PUBLIC_SUI_NETWORK` value");
+        expect(readme).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
     });
 
     it("documents Enoki private key as server-only secret", async () => {
@@ -124,11 +129,14 @@ describe("dapp Enoki setup docs", () => {
         const wrangler = await readDappWrangler();
         const devVarsExample = await readDappDevVarsExample();
 
+        expect(readme).toContain("POST /api/enoki/membership/sponsor");
         expect(readme).toContain("wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp");
         expect(readme).toContain("NEXT_PUBLIC_* に secret を置かない");
+        expect(readme).toContain("MembershipPass 発行専用");
         expect(readme).toContain("ENOKI_PRIVATE_API_KEY");
         expect(wrangler).toContain("ENOKI_PRIVATE_API_KEY");
         expect(devVarsExample).toContain("ENOKI_PRIVATE_API_KEY=");
+        expect(devVarsExample).toContain("/api/enoki/membership/sponsor");
         expect(devVarsExample).toContain("NEXT_PUBLIC_ は付けません");
     });
 });
