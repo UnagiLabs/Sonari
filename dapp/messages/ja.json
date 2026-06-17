@@ -24,6 +24,9 @@
                 "title": "Sonari のメンバーになる",
                 "lead": "手順は3つだけ。先に居住エリアを選び、譲渡不可のメンバーシップ SBT を発行し、本人確認は準備ができたときに行えます。",
                 "walletHint": "Sui ウォレットを接続してはじめましょう。",
+                "walletGoogleTitle": "Google zkLogin は Google アカウントから Sui アドレスを作ります。",
+                "walletGoogleBody": "Sonari は接続中の Sui アドレスにメンバーシップ SBT を発行します。他の Sui ウォレットも利用できます。",
+                "walletSponsorNote": "初回メンバーシップ SBT 発行の network fee は Sonari が負担するため、SUI は不要です。",
                 "cta": "はじめる",
                 "membership": {
                     "checking": "メンバーシップ SBT を確認中…",

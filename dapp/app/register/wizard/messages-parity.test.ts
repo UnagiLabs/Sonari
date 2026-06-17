@@ -20,6 +20,10 @@ const membershipStepSource = readFileSync(
     resolve(dirname(fileURLToPath(import.meta.url)), "steps/membership-step.tsx"),
     "utf8",
 );
+const welcomeStepSource = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "steps/welcome-step.tsx"),
+    "utf8",
+);
 
 function loadCatalog(locale: string): Record<string, unknown> {
     return JSON.parse(readFileSync(resolve(messagesDir, `${locale}.json`), "utf8")) as Record<
@@ -224,5 +228,23 @@ describe("messages catalog parity", () => {
         expect(membershipStepSource).toContain('t("issue.signatureNote")');
         expect(membershipStepSource).toContain('phase: "prepare"');
         expect(membershipStepSource).toContain("membershipIssueFailureMessageKey(error.stage)");
+    });
+
+    it("welcome の connect panel 説明を catalog で管理する", () => {
+        const keys = [
+            "register.wizard.welcome.walletGoogleTitle",
+            "register.wizard.welcome.walletGoogleBody",
+            "register.wizard.welcome.walletSponsorNote",
+        ];
+        for (const key of keys) {
+            expect(en.has(key), key).toBe(true);
+            expect(ja.has(key), key).toBe(true);
+        }
+    });
+
+    it("welcome step は connect panel 説明を実際に参照する", () => {
+        expect(welcomeStepSource).toContain('t("walletGoogleTitle")');
+        expect(welcomeStepSource).toContain('t("walletGoogleBody")');
+        expect(welcomeStepSource).toContain('t("walletSponsorNote")');
     });
 });
