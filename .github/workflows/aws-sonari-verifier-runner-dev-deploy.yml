@@ -705,9 +705,9 @@ jobs:
           IDENTITY_RELAYER_MODE: ${{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_IDENTITY_RELAYER_MODE }}
           # affected-cells-proof-worker の URL は dapp と同じ repo-level 単一情報源を使う。
           AFFECTED_PROOF_WORKER_URL: ${{ vars.SONARI_AFFECTED_PROOF_WORKER_URL }}
-          # FloorCensus mode / RPC は repo-level Variables のまま。target と object ids は resolver 由来。
+          # FloorCensus mode / GraphQL URL は repo-level Variables のまま。target と object ids は resolver 由来。
           FLOOR_CENSUS_MODE: ${{ vars.SONARI_FLOOR_CENSUS_MODE }}
-          FLOOR_CENSUS_JSON_RPC_URL: ${{ vars.SONARI_FLOOR_CENSUS_JSON_RPC_URL }}
+          FLOOR_CENSUS_GRAPHQL_URL: ${{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}
         run: |
           set -euo pipefail
           mapfile -t deploy_plan_parameter_overrides < <(
@@ -812,8 +812,8 @@ jobs:
           if [[ -n "${FLOOR_CENSUS_MAIN_POOL:-}" ]]; then
             extra_parameter_overrides+=("FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL")
           fi
-          if [[ -n "${FLOOR_CENSUS_JSON_RPC_URL:-}" ]]; then
-            extra_parameter_overrides+=("FloorCensusJsonRpcUrl=$FLOOR_CENSUS_JSON_RPC_URL")
+          if [[ -n "${FLOOR_CENSUS_GRAPHQL_URL:-}" ]]; then
+            extra_parameter_overrides+=("FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL")
           fi
 
           aws cloudformation deploy \

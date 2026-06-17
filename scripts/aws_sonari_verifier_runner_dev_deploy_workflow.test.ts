@@ -196,6 +196,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
         expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_CATEGORY_POOL");
         expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_MAIN_POOL");
         expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");
+        expect(jobEnvMatch?.[1]).not.toContain("FLOOR_CENSUS_GRAPHQL_URL");
 
         expectContainsAll(workflow, [
             "RELAYER_MODE: $" + "{{ vars.AWS_SONARI_VERIFIER_RUNNER_DEV_RELAYER_MODE }}",
@@ -509,14 +510,17 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
 
         expectContainsAll(workflow, [
             "FLOOR_CENSUS_MODE: $" + "{{ vars.SONARI_FLOOR_CENSUS_MODE }}",
-            "FLOOR_CENSUS_JSON_RPC_URL: $" + "{{ vars.SONARI_FLOOR_CENSUS_JSON_RPC_URL }}",
+            "FLOOR_CENSUS_GRAPHQL_URL: $" + "{{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}",
             "FloorCensusMode=$FLOOR_CENSUS_MODE",
             "FloorCensusTarget=$FLOOR_CENSUS_TARGET",
             "FloorCensusPauseState=$FLOOR_CENSUS_PAUSE_STATE",
             "FloorCensusCategoryPool=$FLOOR_CENSUS_CATEGORY_POOL",
             "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
-            "FloorCensusJsonRpcUrl=$FLOOR_CENSUS_JSON_RPC_URL",
+            "FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL",
         ]);
+        expect(workflow).not.toContain("SONARI_FLOOR_CENSUS_JSON_RPC_URL");
+        expect(workflow).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");
+        expect(workflow).not.toContain("FloorCensusJsonRpcUrl");
         expect(workflow).not.toContain(
             "FLOOR_CENSUS_TARGET: $" + "{{ vars.SONARI_FLOOR_CENSUS_TARGET }}",
         );
