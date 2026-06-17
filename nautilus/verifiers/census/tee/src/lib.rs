@@ -2,9 +2,13 @@ use sonari_tee_core::registry::{
     CENSUS_ATTESTATION_PUBLIC_KEY_LABEL, CENSUS_VERIFIER_CONFIG_KEY, VERIFIER_REGISTRY,
 };
 
+pub mod affected_cells;
 pub mod encoding;
 pub mod error;
 
+pub use affected_cells::{
+    AffectedCell, AffectedCellsArtifact, compute_affected_cells_root, validate_affected_cells_root,
+};
 pub use error::CensusError;
 
 pub const INTENT: &str = "SONARI_FLOOR_CENSUS_V1";
