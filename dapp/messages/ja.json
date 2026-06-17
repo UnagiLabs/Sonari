@@ -117,6 +117,10 @@
                     "checking": "このウォレットにメンバーシップ SBT があるか確認中…",
                     "alreadyIssued": "このウォレットにはすでにメンバーシップ SBT があります。次へ進んでください。",
                     "submitting": "ウォレットでトランザクションを承認してください。",
+                    "sponsorNoteTitle": "初回メンバーシップ SBT のガス代は Sonari が負担します。",
+                    "sponsorNoteBody": "接続中の Sui アドレスに、この居住セルのメンバーシップ SBT を発行します。",
+                    "signatureNote": "送信前に、スポンサー付きトランザクションをウォレットで確認して署名します。",
+                    "preparing": "メンバーシップ SBT トランザクションを準備しています。",
                     "sponsoring": "ガス代不要のメンバーシップ SBT トランザクションを準備しています。",
                     "signing": "ウォレットでスポンサー付きメンバーシップ SBT トランザクションを承認してください。",
                     "executing": "メンバーシップ SBT をオンチェーンで発行しています。",
@@ -128,6 +132,10 @@
                     "proofFetchFailed": "居住地証明を取得できませんでした。",
                     "invalidProofResponse": "居住地証明のレスポンスが不正です。",
                     "residenceNotAllowed": "選択した居住セルは許可リストに含まれていません。",
+                    "prepareFailed": "メンバーシップ SBT トランザクションを準備できませんでした。{reason}",
+                    "sponsorFailed": "Sonari がメンバーシップ SBT トランザクションを sponsor できませんでした。{reason}",
+                    "signatureRejected": "メンバーシップ SBT トランザクションは署名されませんでした。{reason}",
+                    "executeFailed": "スポンサー付きメンバーシップ SBT トランザクションを送信できませんでした。{reason}",
                     "transactionFailed": "メンバーシップの発行に失敗しました。"
                 }
             },
