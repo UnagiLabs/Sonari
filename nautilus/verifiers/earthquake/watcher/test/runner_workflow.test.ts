@@ -2323,6 +2323,57 @@ describe("AWS runner workflow helper", () => {
         );
     });
 
+    it("requires an EventStreamHead object id for floor census submit mode", () => {
+        setRequiredFloorCensusEnv();
+        delete process.env.SONARI_EVENT_STREAM_HEAD_OBJECT_ID;
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.configurationError).toContain(
+            "SONARI_EVENT_STREAM_HEAD_OBJECT_ID required for FLOOR_CENSUS_MODE=submit",
+        );
+    });
+
+    it("wires an authenticated event proof collector when the EventStreamHead is configured", () => {
+        setRequiredFloorCensusEnv();
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.configurationError).toBeUndefined();
+        const options = readReaderOptions(config?.reader);
+        expect(options?.authenticatedEventProofCollector).toBeDefined();
+        expect(options?.eventStreamHeadObjectId).toBe(`0x${"ee".repeat(32)}`);
+    });
+
+    it("threads an optional authenticated events start checkpoint into the reader", () => {
+        setRequiredFloorCensusEnv();
+        process.env.SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT = "1234";
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.configurationError).toBeUndefined();
+        expect(readReaderOptions(config?.reader)?.authenticatedEventsStartCheckpoint).toBe(1234);
+    });
+
+    it("fails closed on a malformed authenticated events start checkpoint", () => {
+        setRequiredFloorCensusEnv();
+        process.env.SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT = "not-a-number";
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.configurationError).toContain(
+            "SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT must be a non-negative integer",
+        );
+    });
+
     it("derives enclave registration config from relayer submit environment lazily", async () => {
         process.env.RELAYER_NETWORK = "testnet";
         process.env.RELAYER_TARGET = earthquakeRelayerTarget;
@@ -3328,10 +3379,23 @@ function setRequiredFloorCensusEnv(): void {
     process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
     process.env.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST =
         "11111111111111111111111111111111";
+    process.env.SONARI_EVENT_STREAM_HEAD_OBJECT_ID = `0x${"ee".repeat(32)}`;
 }
 
 function readReaderEndpoint(reader: FloorCensusOnchainReader | undefined): unknown {
     return reader === undefined ? undefined : Reflect.get(reader, "endpoint");
+}
+
+function readReaderOptions(
+    reader: FloorCensusOnchainReader | undefined,
+): Record<string, unknown> | undefined {
+    if (reader === undefined) {
+        return undefined;
+    }
+    const options = Reflect.get(reader, "options");
+    return typeof options === "object" && options !== null
+        ? (options as Record<string, unknown>)
+        : undefined;
 }
 
 class RecordingEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {

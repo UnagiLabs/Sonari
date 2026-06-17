@@ -44,6 +44,17 @@ export {
     type SuiObjectInclusionProofResponse,
 } from "./authenticated_events.js";
 export {
+    createGrpcCheckpointLedgerClient,
+    encodeCheckpointSignatureBcs,
+    encodeValidatorCommitteeBcs,
+    type LedgerServiceLike,
+    SuiAlphaAuthenticatedEventsTransport,
+    type SuiAlphaAuthenticatedEventsTransportOptions,
+    type SuiCheckpointLedgerClient,
+    type SuiCheckpointSignature,
+    type SuiEpochCommittee,
+} from "./authenticated_events_transport.js";
+export {
     DAY_MS,
     DEFAULT_DUE_LIMIT,
     FAILED_RETRY_BACKOFF_MS,

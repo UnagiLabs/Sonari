@@ -65,6 +65,12 @@ import {
     IntegrityAffectedCellsProofRegistrationError,
     RetryableAffectedCellsProofRegistrationError,
 } from "./affected_cells_proof_registrar.js";
+import { SuiAuthenticatedEventProofCollector } from "./authenticated_events.js";
+import {
+    createGrpcCheckpointLedgerClient,
+    type LedgerServiceLike,
+    SuiAlphaAuthenticatedEventsTransport,
+} from "./authenticated_events_transport.js";
 import {
     type FloorCensusAdapter,
     type FloorCensusSubmitConfig,
@@ -3054,6 +3060,10 @@ export function readFloorCensusConfigFromEnv(
         readOptionalEnv("FLOOR_CENSUS_GRAPHQL_URL") ??
         readOptionalEnv("SONARI_SUI_GRAPHQL_URL") ??
         defaultSuiGraphqlUrl(network);
+    const eventStreamHeadObjectId = readOptionalEnv("SONARI_EVENT_STREAM_HEAD_OBJECT_ID");
+    const authenticatedEventsStartCheckpoint = readNonNegativeIntegerEnv(
+        "SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT",
+    );
     const missing = [
         ["FLOOR_CENSUS_TARGET", target],
         ["FLOOR_CENSUS_PAUSE_STATE", process.env.FLOOR_CENSUS_PAUSE_STATE],
@@ -3065,6 +3075,7 @@ export function readFloorCensusConfigFromEnv(
         ["RELAYER_GRPC_URL", grpcUrl],
         ["RELAYER_SIGNER_SECRET_ARN", process.env.RELAYER_SIGNER_SECRET_ARN],
         ["SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST", trustedValidatorCommitteeDigest],
+        ["SONARI_EVENT_STREAM_HEAD_OBJECT_ID", eventStreamHeadObjectId],
     ]
         .filter(([, value]) => value === undefined || value.length === 0)
         .map(([name]) => name);
@@ -3084,6 +3095,31 @@ export function readFloorCensusConfigFromEnv(
             "RELAYER_NETWORK is required for floor census",
         );
     }
+    if (
+        process.env.SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT !== undefined &&
+        process.env.SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT.length > 0 &&
+        authenticatedEventsStartCheckpoint === undefined
+    ) {
+        configurationError = appendConfigurationError(
+            configurationError,
+            "SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT must be a non-negative integer",
+        );
+    }
+    // The Census TEE only signs floor census results backed by an authenticated
+    // Sui event stream proof, so production submit requires a gRPC endpoint that
+    // can serve the alpha EventService/ProofService plus the EventStreamHead
+    // object id of the membership package's authenticated event stream.
+    const suiClient =
+        grpcUrl !== undefined && network !== undefined
+            ? new SuiGrpcClient({ network, baseUrl: grpcUrl })
+            : undefined;
+    const reader = buildFloorCensusReader({
+        graphqlUrl,
+        grpcUrl,
+        suiClient,
+        eventStreamHeadObjectId,
+        authenticatedEventsStartCheckpoint,
+    });
     const config: FloorCensusSubmitConfig = {
         target,
         pauseState: process.env.FLOOR_CENSUS_PAUSE_STATE ?? "",
@@ -3092,18 +3128,15 @@ export function readFloorCensusConfigFromEnv(
         mainPool: process.env.FLOOR_CENSUS_MAIN_POOL ?? "",
         membershipRegistry: process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "",
         trustedValidatorCommitteeDigest,
-        reader: graphqlUrl === undefined ? undefined : new GraphqlFloorCensusReader(graphqlUrl),
+        reader,
     };
     if (network !== undefined) {
         config.network = network;
     }
     if (grpcUrl !== undefined) {
         config.grpcUrl = grpcUrl;
-        if (network !== undefined) {
-            config.client = new SuiGrpcClient({
-                network,
-                baseUrl: grpcUrl,
-            }) as unknown as NonNullable<FloorCensusSubmitConfig["client"]>;
+        if (suiClient !== undefined) {
+            config.client = suiClient as unknown as NonNullable<FloorCensusSubmitConfig["client"]>;
         }
     }
     if (configurationError !== undefined) {
@@ -3172,6 +3205,47 @@ function readPositiveIntegerEnv(name: string, fallback: number): number | undefi
     }
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function readNonNegativeIntegerEnv(name: string): number | undefined {
+    const value = process.env[name];
+    if (value === undefined || value.length === 0) {
+        return undefined;
+    }
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function buildFloorCensusReader(input: {
+    graphqlUrl: string | undefined;
+    grpcUrl: string | undefined;
+    suiClient: SuiGrpcClient | undefined;
+    eventStreamHeadObjectId: string | undefined;
+    authenticatedEventsStartCheckpoint: number | undefined;
+}): GraphqlFloorCensusReader | undefined {
+    if (input.graphqlUrl === undefined) {
+        return undefined;
+    }
+    if (
+        input.grpcUrl === undefined ||
+        input.suiClient === undefined ||
+        input.eventStreamHeadObjectId === undefined
+    ) {
+        return new GraphqlFloorCensusReader(input.graphqlUrl);
+    }
+    const transport = new SuiAlphaAuthenticatedEventsTransport({
+        grpcUrl: input.grpcUrl,
+        ledger: createGrpcCheckpointLedgerClient(
+            input.suiClient.ledgerService as unknown as LedgerServiceLike,
+        ),
+    });
+    return new GraphqlFloorCensusReader(input.graphqlUrl, {
+        authenticatedEventProofCollector: new SuiAuthenticatedEventProofCollector(transport),
+        eventStreamHeadObjectId: input.eventStreamHeadObjectId,
+        ...(input.authenticatedEventsStartCheckpoint !== undefined
+            ? { authenticatedEventsStartCheckpoint: input.authenticatedEventsStartCheckpoint }
+            : {}),
+    });
 }
 
 function validateSuiNetworkGrpcUrl(network: SuiNetwork, grpcUrl: string, fieldName: string): void {
