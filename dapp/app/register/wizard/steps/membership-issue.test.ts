@@ -1,8 +1,10 @@
+import type { ClientWithCoreApi } from "@mysten/sui/client";
 import { describe, expect, it } from "vitest";
 import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
 import {
     buildRegisterMemberTransaction,
     fetchResidenceProof,
+    issueMembershipPass,
     MembershipIssueError,
     type ResidenceProofResponse,
 } from "./membership-issue";
@@ -176,5 +178,36 @@ describe("membership issue helpers", () => {
             function: "register_member",
         });
         expect(register.MoveCall.arguments).toHaveLength(7);
+    });
+
+    it("always issues membership through the sponsored executor", async () => {
+        const client = {} as ClientWithCoreApi;
+        const sponsoredCalls: Array<{ client: ClientWithCoreApi; sender: string }> = [];
+
+        const result = await issueMembershipPass({
+            client,
+            senderAddress: SENDER,
+            homeCell: HOME_CELL,
+            residenceProofWorkerUrl: "https://worker.example",
+            packageId: PACKAGE_ID,
+            objects: {
+                pauseState: PAUSE_STATE,
+                membershipRegistry: MEMBERSHIP_REGISTRY,
+                allowedResidenceCellRegistry: ALLOWED_RESIDENCE_CELL_REGISTRY,
+            },
+            fetchImpl: async () =>
+                ({
+                    status: 200,
+                    ok: true,
+                    json: async () => RESIDENCE_PROOF,
+                }) as Response,
+            sponsoredExecutor: async (input) => {
+                sponsoredCalls.push({ client: input.client, sender: input.sender });
+                return { digest: "sponsored-digest" };
+            },
+        });
+
+        expect(result).toEqual({ digest: "sponsored-digest" });
+        expect(sponsoredCalls).toEqual([{ client, sender: SENDER }]);
     });
 });

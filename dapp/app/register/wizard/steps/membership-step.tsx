@@ -6,9 +6,9 @@ import { useEffect, useState } from "react";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
 import {
-    executeWalletTransaction,
-    WalletTransactionError,
-} from "../../../wallet/wallet-transaction-adapter";
+    executeSponsoredMembershipTransaction,
+    SponsoredMembershipTransactionError,
+} from "../../../wallet/sponsored-membership-transaction";
 import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { h3DecimalToHex } from "../../residence/h3-geo";
 import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
@@ -18,11 +18,11 @@ import {
     disabledReasonMessageKey,
     type MembershipLookupViewState,
 } from "./membership-gate";
+import { issueMembershipPass, MembershipIssueError } from "./membership-issue";
 import {
-    buildRegisterMemberTransaction,
-    fetchResidenceProof,
-    MembershipIssueError,
-} from "./membership-issue";
+    type MembershipIssueViewState,
+    membershipSubmittingMessageKey,
+} from "./membership-issue-state";
 import { shortAddress } from "./membership-presence";
 
 interface MembershipStepProps {
@@ -32,11 +32,6 @@ interface MembershipStepProps {
     readonly onBack: () => void;
     readonly onNext: () => void;
 }
-
-type MembershipIssueViewState =
-    | { readonly kind: "idle" }
-    | { readonly kind: "submitting" }
-    | { readonly kind: "failed"; readonly message: string };
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 const residenceProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL ?? "";
@@ -166,26 +161,31 @@ export function MembershipStep({
     }
 
     async function runMembershipIssuance(senderAddress: string, homeCell: string) {
-        setIssueState({ kind: "submitting" });
+        setIssueState({ kind: "submitting", phase: "sponsor" });
 
         try {
-            const residenceProof = await fetchResidenceProof({
-                workerUrl: residenceProofWorkerUrl,
-                homeCell,
-            });
-            const { transaction } = buildRegisterMemberTransaction({
+            await issueMembershipPass({
+                client,
                 senderAddress,
+                homeCell,
+                residenceProofWorkerUrl,
                 packageId: membershipPackageId,
                 objects: {
                     pauseState: pauseStateId,
                     membershipRegistry: membershipRegistryId,
                     allowedResidenceCellRegistry: allowedResidenceCellRegistryId,
                 },
-                homeCell,
-                residenceProof,
                 termsVersion: MEMBERSHIP_TERMS_VERSION,
+                sponsoredExecutor: (input) =>
+                    executeSponsoredMembershipTransaction({
+                        client: input.client,
+                        transaction: input.transaction,
+                        sender: input.sender,
+                        signer: dAppKit,
+                        onStageChange: (stage) =>
+                            setIssueState({ kind: "submitting", phase: stage }),
+                    }),
             });
-            await executeWalletTransaction(dAppKit, { transaction });
             onIssued();
             setIssueState({ kind: "idle" });
             onNext();
@@ -210,7 +210,7 @@ export function MembershipStep({
                     return t("issue.residenceNotAllowed");
             }
         }
-        if (error instanceof WalletTransactionError) {
+        if (error instanceof SponsoredMembershipTransactionError) {
             return error.message.length > 0 ? error.message : t("issue.transactionFailed");
         }
         return t("issue.transactionFailed");
@@ -249,7 +249,11 @@ export function MembershipStep({
             return { message: issueState.message, tone: "alert" };
         }
         if (issueState.kind === "submitting") {
-            return { message: t("issue.submitting"), tone: "note", loading: true };
+            return {
+                message: t(membershipSubmittingMessageKey(issueState.phase)),
+                tone: "note",
+                loading: true,
+            };
         }
         if (owner.length === 0) {
             return { message: t("issue.connectWallet"), tone: "note" };
