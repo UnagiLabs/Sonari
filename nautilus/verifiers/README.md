@@ -5,6 +5,17 @@ The Nautilus / TEE side of Sonari. Each verifier re-fetches its source data insi
 - **Role**: produce TEE-signed earthquake and identity results (plus Merkle roots / proofs) for on-chain verification
 - **Trust boundary**: the enclave is the only root of trust; watchers, runners, relayers, and caches are untrusted transport
 
+## Verifier Numbering
+
+| Verifier | `verifier_family` | `verifier_config_key` | Attestation public-key label |
+|----------|-------------------|-----------------------|------------------------------|
+| earthquake | 3 | 1 | `sonari-earthquake-attestation-public-key` |
+| identity | 4 | 2 | `sonari-membership-attestation-public-key` |
+| census | 5 | 3 | `sonari-census-attestation-public-key` |
+
+`verifier_config_key` values are assigned sequentially and are never reused.
+The next reserved key is `4`.
+
 ## Where to Read More
 
 - [docs/verifiers/overview.md](../../docs/verifiers/overview.md) — full overview: Nautilus pattern, trust model, implemented flows, and the exact payload field order
@@ -20,6 +31,17 @@ Sonari の Nautilus / TEE 側です。各 verifier は Nitro Enclave の中で s
 
 - **役割**: on-chain 検証のための TEE 署名済み地震 / identity 結果（および Merkle root / proof）の生成
 - **信頼境界**: enclave のみが信頼の起点。watcher / runner / relayer / cache は信頼しない transport
+
+## Verifier 番号
+
+| Verifier | `verifier_family` | `verifier_config_key` | Attestation public-key label |
+|----------|-------------------|-----------------------|------------------------------|
+| earthquake | 3 | 1 | `sonari-earthquake-attestation-public-key` |
+| identity | 4 | 2 | `sonari-membership-attestation-public-key` |
+| census | 5 | 3 | `sonari-census-attestation-public-key` |
+
+`verifier_config_key` は順番に割り当て、再利用しません。
+次に予約されている key は `4` です。
 
 ## 詳細資料
 

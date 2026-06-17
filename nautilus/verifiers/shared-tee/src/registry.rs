@@ -14,9 +14,10 @@
 //! ## Numbering rule
 //!
 //! `config_key` (u64) is assigned sequentially, one per verifier, and is never
-//! reused. earthquake = 1, identity = 2, and the next verifier reserves
-//! [`NEXT_VERIFIER_CONFIG_KEY`] (= 3). The `family` (u8) values mirror the Move
-//! `metadata_verifier` module (earthquake oracle = 3, identity = 4).
+//! reused. earthquake = 1, identity = 2, census = 3, and the next verifier
+//! reserves [`NEXT_VERIFIER_CONFIG_KEY`] (= 4). The `family` (u8) values mirror
+//! the Move `metadata_verifier` module (earthquake oracle = 3, identity = 4,
+//! census = 5).
 
 /// `config_key` for the earthquake (USGS oracle) verifier family.
 pub const EARTHQUAKE_VERIFIER_CONFIG_KEY: u64 = 1;
@@ -24,12 +25,15 @@ pub const EARTHQUAKE_VERIFIER_CONFIG_KEY: u64 = 1;
 /// `config_key` for the identity (membership) verifier family.
 pub const IDENTITY_VERIFIER_CONFIG_KEY: u64 = 2;
 
+/// `config_key` for the census verifier family.
+pub const CENSUS_VERIFIER_CONFIG_KEY: u64 = 3;
+
 /// Reserved `config_key` for the next verifier added to the shared registry.
 ///
 /// The numbering rule assigns the next sequential key (+1 above the highest
 /// registered key); update this and append a [`VERIFIER_REGISTRY`] entry when a
-/// third verifier lands.
-pub const NEXT_VERIFIER_CONFIG_KEY: u64 = 3;
+/// fourth verifier lands.
+pub const NEXT_VERIFIER_CONFIG_KEY: u64 = 4;
 
 /// Attestation public-key label for the earthquake verifier enclave.
 pub const EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL: &[u8] =
@@ -38,6 +42,9 @@ pub const EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL: &[u8] =
 /// Attestation public-key label for the identity (membership) verifier enclave.
 pub const IDENTITY_ATTESTATION_PUBLIC_KEY_LABEL: &[u8] =
     b"sonari-membership-attestation-public-key";
+
+/// Attestation public-key label for the census verifier enclave.
+pub const CENSUS_ATTESTATION_PUBLIC_KEY_LABEL: &[u8] = b"sonari-census-attestation-public-key";
 
 /// How a verifier's intent / domain-separation marker is represented on the
 /// signed payload.
@@ -88,11 +95,19 @@ pub const VERIFIER_REGISTRY: &[VerifierRegistryEntry] = &[
         attestation_public_key_label: IDENTITY_ATTESTATION_PUBLIC_KEY_LABEL,
         intent: VerifierIntent::Utf8String("SONARI_IDENTITY_VERIFICATION_V1"),
     },
+    VerifierRegistryEntry {
+        name: "census",
+        family: 5,
+        config_key: CENSUS_VERIFIER_CONFIG_KEY,
+        attestation_public_key_label: CENSUS_ATTESTATION_PUBLIC_KEY_LABEL,
+        intent: VerifierIntent::Utf8String("SONARI_FLOOR_CENSUS_V1"),
+    },
 ];
 
 #[cfg(test)]
 mod tests {
     use super::{
+        CENSUS_ATTESTATION_PUBLIC_KEY_LABEL, CENSUS_VERIFIER_CONFIG_KEY,
         EARTHQUAKE_ATTESTATION_PUBLIC_KEY_LABEL, EARTHQUAKE_VERIFIER_CONFIG_KEY,
         IDENTITY_ATTESTATION_PUBLIC_KEY_LABEL, IDENTITY_VERIFIER_CONFIG_KEY,
         NEXT_VERIFIER_CONFIG_KEY, VERIFIER_REGISTRY,
@@ -158,6 +173,22 @@ mod tests {
             identity.attestation_public_key_label,
             b"sonari-membership-attestation-public-key",
         );
+
+        let census = VERIFIER_REGISTRY
+            .iter()
+            .find(|entry| entry.name == "census")
+            .expect("census entry");
+        assert_eq!(census.family, 5);
+        assert_eq!(census.config_key, CENSUS_VERIFIER_CONFIG_KEY);
+        assert_eq!(census.config_key, 3);
+        assert_eq!(
+            census.attestation_public_key_label,
+            CENSUS_ATTESTATION_PUBLIC_KEY_LABEL,
+        );
+        assert_eq!(
+            census.attestation_public_key_label,
+            b"sonari-census-attestation-public-key",
+        );
     }
 
     #[test]
@@ -172,6 +203,6 @@ mod tests {
             );
         }
         // The numbering rule reserves +1 after the highest registered key.
-        assert_eq!(NEXT_VERIFIER_CONFIG_KEY, 3);
+        assert_eq!(NEXT_VERIFIER_CONFIG_KEY, 4);
     }
 }
