@@ -1051,8 +1051,9 @@ jobs:
           fi
 
           echo "Registering verifier PCR configs against $SONARI_VERIFIER_REGISTRY_ID (admin $admin_address)"
-          # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2 の env fallback で
-          # 新 EIF 値が自動的に入る。idempotent（create→abort9→update fallback）なので再実行安全。
+          # PCR は EARTHQUAKE_EIF_PCR0/1/2・MEMBERSHIP_IDENTITY_EIF_PCR0/1/2・
+          # CENSUS_EIF_PCR0/1/2 の env fallback で新 EIF 値が自動的に入る。
+          # idempotent（create→abort9→update fallback）なので再実行安全。
           scripts/register-verifier-configs.sh \
             --package-id "$SONARI_IDENTITY_PACKAGE_ID" \
             --admin-cap-id "$SONARI_ADMIN_CAP_ID" \
@@ -1076,7 +1077,7 @@ jobs:
 
           REGISTRY_JSON="$registry_json" node --input-type=module <<'NODE'
           const EXPECTED = {
-            // verifier_family: earthquake=3, identity=4（contracts/sources/metadata_verifier.move）。
+            // verifier_family: earthquake=3, identity=4, census=5（contracts/sources/metadata_verifier.move）。
             3: {
               label: "earthquake",
               pcr0: process.env.EARTHQUAKE_EIF_PCR0,
@@ -1088,6 +1089,12 @@ jobs:
               pcr0: process.env.MEMBERSHIP_IDENTITY_EIF_PCR0,
               pcr1: process.env.MEMBERSHIP_IDENTITY_EIF_PCR1,
               pcr2: process.env.MEMBERSHIP_IDENTITY_EIF_PCR2,
+            },
+            5: {
+              label: "census",
+              pcr0: process.env.CENSUS_EIF_PCR0,
+              pcr1: process.env.CENSUS_EIF_PCR1,
+              pcr2: process.env.CENSUS_EIF_PCR2,
             },
           };
 

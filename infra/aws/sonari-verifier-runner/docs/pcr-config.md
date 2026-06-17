@@ -1,6 +1,6 @@
 # PCR config runbook
 
-Earthquake verifier と membership identity verifier の PCR config は、既存の `admin.move` 関数で管理します。既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません。
+Earthquake verifier、membership identity verifier、census verifier の PCR config は、既存の `admin.move` 関数で管理します。既存の `admin.move` 関数で足りるため、新しい wrapper は追加しません。
 
 ## dev/testnet の PCR 自動再登録（速度優先の例外）
 
@@ -8,7 +8,7 @@ Earthquake verifier と membership identity verifier の PCR config は、既存
 
 これを構造的に消すため、**dev/testnet 専用**として `aws-sonari-verifier-runner-dev` deploy workflow（`.github/workflows/aws-sonari-verifier-runner-dev-deploy.yml`）が、EIF ビルド・CloudFormation デプロイの後に `scripts/register-verifier-configs.sh` を自動実行し、新 EIF の PCR を on-chain に再登録します。これにより **手動の `register-verifier-configs.sh` 実行は dev では不要**になりました。
 
-- workflow は EIF measurement から `EARTHQUAKE_EIF_PCR0/1/2` と `MEMBERSHIP_IDENTITY_EIF_PCR0/1/2` を読み、スクリプトの env fallback 経由で渡します。`register-verifier-configs.sh` は idempotent（create→abort9→update fallback）なので再実行は安全です。
+- workflow は EIF measurement から `EARTHQUAKE_EIF_PCR0/1/2`、`MEMBERSHIP_IDENTITY_EIF_PCR0/1/2`、`CENSUS_EIF_PCR0/1/2` を読み、スクリプトの env fallback 経由で渡します。`register-verifier-configs.sh` は idempotent（create→abort9→update fallback）なので再実行は安全です。
 - 再登録後に on-chain config の PCR が新 EIF と一致するかを read-only（AdminCap 不要）で検証し、不一致なら fail します。サイレントな部分失敗を検出するためです。
 - CI に投入する admin 鍵は **dev/testnet 専用の使い捨て鍵**（GitHub Secret `SONARI_DEV_ADMIN_PRIVATE_KEY`、環境 `aws-sonari-verifier-runner-dev` スコープ）で、本番 AdminCap とは別物です。漏洩時の被害は testnet に限定されます。AdminCap object id は `contracts/Published.toml` の package id と Sui events から workflow が導出します。
 - secret は環境スコープ＋手動 `workflow_dispatch` 限定（GitHub Actions コスト削減のため push トリガーは持たない）で、fork PR からは読めません。鍵は workflow ログに出しません（`set +x` / `::add-mask::` / 後始末の `rm -rf`）。

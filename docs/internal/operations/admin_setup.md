@@ -193,6 +193,9 @@ EARTHQUAKE_EIF_PCR2="..."
 MEMBERSHIP_IDENTITY_EIF_PCR0="..."
 MEMBERSHIP_IDENTITY_EIF_PCR1="..."
 MEMBERSHIP_IDENTITY_EIF_PCR2="..."
+CENSUS_EIF_PCR0="..."
+CENSUS_EIF_PCR1="..."
+CENSUS_EIF_PCR2="..."
 ```
 
 まとめて実行:
@@ -207,13 +210,18 @@ MEMBERSHIP_IDENTITY_EIF_PCR2="..."
   --earthquake-pcr2 "$EARTHQUAKE_EIF_PCR2" \
   --identity-pcr0 "$MEMBERSHIP_IDENTITY_EIF_PCR0" \
   --identity-pcr1 "$MEMBERSHIP_IDENTITY_EIF_PCR1" \
-  --identity-pcr2 "$MEMBERSHIP_IDENTITY_EIF_PCR2"
+  --identity-pcr2 "$MEMBERSHIP_IDENTITY_EIF_PCR2" \
+  --census-pcr0 "$CENSUS_EIF_PCR0" \
+  --census-pcr1 "$CENSUS_EIF_PCR1" \
+  --census-pcr2 "$CENSUS_EIF_PCR2"
 ```
 
 補足:
 
 - `--skip-identity` を付けると earthquake のみ先に登録できます。
+- `--skip-census` を付けると census config の登録を省略できます。
 - identity config は `config_key=2`（family=IDENTITY）なので、earthquake 用 PCR を流用しないこと。
+- census config は `config_key=3`（family=CENSUS）なので、earthquake / identity 用 PCR を流用しないこと。
 
 ## Publish しない場所
 

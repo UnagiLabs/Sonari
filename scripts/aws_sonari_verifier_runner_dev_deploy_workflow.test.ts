@@ -435,6 +435,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             '--sui-config "$client_config"',
             "--sui-env testnet",
             // PCR は EIF 値の env fallback で渡る（手書きしない）。
+            "CENSUS_EIF_PCR0",
             "register-verifier-configs.sh",
         ]);
         // admin cap id と registry id は resolver 由来、admin 鍵は環境スコープ secret から。
@@ -470,6 +471,7 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "verifier_family",
             "EARTHQUAKE_EIF_PCR0",
             "MEMBERSHIP_IDENTITY_EIF_PCR0",
+            "CENSUS_EIF_PCR0",
             "process.exit(1)",
         ]);
     });
