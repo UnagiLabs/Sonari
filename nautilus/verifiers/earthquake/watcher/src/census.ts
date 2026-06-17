@@ -1225,7 +1225,8 @@ function readGraphqlDynamicFields(response: unknown): unknown[] {
 function readMembershipStatus(field: unknown): number {
     const contents = readRecordField(field, "contents");
     const json = readRecordField(contents, "json");
-    const status = readSafeInteger(json?.status);
+    const value = readRecordField(json, "value");
+    const status = readSafeInteger(json?.status) ?? readSafeInteger(value?.status);
     if (status === undefined) {
         throw new Error("membership dynamic field status is malformed");
     }

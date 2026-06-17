@@ -336,6 +336,38 @@ describe("GraphqlFloorCensusReader", () => {
         });
     });
 
+    it("reads active membership status from GraphQL dynamic field value objects", async () => {
+        const activeLineage = `0x${"11".repeat(32)}`;
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [
+                            {
+                                contents: {
+                                    json: {
+                                        id: "0xfield",
+                                        name: activeLineage,
+                                        value: {
+                                            status: 1,
+                                        },
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.listActiveLineages({
+                membershipRegistryId: "0xmembership",
+                lineages: [activeLineage],
+            }),
+        ).resolves.toEqual(new Set([activeLineage]));
+    });
+
     it("encodes lineage object IDs as GraphQL dynamic field key BCS bytes", async () => {
         const requests: Array<{ variables: Record<string, unknown> }> = [];
         globalThis.fetch = async (_input, init) => {
