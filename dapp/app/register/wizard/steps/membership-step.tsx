@@ -1,17 +1,11 @@
 "use client";
 
-import { useCurrentAccount, useCurrentClient, useCurrentWallet } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
-import { readEnokiConfig } from "../../../wallet/enoki-config";
-import { shouldUseSponsoredMembershipTransaction } from "../../../wallet/enoki-wallet-detection";
 import { executeSponsoredMembershipTransaction } from "../../../wallet/sponsored-membership-transaction";
-import {
-    executeWalletTransaction,
-    WalletTransactionError,
-} from "../../../wallet/wallet-transaction-adapter";
 import { lookupMembershipPass } from "../../identity/membership-lookup";
 import { h3DecimalToHex } from "../../residence/h3-geo";
 import { MEMBERSHIP_TERMS_VERSION } from "../../terms-version";
@@ -54,7 +48,6 @@ export function MembershipStep({
     const tCommon = useTranslations("register.wizard.common");
 
     const account = useCurrentAccount();
-    const currentWallet = useCurrentWallet();
     const client = useCurrentClient();
     const owner = account?.address ?? "";
 
@@ -165,17 +158,7 @@ export function MembershipStep({
     }
 
     async function runMembershipIssuance(senderAddress: string, homeCell: string) {
-        const executionMode = shouldUseSponsoredMembershipTransaction({
-            wallet: currentWallet,
-            enokiConfigResult: readEnokiConfig(),
-            signer: dAppKit,
-        })
-            ? "sponsored"
-            : "wallet";
-        setIssueState({
-            kind: "submitting",
-            phase: executionMode === "sponsored" ? "sponsor" : "wallet",
-        });
+        setIssueState({ kind: "submitting", phase: "sponsor" });
 
         try {
             await issueMembershipPass({
@@ -190,8 +173,6 @@ export function MembershipStep({
                     allowedResidenceCellRegistry: allowedResidenceCellRegistryId,
                 },
                 termsVersion: MEMBERSHIP_TERMS_VERSION,
-                executionMode,
-                walletExecutor: (input) => executeWalletTransaction(dAppKit, input),
                 sponsoredExecutor: (input) =>
                     executeSponsoredMembershipTransaction({
                         client: input.client,
@@ -225,9 +206,6 @@ export function MembershipStep({
                 case "residence_cell_not_allowed":
                     return t("issue.residenceNotAllowed");
             }
-        }
-        if (error instanceof WalletTransactionError) {
-            return error.message.length > 0 ? error.message : t("issue.transactionFailed");
         }
         return t("issue.transactionFailed");
     }

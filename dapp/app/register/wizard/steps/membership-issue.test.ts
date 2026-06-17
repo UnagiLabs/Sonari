@@ -180,46 +180,8 @@ describe("membership issue helpers", () => {
         expect(register.MoveCall.arguments).toHaveLength(7);
     });
 
-    it("issues membership through the existing wallet executor by default", async () => {
-        const walletCalls: unknown[] = [];
-        const sponsoredCalls: unknown[] = [];
-
-        const result = await issueMembershipPass({
-            client: {} as ClientWithCoreApi,
-            senderAddress: SENDER,
-            homeCell: HOME_CELL,
-            residenceProofWorkerUrl: "https://worker.example",
-            packageId: PACKAGE_ID,
-            objects: {
-                pauseState: PAUSE_STATE,
-                membershipRegistry: MEMBERSHIP_REGISTRY,
-                allowedResidenceCellRegistry: ALLOWED_RESIDENCE_CELL_REGISTRY,
-            },
-            fetchImpl: async () =>
-                ({
-                    status: 200,
-                    ok: true,
-                    json: async () => RESIDENCE_PROOF,
-                }) as Response,
-            walletExecutor: async (input) => {
-                walletCalls.push(input);
-                return { digest: "wallet-digest" };
-            },
-            sponsoredExecutor: async (input) => {
-                sponsoredCalls.push(input);
-                return { digest: "sponsored-digest" };
-            },
-            executionMode: "wallet",
-        });
-
-        expect(result).toEqual({ digest: "wallet-digest" });
-        expect(walletCalls).toHaveLength(1);
-        expect(sponsoredCalls).toHaveLength(0);
-    });
-
-    it("issues membership through the sponsored executor when requested", async () => {
+    it("always issues membership through the sponsored executor", async () => {
         const client = {} as ClientWithCoreApi;
-        const walletCalls: unknown[] = [];
         const sponsoredCalls: Array<{ client: ClientWithCoreApi; sender: string }> = [];
 
         const result = await issueMembershipPass({
@@ -239,19 +201,13 @@ describe("membership issue helpers", () => {
                     ok: true,
                     json: async () => RESIDENCE_PROOF,
                 }) as Response,
-            walletExecutor: async (input) => {
-                walletCalls.push(input);
-                return { digest: "wallet-digest" };
-            },
             sponsoredExecutor: async (input) => {
                 sponsoredCalls.push({ client: input.client, sender: input.sender });
                 return { digest: "sponsored-digest" };
             },
-            executionMode: "sponsored",
         });
 
         expect(result).toEqual({ digest: "sponsored-digest" });
-        expect(walletCalls).toHaveLength(0);
         expect(sponsoredCalls).toEqual([{ client, sender: SENDER }]);
     });
 });

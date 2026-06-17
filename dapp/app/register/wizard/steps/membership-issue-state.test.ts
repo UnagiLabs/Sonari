@@ -6,7 +6,6 @@ import {
 
 describe("membershipSubmittingMessageKey", () => {
     it.each<[MembershipIssueSubmittingPhase, string]>([
-        ["wallet", "issue.submitting"],
         ["sponsor", "issue.sponsoring"],
         ["sign", "issue.signing"],
         ["execute", "issue.executing"],

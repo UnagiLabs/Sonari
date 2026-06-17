@@ -49,14 +49,9 @@ export interface RegisterMemberTransactionResult {
     readonly transaction: Transaction;
 }
 
-export type MembershipIssueExecutionMode = "wallet" | "sponsored";
-
-export interface MembershipIssueExecutorInput {
-    readonly transaction: Transaction;
-}
-
-export interface SponsoredMembershipIssueExecutorInput extends MembershipIssueExecutorInput {
+export interface SponsoredMembershipIssueExecutorInput {
     readonly client: ClientWithCoreApi;
+    readonly transaction: Transaction;
     readonly sender: string;
 }
 
@@ -74,10 +69,6 @@ export interface IssueMembershipPassInput {
     readonly termsVersion?: number;
     readonly signedStatementHash?: string;
     readonly fetchImpl?: typeof fetch;
-    readonly executionMode: MembershipIssueExecutionMode;
-    readonly walletExecutor: (
-        input: MembershipIssueExecutorInput,
-    ) => Promise<MembershipIssueExecutionResult>;
     readonly sponsoredExecutor: (
         input: SponsoredMembershipIssueExecutorInput,
     ) => Promise<MembershipIssueExecutionResult>;
@@ -212,15 +203,11 @@ export async function issueMembershipPass(
             : { signedStatementHash: input.signedStatementHash }),
     });
 
-    if (input.executionMode === "sponsored") {
-        return input.sponsoredExecutor({
-            client: input.client,
-            transaction,
-            sender: input.senderAddress,
-        });
-    }
-
-    return input.walletExecutor({ transaction });
+    return input.sponsoredExecutor({
+        client: input.client,
+        transaction,
+        sender: input.senderAddress,
+    });
 }
 
 function buildResidenceProofRequestUrl(workerUrl: string, homeCell: string): string {

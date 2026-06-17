@@ -1,4 +1,4 @@
-export type MembershipIssueSubmittingPhase = "wallet" | "sponsor" | "sign" | "execute";
+export type MembershipIssueSubmittingPhase = "sponsor" | "sign" | "execute";
 
 export type MembershipIssueViewState =
     | { readonly kind: "idle" }
@@ -7,8 +7,6 @@ export type MembershipIssueViewState =
 
 export function membershipSubmittingMessageKey(phase: MembershipIssueSubmittingPhase): string {
     switch (phase) {
-        case "wallet":
-            return "issue.submitting";
         case "sponsor":
             return "issue.sponsoring";
         case "sign":
