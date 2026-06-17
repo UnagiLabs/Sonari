@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { sha256Hex } from "@sonari/proof-core";
-import { NonRetryableError } from "cloudflare:workers";
+import { NonRetryableError } from "cloudflare:workflows";
 import { describe, expect, it } from "vitest";
 import type { AffectedAreaR2Bucket, AffectedAreaR2PutOptions } from "./affected_area_r2.js";
 import {

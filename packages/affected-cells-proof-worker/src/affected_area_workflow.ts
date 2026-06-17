@@ -1,6 +1,6 @@
 import "./workflow_runtime_types.js";
 import { sha256Hex } from "@sonari/proof-core";
-import { NonRetryableError } from "cloudflare:workers";
+import { NonRetryableError } from "cloudflare:workflows";
 import { generateAffectedAreaArtifacts } from "./affected_area_artifacts.js";
 import {
     affectedAreaManifestR2Key,

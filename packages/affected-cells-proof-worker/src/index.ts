@@ -14,7 +14,8 @@
  */
 
 import "./workflow_runtime_types.js";
-import { NonRetryableError, WorkflowEntrypoint } from "cloudflare:workers";
+import { WorkflowEntrypoint } from "cloudflare:workers";
+import { NonRetryableError } from "cloudflare:workflows";
 import {
     AffectedCellsProofError,
     errorResponse,

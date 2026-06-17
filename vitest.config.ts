@@ -10,6 +10,12 @@ export default defineConfig({
                     import.meta.url,
                 ),
             ),
+            "cloudflare:workflows": fileURLToPath(
+                new URL(
+                    "./packages/affected-cells-proof-worker/src/test_cloudflare_workflows.ts",
+                    import.meta.url,
+                ),
+            ),
         },
     },
     test: {
