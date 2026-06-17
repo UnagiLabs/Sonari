@@ -476,6 +476,14 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         const watcherRoleStart = template.indexOf("WatcherLambdaRole:");
         const runnerRole = template.slice(runnerRoleStart, watcherRoleStart);
         expect(runnerRole).not.toContain("SourceArchiverPrivateKeySecretArn");
+        expect(runnerRole).toContain("Action: s3:GetObject");
+        expect(runnerRole).toContain(
+            "Resource:\n                  - !Sub arn:$" +
+                "{AWS::Partition}:s3:::$" +
+                "{TeeArtifactS3Bucket}/$" +
+                "{TeeArtifactS3Key}",
+        );
+        expect(runnerRole).toContain("- !Sub $" + "{RunnerResultBucket.Arn}/source-artifacts/*");
     });
 
     it("configures earthquake enclave egress through a parent CONNECT proxy and local bridge", async () => {

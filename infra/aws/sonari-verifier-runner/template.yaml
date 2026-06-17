@@ -482,6 +482,7 @@ Resources:
                   - !Sub arn:${AWS::Partition}:s3:::${CensusTeeArtifactS3Bucket}/${CensusTeeArtifactS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${CensusTeeEifS3Bucket}/${CensusTeeEifS3Key}
                   - !Sub arn:${AWS::Partition}:s3:::${SigningSeedCiphertextS3Bucket}/${SigningSeedCiphertextS3Key}
+                  - !Sub ${RunnerResultBucket.Arn}/source-artifacts/*
               - Effect: Allow
                 Action: s3:PutObject
                 Resource: !Sub ${RunnerResultBucket.Arn}/results/*
