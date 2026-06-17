@@ -576,6 +576,11 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "FloorCensusMainPool=$FLOOR_CENSUS_MAIN_POOL",
             "FloorCensusGraphqlUrl=$FLOOR_CENSUS_GRAPHQL_URL",
             "CensusTrustedValidatorCommitteeDigest=$CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST",
+            "EVENT_STREAM_HEAD_OBJECT_ID: $" + "{{ vars.SONARI_EVENT_STREAM_HEAD_OBJECT_ID }}",
+            "AUTHENTICATED_EVENTS_START_CHECKPOINT: $" +
+                "{{ vars.SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT }}",
+            "SonariEventStreamHeadObjectId=$EVENT_STREAM_HEAD_OBJECT_ID",
+            "SonariAuthenticatedEventsStartCheckpoint=$AUTHENTICATED_EVENTS_START_CHECKPOINT",
         ]);
         expect(workflow).not.toContain("SONARI_FLOOR_CENSUS_JSON_RPC_URL");
         expect(workflow).not.toContain("FLOOR_CENSUS_JSON_RPC_URL");

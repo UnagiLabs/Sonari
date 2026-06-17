@@ -280,6 +280,14 @@ Parameters:
     Type: String
     Default: ""
     Description: Trusted Sui validator committee digest used by the Census TEE authenticated event verifier.
+  SonariEventStreamHeadObjectId:
+    Type: String
+    Default: ""
+    Description: EventStreamHead object id of the membership package authenticated event stream. Required for floor census authenticated event proof collection.
+  SonariAuthenticatedEventsStartCheckpoint:
+    Type: String
+    Default: ""
+    Description: Optional inclusive start checkpoint for authenticated event replay. Must be within the node's available (non-pruned) range and at or before the membership stream's first event.
   RelayerAllowSubmit:
     Type: String
     Default: "false"
@@ -1311,6 +1319,8 @@ Resources:
           FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool
           FLOOR_CENSUS_GRAPHQL_URL: !Ref FloorCensusGraphqlUrl
           SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST: !Ref CensusTrustedValidatorCommitteeDigest
+          SONARI_EVENT_STREAM_HEAD_OBJECT_ID: !Ref SonariEventStreamHeadObjectId
+          SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT: !Ref SonariAuthenticatedEventsStartCheckpoint
           IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
           SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
           SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId

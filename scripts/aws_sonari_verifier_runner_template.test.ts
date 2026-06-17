@@ -761,6 +761,14 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("FloorCensusMainPool:");
         expect(template).toContain("FloorCensusGraphqlUrl:");
         expect(template).toContain("CensusTrustedValidatorCommitteeDigest:");
+        expect(template).toContain("SonariEventStreamHeadObjectId:");
+        expect(template).toContain("SonariAuthenticatedEventsStartCheckpoint:");
+        expect(template).toContain(
+            "SONARI_EVENT_STREAM_HEAD_OBJECT_ID: !Ref SonariEventStreamHeadObjectId",
+        );
+        expect(template).toContain(
+            "SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT: !Ref SonariAuthenticatedEventsStartCheckpoint",
+        );
         expect(template).toContain("FLOOR_CENSUS_MODE: !Ref FloorCensusMode");
         expect(template).toContain("FLOOR_CENSUS_TARGET: !Ref FloorCensusTarget");
         expect(template).toContain("FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState");

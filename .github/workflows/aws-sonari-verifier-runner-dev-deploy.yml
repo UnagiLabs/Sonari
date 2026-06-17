@@ -797,6 +797,8 @@ jobs:
           FLOOR_CENSUS_MODE: ${{ vars.SONARI_FLOOR_CENSUS_MODE }}
           FLOOR_CENSUS_GRAPHQL_URL: ${{ vars.SONARI_FLOOR_CENSUS_GRAPHQL_URL }}
           CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST: ${{ vars.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST }}
+          EVENT_STREAM_HEAD_OBJECT_ID: ${{ vars.SONARI_EVENT_STREAM_HEAD_OBJECT_ID }}
+          AUTHENTICATED_EVENTS_START_CHECKPOINT: ${{ vars.SONARI_AUTHENTICATED_EVENTS_START_CHECKPOINT }}
         run: |
           set -euo pipefail
           mapfile -t deploy_plan_parameter_overrides < <(
@@ -906,6 +908,12 @@ jobs:
           fi
           if [[ -n "${CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST:-}" ]]; then
             extra_parameter_overrides+=("CensusTrustedValidatorCommitteeDigest=$CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST")
+          fi
+          if [[ -n "${EVENT_STREAM_HEAD_OBJECT_ID:-}" ]]; then
+            extra_parameter_overrides+=("SonariEventStreamHeadObjectId=$EVENT_STREAM_HEAD_OBJECT_ID")
+          fi
+          if [[ -n "${AUTHENTICATED_EVENTS_START_CHECKPOINT:-}" ]]; then
+            extra_parameter_overrides+=("SonariAuthenticatedEventsStartCheckpoint=$AUTHENTICATED_EVENTS_START_CHECKPOINT")
           fi
 
           aws cloudformation deploy \
