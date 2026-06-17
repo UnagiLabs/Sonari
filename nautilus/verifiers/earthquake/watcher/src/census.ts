@@ -1094,6 +1094,17 @@ function readSafeInteger(input: unknown): number | undefined {
 
 function readBytesHex(input: unknown): string | undefined {
     if (typeof input === "string") {
+        if (/^0x[0-9a-fA-F]{64}$/.test(input)) {
+            return input;
+        }
+        try {
+            const decoded = Buffer.from(input, "base64");
+            if (decoded.byteLength === 32 && decoded.toString("base64") === input) {
+                return bytesToHex(decoded);
+            }
+        } catch {
+            return undefined;
+        }
         return input;
     }
     if (

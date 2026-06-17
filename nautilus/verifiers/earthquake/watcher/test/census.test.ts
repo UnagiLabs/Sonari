@@ -446,7 +446,10 @@ describe("GraphqlFloorCensusReader", () => {
                                         contents: {
                                             json: {
                                                 campaign_id: "0xcampaign-event",
-                                                event_uid: eventUid,
+                                                event_uid: Buffer.from(
+                                                    eventUid.slice(2),
+                                                    "hex",
+                                                ).toString("base64"),
                                                 event_revision: 7,
                                             },
                                         },
