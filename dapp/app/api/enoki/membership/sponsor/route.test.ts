@@ -26,6 +26,7 @@ const ALLOWED_MOVE_CALL_TARGETS = [
 
 const originalEnv = {
     ENOKI_PRIVATE_API_KEY: process.env.ENOKI_PRIVATE_API_KEY,
+    SONARI_SUI_NETWORK: process.env.SONARI_SUI_NETWORK,
     NEXT_PUBLIC_SUI_NETWORK: process.env.NEXT_PUBLIC_SUI_NETWORK,
     NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID:
         process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID,
@@ -43,7 +44,8 @@ function restoreEnv(): void {
 
 function configureEnv(): void {
     process.env.ENOKI_PRIVATE_API_KEY = PRIVATE_API_KEY;
-    process.env.NEXT_PUBLIC_SUI_NETWORK = "testnet";
+    process.env.SONARI_SUI_NETWORK = "testnet";
+    process.env.NEXT_PUBLIC_SUI_NETWORK = "mainnet";
     process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID = PACKAGE_ID;
 }
 

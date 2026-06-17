@@ -28,6 +28,14 @@ async function readDappDevVarsExample(): Promise<string> {
     return readFile(dappDevVarsExamplePath, "utf8");
 }
 
+function stepBlock(workflow: string, stepName: string): string {
+    const start = workflow.indexOf(`- name: ${stepName}`);
+    expect(start).toBeGreaterThan(-1);
+
+    const next = workflow.indexOf("\n      - name: ", start + 1);
+    return next === -1 ? workflow.slice(start) : workflow.slice(start, next);
+}
+
 describe("dapp deploy workflow", () => {
     it("resolves public Sonari contract ids before the build", async () => {
         const workflow = await readWorkflow();
@@ -77,17 +85,54 @@ describe("dapp deploy workflow", () => {
 
     it("passes Enoki public configuration to the dapp build", async () => {
         const workflow = await readWorkflow();
+        const deployStep = stepBlock(workflow, "Build and deploy to Cloudflare");
 
-        expect(workflow).toContain(
+        expect(deployStep).toContain(
             "NEXT_PUBLIC_ENOKI_API_KEY: $" + "{{ vars.NEXT_PUBLIC_ENOKI_API_KEY }}",
         );
-        expect(workflow).toContain(
+        expect(deployStep).toContain(
             "NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID: $" +
                 "{{ vars.NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID }}",
         );
         expect(workflow).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
-        expect(workflow).toContain("NEXT_PUBLIC_SUI_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}");
-        expect(workflow).not.toContain("ENOKI_PRIVATE_API_KEY:");
+        expect(deployStep).toContain("SONARI_SUI_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}");
+        expect(deployStep).toContain(
+            "NEXT_PUBLIC_SUI_NETWORK: $" + "{{ vars.SONARI_SUI_NETWORK }}",
+        );
+        expect(deployStep).not.toContain("ENOKI_PRIVATE_API_KEY");
+    });
+
+    it("syncs Enoki private key from GitHub Environment Secret to Cloudflare runtime secret", async () => {
+        const workflow = await readWorkflow();
+        const syncStep = stepBlock(workflow, "Sync Enoki private API key to Cloudflare secret");
+        const deployStep = stepBlock(workflow, "Build and deploy to Cloudflare");
+
+        expect(workflow).toContain(
+            "ENOKI_PRIVATE_API_KEY: $" + "{{ secrets.ENOKI_PRIVATE_API_KEY }}",
+        );
+        expect(syncStep).toContain(
+            "CLOUDFLARE_API_TOKEN: $" + "{{ secrets.CLOUDFLARE_API_TOKEN }}",
+        );
+        expect(syncStep).toContain(
+            "CLOUDFLARE_ACCOUNT_ID: $" + "{{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
+        );
+        expect(syncStep).toContain(
+            "ENOKI_PRIVATE_API_KEY: $" + "{{ secrets.ENOKI_PRIVATE_API_KEY }}",
+        );
+        expect(syncStep).toContain(
+            "Missing required GitHub Environment secret: ENOKI_PRIVATE_API_KEY",
+        );
+        expect(syncStep).toContain(
+            "printf '%s' \"$ENOKI_PRIVATE_API_KEY\" | pnpm --filter @sonari/dapp exec wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp",
+        );
+
+        expect(workflow.indexOf("Sync Enoki private API key to Cloudflare secret")).toBeGreaterThan(
+            -1,
+        );
+        expect(workflow.indexOf("Build and deploy to Cloudflare")).toBeGreaterThan(
+            workflow.indexOf("Sync Enoki private API key to Cloudflare secret"),
+        );
+        expect(deployStep).not.toContain("ENOKI_PRIVATE_API_KEY");
     });
 });
 
@@ -97,6 +142,7 @@ describe("dapp env example", () => {
 
         expect(envExample).toContain("NEXT_PUBLIC_ENOKI_API_KEY=");
         expect(envExample).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=");
+        expect(envExample).toContain("SONARI_SUI_NETWORK=testnet");
         expect(envExample).toContain("NEXT_PUBLIC_SUI_NETWORK=testnet");
         expect(envExample).toContain("Enoki / zkLogin もこの値を共有");
         expect(envExample).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
@@ -130,13 +176,24 @@ describe("dapp Enoki setup docs", () => {
         const devVarsExample = await readDappDevVarsExample();
 
         expect(readme).toContain("POST /api/enoki/membership/sponsor");
-        expect(readme).toContain("wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp");
+        expect(readme).toContain("POST /api/enoki/membership/execute");
+        expect(readme).toContain(
+            'gh secret set ENOKI_PRIVATE_API_KEY -R UnagiLabs/Sonari -e cloudflare-dapp-worker --body "<ENOKI_PRIVATE_API_KEY>"',
+        );
+        expect(readme).toContain("GitHub Environment Secret");
+        expect(readme).toContain("Cloudflare Worker runtime secret");
         expect(readme).toContain("NEXT_PUBLIC_* に secret を置かない");
         expect(readme).toContain("MembershipPass 発行専用");
         expect(readme).toContain("ENOKI_PRIVATE_API_KEY");
+        expect(wrangler).toContain('"SONARI_SUI_NETWORK": "testnet"');
+        expect(wrangler).toContain("Worker runtime 側でも server route が同じ名前を読む");
         expect(wrangler).toContain("ENOKI_PRIVATE_API_KEY");
+        expect(wrangler).toContain("dapp deploy workflow");
+        expect(wrangler).toContain("GitHub Environment Secret");
         expect(devVarsExample).toContain("ENOKI_PRIVATE_API_KEY=");
         expect(devVarsExample).toContain("/api/enoki/membership/sponsor");
+        expect(devVarsExample).toContain("/api/enoki/membership/execute");
+        expect(devVarsExample).toContain("GitHub Environment Secret");
         expect(devVarsExample).toContain("NEXT_PUBLIC_ は付けません");
     });
 });

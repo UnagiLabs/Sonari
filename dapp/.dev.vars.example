@@ -7,16 +7,19 @@
 # .dev.vars はサーバー側ランタイムだけが読む秘密値です。NEXT_PUBLIC_ は付けません
 # （ブラウザのバンドルに出ません）。値入りの dapp/.dev.vars はコミットされません（.gitignore 済み）。
 #
-# 本番（Cloudflare Worker）では .dev.vars ではなく次のコマンドで登録します。
+# 本番（Cloudflare Worker）では .dev.vars は使いません。
+# WORLD_ID_RP_SIGNING_KEY は次のコマンドで登録します。
 #   wrangler secret put WORLD_ID_RP_SIGNING_KEY --name sonari-dapp
-#   wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp
+# ENOKI_PRIVATE_API_KEY は cloudflare-dapp-worker の GitHub Environment Secret を
+# dapp deploy workflow が Cloudflare Worker runtime secret へ同期します。
 
 # World ID の RP 署名鍵。/api/world-id/rp-signature の signRequest だけが使う server-only 秘密鍵。
 # Developer Portal で発行した signing key（hex, 0x...）を入れます。
 # 未設定なら署名 API は 500（"World ID signing is not configured"）を返します。
 WORLD_ID_RP_SIGNING_KEY=
 
-# Enoki の sponsored transaction 用 private API key。
-# /api/enoki/membership/sponsor だけが MembershipPass 発行専用に使います。
+# Enoki の sponsored transaction / execute 用 private API key。
+# /api/enoki/membership/sponsor と /api/enoki/membership/execute が
+# MembershipPass 発行専用に使います。
 # NEXT_PUBLIC_ は付けません。
 ENOKI_PRIVATE_API_KEY=
