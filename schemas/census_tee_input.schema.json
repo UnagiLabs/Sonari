@@ -2,15 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sonari.example/schemas/census_tee_input.schema.json",
   "title": "Sonari Census TEE Input",
-  "$comment": "Local fixture MVP input for the census TEE. This schema only fixes the input envelope required by STEP 1; BCS encoding, affected root calculation, aggregation, and server mode are intentionally out of scope.",
+  "$comment": "MVP input for the census TEE. BCS output field order is defined separately in schemas/census_result.bcs.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "event_uid",
     "event_revision",
-    "cutoff_ms",
+    "occurred_at_ms",
     "affected_cells_root",
     "issued_at_ms",
+    "campaign_id",
+    "disaster_event_id",
+    "census_checkpoint",
     "affected_cells",
     "home_cell_events",
     "active_lineages"
@@ -24,7 +27,7 @@
       "type": "integer",
       "minimum": 1
     },
-    "cutoff_ms": {
+    "occurred_at_ms": {
       "type": "integer",
       "minimum": 0
     },
@@ -33,6 +36,18 @@
       "pattern": "^0x[0-9a-f]{64}$"
     },
     "issued_at_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "disaster_event_id": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "census_checkpoint": {
       "type": "integer",
       "minimum": 0
     },
