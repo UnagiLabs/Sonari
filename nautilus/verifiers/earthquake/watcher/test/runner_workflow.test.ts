@@ -32,6 +32,7 @@ import {
     ConfigurationSourceArchiveError,
     type EnclaveRegistrationAdapter,
     type EnclaveRegistrationClient,
+    type EnclaveRegistryReader,
     IntegritySourceArchiveError,
     SuiEnclaveRegistrationAdapter,
     type Ec2ClientLike,
@@ -2419,6 +2420,46 @@ describe("AWS runner workflow helper", () => {
         expect(client.requests[0]?.transaction).toBeDefined();
     });
 
+    it("reuses verified metadata when enclave registration reports an existing instance", async () => {
+        const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
+        const client = new FailingEnclaveRegistrationClient(
+            "Transaction resolution failed: MoveAbort in 2nd command, abort code: 16, in '0x123::metadata_verifier::register_enclave_instance_internal'",
+        );
+        const registryReader = new RecordingEnclaveRegistryReader(censusRegistrationMetadata);
+        const adapter = new SuiEnclaveRegistrationAdapter({
+            target: "0x123::metadata_verifier::register_enclave_instance",
+            verifierRegistry: earthquakeRelayerVerifierRegistry,
+            network: "testnet",
+            grpcUrl: "https://fullnode.testnet.sui.io:443",
+            allowSubmit: true,
+            signer,
+            client,
+            instanceTtlMs: 60_000,
+            configKey: 3,
+            expectedFamily: 5,
+            registryReader,
+            now: () => 1_800_000_000_000,
+        });
+
+        await expect(
+            adapter.register({
+                sourceEventId: "us7000sonari",
+                attestationDocumentHex,
+                publicKey: finalizedPublicKey,
+            }),
+        ).resolves.toEqual(censusRegistrationMetadata);
+        expect(registryReader.inputs).toEqual([
+            {
+                verifierRegistry: earthquakeRelayerVerifierRegistry,
+                publicKey: finalizedPublicKey,
+                expectedFamily: 5,
+                expectedVersion: 1,
+                configKey: 3,
+                nowMs: 1_800_000_000_000,
+            },
+        ]);
+    });
+
     it("accepts base64 encoded enclave public keys in Sui registration events", async () => {
         const signer = createEd25519SuiSignerFromPrivateKey(validEd25519SuiPrivateKey);
         const client = new RecordingEnclaveRegistrationClient(
@@ -3352,6 +3393,46 @@ class RecordingEnclaveRegistrationClient implements EnclaveRegistrationClient {
                 ],
             },
         };
+    }
+}
+
+class FailingEnclaveRegistrationClient implements EnclaveRegistrationClient {
+    readonly requests: Array<{
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }> = [];
+
+    constructor(private readonly message: string) {}
+
+    async signAndExecuteTransaction(input: {
+        transaction: unknown;
+        signer: unknown;
+        include: { effects: true; events: true };
+    }) {
+        this.requests.push(input);
+        return {
+            $kind: "FailedTransaction" as const,
+            FailedTransaction: {
+                status: {
+                    success: false,
+                    error: { message: this.message },
+                },
+            },
+        };
+    }
+}
+
+class RecordingEnclaveRegistryReader implements EnclaveRegistryReader {
+    readonly inputs: Parameters<EnclaveRegistryReader["readExistingRegistration"]>[0][] = [];
+
+    constructor(private readonly metadata: EnclaveVerificationMetadata | undefined) {}
+
+    async readExistingRegistration(
+        input: Parameters<EnclaveRegistryReader["readExistingRegistration"]>[0],
+    ): Promise<EnclaveVerificationMetadata | undefined> {
+        this.inputs.push(input);
+        return this.metadata;
     }
 }
 

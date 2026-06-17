@@ -220,6 +220,18 @@ export interface EnclaveRegistrationConfig {
     configKey?: number | undefined;
     expectedFamily?: number | undefined;
     now?: () => number;
+    registryReader?: EnclaveRegistryReader | undefined;
+}
+
+export interface EnclaveRegistryReader {
+    readExistingRegistration(input: {
+        verifierRegistry: string;
+        publicKey: string;
+        expectedFamily: number;
+        expectedVersion: number;
+        configKey: number;
+        nowMs: number;
+    }): Promise<EnclaveVerificationMetadata | undefined>;
 }
 
 export interface EnclaveRegistrationClient {
@@ -1744,21 +1756,123 @@ export class SuiEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter
                     ? {}
                     : { configKey: this.config.configKey }),
             });
-        const response = await client.signAndExecuteTransaction({
-            transaction,
-            signer,
-            include: { effects: true, events: true },
-        });
-        const events = readSuccessfulEnclaveRegistrationEvents(response);
-        const metadata = readEnclaveRegistrationMetadata(events, {
-            expectedFamily: this.config.expectedFamily ?? 3,
-            expectedVersion: 1,
-            configKey: this.config.configKey ?? EARTHQUAKE_VERIFIER_CONFIG_KEY,
-        });
+        const expectedFamily = this.config.expectedFamily ?? 3;
+        const configKey = this.config.configKey ?? EARTHQUAKE_VERIFIER_CONFIG_KEY;
+        let metadata: EnclaveVerificationMetadata;
+        try {
+            const response = await client.signAndExecuteTransaction({
+                transaction,
+                signer,
+                include: { effects: true, events: true },
+            });
+            const events = readSuccessfulEnclaveRegistrationEvents(response);
+            metadata = readEnclaveRegistrationMetadata(events, {
+                expectedFamily,
+                expectedVersion: 1,
+                configKey,
+            });
+        } catch (error) {
+            if (!isEnclaveInstanceAlreadyRegisteredError(error)) {
+                throw error;
+            }
+            const reader = this.config.registryReader ?? new JsonRpcEnclaveRegistryReader(grpcUrl);
+            const existing = await reader.readExistingRegistration({
+                verifierRegistry: this.config.verifierRegistry,
+                publicKey: input.publicKey,
+                expectedFamily,
+                expectedVersion: 1,
+                configKey,
+                nowMs,
+            });
+            if (existing === undefined) {
+                throw error;
+            }
+            metadata = existing;
+        }
         if (normalizeHex(metadata.enclave_instance_public_key) !== normalizeHex(input.publicKey)) {
             throw new Error("registered enclave public key does not match attestation");
         }
         return metadata;
+    }
+}
+
+class JsonRpcEnclaveRegistryReader implements EnclaveRegistryReader {
+    constructor(private readonly endpoint: string) {}
+
+    async readExistingRegistration(input: {
+        verifierRegistry: string;
+        publicKey: string;
+        expectedFamily: number;
+        expectedVersion: number;
+        configKey: number;
+        nowMs: number;
+    }): Promise<EnclaveVerificationMetadata | undefined> {
+        const body = await this.call("sui_getObject", [
+            input.verifierRegistry,
+            { showContent: true },
+        ]);
+        const content = readRecordPath(body, ["result", "data", "content", "fields"]);
+        const config = findVecMapValue(
+            content?.configs,
+            (key) => readU64String(key) === input.configKey,
+        );
+        const instance = findVecMapValue(
+            content?.instances,
+            (key) => readByteVectorHex(key) === normalizeHex(input.publicKey),
+        );
+        if (config === undefined || instance === undefined) {
+            return undefined;
+        }
+        const configFields = readRecordField(config, "fields");
+        const instanceFields = readRecordField(instance, "fields");
+        const configVersion = readU64String(configFields?.config_version);
+        if (
+            configFields?.enabled !== true ||
+            readU64String(configFields?.verifier_family) !== input.expectedFamily ||
+            readU64String(configFields?.verifier_version) !== input.expectedVersion ||
+            configVersion === undefined
+        ) {
+            return undefined;
+        }
+        if (
+            instanceFields?.enabled !== true ||
+            readU64String(instanceFields?.verifier_family) !== input.expectedFamily ||
+            readU64String(instanceFields?.verifier_version) !== input.expectedVersion ||
+            readU64String(instanceFields?.config_version) !== configVersion
+        ) {
+            return undefined;
+        }
+        const expiresAtMs = readU64String(instanceFields?.expires_at_ms);
+        if (expiresAtMs === undefined || expiresAtMs <= input.nowMs) {
+            return undefined;
+        }
+        const publicKey = readByteVectorHex(instanceFields?.public_key);
+        if (publicKey !== normalizeHex(input.publicKey)) {
+            return undefined;
+        }
+        return {
+            verifier_config_key: input.configKey,
+            verifier_config_version: configVersion,
+            enclave_instance_public_key: `0x${publicKey}`,
+        };
+    }
+
+    private async call(method: string, params: unknown[]): Promise<unknown> {
+        const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        });
+        if (!response.ok) {
+            throw new Error(`Sui JSON-RPC query failed with HTTP ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        const error = readRecordField(body, "error");
+        if (error !== undefined) {
+            const message = readStringField(error, "message") ?? JSON.stringify(error);
+            throw new Error(`Sui JSON-RPC query failed: ${message}`);
+        }
+        return body;
     }
 }
 
@@ -3079,6 +3193,83 @@ function validateSuiNetworkGrpcUrl(network: SuiNetwork, grpcUrl: string, fieldNa
             `${fieldName} host ${url.hostname} does not match RELAYER_NETWORK=${network}`,
         );
     }
+}
+
+function isEnclaveInstanceAlreadyRegisteredError(error: unknown): boolean {
+    return (
+        error instanceof Error &&
+        /abort code: 16\b/.test(error.message) &&
+        error.message.includes("metadata_verifier::register_enclave_instance")
+    );
+}
+
+function readRecordPath(
+    input: unknown,
+    path: readonly string[],
+): Record<string, unknown> | undefined {
+    let current: unknown = input;
+    for (const segment of path) {
+        current = readRecordField(current, segment);
+        if (current === undefined) {
+            return undefined;
+        }
+    }
+    return isRecord(current) ? current : undefined;
+}
+
+function readRecordField(input: unknown, field: string): Record<string, unknown> | undefined {
+    if (!isRecord(input)) {
+        return undefined;
+    }
+    const value = input[field];
+    return isRecord(value) ? value : undefined;
+}
+
+function readStringField(input: unknown, field: string): string | undefined {
+    if (!isRecord(input)) {
+        return undefined;
+    }
+    const value = input[field];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function findVecMapValue(
+    input: unknown,
+    matchesKey: (key: unknown) => boolean,
+): unknown | undefined {
+    const contents = readRecordPath(input, ["fields"])?.contents;
+    if (!Array.isArray(contents)) {
+        return undefined;
+    }
+    for (const item of contents) {
+        const fields = readRecordField(item, "fields");
+        if (fields !== undefined && matchesKey(fields.key)) {
+            return fields.value;
+        }
+    }
+    return undefined;
+}
+
+function readU64String(input: unknown): number | undefined {
+    const value = typeof input === "string" ? Number(input) : input;
+    if (typeof value !== "number") {
+        return undefined;
+    }
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+function readByteVectorHex(input: unknown): string | undefined {
+    if (!Array.isArray(input)) {
+        return undefined;
+    }
+    const bytes: number[] = [];
+    for (const item of input) {
+        if (!Number.isInteger(item) || item < 0 || item > 255) {
+            return undefined;
+        }
+        bytes.push(item);
+    }
+    return Buffer.from(bytes).toString("hex");
 }
 
 function readSuccessfulEnclaveRegistrationEvents(
