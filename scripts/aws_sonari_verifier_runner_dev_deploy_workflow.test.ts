@@ -122,6 +122,13 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             "pnpm build:aws-membership-identity-eif",
             "pnpm build:aws-census-tee-artifact",
             "pnpm build:aws-census-eif",
+            "Read census EIF measurements",
+            "--eif-path dist/aws/census-tee.eif",
+            "dist/aws/census-tee-measurements.json",
+            "CENSUS_EIF_PCR0",
+            "CENSUS_EIF_PCR1",
+            "CENSUS_EIF_PCR2",
+            "Census EIF PCRs",
             "NITRO_CLI_TAG: v1.4.4",
             "Cache Nitro CLI build",
             "Use local Nitro CLI",
@@ -146,6 +153,21 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             '--sender "$admin_address"',
             'Buffer.from(value, "base64")',
             "PCR field is not a byte array or base64 string",
+        ]);
+    });
+
+    it("reads census EIF measurements and writes PCR0/1/2 to run summary", async () => {
+        const workflow = await readWorkflow();
+
+        expectContainsAll(workflow, [
+            "Read census EIF measurements",
+            "--eif-path dist/aws/census-tee.eif",
+            "dist/aws/census-tee-measurements.json",
+            "CENSUS_EIF_PCR0",
+            "CENSUS_EIF_PCR1",
+            "CENSUS_EIF_PCR2",
+            "Census EIF PCRs",
+            "Use these values for the Sui `VerifierRegistry` census config.",
         ]);
     });
 
@@ -269,7 +291,9 @@ describe("AWS Sonari verifier runner dev deploy workflow", () => {
             'validate_sha256 "census TEE artifact" dist/aws/census-tee-artifact.tar.gz',
             'validate_sha256 "census EIF" dist/aws/census-tee.eif',
             '[[ "$digest" =~ ^[0-9a-f]{64}$ ]]',
-            "for pcr_name in EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2",
+            "EARTHQUAKE_EIF_PCR0 EARTHQUAKE_EIF_PCR1 EARTHQUAKE_EIF_PCR2",
+            "MEMBERSHIP_IDENTITY_EIF_PCR0 MEMBERSHIP_IDENTITY_EIF_PCR1 MEMBERSHIP_IDENTITY_EIF_PCR2",
+            "CENSUS_EIF_PCR0 CENSUS_EIF_PCR1 CENSUS_EIF_PCR2",
             '[[ ! "$' + '{!pcr_name}" =~ ^[0-9a-f]{96}$ ]]',
         ]);
     });
