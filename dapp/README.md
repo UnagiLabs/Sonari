@@ -22,6 +22,10 @@ registration and transaction execution stay on the existing Sui dApp Kit path.
 | authorized JavaScript origins | `http://localhost:3000`, `https://sonari.help` |
 | authorized redirect URIs | `http://localhost:3000/`, `https://sonari.help/` |
 
+Do not register query-bearing redirect URIs such as
+`https://sonari.help/?next=/register`. Sonari stores `next` inside the app and
+normalizes the visible URL back to `/` before starting Google zkLogin.
+
 4. Register that Google OAuth Client ID in the Enoki Portal Google provider.
 5. Add the allowed origins `http://localhost:3000` and `https://sonari.help` in Enoki Portal.
 6. Store these public build-time values in the `cloudflare-dapp-worker`
@@ -73,6 +77,9 @@ transaction 実行は、既存の Sui dApp Kit 経路から変えません。
 |--------------------|--------|
 | authorized JavaScript origins | `http://localhost:3000`, `https://sonari.help` |
 | authorized redirect URIs | `http://localhost:3000/`, `https://sonari.help/` |
+
+`https://sonari.help/?next=/register` のような query 付き redirect URI は登録しないでください。
+Sonari は `next` を app 内部に保存し、Google zkLogin を始める前に表示中の URL を `/` へ戻します。
 
 4. Enoki Portal の Google provider に同じ Google OAuth Client ID を登録する。
 5. Enoki Portal の allowed origin に `http://localhost:3000` と `https://sonari.help` を追加する。
