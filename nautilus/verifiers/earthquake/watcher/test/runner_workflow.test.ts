@@ -19,6 +19,11 @@ import {
 import { FAILED_RETRY_BACKOFF_MS } from "../src/constants.js";
 import type { RelayerAdapter, RelayerErrorCode, RelayerSuccess } from "../src/relayer_preview.js";
 import {
+    GraphqlFloorCensusReader,
+    JsonRpcFloorCensusReader,
+    type FloorCensusOnchainReader,
+} from "../src/census.js";
+import {
     buildRunnerBootstrapReadinessShellCommand,
     createRunnerControlHandler,
     handler as runnerWorkflowHandler,
@@ -31,6 +36,7 @@ import {
     SuiEnclaveRegistrationAdapter,
     type Ec2ClientLike,
     readEnclaveRegistrationConfigFromEnv,
+    readFloorCensusConfigFromEnv,
     readRelayerConfigFromEnv,
     type RelayerSignerSecretReader,
     RetryableSourceArchiveError,
@@ -2224,6 +2230,67 @@ describe("AWS runner workflow helper", () => {
         expect(reader.secretReads).toEqual(["arn:aws:secretsmanager:relayer-signer"]);
     });
 
+    it("uses FLOOR_CENSUS_GRAPHQL_URL before other floor census endpoint sources", () => {
+        setRequiredFloorCensusEnv();
+        process.env.FLOOR_CENSUS_GRAPHQL_URL = "https://floor.example/graphql";
+        process.env.SONARI_SUI_GRAPHQL_URL = "https://sonari.example/graphql";
+        process.env.FLOOR_CENSUS_JSON_RPC_URL = "https://fullnode.example:443";
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
+        expect(readReaderEndpoint(config?.reader)).toBe("https://floor.example/graphql");
+    });
+
+    it("falls back to SONARI_SUI_GRAPHQL_URL for floor census GraphQL reads", () => {
+        setRequiredFloorCensusEnv();
+        process.env.SONARI_SUI_GRAPHQL_URL = "https://sonari.example/graphql";
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
+        expect(readReaderEndpoint(config?.reader)).toBe("https://sonari.example/graphql");
+    });
+
+    it("falls back to the RELAYER_NETWORK default GraphQL endpoint for floor census reads", () => {
+        setRequiredFloorCensusEnv();
+        process.env.RELAYER_NETWORK = "testnet";
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
+        expect(readReaderEndpoint(config?.reader)).toBe("https://graphql.testnet.sui.io/graphql");
+    });
+
+    it("does not use FLOOR_CENSUS_JSON_RPC_URL for the production floor census reader", () => {
+        setRequiredFloorCensusEnv();
+        process.env.FLOOR_CENSUS_JSON_RPC_URL = "https://fullnode.example:443";
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
+        expect(config?.reader).not.toBeInstanceOf(JsonRpcFloorCensusReader);
+        expect(readReaderEndpoint(config?.reader)).toBe("https://graphql.testnet.sui.io/graphql");
+    });
+
+    it("creates a GraphQL floor census reader for production config", () => {
+        setRequiredFloorCensusEnv();
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
+    });
+
     it("derives enclave registration config from relayer submit environment lazily", async () => {
         process.env.RELAYER_NETWORK = "testnet";
         process.env.RELAYER_TARGET = earthquakeRelayerTarget;
@@ -2950,6 +3017,23 @@ class RecordingSourceArchiveAdapter implements SourceArchiveAdapter {
     };
 
     constructor(private readonly bytes: Uint8Array) {}
+}
+
+function setRequiredFloorCensusEnv(): void {
+    process.env.FLOOR_CENSUS_MODE = "submit";
+    process.env.FLOOR_CENSUS_TARGET = "0x123::floor_census::submit";
+    process.env.FLOOR_CENSUS_PAUSE_STATE = "0xpause";
+    process.env.FLOOR_CENSUS_CATEGORY_POOL = earthquakeRelayerCategoryPool;
+    process.env.FLOOR_CENSUS_MAIN_POOL = "0xmainpool";
+    process.env.SONARI_MEMBERSHIP_REGISTRY_ID = "0xmembership";
+    process.env.RELAYER_VERIFIER_REGISTRY = earthquakeRelayerVerifierRegistry;
+    process.env.RELAYER_NETWORK = "testnet";
+    process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
+    process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
+}
+
+function readReaderEndpoint(reader: FloorCensusOnchainReader | undefined): unknown {
+    return reader === undefined ? undefined : Reflect.get(reader, "endpoint");
 }
 
 class RecordingEnclaveRegistrationAdapter implements EnclaveRegistrationAdapter {

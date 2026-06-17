@@ -69,7 +69,7 @@ import {
     DirectFloorCensusAdapter,
     type FloorCensusAdapter,
     type FloorCensusSubmitConfig,
-    JsonRpcFloorCensusReader,
+    GraphqlFloorCensusReader,
 } from "./census.js";
 import { FAILED_RETRY_BACKOFF_MS, HOUR_MS } from "./constants.js";
 import { buildEarthquakeVerifierRequest } from "./index.js";
@@ -2720,11 +2720,10 @@ export function readFloorCensusConfigFromEnv(
     const network = readSuiNetwork(process.env.RELAYER_NETWORK);
     const target = process.env.FLOOR_CENSUS_TARGET ?? "";
     const grpcUrl = process.env.RELAYER_GRPC_URL;
-    const jsonRpcUrl =
-        process.env.FLOOR_CENSUS_JSON_RPC_URL === undefined ||
-        process.env.FLOOR_CENSUS_JSON_RPC_URL.length === 0
-            ? defaultSuiJsonRpcUrl(network)
-            : process.env.FLOOR_CENSUS_JSON_RPC_URL;
+    const graphqlUrl =
+        readOptionalEnv("FLOOR_CENSUS_GRAPHQL_URL") ??
+        readOptionalEnv("SONARI_SUI_GRAPHQL_URL") ??
+        defaultSuiGraphqlUrl(network);
     const missing = [
         ["FLOOR_CENSUS_TARGET", target],
         ["FLOOR_CENSUS_PAUSE_STATE", process.env.FLOOR_CENSUS_PAUSE_STATE],
@@ -2761,7 +2760,7 @@ export function readFloorCensusConfigFromEnv(
         categoryPool: process.env.FLOOR_CENSUS_CATEGORY_POOL ?? "",
         mainPool: process.env.FLOOR_CENSUS_MAIN_POOL ?? "",
         membershipRegistry: process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "",
-        reader: jsonRpcUrl === undefined ? undefined : new JsonRpcFloorCensusReader(jsonRpcUrl),
+        reader: graphqlUrl === undefined ? undefined : new GraphqlFloorCensusReader(graphqlUrl),
     };
     if (network !== undefined) {
         config.network = network;
@@ -2788,11 +2787,16 @@ export function readFloorCensusConfigFromEnv(
     return config;
 }
 
-function defaultSuiJsonRpcUrl(network: SuiNetwork | undefined): string | undefined {
+function defaultSuiGraphqlUrl(network: SuiNetwork | undefined): string | undefined {
     if (network === undefined) {
         return undefined;
     }
-    return `https://fullnode.${network}.sui.io:443`;
+    return `https://graphql.${network}.sui.io/graphql`;
+}
+
+function readOptionalEnv(name: string): string | undefined {
+    const value = process.env[name];
+    return value === undefined || value.length === 0 ? undefined : value;
 }
 
 function appendConfigurationError(existing: string | undefined, next: string): string {

@@ -73,7 +73,7 @@ Floor Census は earthquake relayer submit 成功後に同じ `RunnerControlLamb
 - `RelayerVerifierRegistry=<VerifierRegistry object id>`
 - `SonariMembershipRegistryId=<MembershipRegistry object id>`
 - `RelayerSignerSecretArn=<relayer Sui private key secret ARN>`
-- `FloorCensusJsonRpcUrl=<Sui JSON-RPC URL>` は任意です。空の場合は `RelayerNetwork` から `https://fullnode.<network>.sui.io:443` を使います。
+- `FloorCensusGraphqlUrl=<Sui GraphQL URL>` は任意です。実行時は `FLOOR_CENSUS_GRAPHQL_URL`、`SONARI_SUI_GRAPHQL_URL`、`RelayerNetwork` default の順に GraphQL endpoint を選びます。stack parameter が空で、`SonariSuiGraphqlUrl` も空の場合は `RelayerNetwork` から default GraphQL URL を使います。
 
 初回だけ、AdminCap を持つ管理者 wallet で relayer 公開鍵を census family に登録します。この wallet は AWS に置きません。作業場所は repository の agent instructions で定めた repo-local admin wallet directory を使います。
 

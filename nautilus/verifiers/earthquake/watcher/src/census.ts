@@ -24,6 +24,85 @@ const RPC_MAX_ATTEMPTS = 4;
 const RPC_INITIAL_RETRY_DELAY_MS = 500;
 const RPC_RETRY_BACKOFF_FACTOR = 2;
 const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503]);
+const HOME_CELL_REGISTERED_GRAPHQL_QUERY = `
+query SonariHomeCellRegisteredEvents(
+  $eventType: String!
+  $beforeCheckpoint: UInt53
+  $cursor: String
+) {
+  events(filter: { type: $eventType, beforeCheckpoint: $beforeCheckpoint }, after: $cursor) {
+    nodes {
+      contents {
+        json
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+`;
+const ACTIVE_LINEAGES_GRAPHQL_QUERY = `
+query SonariMembershipActiveLineages(
+  $membershipRegistryId: SuiAddress!
+  $checkpoint: UInt53
+  $keys: [DynamicFieldName!]!
+) {
+  object(address: $membershipRegistryId, atCheckpoint: $checkpoint) {
+    multiGetDynamicFields(keys: $keys) {
+      contents {
+        json
+      }
+    }
+  }
+}
+`;
+const CAMPAIGN_TRANSACTION_GRAPHQL_QUERY = `
+query SonariCampaignTransaction(
+  $digest: String!
+  $eventsCursor: String
+  $objectChangesCursor: String
+) {
+  transaction(digest: $digest) {
+    effects {
+      checkpoint {
+        sequenceNumber
+      }
+      events(after: $eventsCursor) {
+        nodes {
+          contents {
+            json
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+      objectChanges(after: $objectChangesCursor) {
+        nodes {
+          address
+          outputState {
+            address
+            asMoveObject {
+              contents {
+                type {
+                  repr
+                }
+              }
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
+`;
 
 export interface HomeCellRegisteredEvent {
     lineage: string;
@@ -86,16 +165,20 @@ export interface FloorCensusAdapter {
 }
 
 export interface FloorCensusOnchainReader {
-    listHomeCellRegisteredEvents(input: { packageId: string }): Promise<HomeCellRegisteredEvent[]>;
+    listHomeCellRegisteredEvents(input: {
+        packageId: string;
+        checkpoint?: number | undefined;
+    }): Promise<HomeCellRegisteredEvent[]>;
     listActiveLineages(input: {
         membershipRegistryId: string;
         lineages: readonly string[];
+        checkpoint?: number | undefined;
     }): Promise<ReadonlySet<string>>;
     findCampaignId(input: {
         digest: string;
         eventUid: string;
         eventRevision: number;
-    }): Promise<string | undefined>;
+    }): Promise<{ campaignId: string; checkpoint: number } | undefined>;
 }
 
 export interface FloorCensusSubmitClient {
@@ -301,11 +384,23 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
         const parsed = validation.value;
         const payload = parsed.payload as EarthquakeOraclePayload;
         const affectedCells = requireAffectedCells(parsed);
+        const campaign = await reader.findCampaignId({
+            digest: input.relayerDigest,
+            eventUid: payload.event_uid,
+            eventRevision: payload.event_revision,
+        });
+        if (campaign === undefined) {
+            throw new Error("relayer transaction did not include CampaignCreated for census");
+        }
         const packageId = packageIdFromTarget(this.config.target);
-        const homeCellEvents = await reader.listHomeCellRegisteredEvents({ packageId });
+        const homeCellEvents = await reader.listHomeCellRegisteredEvents({
+            packageId,
+            checkpoint: campaign.checkpoint,
+        });
         const activeLineages = await reader.listActiveLineages({
             membershipRegistryId: this.config.membershipRegistry,
             lineages: unique(homeCellEvents.map((event) => event.lineage)),
+            checkpoint: campaign.checkpoint,
         });
         const counts = computeFloorCensusCounts({
             affectedCells,
@@ -316,14 +411,6 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
             eventUid: payload.event_uid,
             eventRevision: payload.event_revision,
         });
-        const campaignId = await reader.findCampaignId({
-            digest: input.relayerDigest,
-            eventUid: payload.event_uid,
-            eventRevision: payload.event_revision,
-        });
-        if (campaignId === undefined) {
-            throw new Error("relayer transaction did not include CampaignCreated for census");
-        }
         const signed = await signFloorCensusResult(signer, {
             eventUid: payload.event_uid,
             eventRevision: payload.event_revision,
@@ -336,7 +423,7 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
                 target: this.config.target,
                 senderAddress: signer.toSuiAddress(),
                 pauseState: this.config.pauseState,
-                campaignId,
+                campaignId: campaign.campaignId,
                 disasterEventId: input.disasterEventId,
                 verifierRegistry: this.config.verifierRegistry,
                 categoryPool: this.config.categoryPool,
@@ -352,7 +439,7 @@ export class DirectFloorCensusAdapter implements FloorCensusAdapter {
         return {
             status: "succeeded",
             digest,
-            campaignId,
+            campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
             counts,
             censusBcsHex: signed.censusBcsHex,
@@ -426,11 +513,15 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
         digest: string;
         eventUid: string;
         eventRevision: number;
-    }): Promise<string | undefined> {
+    }): Promise<{ campaignId: string; checkpoint: number } | undefined> {
         const response = await this.call("sui_getTransactionBlock", [
             input.digest,
             { showEvents: true, showObjectChanges: true },
         ]);
+        const checkpoint = readSafeInteger(readUnknownField(response, "checkpoint"));
+        if (checkpoint === undefined) {
+            throw new Error("relayer transaction checkpoint is missing");
+        }
         for (const event of readArrayField(response, "events")) {
             const type = readStringField(event, "type");
             if (type?.endsWith("::campaign::CampaignCreated") !== true) {
@@ -443,16 +534,25 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
                 eventRevision === input.eventRevision &&
                 (eventUid === undefined || normalizeHex(eventUid) === normalizeHex(input.eventUid))
             ) {
-                return readObjectId(parsedJson?.campaign_id);
+                const campaignId = readObjectId(parsedJson?.campaign_id);
+                return campaignId === undefined ? undefined : { campaignId, checkpoint };
             }
         }
+        const candidates: string[] = [];
         for (const change of readArrayField(response, "objectChanges")) {
             const type = readStringField(change, "objectType");
             if (type?.endsWith("::campaign::Campaign") === true) {
-                return readObjectId(readUnknownField(change, "objectId"));
+                const objectId = readObjectId(readUnknownField(change, "objectId"));
+                if (objectId !== undefined) {
+                    candidates.push(objectId);
+                }
             }
         }
-        return undefined;
+        if (candidates.length > 1) {
+            throw new Error("relayer transaction included multiple Campaign object changes");
+        }
+        const campaignId = candidates[0];
+        return campaignId === undefined ? undefined : { campaignId, checkpoint };
     }
 
     private async call(method: string, params: unknown[]): Promise<unknown> {
@@ -495,6 +595,145 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
             return readUnknownField(body, "result");
         }
         throw new Error(`Sui RPC ${method} retry attempts exhausted`);
+    }
+}
+
+export class GraphqlFloorCensusReader implements FloorCensusOnchainReader {
+    constructor(private readonly endpoint: string) {}
+
+    async listHomeCellRegisteredEvents(input: {
+        packageId: string;
+        checkpoint?: number | undefined;
+    }): Promise<HomeCellRegisteredEvent[]> {
+        const eventType = `${input.packageId}::membership::HomeCellRegistered`;
+        const beforeCheckpoint =
+            input.checkpoint === undefined ? undefined : readBeforeCheckpoint(input.checkpoint);
+        const events: HomeCellRegisteredEvent[] = [];
+        let cursor: string | null = null;
+        while (true) {
+            const response = await this.query(HOME_CELL_REGISTERED_GRAPHQL_QUERY, {
+                eventType,
+                beforeCheckpoint,
+                cursor,
+            });
+            const page = readGraphqlEventsPage(response);
+            for (const node of page.nodes) {
+                events.push(parseHomeCellRegisteredEvent(node));
+            }
+            cursor = page.endCursor;
+            if (!page.hasNextPage) {
+                break;
+            }
+        }
+        return events;
+    }
+
+    async listActiveLineages(input: {
+        membershipRegistryId: string;
+        lineages: readonly string[];
+        checkpoint?: number | undefined;
+    }): Promise<ReadonlySet<string>> {
+        const lineages = unique(input.lineages);
+        if (lineages.length === 0) {
+            return new Set();
+        }
+        const response = await this.query(ACTIVE_LINEAGES_GRAPHQL_QUERY, {
+            membershipRegistryId: input.membershipRegistryId,
+            checkpoint: input.checkpoint,
+            keys: lineages.map(lineageDynamicFieldKey),
+        });
+        const fields = readGraphqlDynamicFields(response);
+        if (fields.length !== lineages.length) {
+            throw new Error("GraphQL membership dynamic fields response is malformed");
+        }
+        const active = new Set<string>();
+        for (let index = 0; index < lineages.length; index += 1) {
+            const field = fields[index];
+            if (field === null || field === undefined) {
+                continue;
+            }
+            const status = readMembershipStatus(field);
+            if (status === 1) {
+                const lineage = lineages[index];
+                if (lineage === undefined) {
+                    throw new Error("GraphQL membership dynamic fields response is malformed");
+                }
+                active.add(lineage);
+            }
+        }
+        return active;
+    }
+
+    async findCampaignId(input: {
+        digest: string;
+        eventUid: string;
+        eventRevision: number;
+    }): Promise<{ campaignId: string; checkpoint: number } | undefined> {
+        let checkpoint: number | undefined;
+        let eventsCursor: string | null = null;
+        let objectChangesCursor: string | null = null;
+        let hasNextEventsPage = true;
+        let hasNextObjectChangesPage = true;
+        const campaignCandidates: string[] = [];
+
+        while (hasNextEventsPage || hasNextObjectChangesPage) {
+            const response = await this.query(CAMPAIGN_TRANSACTION_GRAPHQL_QUERY, {
+                digest: input.digest,
+                eventsCursor,
+                objectChangesCursor,
+            });
+            const page = readGraphqlTransactionEffectsPage(response);
+            checkpoint ??= page.checkpoint;
+
+            if (hasNextEventsPage) {
+                for (const event of page.events.nodes) {
+                    const campaignId = parseCampaignCreatedEvent(event, input);
+                    if (campaignId !== undefined) {
+                        return { campaignId, checkpoint };
+                    }
+                }
+                eventsCursor = page.events.endCursor;
+                hasNextEventsPage = page.events.hasNextPage;
+            }
+            if (hasNextObjectChangesPage) {
+                for (const change of page.objectChanges.nodes) {
+                    const campaignId = readCampaignObjectChangeId(change);
+                    if (campaignId !== undefined) {
+                        campaignCandidates.push(campaignId);
+                    }
+                }
+                objectChangesCursor = page.objectChanges.endCursor;
+                hasNextObjectChangesPage = page.objectChanges.hasNextPage;
+            }
+        }
+
+        if (checkpoint === undefined) {
+            throw new Error("relayer transaction checkpoint is missing");
+        }
+        if (campaignCandidates.length > 1) {
+            throw new Error("relayer transaction included multiple Campaign object changes");
+        }
+        const campaignId = campaignCandidates[0];
+        return campaignId === undefined ? undefined : { campaignId, checkpoint };
+    }
+
+    private async query(query: string, variables: Record<string, unknown>): Promise<unknown> {
+        const response = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ query, variables }),
+        });
+        if (!response.ok) {
+            throw new Error(`Sui GraphQL query failed with HTTP ${response.status}`);
+        }
+        const body = (await response.json()) as unknown;
+        const errors = readUnknownField(body, "errors");
+        if (Array.isArray(errors) && errors.length > 0) {
+            const firstError = errors[0];
+            const message = readStringField(firstError, "message") ?? JSON.stringify(firstError);
+            throw new Error(`Sui GraphQL query failed: ${message}`);
+        }
+        return body;
     }
 }
 
@@ -585,6 +824,215 @@ function readExecutionError(
     return undefined;
 }
 
+function parseHomeCellRegisteredEvent(event: unknown): HomeCellRegisteredEvent {
+    const parsedJson = readEventJson(event);
+    let lineage: string | undefined;
+    let homeCell: string | undefined;
+    let registeredAtMs: number | undefined;
+    try {
+        lineage = readObjectId(parsedJson?.lineage);
+        homeCell = readU64Decimal(parsedJson?.home_cell);
+        registeredAtMs = readSafeInteger(parsedJson?.registered_at);
+    } catch {
+        throw new Error("HomeCellRegistered event is malformed");
+    }
+    if (lineage === undefined || homeCell === undefined || registeredAtMs === undefined) {
+        throw new Error("HomeCellRegistered event is malformed");
+    }
+    return { lineage, homeCell, registeredAtMs };
+}
+
+function readGraphqlEventsPage(response: unknown): {
+    nodes: unknown[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+} {
+    const data = readRecordField(response, "data");
+    const events = readRecordField(data, "events");
+    if (events === undefined) {
+        throw new Error("GraphQL events page is missing or malformed");
+    }
+    const nodes = readUnknownField(events, "nodes");
+    if (!Array.isArray(nodes)) {
+        throw new Error("GraphQL event nodes must be an array");
+    }
+    const pageInfo = readRecordField(events, "pageInfo");
+    if (pageInfo === undefined) {
+        throw new Error("GraphQL events pageInfo is malformed");
+    }
+    const hasNextPageValue = readUnknownField(pageInfo, "hasNextPage");
+    if (typeof hasNextPageValue !== "boolean") {
+        throw new Error("GraphQL events pageInfo is malformed");
+    }
+    const endCursorValue = readUnknownField(pageInfo, "endCursor");
+    const endCursor =
+        typeof endCursorValue === "string" && endCursorValue.length > 0 ? endCursorValue : null;
+    if (hasNextPageValue && endCursor === null) {
+        throw new Error("GraphQL events pageInfo is malformed");
+    }
+    return { nodes, hasNextPage: hasNextPageValue, endCursor };
+}
+
+function readGraphqlTransactionEffectsPage(response: unknown): {
+    checkpoint: number;
+    events: { nodes: unknown[]; hasNextPage: boolean; endCursor: string | null };
+    objectChanges: { nodes: unknown[]; hasNextPage: boolean; endCursor: string | null };
+} {
+    const data = readRecordField(response, "data");
+    const transaction = readRecordField(data, "transaction");
+    const effects = readRecordField(transaction, "effects");
+    if (effects === undefined) {
+        throw new Error("GraphQL transaction effects are missing or malformed");
+    }
+    const checkpoint = readSafeInteger(
+        readUnknownField(readRecordField(effects, "checkpoint"), "sequenceNumber"),
+    );
+    if (checkpoint === undefined) {
+        throw new Error("relayer transaction checkpoint is missing");
+    }
+    return {
+        checkpoint,
+        events: readGraphqlConnectionPage(effects, "events", "GraphQL transaction events pageInfo"),
+        objectChanges: readGraphqlConnectionPage(
+            effects,
+            "objectChanges",
+            "GraphQL transaction objectChanges pageInfo",
+        ),
+    };
+}
+
+function readGraphqlConnectionPage(
+    input: unknown,
+    field: string,
+    pageInfoError: string,
+): {
+    nodes: unknown[];
+    hasNextPage: boolean;
+    endCursor: string | null;
+} {
+    const page = readRecordField(input, field);
+    if (page === undefined) {
+        throw new Error(`${pageInfoError} is malformed`);
+    }
+    const nodes = readUnknownField(page, "nodes");
+    if (!Array.isArray(nodes)) {
+        throw new Error(`${pageInfoError} is malformed`);
+    }
+    const pageInfo = readRecordField(page, "pageInfo");
+    const hasNextPageValue = readUnknownField(pageInfo, "hasNextPage");
+    if (typeof hasNextPageValue !== "boolean") {
+        throw new Error(`${pageInfoError} is malformed`);
+    }
+    const endCursorValue = readUnknownField(pageInfo, "endCursor");
+    const endCursor =
+        typeof endCursorValue === "string" && endCursorValue.length > 0 ? endCursorValue : null;
+    if (hasNextPageValue && endCursor === null) {
+        throw new Error(`${pageInfoError} is malformed`);
+    }
+    return { nodes, hasNextPage: hasNextPageValue, endCursor };
+}
+
+function parseCampaignCreatedEvent(
+    event: unknown,
+    expected: { eventUid: string; eventRevision: number },
+): string | undefined {
+    const parsedJson = readEventJson(event);
+    const campaignId = readObjectId(parsedJson?.campaign_id);
+    if (campaignId === undefined) {
+        return undefined;
+    }
+    const eventRevision = readSafeInteger(parsedJson?.event_revision);
+    const eventUid = readBytesHex(parsedJson?.event_uid);
+    if (
+        eventRevision === expected.eventRevision &&
+        eventUid !== undefined &&
+        normalizeHex(eventUid) === normalizeHex(expected.eventUid)
+    ) {
+        return campaignId;
+    }
+    return undefined;
+}
+
+function readCampaignObjectChangeId(change: unknown): string | undefined {
+    const outputState = readRecordField(change, "outputState");
+    const type = readMoveObjectTypeRepr(outputState) ?? readStringField(change, "objectType");
+    if (type?.endsWith("::campaign::Campaign") !== true) {
+        return undefined;
+    }
+    return (
+        readObjectId(readUnknownField(outputState, "address")) ??
+        readObjectId(readUnknownField(change, "address")) ??
+        readObjectId(readUnknownField(change, "objectId"))
+    );
+}
+
+function readMoveObjectTypeRepr(input: unknown): string | undefined {
+    return readStringField(
+        readRecordField(
+            readRecordField(readRecordField(input, "asMoveObject"), "contents"),
+            "type",
+        ),
+        "repr",
+    );
+}
+
+function readGraphqlDynamicFields(response: unknown): unknown[] {
+    const data = readRecordField(response, "data");
+    const object = readRecordField(data, "object");
+    if (object === undefined) {
+        throw new Error("GraphQL membership registry object is missing or malformed");
+    }
+    const fields = readUnknownField(object, "multiGetDynamicFields");
+    if (!Array.isArray(fields)) {
+        throw new Error("GraphQL membership dynamic fields response is malformed");
+    }
+    return fields;
+}
+
+function readMembershipStatus(field: unknown): number {
+    const contents = readRecordField(field, "contents");
+    const json = readRecordField(contents, "json");
+    const status = readSafeInteger(json?.status);
+    if (status === undefined) {
+        throw new Error("membership dynamic field status is malformed");
+    }
+    return status;
+}
+
+function readEventJson(event: unknown): Record<string, unknown> | undefined {
+    const parsedJson = readRecordField(event, "parsedJson");
+    if (parsedJson !== undefined) {
+        return parsedJson;
+    }
+    const contents = readRecordField(event, "contents");
+    return readRecordField(contents, "json");
+}
+
+function readBeforeCheckpoint(checkpoint: number): number {
+    if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) {
+        throw new Error("checkpoint must be a non-negative safe integer");
+    }
+    if (checkpoint >= Number.MAX_SAFE_INTEGER) {
+        throw new Error("beforeCheckpoint must be a safe integer");
+    }
+    return checkpoint + 1;
+}
+
+function lineageDynamicFieldKey(lineage: string): { type: "0x2::object::ID"; bcs: string } {
+    return {
+        type: "0x2::object::ID",
+        bcs: Buffer.from(objectIdBytes(lineage)).toString("base64"),
+    };
+}
+
+function objectIdBytes(value: string): Uint8Array {
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+        throw new Error(`object ID must be 32 bytes: ${value}`);
+    }
+    return Uint8Array.from(Buffer.from(hex, "hex"));
+}
+
 function readRecordField(input: unknown, field: string): Record<string, unknown> | undefined {
     const value = readUnknownField(input, field);
     return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -646,6 +1094,17 @@ function readSafeInteger(input: unknown): number | undefined {
 
 function readBytesHex(input: unknown): string | undefined {
     if (typeof input === "string") {
+        if (/^0x[0-9a-fA-F]{64}$/.test(input)) {
+            return input;
+        }
+        try {
+            const decoded = Buffer.from(input, "base64");
+            if (decoded.byteLength === 32 && decoded.toString("base64") === input) {
+                return bytesToHex(decoded);
+            }
+        } catch {
+            return undefined;
+        }
         return input;
     }
     if (

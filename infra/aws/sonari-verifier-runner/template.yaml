@@ -250,10 +250,10 @@ Parameters:
     Type: String
     Default: ""
     Description: MainPool object ID used by accessor::set_floor_census.
-  FloorCensusJsonRpcUrl:
+  FloorCensusGraphqlUrl:
     Type: String
     Default: ""
-    Description: Optional Sui JSON-RPC URL for floor census event and transaction readback.
+    Description: Optional Sui GraphQL URL for floor census event and transaction readback.
   RelayerAllowSubmit:
     Type: String
     Default: "false"
@@ -1317,6 +1317,7 @@ Resources:
           RELAYER_CATEGORY_REGISTRY: !Ref RelayerCategoryRegistry
           RELAYER_CATEGORY_POOL: !Ref RelayerCategoryPool
           RELAYER_GRPC_URL: !Ref RelayerGrpcUrl
+          SONARI_SUI_GRAPHQL_URL: !Ref SonariSuiGraphqlUrl
           RELAYER_SENDER_ADDRESS: !Ref RelayerSenderAddress
           RELAYER_SIGNER_SECRET_ARN: !Ref RelayerSignerSecretArn
           RELAYER_ALLOW_SUBMIT: !Ref RelayerAllowSubmit
@@ -1325,7 +1326,7 @@ Resources:
           FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState
           FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool
           FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool
-          FLOOR_CENSUS_JSON_RPC_URL: !Ref FloorCensusJsonRpcUrl
+          FLOOR_CENSUS_GRAPHQL_URL: !Ref FloorCensusGraphqlUrl
           IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
           SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId
           SONARI_IDENTITY_PAUSE_STATE_ID: !Ref SonariIdentityPauseStateId

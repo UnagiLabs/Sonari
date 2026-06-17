@@ -6,6 +6,7 @@ import {
     encodeFloorCensusResultBcs,
     type FloorCensusOnchainReader,
     type FloorCensusSubmitClient,
+    GraphqlFloorCensusReader,
     JsonRpcFloorCensusReader,
     signFloorCensusResult,
     type HomeCellRegisteredEvent,
@@ -183,6 +184,440 @@ describe("JsonRpcFloorCensusReader", () => {
     });
 });
 
+describe("GraphqlFloorCensusReader", () => {
+    it("reads active membership lineages from GraphQL dynamic fields", async () => {
+        const activeLineage = `0x${"11".repeat(32)}`;
+        const inactiveLineage = `0x${"22".repeat(32)}`;
+        const missingLineage = `0x${"33".repeat(32)}`;
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [
+                            { contents: { json: { status: 1 } } },
+                            { contents: { json: { status: 0 } } },
+                            null,
+                        ],
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.listActiveLineages({
+                membershipRegistryId: "0xmembership",
+                lineages: [activeLineage, inactiveLineage, missingLineage],
+            }),
+        ).resolves.toEqual(new Set([activeLineage]));
+    });
+
+    it("passes the membership checkpoint to the GraphQL object lookup", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            return jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [null],
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await reader.listActiveLineages({
+            membershipRegistryId: "0xmembership",
+            lineages: [`0x${"11".repeat(32)}`],
+            checkpoint: 41,
+        });
+
+        expect(requests[0]?.variables).toMatchObject({
+            membershipRegistryId: "0xmembership",
+            checkpoint: 41,
+        });
+    });
+
+    it("encodes lineage object IDs as GraphQL dynamic field key BCS bytes", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            return jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [null],
+                    },
+                },
+            });
+        };
+
+        const lineage = `0x${"11".repeat(32)}`;
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await reader.listActiveLineages({
+            membershipRegistryId: "0xmembership",
+            lineages: [lineage],
+        });
+
+        expect(requests[0]?.variables.keys).toEqual([
+            {
+                type: "0x2::object::ID",
+                bcs: Buffer.from("11".repeat(32), "hex").toString("base64"),
+            },
+        ]);
+    });
+
+    it("fails closed when a GraphQL membership dynamic field status is malformed", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [{ contents: { json: { status: "active" } } }],
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.listActiveLineages({
+                membershipRegistryId: "0xmembership",
+                lineages: [`0x${"11".repeat(32)}`],
+            }),
+        ).rejects.toThrow("membership dynamic field status is malformed");
+    });
+
+    it("paginates HomeCellRegistered events and includes the checkpoint boundary", async () => {
+        const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                query: string;
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            if (request.variables.cursor === null) {
+                return jsonResponse({
+                    data: {
+                        events: {
+                            nodes: [
+                                {
+                                    contents: {
+                                        json: {
+                                            lineage: "0xlineage1",
+                                            home_cell: "10",
+                                            registered_at: "900",
+                                        },
+                                    },
+                                },
+                            ],
+                            pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+                        },
+                    },
+                });
+            }
+            return jsonResponse({
+                data: {
+                    events: {
+                        nodes: [
+                            {
+                                contents: {
+                                    json: {
+                                        lineage: { id: "0xlineage2" },
+                                        home_cell: 20,
+                                        registered_at: 950,
+                                    },
+                                },
+                            },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        const events = await reader.listHomeCellRegisteredEvents({
+            packageId: "0xpackage",
+            checkpoint: 41,
+        });
+
+        expect(events).toEqual([
+            { lineage: "0xlineage1", homeCell: "10", registeredAtMs: 900 },
+            { lineage: "0xlineage2", homeCell: "20", registeredAtMs: 950 },
+        ]);
+        expect(requests).toHaveLength(2);
+        expect(requests[0]?.query).toContain("beforeCheckpoint");
+        expect(requests.map((request) => request.variables)).toEqual([
+            {
+                eventType: "0xpackage::membership::HomeCellRegistered",
+                beforeCheckpoint: 42,
+                cursor: null,
+            },
+            {
+                eventType: "0xpackage::membership::HomeCellRegistered",
+                beforeCheckpoint: 42,
+                cursor: "cursor-1",
+            },
+        ]);
+    });
+
+    it("fails closed when a HomeCellRegistered GraphQL event is malformed", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    events: {
+                        nodes: [{ contents: { json: { lineage: "0xlineage1", home_cell: "bad" } } }],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "HomeCellRegistered event is malformed",
+        );
+    });
+
+    it("fails closed on HTTP errors, GraphQL errors, and malformed pages", async () => {
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+
+        globalThis.fetch = async () => jsonResponse({}, { status: 500 });
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "Sui GraphQL query failed with HTTP 500",
+        );
+
+        globalThis.fetch = async () =>
+            jsonResponse({ errors: [{ message: "indexer unavailable" }] });
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "Sui GraphQL query failed: indexer unavailable",
+        );
+
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    events: {
+                        nodes: [],
+                        pageInfo: { hasNextPage: true, endCursor: null },
+                    },
+                },
+            });
+        await expect(reader.listHomeCellRegisteredEvents({ packageId: "0xpackage" })).rejects.toThrow(
+            "GraphQL events pageInfo is malformed",
+        );
+    });
+
+    it("reads campaign id and checkpoint from a paginated CampaignCreated GraphQL event", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            if (request.variables.eventsCursor === null) {
+                return jsonResponse({
+                    data: {
+                        transaction: {
+                            effects: {
+                                checkpoint: { sequenceNumber: "41" },
+                                events: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: true, endCursor: "events-1" },
+                                },
+                                objectChanges: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: false, endCursor: null },
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+            return jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: { sequenceNumber: "41" },
+                            events: {
+                                nodes: [
+                                    {
+                                        contents: {
+                                            json: {
+                                                campaign_id: "0xcampaign-event",
+                                                event_uid: Buffer.from(
+                                                    eventUid.slice(2),
+                                                    "hex",
+                                                ).toString("base64"),
+                                                event_revision: 7,
+                                            },
+                                        },
+                                    },
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).resolves.toEqual({ campaignId: "0xcampaign-event", checkpoint: 41 });
+        expect(requests.map((request) => request.variables.eventsCursor)).toEqual([
+            null,
+            "events-1",
+        ]);
+    });
+
+    it("falls back to a unique paginated Campaign object change candidate", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            if (request.variables.objectChangesCursor === null) {
+                return jsonResponse({
+                    data: {
+                        transaction: {
+                            effects: {
+                                checkpoint: { sequenceNumber: 41 },
+                                events: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: false, endCursor: null },
+                                },
+                                objectChanges: {
+                                    nodes: [],
+                                    pageInfo: { hasNextPage: true, endCursor: "changes-1" },
+                                },
+                            },
+                        },
+                    },
+                });
+            }
+            return jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: { sequenceNumber: 41 },
+                            events: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [
+                                    {
+                                        address: "0xcampaign-object",
+                                        outputState: {
+                                            address: "0xcampaign-object",
+                                            asMoveObject: {
+                                                contents: {
+                                                    type: {
+                                                        repr: "0xabc::campaign::Campaign",
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    },
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).resolves.toEqual({ campaignId: "0xcampaign-object", checkpoint: 41 });
+        expect(requests.map((request) => request.variables.objectChangesCursor)).toEqual([
+            null,
+            "changes-1",
+        ]);
+    });
+
+    it("fails closed when a campaign transaction has no checkpoint", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: null,
+                            events: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).rejects.toThrow("relayer transaction checkpoint is missing");
+    });
+
+    it("fails closed when multiple Campaign object change candidates exist", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    transaction: {
+                        effects: {
+                            checkpoint: { sequenceNumber: 41 },
+                            events: {
+                                nodes: [],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                            objectChanges: {
+                                nodes: [
+                                    campaignObjectChange("0xcampaign-1"),
+                                    campaignObjectChange("0xcampaign-2"),
+                                ],
+                                pageInfo: { hasNextPage: false, endCursor: null },
+                            },
+                        },
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.findCampaignId({
+                digest: "tx-digest",
+                eventUid,
+                eventRevision: 7,
+            }),
+        ).rejects.toThrow("relayer transaction included multiple Campaign object changes");
+    });
+});
+
 describe("DirectFloorCensusAdapter", () => {
     it("looks up the campaign and signs census with the payload revision", async () => {
         const result = finalizedResultForCensus();
@@ -221,6 +656,14 @@ describe("DirectFloorCensusAdapter", () => {
                 eventRevision: 7,
             },
         ]);
+        expect(reader.homeCellLookups).toEqual([{ packageId: "0xabc", checkpoint: 41 }]);
+        expect(reader.activeLineageLookups).toEqual([
+            {
+                membershipRegistryId: "0xmembership",
+                lineages: ["0xlineage"],
+                checkpoint: 41,
+            },
+        ]);
         expect(Buffer.from(signer.signedBytes ?? []).toString("hex")).toContain("07000000");
         expect(client.submissions).toHaveLength(1);
     });
@@ -242,6 +685,22 @@ function jsonResponse(
         status: init.status ?? 200,
         headers: { "content-type": "application/json", ...init.headers },
     });
+}
+
+function campaignObjectChange(address: string): unknown {
+    return {
+        address,
+        outputState: {
+            address,
+            asMoveObject: {
+                contents: {
+                    type: {
+                        repr: "0xabc::campaign::Campaign",
+                    },
+                },
+            },
+        },
+    };
 }
 
 function computeAffectedCellsRootForTest(input: typeof affectedCells): string | null {
@@ -345,12 +804,27 @@ class RecordingSigner {
 class RecordingFloorCensusReader implements FloorCensusOnchainReader {
     readonly campaignLookups: Array<{ digest: string; eventUid: string; eventRevision: number }> =
         [];
+    readonly homeCellLookups: Array<{ packageId: string; checkpoint?: number | undefined }> = [];
+    readonly activeLineageLookups: Array<{
+        membershipRegistryId: string;
+        lineages: readonly string[];
+        checkpoint?: number | undefined;
+    }> = [];
 
-    async listHomeCellRegisteredEvents(): Promise<HomeCellRegisteredEvent[]> {
+    async listHomeCellRegisteredEvents(input: {
+        packageId: string;
+        checkpoint?: number | undefined;
+    }): Promise<HomeCellRegisteredEvent[]> {
+        this.homeCellLookups.push(input);
         return [{ lineage: "0xlineage", homeCell: "20", registeredAtMs: 900 }];
     }
 
-    async listActiveLineages(): Promise<ReadonlySet<string>> {
+    async listActiveLineages(input: {
+        membershipRegistryId: string;
+        lineages: readonly string[];
+        checkpoint?: number | undefined;
+    }): Promise<ReadonlySet<string>> {
+        this.activeLineageLookups.push(input);
         return new Set(["0xlineage"]);
     }
 
@@ -358,9 +832,11 @@ class RecordingFloorCensusReader implements FloorCensusOnchainReader {
         digest: string;
         eventUid: string;
         eventRevision: number;
-    }): Promise<string | undefined> {
+    }): Promise<{ campaignId: string; checkpoint: number } | undefined> {
         this.campaignLookups.push(input);
-        return input.eventRevision === 7 ? "0xcampaign-revision-7" : undefined;
+        return input.eventRevision === 7
+            ? { campaignId: "0xcampaign-revision-7", checkpoint: 41 }
+            : undefined;
     }
 }
 
