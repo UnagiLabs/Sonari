@@ -21,10 +21,7 @@ import {
     disabledReasonMessageKey,
     type MembershipLookupViewState,
 } from "./membership-gate";
-import {
-    issueMembershipPass,
-    MembershipIssueError,
-} from "./membership-issue";
+import { issueMembershipPass, MembershipIssueError } from "./membership-issue";
 import {
     type MembershipIssueViewState,
     membershipSubmittingMessageKey,
