@@ -955,9 +955,7 @@ function parseCampaignCreatedEvent(
 
 function readCampaignObjectChangeId(change: unknown): string | undefined {
     const outputState = readRecordField(change, "outputState");
-    const type =
-        readMoveObjectTypeRepr(outputState) ??
-        readStringField(change, "objectType");
+    const type = readMoveObjectTypeRepr(outputState) ?? readStringField(change, "objectType");
     if (type?.endsWith("::campaign::Campaign") !== true) {
         return undefined;
     }
@@ -970,7 +968,10 @@ function readCampaignObjectChangeId(change: unknown): string | undefined {
 
 function readMoveObjectTypeRepr(input: unknown): string | undefined {
     return readStringField(
-        readRecordField(readRecordField(readRecordField(input, "asMoveObject"), "contents"), "type"),
+        readRecordField(
+            readRecordField(readRecordField(input, "asMoveObject"), "contents"),
+            "type",
+        ),
         "repr",
     );
 }

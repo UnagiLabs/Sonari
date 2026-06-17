@@ -2787,13 +2787,6 @@ export function readFloorCensusConfigFromEnv(
     return config;
 }
 
-function defaultSuiJsonRpcUrl(network: SuiNetwork | undefined): string | undefined {
-    if (network === undefined) {
-        return undefined;
-    }
-    return `https://fullnode.${network}.sui.io:443`;
-}
-
 function defaultSuiGraphqlUrl(network: SuiNetwork | undefined): string | undefined {
     if (network === undefined) {
         return undefined;
