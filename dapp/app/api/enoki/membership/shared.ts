@@ -1,5 +1,5 @@
 import { Transaction } from "@mysten/sui/transactions";
-import { fromBase64, isValidSuiAddress } from "@mysten/sui/utils";
+import { fromBase64, isValidSuiAddress, isValidTransactionDigest } from "@mysten/sui/utils";
 
 export const ENOKI_MEMBERSHIP_MAX_TRANSACTION_KIND_BYTES = 16 * 1024;
 
@@ -15,7 +15,9 @@ export type EnokiMembershipErrorCode =
     | "disallowed_move_call_target"
     | "unsupported_network"
     | "missing_enoki_private_api_key"
-    | "invalid_membership_package_id";
+    | "invalid_membership_package_id"
+    | "invalid_digest"
+    | "invalid_signature";
 
 export interface EnokiMembershipError {
     readonly code: EnokiMembershipErrorCode;
@@ -33,18 +35,36 @@ export interface EnokiMembershipConfig {
     readonly allowedMoveCallTargets: ReadonlySet<string>;
 }
 
+export interface EnokiMembershipExecuteConfig {
+    readonly enokiPrivateApiKey: string;
+    readonly network: "testnet";
+}
+
 export interface EnokiMembershipRequest {
     readonly sender: string;
     readonly transactionBlockKindBytes: string;
     readonly decodedTransactionBlockKindBytes: Uint8Array;
 }
 
+export interface EnokiMembershipExecuteRequest {
+    readonly digest: string;
+    readonly signature: string;
+}
+
 export type EnokiMembershipConfigResult =
     | { readonly ok: true; readonly config: EnokiMembershipConfig }
     | { readonly ok: false; readonly error: EnokiMembershipError };
 
+export type EnokiMembershipExecuteConfigResult =
+    | { readonly ok: true; readonly config: EnokiMembershipExecuteConfig }
+    | { readonly ok: false; readonly error: EnokiMembershipError };
+
 export type EnokiMembershipRequestResult =
     | { readonly ok: true; readonly request: EnokiMembershipRequest }
+    | { readonly ok: false; readonly error: EnokiMembershipError };
+
+export type EnokiMembershipExecuteRequestResult =
+    | { readonly ok: true; readonly request: EnokiMembershipExecuteRequest }
     | { readonly ok: false; readonly error: EnokiMembershipError };
 
 export function readEnokiMembershipPackageId(): EnokiMembershipResult<string> {
@@ -57,14 +77,9 @@ export function readEnokiMembershipPackageId(): EnokiMembershipResult<string> {
 }
 
 export function readEnokiMembershipConfig(): EnokiMembershipConfigResult {
-    const network = process.env.NEXT_PUBLIC_SUI_NETWORK;
-    if (network !== "testnet") {
-        return err("unsupported_network", "Enoki membership sponsorship is only enabled on testnet.");
-    }
-
-    const enokiPrivateApiKey = process.env.ENOKI_PRIVATE_API_KEY;
-    if (enokiPrivateApiKey === undefined || enokiPrivateApiKey.trim().length === 0) {
-        return err("missing_enoki_private_api_key", "Enoki sponsorship is not configured.");
+    const executeConfigResult = readEnokiMembershipExecuteConfig();
+    if (!executeConfigResult.ok) {
+        return executeConfigResult;
     }
 
     const packageIdResult = readEnokiMembershipPackageId();
@@ -75,10 +90,30 @@ export function readEnokiMembershipConfig(): EnokiMembershipConfigResult {
     return {
         ok: true,
         config: {
-            enokiPrivateApiKey,
-            network,
+            enokiPrivateApiKey: executeConfigResult.config.enokiPrivateApiKey,
+            network: executeConfigResult.config.network,
             membershipPackageId: packageIdResult.value,
             allowedMoveCallTargets: membershipAllowlist(packageIdResult.value),
+        },
+    };
+}
+
+export function readEnokiMembershipExecuteConfig(): EnokiMembershipExecuteConfigResult {
+    const network = process.env.SONARI_SUI_NETWORK;
+    if (network !== "testnet") {
+        return err("unsupported_network", "Enoki membership sponsorship is only enabled on testnet.");
+    }
+
+    const enokiPrivateApiKey = process.env.ENOKI_PRIVATE_API_KEY;
+    if (enokiPrivateApiKey === undefined || enokiPrivateApiKey.trim().length === 0) {
+        return err("missing_enoki_private_api_key", "Enoki sponsorship is not configured.");
+    }
+
+    return {
+        ok: true,
+        config: {
+            enokiPrivateApiKey,
+            network,
         },
     };
 }
@@ -131,6 +166,31 @@ export function parseEnokiMembershipRequest(
             sender,
             transactionBlockKindBytes: encodedKindBytes,
             decodedTransactionBlockKindBytes: decodedKindBytes,
+        },
+    };
+}
+
+export function parseEnokiMembershipExecuteRequest(body: unknown): EnokiMembershipExecuteRequestResult {
+    const record = expectRecord(body);
+    if (!record.ok) {
+        return record;
+    }
+
+    const digest = record.value.digest;
+    if (typeof digest !== "string" || !isValidTransactionDigest(digest)) {
+        return err("invalid_digest", "digest must be a Sui transaction digest.");
+    }
+
+    const signature = record.value.signature;
+    if (typeof signature !== "string" || signature.length === 0 || !isBase64(signature)) {
+        return err("invalid_signature", "signature must be base64.");
+    }
+
+    return {
+        ok: true,
+        request: {
+            digest,
+            signature,
         },
     };
 }

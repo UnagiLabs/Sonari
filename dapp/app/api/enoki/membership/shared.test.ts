@@ -12,6 +12,7 @@ const SENDER = `0x${"34".repeat(32)}`;
 
 const originalEnv = {
     ENOKI_PRIVATE_API_KEY: process.env.ENOKI_PRIVATE_API_KEY,
+    SONARI_SUI_NETWORK: process.env.SONARI_SUI_NETWORK,
     NEXT_PUBLIC_SUI_NETWORK: process.env.NEXT_PUBLIC_SUI_NETWORK,
     NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID:
         process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID,
@@ -29,7 +30,8 @@ function restoreEnv(): void {
 
 function configureEnv(): void {
     process.env.ENOKI_PRIVATE_API_KEY = "enoki-private-key";
-    process.env.NEXT_PUBLIC_SUI_NETWORK = "testnet";
+    process.env.SONARI_SUI_NETWORK = "testnet";
+    process.env.NEXT_PUBLIC_SUI_NETWORK = "mainnet";
     process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID = PACKAGE_ID;
 }
 
@@ -58,8 +60,28 @@ describe("Enoki membership shared validation", () => {
     });
 
     describe("readEnokiMembershipConfig", () => {
-        it("rejects non-testnet network", () => {
+        it("reads the server-side network instead of the public network", () => {
+            process.env.SONARI_SUI_NETWORK = "testnet";
             process.env.NEXT_PUBLIC_SUI_NETWORK = "mainnet";
+
+            expect(readEnokiMembershipConfig()).toMatchObject({
+                ok: true,
+                config: { network: "testnet" },
+            });
+        });
+
+        it("rejects missing server-side network", () => {
+            delete process.env.SONARI_SUI_NETWORK;
+            process.env.NEXT_PUBLIC_SUI_NETWORK = "testnet";
+
+            expect(readEnokiMembershipConfig()).toMatchObject({
+                ok: false,
+                error: { code: "unsupported_network" },
+            });
+        });
+
+        it("rejects non-testnet network", () => {
+            process.env.SONARI_SUI_NETWORK = "mainnet";
 
             expect(readEnokiMembershipConfig()).toMatchObject({
                 ok: false,
