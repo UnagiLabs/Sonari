@@ -1,10 +1,13 @@
 "use client";
 
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient, useCurrentWallet } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
+import { readEnokiConfig } from "../../../wallet/enoki-config";
+import { shouldUseSponsoredMembershipTransaction } from "../../../wallet/enoki-wallet-detection";
+import { executeSponsoredMembershipTransaction } from "../../../wallet/sponsored-membership-transaction";
 import {
     executeWalletTransaction,
     WalletTransactionError,
@@ -19,8 +22,7 @@ import {
     type MembershipLookupViewState,
 } from "./membership-gate";
 import {
-    buildRegisterMemberTransaction,
-    fetchResidenceProof,
+    issueMembershipPass,
     MembershipIssueError,
 } from "./membership-issue";
 import { shortAddress } from "./membership-presence";
@@ -56,6 +58,7 @@ export function MembershipStep({
     const tCommon = useTranslations("register.wizard.common");
 
     const account = useCurrentAccount();
+    const currentWallet = useCurrentWallet();
     const client = useCurrentClient();
     const owner = account?.address ?? "";
 
@@ -169,23 +172,35 @@ export function MembershipStep({
         setIssueState({ kind: "submitting" });
 
         try {
-            const residenceProof = await fetchResidenceProof({
-                workerUrl: residenceProofWorkerUrl,
-                homeCell,
-            });
-            const { transaction } = buildRegisterMemberTransaction({
+            const executionMode = shouldUseSponsoredMembershipTransaction({
+                wallet: currentWallet,
+                enokiConfigResult: readEnokiConfig(),
+                signer: dAppKit,
+            })
+                ? "sponsored"
+                : "wallet";
+            await issueMembershipPass({
+                client,
                 senderAddress,
+                homeCell,
+                residenceProofWorkerUrl,
                 packageId: membershipPackageId,
                 objects: {
                     pauseState: pauseStateId,
                     membershipRegistry: membershipRegistryId,
                     allowedResidenceCellRegistry: allowedResidenceCellRegistryId,
                 },
-                homeCell,
-                residenceProof,
                 termsVersion: MEMBERSHIP_TERMS_VERSION,
+                executionMode,
+                walletExecutor: (input) => executeWalletTransaction(dAppKit, input),
+                sponsoredExecutor: (input) =>
+                    executeSponsoredMembershipTransaction({
+                        client: input.client,
+                        transaction: input.transaction,
+                        sender: input.sender,
+                        signer: dAppKit,
+                    }),
             });
-            await executeWalletTransaction(dAppKit, { transaction });
             onIssued();
             setIssueState({ kind: "idle" });
             onNext();

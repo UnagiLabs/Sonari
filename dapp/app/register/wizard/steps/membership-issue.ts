@@ -1,5 +1,6 @@
 "use client";
 
+import type { ClientWithCoreApi } from "@mysten/sui/client";
 import { Transaction } from "@mysten/sui/transactions";
 import {
     type ProofStep,
@@ -46,6 +47,40 @@ export interface BuildRegisterMemberTransactionInput {
 
 export interface RegisterMemberTransactionResult {
     readonly transaction: Transaction;
+}
+
+export type MembershipIssueExecutionMode = "wallet" | "sponsored";
+
+export interface MembershipIssueExecutorInput {
+    readonly transaction: Transaction;
+}
+
+export interface SponsoredMembershipIssueExecutorInput extends MembershipIssueExecutorInput {
+    readonly client: ClientWithCoreApi;
+    readonly sender: string;
+}
+
+export interface MembershipIssueExecutionResult {
+    readonly digest: string;
+}
+
+export interface IssueMembershipPassInput {
+    readonly client: ClientWithCoreApi;
+    readonly senderAddress: string;
+    readonly homeCell: string;
+    readonly residenceProofWorkerUrl: string;
+    readonly packageId: string;
+    readonly objects: MembershipIssueTransactionObjects;
+    readonly termsVersion?: number;
+    readonly signedStatementHash?: string;
+    readonly fetchImpl?: typeof fetch;
+    readonly executionMode: MembershipIssueExecutionMode;
+    readonly walletExecutor: (
+        input: MembershipIssueExecutorInput,
+    ) => Promise<MembershipIssueExecutionResult>;
+    readonly sponsoredExecutor: (
+        input: SponsoredMembershipIssueExecutorInput,
+    ) => Promise<MembershipIssueExecutionResult>;
 }
 
 type MembershipIssueErrorCode =
@@ -155,6 +190,37 @@ export function buildRegisterMemberTransaction(
     });
 
     return { transaction: tx };
+}
+
+export async function issueMembershipPass(
+    input: IssueMembershipPassInput,
+): Promise<MembershipIssueExecutionResult> {
+    const residenceProof = await fetchResidenceProof({
+        workerUrl: input.residenceProofWorkerUrl,
+        homeCell: input.homeCell,
+        ...(input.fetchImpl === undefined ? {} : { fetchImpl: input.fetchImpl }),
+    });
+    const { transaction } = buildRegisterMemberTransaction({
+        senderAddress: input.senderAddress,
+        packageId: input.packageId,
+        objects: input.objects,
+        homeCell: input.homeCell,
+        residenceProof,
+        ...(input.termsVersion === undefined ? {} : { termsVersion: input.termsVersion }),
+        ...(input.signedStatementHash === undefined
+            ? {}
+            : { signedStatementHash: input.signedStatementHash }),
+    });
+
+    if (input.executionMode === "sponsored") {
+        return input.sponsoredExecutor({
+            client: input.client,
+            transaction,
+            sender: input.senderAddress,
+        });
+    }
+
+    return input.walletExecutor({ transaction });
 }
 
 function buildResidenceProofRequestUrl(workerUrl: string, homeCell: string): string {
