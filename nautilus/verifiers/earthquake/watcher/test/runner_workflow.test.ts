@@ -2844,7 +2844,10 @@ describe("AWS runner workflow helper", () => {
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004000.json' - |",
         );
         expect(ssm.commands[0]).toContain(
-            ": \"${SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST:?SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST is required}\"",
+            ': "${SCT:?SCT is required}"',
+        );
+        expect(ssm.commands[0]).toContain(
+            'SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST="$SCT"',
         );
         expect(ssm.commands[0]).toContain(
             "export SONARI_CENSUS_EIF_PATH SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS SONARI_CENSUS_ENCLAVE_CID SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST NITRO_ENCLAVE_PROCESS_COMMAND",
