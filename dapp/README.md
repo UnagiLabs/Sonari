@@ -8,6 +8,34 @@ Next.js (App Router) web app for Sonari — the donation, registration, and clai
 ## Where to Read More
 - [../README.md](../README.md) — project overview & documentation index
 
+## Enoki / Google zkLogin Testnet Setup
+
+This setup only fixes the public configuration contract for testnet. Wallet
+registration and transaction execution stay on the existing Sui dApp Kit path.
+
+1. Create a testnet app in Enoki Portal.
+2. Create a Google OAuth Client ID in Google Cloud Console.
+3. Register that Google OAuth Client ID in the Enoki Portal Google provider.
+4. Add the allowed origins `http://localhost:3000` and `https://sonari.help`.
+5. Store these public build-time values in the `cloudflare-dapp-worker`
+   GitHub Environment Variables:
+
+```env
+NEXT_PUBLIC_ENOKI_API_KEY=
+NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=
+NEXT_PUBLIC_ENOKI_NETWORK=testnet
+```
+
+`NEXT_PUBLIC_*` values are bundled into the browser. Do not put secrets,
+private API keys, OAuth client secrets, signing keys, or mnemonics there.
+
+`ENOKI_PRIVATE_API_KEY` is a server-only secret for sponsored transactions in a
+later issue. Register it in Cloudflare, not in client env:
+
+```bash
+wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp
+```
+
 ---
 
 # Sonari dapp（日本語）
@@ -19,3 +47,30 @@ Sonari の Next.js（App Router）Web アプリ。寄付・登録・claim の UI
 
 ## 詳細資料
 - [../README.md](../README.md) — プロジェクト概要・ドキュメント索引
+
+## Enoki / Google zkLogin testnet 設定
+
+この設定は、testnet 用の公開 env 契約だけを固定します。wallet 登録や
+transaction 実行は、既存の Sui dApp Kit 経路から変えません。
+
+1. Enoki Portal で testnet app を作成する。
+2. Google Cloud Console で Google OAuth Client ID を作成する。
+3. Enoki Portal の Google provider に同じ Google OAuth Client ID を登録する。
+4. allowed origin に `http://localhost:3000` と `https://sonari.help` を追加する。
+5. `cloudflare-dapp-worker` の GitHub Environment Variables に公開値を登録する。
+
+```env
+NEXT_PUBLIC_ENOKI_API_KEY=
+NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=
+NEXT_PUBLIC_ENOKI_NETWORK=testnet
+```
+
+`NEXT_PUBLIC_*` はブラウザの bundle に入ります。NEXT_PUBLIC_* に secret を置かないでください。
+private API key、OAuth client secret、署名鍵、ニーモニックは入れません。
+
+`ENOKI_PRIVATE_API_KEY` は後続 Issue の sponsored transaction 用 server-only secret です。
+client env ではなく Cloudflare に登録します。
+
+```bash
+wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp
+```

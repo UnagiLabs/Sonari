@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 
 const workflowPath = path.join(process.cwd(), ".github/workflows/dapp-deploy.yml");
 const dappEnvExamplePath = path.join(process.cwd(), "dapp/.env.example");
+const dappReadmePath = path.join(process.cwd(), "dapp/README.md");
+const dappWranglerPath = path.join(process.cwd(), "dapp/wrangler.jsonc");
+const dappDevVarsExamplePath = path.join(process.cwd(), "dapp/.dev.vars.example");
 
 async function readWorkflow(): Promise<string> {
     return readFile(workflowPath, "utf8");
@@ -11,6 +14,18 @@ async function readWorkflow(): Promise<string> {
 
 async function readDappEnvExample(): Promise<string> {
     return readFile(dappEnvExamplePath, "utf8");
+}
+
+async function readDappReadme(): Promise<string> {
+    return readFile(dappReadmePath, "utf8");
+}
+
+async function readDappWrangler(): Promise<string> {
+    return readFile(dappWranglerPath, "utf8");
+}
+
+async function readDappDevVarsExample(): Promise<string> {
+    return readFile(dappDevVarsExamplePath, "utf8");
 }
 
 describe("dapp deploy workflow", () => {
@@ -83,5 +98,33 @@ describe("dapp env example", () => {
         expect(envExample).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID=");
         expect(envExample).toContain("NEXT_PUBLIC_ENOKI_NETWORK=testnet");
         expect(envExample).not.toContain("ENOKI_PRIVATE_API_KEY=");
+    });
+});
+
+describe("dapp Enoki setup docs", () => {
+    it("documents Google OAuth and Enoki allowed origins", async () => {
+        const readme = await readDappReadme();
+
+        expect(readme).toContain("Google OAuth Client ID");
+        expect(readme).toContain("Enoki Portal");
+        expect(readme).toContain("Google provider");
+        expect(readme).toContain("http://localhost:3000");
+        expect(readme).toContain("https://sonari.help");
+        expect(readme).toContain("NEXT_PUBLIC_ENOKI_API_KEY");
+        expect(readme).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID");
+        expect(readme).toContain("NEXT_PUBLIC_ENOKI_NETWORK=testnet");
+    });
+
+    it("documents Enoki private key as server-only secret", async () => {
+        const readme = await readDappReadme();
+        const wrangler = await readDappWrangler();
+        const devVarsExample = await readDappDevVarsExample();
+
+        expect(readme).toContain("wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp");
+        expect(readme).toContain("NEXT_PUBLIC_* に secret を置かない");
+        expect(readme).toContain("ENOKI_PRIVATE_API_KEY");
+        expect(wrangler).toContain("ENOKI_PRIVATE_API_KEY");
+        expect(devVarsExample).toContain("ENOKI_PRIVATE_API_KEY=");
+        expect(devVarsExample).toContain("NEXT_PUBLIC_ は付けません");
     });
 });
