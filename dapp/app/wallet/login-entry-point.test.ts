@@ -17,7 +17,13 @@ describe("LoginEntryPoint", () => {
         expect(source).toContain('const t = useTranslations("wallet");');
     });
 
-    it("keeps WalletConnect on root and after wallet connection", () => {
+    it("does not render WalletConnect while root still has a next query", () => {
+        expect(source).toMatch(/const\s+hasNextParam\s*=\s*searchParams\.has\("next"\);/);
+        expect(source).toMatch(/if\s*\(\s*pathname\s*===\s*"\/"\s*&&\s*hasNextParam\s*\)/);
+        expect(source).toMatch(/return\s*<LoginEntryPointFallback\s*\/>/);
+    });
+
+    it("keeps WalletConnect on normalized root and after wallet connection", () => {
         expect(source).toMatch(/if\s*\(\s*pathname\s*===\s*"\/"\s*\|\|\s*account\s*\)\s*\{\s*return\s*<WalletConnect\s*\/>/s);
     });
 

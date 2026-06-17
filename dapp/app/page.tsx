@@ -1,9 +1,11 @@
 import { cookies } from "next/headers";
+import { Suspense } from "react";
 import enMessages from "../messages/en.json";
 import jaMessages from "../messages/ja.json";
 import { HomeView } from "./home-view";
 import { SonariIntlProvider } from "./i18n/intl-provider";
 import { canonicalMetadata } from "./i18n/site-metadata";
+import { LoginEntryController } from "./login-entry/login-entry-controller";
 import { parseLocale, SONARI_LOCALE_COOKIE, type SonariLocale } from "./register/wizard/locale";
 
 export const metadata = canonicalMetadata("/");
@@ -21,6 +23,9 @@ export default async function LandingPage() {
 
     return (
         <SonariIntlProvider locale={locale} messages={messagesByLocale[locale]}>
+            <Suspense fallback={null}>
+                <LoginEntryController />
+            </Suspense>
             <HomeView locale={locale} />
         </SonariIntlProvider>
     );

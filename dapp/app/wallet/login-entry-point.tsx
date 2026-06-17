@@ -23,6 +23,11 @@ function LoginEntryPointContent() {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const t = useTranslations("wallet");
+    const hasNextParam = searchParams.has("next");
+
+    if (pathname === "/" && hasNextParam) {
+        return <LoginEntryPointFallback />;
+    }
 
     if (pathname === "/" || account) {
         return <WalletConnect />;
