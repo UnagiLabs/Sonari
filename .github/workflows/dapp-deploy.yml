@@ -136,11 +136,11 @@ jobs:
       #   - repo-level Variables（SONARI_*）= dapp / Cloudflare worker / AWS runner で共有する値。
       #     1 箇所更新すれば全デプロイ先へ反映される。ここでは NEXT_PUBLIC_* 名へ写し替えて渡す。
       #   - environment-level Variables（cloudflare-dapp-worker）= dapp 固有の値
-      #     （Google Maps key / World ID app_id）。
+      #     （Google Maps key / World ID app_id / Enoki public key / Google OAuth client id）。
       # NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID / NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID は
       # next.config が Published.toml から自動注入するので、env 変数としては渡さない。
       #
-      # アプリ secret（WORLD_ID_RP_SIGNING_KEY）は CI に置かない。`wrangler secret put` で
+      # アプリ secret（WORLD_ID_RP_SIGNING_KEY / ENOKI_PRIVATE_API_KEY）は CI に置かない。`wrangler secret put` で
       # Cloudflare 側に別管理する。CI が扱うのは Cloudflare API token と account id、公開値のみ。
       - name: Build and deploy to Cloudflare
         env:
@@ -162,5 +162,8 @@ jobs:
           # dapp 固有（environment-level Variables）。
           NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${{ vars.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY }}
           NEXT_PUBLIC_WORLD_ID_APP_ID: ${{ vars.NEXT_PUBLIC_WORLD_ID_APP_ID }}
+          NEXT_PUBLIC_ENOKI_API_KEY: ${{ vars.NEXT_PUBLIC_ENOKI_API_KEY }}
+          NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID }}
+          NEXT_PUBLIC_ENOKI_NETWORK: testnet
         shell: bash
         run: pnpm --filter @sonari/dapp run deploy

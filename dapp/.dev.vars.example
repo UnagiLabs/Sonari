@@ -9,8 +9,13 @@
 #
 # 本番（Cloudflare Worker）では .dev.vars ではなく次のコマンドで登録します。
 #   wrangler secret put WORLD_ID_RP_SIGNING_KEY --name sonari-dapp
+#   wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp
 
 # World ID の RP 署名鍵。/api/world-id/rp-signature の signRequest だけが使う server-only 秘密鍵。
 # Developer Portal で発行した signing key（hex, 0x...）を入れます。
 # 未設定なら署名 API は 500（"World ID signing is not configured"）を返します。
 WORLD_ID_RP_SIGNING_KEY=
+
+# Enoki の sponsored transaction 用 private API key。
+# 後続 Issue の server-only 経路だけが使います。NEXT_PUBLIC_ は付けません。
+ENOKI_PRIVATE_API_KEY=

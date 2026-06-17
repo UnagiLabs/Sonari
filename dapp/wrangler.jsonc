@@ -25,10 +25,12 @@
     // Secrets（repo にハードコードしない・deploy 時に wrangler secret put で設定する）
     // ---------------------------------------------------------------------------
     //
-    // World ID の RP 署名鍵は server-only secret。repo / CI / NEXT_PUBLIC_* に出さない。
+    // World ID の RP 署名鍵と Enoki の private API key は server-only secret。
+    // repo / CI / NEXT_PUBLIC_* に出さない。
     // 次のコマンドで Cloudflare 側に登録する（値はリポジトリ管理者が保持）。
     //
     //   wrangler secret put WORLD_ID_RP_SIGNING_KEY --name sonari-dapp
+    //   wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp
     //
     // 未設定のままだと /api/world-id/rp-signature は 500（"World ID signing is not configured"）を返す。
     //
