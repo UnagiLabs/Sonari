@@ -6,6 +6,7 @@ pub mod affected_cells;
 pub mod counts;
 pub mod encoding;
 pub mod error;
+pub mod server;
 
 pub use affected_cells::{
     AffectedCell, AffectedCellsArtifact, compute_affected_cells_root, validate_affected_cells_root,

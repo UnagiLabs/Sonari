@@ -175,6 +175,8 @@ name = "census-tee"
 version = "0.1.0"
 dependencies = [
  "bcs",
+ "clap",
+ "ed25519-dalek",
  "serde",
  "serde_json",
  "sonari-tee-core",

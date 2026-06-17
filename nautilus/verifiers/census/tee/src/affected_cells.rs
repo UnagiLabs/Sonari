@@ -9,7 +9,7 @@ const CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_GRID_POINT_P90_V1: u8 = 1;
 const CELLS_GENERATION_METHOD_SHAKEMAP_HDF_H3_AREA_WEIGHTED_P90_V1: u8 = 2;
 const CELLS_GENERATION_METHOD_SHAKEMAP_GRIDXML_H3_CENTER_BILINEAR_V1: u8 = 3;
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct AffectedCellsArtifact {
     pub event_uid: String,
     pub event_revision: u32,
@@ -22,7 +22,7 @@ pub struct AffectedCellsArtifact {
     pub affected_cells: Vec<AffectedCell>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct AffectedCell {
     pub h3_index: String,
     pub intensity_value: u64,

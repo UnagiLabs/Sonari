@@ -2,10 +2,10 @@ use crate::{
     AffectedCellsArtifact, CensusError, FloorCensusResult, INTENT, VERIFIER_FAMILY,
     VERIFIER_VERSION, validate_affected_cells_root,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct CensusInputBundle {
     pub event_uid: String,
     pub event_revision: u32,
@@ -17,7 +17,7 @@ pub struct CensusInputBundle {
     pub active_lineages: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 pub struct HomeCellRegisteredEvent {
     pub lineage: String,
     pub home_cell: String,
