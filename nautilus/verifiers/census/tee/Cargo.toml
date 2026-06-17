@@ -1,0 +1,23 @@
+[package]
+name = "census-tee"
+version = "0.1.0"
+edition = "2024"
+default-run = "census-tee"
+
+[lib]
+name = "census_tee"
+path = "src/lib.rs"
+
+[[bin]]
+name = "census-tee"
+path = "src/main.rs"
+
+[dependencies]
+bcs = "0.1"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sonari-tee-core = { path = "../../shared-tee" }
+
+[dev-dependencies]
+ed25519-dalek = "2.2.0"

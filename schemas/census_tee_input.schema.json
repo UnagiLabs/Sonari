@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sonari.example/schemas/census_tee_input.schema.json",
+  "title": "Sonari Census TEE Input",
+  "$comment": "Local fixture MVP input for the census TEE. This schema only fixes the input envelope required by STEP 1; BCS encoding, affected root calculation, aggregation, and server mode are intentionally out of scope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_uid",
+    "event_revision",
+    "cutoff_ms",
+    "affected_cells_root",
+    "issued_at_ms",
+    "affected_cells",
+    "home_cell_events",
+    "active_lineages"
+  ],
+  "properties": {
+    "event_uid": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "event_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "cutoff_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "affected_cells_root": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "issued_at_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "affected_cells": {
+      "type": "object"
+    },
+    "home_cell_events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lineage", "home_cell", "registered_at_ms"],
+        "properties": {
+          "lineage": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]{64}$"
+          },
+          "home_cell": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "registered_at_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "active_lineages": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^0x[0-9a-f]{64}$"
+      }
+    }
+  }
+}
