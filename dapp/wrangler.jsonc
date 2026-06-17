@@ -22,6 +22,17 @@
         "enabled": true,
     },
     // ---------------------------------------------------------------------------
+    // Runtime vars（secret ではないが、Route Handler が Worker runtime で読む値）
+    // ---------------------------------------------------------------------------
+    //
+    // dapp deploy workflow は repo-level Variable の SONARI_SUI_NETWORK を
+    // build-time の SONARI_SUI_NETWORK / NEXT_PUBLIC_SUI_NETWORK に写し替える。
+    // Worker runtime 側でも server route が同じ名前を読むため、Cloudflare runtime var として
+    // wrangler config に明示する。Enoki membership API は testnet のみ有効。
+    "vars": {
+        "SONARI_SUI_NETWORK": "testnet",
+    },
+    // ---------------------------------------------------------------------------
     // Secrets（repo にハードコードしない・runtime secret として設定する）
     // ---------------------------------------------------------------------------
     //

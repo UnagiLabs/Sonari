@@ -185,6 +185,8 @@ describe("dapp Enoki setup docs", () => {
         expect(readme).toContain("NEXT_PUBLIC_* に secret を置かない");
         expect(readme).toContain("MembershipPass 発行専用");
         expect(readme).toContain("ENOKI_PRIVATE_API_KEY");
+        expect(wrangler).toContain('"SONARI_SUI_NETWORK": "testnet"');
+        expect(wrangler).toContain("Worker runtime 側でも server route が同じ名前を読む");
         expect(wrangler).toContain("ENOKI_PRIVATE_API_KEY");
         expect(wrangler).toContain("dapp deploy workflow");
         expect(wrangler).toContain("GitHub Environment Secret");
