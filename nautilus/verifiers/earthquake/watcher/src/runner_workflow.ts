@@ -1974,11 +1974,12 @@ function buildCensusSsmShellCommand(input: {
             "SONARI_CENSUS_EIF_PATH",
             "SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS",
             "SONARI_CENSUS_ENCLAVE_CID",
+            "SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST",
             "NITRO_ENCLAVE_PROCESS_COMMAND",
         ],
         postEnvCommands: [
             'test -s "$SONARI_CENSUS_EIF_PATH"',
-            "export SONARI_CENSUS_EIF_PATH SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS SONARI_CENSUS_ENCLAVE_CID NITRO_ENCLAVE_PROCESS_COMMAND",
+            "export SONARI_CENSUS_EIF_PATH SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS SONARI_CENSUS_ENCLAVE_CID SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST NITRO_ENCLAVE_PROCESS_COMMAND",
             `export SONARI_VERIFIER_KIND=${CENSUS_VERIFIER_KIND}`,
         ],
         tempResultPath,
@@ -2932,6 +2933,8 @@ export function readFloorCensusConfigFromEnv(
     const network = readSuiNetwork(process.env.RELAYER_NETWORK);
     const target = process.env.FLOOR_CENSUS_TARGET ?? "";
     const grpcUrl = process.env.RELAYER_GRPC_URL;
+    const trustedValidatorCommitteeDigest =
+        process.env.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST;
     const graphqlUrl =
         readOptionalEnv("FLOOR_CENSUS_GRAPHQL_URL") ??
         readOptionalEnv("SONARI_SUI_GRAPHQL_URL") ??
@@ -2946,6 +2949,7 @@ export function readFloorCensusConfigFromEnv(
         ["RELAYER_NETWORK", process.env.RELAYER_NETWORK],
         ["RELAYER_GRPC_URL", grpcUrl],
         ["RELAYER_SIGNER_SECRET_ARN", process.env.RELAYER_SIGNER_SECRET_ARN],
+        ["SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST", trustedValidatorCommitteeDigest],
     ]
         .filter(([, value]) => value === undefined || value.length === 0)
         .map(([name]) => name);
@@ -2972,6 +2976,7 @@ export function readFloorCensusConfigFromEnv(
         categoryPool: process.env.FLOOR_CENSUS_CATEGORY_POOL ?? "",
         mainPool: process.env.FLOOR_CENSUS_MAIN_POOL ?? "",
         membershipRegistry: process.env.SONARI_MEMBERSHIP_REGISTRY_ID ?? "",
+        trustedValidatorCommitteeDigest,
         reader: graphqlUrl === undefined ? undefined : new GraphqlFloorCensusReader(graphqlUrl),
     };
     if (network !== undefined) {

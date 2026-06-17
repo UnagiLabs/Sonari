@@ -2304,6 +2304,22 @@ describe("AWS runner workflow helper", () => {
         );
 
         expect(config?.reader).toBeInstanceOf(GraphqlFloorCensusReader);
+        expect(config?.trustedValidatorCommitteeDigest).toBe(
+            "11111111111111111111111111111111",
+        );
+    });
+
+    it("requires a trusted validator committee digest for floor census submit mode", () => {
+        setRequiredFloorCensusEnv();
+        delete process.env.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST;
+
+        const config = readFloorCensusConfigFromEnv(
+            new RecordingRelayerSignerSecretReader(validEd25519SuiPrivateKey),
+        );
+
+        expect(config?.configurationError).toContain(
+            "SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST required for FLOOR_CENSUS_MODE=submit",
+        );
     });
 
     it("derives enclave registration config from relayer submit environment lazily", async () => {
@@ -2827,6 +2843,12 @@ describe("AWS runner workflow helper", () => {
         expect(ssm.commands[0]).toContain(
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004000.json' - |",
         );
+        expect(ssm.commands[0]).toContain(
+            ": \"${SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST:?SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST is required}\"",
+        );
+        expect(ssm.commands[0]).toContain(
+            "export SONARI_CENSUS_EIF_PATH SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS SONARI_CENSUS_ENCLAVE_CID SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST NITRO_ENCLAVE_PROCESS_COMMAND",
+        );
         expect(ssm.commands[0]).toContain("export SONARI_VERIFIER_KIND=census");
         expect(ssm.commands[1]).toContain(
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004001.json' - |",
@@ -3260,6 +3282,8 @@ function setRequiredFloorCensusEnv(): void {
     process.env.RELAYER_NETWORK = "testnet";
     process.env.RELAYER_GRPC_URL = "https://fullnode.testnet.sui.io:443";
     process.env.RELAYER_SIGNER_SECRET_ARN = "arn:aws:secretsmanager:relayer-signer";
+    process.env.SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST =
+        "11111111111111111111111111111111";
 }
 
 function readReaderEndpoint(reader: FloorCensusOnchainReader | undefined): unknown {

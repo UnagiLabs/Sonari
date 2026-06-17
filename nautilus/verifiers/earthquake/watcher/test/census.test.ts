@@ -20,6 +20,7 @@ import {
     type EarthquakeOraclePayload,
 } from "@sonari/earthquake-shared";
 import type { RelayerSigner } from "@sonari/earthquake-relayer";
+import type { AuthenticatedEventProofBundle } from "../src/authenticated_events.js";
 
 const eventUid = `0x${"aa".repeat(32)}`;
 const affectedCellsRoot = `0x${"bb".repeat(32)}`;
@@ -302,6 +303,46 @@ describe("JsonRpcFloorCensusReader", () => {
 });
 
 describe("GraphqlFloorCensusReader", () => {
+    it("delegates authenticated event proof collection to the configured collector", async () => {
+        const collector = new RecordingAuthenticatedEventProofCollector();
+        const reader = new GraphqlFloorCensusReader("https://graphql.example", {
+            authenticatedEventProofCollector: collector,
+            eventStreamHeadObjectId: `0x${"44".repeat(32)}`,
+        });
+
+        const proof = await reader.collectAuthenticatedEventProof({
+            packageId: `0x${"12".repeat(32)}`,
+            membershipRegistryId: `0x${"77".repeat(32)}`,
+            censusCheckpoint: 42,
+        });
+
+        expect(collector.inputs).toEqual([
+            {
+                streamId: `0x${"12".repeat(32)}`,
+                eventStreamHeadObjectId: `0x${"44".repeat(32)}`,
+                startCheckpoint: 0,
+                endCheckpoint: 42,
+            },
+        ]);
+        expect(proof).toMatchObject({
+            protocol: "sui-authenticated-events-v1",
+            stream_id: `0x${"12".repeat(32)}`,
+            end_checkpoint: 42,
+        });
+    });
+
+    it("fails closed when authenticated event proof collection is not configured", async () => {
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+
+        await expect(
+            reader.collectAuthenticatedEventProof({
+                packageId: `0x${"12".repeat(32)}`,
+                membershipRegistryId: `0x${"77".repeat(32)}`,
+                censusCheckpoint: 42,
+            }),
+        ).rejects.toThrow("GraphQL floor census reader requires an authenticated event proof collector");
+    });
+
     it("reads active membership lineages from GraphQL dynamic fields", async () => {
         const activeLineage = `0x${"11".repeat(32)}`;
         const inactiveLineage = `0x${"22".repeat(32)}`;
@@ -1027,6 +1068,47 @@ class RecordingFloorCensusReader implements FloorCensusOnchainReader {
         return input.eventRevision === 7
             ? { campaignId: "0xcampaign-revision-7", checkpoint: 41 }
             : undefined;
+    }
+}
+
+class RecordingAuthenticatedEventProofCollector {
+    readonly inputs: Array<{
+        streamId: string;
+        eventStreamHeadObjectId: string;
+        startCheckpoint: number;
+        endCheckpoint: number;
+    }> = [];
+
+    async collect(input: {
+        streamId: string;
+        eventStreamHeadObjectId: string;
+        startCheckpoint: number;
+        endCheckpoint: number;
+    }): Promise<AuthenticatedEventProofBundle> {
+        this.inputs.push(input);
+        return {
+            protocol: "sui-authenticated-events-v1",
+            stream_id: input.streamId,
+            event_stream_head_object_id: input.eventStreamHeadObjectId,
+            start_checkpoint: input.startCheckpoint,
+            end_checkpoint: input.endCheckpoint,
+            highest_indexed_checkpoint: input.endCheckpoint,
+            validator_committee_bcs: "Y29tbWl0dGVl",
+            checkpoint_summary_bcs: "c3VtbWFyeQ==",
+            checkpoint_signature_bcs: "c2lnbmF0dXJl",
+            event_stream_head: {
+                object_id: input.eventStreamHeadObjectId,
+                version: "1",
+                digest: "11111111111111111111111111111111",
+                object_bcs: "aGVhZA==",
+            },
+            ocs_proof: {
+                leaf_index: 0,
+                tree_root: "11111111111111111111111111111112",
+                merkle_proof: [],
+            },
+            events: [],
+        };
     }
 }
 

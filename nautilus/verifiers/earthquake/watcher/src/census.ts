@@ -2,7 +2,6 @@ import { Transaction } from "@mysten/sui/transactions";
 import { SUI_CLOCK_OBJECT_ID } from "@mysten/sui/utils";
 import type { RelayerSigner, SuiNetwork } from "@sonari/earthquake-relayer";
 import {
-    type AuthenticatedEventProofBundle,
     type AffectedCellsArtifact,
     computeAffectedCellsRootHex,
     type EarthquakeOraclePayload,
@@ -13,6 +12,7 @@ import {
     type TeeCoreResult,
     validateRelayerSubmitInput,
 } from "@sonari/earthquake-shared";
+import type { AuthenticatedEventProofBundle } from "./authenticated_events.js";
 
 const CENSUS_INTENT = "SONARI_FLOOR_CENSUS_V1";
 const CENSUS_VERIFIER_FAMILY = "census";
@@ -254,6 +254,7 @@ export interface FloorCensusSubmitConfig {
     membershipRegistry: string;
     network?: SuiNetwork | undefined;
     grpcUrl?: string | undefined;
+    trustedValidatorCommitteeDigest?: string | undefined;
     signer?: RelayerSigner | undefined;
     loadSigner?: (() => Promise<RelayerSigner>) | undefined;
     client?: FloorCensusSubmitClient | undefined;
@@ -840,7 +841,42 @@ export class JsonRpcFloorCensusReader implements FloorCensusOnchainReader {
 }
 
 export class GraphqlFloorCensusReader implements FloorCensusOnchainReader {
-    constructor(private readonly endpoint: string) {}
+    constructor(
+        private readonly endpoint: string,
+        private readonly options: {
+            authenticatedEventProofCollector?: {
+                collect(input: {
+                    streamId: string;
+                    eventStreamHeadObjectId: string;
+                    startCheckpoint: number;
+                    endCheckpoint: number;
+                }): Promise<AuthenticatedEventProofBundle>;
+            };
+            eventStreamHeadObjectId?: string | undefined;
+            authenticatedEventsStartCheckpoint?: number | undefined;
+        } = {},
+    ) {}
+
+    async collectAuthenticatedEventProof(input: {
+        packageId: string;
+        membershipRegistryId: string;
+        censusCheckpoint: number;
+    }): Promise<AuthenticatedEventProofBundle> {
+        if (
+            this.options.authenticatedEventProofCollector === undefined ||
+            this.options.eventStreamHeadObjectId === undefined
+        ) {
+            throw new Error(
+                "GraphQL floor census reader requires an authenticated event proof collector",
+            );
+        }
+        return this.options.authenticatedEventProofCollector.collect({
+            streamId: input.packageId,
+            eventStreamHeadObjectId: this.options.eventStreamHeadObjectId,
+            startCheckpoint: this.options.authenticatedEventsStartCheckpoint ?? 0,
+            endCheckpoint: input.censusCheckpoint,
+        });
+    }
 
     async listHomeCellRegisteredEvents(input: {
         packageId: string;
