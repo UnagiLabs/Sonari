@@ -3482,17 +3482,18 @@ class RecordingFloorCensusReader implements FloorCensusOnchainReader {
             start_checkpoint: 0,
             end_checkpoint: 123,
             highest_indexed_checkpoint: 123,
+            validator_committee_bcs: "Y29tbWl0dGVl",
             checkpoint_summary_bcs: "c3VtbWFyeQ==",
             checkpoint_signature_bcs: "c2lnbmF0dXJl",
             event_stream_head: {
                 object_id: `0x${"34".repeat(32)}`,
                 version: "7",
-                digest: `0x${"56".repeat(32)}`,
+                digest: "11111111111111111111111111111111",
                 object_bcs: "aGVhZA==",
             },
             ocs_proof: {
                 leaf_index: 3,
-                tree_root: `0x${"78".repeat(32)}`,
+                tree_root: "11111111111111111111111111111112",
                 merkle_proof: ["cHJvb2YtMQ=="],
             },
             events: [

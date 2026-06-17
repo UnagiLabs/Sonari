@@ -1050,16 +1050,17 @@ function validateAuthenticatedEventProof(
     if (proof.highest_indexed_checkpoint < proof.end_checkpoint) {
         throw new Error("authenticated_event_proof index is behind end_checkpoint");
     }
-    validateObjectId(
+    validateSuiDigest(
         proof.event_stream_head.digest,
         "authenticated_event_proof.event_stream_head.digest",
     );
-    validateObjectId(proof.ocs_proof.tree_root, "authenticated_event_proof.ocs_proof.tree_root");
+    validateSuiDigest(proof.ocs_proof.tree_root, "authenticated_event_proof.ocs_proof.tree_root");
     if (!/^(0|[1-9][0-9]*)$/.test(proof.event_stream_head.version)) {
         throw new Error("authenticated_event_proof EventStreamHead version is malformed");
     }
     assertBase64(proof.checkpoint_summary_bcs, "authenticated_event_proof.checkpoint_summary_bcs");
     assertBase64(proof.checkpoint_signature_bcs, "authenticated_event_proof.checkpoint_signature_bcs");
+    assertBase64(proof.validator_committee_bcs, "authenticated_event_proof.validator_committee_bcs");
     assertBase64(proof.event_stream_head.object_bcs, "authenticated_event_proof.event_stream_head.object_bcs");
     for (const [index, node] of proof.ocs_proof.merkle_proof.entries()) {
         assertBase64(node, `authenticated_event_proof.ocs_proof.merkle_proof[${index}]`);
@@ -1582,6 +1583,12 @@ function validateObjectId(value: string, field: string): void {
         objectIdBytes(value);
     } catch {
         throw new Error(`${field} must be a 32-byte object ID`);
+    }
+}
+
+function validateSuiDigest(value: string, field: string): void {
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)) {
+        throw new Error(`${field} must be a Sui base58 digest`);
     }
 }
 

@@ -1,9 +1,12 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+mod authenticated_fixture;
+
+use authenticated_fixture::authenticated_event_proof_json;
 use census_tee::{
-    AffectedCell, AffectedCellsArtifact, INTENT, VERIFIER_FAMILY, VERIFIER_VERSION,
-    compute_affected_cells_root,
+    AffectedCell, AffectedCellsArtifact, INTENT, TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+    VERIFIER_FAMILY, VERIFIER_VERSION, compute_affected_cells_root,
 };
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
@@ -64,8 +67,13 @@ fn cli_fixture_command_returns_signed_floor_census_result() {
 }
 
 fn run_fixture(input: &serde_json::Value) -> std::process::Output {
+    let trust = authenticated_event_proof_json();
     let mut child = census_tee()
         .args(["fixture", "--signing-key-seed", &"7b".repeat(32)])
+        .env(
+            TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+            trust.trusted_validator_committee_digest,
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -142,47 +150,7 @@ fn valid_bundle_json() -> serde_json::Value {
             format!("0x{}", "22".repeat(32)),
             format!("0x{}", "33".repeat(32))
         ],
-        "authenticated_event_proof": authenticated_event_proof_json()
-    })
-}
-
-fn authenticated_event_proof_json() -> serde_json::Value {
-    serde_json::json!({
-        "protocol": "sui-authenticated-events-v1",
-        "stream_id": format!("0x{}", "12".repeat(32)),
-        "event_stream_head_object_id": format!("0x{}", "34".repeat(32)),
-        "start_checkpoint": 0,
-        "end_checkpoint": 345,
-        "highest_indexed_checkpoint": 345,
-        "checkpoint_summary_bcs": "c3VtbWFyeQ==",
-        "checkpoint_signature_bcs": "c2lnbmF0dXJl",
-        "event_stream_head": {
-            "object_id": format!("0x{}", "34".repeat(32)),
-            "version": "7",
-            "digest": format!("0x{}", "56".repeat(32)),
-            "object_bcs": "aGVhZA=="
-        },
-        "ocs_proof": {
-            "leaf_index": 3,
-            "tree_root": format!("0x{}", "78".repeat(32)),
-            "merkle_proof": ["cHJvb2YtMQ=="]
-        },
-        "events": [
-            {
-                "checkpoint": 100,
-                "transaction_index": 0,
-                "event_index": 0,
-                "type": format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
-                "event_bcs": "ZXZlbnQtMQ=="
-            },
-            {
-                "checkpoint": 101,
-                "transaction_index": 0,
-                "event_index": 1,
-                "type": format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
-                "event_bcs": "ZXZlbnQtMg=="
-            }
-        ]
+        "authenticated_event_proof": authenticated_event_proof_json().proof
     })
 }
 

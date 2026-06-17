@@ -5,7 +5,10 @@ use census_tee::encoding::census_bcs::payload_bcs_bytes;
 use census_tee::server::{
     CensusProcessHandler, census_result_json, finalize_process_output, parse_process_data_envelope,
 };
-use census_tee::{ATTESTATION_PUBLIC_KEY_LABEL, CensusInputBundle, process_floor_census_bundle};
+use census_tee::{
+    ATTESTATION_PUBLIC_KEY_LABEL, CensusInputBundle, TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+    process_floor_census_bundle_with_trust,
+};
 use clap::{Parser, Subcommand};
 use sonari_tee_core::{
     HttpRequest, LocalEd25519Signer, PayloadSigner, ProcessDataHandler, TeeContext, VsockListener,
@@ -66,7 +69,9 @@ fn fixture_result(args: FixtureArgs) -> Result<serde_json::Value, Box<dyn std::e
     let mut stdin = Vec::new();
     io::stdin().read_to_end(&mut stdin)?;
     let bundle: CensusInputBundle = serde_json::from_slice(&stdin)?;
-    let payload = process_floor_census_bundle(&bundle)?;
+    let trusted_validator_committee_digest = std::env::var(TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV)?;
+    let payload =
+        process_floor_census_bundle_with_trust(&bundle, &trusted_validator_committee_digest)?;
     let payload_bcs = payload_bcs_bytes(&payload)?;
     let seed = signing_key_seed_from_env(
         args.signing_key_seed,
@@ -92,7 +97,7 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
     }
     let state = EnclaveState {
         signing_key_seed,
-        ctx: TeeContext::new(),
+        ctx: census_tee_context()?,
     };
     let listener = VsockListener::bind(args.port)?;
     eprintln!(
@@ -109,6 +114,13 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
             }
         });
     }
+}
+
+fn census_tee_context() -> Result<TeeContext, Box<dyn std::error::Error>> {
+    Ok(TeeContext::with_env([(
+        TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+        std::env::var(TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV)?,
+    )]))
 }
 
 fn route_request(

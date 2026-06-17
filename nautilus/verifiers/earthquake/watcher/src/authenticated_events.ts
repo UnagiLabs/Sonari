@@ -10,6 +10,7 @@ export interface AuthenticatedEventProofBundle {
     start_checkpoint: number;
     end_checkpoint: number;
     highest_indexed_checkpoint: number;
+    validator_committee_bcs: string;
     checkpoint_summary_bcs: string;
     checkpoint_signature_bcs: string;
     event_stream_head: {
@@ -61,6 +62,7 @@ export interface SuiObjectInclusionProofResponse {
         digest: string;
     };
     objectBcs: string;
+    validatorCommitteeBcs: string;
     checkpointSummaryBcs: string;
     checkpointSignatureBcs: string;
     inclusionProof: {
@@ -149,6 +151,7 @@ export class SuiAuthenticatedEventProofCollector {
             start_checkpoint: startCheckpoint,
             end_checkpoint: endCheckpoint,
             highest_indexed_checkpoint: highestIndexedCheckpoint,
+            validator_committee_bcs: proof.validatorCommitteeBcs,
             checkpoint_summary_bcs: proof.checkpointSummaryBcs,
             checkpoint_signature_bcs: proof.checkpointSignatureBcs,
             event_stream_head: {
@@ -217,8 +220,12 @@ function parseObjectInclusionProof(
         throw new Error("EventStreamHead proof object_id mismatch");
     }
     const version = readCanonicalU64String(objectRef.version, "EventStreamHead object version");
-    const digest = validateObjectId(objectRef.digest, "EventStreamHead object digest");
+    const digest = validateSuiDigest(objectRef.digest, "EventStreamHead object digest");
     const objectBcs = validateBase64(input.objectBcs, "EventStreamHead object_bcs");
+    const validatorCommitteeBcs = validateBase64(
+        input.validatorCommitteeBcs,
+        "validator_committee_bcs",
+    );
     const checkpointSummaryBcs = validateBase64(
         input.checkpointSummaryBcs,
         "checkpoint_summary_bcs",
@@ -232,12 +239,13 @@ function parseObjectInclusionProof(
         throw new Error("EventStreamHead inclusion proof is malformed");
     }
     const leafIndex = validateSafeInteger(inclusionProof.leafIndex, "OCS proof leaf_index");
-    const treeRoot = validateObjectId(inclusionProof.treeRoot, "OCS proof tree_root");
+    const treeRoot = validateSuiDigest(inclusionProof.treeRoot, "OCS proof tree_root");
     const merkleProof = readBase64Array(inclusionProof.merkleProof, "OCS proof merkle_proof");
 
     return {
         objectRef: { objectId, version, digest },
         objectBcs,
+        validatorCommitteeBcs,
         checkpointSummaryBcs,
         checkpointSignatureBcs,
         inclusionProof: { leafIndex, treeRoot, merkleProof },
@@ -271,6 +279,14 @@ function validateObjectId(value: unknown, field: string): string {
     const text = readNonEmptyString(value, field);
     if (!/^0x[0-9a-f]{64}$/.test(text)) {
         throw new Error(`${field} must be a 0x-prefixed 32-byte lowercase hex string`);
+    }
+    return text;
+}
+
+function validateSuiDigest(value: unknown, field: string): string {
+    const text = readNonEmptyString(value, field);
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text)) {
+        throw new Error(`${field} must be a Sui base58 digest`);
     }
     return text;
 }

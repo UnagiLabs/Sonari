@@ -12,8 +12,9 @@ pub use affected_cells::{
     AffectedCell, AffectedCellsArtifact, compute_affected_cells_root, validate_affected_cells_root,
 };
 pub use counts::{
-    CensusInputBundle, HomeCellRegisteredEvent, compute_floor_census_counts,
-    process_floor_census_bundle,
+    CensusInputBundle, HomeCellRegisteredEvent, TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+    compute_floor_census_counts, process_floor_census_bundle,
+    process_floor_census_bundle_with_trust, validator_committee_digest,
 };
 pub use error::CensusError;
 

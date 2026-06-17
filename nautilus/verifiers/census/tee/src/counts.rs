@@ -2,8 +2,17 @@ use crate::{
     AffectedCellsArtifact, CensusError, FloorCensusResult, INTENT, VERIFIER_FAMILY,
     VERIFIER_VERSION, validate_affected_cells_root,
 };
-use serde::{Deserialize, Serialize};
+use base64ct::{Base64, Encoding};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::{HashMap, HashSet};
+use sui_crypto::bls12381::ValidatorCommitteeSignatureVerifier;
+use sui_sdk_types::{
+    Address, CheckpointCommitment, CheckpointSummary, Digest, Object, ValidatorAggregatedSignature,
+    ValidatorCommittee, hash::Hasher,
+};
+
+pub const TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV: &str =
+    "SONARI_CENSUS_TRUSTED_VALIDATOR_COMMITTEE_DIGEST";
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -39,6 +48,7 @@ pub struct AuthenticatedEventProofBundle {
     pub start_checkpoint: u64,
     pub end_checkpoint: u64,
     pub highest_indexed_checkpoint: u64,
+    pub validator_committee_bcs: String,
     pub checkpoint_summary_bcs: String,
     pub checkpoint_signature_bcs: String,
     pub event_stream_head: EventStreamHeadProofObject,
@@ -107,7 +117,21 @@ pub fn compute_floor_census_counts(bundle: &CensusInputBundle) -> Result<[u64; 3
 pub fn process_floor_census_bundle(
     bundle: &CensusInputBundle,
 ) -> Result<FloorCensusResult, CensusError> {
-    validate_census_context(bundle)?;
+    validate_census_context(bundle, None)?;
+    process_validated_floor_census_bundle(bundle)
+}
+
+pub fn process_floor_census_bundle_with_trust(
+    bundle: &CensusInputBundle,
+    trusted_validator_committee_digest: &str,
+) -> Result<FloorCensusResult, CensusError> {
+    validate_census_context(bundle, Some(trusted_validator_committee_digest))?;
+    process_validated_floor_census_bundle(bundle)
+}
+
+fn process_validated_floor_census_bundle(
+    bundle: &CensusInputBundle,
+) -> Result<FloorCensusResult, CensusError> {
     let counts = compute_floor_census_counts(bundle)?;
 
     Ok(FloorCensusResult {
@@ -122,12 +146,16 @@ pub fn process_floor_census_bundle(
     })
 }
 
-fn validate_census_context(bundle: &CensusInputBundle) -> Result<(), CensusError> {
+fn validate_census_context(
+    bundle: &CensusInputBundle,
+    trusted_validator_committee_digest: Option<&str>,
+) -> Result<(), CensusError> {
     validate_object_id(&bundle.campaign_id, "campaign_id")?;
     validate_object_id(&bundle.disaster_event_id, "disaster_event_id")?;
     validate_authenticated_event_proof(
         &bundle.authenticated_event_proof,
         bundle.census_checkpoint,
+        trusted_validator_committee_digest,
     )?;
     Ok(())
 }
@@ -135,6 +163,7 @@ fn validate_census_context(bundle: &CensusInputBundle) -> Result<(), CensusError
 fn validate_authenticated_event_proof(
     proof: &AuthenticatedEventProofBundle,
     census_checkpoint: u64,
+    trusted_validator_committee_digest: Option<&str>,
 ) -> Result<(), CensusError> {
     if proof.protocol != "sui-authenticated-events-v1" {
         return Err(CensusError::InvalidPayload(
@@ -155,11 +184,11 @@ fn validate_authenticated_event_proof(
             "authenticated_event_proof EventStreamHead object id mismatch".to_owned(),
         ));
     }
-    validate_object_id(
+    let event_stream_head_digest = parse_sui_digest(
         &proof.event_stream_head.digest,
         "authenticated_event_proof.event_stream_head.digest",
     )?;
-    validate_object_id(
+    let tree_root = parse_sui_digest(
         &proof.ocs_proof.tree_root,
         "authenticated_event_proof.ocs_proof.tree_root",
     )?;
@@ -167,15 +196,19 @@ fn validate_authenticated_event_proof(
         &proof.event_stream_head.version,
         "authenticated_event_proof.event_stream_head.version",
     )?;
-    validate_base64(
+    let validator_committee_bcs = decode_base64(
+        &proof.validator_committee_bcs,
+        "authenticated_event_proof.validator_committee_bcs",
+    )?;
+    let checkpoint_summary_bcs = decode_base64(
         &proof.checkpoint_summary_bcs,
         "authenticated_event_proof.checkpoint_summary_bcs",
     )?;
-    validate_base64(
+    let checkpoint_signature_bcs = decode_base64(
         &proof.checkpoint_signature_bcs,
         "authenticated_event_proof.checkpoint_signature_bcs",
     )?;
-    validate_base64(
+    let event_stream_head_object_bcs = decode_base64(
         &proof.event_stream_head.object_bcs,
         "authenticated_event_proof.event_stream_head.object_bcs",
     )?;
@@ -201,6 +234,18 @@ fn validate_authenticated_event_proof(
                 .to_owned(),
         ));
     }
+
+    verify_checkpoint_signature_and_head(
+        proof,
+        &validator_committee_bcs,
+        &checkpoint_summary_bcs,
+        &checkpoint_signature_bcs,
+        &event_stream_head_object_bcs,
+        event_stream_head_digest,
+        tree_root,
+        trusted_validator_committee_digest,
+    )?;
+
     let mut last_position: Option<(u64, u64, u64)> = None;
     for event in &proof.events {
         if event.checkpoint < proof.start_checkpoint || event.checkpoint > proof.end_checkpoint {
@@ -226,6 +271,111 @@ fn validate_authenticated_event_proof(
         last_position = Some(position);
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_checkpoint_signature_and_head(
+    proof: &AuthenticatedEventProofBundle,
+    validator_committee_bcs: &[u8],
+    checkpoint_summary_bcs: &[u8],
+    checkpoint_signature_bcs: &[u8],
+    event_stream_head_object_bcs: &[u8],
+    event_stream_head_digest: Digest,
+    tree_root: Digest,
+    trusted_validator_committee_digest: Option<&str>,
+) -> Result<(), CensusError> {
+    let committee: ValidatorCommittee = decode_bcs(
+        validator_committee_bcs,
+        "authenticated_event_proof.validator_committee_bcs",
+    )?;
+    let summary: CheckpointSummary = decode_bcs(
+        checkpoint_summary_bcs,
+        "authenticated_event_proof.checkpoint_summary_bcs",
+    )?;
+    let signature: ValidatorAggregatedSignature = decode_bcs(
+        checkpoint_signature_bcs,
+        "authenticated_event_proof.checkpoint_signature_bcs",
+    )?;
+
+    if let Some(trusted_digest) = trusted_validator_committee_digest {
+        let expected = parse_sui_digest(trusted_digest, TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV)?;
+        let actual = validator_committee_digest(validator_committee_bcs);
+        if actual != expected {
+            return Err(CensusError::InvalidPayload(
+                "authenticated_event_proof validator committee does not match trusted digest"
+                    .to_owned(),
+            ));
+        }
+    }
+
+    if committee.epoch != summary.epoch {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof validator committee epoch does not match checkpoint summary"
+                .to_owned(),
+        ));
+    }
+    if summary.sequence_number != proof.end_checkpoint {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof checkpoint summary sequence_number must equal end_checkpoint"
+                .to_owned(),
+        ));
+    }
+    if !summary
+        .checkpoint_commitments
+        .iter()
+        .any(|commitment| matches!(commitment, CheckpointCommitment::EcmhLiveObjectSet { digest } if *digest == tree_root))
+    {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof OCS tree_root is not committed by checkpoint summary"
+                .to_owned(),
+        ));
+    }
+
+    let verifier = ValidatorCommitteeSignatureVerifier::new(committee).map_err(|error| {
+        CensusError::InvalidPayload(format!(
+            "authenticated_event_proof validator committee is invalid: {error}"
+        ))
+    })?;
+    verifier
+        .verify_checkpoint_summary(&summary, &signature)
+        .map_err(|error| {
+            CensusError::InvalidPayload(format!(
+                "authenticated_event_proof checkpoint signature is invalid: {error}"
+            ))
+        })?;
+
+    let event_stream_head: Object = decode_bcs(
+        event_stream_head_object_bcs,
+        "authenticated_event_proof.event_stream_head.object_bcs",
+    )?;
+    let expected_object_id = parse_sui_address(
+        &proof.event_stream_head_object_id,
+        "authenticated_event_proof.event_stream_head_object_id",
+    )?;
+    if event_stream_head.object_id() != expected_object_id {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof EventStreamHead object_bcs object id mismatch".to_owned(),
+        ));
+    }
+    if event_stream_head.version().to_string() != proof.event_stream_head.version {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof EventStreamHead object_bcs version mismatch".to_owned(),
+        ));
+    }
+    if event_stream_head.digest() != event_stream_head_digest {
+        return Err(CensusError::InvalidPayload(
+            "authenticated_event_proof EventStreamHead object digest mismatch".to_owned(),
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn validator_committee_digest(validator_committee_bcs: &[u8]) -> Digest {
+    let mut hasher = Hasher::new();
+    hasher.update(b"SonariCensusValidatorCommittee::");
+    hasher.update(validator_committee_bcs);
+    hasher.finalize()
 }
 
 fn active_lineage_set(lineages: &[String]) -> Result<HashSet<String>, CensusError> {
@@ -301,6 +451,20 @@ fn validate_object_id(value: &str, field: &str) -> Result<(), CensusError> {
     Ok(())
 }
 
+fn parse_sui_address(value: &str, field: &str) -> Result<Address, CensusError> {
+    validate_object_id(value, field)?;
+    let bytes = sonari_tee_core::hex_to_32(value)?;
+    Address::from_bytes(bytes).map_err(|error| {
+        CensusError::InvalidPayload(format!("{field} must be a Sui address: {error}"))
+    })
+}
+
+fn parse_sui_digest(value: &str, field: &str) -> Result<Digest, CensusError> {
+    Digest::from_base58(value).map_err(|error| {
+        CensusError::InvalidPayload(format!("{field} must be a Sui base58 digest: {error}"))
+    })
+}
+
 fn parse_canonical_u64_decimal(value: &str, field: &str) -> Result<u64, CensusError> {
     if value.is_empty() {
         return Err(CensusError::InvalidPayload(format!(
@@ -322,21 +486,18 @@ fn parse_canonical_u64_decimal(value: &str, field: &str) -> Result<u64, CensusEr
         .map_err(|_| CensusError::InvalidPayload(format!("{field} must be a decimal u64 string")))
 }
 
+fn decode_base64(value: &str, field: &str) -> Result<Vec<u8>, CensusError> {
+    Base64::decode_vec(value)
+        .map_err(|_| CensusError::InvalidPayload(format!("{field} must be base64-encoded bytes")))
+}
+
+fn decode_bcs<T: DeserializeOwned>(bytes: &[u8], field: &str) -> Result<T, CensusError> {
+    bcs::from_bytes(bytes)
+        .map_err(|error| CensusError::InvalidPayload(format!("{field} must be valid BCS: {error}")))
+}
+
 fn validate_base64(value: &str, field: &str) -> Result<(), CensusError> {
-    if value.is_empty() || value.len() % 4 != 0 {
-        return Err(CensusError::InvalidPayload(format!(
-            "{field} must be base64-encoded bytes"
-        )));
-    }
-    if !value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
-    {
-        return Err(CensusError::InvalidPayload(format!(
-            "{field} must be base64-encoded bytes"
-        )));
-    }
-    Ok(())
+    decode_base64(value, field).map(|_| ())
 }
 
 #[cfg(test)]
@@ -344,10 +505,19 @@ mod tests {
     use super::{
         AuthenticatedEventProofBundle, AuthenticatedStreamEvent, CensusInputBundle,
         EventStreamHeadProofObject, HomeCellRegisteredEvent, ObjectInclusionProof,
+        validator_committee_digest,
     };
     use crate::{
         AffectedCell, AffectedCellsArtifact, INTENT, VERIFIER_FAMILY, VERIFIER_VERSION,
         compute_affected_cells_root, compute_floor_census_counts, process_floor_census_bundle,
+        process_floor_census_bundle_with_trust,
+    };
+    use base64ct::{Base64, Encoding};
+    use sui_crypto::bls12381::{Bls12381PrivateKey, ValidatorCommitteeSignatureAggregator};
+    use sui_sdk_types::{
+        Address, CheckpointCommitment, CheckpointSummary, Digest, GasCostSummary, Identifier,
+        MoveStruct, Object, ObjectData, Owner, StructTag, ValidatorCommittee,
+        ValidatorCommitteeMember,
     };
 
     const EVENT_UID: &str = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
@@ -411,6 +581,7 @@ mod tests {
     }
 
     fn authenticated_event_proof() -> AuthenticatedEventProofBundle {
+        let fixture = authenticated_checkpoint_fixture(345, Digest::new([0x78; 32]));
         AuthenticatedEventProofBundle {
             protocol: "sui-authenticated-events-v1".to_owned(),
             stream_id: format!("0x{}", "12".repeat(32)),
@@ -418,17 +589,18 @@ mod tests {
             start_checkpoint: 0,
             end_checkpoint: 345,
             highest_indexed_checkpoint: 345,
-            checkpoint_summary_bcs: "c3VtbWFyeQ==".to_owned(),
-            checkpoint_signature_bcs: "c2lnbmF0dXJl".to_owned(),
+            validator_committee_bcs: fixture.validator_committee_bcs,
+            checkpoint_summary_bcs: fixture.checkpoint_summary_bcs,
+            checkpoint_signature_bcs: fixture.checkpoint_signature_bcs,
             event_stream_head: EventStreamHeadProofObject {
                 object_id: format!("0x{}", "34".repeat(32)),
                 version: "7".to_owned(),
-                digest: format!("0x{}", "56".repeat(32)),
-                object_bcs: "aGVhZA==".to_owned(),
+                digest: fixture.event_stream_head_digest,
+                object_bcs: fixture.event_stream_head_object_bcs,
             },
             ocs_proof: ObjectInclusionProof {
                 leaf_index: 3,
-                tree_root: format!("0x{}", "78".repeat(32)),
+                tree_root: fixture.tree_root,
                 merkle_proof: vec!["cHJvb2YtMQ==".to_owned()],
             },
             events: vec![AuthenticatedStreamEvent {
@@ -438,6 +610,99 @@ mod tests {
                 event_type: format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
                 event_bcs: "ZXZlbnQtMQ==".to_owned(),
             }],
+        }
+    }
+
+    struct AuthenticatedCheckpointFixture {
+        validator_committee_bcs: String,
+        checkpoint_summary_bcs: String,
+        checkpoint_signature_bcs: String,
+        event_stream_head_digest: String,
+        event_stream_head_object_bcs: String,
+        tree_root: String,
+    }
+
+    fn authenticated_checkpoint_fixture(
+        sequence_number: u64,
+        tree_root: Digest,
+    ) -> AuthenticatedCheckpointFixture {
+        let object_id = Address::new([0x34; 32]);
+        let mut contents = object_id.into_inner().to_vec();
+        contents.extend_from_slice(b"event-stream-head");
+        let move_struct = MoveStruct::new(
+            StructTag::new(
+                Address::new([0x12; 32]),
+                Identifier::from_static("authenticated_event"),
+                Identifier::from_static("EventStreamHead"),
+                Vec::new(),
+            ),
+            false,
+            7,
+            contents,
+        )
+        .unwrap();
+        let event_stream_head = Object::new(
+            ObjectData::Struct(move_struct),
+            Owner::Shared(1),
+            Digest::new([0x99; 32]),
+            0,
+        );
+
+        let summary = CheckpointSummary {
+            epoch: 22,
+            sequence_number,
+            network_total_transactions: 123,
+            content_digest: Digest::new([0x41; 32]),
+            previous_digest: Some(Digest::new([0x42; 32])),
+            epoch_rolling_gas_cost_summary: GasCostSummary::new(0, 0, 0, 0),
+            timestamp_ms: 1_700_000_000_000,
+            checkpoint_commitments: vec![CheckpointCommitment::EcmhLiveObjectSet {
+                digest: tree_root,
+            }],
+            end_of_epoch_data: None,
+            version_specific_data: Vec::new(),
+        };
+        let private_keys = [
+            Bls12381PrivateKey::new([1; 32]).unwrap(),
+            Bls12381PrivateKey::new([2; 32]).unwrap(),
+            Bls12381PrivateKey::new([3; 32]).unwrap(),
+            Bls12381PrivateKey::new([4; 32]).unwrap(),
+        ];
+        let committee = ValidatorCommittee {
+            epoch: summary.epoch,
+            members: private_keys
+                .iter()
+                .map(|key| ValidatorCommitteeMember {
+                    public_key: key.public_key(),
+                    stake: 1,
+                })
+                .collect(),
+        };
+        let mut aggregator = ValidatorCommitteeSignatureAggregator::new_checkpoint_summary(
+            committee.clone(),
+            &summary,
+        )
+        .unwrap();
+        aggregator
+            .add_signature(private_keys[0].sign_checkpoint_summary(&summary))
+            .unwrap();
+        aggregator
+            .add_signature(private_keys[1].sign_checkpoint_summary(&summary))
+            .unwrap();
+        aggregator
+            .add_signature(private_keys[2].sign_checkpoint_summary(&summary))
+            .unwrap();
+        let signature = aggregator.finish().unwrap();
+
+        AuthenticatedCheckpointFixture {
+            validator_committee_bcs: Base64::encode_string(&bcs::to_bytes(&committee).unwrap()),
+            checkpoint_summary_bcs: Base64::encode_string(&bcs::to_bytes(&summary).unwrap()),
+            checkpoint_signature_bcs: Base64::encode_string(&bcs::to_bytes(&signature).unwrap()),
+            event_stream_head_digest: event_stream_head.digest().to_string(),
+            event_stream_head_object_bcs: Base64::encode_string(
+                &bcs::to_bytes(&event_stream_head).unwrap(),
+            ),
+            tree_root: tree_root.to_string(),
         }
     }
 
@@ -572,5 +837,73 @@ mod tests {
                 event_bcs: "ZXZlbnQtMg==".to_owned(),
             });
         assert!(process_floor_census_bundle(&bundle).is_err());
+    }
+
+    #[test]
+    fn process_rejects_invalid_checkpoint_signature() {
+        let mut bundle = valid_bundle();
+        let replacement_signature =
+            authenticated_checkpoint_fixture(344, Digest::new([0x78; 32])).checkpoint_signature_bcs;
+        bundle.authenticated_event_proof.checkpoint_signature_bcs = replacement_signature;
+
+        let error = process_floor_census_bundle(&bundle)
+            .expect_err("checkpoint signature must match checkpoint summary");
+
+        assert!(
+            error
+                .to_string()
+                .contains("checkpoint signature is invalid")
+        );
+    }
+
+    #[test]
+    fn process_with_trust_rejects_untrusted_validator_committee() {
+        let bundle = valid_bundle();
+        let untrusted_digest = Digest::new([0xaa; 32]).to_string();
+
+        let error = process_floor_census_bundle_with_trust(&bundle, &untrusted_digest)
+            .expect_err("validator committee must match trusted digest");
+
+        assert!(
+            error
+                .to_string()
+                .contains("validator committee does not match trusted digest")
+        );
+    }
+
+    #[test]
+    fn process_with_trust_accepts_trusted_validator_committee() {
+        let bundle = valid_bundle();
+        let committee_bcs =
+            Base64::decode_vec(&bundle.authenticated_event_proof.validator_committee_bcs).unwrap();
+        let trusted_digest = validator_committee_digest(&committee_bcs).to_string();
+
+        let result = process_floor_census_bundle_with_trust(&bundle, &trusted_digest)
+            .expect("trusted committee should be accepted");
+
+        assert_eq!(result.intent, INTENT);
+    }
+
+    #[test]
+    fn process_rejects_ocs_root_not_committed_by_checkpoint() {
+        let mut bundle = valid_bundle();
+        bundle.authenticated_event_proof.ocs_proof.tree_root = Digest::new([0x79; 32]).to_string();
+
+        let error = process_floor_census_bundle(&bundle)
+            .expect_err("OCS root must be committed by checkpoint summary");
+
+        assert!(error.to_string().contains("OCS tree_root"));
+    }
+
+    #[test]
+    fn process_rejects_event_stream_head_digest_mismatch() {
+        let mut bundle = valid_bundle();
+        bundle.authenticated_event_proof.event_stream_head.digest =
+            Digest::new([0x56; 32]).to_string();
+
+        let error = process_floor_census_bundle(&bundle)
+            .expect_err("EventStreamHead digest must match object BCS");
+
+        assert!(error.to_string().contains("object digest mismatch"));
     }
 }

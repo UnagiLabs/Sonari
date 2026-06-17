@@ -1,5 +1,8 @@
 use crate::encoding::census_bcs::payload_bcs_bytes;
-use crate::{CensusInputBundle, VERIFIER_CONFIG_KEY, process_floor_census_bundle};
+use crate::{
+    CensusInputBundle, TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV, VERIFIER_CONFIG_KEY,
+    process_floor_census_bundle_with_trust,
+};
 use serde::Deserialize;
 use sonari_tee_core::{
     EnclaveRegistrationMetadata, HandlerError, PayloadSigner, ProcessDataHandler, ProcessOutput,
@@ -12,15 +15,24 @@ const PROCESS_DATA_ACTION: &str = "process_data";
 pub struct CensusProcessHandler;
 
 impl ProcessDataHandler for CensusProcessHandler {
-    fn process(&self, input: &[u8], _ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
+    fn process(&self, input: &[u8], ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
         let bundle: CensusInputBundle = serde_json::from_slice(input).map_err(|error| {
             HandlerError::new(
                 "CENSUS_PROCESS_FAILED",
                 format!("invalid census input: {error}"),
             )
         })?;
-        let result = process_floor_census_bundle(&bundle)
-            .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
+        let trusted_validator_committee_digest = ctx
+            .get(TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV)
+            .ok_or_else(|| {
+                HandlerError::new(
+                    "CENSUS_PROCESS_FAILED",
+                    format!("{TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV} is required"),
+                )
+            })?;
+        let result =
+            process_floor_census_bundle_with_trust(&bundle, trusted_validator_committee_digest)
+                .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
         let payload_bcs = payload_bcs_bytes(&result)
             .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
         if payload_bcs.is_empty() {

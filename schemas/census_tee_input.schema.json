@@ -94,6 +94,7 @@
         "start_checkpoint",
         "end_checkpoint",
         "highest_indexed_checkpoint",
+        "validator_committee_bcs",
         "checkpoint_summary_bcs",
         "checkpoint_signature_bcs",
         "event_stream_head",
@@ -124,6 +125,10 @@
           "type": "integer",
           "minimum": 0
         },
+        "validator_committee_bcs": {
+          "type": "string",
+          "contentEncoding": "base64"
+        },
         "checkpoint_summary_bcs": {
           "type": "string",
           "contentEncoding": "base64"
@@ -147,7 +152,7 @@
             },
             "digest": {
               "type": "string",
-              "pattern": "^0x[0-9a-f]{64}$"
+              "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
             },
             "object_bcs": {
               "type": "string",
@@ -166,7 +171,7 @@
             },
             "tree_root": {
               "type": "string",
-              "pattern": "^0x[0-9a-f]{64}$"
+              "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$"
             },
             "merkle_proof": {
               "type": "array",

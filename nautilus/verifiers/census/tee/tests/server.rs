@@ -1,19 +1,30 @@
 use census_tee::server::{
     CensusProcessHandler, finalize_process_output, parse_process_data_envelope,
 };
-use census_tee::{AffectedCell, AffectedCellsArtifact, compute_affected_cells_root};
+use census_tee::{
+    AffectedCell, AffectedCellsArtifact, TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+    compute_affected_cells_root,
+};
 use sonari_tee_core::{
     EnclaveRegistrationMetadata, LocalEd25519Signer, ProcessDataHandler, ProcessOutput, TeeContext,
 };
 
+mod authenticated_fixture;
+
+use authenticated_fixture::authenticated_event_proof_json;
+
 #[test]
 fn server_handler_returns_non_empty_signable_output() {
     let handler = CensusProcessHandler;
+    let trust = authenticated_event_proof_json();
 
     let output = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
-            &TeeContext::new(),
+            &TeeContext::with_env([(
+                TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+                trust.trusted_validator_committee_digest,
+            )]),
         )
         .expect("census handler should process a valid bundle");
 
@@ -55,6 +66,7 @@ fn server_process_data_envelope_rejects_wrong_verifier_config_key() {
 #[test]
 fn server_handler_rejects_missing_authenticated_event_proof_bundle() {
     let handler = CensusProcessHandler;
+    let trust = authenticated_event_proof_json();
     let mut bundle = valid_bundle_json();
     bundle
         .as_object_mut()
@@ -64,7 +76,10 @@ fn server_handler_rejects_missing_authenticated_event_proof_bundle() {
     let error = handler
         .process(
             serde_json::to_vec(&bundle).unwrap().as_slice(),
-            &TeeContext::new(),
+            &TeeContext::with_env([(
+                TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+                trust.trusted_validator_committee_digest,
+            )]),
         )
         .expect_err("authenticated_event_proof is required");
 
@@ -78,6 +93,7 @@ fn server_handler_rejects_missing_authenticated_event_proof_bundle() {
 #[test]
 fn server_handler_rejects_malformed_authenticated_event_proof_bundle() {
     let handler = CensusProcessHandler;
+    let trust = authenticated_event_proof_json();
     let mut bundle = valid_bundle_json();
     bundle["authenticated_event_proof"]["event_stream_head"]["unexpected"] =
         serde_json::json!(true);
@@ -85,7 +101,10 @@ fn server_handler_rejects_malformed_authenticated_event_proof_bundle() {
     let error = handler
         .process(
             serde_json::to_vec(&bundle).unwrap().as_slice(),
-            &TeeContext::new(),
+            &TeeContext::with_env([(
+                TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+                trust.trusted_validator_committee_digest,
+            )]),
         )
         .expect_err("nested authenticated_event_proof fields should be strict");
 
@@ -93,12 +112,34 @@ fn server_handler_rejects_malformed_authenticated_event_proof_bundle() {
 }
 
 #[test]
-fn server_finalization_injects_signature_public_key_and_registration_metadata() {
+fn server_handler_rejects_missing_trusted_validator_committee_digest() {
     let handler = CensusProcessHandler;
-    let output = handler
+
+    let error = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
             &TeeContext::new(),
+        )
+        .expect_err("trusted committee digest is required");
+
+    assert!(
+        error
+            .to_string()
+            .contains(TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV)
+    );
+}
+
+#[test]
+fn server_finalization_injects_signature_public_key_and_registration_metadata() {
+    let handler = CensusProcessHandler;
+    let trust = authenticated_event_proof_json();
+    let output = handler
+        .process(
+            serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
+            &TeeContext::with_env([(
+                TRUSTED_VALIDATOR_COMMITTEE_DIGEST_ENV,
+                trust.trusted_validator_committee_digest,
+            )]),
         )
         .expect("census handler should process a valid bundle");
     let metadata = EnclaveRegistrationMetadata {
@@ -179,46 +220,6 @@ fn valid_bundle_json() -> serde_json::Value {
             format!("0x{}", "11".repeat(32)),
             format!("0x{}", "22".repeat(32))
         ],
-        "authenticated_event_proof": authenticated_event_proof_json()
-    })
-}
-
-fn authenticated_event_proof_json() -> serde_json::Value {
-    serde_json::json!({
-        "protocol": "sui-authenticated-events-v1",
-        "stream_id": format!("0x{}", "12".repeat(32)),
-        "event_stream_head_object_id": format!("0x{}", "34".repeat(32)),
-        "start_checkpoint": 0,
-        "end_checkpoint": 345,
-        "highest_indexed_checkpoint": 345,
-        "checkpoint_summary_bcs": "c3VtbWFyeQ==",
-        "checkpoint_signature_bcs": "c2lnbmF0dXJl",
-        "event_stream_head": {
-            "object_id": format!("0x{}", "34".repeat(32)),
-            "version": "7",
-            "digest": format!("0x{}", "56".repeat(32)),
-            "object_bcs": "aGVhZA=="
-        },
-        "ocs_proof": {
-            "leaf_index": 3,
-            "tree_root": format!("0x{}", "78".repeat(32)),
-            "merkle_proof": ["cHJvb2YtMQ=="]
-        },
-        "events": [
-            {
-                "checkpoint": 100,
-                "transaction_index": 0,
-                "event_index": 0,
-                "type": format!("0x{}::membership::MembershipPassIssued", "12".repeat(32)),
-                "event_bcs": "ZXZlbnQtMQ=="
-            },
-            {
-                "checkpoint": 101,
-                "transaction_index": 0,
-                "event_index": 1,
-                "type": format!("0x{}::membership::HomeCellRegistered", "12".repeat(32)),
-                "event_bcs": "ZXZlbnQtMg=="
-            }
-        ]
+        "authenticated_event_proof": authenticated_event_proof_json().proof
     })
 }
