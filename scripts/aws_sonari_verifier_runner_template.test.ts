@@ -381,6 +381,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("systemctl restart nitro-enclaves-allocator.service");
         expect(template).toContain("source /opt/sonari/runner.env");
         expect(template).toContain("cat >/opt/sonari/bin/run-http-enclave");
+        expect(template).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(template).toContain("VSOCK-CONNECT:$C:7777");
         expect(template).toContain("VSOCK-CONNECT:$C:3000");
         expect(template).toContain("health_check) method=GET; path=/health_check");
@@ -597,6 +598,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("test -x /opt/sonari/bin/run-census-enclave");
 
         expect(censusWrapper).toContain("/opt/sonari/runner.env");
+        expect(censusWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(censusWrapper).toContain(
             ': "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"',
         );
@@ -615,6 +617,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
 
         expect(membershipWrapper).toContain("/opt/sonari/runner.env");
+        expect(membershipWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(membershipWrapper).toContain(
             ': "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID" "$SONARI_WORLD_ID_ACTION"',
         );
@@ -644,6 +647,7 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         );
 
         expect(earthquakeWrapper).toContain("M=/tmp/se");
+        expect(earthquakeWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(earthquakeWrapper).toContain('X="/tmp/sm /tmp/sc"');
         expect(membershipWrapper).toContain("M=/tmp/sm");
         expect(membershipWrapper).toContain('X="/tmp/se /tmp/sc"');

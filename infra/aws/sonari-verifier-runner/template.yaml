@@ -614,15 +614,14 @@ Resources:
             cat >/opt/sonari/bin/run-earthquake-enclave <<'SONARI_EARTHQUAKE_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            . /opt/sonari/runner.env
-            : "${!SONARI_WALRUS_CLI:?}" "${!SONARI_WALRUS_N_SHARDS:?}" "${!SONARI_EARTHQUAKE_EGRESS_PROXY_URL:?}"
+            set -a;. /opt/sonari/runner.env;set +a
             E="$SONARI_EARTHQUAKE_EIF_PATH" A="$SONARI_EARTHQUAKE_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_EARTHQUAKE_ENCLAVE_CID" M=/tmp/se X="/tmp/sm /tmp/sc" T=180 B='jq -n --arg walrus_cli "$SONARI_WALRUS_CLI" --argjson walrus_n_shards "$SONARI_WALRUS_N_SHARDS" --arg egress_proxy_url "$SONARI_EARTHQUAKE_EGRESS_PROXY_URL" "{walrus_cli:\$walrus_cli,walrus_n_shards:\$walrus_n_shards,egress_proxy_url:\$egress_proxy_url}" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_EARTHQUAKE_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-earthquake-enclave
             cat >/opt/sonari/bin/run-membership-identity-enclave <<'SONARI_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            . /opt/sonari/runner.env
+            set -a;. /opt/sonari/runner.env;set +a
             : "$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" "$SONARI_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" "$SONARI_WORLD_ID_API_BASE" "$SONARI_WORLD_ID_EGRESS_PROXY_URL" "$SONARI_WORLD_ID_APP_ID" "$SONARI_WORLD_ID_ACTION"
             E="$SONARI_MEMBERSHIP_IDENTITY_EIF_PATH" A="$SONARI_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_MEMBERSHIP_IDENTITY_ENCLAVE_CID" M=/tmp/sm X="/tmp/se /tmp/sc" T=180 B='jq -nc --arg world_id_api_base "$SONARI_WORLD_ID_API_BASE" --arg world_id_app_id "$SONARI_WORLD_ID_APP_ID" --arg egress_proxy_url "$SONARI_WORLD_ID_EGRESS_PROXY_URL" --arg network "$RELAYER_NETWORK" --arg proof_mode "$SONARI_WORLD_ID_PROOF_MODE" --arg world_id_action "$SONARI_WORLD_ID_ACTION" "{\$world_id_api_base,\$world_id_app_id,\$egress_proxy_url,\$network,\$proof_mode,\$world_id_action}" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_ENCLAVE_WRAPPER
@@ -630,7 +629,7 @@ Resources:
             cat >/opt/sonari/bin/run-census-enclave <<'SONARI_CENSUS_ENCLAVE_WRAPPER'
             #!/bin/bash
             set -euo pipefail
-            . /opt/sonari/runner.env
+            set -a;. /opt/sonari/runner.env;set +a
             : "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"
             E="$SONARI_CENSUS_EIF_PATH" A="$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_CENSUS_ENCLAVE_CID" M=/tmp/sc X="/tmp/se /tmp/sm" T=180 B='printf "{}\n" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_CENSUS_ENCLAVE_WRAPPER
