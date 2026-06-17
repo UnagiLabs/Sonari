@@ -545,11 +545,13 @@ public struct MembershipPass has key {
 - 居住セルは後から変更でき、変更時刻を `home_cell_registered_at_ms` に保存する
   （災害後変更の駆け込み Claim は cutoff 判定で拒否される）。
 
-> **#296 連携（要対応）**: 後置センサスの indexer 化のため、`home_cell` の登録・変更を
-> イベント化する（例: `HomeCellRegistered { lineage, home_cell, registered_at }`）。
-> 現状 `home_cell` はどのイベントにも出ておらず（`MembershipPassIssued` は cell を含まず、
-> `set_home_cell` はイベント無発行）、indexer がイベントだけで居住セルを追えない。
-> 本書では「イベント追加」を target 仕様に含める。
+> **Floor Census 連携**: `MembershipPassIssued` と `HomeCellRegistered` は
+> authenticated event として発行する。
+> Floor Census TEE は、災害前に登録済みだった lineage と居住セルを集計するとき、
+> これらの authenticated membership event を検証対象にする。
+> 将来 membership status 変更 entry を追加する場合は、
+> status change event も authenticated event として発行し、
+> Census 側の active 判定に含める。
 
 ### 8.2 IdentityRegistry / 本人確認結果の受理 / metadata_verifier
 
@@ -873,7 +875,7 @@ assert!(obj.version == VERSION, EVersionMismatch);
 | `RecipientExcluded` | exclude_recipient | pass_lineage_id、reason_code、round、actor |
 | `ResidualSweep` | sweep_residual | amount、final_round |
 | `DonationPeriodExtended` | extend_donation_period | old_end_ms、new_end_ms |
-| `DisasterEventCreated` / `MembershipPassIssued` / `HomeCellRegistered`（新規・#296）/ `RegistryCreated` / `Paused` / `Unpaused` / `GenesisObjectCreated` / verifier config 系 | 各所 | — |
+| `DisasterEventCreated` / `MembershipPassIssued`（authenticated）/ `HomeCellRegistered`（authenticated）/ `RegistryCreated` / `Paused` / `Unpaused` / `GenesisObjectCreated` / verifier config 系 | 各所 | — |
 
 ## 14. セキュリティ要件
 
@@ -966,7 +968,7 @@ target 仕様として残っていないことを確認する。
 - 本払いは Campaign 残のみで按分（補填なし、Round 1 + 90日ごと再分配）。確定は `claim` 内 lazy finalize
 - `sweep_residual`（Main へのみ）/ `exclude_recipient` / `extend_donation_period` / `spend_operations` / `create_category_pool`
 - `metadata_verifier` に census family（= 5）を追加
-- `home_cell` 登録/変更のイベント化（#296 indexer 前提）
+- authenticated membership event による `home_cell` 登録/変更の追跡
 - リアルタイム表示用フィールド
 - 対応通貨は USDC のみ
 

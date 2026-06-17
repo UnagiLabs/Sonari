@@ -113,7 +113,7 @@ public(package) fun register_member(
     dynamic_field::add(&mut registry.id, pass_lineage_id, record);
     registry.issued_count = registry.issued_count + 1;
 
-    event::emit(MembershipPassIssued {
+    event::emit_authenticated(MembershipPassIssued {
         registry_id,
         pass_id,
         owner: pass.owner,
@@ -143,7 +143,7 @@ fun set_home_cell(
 ) {
     pass.home_cell = home_cell;
     pass.home_cell_registered_at_ms = registered_at_ms;
-    event::emit(HomeCellRegistered {
+    event::emit_authenticated(HomeCellRegistered {
         lineage: pass.pass_lineage_id,
         home_cell,
         registered_at: registered_at_ms,
