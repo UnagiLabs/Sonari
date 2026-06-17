@@ -124,11 +124,14 @@ describe("dapp Enoki setup docs", () => {
         const wrangler = await readDappWrangler();
         const devVarsExample = await readDappDevVarsExample();
 
+        expect(readme).toContain("POST /api/enoki/membership/sponsor");
         expect(readme).toContain("wrangler secret put ENOKI_PRIVATE_API_KEY --name sonari-dapp");
         expect(readme).toContain("NEXT_PUBLIC_* に secret を置かない");
+        expect(readme).toContain("MembershipPass 発行専用");
         expect(readme).toContain("ENOKI_PRIVATE_API_KEY");
         expect(wrangler).toContain("ENOKI_PRIVATE_API_KEY");
         expect(devVarsExample).toContain("ENOKI_PRIVATE_API_KEY=");
+        expect(devVarsExample).toContain("/api/enoki/membership/sponsor");
         expect(devVarsExample).toContain("NEXT_PUBLIC_ は付けません");
     });
 });

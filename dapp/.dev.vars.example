@@ -17,5 +17,6 @@
 WORLD_ID_RP_SIGNING_KEY=
 
 # Enoki の sponsored transaction 用 private API key。
-# 後続 Issue の server-only 経路だけが使います。NEXT_PUBLIC_ は付けません。
+# /api/enoki/membership/sponsor だけが MembershipPass 発行専用に使います。
+# NEXT_PUBLIC_ は付けません。
 ENOKI_PRIVATE_API_KEY=
