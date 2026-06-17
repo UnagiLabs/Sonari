@@ -35,6 +35,15 @@ import {
 } from "./usgs.js";
 
 export {
+    SuiAuthenticatedEventProofCollector,
+    type AuthenticatedEventProofBundle,
+    type AuthenticatedEventProofCollectorOptions,
+    type AuthenticatedStreamEvent,
+    type SuiAuthenticatedEventsPage,
+    type SuiAuthenticatedEventsTransport,
+    type SuiObjectInclusionProofResponse,
+} from "./authenticated_events.js";
+export {
     DAY_MS,
     DEFAULT_DUE_LIMIT,
     FAILED_RETRY_BACKOFF_MS,
