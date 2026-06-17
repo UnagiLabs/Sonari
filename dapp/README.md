@@ -15,9 +15,16 @@ registration and transaction execution stay on the existing Sui dApp Kit path.
 
 1. Create a testnet app in Enoki Portal.
 2. Create a Google OAuth Client ID in Google Cloud Console.
-3. Register that Google OAuth Client ID in the Enoki Portal Google provider.
-4. Add the allowed origins `http://localhost:3000` and `https://sonari.help`.
-5. Store these public build-time values in the `cloudflare-dapp-worker`
+3. Configure the Google OAuth client with these values:
+
+| Google OAuth field | Values |
+|--------------------|--------|
+| authorized JavaScript origins | `http://localhost:3000`, `https://sonari.help` |
+| authorized redirect URIs | `http://localhost:3000/`, `https://sonari.help/` |
+
+4. Register that Google OAuth Client ID in the Enoki Portal Google provider.
+5. Add the allowed origins `http://localhost:3000` and `https://sonari.help` in Enoki Portal.
+6. Store these public build-time values in the `cloudflare-dapp-worker`
    GitHub Environment Variables:
 
 ```env
@@ -55,9 +62,16 @@ transaction 実行は、既存の Sui dApp Kit 経路から変えません。
 
 1. Enoki Portal で testnet app を作成する。
 2. Google Cloud Console で Google OAuth Client ID を作成する。
-3. Enoki Portal の Google provider に同じ Google OAuth Client ID を登録する。
-4. allowed origin に `http://localhost:3000` と `https://sonari.help` を追加する。
-5. `cloudflare-dapp-worker` の GitHub Environment Variables に公開値を登録する。
+3. Google OAuth client に次の値を設定する。
+
+| Google OAuth field | Values |
+|--------------------|--------|
+| authorized JavaScript origins | `http://localhost:3000`, `https://sonari.help` |
+| authorized redirect URIs | `http://localhost:3000/`, `https://sonari.help/` |
+
+4. Enoki Portal の Google provider に同じ Google OAuth Client ID を登録する。
+5. Enoki Portal の allowed origin に `http://localhost:3000` と `https://sonari.help` を追加する。
+6. `cloudflare-dapp-worker` の GitHub Environment Variables に公開値を登録する。
 
 ```env
 NEXT_PUBLIC_ENOKI_API_KEY=

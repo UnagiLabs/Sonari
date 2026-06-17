@@ -106,10 +106,14 @@ describe("dapp Enoki setup docs", () => {
         const readme = await readDappReadme();
 
         expect(readme).toContain("Google OAuth Client ID");
+        expect(readme).toContain("authorized JavaScript origins");
+        expect(readme).toContain("authorized redirect URIs");
         expect(readme).toContain("Enoki Portal");
         expect(readme).toContain("Google provider");
         expect(readme).toContain("http://localhost:3000");
+        expect(readme).toContain("http://localhost:3000/");
         expect(readme).toContain("https://sonari.help");
+        expect(readme).toContain("https://sonari.help/");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_API_KEY");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_GOOGLE_CLIENT_ID");
         expect(readme).toContain("NEXT_PUBLIC_ENOKI_NETWORK=testnet");
