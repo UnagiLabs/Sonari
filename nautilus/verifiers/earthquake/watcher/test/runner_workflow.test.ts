@@ -2571,11 +2571,13 @@ describe("AWS runner workflow helper", () => {
                 action: "record_relayer_success",
                 source_event_id: "us7000sonari",
                 attempt: 1,
+                instance_id: "i-123",
                 result,
                 relayer_success: relayerResult.relayer_success,
             } as never),
         ).resolves.toMatchObject({
             relayer: "recorded",
+            instance_id: "i-123",
             relayer_success: relayerResult.relayer_success,
         });
         await expect(repository.get("us7000sonari")).resolves.toMatchObject({
@@ -2786,6 +2788,60 @@ describe("AWS runner workflow helper", () => {
             floor_census_status: "succeeded",
             floor_census_digest: "census-submit-digest",
             floor_census_counts_json: JSON.stringify(["1", "2", "3"]),
+        });
+    });
+
+    it("marks configured floor census failed when Census TEE cannot be prepared", async () => {
+        const repository = new InMemoryStateRepository();
+        const result = finalizedResultWithRawManifest(jsonBytes({ fixture: "floor-census" }));
+        await repository.upsertManualEvent("us7000sonari", 1_800_000_000_000, {
+            requestedSourceEventId: "us7000sonari",
+        });
+        await repository.markWorkflowStarted("us7000sonari", "exec", 1_800_000_001_000);
+        await repository.applyRunnerResult("us7000sonari", result, 1_800_000_002_000, undefined, 1);
+        const handler = createRunnerControlHandler({
+            autoscaling: new RecordingAutoScalingClient(),
+            ec2: new RecordingEc2Client(),
+            ssm: new RecordingSsmClient(),
+            s3: new RecordingS3Client({ body: JSON.stringify(result) }),
+            repository,
+            now: () => 1_800_000_004_000,
+            config: {
+                ...baseConfig(),
+                censusNitroEnclaveProcessCommand: "/opt/sonari/bin/run-census-enclave",
+                floorCensus: {
+                    target: "0x123::accessor::set_floor_census",
+                    pauseState: "0xpause",
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
+                    mainPool: "0xmainpool",
+                    membershipRegistry: "0xmembership",
+                },
+            },
+        });
+
+        await expect(
+            handler({
+                action: "run_floor_census",
+                source_event_id: "us7000sonari",
+                attempt: 1,
+                result_s3_key: "results/us7000sonari/finalized.json",
+                relayer_success: {
+                    mode: "submit",
+                    target: earthquakeRelayerTarget,
+                    registry: earthquakeRelayerRegistry,
+                    verifierRegistry: earthquakeRelayerVerifierRegistry,
+                    categoryRegistry: earthquakeRelayerCategoryRegistry,
+                    categoryPool: earthquakeRelayerCategoryPool,
+                    digest: "tx-digest",
+                    objectId: `0x${"55".repeat(32)}`,
+                },
+            } as never),
+        ).rejects.toThrow("floor census requires a runner instance_id");
+
+        await expect(repository.get("us7000sonari")).resolves.toMatchObject({
+            floor_census_status: "failed",
+            floor_census_error_message: "floor census requires a runner instance_id",
         });
     });
 });

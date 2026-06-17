@@ -385,6 +385,7 @@ export type RunnerControlEvent = RunnerControlVerifierKind &
               action: "record_relayer_success";
               source_event_id: string;
               attempt?: number | undefined;
+              instance_id?: string | undefined;
               result_s3_key: string;
               relayer_success: RelayerRecordSuccessInput;
           }
@@ -509,6 +510,7 @@ export type RunnerControlResult = RunnerControlVerifierKind &
               source_event_id: string;
               attempt?: number | undefined;
               relayer: "recorded";
+              instance_id?: string | undefined;
               result_s3_key: string;
               result_status: TeeCoreResult["status"];
               relayer_success: RelayerRecordSuccessInput;
@@ -1101,6 +1103,7 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                     source_event_id: event.source_event_id,
                     attempt: event.attempt,
                     relayer: "recorded",
+                    ...(event.instance_id === undefined ? {} : { instance_id: event.instance_id }),
                     result_s3_key: event.result_s3_key,
                     result_status: result.status,
                     relayer_success: event.relayer_success,
@@ -1133,26 +1136,26 @@ export function createRunnerControlHandler(options: RunnerControlHandlerOptions)
                 if (!markedProcessing) {
                     throw new Error("stale runner workflow attempt");
                 }
-                const result = await readTeeResultFromS3(options, event);
-                const floorCensus =
-                    options.floorCensus ??
-                    (await buildCensusTeeFloorCensusFromConfig(options, event, nowMs));
-                if (floorCensus === undefined) {
-                    await repository.markFloorCensusResult(
-                        event.source_event_id,
-                        { status: "skipped", message: "floor census is not configured" },
-                        nowMs,
-                        event.attempt,
-                    );
-                    return retainVerifierKind({
-                        source_event_id: event.source_event_id,
-                        attempt: event.attempt,
-                        floor_census: "skipped",
-                        result_s3_key: event.result_s3_key,
-                        result_status: result.status,
-                    });
-                }
                 try {
+                    const result = await readTeeResultFromS3(options, event);
+                    const floorCensus =
+                        options.floorCensus ??
+                        (await buildCensusTeeFloorCensusFromConfig(options, event, nowMs));
+                    if (floorCensus === undefined) {
+                        await repository.markFloorCensusResult(
+                            event.source_event_id,
+                            { status: "skipped", message: "floor census is not configured" },
+                            nowMs,
+                            event.attempt,
+                        );
+                        return retainVerifierKind({
+                            source_event_id: event.source_event_id,
+                            attempt: event.attempt,
+                            floor_census: "skipped",
+                            result_s3_key: event.result_s3_key,
+                            result_status: result.status,
+                        });
+                    }
                     const census = await floorCensus.run({
                         sourceEventId: event.source_event_id,
                         result,
