@@ -185,6 +185,111 @@ describe("JsonRpcFloorCensusReader", () => {
 });
 
 describe("GraphqlFloorCensusReader", () => {
+    it("reads active membership lineages from GraphQL dynamic fields", async () => {
+        const activeLineage = `0x${"11".repeat(32)}`;
+        const inactiveLineage = `0x${"22".repeat(32)}`;
+        const missingLineage = `0x${"33".repeat(32)}`;
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [
+                            { contents: { json: { status: 1 } } },
+                            { contents: { json: { status: 0 } } },
+                            null,
+                        ],
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.listActiveLineages({
+                membershipRegistryId: "0xmembership",
+                lineages: [activeLineage, inactiveLineage, missingLineage],
+            }),
+        ).resolves.toEqual(new Set([activeLineage]));
+    });
+
+    it("passes the membership checkpoint to the GraphQL object lookup", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            return jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [null],
+                    },
+                },
+            });
+        };
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await reader.listActiveLineages({
+            membershipRegistryId: "0xmembership",
+            lineages: [`0x${"11".repeat(32)}`],
+            checkpoint: 41,
+        });
+
+        expect(requests[0]?.variables).toMatchObject({
+            membershipRegistryId: "0xmembership",
+            checkpoint: 41,
+        });
+    });
+
+    it("encodes lineage object IDs as GraphQL dynamic field key BCS bytes", async () => {
+        const requests: Array<{ variables: Record<string, unknown> }> = [];
+        globalThis.fetch = async (_input, init) => {
+            const request = JSON.parse(String(init?.body)) as {
+                variables: Record<string, unknown>;
+            };
+            requests.push(request);
+            return jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [null],
+                    },
+                },
+            });
+        };
+
+        const lineage = `0x${"11".repeat(32)}`;
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await reader.listActiveLineages({
+            membershipRegistryId: "0xmembership",
+            lineages: [lineage],
+        });
+
+        expect(requests[0]?.variables.keys).toEqual([
+            {
+                type: "0x2::object::ID",
+                bcs: Buffer.from("11".repeat(32), "hex").toString("base64"),
+            },
+        ]);
+    });
+
+    it("fails closed when a GraphQL membership dynamic field status is malformed", async () => {
+        globalThis.fetch = async () =>
+            jsonResponse({
+                data: {
+                    object: {
+                        multiGetDynamicFields: [{ contents: { json: { status: "active" } } }],
+                    },
+                },
+            });
+
+        const reader = new GraphqlFloorCensusReader("https://graphql.example");
+        await expect(
+            reader.listActiveLineages({
+                membershipRegistryId: "0xmembership",
+                lineages: [`0x${"11".repeat(32)}`],
+            }),
+        ).rejects.toThrow("membership dynamic field status is malformed");
+    });
+
     it("paginates HomeCellRegistered events and includes the checkpoint boundary", async () => {
         const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
         globalThis.fetch = async (_input, init) => {

@@ -43,6 +43,21 @@ query SonariHomeCellRegisteredEvents(
   }
 }
 `;
+const ACTIVE_LINEAGES_GRAPHQL_QUERY = `
+query SonariMembershipActiveLineages(
+  $membershipRegistryId: SuiAddress!
+  $checkpoint: UInt53
+  $keys: [DynamicFieldName!]!
+) {
+  object(address: $membershipRegistryId, atCheckpoint: $checkpoint) {
+    multiGetDynamicFields(keys: $keys) {
+      contents {
+        json
+      }
+    }
+  }
+}
+`;
 
 export interface HomeCellRegisteredEvent {
     lineage: string;
@@ -112,6 +127,7 @@ export interface FloorCensusOnchainReader {
     listActiveLineages(input: {
         membershipRegistryId: string;
         lineages: readonly string[];
+        checkpoint?: number | undefined;
     }): Promise<ReadonlySet<string>>;
     findCampaignId(input: {
         digest: string;
@@ -550,8 +566,40 @@ export class GraphqlFloorCensusReader implements FloorCensusOnchainReader {
         return events;
     }
 
-    async listActiveLineages(): Promise<ReadonlySet<string>> {
-        throw new Error("GraphqlFloorCensusReader.listActiveLineages is not implemented");
+    async listActiveLineages(input: {
+        membershipRegistryId: string;
+        lineages: readonly string[];
+        checkpoint?: number | undefined;
+    }): Promise<ReadonlySet<string>> {
+        const lineages = unique(input.lineages);
+        if (lineages.length === 0) {
+            return new Set();
+        }
+        const response = await this.query(ACTIVE_LINEAGES_GRAPHQL_QUERY, {
+            membershipRegistryId: input.membershipRegistryId,
+            checkpoint: input.checkpoint,
+            keys: lineages.map(lineageDynamicFieldKey),
+        });
+        const fields = readGraphqlDynamicFields(response);
+        if (fields.length !== lineages.length) {
+            throw new Error("GraphQL membership dynamic fields response is malformed");
+        }
+        const active = new Set<string>();
+        for (let index = 0; index < lineages.length; index += 1) {
+            const field = fields[index];
+            if (field === null || field === undefined) {
+                continue;
+            }
+            const status = readMembershipStatus(field);
+            if (status === 1) {
+                const lineage = lineages[index];
+                if (lineage === undefined) {
+                    throw new Error("GraphQL membership dynamic fields response is malformed");
+                }
+                active.add(lineage);
+            }
+        }
+        return active;
     }
 
     async findCampaignId(): Promise<string | undefined> {
@@ -714,6 +762,29 @@ function readGraphqlEventsPage(response: unknown): {
     return { nodes, hasNextPage: hasNextPageValue, endCursor };
 }
 
+function readGraphqlDynamicFields(response: unknown): unknown[] {
+    const data = readRecordField(response, "data");
+    const object = readRecordField(data, "object");
+    if (object === undefined) {
+        throw new Error("GraphQL membership registry object is missing or malformed");
+    }
+    const fields = readUnknownField(object, "multiGetDynamicFields");
+    if (!Array.isArray(fields)) {
+        throw new Error("GraphQL membership dynamic fields response is malformed");
+    }
+    return fields;
+}
+
+function readMembershipStatus(field: unknown): number {
+    const contents = readRecordField(field, "contents");
+    const json = readRecordField(contents, "json");
+    const status = readSafeInteger(json?.status);
+    if (status === undefined) {
+        throw new Error("membership dynamic field status is malformed");
+    }
+    return status;
+}
+
 function readEventJson(event: unknown): Record<string, unknown> | undefined {
     const parsedJson = readRecordField(event, "parsedJson");
     if (parsedJson !== undefined) {
@@ -731,6 +802,21 @@ function readBeforeCheckpoint(checkpoint: number): number {
         throw new Error("beforeCheckpoint must be a safe integer");
     }
     return checkpoint + 1;
+}
+
+function lineageDynamicFieldKey(lineage: string): { type: "0x2::object::ID"; bcs: string } {
+    return {
+        type: "0x2::object::ID",
+        bcs: Buffer.from(objectIdBytes(lineage)).toString("base64"),
+    };
+}
+
+function objectIdBytes(value: string): Uint8Array {
+    const hex = value.startsWith("0x") ? value.slice(2) : value;
+    if (!/^[0-9a-fA-F]{64}$/.test(hex)) {
+        throw new Error(`object ID must be 32 bytes: ${value}`);
+    }
+    return Uint8Array.from(Buffer.from(hex, "hex"));
 }
 
 function readRecordField(input: unknown, field: string): Record<string, unknown> | undefined {
