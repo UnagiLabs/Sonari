@@ -25,6 +25,10 @@ import {
     issueMembershipPass,
     MembershipIssueError,
 } from "./membership-issue";
+import {
+    type MembershipIssueViewState,
+    membershipSubmittingMessageKey,
+} from "./membership-issue-state";
 import { shortAddress } from "./membership-presence";
 
 interface MembershipStepProps {
@@ -34,11 +38,6 @@ interface MembershipStepProps {
     readonly onBack: () => void;
     readonly onNext: () => void;
 }
-
-type MembershipIssueViewState =
-    | { readonly kind: "idle" }
-    | { readonly kind: "submitting" }
-    | { readonly kind: "failed"; readonly message: string };
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 const residenceProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL ?? "";
@@ -169,16 +168,19 @@ export function MembershipStep({
     }
 
     async function runMembershipIssuance(senderAddress: string, homeCell: string) {
-        setIssueState({ kind: "submitting" });
+        const executionMode = shouldUseSponsoredMembershipTransaction({
+            wallet: currentWallet,
+            enokiConfigResult: readEnokiConfig(),
+            signer: dAppKit,
+        })
+            ? "sponsored"
+            : "wallet";
+        setIssueState({
+            kind: "submitting",
+            phase: executionMode === "sponsored" ? "sponsor" : "wallet",
+        });
 
         try {
-            const executionMode = shouldUseSponsoredMembershipTransaction({
-                wallet: currentWallet,
-                enokiConfigResult: readEnokiConfig(),
-                signer: dAppKit,
-            })
-                ? "sponsored"
-                : "wallet";
             await issueMembershipPass({
                 client,
                 senderAddress,
@@ -199,6 +201,8 @@ export function MembershipStep({
                         transaction: input.transaction,
                         sender: input.sender,
                         signer: dAppKit,
+                        onStageChange: (stage) =>
+                            setIssueState({ kind: "submitting", phase: stage }),
                     }),
             });
             onIssued();
@@ -264,7 +268,11 @@ export function MembershipStep({
             return { message: issueState.message, tone: "alert" };
         }
         if (issueState.kind === "submitting") {
-            return { message: t("issue.submitting"), tone: "note", loading: true };
+            return {
+                message: t(membershipSubmittingMessageKey(issueState.phase)),
+                tone: "note",
+                loading: true,
+            };
         }
         if (owner.length === 0) {
             return { message: t("issue.connectWallet"), tone: "note" };

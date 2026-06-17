@@ -92,6 +92,34 @@ describe("executeSponsoredMembershipTransaction", () => {
         });
     });
 
+    it("reports sponsored execution stages in sponsor, sign, execute order", async () => {
+        const stages: string[] = [];
+
+        await executeSponsoredMembershipTransaction({
+            client: {} as ClientWithCoreApi,
+            transaction: makeTransaction(),
+            sender: SENDER,
+            signer: {
+                signTransaction: async () => ({
+                    bytes: "signed-bytes",
+                    signature: "signed-signature",
+                }),
+            },
+            fetchImpl: async (url: string | URL | Request) => {
+                if (String(url) === "/api/enoki/membership/sponsor") {
+                    return jsonResponse({
+                        digest: "9WLwYUF4DQ3sVDzj5aJU32Bpc9gnk7Qx8xPiCXbUsc6",
+                        bytes: "c3BvbnNvcmVk",
+                    });
+                }
+                return jsonResponse({ digest: "executed-digest" });
+            },
+            onStageChange: (stage) => stages.push(stage),
+        });
+
+        expect(stages).toEqual(["sponsor", "sign", "execute"]);
+    });
+
     it("encodes Transaction.build onlyTransactionKind bytes as base64", async () => {
         const tx = makeTransaction();
         const expectedKindBytes = toBase64(

@@ -2,7 +2,10 @@ import type { ClientWithCoreApi } from "@mysten/sui/client";
 import type { Transaction } from "@mysten/sui/transactions";
 import { toBase64 } from "@mysten/sui/utils";
 
-type SponsoredMembershipTransactionStage = "build" | "sponsor" | "sign" | "execute";
+export type SponsoredMembershipTransactionStage = "sponsor" | "sign" | "execute";
+type SponsoredMembershipTransactionInternalStage =
+    | "build"
+    | SponsoredMembershipTransactionStage;
 
 interface SponsoredMembershipSigner {
     signTransaction(args: { readonly transaction: string }): Promise<{
@@ -21,6 +24,7 @@ export interface ExecuteSponsoredMembershipTransactionInput {
     readonly sender: string;
     readonly signer: SponsoredMembershipSigner;
     readonly fetchImpl?: SponsoredMembershipFetch;
+    readonly onStageChange?: (stage: SponsoredMembershipTransactionStage) => void;
 }
 
 export interface SponsoredMembershipTransactionSuccess {
@@ -37,9 +41,9 @@ interface ExecuteResponse {
 }
 
 export class SponsoredMembershipTransactionError extends Error {
-    readonly stage: SponsoredMembershipTransactionStage;
+    readonly stage: SponsoredMembershipTransactionInternalStage;
 
-    constructor(stage: SponsoredMembershipTransactionStage, message: string) {
+    constructor(stage: SponsoredMembershipTransactionInternalStage, message: string) {
         super(message);
         this.name = "SponsoredMembershipTransactionError";
         this.stage = stage;
@@ -52,6 +56,7 @@ export async function executeSponsoredMembershipTransaction({
     sender,
     signer,
     fetchImpl = fetch,
+    onStageChange,
 }: ExecuteSponsoredMembershipTransactionInput): Promise<SponsoredMembershipTransactionSuccess> {
     let transactionBlockKindBytes: string;
     try {
@@ -62,6 +67,7 @@ export async function executeSponsoredMembershipTransaction({
         throw new SponsoredMembershipTransactionError("build", errorMessage(error, "Could not build transaction."));
     }
 
+    onStageChange?.("sponsor");
     const sponsored = await postJson<SponsorResponse>(
         fetchImpl,
         "/api/enoki/membership/sponsor",
@@ -74,6 +80,7 @@ export async function executeSponsoredMembershipTransaction({
 
     let signature: string;
     try {
+        onStageChange?.("sign");
         const signed = await signer.signTransaction({ transaction: sponsored.bytes });
         if (typeof signed.signature !== "string" || signed.signature.length === 0) {
             throw new Error("Wallet returned an empty transaction signature.");
@@ -86,6 +93,7 @@ export async function executeSponsoredMembershipTransaction({
         );
     }
 
+    onStageChange?.("execute");
     const executed = await postJson<ExecuteResponse>(
         fetchImpl,
         "/api/enoki/membership/execute",
@@ -103,7 +111,7 @@ async function postJson<T extends SponsorResponse | ExecuteResponse>(
     fetchImpl: SponsoredMembershipFetch,
     url: string,
     body: unknown,
-    stage: Extract<SponsoredMembershipTransactionStage, "sponsor" | "execute">,
+    stage: Extract<SponsoredMembershipTransactionInternalStage, "sponsor" | "execute">,
 ): Promise<T> {
     let response: Response;
     try {
@@ -138,7 +146,7 @@ async function postJson<T extends SponsorResponse | ExecuteResponse>(
 
 function parseSuccessPayload<T extends SponsorResponse | ExecuteResponse>(
     payload: unknown,
-    stage: Extract<SponsoredMembershipTransactionStage, "sponsor" | "execute">,
+    stage: Extract<SponsoredMembershipTransactionInternalStage, "sponsor" | "execute">,
 ): T {
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
         throw new SponsoredMembershipTransactionError(
