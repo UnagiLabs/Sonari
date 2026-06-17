@@ -3,6 +3,8 @@ declare module "cloudflare:workers" {
         readonly env: Env;
         run(event: WorkflowEvent<Params>, step: WorkflowStep): Promise<unknown>;
     }
+}
 
+declare module "cloudflare:workflows" {
     export class NonRetryableError extends Error {}
 }
