@@ -170,20 +170,18 @@ describe("floor census core", () => {
         expect(signed.publicKeyHex).toBe(`0x${"22".repeat(32)}`);
     });
 
-    it("builds a Census TEE input bundle from the earthquake result and membership snapshot", async () => {
+    it("builds a Census TEE input bundle without replay-derived membership data", async () => {
         const bundle = await buildFloorCensusInputBundle({
             result: finalizedResultForCensus(),
-            homeCellEvents: [{ lineage: `0x${"11".repeat(32)}`, homeCell: "20", registeredAtMs: 900 }],
-            activeLineages: new Set([`0x${"11".repeat(32)}`]),
+            packageId: `0x${"99".repeat(32)}`,
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
             membershipRegistryId,
-            cellCountIndexId,
-            censusCheckpoint: 41,
             issuedAtMs: 1_800_000_001_000,
         });
 
         expect(bundle).toMatchObject({
+            package_id: `0x${"99".repeat(32)}`,
             event_uid: eventUid,
             event_revision: 7,
             occurred_at_ms: 1_000,
@@ -192,23 +190,11 @@ describe("floor census core", () => {
             campaign_id: `0x${"44".repeat(32)}`,
             disaster_event_id: `0x${"55".repeat(32)}`,
             membership_registry_id: membershipRegistryId,
-            cell_count_index_id: cellCountIndexId,
-            census_checkpoint: 41,
-            counted_cells_root: computeCountedCellsRootForTest([
-                { h3: 10n, band: 1, count: 0n },
-                { h3: 20n, band: 2, count: 1n },
-                { h3: 30n, band: 3, count: 0n },
-            ]),
-            home_cell_events: [
-                {
-                    lineage: `0x${"11".repeat(32)}`,
-                    home_cell: "20",
-                    registered_at_ms: 900,
-                },
-            ],
-            active_lineages: [`0x${"11".repeat(32)}`],
         });
         expect(bundle.affected_cells).toEqual({ ...affectedCells, event_revision: 7 });
+        expect("home_cell_events" in bundle).toBe(false);
+        expect("active_lineages" in bundle).toBe(false);
+        expect("counted_cells_root" in bundle).toBe(false);
     });
 
     it("resolves affected cells from stored references when the finalized result omits the inline artifact", async () => {
@@ -226,13 +212,10 @@ describe("floor census core", () => {
 
         const bundle = await buildFloorCensusInputBundle({
             result,
-            homeCellEvents: [],
-            activeLineages: [],
+            packageId: `0x${"99".repeat(32)}`,
             campaignId: `0x${"44".repeat(32)}`,
             disasterEventId: `0x${"55".repeat(32)}`,
             membershipRegistryId,
-            cellCountIndexId,
-            censusCheckpoint: 41,
             issuedAtMs: 1_800_000_001_000,
             affectedCellsResolver: resolver,
         });
@@ -246,32 +229,16 @@ describe("floor census core", () => {
         ]);
     });
 
-    it("builds counted_cells_root from the membership snapshot instead of accepting a caller-supplied root", async () => {
-        const bundle = await buildFloorCensusInputBundle({
-            result: finalizedResultForCensus(),
-            homeCellEvents: [],
-            activeLineages: [],
-            campaignId: `0x${"44".repeat(32)}`,
-            disasterEventId: `0x${"55".repeat(32)}`,
-            membershipRegistryId,
-            cellCountIndexId,
-            censusCheckpoint: 41,
-            issuedAtMs: 1_800_000_001_000,
-        });
-
-        expect(bundle.counted_cells_root).toBe(
-            computeCountedCellsRootForTest([
-                { h3: 10n, band: 1, count: 0n },
-                { h3: 20n, band: 2, count: 0n },
-                { h3: 30n, band: 3, count: 0n },
-            ]),
-        );
-    });
-
     it("parses Census TEE output into raw submit bytes and counts", () => {
         const parsed = parseFloorCensusTeeOutput({
             status: "finalized",
             payload: {
+                event_uid: eventUid,
+                event_revision: 7,
+                affected_cells_root: affectedCellsRoot,
+                membership_registry_id: membershipRegistryId,
+                cell_count_index_id: cellCountIndexId,
+                census_checkpoint: 41,
                 registered_members_by_band: [1, "2", 3],
             },
             payload_bcs_hex: `0x${"aa".repeat(8)}`,
@@ -283,6 +250,7 @@ describe("floor census core", () => {
         expect(parsed.censusBcs).toEqual(Uint8Array.from({ length: 8 }, () => 0xaa));
         expect(parsed.signature).toHaveLength(64);
         expect(parsed.publicKey).toHaveLength(32);
+        expect(parsed.payload.cellCountIndexId).toBe(cellCountIndexId);
     });
 
     it("fails closed on malformed Census TEE output", () => {
@@ -883,14 +851,15 @@ describe("DirectFloorCensusAdapter", () => {
 });
 
 describe("TeeFloorCensusAdapter", () => {
-    it("passes a computed counted_cells_root into the Census TEE input bundle", async () => {
+    it("passes non-replay context into the Census TEE input bundle", async () => {
         const result = finalizedResultForCensus();
         const reader = new RecordingFloorCensusReader();
         const client = new RecordingFloorCensusSubmitClient();
         const tee = new RecordingFloorCensusTeeClient();
+        const packageId = `0x${"99".repeat(32)}`;
         const adapter = new TeeFloorCensusAdapter(
             {
-                target: "0xabc::accessor::set_floor_census",
+                target: `${packageId}::accessor::set_floor_census`,
                 pauseState: "0xpause",
                 verifierRegistry: "0xverifier",
                 categoryPool: "0xcategory",
@@ -916,13 +885,13 @@ describe("TeeFloorCensusAdapter", () => {
         ).resolves.toMatchObject({ status: "succeeded" });
 
         expect(tee.inputs).toHaveLength(1);
-        expect(tee.inputs[0]?.payload.counted_cells_root).toBe(
-            computeCountedCellsRootForTest([
-                { h3: 10n, band: 1, count: 0n },
-                { h3: 20n, band: 2, count: 1n },
-                { h3: 30n, band: 3, count: 0n },
-            ]),
-        );
+        expect(tee.inputs[0]?.payload.package_id).toBe(packageId);
+        expect(tee.inputs[0]?.payload.membership_registry_id).toBe(membershipRegistryId);
+        expect("home_cell_events" in (tee.inputs[0]?.payload ?? {})).toBe(false);
+        expect("active_lineages" in (tee.inputs[0]?.payload ?? {})).toBe(false);
+        expect("counted_cells_root" in (tee.inputs[0]?.payload ?? {})).toBe(false);
+        expect(reader.homeCellLookups).toEqual([]);
+        expect(reader.activeLineageLookups).toEqual([]);
     });
 });
 
@@ -1154,7 +1123,7 @@ class RecordingFloorCensusSubmitClient implements FloorCensusSubmitClient {
 class RecordingFloorCensusTeeClient {
     readonly inputs: Array<{
         action: "process_data";
-        payload: { counted_cells_root: string };
+        payload: { package_id: string; membership_registry_id: string };
         registration_metadata: EnclaveVerificationMetadata;
     }> = [];
 
@@ -1162,13 +1131,21 @@ class RecordingFloorCensusTeeClient {
         this.inputs.push(
             input as {
                 action: "process_data";
-                payload: { counted_cells_root: string };
+                payload: { package_id: string; membership_registry_id: string };
                 registration_metadata: EnclaveVerificationMetadata;
             },
         );
         return {
             status: "finalized",
-            payload: { registered_members_by_band: [0, 1, 0] },
+            payload: {
+                event_uid: eventUid,
+                event_revision: 7,
+                affected_cells_root: expectedRoot(),
+                membership_registry_id: membershipRegistryId,
+                cell_count_index_id: cellCountIndexId,
+                census_checkpoint: 41,
+                registered_members_by_band: [0, 1, 0],
+            },
             payload_bcs_hex: `0x${"aa".repeat(8)}`,
             signature: `0x${"11".repeat(64)}`,
             public_key: censusRegistrationMetadata.enclave_instance_public_key,

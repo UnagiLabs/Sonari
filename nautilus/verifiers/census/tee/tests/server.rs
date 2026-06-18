@@ -1,9 +1,11 @@
 use census_tee::server::{
-    CensusProcessHandler, finalize_process_output, parse_process_data_envelope,
+    CensusProcessHandler, CensusProcessHandlerWithResolver, CensusSnapshotResolver,
+    finalize_process_output, parse_process_data_envelope,
 };
 use census_tee::{
-    AffectedCell, AffectedCellsArtifact, CensusInputBundle, HomeCellRegisteredEvent,
-    compute_affected_cells_root, compute_floor_census_snapshot,
+    AffectedCell, AffectedCellsArtifact, CensusError, CensusInputBundle, CensusResolvedSnapshot,
+    CensusSnapshotBundle, CountedCell, compute_affected_cells_root, compute_floor_census_snapshot,
+    graphql::{CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY},
 };
 use sonari_tee_core::{
     EnclaveRegistrationMetadata, LocalEd25519Signer, ProcessDataHandler, ProcessOutput, TeeContext,
@@ -11,12 +13,12 @@ use sonari_tee_core::{
 
 #[test]
 fn server_handler_returns_non_empty_signable_output() {
-    let handler = CensusProcessHandler;
+    let handler = CensusProcessHandlerWithResolver::new(FixedSnapshotResolver);
 
     let output = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
-            &TeeContext::new(),
+            &valid_context(),
         )
         .expect("census handler should process a valid bundle");
 
@@ -31,7 +33,7 @@ fn server_handler_returns_non_empty_signable_output() {
     assert_eq!(result_json["status"], "finalized");
     assert_eq!(
         result_json["payload"]["registered_members_by_band"],
-        serde_json::json!([1, 1, 0])
+        serde_json::json!([4, 7, 0])
     );
     assert_eq!(
         result_json["payload"]["membership_registry_id"],
@@ -70,11 +72,11 @@ fn server_process_data_envelope_rejects_wrong_verifier_config_key() {
 
 #[test]
 fn server_finalization_injects_signature_public_key_and_registration_metadata() {
-    let handler = CensusProcessHandler;
+    let handler = CensusProcessHandlerWithResolver::new(FixedSnapshotResolver);
     let output = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
-            &TeeContext::new(),
+            &valid_context(),
         )
         .expect("census handler should process a valid bundle");
     let metadata = EnclaveRegistrationMetadata {
@@ -103,6 +105,35 @@ fn server_finalization_injects_signature_public_key_and_registration_metadata() 
     );
 }
 
+#[test]
+fn server_handler_requires_canonical_graphql_network_context() {
+    let handler = CensusProcessHandler;
+    let error = handler
+        .process(
+            serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
+            &TeeContext::new(),
+        )
+        .expect_err("missing GraphQL network must fail closed");
+
+    assert!(error.to_string().contains(CENSUS_GRAPHQL_NETWORK_KEY));
+
+    let error = handler
+        .process(
+            serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
+            &TeeContext::with_env([
+                (CENSUS_GRAPHQL_NETWORK_KEY, "testnet"),
+                (CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, "not a url"),
+            ]),
+        )
+        .expect_err("malformed proxy must fail closed");
+
+    assert!(error.to_string().contains("egress proxy"));
+}
+
+fn valid_context() -> TeeContext {
+    TeeContext::with_env([(CENSUS_GRAPHQL_NETWORK_KEY, "testnet")])
+}
+
 fn valid_bundle_json() -> serde_json::Value {
     let event_uid = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
     let affected_cells = AffectedCellsArtifact {
@@ -128,41 +159,6 @@ fn valid_bundle_json() -> serde_json::Value {
         ],
     };
     let affected_cells_root = compute_affected_cells_root(event_uid, 7, &affected_cells).unwrap();
-    let home_cell_events = vec![
-        HomeCellRegisteredEvent {
-            lineage: format!("0x{}", "11".repeat(32)),
-            home_cell: "10".to_owned(),
-            registered_at_ms: 900,
-        },
-        HomeCellRegisteredEvent {
-            lineage: format!("0x{}", "22".repeat(32)),
-            home_cell: "20".to_owned(),
-            registered_at_ms: 901,
-        },
-    ];
-    let active_lineages = vec![
-        format!("0x{}", "11".repeat(32)),
-        format!("0x{}", "22".repeat(32)),
-    ];
-    let counted_cells_root = compute_floor_census_snapshot(&CensusInputBundle {
-        event_uid: event_uid.to_owned(),
-        event_revision: 7,
-        occurred_at_ms: 1_000,
-        affected_cells_root: affected_cells_root.clone(),
-        issued_at_ms: 1_234,
-        campaign_id: format!("0x{}", "44".repeat(32)),
-        disaster_event_id: format!("0x{}", "55".repeat(32)),
-        membership_registry_id: format!("0x{}", "22".repeat(32)),
-        cell_count_index_id: format!("0x{}", "33".repeat(32)),
-        census_checkpoint: 345,
-        counted_cells_root: format!("0x{}", "cc".repeat(32)),
-        affected_cells: affected_cells.clone(),
-        home_cell_events: home_cell_events.clone(),
-        active_lineages: active_lineages.clone(),
-    })
-    .unwrap()
-    .counted_cells_root;
-
     serde_json::json!({
         "event_uid": event_uid,
         "event_revision": 7,
@@ -172,15 +168,86 @@ fn valid_bundle_json() -> serde_json::Value {
         "campaign_id": format!("0x{}", "44".repeat(32)),
         "disaster_event_id": format!("0x{}", "55".repeat(32)),
         "membership_registry_id": format!("0x{}", "22".repeat(32)),
-        "cell_count_index_id": format!("0x{}", "33".repeat(32)),
-        "census_checkpoint": 345,
-        "counted_cells_root": counted_cells_root,
-        "affected_cells": affected_cells,
-        "home_cell_events": home_cell_events,
-        "active_lineages": active_lineages
+        "package_id": format!("0x{}", "99".repeat(32)),
+        "affected_cells": affected_cells
     })
 }
 
 fn expected_counted_cells_root() -> serde_json::Value {
-    valid_bundle_json()["counted_cells_root"].clone()
+    let event_uid = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";
+    let affected_cells = AffectedCellsArtifact {
+        event_uid: event_uid.to_owned(),
+        event_revision: 7,
+        oracle_version: 1,
+        geo_resolution: 7,
+        cells_generation_method: "shakemap_gridxml_h3_grid_point_p90_v1".to_owned(),
+        cell_metric: "USGS_MMI".to_owned(),
+        cell_aggregation: "GRID_POINT_P90".to_owned(),
+        intensity_scale: "MMI_X100".to_owned(),
+        affected_cells: vec![
+            AffectedCell {
+                h3_index: "10".to_owned(),
+                intensity_value: 600,
+                cell_band: 1,
+            },
+            AffectedCell {
+                h3_index: "20".to_owned(),
+                intensity_value: 700,
+                cell_band: 2,
+            },
+        ],
+    };
+    let affected_cells_root = compute_affected_cells_root(event_uid, 7, &affected_cells).unwrap();
+    serde_json::Value::String(
+        compute_floor_census_snapshot(&CensusSnapshotBundle {
+            event_uid: event_uid.to_owned(),
+            event_revision: 7,
+            occurred_at_ms: 1_000,
+            affected_cells_root,
+            issued_at_ms: 1_234,
+            campaign_id: format!("0x{}", "44".repeat(32)),
+            disaster_event_id: format!("0x{}", "55".repeat(32)),
+            membership_registry_id: format!("0x{}", "22".repeat(32)),
+            cell_count_index_id: format!("0x{}", "33".repeat(32)),
+            census_checkpoint: 345,
+            affected_cells,
+            counted_cells: valid_counted_cells(),
+        })
+        .unwrap()
+        .counted_cells_root,
+    )
+}
+
+fn valid_counted_cells() -> Vec<CountedCell> {
+    vec![
+        CountedCell {
+            h3_cell: "10".to_owned(),
+            cell_band: 1,
+            shard_id: 10,
+            active_count: "4".to_owned(),
+        },
+        CountedCell {
+            h3_cell: "20".to_owned(),
+            cell_band: 2,
+            shard_id: 20,
+            active_count: "7".to_owned(),
+        },
+    ]
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FixedSnapshotResolver;
+
+impl CensusSnapshotResolver for FixedSnapshotResolver {
+    fn resolve_snapshot(
+        &self,
+        _bundle: &CensusInputBundle,
+        _ctx: &TeeContext,
+    ) -> Result<CensusResolvedSnapshot, CensusError> {
+        Ok(CensusResolvedSnapshot {
+            cell_count_index_id: format!("0x{}", "33".repeat(32)),
+            census_checkpoint: 345,
+            counted_cells: valid_counted_cells(),
+        })
+    }
 }

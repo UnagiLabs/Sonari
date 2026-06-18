@@ -1,5 +1,9 @@
 use crate::encoding::census_bcs::payload_bcs_bytes;
-use crate::{CensusInputBundle, VERIFIER_CONFIG_KEY, process_floor_census_bundle};
+use crate::graphql::CensusGraphqlClient;
+use crate::{
+    CensusError, CensusInputBundle, CensusResolvedSnapshot, VERIFIER_CONFIG_KEY,
+    process_floor_census_input_bundle, validate_census_input_bundle_context,
+};
 use serde::Deserialize;
 use sonari_tee_core::{
     EnclaveRegistrationMetadata, HandlerError, PayloadSigner, ProcessDataHandler, ProcessOutput,
@@ -12,29 +16,82 @@ const PROCESS_DATA_ACTION: &str = "process_data";
 pub struct CensusProcessHandler;
 
 impl ProcessDataHandler for CensusProcessHandler {
-    fn process(&self, input: &[u8], _ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
-        let bundle: CensusInputBundle = serde_json::from_slice(input).map_err(|error| {
-            HandlerError::new(
-                "CENSUS_PROCESS_FAILED",
-                format!("invalid census input: {error}"),
-            )
-        })?;
-        let result = process_floor_census_bundle(&bundle)
-            .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
-        let payload_bcs = payload_bcs_bytes(&result)
-            .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
-        if payload_bcs.is_empty() {
-            return Err(HandlerError::new(
-                "CENSUS_PROCESS_FAILED",
-                "payload_bcs must not be empty",
-            ));
-        }
-
-        Ok(ProcessOutput::signable(
-            payload_bcs.clone(),
-            census_result_json(&result, &payload_bcs, "", ""),
-        ))
+    fn process(&self, input: &[u8], ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
+        process_with_resolver(input, ctx, &GraphqlCensusSnapshotResolver)
     }
+}
+
+pub trait CensusSnapshotResolver {
+    fn resolve_snapshot(
+        &self,
+        bundle: &CensusInputBundle,
+        ctx: &TeeContext,
+    ) -> Result<CensusResolvedSnapshot, CensusError>;
+}
+
+#[derive(Clone, Debug)]
+pub struct CensusProcessHandlerWithResolver<R> {
+    resolver: R,
+}
+
+impl<R> CensusProcessHandlerWithResolver<R> {
+    pub fn new(resolver: R) -> Self {
+        Self { resolver }
+    }
+}
+
+impl<R: CensusSnapshotResolver> ProcessDataHandler for CensusProcessHandlerWithResolver<R> {
+    fn process(&self, input: &[u8], ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
+        process_with_resolver(input, ctx, &self.resolver)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct GraphqlCensusSnapshotResolver;
+
+impl CensusSnapshotResolver for GraphqlCensusSnapshotResolver {
+    fn resolve_snapshot(
+        &self,
+        bundle: &CensusInputBundle,
+        ctx: &TeeContext,
+    ) -> Result<CensusResolvedSnapshot, CensusError> {
+        let graphql = CensusGraphqlClient::from_context(ctx)
+            .map_err(|error| CensusError::InvalidPayload(error.to_string()))?;
+        graphql.resolve_counted_cells(bundle)
+    }
+}
+
+fn process_with_resolver<R: CensusSnapshotResolver>(
+    input: &[u8],
+    ctx: &TeeContext,
+    resolver: &R,
+) -> Result<ProcessOutput, HandlerError> {
+    let bundle: CensusInputBundle = serde_json::from_slice(input).map_err(|error| {
+        HandlerError::new(
+            "CENSUS_PROCESS_FAILED",
+            format!("invalid census input: {error}"),
+        )
+    })?;
+    validate_census_input_bundle_context(&bundle)
+        .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
+    let snapshot = resolver
+        .resolve_snapshot(&bundle, ctx)
+        .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
+    let result = process_floor_census_input_bundle(&bundle, snapshot)
+        .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
+    let payload_bcs = payload_bcs_bytes(&result)
+        .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
+    if payload_bcs.is_empty() {
+        return Err(HandlerError::new(
+            "CENSUS_PROCESS_FAILED",
+            "payload_bcs must not be empty",
+        ));
+    }
+
+    Ok(ProcessOutput::signable(
+        payload_bcs.clone(),
+        census_result_json(&result, &payload_bcs, "", ""),
+    ))
 }
 
 #[derive(Debug, Deserialize)]

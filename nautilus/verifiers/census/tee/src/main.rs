@@ -1,11 +1,13 @@
+use std::env;
 use std::io::{self, Read};
 use std::thread;
 
 use census_tee::encoding::census_bcs::payload_bcs_bytes;
+use census_tee::graphql::{CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY};
 use census_tee::server::{
     CensusProcessHandler, census_result_json, finalize_process_output, parse_process_data_envelope,
 };
-use census_tee::{ATTESTATION_PUBLIC_KEY_LABEL, CensusInputBundle, process_floor_census_bundle};
+use census_tee::{ATTESTATION_PUBLIC_KEY_LABEL, CensusSnapshotBundle, process_floor_census_bundle};
 use clap::{Parser, Subcommand};
 use sonari_tee_core::{
     HttpRequest, LocalEd25519Signer, PayloadSigner, ProcessDataHandler, TeeContext, VsockListener,
@@ -65,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn fixture_result(args: FixtureArgs) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut stdin = Vec::new();
     io::stdin().read_to_end(&mut stdin)?;
-    let bundle: CensusInputBundle = serde_json::from_slice(&stdin)?;
+    let bundle: CensusSnapshotBundle = serde_json::from_slice(&stdin)?;
     let payload = process_floor_census_bundle(&bundle)?;
     let payload_bcs = payload_bcs_bytes(&payload)?;
     let seed = signing_key_seed_from_env(
@@ -92,7 +94,7 @@ fn run_nautilus_server(args: ServerArgs) -> Result<(), Box<dyn std::error::Error
     }
     let state = EnclaveState {
         signing_key_seed,
-        ctx: TeeContext::new(),
+        ctx: tee_context_from_env(),
     };
     let listener = VsockListener::bind(args.port)?;
     eprintln!(
@@ -149,5 +151,66 @@ fn receive_bootstrap_config(port: u32) -> Result<(), Box<dyn std::error::Error>>
     let mut stream = listener.accept()?;
     let mut bytes = Vec::new();
     stream.read_to_end(&mut bytes)?;
+    let config: BootstrapConfig = serde_json::from_slice(&bytes)?;
+    apply_network_env(config.network.as_deref());
+    apply_egress_proxy_env(config.egress_proxy_url.as_deref());
     Ok(())
+}
+
+fn tee_context_from_env() -> TeeContext {
+    let mut entries = Vec::new();
+    if let Some(network) = non_empty_env(CENSUS_GRAPHQL_NETWORK_KEY) {
+        entries.push((CENSUS_GRAPHQL_NETWORK_KEY, network));
+    }
+    if let Some(proxy) = non_empty_env(CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY) {
+        entries.push((CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, proxy));
+    }
+    if entries.is_empty() {
+        TeeContext::new()
+    } else {
+        TeeContext::with_env(entries)
+    }
+}
+
+fn apply_network_env(network: Option<&str>) {
+    match network.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(network) => set_env_before_server(CENSUS_GRAPHQL_NETWORK_KEY, network),
+        None => unset_env_before_server(CENSUS_GRAPHQL_NETWORK_KEY),
+    }
+}
+
+fn apply_egress_proxy_env(egress_proxy_url: Option<&str>) {
+    match egress_proxy_url {
+        Some(proxy) => set_env_before_server(CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, proxy),
+        None => unset_env_before_server(CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BootstrapConfig {
+    network: Option<String>,
+    egress_proxy_url: Option<String>,
+}
+
+fn non_empty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn set_env_before_server(name: &str, value: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap values are installed.
+    unsafe {
+        env::set_var(name, value);
+    }
+}
+
+fn unset_env_before_server(name: &str) {
+    // The server is not accepting requests yet, so no other Rust thread is reading
+    // the process environment when bootstrap clears stale values.
+    unsafe {
+        env::remove_var(name);
+    }
 }

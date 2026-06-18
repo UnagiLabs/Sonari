@@ -6,14 +6,17 @@ pub mod affected_cells;
 pub mod counts;
 pub mod encoding;
 pub mod error;
+pub mod graphql;
 pub mod server;
 
 pub use affected_cells::{
     AffectedCell, AffectedCellsArtifact, compute_affected_cells_root, validate_affected_cells_root,
 };
 pub use counts::{
-    CensusInputBundle, FloorCensusSnapshot, HomeCellRegisteredEvent, compute_floor_census_counts,
-    compute_floor_census_snapshot, process_floor_census_bundle,
+    CensusInputBundle, CensusResolvedSnapshot, CensusSnapshotBundle, CountedCell,
+    FloorCensusSnapshot, compute_floor_census_counts, compute_floor_census_snapshot,
+    process_floor_census_bundle, process_floor_census_input_bundle,
+    validate_census_input_bundle_context,
 };
 pub use error::CensusError;
 

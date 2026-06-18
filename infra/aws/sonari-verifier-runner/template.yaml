@@ -635,8 +635,8 @@ Resources:
             #!/bin/bash
             set -euo pipefail
             set -a;. /opt/sonari/runner.env;set +a
-            : "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"
-            E="$SONARI_CENSUS_EIF_PATH" A="$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_CENSUS_ENCLAVE_CID" M=/tmp/sc X="/tmp/se /tmp/sm" T=180 B='printf "{}\n" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
+            : "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID" "$RELAYER_NETWORK"
+            E="$SONARI_CENSUS_EIF_PATH" A="$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" C="$SONARI_CENSUS_ENCLAVE_CID" M=/tmp/sc X="/tmp/se /tmp/sm" T=180 B='printf "{\"network\":\"%s\",\"egress_proxy_url\":\"http://127.0.0.1:18080\"}\n" "$RELAYER_NETWORK" | socat -t "$T" - "VSOCK-CONNECT:$C:7777" >/dev/null' exec /opt/sonari/bin/run-http-enclave
             SONARI_CENSUS_ENCLAVE_WRAPPER
             chmod 0500 /opt/sonari/bin/run-census-enclave
             cat >/opt/sonari/bin/run-sonari-verifier <<'SONARI_VERIFIER_DISPATCH'
@@ -754,8 +754,7 @@ Resources:
                 server.serve_forever()
             SONARI_EARTHQUAKE_CONNECT_PROXY
             chmod 0500 /opt/sonari/bin/sonari-earthquake-egress-connect-proxy
-            printf '%s\n' "earthquake.usgs.gov:443" >/opt/sonari/earthquake-egress-allowlist
-            printf '%s\n' "$world_id_api_host:443" >>/opt/sonari/earthquake-egress-allowlist
+            printf '%s\n' "earthquake.usgs.gov:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist
             if ! grep -Fq '{address: 127.0.0.1, port: 18081}' /etc/nitro_enclaves/vsock-proxy.yaml; then
               printf '%s\n' '- {address: 127.0.0.1, port: 18081}' >>/etc/nitro_enclaves/vsock-proxy.yaml
             fi
@@ -811,8 +810,6 @@ Resources:
               printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q\n' "--eif-path $census_eif --cpu-count ${NitroEnclaveCpuCount} --memory ${NitroEnclaveMemoryMiB} --enclave-cid ${NitroEnclaveCid}"
               printf 'SONARI_WORLD_ID_APP_ID=%q\n' "$world_id_app_id"
               printf 'SONARI_WORLD_ID_ACTION=%q\n' "$world_id_action"
-              echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"
-              echo "RELAYER_NETWORK=${RelayerNetwork}"
               echo "SONARI_WORLD_ID_API_BASE=https://developer.world.org"
               echo "SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080"
               echo "SONARI_WORLD_ID_PROOF_MODE=${WorldIdProofMode}"

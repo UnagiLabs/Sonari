@@ -2768,7 +2768,16 @@ describe("AWS runner workflow helper", () => {
                     public_key: finalizedPublicKey,
                 }),
                 JSON.stringify({
-                    payload: { registered_members_by_band: ["1", "2", "3"] },
+                    payload: {
+                        event_uid: (result.payload as EarthquakeOraclePayload).event_uid,
+                        event_revision: (result.payload as EarthquakeOraclePayload).event_revision,
+                        affected_cells_root: (result.payload as EarthquakeOraclePayload)
+                            .affected_cells_root,
+                        membership_registry_id: `0x${"22".repeat(32)}`,
+                        cell_count_index_id: `0x${"33".repeat(32)}`,
+                        census_checkpoint: 42,
+                        registered_members_by_band: ["1", "2", "3"],
+                    },
                     payload_bcs_hex: `0x${"aa".repeat(32)}`,
                     signature: `0x${"11".repeat(64)}`,
                     public_key: finalizedPublicKey,
@@ -2789,7 +2798,7 @@ describe("AWS runner workflow helper", () => {
                 ...baseConfig(),
                 censusNitroEnclaveProcessCommand: "/opt/sonari/bin/run-census-enclave",
                 floorCensus: {
-                    target: "0x123::accessor::set_floor_census",
+                    target: `0x${"12".repeat(32)}::accessor::set_floor_census`,
                     pauseState: "0xpause",
                     verifierRegistry: earthquakeRelayerVerifierRegistry,
                     categoryPool: earthquakeRelayerCategoryPool,
@@ -2829,10 +2838,12 @@ describe("AWS runner workflow helper", () => {
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004000.json' - |",
         );
         expect(ssm.commands[0]).toContain("export SONARI_VERIFIER_KIND=census");
+        expect(ssm.commands[0]).toContain("RELAYER_NETWORK");
         expect(ssm.commands[1]).toContain(
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004001.json' - |",
         );
         expect(ssm.commands[1]).not.toContain('"action":"process_data"');
+        expect(ssm.commands[1]).toContain("RELAYER_NETWORK");
         expect(s3.puts).toHaveLength(2);
         expect(s3.puts[0]).toMatchObject({
             bucket: "sonari-results",

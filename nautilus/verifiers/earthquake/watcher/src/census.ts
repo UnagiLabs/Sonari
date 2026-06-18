@@ -153,6 +153,7 @@ export interface SignedFloorCensusResult {
 }
 
 export interface FloorCensusInputBundle {
+    package_id: string;
     event_uid: string;
     event_revision: number;
     occurred_at_ms: number;
@@ -161,16 +162,7 @@ export interface FloorCensusInputBundle {
     campaign_id: string;
     disaster_event_id: string;
     membership_registry_id: string;
-    cell_count_index_id: string;
-    census_checkpoint: number;
-    counted_cells_root: string;
     affected_cells: AffectedCellsArtifact;
-    home_cell_events: Array<{
-        lineage: string;
-        home_cell: string;
-        registered_at_ms: number;
-    }>;
-    active_lineages: string[];
 }
 
 export interface FloorCensusAffectedCellsResolver {
@@ -182,6 +174,14 @@ export interface FloorCensusAffectedCellsResolver {
 
 export interface ParsedFloorCensusTeeOutput extends SignedFloorCensusResult {
     counts: readonly [bigint, bigint, bigint];
+    payload: {
+        eventUid: string;
+        eventRevision: number;
+        affectedCellsRoot: string;
+        membershipRegistryId: string;
+        cellCountIndexId: string;
+        censusCheckpoint: number;
+    };
 }
 
 export interface FloorCensusRunInput {
@@ -397,13 +397,10 @@ export async function signFloorCensusResult(
 
 export async function buildFloorCensusInputBundle(input: {
     result: TeeCoreResult;
-    homeCellEvents: readonly HomeCellRegisteredEvent[];
-    activeLineages: ReadonlySet<string> | readonly string[];
+    packageId: string;
     campaignId: string;
     disasterEventId: string;
     membershipRegistryId: string;
-    cellCountIndexId: string;
-    censusCheckpoint: number;
     issuedAtMs: number;
     affectedCellsResolver?: FloorCensusAffectedCellsResolver | undefined;
 }): Promise<FloorCensusInputBundle> {
@@ -414,24 +411,15 @@ export async function buildFloorCensusInputBundle(input: {
     validateObjectId(input.campaignId, "campaign_id");
     validateObjectId(input.disasterEventId, "disaster_event_id");
     validateObjectId(input.membershipRegistryId, "membership_registry_id");
-    validateObjectId(input.cellCountIndexId, "cell_count_index_id");
-    validateSafeInteger(input.censusCheckpoint, "census_checkpoint");
+    validateObjectId(input.packageId, "package_id");
     validateSafeInteger(input.issuedAtMs, "issued_at_ms");
 
     const parsed = validation.value;
     const payload = parsed.payload as EarthquakeOraclePayload;
     const affectedCells = await resolveAffectedCellsForCensus(parsed, input.affectedCellsResolver);
-    const snapshot = computeFloorCensusSnapshot({
-        affectedCells,
-        homeCellEvents: input.homeCellEvents,
-        activeLineages: new Set(activeLineageArray(input.activeLineages)),
-        cutoffMs: payload.occurred_at_ms,
-        expectedAffectedCellsRoot: payload.affected_cells_root,
-        eventUid: payload.event_uid,
-        eventRevision: payload.event_revision,
-    });
 
     return {
+        package_id: input.packageId,
         event_uid: payload.event_uid,
         event_revision: payload.event_revision,
         occurred_at_ms: payload.occurred_at_ms,
@@ -440,16 +428,7 @@ export async function buildFloorCensusInputBundle(input: {
         campaign_id: input.campaignId,
         disaster_event_id: input.disasterEventId,
         membership_registry_id: input.membershipRegistryId,
-        cell_count_index_id: input.cellCountIndexId,
-        census_checkpoint: input.censusCheckpoint,
-        counted_cells_root: snapshot.countedCellsRoot,
         affected_cells: affectedCells,
-        home_cell_events: input.homeCellEvents.map((event) => ({
-            lineage: event.lineage,
-            home_cell: canonicalU64Decimal(event.homeCell),
-            registered_at_ms: event.registeredAtMs,
-        })),
-        active_lineages: activeLineageArray(input.activeLineages),
     };
 }
 
@@ -464,6 +443,14 @@ export function parseFloorCensusTeeOutput(input: unknown): ParsedFloorCensusTeeO
     const publicKey = hexToBytes(publicKeyHex);
     return {
         counts,
+        payload: {
+            eventUid: readHexField(payload, "event_uid", 32),
+            eventRevision: readU32Field(payload, "event_revision"),
+            affectedCellsRoot: readHexField(payload, "affected_cells_root", 32),
+            membershipRegistryId: readHexField(payload, "membership_registry_id", 32),
+            cellCountIndexId: readHexField(payload, "cell_count_index_id", 32),
+            censusCheckpoint: readSafeIntegerField(payload, "census_checkpoint"),
+        },
         censusBcs,
         censusBcsHex,
         signature,
@@ -659,24 +646,12 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
             throw new Error("relayer transaction did not include CampaignCreated for census");
         }
         const packageId = packageIdFromTarget(this.config.target);
-        const homeCellEvents = await reader.listHomeCellRegisteredEvents({
-            packageId,
-            checkpoint: campaign.checkpoint,
-        });
-        const activeLineages = await reader.listActiveLineages({
-            membershipRegistryId: this.config.membershipRegistry,
-            lineages: unique(homeCellEvents.map((event) => event.lineage)),
-            checkpoint: campaign.checkpoint,
-        });
         const bundle = await buildFloorCensusInputBundle({
             result: input.result,
-            homeCellEvents,
-            activeLineages,
+            packageId,
             campaignId: campaign.campaignId,
             disasterEventId: input.disasterEventId,
             membershipRegistryId: this.config.membershipRegistry,
-            cellCountIndexId: this.config.cellCountIndex,
-            censusCheckpoint: campaign.checkpoint,
             issuedAtMs: this.config.now?.() ?? Date.now(),
         });
         const signed = parseFloorCensusTeeOutput(
@@ -692,6 +667,11 @@ export class TeeFloorCensusAdapter implements FloorCensusAdapter {
         ) {
             throw new Error("census TEE public key does not match registration metadata");
         }
+        assertCensusTeeOutputMatchesInput(signed, {
+            payload,
+            membershipRegistryId: this.config.membershipRegistry,
+            cellCountIndexId: this.config.cellCountIndex,
+        });
         const response = await client.signAndExecuteTransaction({
             transaction: createSetFloorCensusTransaction({
                 target: this.config.target,
@@ -1170,6 +1150,37 @@ function readExecutionError(
     return undefined;
 }
 
+function assertCensusTeeOutputMatchesInput(
+    signed: ParsedFloorCensusTeeOutput,
+    expected: {
+        payload: EarthquakeOraclePayload;
+        membershipRegistryId: string;
+        cellCountIndexId: string;
+    },
+): void {
+    if (normalizeHex(signed.payload.eventUid) !== normalizeHex(expected.payload.event_uid)) {
+        throw new Error("census TEE output event_uid does not match submitted event");
+    }
+    if (signed.payload.eventRevision !== expected.payload.event_revision) {
+        throw new Error("census TEE output event_revision does not match submitted event");
+    }
+    if (
+        normalizeHex(signed.payload.affectedCellsRoot) !==
+        normalizeHex(expected.payload.affected_cells_root)
+    ) {
+        throw new Error("census TEE output affected_cells_root does not match submitted event");
+    }
+    if (
+        normalizeHex(signed.payload.membershipRegistryId) !==
+        normalizeHex(expected.membershipRegistryId)
+    ) {
+        throw new Error("census TEE output membership_registry_id does not match submit object");
+    }
+    if (normalizeHex(signed.payload.cellCountIndexId) !== normalizeHex(expected.cellCountIndexId)) {
+        throw new Error("census TEE output cell_count_index_id does not match submit object");
+    }
+}
+
 function parseHomeCellRegisteredEvent(event: unknown): HomeCellRegisteredEvent {
     const parsedJson = readEventJson(event);
     let lineage: string | undefined;
@@ -1420,6 +1431,28 @@ function readHexField(input: unknown, field: string, expectedBytes: number | und
     return `0x${normalized.toLowerCase()}`;
 }
 
+function readU32Field(input: unknown, field: string): number {
+    const value = readSafeIntegerField(input, field);
+    if (value < 0 || value > U32_MAX) {
+        throw new Error(`Census TEE output ${field} is malformed`);
+    }
+    return value;
+}
+
+function readSafeIntegerField(input: unknown, field: string): number {
+    const value = readUnknownField(input, field);
+    const parsed =
+        typeof value === "number"
+            ? value
+            : typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)
+              ? Number(value)
+              : Number.NaN;
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+        throw new Error(`Census TEE output ${field} is malformed`);
+    }
+    return parsed;
+}
+
 function readBooleanField(input: unknown, field: string): boolean {
     return readUnknownField(input, field) === true;
 }
@@ -1501,10 +1534,6 @@ function readBytesHex(input: unknown): string | undefined {
 
 function unique(values: readonly string[]): string[] {
     return [...new Set(values)];
-}
-
-function activeLineageArray(input: ReadonlySet<string> | readonly string[]): string[] {
-    return Array.isArray(input) ? unique(input) : [...input];
 }
 
 function canonicalU64Decimal(value: string): string {

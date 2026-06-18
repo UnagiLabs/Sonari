@@ -500,18 +500,18 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).not.toContain("walrus_upload_relay_host");
     });
 
-    it("keeps the earthquake CONNECT proxy and vsock-proxy egress lines unchanged", async () => {
+    it("keeps the earthquake CONNECT proxy and vsock-proxy egress route stable", async () => {
         const template = await readTemplate();
 
         // The earthquake egress path (CONNECT proxy on 18081, vsock-proxy 18080 ->
-        // 127.0.0.1:18081, usgs.gov allowlist) must remain byte-for-byte stable so
-        // STEP 2's World ID egress unification never perturbs the earthquake route.
+        // 127.0.0.1:18081, usgs.gov allowlist) must keep the same proxy route while
+        // additional verifier destinations share the allowlist file.
         expect(template).toContain(
             "ExecStart=/opt/sonari/bin/sonari-earthquake-egress-connect-proxy --listen-port 18081 --allowlist-file /opt/sonari/earthquake-egress-allowlist",
         );
         expect(template).toContain("ExecStart=$vsock_proxy_path 18080 127.0.0.1 18081");
         expect(template).toContain(
-            "printf '%s\\n' \"earthquake.usgs.gov:443\" >/opt/sonari/earthquake-egress-allowlist",
+            'printf \'%s\\n\' "earthquake.usgs.gov:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443" "graphql.testnet.sui.io:443" "graphql.devnet.sui.io:443" >/opt/sonari/earthquake-egress-allowlist',
         );
         // Exactly one earthquake CONNECT proxy and one earthquake vsock proxy unit.
         expect(
@@ -543,10 +543,10 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         // as earthquake (http://127.0.0.1:18080), whose host-side allowlist gates the
         // destination -- the host never opens a separate localhost World ID tunnel.
         expect(template).toContain("SONARI_WORLD_ID_EGRESS_PROXY_URL=http://127.0.0.1:18080");
-        // The World ID API host is appended to the shared egress allowlist so the
+        // The World ID API host is included in the shared egress allowlist so the
         // CONNECT proxy permits exactly the canonical World ID destination on 443.
         expect(template).toContain(
-            "printf '%s\\n' \"$world_id_api_host:443\" >>/opt/sonari/earthquake-egress-allowlist",
+            '"earthquake.usgs.gov:443" "$world_id_api_host:443" "graphql.mainnet.sui.io:443"',
         );
         // The legacy host-controlled localhost World ID tunnel (vsock-proxy 8000 ->
         // host:443) and its upstream-base env are gone; egress is unified on the proxy.
@@ -616,12 +616,19 @@ describe("AWS Sonari verifier runner CloudFormation template", () => {
         expect(template).toContain("printf 'SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS=%q");
         expect(template).toContain("printf 'SONARI_CENSUS_NITRO_ENCLAVE_PROCESS_COMMAND=%q");
         expect(template).toContain("test -x /opt/sonari/bin/run-census-enclave");
+        expect(template).toContain("graphql.mainnet.sui.io:443");
+        expect(template).toContain("graphql.testnet.sui.io:443");
+        expect(template).toContain("graphql.devnet.sui.io:443");
 
         expect(censusWrapper).toContain("/opt/sonari/runner.env");
         expect(censusWrapper).toContain("set -a;. /opt/sonari/runner.env;set +a");
         expect(censusWrapper).toContain(
-            ': "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID"',
+            ': "$SONARI_CENSUS_EIF_PATH" "$SONARI_CENSUS_NITRO_RUN_ENCLAVE_ARGS" "$SONARI_CENSUS_ENCLAVE_CID" "$RELAYER_NETWORK"',
         );
+        expect(censusWrapper).toContain(
+            'printf "{\\"network\\":\\"%s\\",\\"egress_proxy_url\\":\\"http://127.0.0.1:18080\\"}\\n"',
+        );
+        expect(censusWrapper).toContain('"$RELAYER_NETWORK"');
         expect(censusWrapper).toContain("M=/tmp/sc");
         expect(censusWrapper).toContain('X="/tmp/se /tmp/sm"');
         expect(censusWrapper).toContain("VSOCK-CONNECT:$C:7777");
