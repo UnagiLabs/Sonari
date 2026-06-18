@@ -592,7 +592,8 @@ new shard が無ければ lazy create する。
 count が 0 になっても cell key は削除せず、`active_count = 0` のまま保持する。
 再度同じ cell に member が登録または移動した場合は、既存 key を増やす。
 
-local smoke / devInspect / test 用に `read_count_or_zero` と `read_counts_or_zero` を提供する。
+local smoke / devInspect / test 用の公開 reader として、
+`reader::read_cell_count_or_zero` と `reader::read_cell_counts_or_zero` を提供する。
 missing shard と missing cell は `0` として返す。
 後続 TEE / runner は affected cells を `h3_cell % 4096` で group し、
 存在する shard の dynamic field から count を読む。

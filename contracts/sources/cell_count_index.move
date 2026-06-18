@@ -70,7 +70,7 @@ public(package) fun create_index(
     index_id
 }
 
-public fun read_count_or_zero(index: &CellCountIndex, h3_cell: u64): u64 {
+public(package) fun read_count_or_zero(index: &CellCountIndex, h3_cell: u64): u64 {
     let shard_id = shard_id(h3_cell);
     if (!dynamic_object_field::exists_with_type<u64, CellCountShard>(&index.id, shard_id)) {
         return 0
@@ -85,7 +85,7 @@ public fun read_count_or_zero(index: &CellCountIndex, h3_cell: u64): u64 {
     dynamic_field::borrow<u64, CellCount>(&shard.id, h3_cell).active_count
 }
 
-public fun read_counts_or_zero(index: &CellCountIndex, h3_cells: vector<u64>): vector<u64> {
+public(package) fun read_counts_or_zero(index: &CellCountIndex, h3_cells: vector<u64>): vector<u64> {
     let mut counts = vector[];
     let mut i = 0;
     while (i < h3_cells.length()) {

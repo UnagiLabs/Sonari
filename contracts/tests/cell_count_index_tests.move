@@ -2,6 +2,7 @@
 module contracts::cell_count_index_tests;
 
 use contracts::cell_count_index;
+use contracts::reader;
 use sui::event;
 use sui::test_scenario;
 
@@ -63,12 +64,12 @@ fun missing_shard_and_missing_cell_read_as_zero() {
     scenario.next_tx(ADMIN);
     {
         let mut index = scenario.take_shared_by_id<cell_count_index::CellCountIndex>(index_id);
-        assert!(cell_count_index::read_count_or_zero(&index, H3_CELL) == 0);
+        assert!(reader::read_cell_count_or_zero(&index, H3_CELL) == 0);
 
         cell_count_index::increment_or_create(&mut index, H3_CELL, scenario.ctx());
-        assert!(cell_count_index::read_count_or_zero(&index, OTHER_H3_CELL) == 0);
+        assert!(reader::read_cell_count_or_zero(&index, OTHER_H3_CELL) == 0);
 
-        let counts = cell_count_index::read_counts_or_zero(&index, vector[H3_CELL, OTHER_H3_CELL]);
+        let counts = reader::read_cell_counts_or_zero(&index, vector[H3_CELL, OTHER_H3_CELL]);
         assert!(*counts.borrow(0) == 1);
         assert!(*counts.borrow(1) == 0);
 
@@ -91,7 +92,7 @@ fun first_increment_lazily_creates_shard_and_cell_count() {
         assert!(!cell_count_index::has_shard_for_testing(&index, shard_id));
         cell_count_index::increment_or_create(&mut index, H3_CELL, scenario.ctx());
         assert!(cell_count_index::has_shard_for_testing(&index, shard_id));
-        assert!(cell_count_index::read_count_or_zero(&index, H3_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&index, H3_CELL) == 1);
 
         let emitted = event::events_by_type<cell_count_index::CellCountShardCreated>();
         assert!(emitted.length() == 1);
@@ -130,8 +131,8 @@ fun second_increment_in_same_shard_increments_existing_count() {
         cell_count_index::increment_or_create(&mut index, H3_CELL, scenario.ctx());
         cell_count_index::increment_or_create(&mut index, SAME_SHARD_H3_CELL, scenario.ctx());
 
-        assert!(cell_count_index::read_count_or_zero(&index, H3_CELL) == 2);
-        assert!(cell_count_index::read_count_or_zero(&index, SAME_SHARD_H3_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&index, H3_CELL) == 2);
+        assert!(reader::read_cell_count_or_zero(&index, SAME_SHARD_H3_CELL) == 1);
         assert!(cell_count_index::shard_object_id_for_testing(&index, shard_id) == shard_object_id);
 
         let emitted = event::events_by_type<cell_count_index::CellCountShardCreated>();
@@ -155,11 +156,11 @@ fun decrement_to_zero_keeps_cell_readable_and_reincrement_works() {
         cell_count_index::increment_or_create(&mut index, H3_CELL, scenario.ctx());
         assert!(cell_count_index::has_cell_for_testing(&index, H3_CELL));
         cell_count_index::decrement_existing(&mut index, H3_CELL);
-        assert!(cell_count_index::read_count_or_zero(&index, H3_CELL) == 0);
+        assert!(reader::read_cell_count_or_zero(&index, H3_CELL) == 0);
         assert!(cell_count_index::has_cell_for_testing(&index, H3_CELL));
 
         cell_count_index::increment_or_create(&mut index, H3_CELL, scenario.ctx());
-        assert!(cell_count_index::read_count_or_zero(&index, H3_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&index, H3_CELL) == 1);
         assert!(cell_count_index::has_cell_for_testing(&index, H3_CELL));
 
         test_scenario::return_shared(index);

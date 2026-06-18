@@ -158,7 +158,7 @@ fun first_registration_increments_home_cell_count_and_creates_shard() {
         let shard_id = cell_count_index::shard_id_for_testing(HOME_CELL);
         assert!(cell_count_index::has_shard_for_testing(&count_index, shard_id));
         assert!(cell_count_index::has_cell_for_testing(&count_index, HOME_CELL));
-        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&count_index, HOME_CELL) == 1);
         test_scenario::return_shared(count_index);
     };
 
@@ -174,7 +174,7 @@ fun second_member_in_same_home_cell_increments_existing_count() {
     scenario.next_tx(ADMIN);
     {
         let count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
-        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 2);
+        assert!(reader::read_cell_count_or_zero(&count_index, HOME_CELL) == 2);
         test_scenario::return_shared(count_index);
     };
 
@@ -256,7 +256,7 @@ fun same_cell_update_preserves_count_and_event_behavior() {
     scenario.next_tx(ADMIN);
     {
         let count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
-        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&count_index, HOME_CELL) == 1);
         test_scenario::return_shared(count_index);
     };
 
@@ -283,9 +283,9 @@ fun same_shard_home_cell_move_decrements_old_to_zero_and_increments_new() {
     {
         let count_index = scenario.take_shared<cell_count_index::CellCountIndex>();
         assert!(cell_count_index::shard_id_for_testing(HOME_CELL) == cell_count_index::shard_id_for_testing(PROMOTED_HOME_CELL));
-        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 0);
+        assert!(reader::read_cell_count_or_zero(&count_index, HOME_CELL) == 0);
         assert!(cell_count_index::has_cell_for_testing(&count_index, HOME_CELL));
-        assert!(cell_count_index::read_count_or_zero(&count_index, PROMOTED_HOME_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&count_index, PROMOTED_HOME_CELL) == 1);
         test_scenario::return_shared(count_index);
     };
 
@@ -315,9 +315,9 @@ fun cross_shard_home_cell_move_decrements_old_and_lazily_creates_new_shard() {
         let new_shard_id = cell_count_index::shard_id_for_testing(CROSS_SHARD_HOME_CELL);
         assert!(cell_count_index::shard_id_for_testing(HOME_CELL) != new_shard_id);
         assert!(cell_count_index::has_shard_for_testing(&count_index, new_shard_id));
-        assert!(cell_count_index::read_count_or_zero(&count_index, HOME_CELL) == 0);
+        assert!(reader::read_cell_count_or_zero(&count_index, HOME_CELL) == 0);
         assert!(cell_count_index::has_cell_for_testing(&count_index, HOME_CELL));
-        assert!(cell_count_index::read_count_or_zero(&count_index, CROSS_SHARD_HOME_CELL) == 1);
+        assert!(reader::read_cell_count_or_zero(&count_index, CROSS_SHARD_HOME_CELL) == 1);
         test_scenario::return_shared(count_index);
     };
 
