@@ -1536,10 +1536,6 @@ function unique(values: readonly string[]): string[] {
     return [...new Set(values)];
 }
 
-function activeLineageArray(input: ReadonlySet<string> | readonly string[]): string[] {
-    return Array.isArray(input) ? unique(input) : [...input];
-}
-
 function canonicalU64Decimal(value: string): string {
     if (!/^(0|[1-9][0-9]*)$/.test(value)) {
         throw new Error(`u64 decimal is not canonical: ${value}`);

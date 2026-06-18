@@ -2838,10 +2838,12 @@ describe("AWS runner workflow helper", () => {
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004000.json' - |",
         );
         expect(ssm.commands[0]).toContain("export SONARI_VERIFIER_KIND=census");
+        expect(ssm.commands[0]).toContain("RELAYER_NETWORK");
         expect(ssm.commands[1]).toContain(
             "aws s3 cp 's3://sonari-results/source-artifacts/us7000sonari/census-tee-inputs/1800000004001.json' - |",
         );
         expect(ssm.commands[1]).not.toContain('"action":"process_data"');
+        expect(ssm.commands[1]).toContain("RELAYER_NETWORK");
         expect(s3.puts).toHaveLength(2);
         expect(s3.puts[0]).toMatchObject({
             bucket: "sonari-results",
