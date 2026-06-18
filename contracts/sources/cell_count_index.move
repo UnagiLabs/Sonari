@@ -1,5 +1,7 @@
 module contracts::cell_count_index;
 
+use std::type_name;
+use sui::address;
 use sui::dynamic_field;
 use sui::dynamic_object_field;
 use sui::event;
@@ -174,7 +176,13 @@ fun shard_id(h3_cell: u64): u64 {
 }
 
 fun package_id(): ID {
-    object::id_from_address(@contracts)
+    // `@contracts` resolves to 0x0 in the publish transaction (the package has no
+    // address yet when init runs), so it cannot be emitted as the real package id.
+    // Derive the original (first-version) package address from a type defined in this
+    // package instead, which the runtime resolves to the actual on-chain address.
+    let type_name = type_name::with_original_ids<CellCountIndex>();
+    let package_address = address::from_ascii_bytes(type_name.address_string().as_bytes());
+    object::id_from_address(package_address)
 }
 
 fun assert_valid_shard(index: &CellCountIndex, shard: &CellCountShard, shard_id: u64) {
