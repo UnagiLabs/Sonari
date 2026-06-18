@@ -1,3 +1,4 @@
+import { toBase64 } from "@mysten/sui/utils";
 import { describe, expect, it, vi } from "vitest";
 import {
     type ClaimCampaignEventCursor,
@@ -106,6 +107,38 @@ describe("claim campaign parsing", () => {
             affectedCellsRoot:
                 "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
         });
+    });
+
+    it("parses base64-encoded event_uid and affected_cells_root from gRPC into 0x hex", () => {
+        // SuiGrpcClient は vector<u8> / [u8; 32] を base64 文字列で返す（JSON-RPC は数値配列）。
+        // base64 を扱えないと event_uid が null になり Campaign / DisasterEvent ごと脱落して
+        // 一覧が常に空になる（#461 実機バグ）。base64 でも 0x hex へ復元できることを保証する。
+        const bytes = Uint8Array.from({ length: 32 }, (_, index) => index);
+        const base64 = toBase64(bytes);
+        const expectedHex =
+            "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+
+        expect(
+            parseCampaignObject(CAMPAIGN_ID, campaignObjectJson({ event_uid: base64 })),
+        ).toMatchObject({ eventUid: expectedHex });
+
+        expect(
+            parseDisasterEventObject(
+                DISASTER_EVENT_ID,
+                disasterEventObjectJson({ event_uid: base64, affected_cells_root: base64 }),
+            ),
+        ).toMatchObject({ eventUid: expectedHex, affectedCellsRoot: expectedHex });
+    });
+
+    it("returns null for base64 that does not decode to 32 bytes", () => {
+        // 32 byte 以外の base64 は fail-closed で null（誤った値を表示しない）。
+        const shortBase64 = toBase64(Uint8Array.from({ length: 16 }, () => 1));
+        expect(
+            parseDisasterEventObject(
+                DISASTER_EVENT_ID,
+                disasterEventObjectJson({ affected_cells_root: shortBase64 }),
+            ),
+        ).toBeNull();
     });
 
     it("returns null for malformed Campaign or DisasterEvent object JSON", () => {

@@ -1,5 +1,5 @@
 import { bcs } from "@mysten/sui/bcs";
-import { deriveDynamicFieldID } from "@mysten/sui/utils";
+import { deriveDynamicFieldID, fromBase64 } from "@mysten/sui/utils";
 
 const QUERY_EVENTS_PAGE_LIMIT = 100;
 
@@ -676,7 +676,13 @@ function parseObjectId(value: unknown): string | null {
 function parseBytes32Hex(value: unknown): string | null {
     if (typeof value === "string") {
         const trimmed = value.trim();
-        return /^0x[0-9a-fA-F]{64}$/u.test(trimmed) ? trimmed.toLowerCase() : null;
+        // 0x 付き hex 形（JSON-RPC や明示 hex）
+        if (/^0x[0-9a-fA-F]{64}$/u.test(trimmed)) {
+            return trimmed.toLowerCase();
+        }
+        // gRPC（SuiGrpcClient）は vector<u8> / [u8; 32] を base64 文字列で返す。
+        // 0x hex でなければ base64 として 32 byte へデコードを試みる。
+        return parseBase64Bytes32Hex(trimmed);
     }
     if (!Array.isArray(value) || value.length !== 32) {
         return null;
@@ -689,6 +695,28 @@ function parseBytes32Hex(value: unknown): string | null {
         bytes.push(item.toString(16).padStart(2, "0"));
     }
     return `0x${bytes.join("")}`;
+}
+
+// gRPC が返す base64 の 32 byte 値を 0x hex へ変換する。
+// 32 byte 以外・base64 として不正な場合は null（fail-closed）。
+function parseBase64Bytes32Hex(value: string): string | null {
+    if (value.length === 0) {
+        return null;
+    }
+    let bytes: Uint8Array;
+    try {
+        bytes = fromBase64(value);
+    } catch {
+        return null;
+    }
+    if (bytes.length !== 32) {
+        return null;
+    }
+    let hex = "";
+    for (const byte of bytes) {
+        hex += byte.toString(16).padStart(2, "0");
+    }
+    return `0x${hex}`;
 }
 
 function parseBoolean(value: unknown): boolean | null {
