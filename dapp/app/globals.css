@@ -36,7 +36,8 @@
     0 8px 24px oklch(0.35 0.04 145 / 0.08),
     0 2px 6px oklch(0.4 0.03 145 / 0.05);
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-serif: "Instrument Serif", "Cormorant Garamond", Georgia, serif;
+  --font-serif: "Instrument Serif", "Cormorant Garamond", "Noto Serif JP", "Yu Mincho",
+    "Hiragino Mincho ProN", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --container: 1280px;
 }
@@ -3562,121 +3563,231 @@ h4 {
  * ---------------------------------------------------------------------- */
 
 .donate-emergency-banner {
+  --donate-emergency-font-sans: "Noto Sans JP", var(--font-sans);
+  --donate-emergency-font-serif: "Noto Serif JP", var(--font-serif);
+
   display: grid;
-  gap: 10px;
-  padding: 14px 20px;
-  border: 2px solid oklch(0.78 0.08 25);
+  grid-template-columns: 6px minmax(0, 1fr);
+  overflow: hidden;
+  border: 2px solid oklch(0.84 0.08 25);
   border-radius: var(--radius-lg);
-  background: oklch(0.97 0.025 25);
-  color: oklch(0.42 0.09 25);
+  background: oklch(0.995 0.005 25);
+  color: oklch(0.28 0.07 25);
+  box-shadow: 0 18px 44px oklch(0.62 0.18 25 / 0.12);
+}
+
+.donate-emergency-banner--with-magnitude {
+  grid-template-columns: 6px minmax(210px, 250px) minmax(0, 1fr);
+}
+
+.donate-emergency-banner-rail {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  background: oklch(0.56 0.18 25);
+}
+
+.donate-emergency-banner-magnitude {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 18px 30px;
+  border-right: 1px solid oklch(0.86 0.055 25);
+  background: oklch(0.96 0.035 25);
+}
+
+.donate-emergency-banner-magnitude div {
+  display: grid;
+  gap: 8px;
+}
+
+.donate-emergency-banner-magnitude dt {
+  color: oklch(0.48 0.11 25);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.donate-emergency-banner-magnitude dd {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  color: oklch(0.48 0.17 25);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: clamp(58px, 6vw, 72px);
+  font-weight: 800;
+  line-height: 0.9;
+}
+
+.donate-emergency-banner-magnitude dd span {
+  color: oklch(0.55 0.08 25);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.donate-emergency-banner-content {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 32px;
+  align-items: center;
+  padding: 20px 40px;
+}
+
+.donate-emergency-banner--with-magnitude .donate-emergency-banner-content {
+  grid-column: 3;
 }
 
 .donate-emergency-banner-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+  grid-column: 1;
 }
 
 .donate-emergency-banner-tag {
-  display: inline-block;
-  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
   border-radius: var(--radius-sm, 4px);
-  background: oklch(0.78 0.08 25);
+  background: oklch(0.58 0.16 25);
   color: oklch(0.99 0.005 25);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+.donate-emergency-banner-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: oklch(0.48 0.17 25);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.donate-emergency-banner-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: oklch(0.74 0.08 25);
+  box-shadow: 0 0 0 0 oklch(0.74 0.08 25 / 0.32);
+  animation: donate-emergency-live-pulse 1.6s ease-out infinite;
+}
+
 .donate-emergency-banner-title {
+  grid-column: 1;
   margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: oklch(0.38 0.1 25);
+  color: oklch(0.22 0.055 25);
+  font-family: var(--donate-emergency-font-serif);
+  font-size: clamp(26px, 2.5vw, 34px);
+  font-weight: 500;
+  line-height: 1.12;
 }
 
 .donate-emergency-banner-body {
+  grid-column: 1;
   margin: 0;
+  color: oklch(0.43 0.04 25);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 14px;
-  line-height: 1.55;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .donate-emergency-banner-cta {
-  justify-self: start;
-  padding: 8px 16px;
-  border: 1.5px solid oklch(0.68 0.1 25);
-  border-radius: var(--radius-md);
-  background: oklch(0.94 0.04 25);
-  color: oklch(0.38 0.1 25);
-  font-size: 14px;
-  font-weight: 600;
+  min-width: min(100%, 360px);
+  min-height: 56px;
+  max-width: 100%;
+  padding: 13px 28px;
+  border: 1.5px solid oklch(0.55 0.17 25);
+  background: oklch(0.55 0.17 25);
+  color: oklch(0.99 0.005 25);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: 16px;
+  font-weight: 800;
+  text-align: center;
+  white-space: normal;
   cursor: pointer;
+  box-shadow: 0 14px 28px oklch(0.55 0.17 25 / 0.22);
 }
 
-/* 受け取る（主）と寄付する（副）を 1 枠の中で横並びにする。狭い画面では折り返す。 */
+.donate-emergency-banner-cta::after {
+  content: "→";
+  font-size: 18px;
+  line-height: 1;
+}
+
 .donate-emergency-banner-actions {
+  grid-column: 2;
+  grid-row: 1 / span 3;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+  justify-content: flex-end;
 }
 
-/* 受け取る導線は主ボタンとして塗りつぶしで強調し、寄付ボタンより目立たせる。 */
 .donate-emergency-banner-cta-primary {
-  background: oklch(0.62 0.18 25);
-  border-color: oklch(0.62 0.18 25);
-  color: oklch(0.99 0.005 25);
-}
-
-.donate-emergency-banner-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: oklch(0.62 0.18 25);
-  color: oklch(0.99 0.005 25);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.donate-emergency-banner-status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
   background: oklch(0.99 0.005 25);
+  color: oklch(0.45 0.13 25);
+  box-shadow: none;
 }
 
-.donate-emergency-banner-details {
-  display: grid;
-  gap: 6px 16px;
-  margin: 2px 0 0;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  background: oklch(0.99 0.01 25);
-  border: 1px solid oklch(0.88 0.05 25);
+@keyframes donate-emergency-live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.74 0.08 25 / 0.32);
+  }
+
+  70% {
+    box-shadow: 0 0 0 8px oklch(0.74 0.08 25 / 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.74 0.08 25 / 0);
+  }
 }
 
-.donate-emergency-banner-detail {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 13px;
-}
+@media (max-width: 760px) {
+  .donate-emergency-banner,
+  .donate-emergency-banner--with-magnitude {
+    grid-template-columns: 6px minmax(0, 1fr);
+  }
 
-.donate-emergency-banner-detail dt {
-  color: oklch(0.5 0.06 25);
-  font-weight: 600;
-}
+  .donate-emergency-banner-magnitude {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 16px 22px;
+    border-right: 0;
+    border-bottom: 1px solid oklch(0.86 0.055 25);
+  }
 
-.donate-emergency-banner-detail dd {
-  margin: 0;
-  color: oklch(0.34 0.09 25);
-  font-weight: 600;
-  text-align: right;
+  .donate-emergency-banner-content,
+  .donate-emergency-banner--with-magnitude .donate-emergency-banner-content {
+    grid-column: 2;
+    grid-row: auto;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 20px 22px;
+  }
+
+  .donate-emergency-banner-actions {
+    grid-column: 1;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+
+  .donate-emergency-banner-cta {
+    width: 100%;
+  }
 }
 
 /* -------------------------------------------------------------------------

@@ -32,7 +32,7 @@ describe("buildTohokuEmergencyCampaign", () => {
 
     it("builds detail values from the fixture data (M9.1 etc.)", () => {
         const byLabel = new Map(campaign.details?.map((d) => [d.label, d.value]));
-        expect(byLabel.get("MAGNITUDE")).toBe("M 9.1");
+        expect(byLabel.get("M")).toBe("9.1");
         expect(byLabel.get("MMI")).toBe("8.18");
         expect(byLabel.get("REGION")).toBe("2011 Great Tohoku Earthquake, Japan");
         expect(byLabel.get("DATE")).toBe("2011-03-11");

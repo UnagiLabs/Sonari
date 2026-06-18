@@ -479,9 +479,11 @@
         },
         "emergency": {
             "tag": "緊急",
-            "title": "緊急キャンペーン実施中",
+            "magnitudeLabel": "マグニチュード",
+            "liveStatus": "災害救援受付中",
+            "title": "緊急寄付実施中",
             "body": "現在、災害救援キャンペーンへの寄付を受け付けています: {name}",
-            "cta": "このキャンペーンに寄付する"
+            "cta": "寄付する"
         },
         "category": {
             "comingSoonBadge": "近日対応",
