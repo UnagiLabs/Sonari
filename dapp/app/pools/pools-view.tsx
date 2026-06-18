@@ -17,13 +17,13 @@ import { useCurrentClient } from "@mysten/dapp-kit-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
+import { readClaimCampaigns } from "../claim/claim-campaigns";
+import { createClaimReadClient } from "../claim/claim-read-client";
 import { LoadingIndicator } from "../components/loading-indicator";
+import { readDonateEnvConfig } from "../donate/donate-config";
 import { formatDate } from "../i18n/format";
 import { SiteTopbar } from "../i18n/site-topbar";
 import type { SonariLocale } from "../register/wizard/locale";
-import { readClaimCampaigns } from "../claim/claim-campaigns";
-import { createClaimReadClient } from "../claim/claim-read-client";
-import { readDonateEnvConfig } from "../donate/donate-config";
 import { buildDisasterPoolViews, type DisasterPoolView } from "./disaster-pool-view-model";
 
 // ---------------------------------------------------------------------------

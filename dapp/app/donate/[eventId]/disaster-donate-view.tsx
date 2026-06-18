@@ -21,11 +21,11 @@ import { createClaimReadClient } from "../../claim/claim-read-client";
 import { LoadingIndicator } from "../../components/loading-indicator";
 import { formatDate } from "../../i18n/format";
 import { SiteTopbar } from "../../i18n/site-topbar";
+import type { DisasterPoolView } from "../../pools/disaster-pool-view-model";
+import { buildDisasterPoolViews } from "../../pools/disaster-pool-view-model";
 import type { SonariLocale } from "../../register/wizard/locale";
 import { readDonateEnvConfig } from "../donate-config";
 import { DonateView } from "../donate-view";
-import { buildDisasterPoolViews } from "../../pools/disaster-pool-view-model";
-import type { DisasterPoolView } from "../../pools/disaster-pool-view-model";
 import { resolveCampaignByEvent } from "./resolve-campaign-by-event";
 
 // AffectedAreaMap は "use client" だが next/dynamic ssr:false にしておく

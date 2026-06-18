@@ -8,8 +8,8 @@ import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { readClaimCampaigns } from "./claim/claim-campaigns";
 import { createClaimReadClient } from "./claim/claim-read-client";
-import { readDonateDestinations } from "./donate/donate-destinations";
 import { readDonateEnvConfig } from "./donate/donate-config";
+import { readDonateDestinations } from "./donate/donate-destinations";
 import {
     type DonateDestinationReadState,
     selectEmergencyBannerCampaign,
