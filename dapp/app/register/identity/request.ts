@@ -50,7 +50,7 @@ export function buildIdentitySubmitRequest(
             : undefined;
 
     const request: IdentitySubmitRequest = {
-        registry_id: requireString(registryId, "NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID"),
+        registry_id: requireString(registryId, "identityRegistry"),
         membership_id: membershipId,
         owner,
         provider,

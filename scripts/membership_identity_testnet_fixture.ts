@@ -36,6 +36,7 @@ export const GENESIS_KIND_PAUSE_STATE = 2;
 export const GENESIS_KIND_MEMBERSHIP_REGISTRY = 6;
 export const GENESIS_KIND_VERIFIER_REGISTRY = 7;
 export const GENESIS_KIND_IDENTITY_REGISTRY = 9;
+export const GENESIS_KIND_CELL_COUNT_INDEX = 14;
 
 export const EXPECTED_OBJECT_TYPES = {
     adminCap: "::admin::AdminCap",
@@ -44,6 +45,7 @@ export const EXPECTED_OBJECT_TYPES = {
     membershipRegistry: "::membership::MembershipRegistry",
     verifierRegistry: "::metadata_verifier::VerifierRegistry",
     allowedResidenceCellRegistry: "::allowed_residence_cell::AllowedResidenceCellRegistry",
+    cellCountIndex: "::cell_count_index::CellCountIndex",
     membershipPass: "::membership::MembershipPass",
 } as const;
 
@@ -56,6 +58,7 @@ export interface MembershipIdentityFixtureObjects {
     readonly identityRegistryId: string;
     readonly membershipRegistryId: string;
     readonly verifierRegistryId: string;
+    readonly cellCountIndexId: string;
     readonly allowedResidenceCellRegistryId: string;
     readonly membershipPassId: string;
 }
@@ -98,6 +101,7 @@ export interface MembershipIdentityFixtureManifest {
         readonly identity_registry_id: string;
         readonly membership_registry_id: string;
         readonly verifier_registry_id: string;
+        readonly cell_count_index_id: string;
         readonly allowed_residence_cell_registry_id: string;
         readonly membership_pass_id: string;
     };
@@ -164,6 +168,7 @@ export interface SuiPublishFixtureObjects {
     readonly identityRegistryId: string;
     readonly membershipRegistryId: string;
     readonly verifierRegistryId: string;
+    readonly cellCountIndexId: string;
 }
 
 export interface SuiCommandPlan {
@@ -205,6 +210,7 @@ export interface MembershipIdentityFixtureBaseObjects {
     readonly identityRegistryId: string;
     readonly membershipRegistryId: string;
     readonly verifierRegistryId: string;
+    readonly cellCountIndexId: string;
 }
 
 export interface MembershipIdentityFixtureBaseObjectCandidates {
@@ -214,6 +220,7 @@ export interface MembershipIdentityFixtureBaseObjectCandidates {
     readonly identityRegistryId?: string;
     readonly membershipRegistryId?: string;
     readonly verifierRegistryId?: string;
+    readonly cellCountIndexId?: string;
 }
 
 export interface ResolveBaseFixtureObjectsInput {
@@ -246,6 +253,7 @@ export interface MembershipPassFixtureInput {
     readonly packageId: string;
     readonly pauseStateId: string;
     readonly membershipRegistryId: string;
+    readonly cellCountIndexId: string;
     readonly allowedResidenceCellRegistryId: string;
     readonly homeCell: string;
     readonly proofLeft: string;
@@ -326,6 +334,7 @@ export function buildMembershipIdentityFixtureManifest(
             identity_registry_id: input.objects.identityRegistryId,
             membership_registry_id: input.objects.membershipRegistryId,
             verifier_registry_id: input.objects.verifierRegistryId,
+            cell_count_index_id: input.objects.cellCountIndexId,
             allowed_residence_cell_registry_id: input.objects.allowedResidenceCellRegistryId,
             membership_pass_id: input.objects.membershipPassId,
         },
@@ -377,6 +386,7 @@ export function renderMembershipIdentityFixtureEnv(
         `SONARI_IDENTITY_REGISTRY_ID=${manifest.objects.identity_registry_id}`,
         `SONARI_MEMBERSHIP_REGISTRY_ID=${manifest.objects.membership_registry_id}`,
         `SONARI_VERIFIER_REGISTRY_ID=${manifest.objects.verifier_registry_id}`,
+        `SONARI_CELL_COUNT_INDEX_ID=${manifest.objects.cell_count_index_id}`,
         `SONARI_MEMBERSHIP_PASS_ID=${manifest.objects.membership_pass_id}`,
         "",
     ].join("\n");
@@ -389,6 +399,7 @@ export function validateFixtureObjects(objects: MembershipIdentityFixtureObjects
     assertHexObjectId(objects.identityRegistryId, "identityRegistryId");
     assertHexObjectId(objects.membershipRegistryId, "membershipRegistryId");
     assertHexObjectId(objects.verifierRegistryId, "verifierRegistryId");
+    assertHexObjectId(objects.cellCountIndexId, "cellCountIndexId");
     assertHexObjectId(objects.allowedResidenceCellRegistryId, "allowedResidenceCellRegistryId");
     assertHexObjectId(objects.membershipPassId, "membershipPassId");
 }
@@ -469,6 +480,7 @@ export function parsePublishFixtureObjects(input: unknown): SuiPublishFixtureObj
     const membershipRegistryId = genesis.get(GENESIS_KIND_MEMBERSHIP_REGISTRY);
     const verifierRegistryId = genesis.get(GENESIS_KIND_VERIFIER_REGISTRY);
     const identityRegistryId = genesis.get(GENESIS_KIND_IDENTITY_REGISTRY);
+    const cellCountIndexId = genesis.get(GENESIS_KIND_CELL_COUNT_INDEX);
 
     if (pauseStateId === undefined) {
         throw new Error("publish result did not include PauseState genesis object");
@@ -482,6 +494,9 @@ export function parsePublishFixtureObjects(input: unknown): SuiPublishFixtureObj
     if (identityRegistryId === undefined) {
         throw new Error("publish result did not include IdentityRegistry genesis object");
     }
+    if (cellCountIndexId === undefined) {
+        throw new Error("publish result did not include CellCountIndex genesis object");
+    }
 
     return {
         packageId,
@@ -490,6 +505,7 @@ export function parsePublishFixtureObjects(input: unknown): SuiPublishFixtureObj
         identityRegistryId,
         membershipRegistryId,
         verifierRegistryId,
+        cellCountIndexId,
     };
 }
 
@@ -664,6 +680,7 @@ export function buildRegisterMemberPtbCommand(
     assertHexObjectId(input.packageId, "packageId");
     assertHexObjectId(input.pauseStateId, "pauseStateId");
     assertHexObjectId(input.membershipRegistryId, "membershipRegistryId");
+    assertHexObjectId(input.cellCountIndexId, "cellCountIndexId");
     assertHexObjectId(input.allowedResidenceCellRegistryId, "allowedResidenceCellRegistryId");
     assertHex32(input.proofLeft, "residence.proofLeft");
     assertHex32(input.proofRight, "residence.proofRight");
@@ -689,6 +706,7 @@ export function buildRegisterMemberPtbCommand(
         `${input.packageId}::accessor::register_member`,
         `@${input.pauseStateId}`,
         `@${input.membershipRegistryId}`,
+        `@${input.cellCountIndexId}`,
         `@${input.allowedResidenceCellRegistryId}`,
         input.homeCell,
         "residence_proof",
@@ -768,6 +786,7 @@ export function createRegisterMemberTransaction(
         arguments: [
             tx.object(input.pauseStateId),
             tx.object(input.membershipRegistryId),
+            tx.object(input.cellCountIndexId),
             tx.object(input.allowedResidenceCellRegistryId),
             tx.pure.u64(BigInt(input.homeCell)),
             residenceProof,
@@ -953,6 +972,7 @@ export async function runMembershipIdentityTestnetFixture(
             identityRegistryId: baseObjects.identityRegistryId,
             membershipRegistryId: baseObjects.membershipRegistryId,
             verifierRegistryId: baseObjects.verifierRegistryId,
+            cellCountIndexId: baseObjects.cellCountIndexId,
             allowedResidenceCellRegistryId,
             membershipPassId: passReadback.passId,
         },
@@ -1092,6 +1112,7 @@ async function resolveMembershipPassReadback(input: {
         packageId: input.baseObjects.packageId,
         pauseStateId: input.baseObjects.pauseStateId,
         membershipRegistryId: input.baseObjects.membershipRegistryId,
+        cellCountIndexId: input.baseObjects.cellCountIndexId,
         allowedResidenceCellRegistryId: input.allowedResidenceCellRegistryId,
         homeCell: DEFAULT_HOME_CELL,
         proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
@@ -1140,6 +1161,8 @@ function buildBaseObjectCandidates(
         env.SONARI_MEMBERSHIP_REGISTRY_ID ?? manifest?.objects.membership_registry_id;
     const verifierRegistryId =
         env.SONARI_VERIFIER_REGISTRY_ID ?? manifest?.objects.verifier_registry_id;
+    const cellCountIndexId =
+        env.SONARI_CELL_COUNT_INDEX_ID ?? manifest?.objects.cell_count_index_id;
     return {
         ...(packageId === undefined ? {} : { packageId }),
         ...(adminCapId === undefined ? {} : { adminCapId }),
@@ -1147,6 +1170,7 @@ function buildBaseObjectCandidates(
         ...(identityRegistryId === undefined ? {} : { identityRegistryId }),
         ...(membershipRegistryId === undefined ? {} : { membershipRegistryId }),
         ...(verifierRegistryId === undefined ? {} : { verifierRegistryId }),
+        ...(cellCountIndexId === undefined ? {} : { cellCountIndexId }),
     };
 }
 
@@ -1267,6 +1291,11 @@ async function verifyBaseObjectReadbacks(
         EXPECTED_OBJECT_TYPES.verifierRegistry,
         "verifierRegistryId",
     );
+    await verifyObjectType(
+        objects.cellCountIndexId,
+        EXPECTED_OBJECT_TYPES.cellCountIndex,
+        "cellCountIndexId",
+    );
 
     async function verifyObjectType(
         objectId: string,
@@ -1297,6 +1326,7 @@ function completeBaseObjectCandidates(
             "membershipRegistryId",
         ),
         verifierRegistryId: requiredCandidate(candidates.verifierRegistryId, "verifierRegistryId"),
+        cellCountIndexId: requiredCandidate(candidates.cellCountIndexId, "cellCountIndexId"),
     };
 }
 
@@ -1321,6 +1351,9 @@ function missingBaseObjectFields(
     }
     if (candidates.verifierRegistryId === undefined) {
         missing.push("verifierRegistryId");
+    }
+    if (candidates.cellCountIndexId === undefined) {
+        missing.push("cellCountIndexId");
     }
     return missing;
 }

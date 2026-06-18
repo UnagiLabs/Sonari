@@ -21,6 +21,8 @@ export const GENESIS_OBJECT_KIND = {
     identityRegistry: 9,
     categoryRegistry: 10,
     earthquakePool: 11,
+    allowedResidenceCellRegistry: 13,
+    cellCountIndex: 14,
 } as const;
 
 export interface GenesisEventCursor {
@@ -52,6 +54,29 @@ export interface GenesisObjectRecord {
 export type GenesisObjectIdsResult =
     | { readonly kind: "ok"; readonly ids: ReadonlyMap<number, string> }
     | { readonly kind: "error"; readonly message: string };
+
+export interface MembershipDappGenesisObjects {
+    readonly pauseState: string;
+    readonly membershipRegistry: string;
+    readonly identityRegistry: string;
+    readonly allowedResidenceCellRegistry: string;
+    readonly cellCountIndex: string;
+}
+
+export type MembershipDappGenesisObjectsResult =
+    | { readonly kind: "ok"; readonly objects: MembershipDappGenesisObjects }
+    | { readonly kind: "error"; readonly message: string };
+
+const MEMBERSHIP_DAPP_REQUIRED_OBJECTS = [
+    { key: "pauseState", objectKind: GENESIS_OBJECT_KIND.pauseState },
+    { key: "membershipRegistry", objectKind: GENESIS_OBJECT_KIND.membershipRegistry },
+    { key: "identityRegistry", objectKind: GENESIS_OBJECT_KIND.identityRegistry },
+    {
+        key: "allowedResidenceCellRegistry",
+        objectKind: GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+    },
+    { key: "cellCountIndex", objectKind: GENESIS_OBJECT_KIND.cellCountIndex },
+] as const;
 
 export function parseGenesisObjectCreatedEvent(raw: unknown): GenesisObjectRecord | null {
     if (!isRecord(raw)) {
@@ -123,6 +148,44 @@ export function selectGenesisObjectId(
     objectKind: number,
 ): string | null {
     return ids.get(objectKind) ?? null;
+}
+
+export async function resolveMembershipDappGenesisObjects(
+    client: unknown,
+    input: { readonly packageId: string },
+): Promise<MembershipDappGenesisObjectsResult> {
+    if (!hasQueryEvents(client)) {
+        return {
+            kind: "error",
+            message: "A queryEvents-capable Sui client is required to resolve genesis objects.",
+        };
+    }
+
+    const result = await readGenesisObjectIds(client, input);
+    if (result.kind === "error") {
+        return result;
+    }
+
+    const objects: Partial<Record<keyof MembershipDappGenesisObjects, string>> = {};
+    for (const required of MEMBERSHIP_DAPP_REQUIRED_OBJECTS) {
+        const objectId = selectGenesisObjectId(result.ids, required.objectKind);
+        if (objectId === null) {
+            return {
+                kind: "error",
+                message: `Missing required genesis object ${required.key} (kind ${required.objectKind}).`,
+            };
+        }
+        objects[required.key] = objectId;
+    }
+
+    return {
+        kind: "ok",
+        objects: objects as MembershipDappGenesisObjects,
+    };
+}
+
+function hasQueryEvents(client: unknown): client is GenesisObjectQueryClient {
+    return isRecord(client) && typeof client.queryEvents === "function";
 }
 
 function readParsedJson(value: unknown): unknown {

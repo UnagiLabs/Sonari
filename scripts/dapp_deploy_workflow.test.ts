@@ -7,6 +7,13 @@ const dappEnvExamplePath = path.join(process.cwd(), "dapp/.env.example");
 const dappReadmePath = path.join(process.cwd(), "dapp/README.md");
 const dappWranglerPath = path.join(process.cwd(), "dapp/wrangler.jsonc");
 const dappDevVarsExamplePath = path.join(process.cwd(), "dapp/.dev.vars.example");
+const publicObjectIdEnvNames = [
+    `NEXT_PUBLIC_SONARI_${"IDENTITY_REGISTRY_ID"}`,
+    `NEXT_PUBLIC_SONARI_${"IDENTITY_PAUSE_STATE_ID"}`,
+    `NEXT_PUBLIC_SONARI_${"MEMBERSHIP_REGISTRY_ID"}`,
+    `NEXT_PUBLIC_SONARI_${"ALLOWED_RESIDENCE_CELL_REGISTRY_ID"}`,
+    `NEXT_PUBLIC_SONARI_${"CELL_COUNT_INDEX_ID"}`,
+] as const;
 
 async function readWorkflow(): Promise<string> {
     return readFile(workflowPath, "utf8");
@@ -54,21 +61,9 @@ describe("dapp deploy workflow", () => {
     it("does not pass contract object ids from GitHub Variables to the dapp build", async () => {
         const workflow = await readWorkflow();
 
-        expect(workflow).not.toContain(
-            "NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID: $" + "{{ vars.SONARI_IDENTITY_REGISTRY_ID }}",
-        );
-        expect(workflow).not.toContain(
-            "NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID: $" +
-                "{{ vars.SONARI_IDENTITY_PAUSE_STATE_ID }}",
-        );
-        expect(workflow).not.toContain(
-            "NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID: $" +
-                "{{ vars.SONARI_MEMBERSHIP_REGISTRY_ID }}",
-        );
-        expect(workflow).not.toContain(
-            "NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID: $" +
-                "{{ vars.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID }}",
-        );
+        for (const envName of publicObjectIdEnvNames) {
+            expect(workflow).not.toContain(envName);
+        }
         expect(workflow).not.toContain(
             "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID: $" + "{{ vars.SONARI_FUNDING_PACKAGE_ID }}",
         );
@@ -150,6 +145,16 @@ describe("dapp env example", () => {
         expect(envExample).toContain("Enoki の redirectUrl を origin root に固定");
         expect(envExample).not.toContain("NEXT_PUBLIC_ENOKI_NETWORK");
         expect(envExample).not.toContain("ENOKI_PRIVATE_API_KEY=");
+    });
+
+    it("documents package-id-based automatic resolution without hand-entry object id fields", async () => {
+        const envExample = await readDappEnvExample();
+
+        expect(envExample).toContain("package ID から自動解決");
+        expect(envExample).toContain("admin::GenesisObjectCreated");
+        for (const envName of publicObjectIdEnvNames) {
+            expect(envExample).not.toContain(envName);
+        }
     });
 });
 
