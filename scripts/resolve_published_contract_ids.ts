@@ -12,6 +12,8 @@ export const GENESIS_OBJECT_KIND = {
     identityRegistry: 9,
     categoryRegistry: 10,
     earthquakePool: 11,
+    allowedResidenceCellRegistry: 13,
+    cellCountIndex: 14,
 } as const;
 
 const GENESIS_OUTPUTS = [
@@ -25,6 +27,11 @@ const GENESIS_OUTPUTS = [
     ["SONARI_CATEGORY_REGISTRY_ID", GENESIS_OBJECT_KIND.categoryRegistry],
     ["SONARI_EARTHQUAKE_CATEGORY_POOL_ID", GENESIS_OBJECT_KIND.earthquakePool],
     ["SONARI_FLOOR_CENSUS_CATEGORY_POOL", GENESIS_OBJECT_KIND.earthquakePool],
+    [
+        "SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID",
+        GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+    ],
+    ["SONARI_CELL_COUNT_INDEX_ID", GENESIS_OBJECT_KIND.cellCountIndex],
 ] as const;
 
 export interface EventCursor {
@@ -110,24 +117,6 @@ export async function resolvePublishedContractIds(
         `${packageId}::disaster_event::DisasterRegistryCreated`,
         "DisasterRegistryCreated",
     );
-    const allowedResidenceCellRegistryId = await readSingleAllowedResidenceCellRegistryId(
-        input.client,
-        packageId,
-    );
-    env.SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID = allowedResidenceCellRegistryId;
-    env.NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID = allowedResidenceCellRegistryId;
-    env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID = requireEnvValue(
-        env,
-        "SONARI_IDENTITY_REGISTRY_ID",
-    );
-    env.NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID = requireEnvValue(
-        env,
-        "SONARI_IDENTITY_PAUSE_STATE_ID",
-    );
-    env.NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID = requireEnvValue(
-        env,
-        "SONARI_MEMBERSHIP_REGISTRY_ID",
-    );
 
     return { packageId, env };
 }
@@ -181,30 +170,6 @@ async function readSingleRegistryCreatedEvent(
     const registryId = registryIds[0];
     if (registryId === undefined) {
         throw new Error(`${eventName} must resolve to exactly one registry id`);
-    }
-    return registryId;
-}
-
-async function readSingleAllowedResidenceCellRegistryId(
-    client: QueryEventsClient,
-    packageId: string,
-): Promise<string> {
-    const records = await readMoveEvents(
-        client,
-        `${packageId}::allowed_residence_cell::AllowedResidenceCellRootUpdated`,
-    );
-    const registryIds = new Set(
-        records.map(
-            (record) =>
-                parseRegistryCreatedEvent(record, "AllowedResidenceCellRootUpdated").registryId,
-        ),
-    );
-    if (registryIds.size !== 1) {
-        throw new Error("AllowedResidenceCellRootUpdated must resolve to exactly one registry id");
-    }
-    const registryId = [...registryIds][0];
-    if (registryId === undefined) {
-        throw new Error("AllowedResidenceCellRootUpdated must resolve to exactly one registry id");
     }
     return registryId;
 }
