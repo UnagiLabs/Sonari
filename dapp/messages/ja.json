@@ -605,38 +605,37 @@
     },
     "dashboard": {
         "hero": {
-            "eyebrow": "ダッシュボード",
-            "title": "透明な活動を、ひと目で。",
-            "sub": "プールの残高、確定したイベント、最近の寄付、検証済みの申請、匿名化したインパクトレシートを公開で見られます。"
+            "eyebrow": "PUBLIC DASHBOARD",
+            "title": "資金と情報源の透明性",
+            "sub": "寄付がどのプールにいくら残っているか、そして支援の根拠となる情報源データが検証・確定済みかを、オンチェーンの事実だけで表示します。"
         },
         "actions": {
-            "donate": "寄付",
-            "refresh": "データを更新"
+            "donate": "寄付する",
+            "refresh": "更新"
         },
         "statusBar": {
-            "previewData": "プレビューデータ",
-            "liveData": "チェーン実データ",
+            "liveData": "Live data",
             "loadingData": "チェーンデータ取得中",
             "unavailable": "チェーンデータ取得不可",
-            "lastRefreshed": "最終更新 {time}",
-            "publicView": "公開の透明性ビュー"
+            "lastRefreshed": "最終更新: {time}",
+            "publicView": "オンチェーンの確定値のみを表示"
         },
         "metrics": {
-            "totalDonated": {
-                "label": "寄付総額",
-                "detail": "直近24時間で + $48,200"
+            "totalBalance": {
+                "label": "総残高",
+                "meta": "対象プールの合計 (USDC)"
             },
-            "aidDelivered": {
-                "label": "届けた支援総額",
-                "detail": "検証済み申請 1,291 件"
+            "availableNow": {
+                "label": "利用可能",
+                "meta": "即時に支払い可能"
             },
-            "activePools": {
-                "label": "稼働中のプール",
-                "detail": "メインと地震"
+            "reservedFloor": {
+                "label": "確保（フロア）",
+                "meta": "Main pool の床払い確保分"
             },
-            "receipts": {
-                "label": "インパクトレシート",
-                "detail": "公開・匿名化された記録"
+            "confirmedEvents": {
+                "label": "確定イベント",
+                "meta": "署名検証済みの情報源"
             }
         },
         "status": {
@@ -647,7 +646,7 @@
             "finalized": "確定済み"
         },
         "poolsPanel": {
-            "eyebrow": "プール",
+            "eyebrow": "POOL BALANCE",
             "title": "プールの残高",
             "action": "プールを見る"
         },
@@ -662,47 +661,52 @@
             "main": {
                 "name": "メインプール"
             },
-            "operations": {
-                "name": "運用プール"
-            },
             "earthquake": {
                 "name": "地震救援プール"
             }
         },
+        "confirmedSource": {
+            "eyebrow": "CONFIRMED SOURCE",
+            "title": "確定した情報源",
+            "verifiedBadge": "署名検証済み・Finalized",
+            "empty": "確定イベントなし",
+            "objectLabel": "disaster_event",
+            "revision": "rev {revision} · {date}"
+        },
+        "sourceChain": {
+            "usgs": {
+                "name": "USGS Earthquake API",
+                "note": "公式情報源"
+            },
+            "nautilus": {
+                "name": "Nautilus TEE",
+                "note": "再取得・署名"
+            },
+            "sui": {
+                "name": "Sui Move",
+                "note": "署名検証・確定"
+            }
+        },
         "eventPanel": {
-            "eyebrow": "最新の DisasterEvent",
-            "title": "確定した情報源データ",
-            "action": "イベントを見る",
-            "statusLabel": "状態",
-            "intensityLabel": "規模",
+            "hazardLabel": "ハザード",
             "affectedCellsLabel": "被災セル",
-            "claimWindowLabel": "申請期間"
+            "affectedCellsValue": "{cells} cells · H3 r8",
+            "finalizedAtLabel": "確定日時",
+            "claimWindowLabel": "申請期間",
+            "claimWindowValue": "確定から30日間"
         },
-        "donations": {
-            "title": "最近の寄付",
-            "action": "寄付履歴"
+        "affectedMap": {
+            "caption": "affected-area map",
+            "grid": "H3 r8 · {cells} cells",
+            "note": "被災地域は ShakeMap から計算された H3 セルで表され、claim 時の affected-area proof に使用されます。"
         },
-        "claims": {
-            "title": "最近の申請"
-        },
-        "receiptsPanel": {
-            "title": "インパクトレシート",
-            "action": "すべてのレシート"
-        },
-        "supportersPanel": {
-            "title": "トップ支援者",
-            "individualDonors": "個人の寄付者",
-            "corporateSponsors": "企業スポンサー",
-            "noSupporters": "チェーンデータから作れる支援者ランキングはまだありません。",
-            "rankLabel": "順位 #{rank}"
-        },
+        "disclaimer": "Sonari は保険ではありません。寄付は保証された支払いを生みません。支援は Pool 残高、プログラムルール、検証要件、不正対策、申請タイミングに依存します。",
         "states": {
             "loadingTitle": "チェーンデータを取得中",
             "loadingBody": "Sui RPC からプール残高と最近の活動を読み取っています。",
             "errorTitle": "ダッシュボードデータを取得できませんでした",
             "errorBody": "この画面は代替のモックデータを表示しません。設定を確認するか、RPC request を再試行してください。",
-            "retry": "再試行",
-            "noItems": "表示できるチェーン上の活動はまだありません。"
+            "retry": "再試行"
         }
     },
     "claim": {

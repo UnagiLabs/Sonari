@@ -1,14 +1,13 @@
-import { formatAmount, formatDate, formatRelativeTime } from "../i18n/format";
+import { formatAmount, formatDate } from "../i18n/format";
 import type { SonariLocale } from "../register/wizard/locale";
 import type { DashboardPools } from "./dashboard-chain";
-import type {
-    DashboardClaimEvent,
-    DashboardDisasterEvent,
-    DashboardDonationEvent,
-    StatusKey,
-} from "./dashboard-events";
+import type { DashboardDisasterEvent, StatusKey } from "./dashboard-events";
 
-export type DashboardMetricKey = "totalDonated" | "aidDelivered" | "activePools" | "receipts";
+export type DashboardMetricKey =
+    | "totalBalance"
+    | "availableNow"
+    | "reservedFloor"
+    | "confirmedEvents";
 export type DashboardPoolKey = "main" | "operations" | "earthquake";
 
 export interface DashboardPoolSummary {
@@ -22,49 +21,34 @@ export interface DashboardPoolSummary {
     readonly status: StatusKey;
 }
 
-export interface DashboardActivityItem {
-    readonly label: string;
-    readonly meta: string;
-    readonly amount: string;
-    readonly status: StatusKey;
-}
-
-export interface DashboardSupporter {
-    readonly name: string;
-    readonly meta: string;
-    readonly amount: string;
-    readonly rank: number;
-}
-
-export interface DashboardLatestEventView {
-    readonly id: string;
-    readonly source: string;
-    readonly status: StatusKey;
+// 確定した情報源（最新 finalized DisasterEvent）を確定情報源パネルへ渡すための表示モデル。
+// チェーン由来の値だけを保持し、ラベルや "cells" / "H3 r8" などの技術トークンは view 側で i18n 合成する。
+export interface DashboardConfirmedSource {
+    readonly present: boolean;
+    readonly sourceEventId: string;
     readonly region: string;
-    readonly intensity: string;
-    readonly affectedCells: string;
-    readonly claimWindow: string;
+    readonly hazard: string;
+    readonly affectedCellsCount: string;
+    readonly finalizedAt: string;
+    readonly finalizedDate: string;
+    readonly eventRevision: number;
+    readonly objectId: string;
+    readonly objectIdShort: string;
 }
 
 export interface DashboardViewModel {
     readonly generatedAt: string;
     readonly metricKeys: readonly DashboardMetricKey[];
     readonly metricValues: Record<DashboardMetricKey, string>;
-    readonly metricDetails: Record<DashboardMetricKey, string>;
     readonly pools: readonly DashboardPoolSummary[];
-    readonly latestEvent: DashboardLatestEventView;
-    readonly donations: readonly DashboardActivityItem[];
-    readonly claims: readonly DashboardActivityItem[];
-    readonly receipts: readonly DashboardActivityItem[];
-    readonly topDonors: readonly DashboardSupporter[];
-    readonly topSponsors: readonly DashboardSupporter[];
+    readonly latestEvent: DashboardConfirmedSource;
 }
 
 const METRIC_KEYS: readonly DashboardMetricKey[] = [
-    "totalDonated",
-    "aidDelivered",
-    "activePools",
-    "receipts",
+    "totalBalance",
+    "availableNow",
+    "reservedFloor",
+    "confirmedEvents",
 ] as const;
 
 const USDC_DECIMALS = 1_000_000n;
@@ -73,48 +57,28 @@ export function deriveDashboardViewModel(input: {
     readonly locale: SonariLocale;
     readonly nowMs: number;
     readonly pools: DashboardPools;
-    readonly donations: readonly DashboardDonationEvent[];
-    readonly claims: readonly DashboardClaimEvent[];
-    readonly aidDeliveredUsdc: bigint;
-    readonly totalClaimsCount: number;
     readonly latestEvent: DashboardDisasterEvent | null;
 }): DashboardViewModel {
-    const totalDonated =
-        input.pools.main.totalReceivedUsdc +
-        input.pools.operations.totalReceivedUsdc +
-        input.pools.category.totalReceivedUsdc;
-    const activePools = [
-        input.pools.main,
-        input.pools.operations,
-        input.pools.category,
-    ].filter((pool) => pool.balanceUsdc > 0n).length;
+    // 表示対象は Main + Earthquake の2プールのみ。Operations pool は残高集計にも含めない。
+    const mainAvailable = maxBigint(
+        input.pools.main.balanceUsdc - input.pools.main.reserveFloorUsdc,
+        0n,
+    );
+    const totalBalance = input.pools.main.balanceUsdc + input.pools.category.balanceUsdc;
+    const availableNow = mainAvailable + input.pools.category.balanceUsdc;
+    const confirmedEvents = input.latestEvent === null ? 0 : 1;
 
     return {
         generatedAt: formatTimestamp(input.nowMs, input.locale),
         metricKeys: METRIC_KEYS,
         metricValues: {
-            totalDonated: formatUsdc(totalDonated, input.locale),
-            aidDelivered: formatUsdc(input.aidDeliveredUsdc, input.locale),
-            activePools: formatAmount(activePools, input.locale),
-            receipts: formatAmount(input.totalClaimsCount, input.locale),
+            totalBalance: formatUsdc(totalBalance, input.locale),
+            availableNow: formatUsdc(availableNow, input.locale),
+            reservedFloor: formatUsdc(input.pools.main.reserveFloorUsdc, input.locale),
+            confirmedEvents: formatAmount(confirmedEvents, input.locale),
         },
-        metricDetails: {
-            totalDonated: "Across all configured pools",
-            aidDelivered: "Finalized floor and payout events",
-            activePools: `${activePools} pools read from chain`,
-            receipts: `${input.totalClaimsCount} finalized claim event${input.totalClaimsCount === 1 ? "" : "s"}`,
-        },
-        pools: [
-            deriveMainPool(input.pools.main, input.locale),
-            deriveOperationsPool(input.pools.operations, input.locale),
-            deriveCategoryPool(input.pools.category, input.locale),
-        ],
-        latestEvent: deriveLatestEvent(input.latestEvent, input.locale),
-        donations: input.donations.map((item) => deriveActivity(item, input.locale, input.nowMs)),
-        claims: input.claims.map((item) => deriveActivity(item, input.locale, input.nowMs)),
-        receipts: input.claims.map((item) => deriveReceipt(item, input.locale, input.nowMs)),
-        topDonors: [],
-        topSponsors: [],
+        pools: deriveFeaturedPools(input.pools, input.locale),
+        latestEvent: deriveConfirmedSource(input.latestEvent, input.locale),
     };
 }
 
@@ -144,22 +108,6 @@ function deriveMainPool(
     };
 }
 
-function deriveOperationsPool(
-    pool: DashboardPools["operations"],
-    locale: SonariLocale,
-): DashboardPoolSummary {
-    return {
-        key: "operations",
-        balance: formatUsdc(pool.balanceUsdc, locale),
-        received: formatUsdc(pool.totalReceivedUsdc, locale),
-        paidOut: formatUsdc(pool.totalSpentUsdc, locale),
-        reserved: formatUsdc(0n, locale),
-        available: formatUsdc(pool.balanceUsdc, locale),
-        percentAvailable: percentOf(pool.balanceUsdc, pool.totalReceivedUsdc),
-        status: "active",
-    };
-}
-
 function deriveCategoryPool(
     pool: DashboardPools["category"],
     locale: SonariLocale,
@@ -176,76 +124,37 @@ function deriveCategoryPool(
     };
 }
 
-function deriveActivity(
-    item: DashboardDonationEvent | DashboardClaimEvent,
-    locale: SonariLocale,
-    nowMs: number,
-): DashboardActivityItem {
-    return {
-        label: item.label,
-        meta: `${item.source} · ${relativeTime(item.occurredAtMs, nowMs, locale)}`,
-        amount: formatUsdc(item.amountUsdc, locale),
-        status: item.status,
-    };
-}
-
-function deriveReceipt(
-    item: DashboardClaimEvent,
-    locale: SonariLocale,
-    nowMs: number,
-): DashboardActivityItem {
-    return {
-        label: item.id,
-        meta: `${shortId(item.campaignId)} · ${relativeTime(item.occurredAtMs, nowMs, locale)}`,
-        amount: formatUsdc(item.amountUsdc, locale),
-        status: item.status,
-    };
-}
-
-function deriveLatestEvent(
+function deriveConfirmedSource(
     event: DashboardDisasterEvent | null,
     locale: SonariLocale,
-): DashboardLatestEventView {
+): DashboardConfirmedSource {
     if (event === null) {
         return {
-            id: "",
-            source: "Sui RPC",
-            status: "pending",
-            region: "No finalized event",
-            intensity: "No hazard data",
-            affectedCells: "0 cells",
-            claimWindow: "Not available",
+            present: false,
+            sourceEventId: "",
+            region: "",
+            hazard: "",
+            affectedCellsCount: formatAmount(0, locale),
+            finalizedAt: "",
+            finalizedDate: "",
+            eventRevision: 0,
+            objectId: "",
+            objectIdShort: "",
         };
     }
 
     return {
-        id: event.id,
-        source: event.sourceEventId,
-        status: event.status,
+        present: true,
+        sourceEventId: event.sourceEventId,
         region: event.region,
-        intensity: event.hazardLabel,
-        affectedCells: `${formatAmount(bigintToNumber(event.affectedCellCount), locale)} cells`,
-        claimWindow: `Created ${formatTimestamp(event.occurredAtMs, locale)}`,
+        hazard: event.hazardLabel,
+        affectedCellsCount: formatAmount(bigintToNumber(event.affectedCellCount), locale),
+        finalizedAt: formatTimestamp(event.occurredAtMs, locale),
+        finalizedDate: compactDate(event.occurredAtMs),
+        eventRevision: event.eventRevision,
+        objectId: event.id,
+        objectIdShort: shortId(event.id),
     };
-}
-
-function relativeTime(occurredAtMs: number, nowMs: number, locale: SonariLocale): string {
-    const diffMs = occurredAtMs - nowMs;
-    const absMs = Math.abs(diffMs);
-    const minuteMs = 60_000;
-    const hourMs = 60 * minuteMs;
-    const dayMs = 24 * hourMs;
-
-    if (absMs < minuteMs) {
-        return formatRelativeTime(0, "second", locale);
-    }
-    if (absMs < hourMs) {
-        return formatRelativeTime(Math.round(diffMs / minuteMs), "minute", locale);
-    }
-    if (absMs < dayMs) {
-        return formatRelativeTime(Math.round(diffMs / hourMs), "hour", locale);
-    }
-    return formatRelativeTime(Math.round(diffMs / dayMs), "day", locale);
 }
 
 function formatTimestamp(ms: number, locale: SonariLocale): string {
@@ -256,6 +165,14 @@ function formatTimestamp(ms: number, locale: SonariLocale): string {
             day: "numeric",
         }) ?? "Not available"
     );
+}
+
+// chain strip の「rev N · 確定日」用に locale 非依存の YYYY-MM-DD（UTC）を返す。
+function compactDate(ms: number): string {
+    if (ms <= 0) {
+        return "";
+    }
+    return new Date(ms).toISOString().slice(0, 10);
 }
 
 function formatUsdc(value: bigint, locale: SonariLocale): string {

@@ -1309,6 +1309,18 @@ h4 {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--sage-400), var(--sage-600));
+  transform-origin: left;
+  animation: meter-fill-in 0.6s ease-out;
+}
+
+@keyframes meter-fill-in {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
 }
 
 .pool-row-values {
@@ -1340,6 +1352,11 @@ h4 {
   font-weight: 600;
 }
 
+/* 「利用可能」値だけは accent green で強調する。 */
+.pool-row-values dd.is-accent {
+  color: oklch(0.3 0.06 150);
+}
+
 .event-summary {
   display: grid;
   gap: 20px;
@@ -1369,6 +1386,131 @@ h4 {
   gap: 14px;
   grid-template-columns: repeat(2, 1fr);
   margin: 0;
+}
+
+/* ダッシュボードの2セクションを full-width で縦に積む（flex なので .dash-panel の grid-column は無視される）。 */
+.dashboard-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dashboard-disclaimer {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 検証チェーン strip: USGS → Nautilus TEE → Sui Move を mono ラベルで横並び。 */
+.source-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 18px;
+  margin-bottom: 24px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sage-50);
+}
+
+.source-chain-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-chain-name {
+  color: var(--sage-900);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.source-chain-note {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.source-chain-arrow {
+  color: var(--sage-600);
+  font-size: 14px;
+}
+
+.source-chain-rev {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* 確定情報源パネルの本文: 左に詳細、右に被災エリア map プレースホルダ。 */
+.source-layout {
+  display: grid;
+  align-items: start;
+  gap: 28px;
+  grid-template-columns: 1.1fr 0.9fr;
+}
+
+.source-object-link {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  color: var(--sage-800);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.source-object-link:hover {
+  color: var(--sage-600);
+}
+
+.source-map {
+  display: grid;
+  gap: 12px;
+}
+
+.affected-map-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--sage-50),
+    var(--sage-50) 10px,
+    var(--surface) 10px,
+    var(--surface) 20px
+  );
+}
+
+.affected-map-caption {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 12px 18px;
+  border-radius: var(--radius-md);
+  background: oklch(1 0 0 / 0.7);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+}
+
+.affected-map-note {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .source-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .activity-list {
