@@ -3,6 +3,8 @@
 import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { resolveMembershipDappGenesisObjects } from "../chain/genesis-objects";
+import { createJsonRpcEventClient } from "../chain/json-rpc-event-client";
 import { LoadingIndicator } from "../components/loading-indicator";
 import type { SonariLocale } from "../register/wizard/locale";
 import { WalletConnect } from "../wallet/wallet-connect";
@@ -22,8 +24,13 @@ import {
 } from "./pass-view";
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
-const identityRegistryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
 const identityStatusUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_STATUS_URL ?? "";
+
+type GenesisObjectsState =
+    | { readonly kind: "idle" }
+    | { readonly kind: "loading" }
+    | { readonly kind: "ok"; readonly identityRegistry: string }
+    | { readonly kind: "error"; readonly message: string };
 
 /**
  * デモ用 My Page が登録済み状態を固定で見せるための設定。
@@ -49,9 +56,48 @@ export function MypageView({
     const connected = account !== null;
 
     const [result, setResult] = useState<MembershipPassReadResult | null>(null);
+    const [genesisObjects, setGenesisObjects] = useState<GenesisObjectsState>({ kind: "idle" });
     // Cancels the most recent in-flight read so a slower earlier request (e.g.
     // from a rapid retry) can never overwrite a newer result.
     const cancelRef = useRef<() => void>(() => {});
+    const identityRegistry =
+        genesisObjects.kind === "ok" ? genesisObjects.identityRegistry : "";
+
+    useEffect(() => {
+        if (demo !== undefined || membershipPackageId.length === 0) {
+            setGenesisObjects({ kind: "idle" });
+            return;
+        }
+        let cancelled = false;
+        setGenesisObjects({ kind: "loading" });
+        resolveMembershipDappGenesisObjects(createJsonRpcEventClient(), {
+            packageId: membershipPackageId,
+        })
+            .then((resolved) => {
+                if (cancelled) {
+                    return;
+                }
+                if (resolved.kind === "ok") {
+                    setGenesisObjects({
+                        kind: "ok",
+                        identityRegistry: resolved.objects.identityRegistry,
+                    });
+                    return;
+                }
+                setGenesisObjects({ kind: "error", message: resolved.message });
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setGenesisObjects({
+                        kind: "error",
+                        message: error instanceof Error ? error.message : "",
+                    });
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [demo]);
 
     // Single read routine reused by the initial effect and the retry button,
     // so the linter sees no spurious dependency and retry needs no token state.
@@ -68,6 +114,23 @@ export function MypageView({
             return () => {};
         }
 
+        if (genesisObjects.kind === "loading" || genesisObjects.kind === "idle") {
+            setResult(null);
+            return () => {};
+        }
+
+        if (genesisObjects.kind === "error") {
+            setResult({
+                kind: "error",
+                code: "read",
+                message:
+                    genesisObjects.message.length > 0
+                        ? genesisObjects.message
+                        : "Failed to resolve genesis objects.",
+            });
+            return () => {};
+        }
+
         let cancelled = false;
         const cancel = () => {
             cancelled = true;
@@ -75,7 +138,7 @@ export function MypageView({
         cancelRef.current = cancel;
         setResult(null);
 
-        void readMembershipPass(client, owner, membershipPackageId, identityRegistryId)
+        void readMembershipPass(client, owner, membershipPackageId, identityRegistry)
             .then(async (next): Promise<MembershipPassReadResult> => {
                 if (next.kind !== "ok" || next.pass.identityVerified) {
                     return next;
@@ -95,7 +158,7 @@ export function MypageView({
             });
 
         return cancel;
-    }, [client, connected, dAppKit, owner, demo]);
+    }, [client, connected, dAppKit, owner, demo, genesisObjects, identityRegistry]);
 
     useEffect(() => load(), [load]);
 

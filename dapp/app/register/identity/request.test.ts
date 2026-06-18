@@ -177,7 +177,7 @@ describe("dapp register identity request builder (v4)", () => {
         it("rejects empty registryId", () => {
             expect(() =>
                 buildIdentitySubmitRequest(inputs({ provider: "kyc" }), ""),
-            ).toThrow("NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID is required");
+            ).toThrow("identityRegistry is required");
         });
     });
 

@@ -9,6 +9,8 @@ import { computeIdentityStatementHash } from "@sonari/proof-core";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { type FormEvent, useEffect, useState } from "react";
+import { resolveMembershipDappGenesisObjects } from "../../../chain/genesis-objects";
+import { createJsonRpcEventClient } from "../../../chain/json-rpc-event-client";
 import {
     lookupMembershipPass,
     type MembershipLookupResult,
@@ -27,7 +29,6 @@ const WorldIdVerifyButton = dynamic(
 );
 
 const submitUrl = process.env.NEXT_PUBLIC_SONARI_IDENTITY_SUBMIT_URL ?? "";
-const registryId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_REGISTRY_ID ?? "";
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 
 // Fixed terms version for the duplicate-account statement. The statement is no
@@ -59,6 +60,12 @@ type MembershipLookupState =
     | { readonly kind: "loading" }
     | MembershipLookupResult;
 
+type GenesisObjectsState =
+    | { readonly kind: "idle" }
+    | { readonly kind: "loading" }
+    | { readonly kind: "ok"; readonly identityRegistry: string }
+    | { readonly kind: "error"; readonly message: string };
+
 interface IdentityStepProps {
     readonly provider: IdentityProvider;
     readonly identityVerified: boolean;
@@ -82,6 +89,7 @@ export function IdentityStep({
     const [submitState, setSubmitState] = useState<SubmitState>({ status: "idle" });
     const [worldIdResponse, setWorldIdResponse] = useState<Record<string, unknown> | null>(null);
     const [lookup, setLookup] = useState<MembershipLookupState>({ kind: "idle" });
+    const [genesisObjects, setGenesisObjects] = useState<GenesisObjectsState>({ kind: "idle" });
     // One acceptance flag per duplicate-account statement. The member must affirm
     // every statement before any identity action (World ID verify / KYC submit) is
     // enabled, so verification is always preceded by the statement.
@@ -93,13 +101,51 @@ export function IdentityStep({
     const client = useCurrentClient();
     const owner = account?.address ?? "";
     const membershipId = lookup.kind === "ok" ? lookup.membershipId : "";
-    const isSubmitConfigured = submitUrl.length > 0 && registryId.length > 0;
+    const identityRegistry =
+        genesisObjects.kind === "ok" ? genesisObjects.identityRegistry : "";
+    const isSubmitConfigured = submitUrl.length > 0 && identityRegistry.length > 0;
     // owner + membership_id are both required to build a valid submit request;
     // owner non-empty implies a connected wallet, membershipId non-empty implies
     // a successful single-pass lookup.
     const isBindingReady = owner.length > 0 && membershipId.length > 0;
     // The duplicate-account statement must be fully affirmed before verification.
     const allStatementsAccepted = areIdentityStatementsAccepted(acceptedStatements);
+
+    useEffect(() => {
+        if (membershipPackageId.length === 0) {
+            setGenesisObjects({ kind: "idle" });
+            return;
+        }
+        let cancelled = false;
+        setGenesisObjects({ kind: "loading" });
+        resolveMembershipDappGenesisObjects(createJsonRpcEventClient(), {
+            packageId: membershipPackageId,
+        })
+            .then((result) => {
+                if (cancelled) {
+                    return;
+                }
+                if (result.kind === "ok") {
+                    setGenesisObjects({
+                        kind: "ok",
+                        identityRegistry: result.objects.identityRegistry,
+                    });
+                    return;
+                }
+                setGenesisObjects({ kind: "error", message: result.message });
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setGenesisObjects({
+                        kind: "error",
+                        message: error instanceof Error ? error.message : "",
+                    });
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     // Look up the connected wallet's MembershipPass on chain whenever the wallet
     // or network changes. A cancelled flag drops stale results so a slow lookup
@@ -156,7 +202,7 @@ export function IdentityStep({
                     termsVersion: MEMBERSHIP_TERMS_VERSION,
                     signedStatementHash,
                 },
-                registryId,
+                identityRegistry,
                 worldIdResult,
             );
             fetch(submitUrl, {
@@ -292,7 +338,9 @@ export function IdentityStep({
                             onVerified={handleWorldIdVerified}
                             owner={owner}
                             signedStatementHash={signedStatementHash}
-                            statementsAccepted={allStatementsAccepted}
+                            statementsAccepted={
+                                allStatementsAccepted && isSubmitConfigured && isBindingReady
+                            }
                             verified={worldIdResponse !== null || identityVerified}
                         />
                     </fieldset>
