@@ -1,4 +1,5 @@
 use crate::encoding::census_bcs::payload_bcs_bytes;
+use crate::graphql::CensusGraphqlClient;
 use crate::{CensusInputBundle, VERIFIER_CONFIG_KEY, process_floor_census_bundle};
 use serde::Deserialize;
 use sonari_tee_core::{
@@ -12,7 +13,9 @@ const PROCESS_DATA_ACTION: &str = "process_data";
 pub struct CensusProcessHandler;
 
 impl ProcessDataHandler for CensusProcessHandler {
-    fn process(&self, input: &[u8], _ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
+    fn process(&self, input: &[u8], ctx: &TeeContext) -> Result<ProcessOutput, HandlerError> {
+        let _graphql = CensusGraphqlClient::from_context(ctx)
+            .map_err(|error| HandlerError::new("CENSUS_PROCESS_FAILED", error.to_string()))?;
         let bundle: CensusInputBundle = serde_json::from_slice(input).map_err(|error| {
             HandlerError::new(
                 "CENSUS_PROCESS_FAILED",

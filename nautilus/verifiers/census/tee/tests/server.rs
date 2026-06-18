@@ -4,6 +4,7 @@ use census_tee::server::{
 use census_tee::{
     AffectedCell, AffectedCellsArtifact, CensusInputBundle, CountedCell,
     compute_affected_cells_root, compute_floor_census_snapshot,
+    graphql::{CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, CENSUS_GRAPHQL_NETWORK_KEY},
 };
 use sonari_tee_core::{
     EnclaveRegistrationMetadata, LocalEd25519Signer, ProcessDataHandler, ProcessOutput, TeeContext,
@@ -16,7 +17,7 @@ fn server_handler_returns_non_empty_signable_output() {
     let output = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
-            &TeeContext::new(),
+            &valid_context(),
         )
         .expect("census handler should process a valid bundle");
 
@@ -74,7 +75,7 @@ fn server_finalization_injects_signature_public_key_and_registration_metadata() 
     let output = handler
         .process(
             serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
-            &TeeContext::new(),
+            &valid_context(),
         )
         .expect("census handler should process a valid bundle");
     let metadata = EnclaveRegistrationMetadata {
@@ -101,6 +102,35 @@ fn server_finalization_injects_signature_public_key_and_registration_metadata() 
         finalized["enclave_instance_public_key"],
         metadata.enclave_instance_public_key
     );
+}
+
+#[test]
+fn server_handler_requires_canonical_graphql_network_context() {
+    let handler = CensusProcessHandler;
+    let error = handler
+        .process(
+            serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
+            &TeeContext::new(),
+        )
+        .expect_err("missing GraphQL network must fail closed");
+
+    assert!(error.to_string().contains(CENSUS_GRAPHQL_NETWORK_KEY));
+
+    let error = handler
+        .process(
+            serde_json::to_vec(&valid_bundle_json()).unwrap().as_slice(),
+            &TeeContext::with_env([
+                (CENSUS_GRAPHQL_NETWORK_KEY, "testnet"),
+                (CENSUS_GRAPHQL_EGRESS_PROXY_URL_KEY, "not a url"),
+            ]),
+        )
+        .expect_err("malformed proxy must fail closed");
+
+    assert!(error.to_string().contains("egress proxy"));
+}
+
+fn valid_context() -> TeeContext {
+    TeeContext::with_env([(CENSUS_GRAPHQL_NETWORK_KEY, "testnet")])
 }
 
 fn valid_bundle_json() -> serde_json::Value {

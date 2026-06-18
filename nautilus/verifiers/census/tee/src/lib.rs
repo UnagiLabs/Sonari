@@ -6,6 +6,7 @@ pub mod affected_cells;
 pub mod counts;
 pub mod encoding;
 pub mod error;
+pub mod graphql;
 pub mod server;
 
 pub use affected_cells::{

@@ -177,6 +177,7 @@ dependencies = [
  "bcs",
  "clap",
  "ed25519-dalek",
+ "reqwest",
  "serde",
  "serde_json",
  "sonari-tee-core",
