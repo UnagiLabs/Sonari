@@ -323,7 +323,8 @@
             "donatePreview": "寄付をプレビュー",
             "saveDraft": "下書きを保存",
             "submit": "寄付する",
-            "submitting": "寄付を送信中…"
+            "submitting": "寄付を送信中…",
+            "lockedDestination": "この災害 Pool に寄付する"
         },
         "types": {
             "general": {
@@ -535,6 +536,16 @@
             "delivered": "{amount} 送付",
             "available": "利用可能な残高",
             "statusActive": "稼働中",
+            "balance": "プール残高",
+            "affectedCells": "被災セル数",
+            "status": {
+                "active": "受付中",
+                "ended": "寄付終了",
+                "paused": "一時停止",
+                "closed": "クローズ"
+            },
+            "empty": "現在アクティブな災害救援プールはありません。",
+            "error": "災害特設救援プールを読み込めませんでした。",
             "main": {
                 "name": "メインプール",
                 "description": "稼働中の各プログラムを横断する一般救援の準備金。",
@@ -860,6 +871,42 @@
             "deadlineLabel": "申請締切",
             "deadline": "締切: {date}",
             "viewDetail": "詳細を見る"
+        }
+    },
+    "pools": {
+        "eyebrow": "災害特設救援プール",
+        "title": "実施中の災害特設救援プール",
+        "sub": "特定の災害救援プールに寄付し、資金の使われ方を追跡できます。",
+        "loading": "災害特設救援プールを読み込んでいます。",
+        "error": "災害特設救援プールを読み込めませんでした。",
+        "retry": "再試行",
+        "empty": "現在アクティブな災害救援プールはありません。",
+        "card": {
+            "region": "地域",
+            "affectedCells": "被影響セル数",
+            "donationEnd": "寄付受付締切",
+            "balance": "プール残高",
+            "totalDonated": "累計受入額",
+            "totalPaid": "累計支払額",
+            "donate": "このプールに寄付する"
+        }
+    },
+    "disasterDonate": {
+        "title": "災害特設救援プールへ寄付する",
+        "notFoundTitle": "災害プールが見つかりません",
+        "notFoundBody": "指定されたイベントに対応する災害特設救援プールが見つかりませんでした。削除されたか、リンクが正しくない可能性があります。",
+        "backToPools": "災害特設救援プール一覧に戻る",
+        "mapTitle": "被災エリア",
+        "mapUnavailable": "この災害の被災エリア地図はまだ利用できません。",
+        "affectedCellsLabel": "被影響セル数",
+        "donationEndLabel": "寄付受付締切",
+        "balanceLabel": "プール残高",
+        "statusLabel": "ステータス",
+        "status": {
+            "active": "受付中",
+            "ended": "寄付終了",
+            "paused": "一時停止",
+            "closed": "クローズ"
         }
     },
     "notFound": {

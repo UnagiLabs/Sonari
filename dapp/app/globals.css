@@ -1456,6 +1456,11 @@ h4 {
   grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
 }
 
+/* embedded（/donate/[eventId]）はフォーム＋送金結果のみの単一カラムにする。 */
+.donate-layout-embedded {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .donate-form,
 .preview-block,
 .donate-note {

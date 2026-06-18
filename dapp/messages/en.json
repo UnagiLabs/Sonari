@@ -323,7 +323,8 @@
             "donatePreview": "Donate preview",
             "saveDraft": "Save draft",
             "submit": "Donate now",
-            "submitting": "Submitting donation…"
+            "submitting": "Submitting donation…",
+            "lockedDestination": "Donating to this disaster pool"
         },
         "types": {
             "general": {
@@ -535,6 +536,16 @@
             "delivered": "{amount} delivered",
             "available": "available balance",
             "statusActive": "active",
+            "balance": "Pool balance",
+            "affectedCells": "Affected cells",
+            "status": {
+                "active": "Active",
+                "ended": "Donation ended",
+                "paused": "Paused",
+                "closed": "Closed"
+            },
+            "empty": "No active disaster relief pools at this time.",
+            "error": "Could not load disaster relief pools.",
             "main": {
                 "name": "Main Pool",
                 "description": "General relief reserves across active programs.",
@@ -860,6 +871,42 @@
             "deadlineLabel": "Claim deadline",
             "deadline": "Deadline: {date}",
             "viewDetail": "View detail"
+        }
+    },
+    "pools": {
+        "eyebrow": "Disaster relief pools",
+        "title": "Active disaster relief pools.",
+        "sub": "Donate to a specific disaster relief pool and track how funds are used.",
+        "loading": "Loading disaster relief pools.",
+        "error": "Could not load disaster relief pools.",
+        "retry": "Retry",
+        "empty": "No active disaster relief pools at this time.",
+        "card": {
+            "region": "Region",
+            "affectedCells": "Affected cells",
+            "donationEnd": "Donation deadline",
+            "balance": "Pool balance",
+            "totalDonated": "Total donated",
+            "totalPaid": "Total paid out",
+            "donate": "Donate to this pool"
+        }
+    },
+    "disasterDonate": {
+        "title": "Donate to disaster relief pool",
+        "notFoundTitle": "Disaster pool not found",
+        "notFoundBody": "No disaster relief pool was found for the specified event. It may have been removed or the link may be incorrect.",
+        "backToPools": "Back to disaster relief pools",
+        "mapTitle": "Affected area",
+        "mapUnavailable": "The affected area map is not available yet for this disaster.",
+        "affectedCellsLabel": "Affected cells",
+        "donationEndLabel": "Donation deadline",
+        "balanceLabel": "Pool balance",
+        "statusLabel": "Status",
+        "status": {
+            "active": "Active",
+            "ended": "Donation ended",
+            "paused": "Paused",
+            "closed": "Closed"
         }
     },
     "notFound": {

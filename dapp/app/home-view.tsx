@@ -5,14 +5,10 @@ import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import {
-    GENESIS_OBJECT_KIND,
-    readGenesisObjectIds,
-    selectGenesisObjectId,
-} from "./chain/genesis-objects";
-import { readDashboardPools } from "./dashboard/dashboard-chain";
-import { type DashboardPoolSummary, deriveFeaturedPools } from "./dashboard/dashboard-view-model";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { readClaimCampaigns } from "./claim/claim-campaigns";
+import { createClaimReadClient } from "./claim/claim-read-client";
+import { readDonateEnvConfig } from "./donate/donate-config";
 import { readDonateDestinations } from "./donate/donate-destinations";
 import {
     type DonateDestinationReadState,
@@ -22,6 +18,7 @@ import { EmergencyBanner } from "./donate/emergency-banner";
 import type { EmergencyBannerCampaign } from "./donate/emergency-banner-state";
 import { useClaimBannerCta } from "./home-claim-banner";
 import { SiteTopbar } from "./i18n/site-topbar";
+import { buildDisasterPoolViews, type DisasterPoolView } from "./pools/disaster-pool-view-model";
 import type { SonariLocale } from "./register/wizard/locale";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "./wallet/wallet-network";
 
@@ -49,16 +46,6 @@ const sponsors = [
     { name: "OpenZeppelin", logo: "/assets/sponsors/openzeppelin.png", chip: false },
     { name: "OtterSec", logo: "/assets/sponsors/ottersec.png", chip: false },
 ] as const;
-
-// トップページに出す注目プールの静的設定。Operations Pool は運営費のため出さない。
-// 金額は実残高をチェーンから取得して埋める（FeaturedPools 参照）。icon と画像は固定。
-const FEATURED_POOLS: readonly { key: "main" | "earthquake"; icon: IconName; image: string }[] = [
-    { key: "main", icon: "waves", image: "/assets/pool_main_support.jpg" },
-    { key: "earthquake", icon: "bolt", image: "/assets/donation_earthquake.png" },
-];
-
-// pool ID は環境変数ではなく funding package ID 起点の genesis イベントから導出する。
-const fundingPackageId = process.env.NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID ?? "";
 
 const stepKeys = ["step1", "step2", "step3", "step4"] as const;
 const stepNumbers: Record<(typeof stepKeys)[number], string> = {
@@ -343,7 +330,8 @@ function HomeEmergencyBanner() {
 
     useEffect(() => {
         // funding package 未設定では実施中キャンペーンを判定できないため非表示にする。
-        if (fundingPackageId.trim().length === 0) {
+        const envConfigResult = readDonateEnvConfig();
+        if (envConfigResult.kind !== "ok") {
             setState({
                 status: "error",
                 campaigns: [],
@@ -352,6 +340,7 @@ function HomeEmergencyBanner() {
             });
             return;
         }
+        const fundingPackageId = envConfigResult.config.fundingPackageId;
 
         const client = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
         let cancelled = false;
@@ -472,162 +461,127 @@ function SponsorMarquee() {
 
 type FeaturedPoolsState =
     | { readonly status: "loading" }
-    | { readonly status: "ready"; readonly pools: readonly DashboardPoolSummary[] }
+    | { readonly status: "ready"; readonly views: readonly DisasterPoolView[] }
     | { readonly status: "error" };
 
-// Featured pools をチェーンの実残高で描画する。取得はダッシュボードと同じ流れ。
-// 読み込み中・失敗時はカードの骨格だけ出し、金額は出さない（fail-close）。
-function FeaturedPools({ locale }: { locale: SonariLocale }) {
-    const client = useCurrentClient();
-    const network = readWalletNetwork();
+// Featured pools を disaster campaign 実データで描画する。
+// readClaimCampaigns → buildDisasterPoolViews の流れで最新 3 件を表示する。
+// env 未設定・取得失敗は fail-closed でエラー表示にする。
+function FeaturedPools({ locale: _locale }: { locale: SonariLocale }) {
+    const suiClient = useCurrentClient();
+    const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
     const [state, setState] = useState<FeaturedPoolsState>({ status: "loading" });
-    const cancelRef = useRef<() => void>(() => {});
+    const tPools = useTranslations("pools");
 
-    const load = useCallback((): (() => void) => {
-        cancelRef.current();
-
-        // 詳細な原因は開発者向けに console へ出し、画面には金額を出さない。
-        const failClosed = (detail: string) => {
-            console.error(`featured pools load failed: ${detail}`);
+    useEffect(() => {
+        const envConfigResult = readDonateEnvConfig();
+        if (envConfigResult.kind !== "ok") {
+            console.error(
+                "featured pools load failed: NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.",
+            );
             setState({ status: "error" });
-        };
-
-        if (fundingPackageId.trim().length === 0) {
-            failClosed("NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.");
-            return () => {};
+            return;
         }
-
+        const packageId = envConfigResult.config.fundingPackageId;
         let cancelled = false;
-        const cancel = () => {
-            cancelled = true;
-        };
-        cancelRef.current = cancel;
         setState({ status: "loading" });
 
-        const eventClient = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
-
-        void (async () => {
-            const genesisResult = await readGenesisObjectIds(eventClient, {
-                packageId: fundingPackageId,
+        readClaimCampaigns(client, { packageId, nowMs: Date.now() })
+            .then((result) => {
+                if (cancelled) {
+                    return;
+                }
+                if (result.kind === "ok") {
+                    const views = buildDisasterPoolViews(result.campaigns, Date.now()).slice(0, 3);
+                    setState({ status: "ready", views });
+                    return;
+                }
+                console.error(`featured pools load failed: ${result.message}`);
+                setState({ status: "error" });
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    console.error(
+                        `featured pools load failed: ${error instanceof Error ? error.message : "unknown error"}`,
+                    );
+                    setState({ status: "error" });
+                }
             });
-            if (cancelled) {
-                return;
-            }
-            if (genesisResult.kind === "error") {
-                failClosed(genesisResult.message);
-                return;
-            }
 
-            const mainPoolId = selectGenesisObjectId(
-                genesisResult.ids,
-                GENESIS_OBJECT_KIND.mainPool,
-            );
-            const operationsPoolId = selectGenesisObjectId(
-                genesisResult.ids,
-                GENESIS_OBJECT_KIND.operationsPool,
-            );
-            const categoryPoolId = selectGenesisObjectId(
-                genesisResult.ids,
-                GENESIS_OBJECT_KIND.earthquakePool,
-            );
-            if (mainPoolId === null || operationsPoolId === null || categoryPoolId === null) {
-                failClosed("genesis objects for main/operations/earthquake pool were not found.");
-                return;
-            }
+        return () => {
+            cancelled = true;
+        };
+    }, [client]);
 
-            const poolResult = await readDashboardPools(client, {
-                mainPoolId,
-                operationsPoolId,
-                categoryPoolId,
-            });
-            if (cancelled) {
-                return;
-            }
-            if (poolResult.kind === "error") {
-                failClosed(poolResult.message);
-                return;
-            }
-            setState({ status: "ready", pools: deriveFeaturedPools(poolResult.pools, locale) });
-        })().catch((error: unknown) => {
-            if (cancelled) {
-                return;
-            }
-            failClosed(error instanceof Error ? error.message : "unknown error");
-        });
+    if (state.status === "loading") {
+        return (
+            <div className="pools-grid" aria-busy={true}>
+                <div className="pool-card pool-card-placeholder" />
+                <div className="pool-card pool-card-placeholder" />
+                <div className="pool-card pool-card-placeholder" />
+            </div>
+        );
+    }
 
-        return cancel;
-    }, [client, network, locale]);
+    if (state.status === "error") {
+        return (
+            <div className="pools-grid">
+                <p className="muted">{tPools("error")}</p>
+            </div>
+        );
+    }
 
-    useEffect(() => load(), [load]);
-
-    const summaries = state.status === "ready" ? state.pools : [];
+    if (state.views.length === 0) {
+        return (
+            <div className="pools-grid">
+                <p className="muted">{tPools("empty")}</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="pools-grid" aria-busy={state.status === "loading"}>
-            {FEATURED_POOLS.map(({ key, icon, image }) => (
-                <PoolCard
-                    key={key}
-                    poolKey={key}
-                    icon={icon}
-                    image={image}
-                    summary={summaries.find((pool) => pool.key === key) ?? null}
-                />
+        <div className="pools-grid" aria-busy={false}>
+            {state.views.map((view) => (
+                <DisasterPoolCard key={view.campaignId} view={view} />
             ))}
         </div>
     );
 }
 
-function PoolCard({
-    poolKey,
-    icon,
-    image,
-    summary,
-}: {
-    poolKey: "main" | "earthquake";
-    icon: IconName;
-    image: string;
-    summary: DashboardPoolSummary | null;
-}) {
+function DisasterPoolCard({ view }: { view: DisasterPoolView }) {
     const t = useTranslations("home.pools");
-    const placeholder = "—";
+    const { href, title, region, status, balanceLabel, affectedCellCount } = view;
 
     return (
-        <a className="pool-card" href="/pools">
+        <a className="pool-card" href={href}>
             <figure className="pool-image">
                 <Image
-                    src={image}
-                    alt={t(`${poolKey}.imageAlt`)}
+                    src="/assets/donation_earthquake.png"
+                    alt={title}
                     fill
                     sizes="(min-width: 920px) 33vw, 100vw"
                 />
             </figure>
             <div className="header">
                 <div className="icon">
-                    <Icon name={icon} size={20} />
+                    <Icon name="bolt" size={20} />
                 </div>
-                <span className="tag tag-ok tag-dot">{t("statusActive")}</span>
+                <span className={`tag tag-dot ${status === "active" ? "tag-ok" : "tag-neutral"}`}>
+                    {t(`status.${status}`)}
+                </span>
             </div>
             <div>
-                <h3>{t(`${poolKey}.name`)}</h3>
-                <p className="muted">{t(`${poolKey}.description`)}</p>
+                <h3>{title}</h3>
+                <p className="muted">{region}</p>
             </div>
             <div>
-                <div className="balance">{summary ? summary.available : placeholder}</div>
-                <div className="faint">{t("available")}</div>
+                <div className="balance">{balanceLabel}</div>
+                <div className="faint">{t("balance")}</div>
             </div>
             <div>
-                <div className="meter">
-                    <div
-                        className="meter-fill"
-                        style={{ width: `${summary ? summary.percentAvailable : 0}%` }}
-                    />
-                </div>
                 <div className="footer-row">
                     <span>
-                        {t("received", { amount: summary ? summary.received : placeholder })}
-                    </span>
-                    <span>
-                        {t("delivered", { amount: summary ? summary.paidOut : placeholder })}
+                        {t("affectedCells")}: {affectedCellCount}
                     </span>
                 </div>
             </div>
