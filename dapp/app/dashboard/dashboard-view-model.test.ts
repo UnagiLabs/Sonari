@@ -78,8 +78,7 @@ describe("deriveDashboardViewModel", () => {
             finalizedAt: "November 14, 2023",
             finalizedDate: "2023-11-14",
             eventRevision: 2,
-            objectId: latestEvent.id,
-            objectIdShort: "0x7777...7777",
+            donateHref: `/donate/${latestEvent.id}`,
         });
     });
 
@@ -101,8 +100,7 @@ describe("deriveDashboardViewModel", () => {
             finalizedAt: "",
             finalizedDate: "",
             eventRevision: 0,
-            objectId: "",
-            objectIdShort: "",
+            donateHref: "",
         });
     });
 });

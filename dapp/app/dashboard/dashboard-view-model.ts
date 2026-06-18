@@ -32,8 +32,7 @@ export interface DashboardConfirmedSource {
     readonly finalizedAt: string;
     readonly finalizedDate: string;
     readonly eventRevision: number;
-    readonly objectId: string;
-    readonly objectIdShort: string;
+    readonly donateHref: string;
 }
 
 export interface DashboardViewModel {
@@ -138,8 +137,7 @@ function deriveConfirmedSource(
             finalizedAt: "",
             finalizedDate: "",
             eventRevision: 0,
-            objectId: "",
-            objectIdShort: "",
+            donateHref: "",
         };
     }
 
@@ -152,8 +150,7 @@ function deriveConfirmedSource(
         finalizedAt: formatTimestamp(event.occurredAtMs, locale),
         finalizedDate: compactDate(event.occurredAtMs),
         eventRevision: event.eventRevision,
-        objectId: event.id,
-        objectIdShort: shortId(event.id),
+        donateHref: `/donate/${event.id}`,
     };
 }
 
@@ -200,8 +197,4 @@ function bigintToNumber(value: bigint): number {
         return Number.MAX_SAFE_INTEGER;
     }
     return Number(value);
-}
-
-function shortId(value: string): string {
-    return value.length > 12 ? `${value.slice(0, 6)}...${value.slice(-4)}` : value;
 }

@@ -684,7 +684,6 @@
             "title": "Confirmed source",
             "verifiedBadge": "Signature verified · Finalized",
             "empty": "No finalized event",
-            "objectLabel": "disaster_event",
             "revision": "rev {revision} · {date}"
         },
         "sourceChain": {
@@ -708,11 +707,6 @@
             "finalizedAtLabel": "Finalized at",
             "claimWindowLabel": "Claim window",
             "claimWindowValue": "30 days from finalization"
-        },
-        "affectedMap": {
-            "caption": "affected-area map",
-            "grid": "H3 r8 · {cells} cells",
-            "note": "The affected area is shown as H3 cells computed from ShakeMap and is used for the affected-area proof when claiming."
         },
         "disclaimer": "Sonari is not insurance. Donations do not create a guaranteed payout. Support depends on pool balance, program rules, verification requirements, fraud controls, and claim timing.",
         "states": {
