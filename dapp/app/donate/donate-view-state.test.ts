@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-    buildDonateSplitRows,
     buildDonateDonorPassReadState,
     buildDonateTxResultView,
     resolveDonateSubmitDisabledReason,
@@ -69,69 +68,6 @@ const readyDonorPassState: DonateDonorPassReadState = {
     status: "ready",
     passId: null,
 };
-
-const t = (key: string) => key;
-
-describe("buildDonateSplitRows", () => {
-    it("describes general donations as 95% main and 5% operations", () => {
-        const rows = buildDonateSplitRows({
-            mode: "general",
-            campaignLabel: "Campaign",
-            categoryLabel: "Category",
-            t,
-        });
-
-        expect(rows.map((row) => [row.key, row.value])).toEqual([
-            ["main", "split.value.generalMainShare"],
-            ["operations", "split.value.operationsShare"],
-        ]);
-    });
-
-    it("describes campaign donations without claiming a fixed amount split", () => {
-        const rows = buildDonateSplitRows({
-            mode: "campaign",
-            campaignLabel: "Campaign A",
-            categoryLabel: "Category",
-            t,
-        });
-
-        expect(rows).toEqual([
-            {
-                key: "campaign",
-                label: "Campaign A",
-                detail: "split.campaign.detail",
-                value: "split.value.campaignTerms",
-            },
-            {
-                key: "main",
-                label: "split.main.label",
-                detail: "split.main.campaignDetail",
-                value: "split.value.campaignRemainder",
-            },
-            {
-                key: "operations",
-                label: "split.operations.label",
-                detail: "split.operations.campaignDetail",
-                value: "split.value.campaignOperations",
-            },
-        ]);
-    });
-
-    it("describes category donations as 90% category, 5% main, and 5% operations", () => {
-        const rows = buildDonateSplitRows({
-            mode: "category",
-            campaignLabel: "Campaign",
-            categoryLabel: "Category A",
-            t,
-        });
-
-        expect(rows.map((row) => [row.key, row.value])).toEqual([
-            ["category", "split.value.categoryShare"],
-            ["main", "split.value.categoryMainShare"],
-            ["operations", "split.value.operationsShare"],
-        ]);
-    });
-});
 
 describe("resolveDonateSubmitDisabledReason", () => {
     it("returns configMissing when config is not ready", () => {

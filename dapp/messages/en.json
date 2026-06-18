@@ -311,6 +311,12 @@
             "title": "Send support with a clear trail.",
             "sub": "A front-end donation flow for USDC support, pool selection, public display preferences, and receipt previews."
         },
+        "metrics": {
+            "label": "Donation metrics",
+            "totalReceived": "Total received",
+            "totalSent": "Total sent",
+            "activeReliefPools": "Active relief pools"
+        },
         "form": {
             "eyebrow": "Contribution",
             "title": "Donation setup",
@@ -475,7 +481,8 @@
         "note": {
             "title": "DonorPass note",
             "body": "DonorPass records contribution history only. It does not provide claim rights, payout priority, or promised aid.",
-            "link": "View dashboard"
+            "link": "View dashboard",
+            "inline": "Donations are recorded on-chain and remain in DonorPass contribution history. They do not provide claim rights or payout priority."
         },
         "emergency": {
             "tag": "Emergency",
