@@ -862,6 +862,24 @@
             "viewDetail": "詳細を見る"
         }
     },
+    "pools": {
+        "eyebrow": "災害特設救援プール",
+        "title": "実施中の災害特設救援プール",
+        "sub": "特定の災害救援プールに寄付し、資金の使われ方を追跡できます。",
+        "loading": "災害特設救援プールを読み込んでいます。",
+        "error": "災害特設救援プールを読み込めませんでした。",
+        "retry": "再試行",
+        "empty": "現在アクティブな災害救援プールはありません。",
+        "card": {
+            "region": "地域",
+            "affectedCells": "被影響セル数",
+            "donationEnd": "寄付受付締切",
+            "balance": "プール残高",
+            "totalDonated": "累計受入額",
+            "totalPaid": "累計支払額",
+            "donate": "このプールに寄付する"
+        }
+    },
     "notFound": {
         "brandHomeAria": "Sonari ホームへ戻る",
         "eyebrow": "404 / ページが見つかりません",

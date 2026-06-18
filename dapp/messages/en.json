@@ -862,6 +862,24 @@
             "viewDetail": "View detail"
         }
     },
+    "pools": {
+        "eyebrow": "Disaster relief pools",
+        "title": "Active disaster relief pools.",
+        "sub": "Donate to a specific disaster relief pool and track how funds are used.",
+        "loading": "Loading disaster relief pools.",
+        "error": "Could not load disaster relief pools.",
+        "retry": "Retry",
+        "empty": "No active disaster relief pools at this time.",
+        "card": {
+            "region": "Region",
+            "affectedCells": "Affected cells",
+            "donationEnd": "Donation deadline",
+            "balance": "Pool balance",
+            "totalDonated": "Total donated",
+            "totalPaid": "Total paid out",
+            "donate": "Donate to this pool"
+        }
+    },
     "notFound": {
         "brandHomeAria": "Go to Sonari home",
         "eyebrow": "404 / Page not found",
