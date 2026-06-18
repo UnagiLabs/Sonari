@@ -36,6 +36,22 @@ describe("DisasterDonateView ソース検証", () => {
         expect(viewSource).toContain("lockDestination");
     });
 
+    it("DonateView を embedded（chrome なし）で埋め込んでいる", () => {
+        // DonateView はページ全体（SiteTopbar/緊急バナー/ヒーロー）を描画するため、
+        // 本ビューに埋め込むときは embedded でフォームのみ描画させ二重描画を防ぐ。
+        expect(viewSource).toContain("embedded");
+    });
+
+    it("災害タイトルを sr-only h2 で二重表示しない", () => {
+        // ヒーローの h1 と同じ view.title を sr-only h2 で重複描画していた不具合の回帰防止。
+        // .sr-only は globals.css に未定義で視覚的に隠れず二重表示になっていた。
+        expect(viewSource).not.toContain("sr-only");
+    });
+
+    it("artifact が無いとき地図枠の fallback 文言を出す", () => {
+        expect(viewSource).toContain("mapUnavailable");
+    });
+
     it("affectedAreaArtifactFromBaseUrl を使っている", () => {
         expect(viewSource).toContain("affectedAreaArtifactFromBaseUrl");
     });
@@ -83,6 +99,7 @@ describe("disasterDonate i18n キー整合", () => {
         "notFoundBody",
         "backToPools",
         "mapTitle",
+        "mapUnavailable",
         "regionLabel",
         "affectedCellsLabel",
         "donationEndLabel",

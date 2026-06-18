@@ -897,6 +897,7 @@
         "notFoundBody": "指定されたイベントに対応する災害特設救援プールが見つかりませんでした。削除されたか、リンクが正しくない可能性があります。",
         "backToPools": "災害特設救援プール一覧に戻る",
         "mapTitle": "被災エリア",
+        "mapUnavailable": "この災害の被災エリア地図はまだ利用できません。",
         "regionLabel": "地域",
         "affectedCellsLabel": "被影響セル数",
         "donationEndLabel": "寄付受付締切",

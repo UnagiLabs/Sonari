@@ -131,6 +131,17 @@ describe("DonateView initialMode / initialCampaignId / lockDestination props", (
         expect(donateViewSource).toMatch(/locked-destination|lockedDestination|lockDestination.*className|donate\.locked/);
     });
 
+    it("DonateView が embedded prop を受け取る型定義を持つ", () => {
+        expect(donateViewSource).toContain("embedded");
+    });
+
+    it("embedded のとき chrome なしでフォーム部分のみ返す分岐がある", () => {
+        // embedded のときは watercolor-bg/SiteTopbar/EmergencyBanner/donate-hero を描画せず
+        // donateForm（donate-layout）だけ返す。/donate/[eventId] の二重 chrome を防ぐ。
+        expect(donateViewSource).toMatch(/if\s*\(embedded\)/u);
+        expect(donateViewSource).toContain("donateForm");
+    });
+
     it("auto-select effect で initialCampaignId が指定済みの場合は上書きしない分岐がある", () => {
         // initialCampaignId が与えられたとき auto-select で上書きしないロジック
         expect(donateViewSource).toContain("initialCampaignId");

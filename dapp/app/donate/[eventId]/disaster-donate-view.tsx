@@ -232,14 +232,9 @@ export function DisasterDonateView({
                         </div>
                     </header>
 
-                    {/* 災害情報サマリ */}
-                    <section
-                        className="claim-event-panel"
-                        aria-labelledby="disaster-donate-summary-title"
-                    >
-                        <h2 id="disaster-donate-summary-title" className="sr-only">
-                            {view.title}
-                        </h2>
+                    {/* 災害情報サマリ。見出しはヒーローの h1 と重複するため置かず、
+                        section に aria-label を付けてアクセシビリティを担保する。 */}
+                    <section className="claim-event-panel" aria-label={view.title}>
                         <dl className="pass-grid">
                             <div>
                                 <dt>{t("regionLabel")}</dt>
@@ -276,32 +271,36 @@ export function DisasterDonateView({
                         </dl>
                     </section>
 
-                    {/* 被災エリア地図（env 設定時のみ） */}
-                    {affectedAreaArtifact !== null ? (
-                        <section
-                            className="claim-map-section"
-                            aria-labelledby="disaster-donate-map-title"
-                        >
-                            <div className="panel-header">
-                                <h2 id="disaster-donate-map-title">{t("mapTitle")}</h2>
-                            </div>
+                    {/* 被災エリア地図。artifact が無い（env 未設定 / 未生成）ときも
+                        枠は残し、fallback メッセージを出してページを壊さない。 */}
+                    <section
+                        className="claim-map-section"
+                        aria-labelledby="disaster-donate-map-title"
+                    >
+                        <div className="panel-header">
+                            <h2 id="disaster-donate-map-title">{t("mapTitle")}</h2>
+                        </div>
+                        {affectedAreaArtifact !== null ? (
                             <AffectedAreaMap
                                 affectedAreaArtifact={affectedAreaArtifact}
                                 cellSource={{ kind: "deferred" }}
                                 residenceCell={null}
                             />
-                        </section>
-                    ) : null}
-
-                    {/* 寄付フォーム（campaign 固定モード） */}
-                    <section className="claim-layout" aria-labelledby="donate-form-section">
-                        <DonateView
-                            locale={locale}
-                            initialMode="campaign"
-                            initialCampaignId={campaign.campaignId}
-                            lockDestination
-                        />
+                        ) : (
+                            <p className="muted claim-sub">{t("mapUnavailable")}</p>
+                        )}
                     </section>
+
+                    {/* 寄付フォーム（campaign 固定モード・chrome なし embedded）。
+                        ページ chrome（SiteTopbar・背景・main）は本ビューが用意するため、
+                        DonateView は embedded でフォーム部分のみ描画させ二重描画を防ぐ。 */}
+                    <DonateView
+                        locale={locale}
+                        initialMode="campaign"
+                        initialCampaignId={campaign.campaignId}
+                        lockDestination
+                        embedded
+                    />
                 </main>
             </div>
         </>

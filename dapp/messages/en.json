@@ -897,6 +897,7 @@
         "notFoundBody": "No disaster relief pool was found for the specified event. It may have been removed or the link may be incorrect.",
         "backToPools": "Back to disaster relief pools",
         "mapTitle": "Affected area",
+        "mapUnavailable": "The affected area map is not available yet for this disaster.",
         "regionLabel": "Region",
         "affectedCellsLabel": "Affected cells",
         "donationEndLabel": "Donation deadline",

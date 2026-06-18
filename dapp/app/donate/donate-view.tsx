@@ -63,6 +63,7 @@ export function DonateView({
     initialMode,
     initialCampaignId,
     lockDestination = false,
+    embedded = false,
 }: {
     readonly locale: SonariLocale;
     readonly demo?: DonateDemoConfig;
@@ -81,6 +82,12 @@ export function DonateView({
      * 固定された寄付先のみを表示する。未指定時は false（従来どおり）。
      */
     readonly lockDestination?: boolean;
+    /**
+     * true にするとページ chrome（背景・SiteTopbar・緊急バナー・ヒーロー・main）を
+     * 描画せず、寄付フォーム部分だけを返す。/donate/[eventId] のように、呼び出し側が
+     * 既にページ chrome を用意している場合の二重描画を防ぐ。未指定時は false（従来どおり）。
+     */
+    readonly embedded?: boolean;
 }) {
     const demoMode = demo !== undefined;
     const t = useTranslations("donate");
@@ -575,6 +582,277 @@ export function DonateView({
         }
     }
 
+    const donateForm = (
+        <section className="donate-layout" aria-label={t("form.title")}>
+            <form className="donate-form" aria-labelledby="donation-form-title">
+                <div className="form-heading">
+                    <div>
+                        <div className="eyebrow">{t("form.eyebrow")}</div>
+                        <h2 id="donation-form-title">{t("form.title")}</h2>
+                    </div>
+                    <span className="tag tag-ok tag-dot">USDC</span>
+                </div>
+
+                {lockDestination ? (
+                    <div className="locked-destination control-group">
+                        <p className="faint">{t("form.lockedDestination")}</p>
+                    </div>
+                ) : (
+                    <fieldset className="control-group">
+                        <legend>{t("form.typeLegend")}</legend>
+                        <div className="choice-grid">
+                            <label className="choice-option">
+                                <input
+                                    checked={mode === "general"}
+                                    name="donationMode"
+                                    onChange={() => handleModeChange("general")}
+                                    type="radio"
+                                    value="general"
+                                />
+                                <span>
+                                    <strong>{t("types.general.label")}</strong>
+                                    <small>{t("types.general.description")}</small>
+                                </span>
+                            </label>
+                            <label className="choice-option">
+                                <input
+                                    checked={mode === "category"}
+                                    name="donationMode"
+                                    onChange={() => handleModeChange("category")}
+                                    type="radio"
+                                    value="category"
+                                />
+                                <span>
+                                    <strong>{t("types.category.label")}</strong>
+                                    <small>{t("types.category.description")}</small>
+                                </span>
+                            </label>
+                        </div>
+                    </fieldset>
+                )}
+
+                {!lockDestination && mode === "campaign" ? (
+                    <fieldset className="control-group">
+                        <legend>{t("form.campaignLegend")}</legend>
+                        <div className="pool-select-list">
+                            {destinationState.status === "ready" &&
+                            destinationState.campaigns.length > 0 ? (
+                                destinationState.campaigns.map((campaign) => (
+                                    <label className="pool-select-option" key={campaign.id}>
+                                        <input
+                                            checked={campaign.id === campaignId}
+                                            name="donateCampaign"
+                                            onChange={() => handleCampaignChange(campaign.id)}
+                                            type="radio"
+                                            value={campaign.id}
+                                        />
+                                        <span>
+                                            <strong>{campaign.label}</strong>
+                                            <small>{campaign.campaignId}</small>
+                                        </span>
+                                    </label>
+                                ))
+                            ) : destinationState.status === "loading" ? (
+                                <p className="faint">{t("submit.disabled.campaignLoading")}</p>
+                            ) : destinationState.campaigns.length === 0 ? (
+                                <p className="faint">{t("submit.disabled.campaignNotFound")}</p>
+                            ) : null}
+                        </div>
+                    </fieldset>
+                ) : null}
+
+                {mode === "category" ? (
+                    <fieldset className="control-group">
+                        <legend>{t("form.categoryLegend")}</legend>
+                        <div className="pool-select-list">
+                            {destinationState.status === "loading" ? (
+                                <p className="faint">{t("submit.disabled.categoryLoading")}</p>
+                            ) : destinationState.status === "ready" &&
+                              destinationState.categories.length === 0 ? (
+                                <>
+                                    <p className="faint">{t("submit.disabled.categoryNotFound")}</p>
+                                    {buildCategoryListItems([]).map((item) =>
+                                        item.kind === "comingSoon" ? (
+                                            <label
+                                                className="pool-select-option pool-select-option-disabled"
+                                                key={item.id}
+                                            >
+                                                <input
+                                                    disabled
+                                                    name="donateCategory"
+                                                    type="radio"
+                                                    value={item.id}
+                                                />
+                                                <span>
+                                                    <strong>{t(item.labelKey)}</strong>
+                                                    <small className="tag tag-neutral">
+                                                        {t("category.comingSoonBadge")}
+                                                    </small>
+                                                </span>
+                                            </label>
+                                        ) : null,
+                                    )}
+                                </>
+                            ) : (
+                                buildCategoryListItems(destinationState.categories).map((item) => {
+                                    if (item.kind === "available") {
+                                        return (
+                                            <label className="pool-select-option" key={item.id}>
+                                                <input
+                                                    checked={item.categoryPoolId === categoryPoolId}
+                                                    name="donateCategory"
+                                                    onChange={() =>
+                                                        handleCategoryChange(item.categoryPoolId)
+                                                    }
+                                                    type="radio"
+                                                    value={item.categoryPoolId}
+                                                />
+                                                <span>
+                                                    <strong>{item.label}</strong>
+                                                    <small>{item.categoryPoolId}</small>
+                                                </span>
+                                            </label>
+                                        );
+                                    }
+                                    return (
+                                        <label
+                                            className="pool-select-option pool-select-option-disabled"
+                                            key={item.id}
+                                        >
+                                            <input
+                                                disabled
+                                                name="donateCategory"
+                                                type="radio"
+                                                value={item.id}
+                                            />
+                                            <span>
+                                                <strong>{t(item.labelKey)}</strong>
+                                                <small className="tag tag-neutral">
+                                                    {t("category.comingSoonBadge")}
+                                                </small>
+                                            </span>
+                                        </label>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </fieldset>
+                ) : null}
+
+                <div className="amount-field">
+                    <label htmlFor="donation-amount">{t("form.amountLabel")}</label>
+                    <div className="amount-input-wrap">
+                        <input
+                            id="donation-amount"
+                            inputMode="decimal"
+                            name="amount"
+                            onChange={(event) => {
+                                handleAmountChange(event.target.value);
+                            }}
+                            value={amountInput}
+                        />
+                        <span>USDC</span>
+                    </div>
+                    <div className="quick-amounts">
+                        {QUICK_AMOUNTS.map((amount) => (
+                            <button
+                                key={amount}
+                                onClick={() => {
+                                    handleQuickAmount(amount);
+                                }}
+                                type="button"
+                            >
+                                {amount}
+                            </button>
+                        ))}
+                    </div>
+                    {!amountValidation.ok ? (
+                        <p className="faint">{t(`amount.error.${amountValidation.errorCode}`)}</p>
+                    ) : null}
+                </div>
+
+                <div className="form-actions">
+                    <button
+                        className="btn btn-primary btn-lg"
+                        disabled={isSubmitDisabled}
+                        onClick={handleSubmit}
+                        type="button"
+                    >
+                        {isDonateInFlight ? t("form.submitting") : t("form.submit")}
+                    </button>
+                </div>
+            </form>
+
+            <aside className="donate-side" aria-label={t("split.title")}>
+                <section className="preview-block">
+                    <div className="panel-header compact">
+                        <div>
+                            <div className="eyebrow">{t("split.eyebrow")}</div>
+                            <h2>{t("split.title")}</h2>
+                        </div>
+                        <span className="stat-num">{selectedAmountLabel}</span>
+                    </div>
+                    <div className="split-list">
+                        {splitRows.map((row) => (
+                            <div className="split-row" key={row.key}>
+                                <div>
+                                    <strong>{row.label}</strong>
+                                    <small>{row.detail}</small>
+                                </div>
+                                <span>{row.value}</span>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
+                <section className="preview-block">
+                    <div className="panel-header compact">
+                        <div>
+                            <div className="eyebrow">{t("result.eyebrow")}</div>
+                            <h2>{t("result.title")}</h2>
+                        </div>
+                    </div>
+                    <div className={statusClass}>
+                        {resultView.loading ? (
+                            <LoadingIndicator label={txMessage()} />
+                        ) : (
+                            <strong>{txMessage()}</strong>
+                        )}
+                        <small>{txDetail()}</small>
+                        {resultView.digest !== null ? (
+                            <small className="faint">{resultView.digest}</small>
+                        ) : null}
+                        {resultView.explorerUrl !== null ? (
+                            <a
+                                className="text-action"
+                                href={resultView.explorerUrl}
+                                rel="noopener noreferrer"
+                                target="_blank"
+                            >
+                                {t("tx.submitted.explorerLink")}
+                            </a>
+                        ) : null}
+                        {resultView.canRetry ? <small>{t("tx.failed.retryHint")}</small> : null}
+                    </div>
+                </section>
+
+                <section className="donate-note">
+                    <h3>{t("note.title")}</h3>
+                    <p>{t("note.body")}</p>
+                    <a className="text-action" href="/dashboard">
+                        {t("note.link")}
+                    </a>
+                </section>
+            </aside>
+        </section>
+    );
+
+    // embedded モード（/donate/[eventId] など）ではページ chrome を描画せず
+    // フォーム部分だけ返す。背景・SiteTopbar・緊急バナー・ヒーローは呼び出し側が用意する。
+    if (embedded) {
+        return donateForm;
+    }
+
     return (
         <>
             <div className="watercolor-bg" />
@@ -594,297 +872,7 @@ export function DonateView({
                         </div>
                     </header>
 
-                    <section className="donate-layout" aria-label={t("form.title")}>
-                        <form className="donate-form" aria-labelledby="donation-form-title">
-                            <div className="form-heading">
-                                <div>
-                                    <div className="eyebrow">{t("form.eyebrow")}</div>
-                                    <h2 id="donation-form-title">{t("form.title")}</h2>
-                                </div>
-                                <span className="tag tag-ok tag-dot">USDC</span>
-                            </div>
-
-                            {lockDestination ? (
-                                <div className="locked-destination control-group">
-                                    <p className="faint">{t("form.lockedDestination")}</p>
-                                </div>
-                            ) : (
-                                <fieldset className="control-group">
-                                    <legend>{t("form.typeLegend")}</legend>
-                                    <div className="choice-grid">
-                                        <label className="choice-option">
-                                            <input
-                                                checked={mode === "general"}
-                                                name="donationMode"
-                                                onChange={() => handleModeChange("general")}
-                                                type="radio"
-                                                value="general"
-                                            />
-                                            <span>
-                                                <strong>{t("types.general.label")}</strong>
-                                                <small>{t("types.general.description")}</small>
-                                            </span>
-                                        </label>
-                                        <label className="choice-option">
-                                            <input
-                                                checked={mode === "category"}
-                                                name="donationMode"
-                                                onChange={() => handleModeChange("category")}
-                                                type="radio"
-                                                value="category"
-                                            />
-                                            <span>
-                                                <strong>{t("types.category.label")}</strong>
-                                                <small>{t("types.category.description")}</small>
-                                            </span>
-                                        </label>
-                                    </div>
-                                </fieldset>
-                            )}
-
-                            {!lockDestination && mode === "campaign" ? (
-                                <fieldset className="control-group">
-                                    <legend>{t("form.campaignLegend")}</legend>
-                                    <div className="pool-select-list">
-                                        {destinationState.status === "ready" &&
-                                        destinationState.campaigns.length > 0 ? (
-                                            destinationState.campaigns.map((campaign) => (
-                                                <label
-                                                    className="pool-select-option"
-                                                    key={campaign.id}
-                                                >
-                                                    <input
-                                                        checked={campaign.id === campaignId}
-                                                        name="donateCampaign"
-                                                        onChange={() =>
-                                                            handleCampaignChange(campaign.id)
-                                                        }
-                                                        type="radio"
-                                                        value={campaign.id}
-                                                    />
-                                                    <span>
-                                                        <strong>{campaign.label}</strong>
-                                                        <small>{campaign.campaignId}</small>
-                                                    </span>
-                                                </label>
-                                            ))
-                                        ) : destinationState.status === "loading" ? (
-                                            <p className="faint">
-                                                {t("submit.disabled.campaignLoading")}
-                                            </p>
-                                        ) : destinationState.campaigns.length === 0 ? (
-                                            <p className="faint">
-                                                {t("submit.disabled.campaignNotFound")}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                </fieldset>
-                            ) : null}
-
-                            {mode === "category" ? (
-                                <fieldset className="control-group">
-                                    <legend>{t("form.categoryLegend")}</legend>
-                                    <div className="pool-select-list">
-                                        {destinationState.status === "loading" ? (
-                                            <p className="faint">
-                                                {t("submit.disabled.categoryLoading")}
-                                            </p>
-                                        ) : destinationState.status === "ready" &&
-                                          destinationState.categories.length === 0 ? (
-                                            <>
-                                                <p className="faint">
-                                                    {t("submit.disabled.categoryNotFound")}
-                                                </p>
-                                                {buildCategoryListItems([]).map((item) =>
-                                                    item.kind === "comingSoon" ? (
-                                                        <label
-                                                            className="pool-select-option pool-select-option-disabled"
-                                                            key={item.id}
-                                                        >
-                                                            <input
-                                                                disabled
-                                                                name="donateCategory"
-                                                                type="radio"
-                                                                value={item.id}
-                                                            />
-                                                            <span>
-                                                                <strong>{t(item.labelKey)}</strong>
-                                                                <small className="tag tag-neutral">
-                                                                    {t("category.comingSoonBadge")}
-                                                                </small>
-                                                            </span>
-                                                        </label>
-                                                    ) : null,
-                                                )}
-                                            </>
-                                        ) : (
-                                            buildCategoryListItems(destinationState.categories).map(
-                                                (item) => {
-                                                    if (item.kind === "available") {
-                                                        return (
-                                                            <label
-                                                                className="pool-select-option"
-                                                                key={item.id}
-                                                            >
-                                                                <input
-                                                                    checked={
-                                                                        item.categoryPoolId ===
-                                                                        categoryPoolId
-                                                                    }
-                                                                    name="donateCategory"
-                                                                    onChange={() =>
-                                                                        handleCategoryChange(
-                                                                            item.categoryPoolId,
-                                                                        )
-                                                                    }
-                                                                    type="radio"
-                                                                    value={item.categoryPoolId}
-                                                                />
-                                                                <span>
-                                                                    <strong>{item.label}</strong>
-                                                                    <small>
-                                                                        {item.categoryPoolId}
-                                                                    </small>
-                                                                </span>
-                                                            </label>
-                                                        );
-                                                    }
-                                                    return (
-                                                        <label
-                                                            className="pool-select-option pool-select-option-disabled"
-                                                            key={item.id}
-                                                        >
-                                                            <input
-                                                                disabled
-                                                                name="donateCategory"
-                                                                type="radio"
-                                                                value={item.id}
-                                                            />
-                                                            <span>
-                                                                <strong>{t(item.labelKey)}</strong>
-                                                                <small className="tag tag-neutral">
-                                                                    {t("category.comingSoonBadge")}
-                                                                </small>
-                                                            </span>
-                                                        </label>
-                                                    );
-                                                },
-                                            )
-                                        )}
-                                    </div>
-                                </fieldset>
-                            ) : null}
-
-                            <div className="amount-field">
-                                <label htmlFor="donation-amount">{t("form.amountLabel")}</label>
-                                <div className="amount-input-wrap">
-                                    <input
-                                        id="donation-amount"
-                                        inputMode="decimal"
-                                        name="amount"
-                                        onChange={(event) => {
-                                            handleAmountChange(event.target.value);
-                                        }}
-                                        value={amountInput}
-                                    />
-                                    <span>USDC</span>
-                                </div>
-                                <div className="quick-amounts">
-                                    {QUICK_AMOUNTS.map((amount) => (
-                                        <button
-                                            key={amount}
-                                            onClick={() => {
-                                                handleQuickAmount(amount);
-                                            }}
-                                            type="button"
-                                        >
-                                            {amount}
-                                        </button>
-                                    ))}
-                                </div>
-                                {!amountValidation.ok ? (
-                                    <p className="faint">
-                                        {t(`amount.error.${amountValidation.errorCode}`)}
-                                    </p>
-                                ) : null}
-                            </div>
-
-                            <div className="form-actions">
-                                <button
-                                    className="btn btn-primary btn-lg"
-                                    disabled={isSubmitDisabled}
-                                    onClick={handleSubmit}
-                                    type="button"
-                                >
-                                    {isDonateInFlight ? t("form.submitting") : t("form.submit")}
-                                </button>
-                            </div>
-                        </form>
-
-                        <aside className="donate-side" aria-label={t("split.title")}>
-                            <section className="preview-block">
-                                <div className="panel-header compact">
-                                    <div>
-                                        <div className="eyebrow">{t("split.eyebrow")}</div>
-                                        <h2>{t("split.title")}</h2>
-                                    </div>
-                                    <span className="stat-num">{selectedAmountLabel}</span>
-                                </div>
-                                <div className="split-list">
-                                    {splitRows.map((row) => (
-                                        <div className="split-row" key={row.key}>
-                                            <div>
-                                                <strong>{row.label}</strong>
-                                                <small>{row.detail}</small>
-                                            </div>
-                                            <span>{row.value}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
-
-                            <section className="preview-block">
-                                <div className="panel-header compact">
-                                    <div>
-                                        <div className="eyebrow">{t("result.eyebrow")}</div>
-                                        <h2>{t("result.title")}</h2>
-                                    </div>
-                                </div>
-                                <div className={statusClass}>
-                                    {resultView.loading ? (
-                                        <LoadingIndicator label={txMessage()} />
-                                    ) : (
-                                        <strong>{txMessage()}</strong>
-                                    )}
-                                    <small>{txDetail()}</small>
-                                    {resultView.digest !== null ? (
-                                        <small className="faint">{resultView.digest}</small>
-                                    ) : null}
-                                    {resultView.explorerUrl !== null ? (
-                                        <a
-                                            className="text-action"
-                                            href={resultView.explorerUrl}
-                                            rel="noopener noreferrer"
-                                            target="_blank"
-                                        >
-                                            {t("tx.submitted.explorerLink")}
-                                        </a>
-                                    ) : null}
-                                    {resultView.canRetry ? (
-                                        <small>{t("tx.failed.retryHint")}</small>
-                                    ) : null}
-                                </div>
-                            </section>
-
-                            <section className="donate-note">
-                                <h3>{t("note.title")}</h3>
-                                <p>{t("note.body")}</p>
-                                <a className="text-action" href="/dashboard">
-                                    {t("note.link")}
-                                </a>
-                            </section>
-                        </aside>
-                    </section>
+                    {donateForm}
                 </main>
             </div>
         </>
