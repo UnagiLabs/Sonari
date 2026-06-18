@@ -22,17 +22,19 @@ fun create_index_sets_fields_and_emits_event() {
         scenario.ctx(),
     );
 
-    let emitted = event::events_by_type<cell_count_index::CellCountIndexCreated>();
+    let emitted = event::events_by_type<cell_count_index::CellCountIndexPublished>();
     assert!(emitted.length() == 1);
     let (
-        event_index_id,
+        event_package_id,
         event_membership_registry_id,
+        event_cell_count_index_id,
         event_h3_resolution,
         event_shard_count,
         event_actor,
-    ) = cell_count_index::cell_count_index_created_event_fields(*emitted.borrow(0));
-    assert!(event_index_id == index_id);
+    ) = cell_count_index::cell_count_index_published_event_fields(*emitted.borrow(0));
+    assert!(event_package_id == cell_count_index::package_id_for_testing());
     assert!(event_membership_registry_id == membership_registry_id);
+    assert!(event_cell_count_index_id == index_id);
     assert!(event_h3_resolution == 7);
     assert!(event_shard_count == 4_096);
     assert!(event_actor == ADMIN);

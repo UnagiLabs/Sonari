@@ -30,9 +30,10 @@ public struct CellCount has copy, drop, store {
     active_count: u64,
 }
 
-public struct CellCountIndexCreated has copy, drop {
-    index_id: ID,
+public struct CellCountIndexPublished has copy, drop {
+    package_id: ID,
     membership_registry_id: ID,
+    cell_count_index_id: ID,
     h3_resolution: u8,
     shard_count: u64,
     actor: address,
@@ -58,9 +59,10 @@ public(package) fun create_index(
     };
     let index_id = object::id(&index);
 
-    event::emit(CellCountIndexCreated {
-        index_id,
+    event::emit(CellCountIndexPublished {
+        package_id: package_id(),
         membership_registry_id,
+        cell_count_index_id: index_id,
         h3_resolution: H3_RESOLUTION_RES7,
         shard_count: SHARD_COUNT,
         actor: ctx.sender(),
@@ -168,6 +170,10 @@ fun shard_id(h3_cell: u64): u64 {
     h3_cell % SHARD_COUNT
 }
 
+fun package_id(): ID {
+    object::id_from_address(@contracts)
+}
+
 fun assert_valid_shard(index: &CellCountIndex, shard: &CellCountShard, shard_id: u64) {
     assert_valid_shard_for_id(object::id(index), shard, shard_id);
 }
@@ -198,6 +204,11 @@ public fun index_fields_for_testing(index: &CellCountIndex): (ID, ID, u8, u64) {
 #[test_only]
 public fun shard_id_for_testing(h3_cell: u64): u64 {
     shard_id(h3_cell)
+}
+
+#[test_only]
+public fun package_id_for_testing(): ID {
+    package_id()
 }
 
 #[test_only]
@@ -236,17 +247,25 @@ public fun remove_count_for_testing(index: &mut CellCountIndex, h3_cell: u64) {
 }
 
 #[test_only]
-public fun cell_count_index_created_event_fields(
-    event: CellCountIndexCreated,
-): (ID, ID, u8, u64, address) {
-    let CellCountIndexCreated {
-        index_id,
+public fun cell_count_index_published_event_fields(
+    event: CellCountIndexPublished,
+): (ID, ID, ID, u8, u64, address) {
+    let CellCountIndexPublished {
+        package_id,
         membership_registry_id,
+        cell_count_index_id,
         h3_resolution,
         shard_count,
         actor,
     } = event;
-    (index_id, membership_registry_id, h3_resolution, shard_count, actor)
+    (
+        package_id,
+        membership_registry_id,
+        cell_count_index_id,
+        h3_resolution,
+        shard_count,
+        actor,
+    )
 }
 
 #[test_only]
