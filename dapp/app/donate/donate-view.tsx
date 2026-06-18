@@ -33,10 +33,10 @@ import {
     type DonateTxState,
     isDonateSubmitDisabled,
     resolveDonateSubmitDisabledReason,
-    selectEmergencyBannerCampaign,
 } from "./donate-view-state";
 import { readDonorPassId, readDonorPassIdUntilVisible } from "./donor-pass-read";
 import { EmergencyBanner } from "./emergency-banner";
+import { EmergencyBannerSection } from "./emergency-banner-section";
 import type { EmergencyBannerCampaign } from "./emergency-banner-state";
 
 const QUICK_AMOUNTS = ["$50", "$100", "$250", "$1,000"] as const;
@@ -348,11 +348,6 @@ export function DonateView({
           });
 
     const resultView = buildDonateTxResultView(txState, network);
-    // デモモードでは固定キャンペーンを注入し、本番ではチェーン由来の実施中キャンペーンを選ぶ。
-    const emergencyBannerCampaign =
-        demo !== undefined
-            ? demo.emergencyCampaign
-            : selectEmergencyBannerCampaign(destinationState, BigInt(Date.now()));
     const destination = useMemo<DonateDestinationInput>(() => {
         if (mode === "campaign") {
             return { kind: "campaign", campaignId };
@@ -877,10 +872,15 @@ export function DonateView({
                 <SiteTopbar active="donate" locale={locale} />
 
                 <main className="page donate-page">
-                    <EmergencyBanner
-                        campaign={emergencyBannerCampaign}
-                        onDonate={handleBannerDonate}
-                    />
+                    {/* デモは固定キャンペーンを直接描画し、本番は top と同一の共通バナーを使う。 */}
+                    {demo !== undefined ? (
+                        <EmergencyBanner
+                            campaign={demo.emergencyCampaign}
+                            onDonate={handleBannerDonate}
+                        />
+                    ) : (
+                        <EmergencyBannerSection onDonate={handleBannerDonate} />
+                    )}
                     <header className="donate-hero">
                         <div>
                             <div className="eyebrow">{t("hero.eyebrow")}</div>

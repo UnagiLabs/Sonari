@@ -5,13 +5,12 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { type ClaimCampaignState, readClaimCampaigns } from "./claim/claim-campaigns";
+import { readClaimCampaigns } from "./claim/claim-campaigns";
 import { createClaimReadClient } from "./claim/claim-read-client";
 import { readDonateEnvConfig } from "./donate/donate-config";
-import { selectEmergencyBannerFromClaimCampaigns } from "./donate/donate-view-state";
 import { EmergencyBanner } from "./donate/emergency-banner";
+import { EmergencyBannerSection } from "./donate/emergency-banner-section";
 import type { EmergencyBannerCampaign } from "./donate/emergency-banner-state";
-import { useClaimBannerCta } from "./home-claim-banner";
 import { SiteTopbar } from "./i18n/site-topbar";
 import { buildDisasterPoolViews, type DisasterPoolView } from "./pools/disaster-pool-view-model";
 import type { SonariLocale } from "./register/wizard/locale";
@@ -306,62 +305,12 @@ function HomeEmergencyBannerView({
     );
 }
 
-// 本番ホームの緊急バナー。チェーンから災害 Campaign を読み、実施中のものだけ表示する。
-// FeaturedPools と同じ readClaimCampaigns を使い、バナーに災害イベント名（title）を出す。
-// CampaignCreated イベントだけでは title を取れないため DisasterEvent 紐付け済みの
-// ClaimCampaignState から選ぶ。読み込み中・失敗・該当なしのときは選定が null を返し、
-// バナーは出ない（fail-close）。
+// 本番ホームの緊急バナー。データ取得・選定・受け取り CTA 判定は EmergencyBannerSection に
+// 集約し、/donate の本番バナーと同一データ・同一見た目を共有する。ここでは「寄付する」押下で
+// /donate へ遷移する挙動だけを与える。
 function HomeEmergencyBanner() {
-    const t = useTranslations("home");
-    // 受け取り導線の判定は寄付バナーの取得とは独立。接続済み・登録済み・claim window
-    // 開のキャンペーンがあるときだけ「受け取る」主ボタンを足す（バナーは 1 枠のまま）。
-    const claimCta = useClaimBannerCta();
-    const suiClient = useCurrentClient();
-    const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
-    const [campaigns, setCampaigns] = useState<readonly ClaimCampaignState[]>([]);
-
-    useEffect(() => {
-        // funding package 未設定では実施中キャンペーンを判定できないため非表示にする。
-        const envConfigResult = readDonateEnvConfig();
-        if (envConfigResult.kind !== "ok") {
-            setCampaigns([]);
-            return;
-        }
-        const packageId = envConfigResult.config.fundingPackageId;
-        let cancelled = false;
-        setCampaigns([]);
-
-        readClaimCampaigns(client, { packageId, nowMs: Date.now() })
-            .then((result) => {
-                if (cancelled) {
-                    return;
-                }
-                setCampaigns(result.kind === "ok" ? result.campaigns : []);
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setCampaigns([]);
-                }
-            });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [client]);
-
-    // 現在時刻で実施中判定する。該当が無ければ null になりバナーは非表示。
-    const campaign = selectEmergencyBannerFromClaimCampaigns(campaigns, BigInt(Date.now()));
-    const primaryAction =
-        claimCta !== null
-            ? { href: `/claim?campaign=${claimCta.campaignId}`, label: t("emergencyClaimCta") }
-            : undefined;
-    return (
-        <HomeEmergencyBannerView
-            campaign={campaign}
-            donateHref="/donate"
-            {...(primaryAction !== undefined ? { primaryAction } : {})}
-        />
-    );
+    const router = useRouter();
+    return <EmergencyBannerSection onDonate={() => router.push("/donate")} />;
 }
 
 function SectionHeader({
