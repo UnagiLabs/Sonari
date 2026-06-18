@@ -16,6 +16,7 @@ const VERIFIER_REGISTRY_ID = objectId("07");
 const IDENTITY_REGISTRY_ID = objectId("09");
 const CATEGORY_REGISTRY_ID = objectId("0a");
 const EARTHQUAKE_POOL_ID = objectId("0b");
+const CELL_COUNT_INDEX_ID = objectId("0c");
 const DISASTER_REGISTRY_ID = objectId("0d");
 const ALLOWED_RESIDENCE_CELL_REGISTRY_ID = objectId("0e");
 
@@ -73,6 +74,7 @@ function validClient(): QueryEventsClient {
             genesisEvent(GENESIS_OBJECT_KIND.pauseState, PAUSE_STATE_ID),
             genesisEvent(GENESIS_OBJECT_KIND.mainPool, MAIN_POOL_ID),
             genesisEvent(GENESIS_OBJECT_KIND.membershipRegistry, MEMBERSHIP_REGISTRY_ID),
+            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
             genesisEvent(GENESIS_OBJECT_KIND.verifierRegistry, VERIFIER_REGISTRY_ID),
             genesisEvent(GENESIS_OBJECT_KIND.identityRegistry, IDENTITY_REGISTRY_ID),
             genesisEvent(GENESIS_OBJECT_KIND.categoryRegistry, CATEGORY_REGISTRY_ID),
@@ -142,6 +144,8 @@ describe("resolvePublishedContractIds", () => {
             FLOOR_CENSUS_PAUSE_STATE: PAUSE_STATE_ID,
             FLOOR_CENSUS_MAIN_POOL: MAIN_POOL_ID,
             SONARI_MEMBERSHIP_REGISTRY_ID: MEMBERSHIP_REGISTRY_ID,
+            SONARI_CELL_COUNT_INDEX_ID: CELL_COUNT_INDEX_ID,
+            FLOOR_CENSUS_CELL_COUNT_INDEX: CELL_COUNT_INDEX_ID,
             SONARI_VERIFIER_REGISTRY_ID: VERIFIER_REGISTRY_ID,
             SONARI_IDENTITY_REGISTRY_ID: IDENTITY_REGISTRY_ID,
             SONARI_CATEGORY_REGISTRY_ID: CATEGORY_REGISTRY_ID,
@@ -178,6 +182,7 @@ describe("resolvePublishedContractIds", () => {
                                 GENESIS_OBJECT_KIND.membershipRegistry,
                                 MEMBERSHIP_REGISTRY_ID,
                             ),
+                            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
                             genesisEvent(
                                 GENESIS_OBJECT_KIND.verifierRegistry,
                                 VERIFIER_REGISTRY_ID,
@@ -218,6 +223,7 @@ describe("resolvePublishedContractIds", () => {
                                 GENESIS_OBJECT_KIND.membershipRegistry,
                                 MEMBERSHIP_REGISTRY_ID,
                             ),
+                            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
                             genesisEvent(
                                 GENESIS_OBJECT_KIND.verifierRegistry,
                                 VERIFIER_REGISTRY_ID,
@@ -260,6 +266,7 @@ describe("resolvePublishedContractIds", () => {
                                 GENESIS_OBJECT_KIND.membershipRegistry,
                                 MEMBERSHIP_REGISTRY_ID,
                             ),
+                            genesisEvent(GENESIS_OBJECT_KIND.cellCountIndex, CELL_COUNT_INDEX_ID),
                             genesisEvent(
                                 GENESIS_OBJECT_KIND.verifierRegistry,
                                 VERIFIER_REGISTRY_ID,

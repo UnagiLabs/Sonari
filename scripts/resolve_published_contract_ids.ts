@@ -12,6 +12,7 @@ export const GENESIS_OBJECT_KIND = {
     identityRegistry: 9,
     categoryRegistry: 10,
     earthquakePool: 11,
+    cellCountIndex: 14,
 } as const;
 
 const GENESIS_OUTPUTS = [
@@ -20,6 +21,7 @@ const GENESIS_OUTPUTS = [
     ["SONARI_FLOOR_CENSUS_PAUSE_STATE", GENESIS_OBJECT_KIND.pauseState],
     ["SONARI_FLOOR_CENSUS_MAIN_POOL", GENESIS_OBJECT_KIND.mainPool],
     ["SONARI_MEMBERSHIP_REGISTRY_ID", GENESIS_OBJECT_KIND.membershipRegistry],
+    ["SONARI_CELL_COUNT_INDEX_ID", GENESIS_OBJECT_KIND.cellCountIndex],
     ["SONARI_VERIFIER_REGISTRY_ID", GENESIS_OBJECT_KIND.verifierRegistry],
     ["SONARI_IDENTITY_REGISTRY_ID", GENESIS_OBJECT_KIND.identityRegistry],
     ["SONARI_CATEGORY_REGISTRY_ID", GENESIS_OBJECT_KIND.categoryRegistry],
@@ -103,6 +105,7 @@ export async function resolvePublishedContractIds(
     env.RELAYER_CATEGORY_POOL = requireEnvValue(env, "SONARI_EARTHQUAKE_CATEGORY_POOL_ID");
     env.FLOOR_CENSUS_PAUSE_STATE = requireEnvValue(env, "SONARI_FLOOR_CENSUS_PAUSE_STATE");
     env.FLOOR_CENSUS_MAIN_POOL = requireEnvValue(env, "SONARI_FLOOR_CENSUS_MAIN_POOL");
+    env.FLOOR_CENSUS_CELL_COUNT_INDEX = requireEnvValue(env, "SONARI_CELL_COUNT_INDEX_ID");
     env.FLOOR_CENSUS_CATEGORY_POOL = requireEnvValue(env, "SONARI_FLOOR_CENSUS_CATEGORY_POOL");
 
     env.RELAYER_REGISTRY = await readSingleRegistryCreatedEvent(

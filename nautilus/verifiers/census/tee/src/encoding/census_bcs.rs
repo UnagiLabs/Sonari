@@ -97,11 +97,9 @@ mod tests {
             affected_cells_root:
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
             membership_registry_id:
-                "0x2222222222222222222222222222222222222222222222222222222222222222"
-                    .to_owned(),
+                "0x2222222222222222222222222222222222222222222222222222222222222222".to_owned(),
             cell_count_index_id:
-                "0x3333333333333333333333333333333333333333333333333333333333333333"
-                    .to_owned(),
+                "0x3333333333333333333333333333333333333333333333333333333333333333".to_owned(),
             census_checkpoint: 41,
             h3_resolution: crate::H3_RESOLUTION,
             shard_count: crate::SHARD_COUNT,

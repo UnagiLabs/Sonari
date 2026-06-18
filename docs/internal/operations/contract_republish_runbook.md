@@ -159,6 +159,7 @@ workflow 成功後の確認:
 | `IdentityRegistry` | `GenesisObjectCreated` kind 9 | resolver output の `SONARI_IDENTITY_REGISTRY_ID` |
 | `CategoryRegistry` | `GenesisObjectCreated` kind 10 | resolver output の `SONARI_CATEGORY_REGISTRY_ID`, `RELAYER_CATEGORY_REGISTRY` |
 | `EarthquakePool` | `GenesisObjectCreated` kind 11 | resolver output の `SONARI_EARTHQUAKE_CATEGORY_POOL_ID`, `FLOOR_CENSUS_CATEGORY_POOL` |
+| `CellCountIndex` | `GenesisObjectCreated` kind 14 | resolver output の `SONARI_CELL_COUNT_INDEX_ID`, `FLOOR_CENSUS_CELL_COUNT_INDEX` |
 | `DisasterRegistry` | `admin::create_disaster_registry` | resolver output の `RELAYER_REGISTRY` |
 | `AllowedResidenceCellRegistry` | `admin::create_allowed_residence_cell_registry` | resolver output の `SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID` |
 | floor census target | 新 package id を埋め込む文字列 | resolver output の `FLOOR_CENSUS_TARGET=<PACKAGE_ID>::accessor::set_floor_census` |

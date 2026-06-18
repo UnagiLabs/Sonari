@@ -272,6 +272,10 @@ Parameters:
     Type: String
     Default: ""
     Description: MainPool object ID used by accessor::set_floor_census.
+  FloorCensusCellCountIndex:
+    Type: String
+    Default: ""
+    Description: CellCountIndex object ID used by accessor::set_floor_census.
   FloorCensusGraphqlUrl:
     Type: String
     Default: ""
@@ -1306,6 +1310,7 @@ Resources:
           FLOOR_CENSUS_PAUSE_STATE: !Ref FloorCensusPauseState
           FLOOR_CENSUS_CATEGORY_POOL: !Ref FloorCensusCategoryPool
           FLOOR_CENSUS_MAIN_POOL: !Ref FloorCensusMainPool
+          FLOOR_CENSUS_CELL_COUNT_INDEX: !Ref FloorCensusCellCountIndex
           FLOOR_CENSUS_GRAPHQL_URL: !Ref FloorCensusGraphqlUrl
           IDENTITY_RELAYER_MODE: !Ref IdentityRelayerMode
           SONARI_IDENTITY_PACKAGE_ID: !Ref SonariIdentityPackageId

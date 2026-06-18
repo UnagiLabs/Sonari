@@ -191,9 +191,9 @@ fn parse_canonical_u64_decimal(value: &str, field: &str) -> Result<u64, CensusEr
 mod tests {
     use super::{CensusInputBundle, HomeCellRegisteredEvent};
     use crate::{
-        AffectedCell, AffectedCellsArtifact, H3_RESOLUTION, INTENT, SHARD_COUNT,
-        VERIFIER_FAMILY, VERIFIER_VERSION, compute_affected_cells_root,
-        compute_floor_census_counts, process_floor_census_bundle,
+        AffectedCell, AffectedCellsArtifact, H3_RESOLUTION, INTENT, SHARD_COUNT, VERIFIER_FAMILY,
+        VERIFIER_VERSION, compute_affected_cells_root, compute_floor_census_counts,
+        process_floor_census_bundle,
     };
 
     const EVENT_UID: &str = "0xab131dd48ad8b67e8ba22ed461a885f0c8aaf937b665d04931018c31d5cf69bd";

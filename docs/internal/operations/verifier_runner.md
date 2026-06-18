@@ -72,6 +72,7 @@ Floor Census は earthquake relayer submit 成功後に同じ runner instance �
 - `FloorCensusPauseState=<PauseState object id>`
 - `FloorCensusCategoryPool=<CategoryPool object id>`
 - `FloorCensusMainPool=<MainPool object id>`
+- `FloorCensusCellCountIndex=<CellCountIndex object id>`
 - `RelayerVerifierRegistry=<VerifierRegistry object id>`
 - `SonariMembershipRegistryId=<MembershipRegistry object id>`
 - `RelayerSignerSecretArn=<relayer Sui private key secret ARN>`
