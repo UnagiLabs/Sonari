@@ -605,38 +605,37 @@
     },
     "dashboard": {
         "hero": {
-            "eyebrow": "Dashboard",
-            "title": "Transparent activity, at a glance.",
-            "sub": "A public view of pool balances, finalized events, recent donations, verified claims, and anonymized impact receipts."
+            "eyebrow": "PUBLIC DASHBOARD",
+            "title": "Funding and source transparency",
+            "sub": "An on-chain-only view of how much remains in each pool, and whether the source data behind aid has been verified and finalized."
         },
         "actions": {
             "donate": "Donate",
-            "refresh": "Refresh data"
+            "refresh": "Refresh"
         },
         "statusBar": {
-            "previewData": "Preview data",
-            "liveData": "Live chain data",
+            "liveData": "Live data",
             "loadingData": "Loading chain data",
             "unavailable": "Chain data unavailable",
-            "lastRefreshed": "Last refreshed {time}",
-            "publicView": "Public transparency view"
+            "lastRefreshed": "Last updated {time}",
+            "publicView": "Showing on-chain finalized values only"
         },
         "metrics": {
-            "totalDonated": {
-                "label": "Total donated",
-                "detail": "+ $48,200 in 24h"
+            "totalBalance": {
+                "label": "Total balance",
+                "meta": "Across the displayed pools (USDC)"
             },
-            "aidDelivered": {
-                "label": "Total aid delivered",
-                "detail": "1,291 verified claims"
+            "availableNow": {
+                "label": "Available now",
+                "meta": "Payable immediately"
             },
-            "activePools": {
-                "label": "Active pools",
-                "detail": "Main and earthquake"
+            "reservedFloor": {
+                "label": "Reserved (floor)",
+                "meta": "Main pool floor reserve"
             },
-            "receipts": {
-                "label": "Impact receipts",
-                "detail": "Public, anonymized records"
+            "confirmedEvents": {
+                "label": "Confirmed events",
+                "meta": "Signature-verified source data"
             }
         },
         "status": {
@@ -647,7 +646,7 @@
             "finalized": "finalized"
         },
         "poolsPanel": {
-            "eyebrow": "Pools",
+            "eyebrow": "POOL BALANCE",
             "title": "Pool balances",
             "action": "View pools"
         },
@@ -662,47 +661,52 @@
             "main": {
                 "name": "Main Pool"
             },
-            "operations": {
-                "name": "Operations Pool"
-            },
             "earthquake": {
                 "name": "Earthquake Relief Pool"
             }
         },
+        "confirmedSource": {
+            "eyebrow": "CONFIRMED SOURCE",
+            "title": "Confirmed source",
+            "verifiedBadge": "Signature verified · Finalized",
+            "empty": "No finalized event",
+            "objectLabel": "disaster_event",
+            "revision": "rev {revision} · {date}"
+        },
+        "sourceChain": {
+            "usgs": {
+                "name": "USGS Earthquake API",
+                "note": "Official source"
+            },
+            "nautilus": {
+                "name": "Nautilus TEE",
+                "note": "Re-fetch & sign"
+            },
+            "sui": {
+                "name": "Sui Move",
+                "note": "Verify & finalize"
+            }
+        },
         "eventPanel": {
-            "eyebrow": "Latest DisasterEvent",
-            "title": "Finalized source data",
-            "action": "View events",
-            "statusLabel": "Status",
-            "intensityLabel": "Intensity",
+            "hazardLabel": "Hazard",
             "affectedCellsLabel": "Affected cells",
-            "claimWindowLabel": "Claim window"
+            "affectedCellsValue": "{cells} cells · H3 r8",
+            "finalizedAtLabel": "Finalized at",
+            "claimWindowLabel": "Claim window",
+            "claimWindowValue": "30 days from finalization"
         },
-        "donations": {
-            "title": "Recent donations",
-            "action": "Donation history"
+        "affectedMap": {
+            "caption": "affected-area map",
+            "grid": "H3 r8 · {cells} cells",
+            "note": "The affected area is shown as H3 cells computed from ShakeMap and is used for the affected-area proof when claiming."
         },
-        "claims": {
-            "title": "Recent claims"
-        },
-        "receiptsPanel": {
-            "title": "Impact receipts",
-            "action": "All receipts"
-        },
-        "supportersPanel": {
-            "title": "Top supporters",
-            "individualDonors": "Individual donors",
-            "corporateSponsors": "Corporate sponsors",
-            "noSupporters": "No supporter ranking is available from chain data yet.",
-            "rankLabel": "rank #{rank}"
-        },
+        "disclaimer": "Sonari is not insurance. Donations do not create a guaranteed payout. Support depends on pool balance, program rules, verification requirements, fraud controls, and claim timing.",
         "states": {
             "loadingTitle": "Reading chain data",
             "loadingBody": "Pool balances and recent activity are being read from Sui RPC.",
             "errorTitle": "Could not read dashboard data",
             "errorBody": "The dashboard does not show fallback mock data. Check the configuration or retry the RPC request.",
-            "retry": "Retry",
-            "noItems": "No chain activity is available yet."
+            "retry": "Retry"
         }
     },
     "claim": {

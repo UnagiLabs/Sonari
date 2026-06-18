@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardPools } from "./dashboard-chain";
-import type {
-    DashboardClaimEvent,
-    DashboardDisasterEvent,
-    DashboardDonationEvent,
-} from "./dashboard-events";
+import type { DashboardDisasterEvent } from "./dashboard-events";
 import { deriveDashboardViewModel, deriveFeaturedPools } from "./dashboard-view-model";
 
 const pools: DashboardPools = {
@@ -33,30 +29,6 @@ const pools: DashboardPools = {
     },
 };
 
-const donation: DashboardDonationEvent = {
-    kind: "donation",
-    id: "donation:1",
-    source: "general",
-    label: "Donor 0x5555...5555",
-    amountUsdc: 2500000n,
-    actor: `0x${"55".repeat(32)}`,
-    poolId: pools.main.objectId,
-    occurredAtMs: 1700000000000,
-    status: "confirmed",
-};
-
-const claim: DashboardClaimEvent = {
-    kind: "claim",
-    id: "claim:1",
-    source: "floor",
-    label: "recipient · 0x4444...4444",
-    amountUsdc: 1000000n,
-    campaignId: `0x${"44".repeat(32)}`,
-    recipient: `0x${"66".repeat(32)}`,
-    occurredAtMs: 1699999940000,
-    status: "finalized",
-};
-
 const latestEvent: DashboardDisasterEvent = {
     id: `0x${"77".repeat(32)}`,
     sourceEventId: "usgs-1",
@@ -70,82 +42,67 @@ const latestEvent: DashboardDisasterEvent = {
 };
 
 describe("deriveDashboardViewModel", () => {
-    it("formats metrics, pools, activities, and event data from real inputs", () => {
+    it("aggregates only the displayed pools and the confirmed source event", () => {
         const view = deriveDashboardViewModel({
             locale: "en",
             nowMs: 1700000000000,
             pools,
-            donations: [donation],
-            claims: [claim],
-            aidDeliveredUsdc: 1000000n,
-            totalClaimsCount: 12,
             latestEvent,
         });
 
+        // メトリクスは表示対象2プール（Main + Earthquake）のみで集計し Operations は含めない。
+        expect(view.metricKeys).toEqual([
+            "totalBalance",
+            "availableNow",
+            "reservedFloor",
+            "confirmedEvents",
+        ]);
         expect(view.metricValues).toEqual({
-            totalDonated: "$44.00",
-            aidDelivered: "$1.00",
-            activePools: "3",
-            receipts: "12",
+            totalBalance: "$20.00", // main 12 + earthquake 8
+            availableNow: "$19.00", // (12 - 1) + 8
+            reservedFloor: "$1.00", // main reserve floor
+            confirmedEvents: "1", // finalized event present
         });
-        expect(view.metricDetails).toEqual({
-            totalDonated: "Across all configured pools",
-            aidDelivered: "Finalized floor and payout events",
-            activePools: "3 pools read from chain",
-            receipts: "12 finalized claim events",
-        });
-        expect(view.pools.map((pool) => pool.key)).toEqual(["main", "operations", "earthquake"]);
+
+        // プールは Main と Earthquake の2件のみ。Operations は出さない。
+        expect(view.pools.map((pool) => pool.key)).toEqual(["main", "earthquake"]);
         expect(view.pools[0]?.available).toBe("$11.00");
-        expect(view.pools[1]?.paidOut).toBe("$1.00");
-        expect(view.donations[0]).toEqual({
-            label: "Donor 0x5555...5555",
-            meta: "general · now",
-            amount: "$2.50",
-            status: "confirmed",
-        });
-        expect(view.claims[0]).toEqual({
-            label: "recipient · 0x4444...4444",
-            meta: "floor · 1 minute ago",
-            amount: "$1.00",
-            status: "finalized",
-        });
-        expect(view.receipts[0]?.label).toBe("claim:1");
+        expect(view.pools[1]?.available).toBe("$8.00");
+
         expect(view.latestEvent).toEqual({
-            id: latestEvent.id,
-            source: "usgs-1",
-            status: "finalized",
+            present: true,
+            sourceEventId: "usgs-1",
             region: "Offshore Iwate, Japan",
-            intensity: "earthquake",
-            affectedCells: "1,284 cells",
-            claimWindow: "Created November 14, 2023",
+            hazard: "earthquake",
+            affectedCellsCount: "1,284",
+            finalizedAt: "November 14, 2023",
+            finalizedDate: "2023-11-14",
+            eventRevision: 2,
+            objectId: latestEvent.id,
+            objectIdShort: "0x7777...7777",
         });
-        expect(view.topDonors).toEqual([]);
-        expect(view.topSponsors).toEqual([]);
     });
 
-    it("uses empty display models instead of mock data", () => {
+    it("returns an empty confirmed source and zero event count when no event is finalized", () => {
         const view = deriveDashboardViewModel({
             locale: "en",
             nowMs: 1700000000000,
             pools,
-            donations: [],
-            claims: [],
-            aidDeliveredUsdc: 0n,
-            totalClaimsCount: 0,
             latestEvent: null,
         });
 
-        expect(view.donations).toEqual([]);
-        expect(view.claims).toEqual([]);
-        expect(view.receipts).toEqual([]);
+        expect(view.metricValues.confirmedEvents).toBe("0");
         expect(view.latestEvent).toEqual({
-            id: "",
-            source: "Sui RPC",
-            status: "pending",
-            region: "No finalized event",
-            intensity: "No hazard data",
-            affectedCells: "0 cells",
-            claimWindow: "Not available",
+            present: false,
+            sourceEventId: "",
+            region: "",
+            hazard: "",
+            affectedCellsCount: "0",
+            finalizedAt: "",
+            finalizedDate: "",
+            eventRevision: 0,
+            objectId: "",
+            objectIdShort: "",
         });
     });
 });

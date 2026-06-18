@@ -15,9 +15,8 @@ import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network"
 import { readDashboardPools } from "./dashboard-chain";
 import { readDashboardEvents } from "./dashboard-events";
 import {
-    type DashboardActivityItem,
+    type DashboardConfirmedSource,
     type DashboardPoolSummary,
-    type DashboardSupporter,
     type DashboardViewModel,
     deriveDashboardViewModel,
 } from "./dashboard-view-model";
@@ -110,10 +109,6 @@ export function DashboardView({ locale }: { readonly locale: SonariLocale }) {
                     locale,
                     nowMs: Date.now(),
                     pools: poolResult.pools,
-                    donations: eventResult.donations,
-                    claims: eventResult.claims,
-                    aidDeliveredUsdc: eventResult.aidDeliveredUsdc,
-                    totalClaimsCount: eventResult.totalClaimsCount,
                     latestEvent: eventResult.latestEvent,
                 }),
             });
@@ -214,13 +209,13 @@ function DashboardContent({ view }: { readonly view: DashboardViewModel }) {
                     <article className="metric-item" key={key}>
                         <div className="label">{t(`metrics.${key}.label`)}</div>
                         <div className="value">{view.metricValues[key]}</div>
-                        <div className="meta">{view.metricDetails[key]}</div>
+                        <div className="meta">{t(`metrics.${key}.meta`)}</div>
                     </article>
                 ))}
             </section>
 
-            <section className="dashboard-grid" aria-label={t("hero.eyebrow")}>
-                <section className="dash-panel dash-panel-wide" aria-labelledby="pool-title">
+            <div className="dashboard-sections">
+                <section className="dash-panel" aria-labelledby="pool-title">
                     <PanelHeader
                         actionHref="/pools"
                         actionLabel={t("poolsPanel.action")}
@@ -235,71 +230,10 @@ function DashboardContent({ view }: { readonly view: DashboardViewModel }) {
                     </div>
                 </section>
 
-                <section className="dash-panel" aria-labelledby="event-title">
-                    <PanelHeader
-                        actionHref="/events"
-                        actionLabel={t("eventPanel.action")}
-                        eyebrow={t("eventPanel.eyebrow")}
-                        titleId="event-title"
-                        title={t("eventPanel.title")}
-                    />
-                    <div className="event-summary">
-                        <div className="event-source">{view.latestEvent.source}</div>
-                        <h3>{view.latestEvent.region}</h3>
-                        <dl>
-                            <div>
-                                <dt>{t("eventPanel.statusLabel")}</dt>
-                                <dd>{t(`status.${view.latestEvent.status}`)}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("eventPanel.intensityLabel")}</dt>
-                                <dd>{view.latestEvent.intensity}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("eventPanel.affectedCellsLabel")}</dt>
-                                <dd>{view.latestEvent.affectedCells}</dd>
-                            </div>
-                            <div>
-                                <dt>{t("eventPanel.claimWindowLabel")}</dt>
-                                <dd>{view.latestEvent.claimWindow}</dd>
-                            </div>
-                        </dl>
-                        {view.latestEvent.id.length > 0 ? (
-                            <a className="text-action" href="/events">
-                                {view.latestEvent.id}
-                            </a>
-                        ) : null}
-                    </div>
-                </section>
+                <ConfirmedSourcePanel source={view.latestEvent} />
+            </div>
 
-                <ActivityPanel
-                    actionHref="/donor"
-                    actionLabel={t("donations.action")}
-                    items={view.donations}
-                    title={t("donations.title")}
-                />
-                <ActivityPanel items={view.claims} title={t("claims.title")} />
-                <ActivityPanel
-                    actionHref="/receipts"
-                    actionLabel={t("receiptsPanel.action")}
-                    items={view.receipts}
-                    title={t("receiptsPanel.title")}
-                />
-
-                <section className="dash-panel dash-panel-wide" aria-labelledby="supporters-title">
-                    <PanelHeader titleId="supporters-title" title={t("supportersPanel.title")} />
-                    <div className="dashboard-supporters">
-                        <SupporterColumn
-                            supporters={view.topDonors}
-                            title={t("supportersPanel.individualDonors")}
-                        />
-                        <SupporterColumn
-                            supporters={view.topSponsors}
-                            title={t("supportersPanel.corporateSponsors")}
-                        />
-                    </div>
-                </section>
-            </section>
+            <p className="muted dashboard-disclaimer">{t("disclaimer")}</p>
         </>
     );
 }
@@ -378,79 +312,117 @@ function PoolRow({ pool }: { pool: DashboardPoolSummary }) {
                 </div>
                 <div>
                     <dt>{t("poolRow.available")}</dt>
-                    <dd>{pool.available}</dd>
+                    <dd className="is-accent">{pool.available}</dd>
                 </div>
             </dl>
         </article>
     );
 }
 
-function ActivityPanel({
-    actionHref,
-    actionLabel,
-    items,
-    title,
-}: {
-    actionHref?: string;
-    actionLabel?: string;
-    items: readonly DashboardActivityItem[];
-    title: string;
-}) {
+function ConfirmedSourcePanel({ source }: { readonly source: DashboardConfirmedSource }) {
     const t = useTranslations("dashboard");
 
     return (
-        <section className="dash-panel">
-            <PanelHeader
-                title={title}
-                {...(actionHref !== undefined && actionLabel !== undefined
-                    ? { actionHref, actionLabel }
-                    : {})}
-            />
-            <div className="activity-list">
-                {items.length === 0 ? <p className="muted">{t("states.noItems")}</p> : null}
-                {items.map((item) => (
-                    <article className="activity-row" key={`${item.label}-${item.meta}`}>
+        <section className="dash-panel" aria-labelledby="source-title">
+            <div className="panel-header">
+                <div>
+                    <div className="eyebrow">{t("confirmedSource.eyebrow")}</div>
+                    <h2 id="source-title">{t("confirmedSource.title")}</h2>
+                </div>
+                <span className={`tag ${source.present ? "tag-ok" : "tag-neutral"} tag-dot`}>
+                    {source.present
+                        ? t("confirmedSource.verifiedBadge")
+                        : t("confirmedSource.empty")}
+                </span>
+            </div>
+
+            <div className="source-chain">
+                <SourceChainStep
+                    name={t("sourceChain.usgs.name")}
+                    note={t("sourceChain.usgs.note")}
+                />
+                <span className="source-chain-arrow" aria-hidden="true">
+                    →
+                </span>
+                <SourceChainStep
+                    name={t("sourceChain.nautilus.name")}
+                    note={t("sourceChain.nautilus.note")}
+                />
+                <span className="source-chain-arrow" aria-hidden="true">
+                    →
+                </span>
+                <SourceChainStep
+                    name={t("sourceChain.sui.name")}
+                    note={t("sourceChain.sui.note")}
+                />
+                {source.present ? (
+                    <span className="source-chain-rev">
+                        {t("confirmedSource.revision", {
+                            revision: source.eventRevision,
+                            date: source.finalizedDate,
+                        })}
+                    </span>
+                ) : null}
+            </div>
+
+            <div className="source-layout">
+                <div className="event-summary">
+                    {source.present ? (
+                        <div className="event-source">{source.sourceEventId}</div>
+                    ) : null}
+                    <h3>{source.present ? source.region : t("confirmedSource.empty")}</h3>
+                    <dl>
                         <div>
-                            <div className="activity-label">{item.label}</div>
-                            <div className="activity-meta">{item.meta}</div>
+                            <dt>{t("eventPanel.hazardLabel")}</dt>
+                            <dd>{source.present ? source.hazard : "—"}</dd>
                         </div>
-                        <div className="activity-amount">
-                            <span>{item.amount}</span>
-                            <small>{t(`status.${item.status}`)}</small>
+                        <div>
+                            <dt>{t("eventPanel.affectedCellsLabel")}</dt>
+                            <dd>
+                                {source.present
+                                    ? t("eventPanel.affectedCellsValue", {
+                                          cells: source.affectedCellsCount,
+                                      })
+                                    : "—"}
+                            </dd>
                         </div>
-                    </article>
-                ))}
+                        <div>
+                            <dt>{t("eventPanel.finalizedAtLabel")}</dt>
+                            <dd>{source.present ? source.finalizedAt : "—"}</dd>
+                        </div>
+                        <div>
+                            <dt>{t("eventPanel.claimWindowLabel")}</dt>
+                            <dd>{source.present ? t("eventPanel.claimWindowValue") : "—"}</dd>
+                        </div>
+                    </dl>
+                    {source.present ? (
+                        <a className="source-object-link" href="/events">
+                            {t("confirmedSource.objectLabel")} {source.objectIdShort} →
+                        </a>
+                    ) : null}
+                </div>
+
+                <div className="source-map">
+                    <div className="affected-map-placeholder" aria-hidden="true">
+                        <div className="affected-map-caption">
+                            <span>{t("affectedMap.caption")}</span>
+                            <span>
+                                {t("affectedMap.grid", { cells: source.affectedCellsCount })}
+                            </span>
+                        </div>
+                    </div>
+                    <p className="muted affected-map-note">{t("affectedMap.note")}</p>
+                </div>
             </div>
         </section>
     );
 }
 
-function SupporterColumn({
-    supporters,
-    title,
-}: {
-    supporters: readonly DashboardSupporter[];
-    title: string;
-}) {
-    const t = useTranslations("dashboard.supportersPanel");
-
+function SourceChainStep({ name, note }: { readonly name: string; readonly note: string }) {
     return (
-        <section className="supporter-group" aria-label={title}>
-            <div className="supporter-group-label">{title}</div>
-            {supporters.length === 0 ? <p className="muted">{t("noSupporters")}</p> : null}
-            {supporters.map((supporter) => (
-                <article className="row-item" key={supporter.name}>
-                    <div className="avatar avatar-sq">{supporter.rank}</div>
-                    <div>
-                        <div className="row-name">{supporter.name}</div>
-                        <div className="row-meta">{supporter.meta}</div>
-                    </div>
-                    <div className="row-amount">
-                        <span className="stat-num">{supporter.amount}</span>
-                        <small>{t("rankLabel", { rank: supporter.rank })}</small>
-                    </div>
-                </article>
-            ))}
-        </section>
+        <span className="source-chain-step">
+            <span className="source-chain-name">{name}</span>
+            <span className="source-chain-note">{note}</span>
+        </span>
     );
 }
