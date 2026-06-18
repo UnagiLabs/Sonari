@@ -12,6 +12,8 @@
 #   wrangler secret put WORLD_ID_RP_SIGNING_KEY --name sonari-dapp
 # ENOKI_PRIVATE_API_KEY は cloudflare-dapp-worker の GitHub Environment Secret を
 # dapp deploy workflow が Cloudflare Worker runtime secret へ同期します。
+# OpenNext / Cloudflare preview smoke と rotation 手順は
+# docs/internal/operations/enoki_membership_smoke.md を参照してください。
 
 # World ID の RP 署名鍵。/api/world-id/rp-signature の signRequest だけが使う server-only 秘密鍵。
 # Developer Portal で発行した signing key（hex, 0x...）を入れます。
@@ -21,5 +23,5 @@ WORLD_ID_RP_SIGNING_KEY=
 # Enoki の sponsored transaction / execute 用 private API key。
 # /api/enoki/membership/sponsor と /api/enoki/membership/execute が
 # MembershipPass 発行専用に使います。
-# NEXT_PUBLIC_ は付けません。
+# NEXT_PUBLIC_ は付けません。公開値は dapp/.env.local に置きます。
 ENOKI_PRIVATE_API_KEY=
