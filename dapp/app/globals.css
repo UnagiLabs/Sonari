@@ -3563,6 +3563,9 @@ h4 {
  * ---------------------------------------------------------------------- */
 
 .donate-emergency-banner {
+  --donate-emergency-font-sans: "Noto Sans JP", var(--font-sans);
+  --donate-emergency-font-serif: "Noto Serif JP", var(--font-serif);
+
   display: grid;
   grid-template-columns: 6px minmax(0, 1fr);
   overflow: hidden;
@@ -3588,7 +3591,7 @@ h4 {
   display: flex;
   align-items: center;
   margin: 0;
-  padding: 22px 30px;
+  padding: 18px 30px;
   border-right: 1px solid oklch(0.86 0.055 25);
   background: oklch(0.96 0.035 25);
 }
@@ -3600,7 +3603,7 @@ h4 {
 
 .donate-emergency-banner-magnitude dt {
   color: oklch(0.48 0.11 25);
-  font-family: var(--font-mono);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -3612,15 +3615,15 @@ h4 {
   gap: 6px;
   margin: 0;
   color: oklch(0.48 0.17 25);
-  font-family: var(--font-sans);
-  font-size: clamp(64px, 7vw, 82px);
+  font-family: var(--donate-emergency-font-sans);
+  font-size: clamp(58px, 6vw, 72px);
   font-weight: 800;
   line-height: 0.9;
 }
 
 .donate-emergency-banner-magnitude dd span {
   color: oklch(0.55 0.08 25);
-  font-family: var(--font-sans);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 19px;
   font-weight: 800;
 }
@@ -3629,9 +3632,9 @@ h4 {
   grid-column: 2;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 32px;
+  gap: 6px 32px;
   align-items: center;
-  padding: 24px 40px;
+  padding: 20px 40px;
 }
 
 .donate-emergency-banner--with-magnitude .donate-emergency-banner-content {
@@ -3653,7 +3656,7 @@ h4 {
   border-radius: var(--radius-sm, 4px);
   background: oklch(0.58 0.16 25);
   color: oklch(0.99 0.005 25);
-  font-family: var(--font-mono);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -3665,7 +3668,7 @@ h4 {
   align-items: center;
   gap: 10px;
   color: oklch(0.48 0.17 25);
-  font-family: var(--font-mono);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.16em;
@@ -3685,8 +3688,8 @@ h4 {
   grid-column: 1;
   margin: 0;
   color: oklch(0.22 0.055 25);
-  font-family: var(--font-serif);
-  font-size: clamp(30px, 3.2vw, 42px);
+  font-family: var(--donate-emergency-font-serif);
+  font-size: clamp(26px, 2.5vw, 34px);
   font-weight: 500;
   line-height: 1.12;
 }
@@ -3695,20 +3698,21 @@ h4 {
   grid-column: 1;
   margin: 0;
   color: oklch(0.43 0.04 25);
-  font-family: var(--font-sans);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .donate-emergency-banner-cta {
   min-width: min(100%, 360px);
-  min-height: 62px;
+  min-height: 56px;
   max-width: 100%;
-  padding: 15px 30px;
+  padding: 13px 28px;
   border: 1.5px solid oklch(0.55 0.17 25);
   background: oklch(0.55 0.17 25);
   color: oklch(0.99 0.005 25);
+  font-family: var(--donate-emergency-font-sans);
   font-size: 16px;
   font-weight: 800;
   text-align: center;
@@ -3762,7 +3766,7 @@ h4 {
   .donate-emergency-banner-magnitude {
     grid-column: 2;
     grid-row: 1;
-    padding: 18px 24px;
+    padding: 16px 22px;
     border-right: 0;
     border-bottom: 1px solid oklch(0.86 0.055 25);
   }
@@ -3772,7 +3776,7 @@ h4 {
     grid-column: 2;
     grid-row: auto;
     grid-template-columns: minmax(0, 1fr);
-    padding: 22px 24px;
+    padding: 20px 22px;
   }
 
   .donate-emergency-banner-actions {
