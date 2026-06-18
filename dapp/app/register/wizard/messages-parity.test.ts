@@ -255,44 +255,39 @@ describe("messages catalog parity", () => {
         expect(welcomeStepSource).toContain('t("walletSponsorNote")');
     });
 
-    it("register、claim、mypage は LoginEntryPoint 経由で login 入口を描画する", () => {
+    it("register、claim、mypage は WalletConnect を直接描画する", () => {
         const sources = [
             {
                 name: "register welcome",
                 source: welcomeStepSource,
-                importPath: "../../../wallet/login-entry-point",
+                importPath: "../../../wallet/wallet-connect",
                 requiresAccountRead: true,
             },
             {
                 name: "claim list",
                 source: claimListViewSource,
-                importPath: "../wallet/login-entry-point",
+                importPath: "../wallet/wallet-connect",
                 requiresAccountRead: false,
             },
             {
                 name: "claim detail",
                 source: claimDetailViewSource,
-                importPath: "../../wallet/login-entry-point",
+                importPath: "../../wallet/wallet-connect",
                 requiresAccountRead: true,
             },
             {
                 name: "mypage",
                 source: mypageViewSource,
-                importPath: "../wallet/login-entry-point",
+                importPath: "../wallet/wallet-connect",
                 requiresAccountRead: true,
             },
         ];
 
         for (const { name, source, importPath, requiresAccountRead } of sources) {
-            expect(source, name).toContain(
-                `import { LoginEntryPoint, LoginEntryPointFallback } from "${importPath}";`,
-            );
-            expect(source, name).toContain(
-                "<Suspense fallback={<LoginEntryPointFallback />}>",
-            );
-            expect(source, name).toContain("<LoginEntryPoint />");
-            expect(source, name).not.toContain("wallet-connect");
-            expect(source, name).not.toContain("<WalletConnect");
+            expect(source, name).toContain(`import { WalletConnect } from "${importPath}";`);
+            expect(source, name).toContain("<WalletConnect />");
+            expect(source, name).not.toContain("login-entry-point");
+            expect(source, name).not.toContain("<LoginEntryPoint");
             if (requiresAccountRead) {
                 expect(source, name).toContain("useCurrentAccount()");
             }
