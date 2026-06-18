@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sonari.example/schemas/census_tee_input.schema.json",
   "title": "Sonari Census TEE Input",
-  "$comment": "MVP input for the census TEE. BCS output field order is defined separately in schemas/census_result.bcs.md.",
+  "$comment": "MVP input for the census TEE. BCS output field order and counted_cells_root leaf hashing are defined separately in schemas/census_result.bcs.md. The TEE recomputes counted_cells_root from the provided snapshot and rejects mismatches.",
   "type": "object",
   "additionalProperties": false,
   "required": [

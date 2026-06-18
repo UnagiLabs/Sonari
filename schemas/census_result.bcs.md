@@ -30,7 +30,7 @@ of the contract.
 | 10 | `h3_resolution` | `u8` | Fixed value `7` |
 | 11 | `shard_count` | `u64` | Fixed value `4096` |
 | 12 | `registered_members_by_band` | `vector<u64>` | ULEB128 length + exactly 3 × `u64` LE; band index matches distance band enum |
-| 13 | `counted_cells_root` | 32 raw bytes | Merkle root of counted cell leaves read by the TEE |
+| 13 | `counted_cells_root` | 32 raw bytes | Merkle root of counted cell leaves computed by the TEE |
 | 14 | `issued_at_ms` | `u64` | Census issue time in milliseconds since Unix epoch |
 
 ## Notes on raw-byte fields
@@ -38,6 +38,20 @@ of the contract.
 Fields 4, 6, 7, 8, and 13 are serialised as exactly 32 raw bytes **without** a BCS
 `vector<u8>` length prefix. This matches the `peel_bytes32` pattern used
 throughout the Sonari contract suite (see `identity_result_v1.move`).
+
+`counted_cells_root` uses the same tree rule as affected cells:
+
+- leaf hash: `SHA-256(0x00 || BCS(CountedCellLeaf))`
+- internal hash: `SHA-256(0x01 || left_32 || right_32)`
+- odd leaf promotion does not duplicate the final hash
+- leaves are sorted by numeric `h3_cell`
+
+`CountedCellLeaf` field order:
+
+1. `h3_cell: u64`
+2. `cell_band: u8`
+3. `shard_id: u64`
+4. `count_at_census_checkpoint: u64`
 
 ## Census index invariants
 

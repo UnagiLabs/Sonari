@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     buildFloorCensusInputBundle,
     computeFloorCensusCounts,
+    computeFloorCensusSnapshot,
     DirectFloorCensusAdapter,
     encodeFloorCensusResultBcs,
     type FloorCensusAffectedCellsResolver,
@@ -12,12 +13,14 @@ import {
     JsonRpcFloorCensusReader,
     parseFloorCensusTeeOutput,
     signFloorCensusResult,
+    TeeFloorCensusAdapter,
     type HomeCellRegisteredEvent,
 } from "../src/census.js";
 import {
     BCS_ENUMS,
     encodeEarthquakeOraclePayloadBcsHex,
     type EarthquakeOraclePayload,
+    type EnclaveVerificationMetadata,
 } from "@sonari/earthquake-shared";
 import type { RelayerSigner } from "@sonari/earthquake-relayer";
 
@@ -26,6 +29,11 @@ const affectedCellsRoot = `0x${"bb".repeat(32)}`;
 const membershipRegistryId = `0x${"22".repeat(32)}`;
 const cellCountIndexId = `0x${"33".repeat(32)}`;
 const countedCellsRoot = `0x${"cc".repeat(32)}`;
+const censusRegistrationMetadata: EnclaveVerificationMetadata = {
+    verifier_config_key: 3,
+    verifier_config_version: 7,
+    enclave_instance_public_key: `0x${"22".repeat(32)}`,
+};
 const originalFetch = globalThis.fetch;
 
 const affectedCells = {
@@ -60,6 +68,24 @@ describe("floor census core", () => {
             { lineage: "0xlineage4", homeCell: "40", registeredAtMs: 700 },
         ];
 
+        const snapshot = computeFloorCensusSnapshot({
+            affectedCells,
+            homeCellEvents: events,
+            activeLineages: new Set(["0xlineage1", "0xlineage2", "0xlineage4"]),
+            cutoffMs: 1_000,
+            expectedAffectedCellsRoot,
+            eventUid,
+            eventRevision: 7,
+        });
+
+        expect(snapshot.counts).toEqual([0n, 1n, 1n]);
+        expect(snapshot.countedCellsRoot).toBe(
+            computeCountedCellsRootForTest([
+                { h3: 10n, band: 1, count: 0n },
+                { h3: 20n, band: 2, count: 1n },
+                { h3: 30n, band: 3, count: 1n },
+            ]),
+        );
         expect(
             computeFloorCensusCounts({
                 affectedCells,
@@ -154,7 +180,6 @@ describe("floor census core", () => {
             membershipRegistryId,
             cellCountIndexId,
             censusCheckpoint: 41,
-            countedCellsRoot,
             issuedAtMs: 1_800_000_001_000,
         });
 
@@ -169,7 +194,11 @@ describe("floor census core", () => {
             membership_registry_id: membershipRegistryId,
             cell_count_index_id: cellCountIndexId,
             census_checkpoint: 41,
-            counted_cells_root: countedCellsRoot,
+            counted_cells_root: computeCountedCellsRootForTest([
+                { h3: 10n, band: 1, count: 0n },
+                { h3: 20n, band: 2, count: 1n },
+                { h3: 30n, band: 3, count: 0n },
+            ]),
             home_cell_events: [
                 {
                     lineage: `0x${"11".repeat(32)}`,
@@ -204,7 +233,6 @@ describe("floor census core", () => {
             membershipRegistryId,
             cellCountIndexId,
             censusCheckpoint: 41,
-            countedCellsRoot,
             issuedAtMs: 1_800_000_001_000,
             affectedCellsResolver: resolver,
         });
@@ -218,21 +246,26 @@ describe("floor census core", () => {
         ]);
     });
 
-    it("fails closed when counted_cells_root is not 32-byte hex", async () => {
-        await expect(
-            buildFloorCensusInputBundle({
-                result: finalizedResultForCensus(),
-                homeCellEvents: [],
-                activeLineages: [],
-                campaignId: `0x${"44".repeat(32)}`,
-                disasterEventId: `0x${"55".repeat(32)}`,
-                membershipRegistryId,
-                cellCountIndexId,
-                censusCheckpoint: 41,
-                countedCellsRoot: "0xcc",
-                issuedAtMs: 1_800_000_001_000,
-            }),
-        ).rejects.toThrow("expected 32-byte hex string");
+    it("builds counted_cells_root from the membership snapshot instead of accepting a caller-supplied root", async () => {
+        const bundle = await buildFloorCensusInputBundle({
+            result: finalizedResultForCensus(),
+            homeCellEvents: [],
+            activeLineages: [],
+            campaignId: `0x${"44".repeat(32)}`,
+            disasterEventId: `0x${"55".repeat(32)}`,
+            membershipRegistryId,
+            cellCountIndexId,
+            censusCheckpoint: 41,
+            issuedAtMs: 1_800_000_001_000,
+        });
+
+        expect(bundle.counted_cells_root).toBe(
+            computeCountedCellsRootForTest([
+                { h3: 10n, band: 1, count: 0n },
+                { h3: 20n, band: 2, count: 0n },
+                { h3: 30n, band: 3, count: 0n },
+            ]),
+        );
     });
 
     it("parses Census TEE output into raw submit bytes and counts", () => {
@@ -814,11 +847,11 @@ describe("DirectFloorCensusAdapter", () => {
                 sourceEventId: "us7000sonari",
                 result,
                 relayerDigest: "tx-digest",
-                disasterEventId: "0xdisaster",
+                disasterEventId: `0x${"88".repeat(32)}`,
             }),
         ).resolves.toMatchObject({
             status: "succeeded",
-            campaignId: "0xcampaign-revision-7",
+            campaignId: `0x${"77".repeat(32)}`,
         });
 
         expect(reader.campaignLookups).toEqual([
@@ -836,8 +869,60 @@ describe("DirectFloorCensusAdapter", () => {
                 checkpoint: 41,
             },
         ]);
-        expect(Buffer.from(signer.signedBytes ?? []).toString("hex")).toContain("07000000");
+        const signedHex = Buffer.from(signer.signedBytes ?? []).toString("hex");
+        expect(signedHex).toContain("07000000");
+        expect(signedHex).toContain(
+            computeCountedCellsRootForTest([
+                { h3: 10n, band: 1, count: 0n },
+                { h3: 20n, band: 2, count: 1n },
+                { h3: 30n, band: 3, count: 0n },
+            ]).slice(2),
+        );
         expect(client.submissions).toHaveLength(1);
+    });
+});
+
+describe("TeeFloorCensusAdapter", () => {
+    it("passes a computed counted_cells_root into the Census TEE input bundle", async () => {
+        const result = finalizedResultForCensus();
+        const reader = new RecordingFloorCensusReader();
+        const client = new RecordingFloorCensusSubmitClient();
+        const tee = new RecordingFloorCensusTeeClient();
+        const adapter = new TeeFloorCensusAdapter(
+            {
+                target: "0xabc::accessor::set_floor_census",
+                pauseState: "0xpause",
+                verifierRegistry: "0xverifier",
+                categoryPool: "0xcategory",
+                mainPool: "0xmain",
+                membershipRegistry: membershipRegistryId,
+                cellCountIndex: cellCountIndexId,
+                signer: new RecordingSigner().asSigner(),
+                reader,
+                client,
+                now: () => 1_800_000_001_000,
+            },
+            tee,
+            censusRegistrationMetadata,
+        );
+
+        await expect(
+            adapter.run({
+                sourceEventId: "us7000sonari",
+                result,
+                relayerDigest: "tx-digest",
+                disasterEventId: `0x${"88".repeat(32)}`,
+            }),
+        ).resolves.toMatchObject({ status: "succeeded" });
+
+        expect(tee.inputs).toHaveLength(1);
+        expect(tee.inputs[0]?.payload.counted_cells_root).toBe(
+            computeCountedCellsRootForTest([
+                { h3: 10n, band: 1, count: 0n },
+                { h3: 20n, band: 2, count: 1n },
+                { h3: 30n, band: 3, count: 0n },
+            ]),
+        );
     });
 });
 
@@ -847,6 +932,45 @@ function expectedRoot(): string {
         throw new Error("fixture should produce root");
     }
     return root;
+}
+
+function computeCountedCellsRootForTest(
+    cells: readonly { h3: bigint; band: number; count: bigint }[],
+): string {
+    const hashes = [...cells]
+        .sort((left, right) => (left.h3 < right.h3 ? -1 : left.h3 > right.h3 ? 1 : 0))
+        .map((cell) =>
+            createHashSync(
+                concat([
+                    Uint8Array.of(0),
+                    u64(cell.h3),
+                    Uint8Array.of(cell.band),
+                    u64(cell.h3 % 4_096n),
+                    u64(cell.count),
+                ]),
+            ),
+        );
+    if (hashes.length === 0) {
+        throw new Error("counted root fixture must have leaves");
+    }
+    let level = hashes;
+    while (level.length > 1) {
+        const next: Uint8Array[] = [];
+        for (let i = 0; i < level.length; i += 2) {
+            const left = level[i];
+            const right = level[i + 1];
+            if (left === undefined) {
+                throw new Error("missing counted root leaf");
+            }
+            next.push(right === undefined ? left : createHashSync(concat([Uint8Array.of(1), left, right])));
+        }
+        level = next;
+    }
+    const root = level[0];
+    if (root === undefined) {
+        throw new Error("missing counted root");
+    }
+    return `0x${Buffer.from(root).toString("hex")}`;
 }
 
 function jsonResponse(
@@ -1007,7 +1131,7 @@ class RecordingFloorCensusReader implements FloorCensusOnchainReader {
     }): Promise<{ campaignId: string; checkpoint: number } | undefined> {
         this.campaignLookups.push(input);
         return input.eventRevision === 7
-            ? { campaignId: "0xcampaign-revision-7", checkpoint: 41 }
+            ? { campaignId: `0x${"77".repeat(32)}`, checkpoint: 41 }
             : undefined;
     }
 }
@@ -1023,6 +1147,31 @@ class RecordingFloorCensusSubmitClient implements FloorCensusSubmitClient {
                 digest: "census-digest",
                 status: { success: true },
             },
+        };
+    }
+}
+
+class RecordingFloorCensusTeeClient {
+    readonly inputs: Array<{
+        action: "process_data";
+        payload: { counted_cells_root: string };
+        registration_metadata: EnclaveVerificationMetadata;
+    }> = [];
+
+    async processData(input: unknown): Promise<unknown> {
+        this.inputs.push(
+            input as {
+                action: "process_data";
+                payload: { counted_cells_root: string };
+                registration_metadata: EnclaveVerificationMetadata;
+            },
+        );
+        return {
+            status: "finalized",
+            payload: { registered_members_by_band: [0, 1, 0] },
+            payload_bcs_hex: `0x${"aa".repeat(8)}`,
+            signature: `0x${"11".repeat(64)}`,
+            public_key: censusRegistrationMetadata.enclave_instance_public_key,
         };
     }
 }
