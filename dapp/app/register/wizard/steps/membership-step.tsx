@@ -3,6 +3,11 @@
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import {
+    type MembershipDappGenesisObjects,
+    resolveMembershipDappGenesisObjects,
+} from "../../../chain/genesis-objects";
+import { createJsonRpcEventClient } from "../../../chain/json-rpc-event-client";
 import { LoadingIndicator } from "../../../components/loading-indicator";
 import { dAppKit } from "../../../wallet/dapp-kit";
 import {
@@ -36,10 +41,12 @@ interface MembershipStepProps {
 
 const membershipPackageId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_PACKAGE_ID ?? "";
 const residenceProofWorkerUrl = process.env.NEXT_PUBLIC_SONARI_RESIDENCE_PROOF_WORKER_URL ?? "";
-const pauseStateId = process.env.NEXT_PUBLIC_SONARI_IDENTITY_PAUSE_STATE_ID ?? "";
-const membershipRegistryId = process.env.NEXT_PUBLIC_SONARI_MEMBERSHIP_REGISTRY_ID ?? "";
-const allowedResidenceCellRegistryId =
-    process.env.NEXT_PUBLIC_SONARI_ALLOWED_RESIDENCE_CELL_REGISTRY_ID ?? "";
+
+type GenesisObjectsViewState =
+    | { readonly kind: "idle" }
+    | { readonly kind: "loading" }
+    | { readonly kind: "ok"; readonly objects: MembershipDappGenesisObjects }
+    | { readonly kind: "error"; readonly message: string };
 
 export function MembershipStep({
     membershipIssued,
@@ -57,13 +64,14 @@ export function MembershipStep({
 
     const [lookup, setLookup] = useState<MembershipLookupViewState>({ kind: "idle" });
     const [issueState, setIssueState] = useState<MembershipIssueViewState>({ kind: "idle" });
+    const [genesisObjects, setGenesisObjects] = useState<GenesisObjectsViewState>({
+        kind: "idle",
+    });
 
     const isConfigured =
         membershipPackageId.length > 0 &&
         residenceProofWorkerUrl.length > 0 &&
-        pauseStateId.length > 0 &&
-        membershipRegistryId.length > 0 &&
-        allowedResidenceCellRegistryId.length > 0;
+        genesisObjects.kind === "ok";
 
     const gateInput = {
         owner,
@@ -79,6 +87,33 @@ export function MembershipStep({
     const isIssued = issuance === "issued";
     const issueButtonLabel = isIssued ? t("issue.buttonIssued") : t("issue.button");
     const isPrimaryActionDisabled = actionState.disabled;
+
+    useEffect(() => {
+        if (membershipPackageId.length === 0) {
+            setGenesisObjects({ kind: "error", message: t("issue.notConfigured") });
+            return;
+        }
+
+        let cancelled = false;
+        setGenesisObjects({ kind: "loading" });
+
+        void resolveMembershipDappGenesisObjects(createJsonRpcEventClient(), {
+            packageId: membershipPackageId,
+        }).then((result) => {
+            if (cancelled) {
+                return;
+            }
+            if (result.kind === "ok") {
+                setGenesisObjects({ kind: "ok", objects: result.objects });
+                return;
+            }
+            setGenesisObjects({ kind: "error", message: t("issue.notConfigured") });
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [t]);
 
     useEffect(() => {
         if (owner.length === 0) {
@@ -138,7 +173,7 @@ export function MembershipStep({
             onNext();
             return;
         }
-        if (!isConfigured) {
+        if (!isConfigured || genesisObjects.kind !== "ok") {
             setIssueState({ kind: "failed", message: t("issue.notConfigured") });
             return;
         }
@@ -158,10 +193,14 @@ export function MembershipStep({
             return;
         }
 
-        void runMembershipIssuance(owner, selectedCellDecimal);
+        void runMembershipIssuance(owner, selectedCellDecimal, genesisObjects.objects);
     }
 
-    async function runMembershipIssuance(senderAddress: string, homeCell: string) {
+    async function runMembershipIssuance(
+        senderAddress: string,
+        homeCell: string,
+        objects: MembershipDappGenesisObjects,
+    ) {
         setIssueState({ kind: "submitting", phase: "prepare" });
 
         try {
@@ -172,9 +211,10 @@ export function MembershipStep({
                 residenceProofWorkerUrl,
                 packageId: membershipPackageId,
                 objects: {
-                    pauseState: pauseStateId,
-                    membershipRegistry: membershipRegistryId,
-                    allowedResidenceCellRegistry: allowedResidenceCellRegistryId,
+                    pauseState: objects.pauseState,
+                    membershipRegistry: objects.membershipRegistry,
+                    cellCountIndex: objects.cellCountIndex,
+                    allowedResidenceCellRegistry: objects.allowedResidenceCellRegistry,
                 },
                 termsVersion: MEMBERSHIP_TERMS_VERSION,
                 sponsoredExecutor: (input) =>
@@ -275,6 +315,9 @@ export function MembershipStep({
         }
         if (lookup.kind === "error") {
             return { message: lookup.message, tone: "alert" };
+        }
+        if (genesisObjects.kind === "loading") {
+            return { message: t("issue.checking"), tone: "note", loading: true };
         }
         if (!isConfigured) {
             return { message: t("issue.notConfigured"), tone: "alert" };

@@ -13,7 +13,8 @@ const PACKAGE_ID = `0x${"aa".repeat(32)}`;
 const SENDER = `0x${"11".repeat(32)}`;
 const PAUSE_STATE = `0x${"12".repeat(32)}`;
 const MEMBERSHIP_REGISTRY = `0x${"13".repeat(32)}`;
-const ALLOWED_RESIDENCE_CELL_REGISTRY = `0x${"14".repeat(32)}`;
+const CELL_COUNT_INDEX = `0x${"14".repeat(32)}`;
+const ALLOWED_RESIDENCE_CELL_REGISTRY = `0x${"15".repeat(32)}`;
 const HOME_CELL = "608819013681676287";
 const WRONG_HOME_CELL = "608819013597790207";
 const RESIDENCE_PROOF: ResidenceProofResponse = {
@@ -139,6 +140,7 @@ describe("membership issue helpers", () => {
             objects: {
                 pauseState: PAUSE_STATE,
                 membershipRegistry: MEMBERSHIP_REGISTRY,
+                cellCountIndex: CELL_COUNT_INDEX,
                 allowedResidenceCellRegistry: ALLOWED_RESIDENCE_CELL_REGISTRY,
             },
             homeCell: HOME_CELL,
@@ -177,7 +179,31 @@ describe("membership issue helpers", () => {
             module: "accessor",
             function: "register_member",
         });
-        expect(register.MoveCall.arguments).toHaveLength(7);
+        expect(register.MoveCall.arguments).toHaveLength(8);
+        expect(register.MoveCall.arguments.slice(0, 4)).toEqual([
+            { $kind: "Input", Input: 1, type: "object" },
+            { $kind: "Input", Input: 2, type: "object" },
+            { $kind: "Input", Input: 3, type: "object" },
+            { $kind: "Input", Input: 4, type: "object" },
+        ]);
+        expect(data.inputs.slice(1, 5)).toEqual([
+            {
+                $kind: "UnresolvedObject",
+                UnresolvedObject: { objectId: PAUSE_STATE },
+            },
+            {
+                $kind: "UnresolvedObject",
+                UnresolvedObject: { objectId: MEMBERSHIP_REGISTRY },
+            },
+            {
+                $kind: "UnresolvedObject",
+                UnresolvedObject: { objectId: CELL_COUNT_INDEX },
+            },
+            {
+                $kind: "UnresolvedObject",
+                UnresolvedObject: { objectId: ALLOWED_RESIDENCE_CELL_REGISTRY },
+            },
+        ]);
     });
 
     it("always issues membership through the sponsored executor", async () => {
@@ -193,6 +219,7 @@ describe("membership issue helpers", () => {
             objects: {
                 pauseState: PAUSE_STATE,
                 membershipRegistry: MEMBERSHIP_REGISTRY,
+                cellCountIndex: CELL_COUNT_INDEX,
                 allowedResidenceCellRegistry: ALLOWED_RESIDENCE_CELL_REGISTRY,
             },
             fetchImpl: async () =>

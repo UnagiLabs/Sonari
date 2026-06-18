@@ -3,6 +3,7 @@ import {
     GENESIS_OBJECT_KIND,
     parseGenesisObjectCreatedEvent,
     readGenesisObjectIds,
+    resolveMembershipDappGenesisObjects,
     selectGenesisObjectId,
 } from "./genesis-objects";
 
@@ -11,8 +12,12 @@ const PAUSE_STATE_ID = `0x${"02".repeat(32)}`;
 const MAIN_POOL_ID = `0x${"03".repeat(32)}`;
 const OPERATIONS_POOL_ID = `0x${"04".repeat(32)}`;
 const DONOR_REGISTRY_ID = `0x${"05".repeat(32)}`;
+const MEMBERSHIP_REGISTRY_ID = `0x${"06".repeat(32)}`;
+const IDENTITY_REGISTRY_ID = `0x${"09".repeat(32)}`;
 const CATEGORY_REGISTRY_ID = `0x${"0a".repeat(32)}`;
 const EARTHQUAKE_POOL_ID = `0x${"0b".repeat(32)}`;
+const ALLOWED_RESIDENCE_CELL_REGISTRY_ID = `0x${"0d".repeat(32)}`;
+const CELL_COUNT_INDEX_ID = `0x${"0e".repeat(32)}`;
 
 function genesisEvent(
     objectId: string,
@@ -31,6 +36,11 @@ function genesisEvent(
 }
 
 describe("parseGenesisObjectCreatedEvent", () => {
+    it("keeps object kind constants aligned with admin.move", () => {
+        expect(GENESIS_OBJECT_KIND.allowedResidenceCellRegistry).toBe(13);
+        expect(GENESIS_OBJECT_KIND.cellCountIndex).toBe(14);
+    });
+
     it("parses a valid genesis object created event", () => {
         expect(
             parseGenesisObjectCreatedEvent({
@@ -54,6 +64,79 @@ describe("parseGenesisObjectCreatedEvent", () => {
             parseGenesisObjectCreatedEvent({ object_id: MAIN_POOL_ID, object_kind: 3, created_at_ms: "x" }),
         ).toBeNull();
         expect(parseGenesisObjectCreatedEvent(null)).toBeNull();
+    });
+});
+
+describe("resolveMembershipDappGenesisObjects", () => {
+    it("resolves required membership dapp objects from genesis events", async () => {
+        const queryEvents = vi.fn(async () => ({
+            data: [
+                genesisEvent(PAUSE_STATE_ID, GENESIS_OBJECT_KIND.pauseState),
+                genesisEvent(MEMBERSHIP_REGISTRY_ID, GENESIS_OBJECT_KIND.membershipRegistry),
+                genesisEvent(IDENTITY_REGISTRY_ID, GENESIS_OBJECT_KIND.identityRegistry),
+                genesisEvent(
+                    ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+                    GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+                ),
+                genesisEvent(CELL_COUNT_INDEX_ID, GENESIS_OBJECT_KIND.cellCountIndex),
+            ],
+            hasNextPage: false,
+        }));
+
+        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: PACKAGE_ID });
+        expect(result).toEqual({
+            kind: "ok",
+            objects: {
+                pauseState: PAUSE_STATE_ID,
+                membershipRegistry: MEMBERSHIP_REGISTRY_ID,
+                identityRegistry: IDENTITY_REGISTRY_ID,
+                allowedResidenceCellRegistry: ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+                cellCountIndex: CELL_COUNT_INDEX_ID,
+            },
+        });
+    });
+
+    it("fails closed when a required object kind is missing", async () => {
+        const queryEvents = vi.fn(async () => ({
+            data: [
+                genesisEvent(PAUSE_STATE_ID, GENESIS_OBJECT_KIND.pauseState),
+                genesisEvent(MEMBERSHIP_REGISTRY_ID, GENESIS_OBJECT_KIND.membershipRegistry),
+                genesisEvent(IDENTITY_REGISTRY_ID, GENESIS_OBJECT_KIND.identityRegistry),
+                genesisEvent(
+                    ALLOWED_RESIDENCE_CELL_REGISTRY_ID,
+                    GENESIS_OBJECT_KIND.allowedResidenceCellRegistry,
+                ),
+            ],
+            hasNextPage: false,
+        }));
+
+        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: PACKAGE_ID });
+        expect(result.kind).toBe("error");
+        expect(result.message).toContain("cellCountIndex");
+        expect(result.message).toContain("14");
+    });
+
+    it("fails closed when the client cannot query events", async () => {
+        const result = await resolveMembershipDappGenesisObjects({}, { packageId: PACKAGE_ID });
+        expect(result).toEqual({
+            kind: "error",
+            message: "A queryEvents-capable Sui client is required to resolve genesis objects.",
+        });
+    });
+
+    it("returns an error result for invalid package ids", async () => {
+        const queryEvents = vi.fn();
+        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: "not-a-package" });
+        expect(result.kind).toBe("error");
+        expect(queryEvents).not.toHaveBeenCalled();
+    });
+
+    it("returns an error result for query errors", async () => {
+        const queryEvents = vi.fn(async () => {
+            throw new Error("rpc down");
+        });
+        const result = await resolveMembershipDappGenesisObjects({ queryEvents }, { packageId: PACKAGE_ID });
+        expect(result).toEqual({ kind: "error", message: "rpc down" });
     });
 });
 

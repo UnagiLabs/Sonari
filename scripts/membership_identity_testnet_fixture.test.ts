@@ -26,6 +26,7 @@ import {
     defaultWorldIdInput,
     EXPECTED_OBJECT_TYPES,
     FIXTURE_NONCE,
+    GENESIS_KIND_CELL_COUNT_INDEX,
     GENESIS_KIND_IDENTITY_REGISTRY,
     GENESIS_KIND_MEMBERSHIP_REGISTRY,
     GENESIS_KIND_PAUSE_STATE,
@@ -64,6 +65,7 @@ describe("membership identity testnet fixture files", () => {
                 `SONARI_IDENTITY_REGISTRY_ID=${objectId("22")}`,
                 `SONARI_MEMBERSHIP_REGISTRY_ID=${objectId("33")}`,
                 `SONARI_VERIFIER_REGISTRY_ID=${objectId("44")}`,
+                `SONARI_CELL_COUNT_INDEX_ID=${objectId("45")}`,
                 `SONARI_MEMBERSHIP_PASS_ID=${objectId("66")}`,
                 "",
             ].join("\n"),
@@ -196,6 +198,7 @@ describe("membership identity Sui JSON parsing", () => {
             identityRegistryId: objectId("22"),
             membershipRegistryId: objectId("33"),
             verifierRegistryId: objectId("44"),
+            cellCountIndexId: objectId("45"),
         });
     });
 
@@ -341,6 +344,7 @@ describe("membership identity base object resolution", () => {
             [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
             [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
             [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+            [objectId("45")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.cellCountIndex}`,
         });
 
         await expect(
@@ -351,6 +355,7 @@ describe("membership identity base object resolution", () => {
             }),
         ).resolves.toEqual(baseCandidates());
         expect(executor.plans.map((plan) => plan.args[5])).toEqual([
+            "object",
             "object",
             "object",
             "object",
@@ -394,6 +399,7 @@ describe("membership identity base object resolution", () => {
             [objectId("22")]: `${objectId("bb")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
             [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
             [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+            [objectId("45")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.cellCountIndex}`,
         });
 
         await expect(
@@ -414,6 +420,7 @@ describe("membership identity base object resolution", () => {
             [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
             [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
             [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+            [objectId("45")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.cellCountIndex}`,
         });
 
         await expect(
@@ -527,6 +534,7 @@ describe("membership identity pass fixture planning", () => {
                 packageId: objectId("aa"),
                 pauseStateId: objectId("11"),
                 membershipRegistryId: objectId("33"),
+                cellCountIndexId: objectId("44"),
                 allowedResidenceCellRegistryId: objectId("55"),
                 homeCell: DEFAULT_HOME_CELL,
                 proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
@@ -552,6 +560,7 @@ describe("membership identity pass fixture planning", () => {
                 `${objectId("aa")}::accessor::register_member`,
                 `@${objectId("11")}`,
                 `@${objectId("33")}`,
+                `@${objectId("44")}`,
                 `@${objectId("55")}`,
                 DEFAULT_HOME_CELL,
                 DEFAULT_TERMS_VERSION.toString(),
@@ -566,6 +575,7 @@ describe("membership identity pass fixture planning", () => {
                 packageId: objectId("aa"),
                 pauseStateId: objectId("11"),
                 membershipRegistryId: objectId("33"),
+                cellCountIndexId: objectId("44"),
                 allowedResidenceCellRegistryId: objectId("55"),
                 homeCell: DEFAULT_HOME_CELL,
                 proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
@@ -608,8 +618,8 @@ describe("membership identity pass fixture planning", () => {
             module: "accessor",
             function: "register_member",
         });
-        expect(register.MoveCall.arguments).toHaveLength(7);
-        expect(register.MoveCall.arguments[4]).toEqual({ Result: 2, $kind: "Result" });
+        expect(register.MoveCall.arguments).toHaveLength(8);
+        expect(register.MoveCall.arguments[5]).toEqual({ Result: 2, $kind: "Result" });
     });
 
     it("submits register_member through the Sui SDK using config-keystore resolution", async () => {
@@ -623,6 +633,7 @@ describe("membership identity pass fixture planning", () => {
                 packageId: objectId("aa"),
                 pauseStateId: objectId("11"),
                 membershipRegistryId: objectId("33"),
+                cellCountIndexId: objectId("44"),
                 allowedResidenceCellRegistryId: objectId("55"),
                 homeCell: DEFAULT_HOME_CELL,
                 proofLeft: DEFAULT_RESIDENCE_PROOF_LEFT,
@@ -717,6 +728,7 @@ describe("membership identity fixture runner", () => {
                 [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
                 [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
                 [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+                [objectId("45")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.cellCountIndex}`,
                 [objectId("55")]:
                     `${objectId("aa")}${EXPECTED_OBJECT_TYPES.allowedResidenceCellRegistry}`,
                 [objectId("66")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipPass}`,
@@ -813,6 +825,7 @@ function fixtureInput(): MembershipIdentityFixtureManifestInput {
             identityRegistryId: objectId("22"),
             membershipRegistryId: objectId("33"),
             verifierRegistryId: objectId("44"),
+            cellCountIndexId: objectId("45"),
             allowedResidenceCellRegistryId: objectId("55"),
             membershipPassId: objectId("66"),
         },
@@ -855,6 +868,7 @@ function publishJson(): unknown {
             genesisEvent(GENESIS_KIND_IDENTITY_REGISTRY, objectId("22")),
             genesisEvent(GENESIS_KIND_MEMBERSHIP_REGISTRY, objectId("33")),
             genesisEvent(GENESIS_KIND_VERIFIER_REGISTRY, objectId("44")),
+            genesisEvent(GENESIS_KIND_CELL_COUNT_INDEX, objectId("45")),
         ],
     };
 }
@@ -867,6 +881,7 @@ function baseCandidates() {
         identityRegistryId: objectId("22"),
         membershipRegistryId: objectId("33"),
         verifierRegistryId: objectId("44"),
+        cellCountIndexId: objectId("45"),
     };
 }
 
@@ -952,6 +967,7 @@ function fullFixtureExecutor(): SuiCommandExecutor & { plans: SuiCommandPlan[] }
         [objectId("22")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.identityRegistry}`,
         [objectId("33")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipRegistry}`,
         [objectId("44")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.verifierRegistry}`,
+        [objectId("45")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.cellCountIndex}`,
         [objectId("55")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.allowedResidenceCellRegistry}`,
         [objectId("66")]: `${objectId("aa")}${EXPECTED_OBJECT_TYPES.membershipPass}`,
     });
