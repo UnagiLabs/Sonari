@@ -505,6 +505,52 @@
             "options": {
                 "earthquake": "地震"
             }
+        },
+        "complete": {
+            "eyebrow": "寄付完了 · DONATION COMPLETE",
+            "title": "ご寄付ありがとうございます。",
+            "body": "あなたの支援はオンチェーンに記録されました。下記の宛名で領収書（寄付証明書）を発行できます。",
+            "amountLabel": "受領金額",
+            "destinationLabel": "寄付先",
+            "txDigestLabel": "トランザクションダイジェスト",
+            "explorerLink": "エクスプローラで開く →",
+            "issueTitle": "領収書の発行",
+            "issueBody": "領収書に記載するお名前（宛名）をご入力ください。",
+            "nameLabel": "領収書の宛名・お名前",
+            "namePlaceholder": "例）山田 太郎 / 山田商店 御中",
+            "anonymous": "匿名で発行する",
+            "anonymousHint": "領収書には「匿名の寄付者」と記載されます。",
+            "issueButton": "領収書を発行する",
+            "printHint": "発行後、ブラウザの印刷から PDF 保存・印刷ができます。",
+            "viewDashboard": "ダッシュボードを見る",
+            "backHome": "ホームへ戻る"
+        },
+        "receipt": {
+            "brandTagline": "TRANSPARENT RELIEF PROTOCOL",
+            "heading": "寄付領収書",
+            "headingEn": "IMPACT RECEIPT",
+            "numberLabel": "No.",
+            "amountLabel": "受領金額 · AMOUNT RECEIVED",
+            "certify": "上記の寄付を、Sonari の透明な救援基金として確かに受領したことを証明します。配分とレシートはすべてオンチェーンで検証できます。",
+            "received": "受領日 · RECEIVED",
+            "destination": "寄付先 · DESTINATION",
+            "networkLabel": "ネットワーク · NETWORK",
+            "donor": "寄付者 · DONOR",
+            "anonymous": "匿名の寄付者",
+            "txDigest": "トランザクションダイジェスト · TX DIGEST",
+            "donorPassLabel": "DONORPASS",
+            "scanHint": "スキャンしてオンチェーンで検証",
+            "verifiedSeal": "VERIFIED ON SUI · TRANSPARENT RELIEF · ",
+            "disclaimer": "本書はオンチェーン記録に基づく寄付の受領証明です。DonorPass は貢献履歴のみを記録し、申請権・支払いの優先度・税控除を保証するものではありません。",
+            "print": "印刷する",
+            "savePdf": "PDFで保存",
+            "back": "← 寄付に戻る",
+            "explorerLink": "エクスプローラで確認 →",
+            "network": {
+                "mainnet": "Sui Mainnet",
+                "testnet": "Sui Testnet",
+                "localnet": "Localnet"
+            }
         }
     },
     "home": {
