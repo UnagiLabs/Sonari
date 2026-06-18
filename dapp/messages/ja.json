@@ -323,7 +323,8 @@
             "donatePreview": "寄付をプレビュー",
             "saveDraft": "下書きを保存",
             "submit": "寄付する",
-            "submitting": "寄付を送信中…"
+            "submitting": "寄付を送信中…",
+            "lockedDestination": "この災害 Pool に寄付する"
         },
         "types": {
             "general": {

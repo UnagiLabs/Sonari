@@ -323,7 +323,8 @@
             "donatePreview": "Donate preview",
             "saveDraft": "Save draft",
             "submit": "Donate now",
-            "submitting": "Submitting donation…"
+            "submitting": "Submitting donation…",
+            "lockedDestination": "Donating to this disaster pool"
         },
         "types": {
             "general": {

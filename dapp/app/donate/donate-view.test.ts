@@ -93,3 +93,84 @@ describe("/donate wallet section removal", () => {
         }
     });
 });
+
+describe("DonateView initialMode / initialCampaignId / lockDestination props", () => {
+    it("DonateView が initialMode prop を受け取る型定義を持つ", () => {
+        expect(donateViewSource).toContain("initialMode");
+    });
+
+    it("DonateView が initialCampaignId prop を受け取る型定義を持つ", () => {
+        expect(donateViewSource).toContain("initialCampaignId");
+    });
+
+    it("DonateView が lockDestination prop を受け取る型定義を持つ", () => {
+        expect(donateViewSource).toContain("lockDestination");
+    });
+
+    it("state の mode 初期値を initialMode から設定する分岐がある", () => {
+        // useState の初期値に initialMode を使う
+        expect(donateViewSource).toContain("initialMode");
+        // 初期値の三項演算子または ?? での活用
+        expect(donateViewSource).toMatch(/initialMode[^;]*\?\?|initialMode[^;]*\?[^:]*:/);
+    });
+
+    it("state の campaignId 初期値を initialCampaignId から設定する分岐がある", () => {
+        expect(donateViewSource).toContain("initialCampaignId");
+        expect(donateViewSource).toMatch(/initialCampaignId[^;]*\?\?|initialCampaignId[^;]*\?[^:]*:/);
+    });
+
+    it("lockDestination が true のとき mode 切替ラジオを非描画にする分岐がソースにある", () => {
+        // lockDestination を条件に使う JSX 分岐が存在する
+        expect(donateViewSource).toContain("lockDestination");
+        // !lockDestination または lockDestination ? ... : ... などで非描画する
+        expect(donateViewSource).toMatch(/lockDestination[^{]*[?!]/);
+    });
+
+    it("lockDestination true 時に固定寄付先ブロックを描画する要素がある", () => {
+        // locked-destination などのクラスまたは i18n キーで固定表示ブロックがある
+        expect(donateViewSource).toMatch(/locked-destination|lockedDestination|lockDestination.*className|donate\.locked/);
+    });
+
+    it("auto-select effect で initialCampaignId が指定済みの場合は上書きしない分岐がある", () => {
+        // initialCampaignId が与えられたとき auto-select で上書きしないロジック
+        expect(donateViewSource).toContain("initialCampaignId");
+        // initialCampaignId を deps 配列または条件に使う箇所
+        expect(donateViewSource).toMatch(/initialCampaignId/);
+    });
+
+    it("props 未指定時の従来挙動用トークンを維持する", () => {
+        // 既存の非回帰トークン
+        expect(donateViewSource).toContain('<SiteTopbar active="donate" locale={locale} />');
+        expect(donateViewSource).toContain("<EmergencyBanner");
+        expect(donateViewSource).toContain('className="donate-layout"');
+        expect(donateViewSource).toContain('className="donate-form"');
+        expect(donateViewSource).toContain("executeWalletTransaction");
+    });
+
+    it("lockDestination 関連の i18n キーが en メッセージに存在する", () => {
+        const messages = readMessages("en");
+        const donateMessages = messages["donate"];
+        if (!isRecord(donateMessages)) {
+            throw new Error("donate messages must be an object");
+        }
+        // locked 固定表示用のキーが存在する（form.lockedDestination など）
+        const form = donateMessages["form"];
+        if (!isRecord(form)) {
+            throw new Error("donate.form messages must be an object");
+        }
+        expect(form).toHaveProperty("lockedDestination");
+    });
+
+    it("lockDestination 関連の i18n キーが ja メッセージに存在する", () => {
+        const messages = readMessages("ja");
+        const donateMessages = messages["donate"];
+        if (!isRecord(donateMessages)) {
+            throw new Error("donate messages must be an object");
+        }
+        const form = donateMessages["form"];
+        if (!isRecord(form)) {
+            throw new Error("donate.form messages must be an object");
+        }
+        expect(form).toHaveProperty("lockedDestination");
+    });
+});

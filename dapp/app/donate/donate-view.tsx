@@ -60,9 +60,27 @@ export interface DonateDemoConfig {
 export function DonateView({
     locale,
     demo,
+    initialMode,
+    initialCampaignId,
+    lockDestination = false,
 }: {
     readonly locale: SonariLocale;
     readonly demo?: DonateDemoConfig;
+    /**
+     * 寄付先モードの初期値。省略時は "general"（従来どおり）。
+     * lockDestination と組み合わせて campaign モードを固定するときに使う。
+     */
+    readonly initialMode?: DonateDestinationMode;
+    /**
+     * キャンペーン ID の初期値。initialMode === "campaign" と一緒に使う。
+     * 省略時は auto-select（従来どおり）。
+     */
+    readonly initialCampaignId?: string;
+    /**
+     * true にすると寄付先の mode 切替 UI・campaign 選択 UI を非描画にし、
+     * 固定された寄付先のみを表示する。未指定時は false（従来どおり）。
+     */
+    readonly lockDestination?: boolean;
 }) {
     const demoMode = demo !== undefined;
     const t = useTranslations("donate");
@@ -91,8 +109,8 @@ export function DonateView({
     const [donorPassState, setDonorPassState] = useState<DonateDonorPassReadState>({
         status: "idle",
     });
-    const [mode, setMode] = useState<DonateDestinationMode>("general");
-    const [campaignId, setCampaignId] = useState("");
+    const [mode, setMode] = useState<DonateDestinationMode>(initialMode ?? "general");
+    const [campaignId, setCampaignId] = useState(initialCampaignId ?? "");
     const [categoryPoolId, setCategoryPoolId] = useState("");
     const [amountInput, setAmountInput] = useState(DEFAULT_DONATION_AMOUNT);
     const [txState, setTxState] = useState<DonateTxState>({ status: "idle" });
@@ -282,6 +300,11 @@ export function DonateView({
                 (campaign) => campaign.id === campaignId,
             );
             if (!hasSelected) {
+                // initialCampaignId が指定済みで、かつそのキャンペーンがまだ読み込まれていない場合は
+                // 初期値を保持したまま待つ（auto-select で initialCampaignId を上書きしない）。
+                if (initialCampaignId !== undefined && initialCampaignId.length > 0) {
+                    return;
+                }
                 setCampaignId(destinationState.campaigns[0]?.id ?? "");
             }
             return;
@@ -301,7 +324,7 @@ export function DonateView({
                 );
             }
         }
-    }, [destinationState, mode, campaignId, categoryPoolId]);
+    }, [destinationState, mode, campaignId, categoryPoolId, initialCampaignId]);
 
     // デモモードでは送金導線を出さないため、無効化理由の算出自体を省く。
     const disabledReason = demoMode
@@ -581,39 +604,45 @@ export function DonateView({
                                 <span className="tag tag-ok tag-dot">USDC</span>
                             </div>
 
-                            <fieldset className="control-group">
-                                <legend>{t("form.typeLegend")}</legend>
-                                <div className="choice-grid">
-                                    <label className="choice-option">
-                                        <input
-                                            checked={mode === "general"}
-                                            name="donationMode"
-                                            onChange={() => handleModeChange("general")}
-                                            type="radio"
-                                            value="general"
-                                        />
-                                        <span>
-                                            <strong>{t("types.general.label")}</strong>
-                                            <small>{t("types.general.description")}</small>
-                                        </span>
-                                    </label>
-                                    <label className="choice-option">
-                                        <input
-                                            checked={mode === "category"}
-                                            name="donationMode"
-                                            onChange={() => handleModeChange("category")}
-                                            type="radio"
-                                            value="category"
-                                        />
-                                        <span>
-                                            <strong>{t("types.category.label")}</strong>
-                                            <small>{t("types.category.description")}</small>
-                                        </span>
-                                    </label>
+                            {lockDestination ? (
+                                <div className="locked-destination control-group">
+                                    <p className="faint">{t("form.lockedDestination")}</p>
                                 </div>
-                            </fieldset>
+                            ) : (
+                                <fieldset className="control-group">
+                                    <legend>{t("form.typeLegend")}</legend>
+                                    <div className="choice-grid">
+                                        <label className="choice-option">
+                                            <input
+                                                checked={mode === "general"}
+                                                name="donationMode"
+                                                onChange={() => handleModeChange("general")}
+                                                type="radio"
+                                                value="general"
+                                            />
+                                            <span>
+                                                <strong>{t("types.general.label")}</strong>
+                                                <small>{t("types.general.description")}</small>
+                                            </span>
+                                        </label>
+                                        <label className="choice-option">
+                                            <input
+                                                checked={mode === "category"}
+                                                name="donationMode"
+                                                onChange={() => handleModeChange("category")}
+                                                type="radio"
+                                                value="category"
+                                            />
+                                            <span>
+                                                <strong>{t("types.category.label")}</strong>
+                                                <small>{t("types.category.description")}</small>
+                                            </span>
+                                        </label>
+                                    </div>
+                                </fieldset>
+                            )}
 
-                            {mode === "campaign" ? (
+                            {!lockDestination && mode === "campaign" ? (
                                 <fieldset className="control-group">
                                     <legend>{t("form.campaignLegend")}</legend>
                                     <div className="pool-select-list">
