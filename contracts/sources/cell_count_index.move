@@ -221,6 +221,21 @@ public fun has_cell_for_testing(index: &CellCountIndex, h3_cell: u64): bool {
 }
 
 #[test_only]
+public fun set_count_for_testing(index: &mut CellCountIndex, h3_cell: u64, active_count: u64) {
+    let shard_id = shard_id(h3_cell);
+    let shard = dynamic_object_field::borrow_mut<u64, CellCountShard>(&mut index.id, shard_id);
+    let count = dynamic_field::borrow_mut<u64, CellCount>(&mut shard.id, h3_cell);
+    count.active_count = active_count;
+}
+
+#[test_only]
+public fun remove_count_for_testing(index: &mut CellCountIndex, h3_cell: u64) {
+    let shard_id = shard_id(h3_cell);
+    let shard = dynamic_object_field::borrow_mut<u64, CellCountShard>(&mut index.id, shard_id);
+    let _ = dynamic_field::remove<u64, CellCount>(&mut shard.id, h3_cell);
+}
+
+#[test_only]
 public fun cell_count_index_created_event_fields(
     event: CellCountIndexCreated,
 ): (ID, ID, u8, u64, address) {

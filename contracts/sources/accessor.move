@@ -80,6 +80,7 @@ public fun new_residence_proof_step_right(
 public fun update_member_home_cell(
     pause_state: &PauseState,
     registry: &membership::MembershipRegistry,
+    count_index: &mut cell_count_index::CellCountIndex,
     residence_registry: &allowed_residence_cell::AllowedResidenceCellRegistry,
     pass: &mut membership::MembershipPass,
     clock: &Clock,
@@ -95,10 +96,12 @@ public fun update_member_home_cell(
     );
     membership::update_home_cell(
         registry,
+        count_index,
         pass,
         ctx.sender(),
         home_cell,
         clock::timestamp_ms(clock),
+        ctx,
     );
 }
 

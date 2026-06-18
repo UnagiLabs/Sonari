@@ -131,12 +131,21 @@ public(package) fun register_member(
 
 public(package) fun update_home_cell(
     registry: &MembershipRegistry,
+    count_index: &mut cell_count_index::CellCountIndex,
     pass: &mut MembershipPass,
     claimant: address,
     home_cell: u64,
     registered_at_ms: u64,
+    ctx: &mut TxContext,
 ) {
     assert_current_pass_precheck(registry, pass, claimant);
+    let registry_id = object::id(registry);
+    cell_count_index::assert_membership_registry_id(count_index, registry_id);
+    let old_cell = pass.home_cell;
+    if (old_cell != home_cell) {
+        cell_count_index::decrement_existing(count_index, old_cell);
+        cell_count_index::increment_or_create(count_index, home_cell, ctx);
+    };
     set_home_cell(pass, home_cell, registered_at_ms);
 }
 
