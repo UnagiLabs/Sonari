@@ -22,6 +22,8 @@ import type { SonariLocale } from "../register/wizard/locale";
 import { dAppKit } from "../wallet/dapp-kit";
 import { readWalletNetwork, resolveGrpcBaseUrl } from "../wallet/wallet-network";
 import { executeWalletTransaction } from "../wallet/wallet-transaction-adapter";
+import { DonationCompleteView } from "./complete/donation-complete-view";
+import { DonationReceiptView } from "./complete/donation-receipt-view";
 import { validateDonationAmount } from "./donate-amount";
 import { combineDonateConfig, type DonateConfig, readDonateEnvConfig } from "./donate-config";
 import { readDonateDestinations } from "./donate-destinations";
@@ -77,6 +79,8 @@ export function DonateView({
     initialCampaignId,
     lockDestination = false,
     embedded = false,
+    onSubmittedChange,
+    destinationLabelOverride,
 }: {
     readonly locale: SonariLocale;
     readonly demo?: DonateDemoConfig;
@@ -101,6 +105,16 @@ export function DonateView({
      * 既にページ chrome を用意している場合の二重描画を防ぐ。未指定時は false（従来どおり）。
      */
     readonly embedded?: boolean;
+    /**
+     * 送金が submitted へ遷移したかを親へ通知する。embedded の呼び出し側が、完了画面へ
+     * 切り替わるタイミングで自前 chrome（ヒーロー・メトリクス等）を隠すために使う。
+     */
+    readonly onSubmittedChange?: (submitted: boolean) => void;
+    /**
+     * 完了/領収書に表示する寄付先ラベルの上書き。campaign の generic ラベル
+     * （"Campaign <shortId>"）を災害名などの友好名に差し替えるときに使う。
+     */
+    readonly destinationLabelOverride?: string;
 }) {
     const demoMode = demo !== undefined;
     const t = useTranslations("donate");
@@ -139,9 +153,21 @@ export function DonateView({
     const [mainPoolMetricsState, setMainPoolMetricsState] = useState<DonateMainPoolMetricsState>({
         status: "idle",
     });
+    // 完了→領収書のフェーズと、領収書に載せる宛名・匿名設定・受領時刻。
+    const [receiptPhase, setReceiptPhase] = useState<"complete" | "receipt">("complete");
+    const [receiptForm, setReceiptForm] = useState<{
+        readonly donorName: string;
+        readonly anonymous: boolean;
+    }>({ donorName: "", anonymous: false });
+    const [submittedAt, setSubmittedAt] = useState<number | null>(null);
 
     const amountValidation = useMemo(() => validateDonationAmount(amountInput), [amountInput]);
     const isWalletConnected = account !== null;
+
+    // submitted への遷移を親へ通知（embedded の親が自前 chrome を隠すため）。
+    useEffect(() => {
+        onSubmittedChange?.(txState.status === "submitted");
+    }, [txState.status, onSubmittedChange]);
 
     useEffect(() => {
         latestDonorPassLookupContext.current = {
@@ -438,6 +464,26 @@ export function DonateView({
         return { kind: "general" };
     }, [campaignId, categoryPoolId, mode]);
 
+    // 完了/領収書に渡す表示値。金額は micro USDC から直接整形する。
+    const completionAmountLabel = amountValidation.ok
+        ? formatMicroUsdc(amountValidation.microUsdc, locale)
+        : "";
+    const destinationLabel =
+        destinationLabelOverride ??
+        (mode === "general"
+            ? t("pools.main.label")
+            : mode === "category"
+              ? (() => {
+                    const item = buildCategoryListItems(destinationState.categories).find(
+                        (c) => c.categoryPoolId === categoryPoolId,
+                    );
+                    return item !== undefined
+                        ? formatCategoryOptionLabel(t, item)
+                        : t("pools.main.label");
+                })()
+              : (destinationState.campaigns.find((c) => c.campaignId === campaignId)?.label ??
+                t("types.general.label")));
+
     const isDonateInFlight = txState.status === "building" || txState.status === "submitting";
     const isSubmitDisabled = isDonateSubmitDisabled({
         demoMode,
@@ -503,24 +549,30 @@ export function DonateView({
         return value.replace(/\$/g, "").replace(/,/g, "").trim();
     }
 
+    // フォーム編集で送金結果と完了フェーズを初期化し、フォームへ戻す。
+    function resetTxToForm() {
+        setTxState({ status: "idle" });
+        setReceiptPhase("complete");
+    }
+
     function handleQuickAmount(value: string) {
         setAmountInput(normalizeAmount(value));
-        setTxState({ status: "idle" });
+        resetTxToForm();
     }
 
     function handleAmountChange(value: string) {
         setAmountInput(value);
-        setTxState({ status: "idle" });
+        resetTxToForm();
     }
 
     function handleModeChange(nextMode: DonateDestinationMode) {
         setMode(nextMode);
-        setTxState({ status: "idle" });
+        resetTxToForm();
     }
 
     function handleCategoryChange(nextCategoryPoolId: string) {
         setCategoryPoolId(nextCategoryPoolId);
-        setTxState({ status: "idle" });
+        resetTxToForm();
     }
 
     async function handleSubmit() {
@@ -574,6 +626,8 @@ export function DonateView({
 
             setTxState({ status: "submitting" });
             const { digest } = await executeWalletTransaction(dAppKit, { transaction });
+            setSubmittedAt(Date.now());
+            setReceiptPhase("complete");
             setTxState({ status: "submitted", digest });
             if (donorPass.kind === "none") {
                 setDonorPassState({ status: "loading" });
@@ -787,10 +841,59 @@ export function DonateView({
         </section>
     );
 
+    // 送金成功後の完了/領収書ビュー（ページ chrome なしの中身）。
+    // embedded / 非embedded のどちらでも使い回す。
+    const completionScreen =
+        receiptPhase === "complete" ? (
+            <DonationCompleteView
+                amountLabel={completionAmountLabel}
+                destinationLabel={destinationLabel}
+                digest={txState.status === "submitted" ? txState.digest : ""}
+                explorerUrl={resultView.explorerUrl}
+                donorName={receiptForm.donorName}
+                anonymous={receiptForm.anonymous}
+                onDonorNameChange={(value) =>
+                    setReceiptForm((prev) => ({ ...prev, donorName: value }))
+                }
+                onAnonymousChange={(value) =>
+                    setReceiptForm((prev) => ({ ...prev, anonymous: value }))
+                }
+                onIssueReceipt={() => setReceiptPhase("receipt")}
+                locale={locale}
+            />
+        ) : (
+            <DonationReceiptView
+                amountLabel={completionAmountLabel}
+                destinationLabel={destinationLabel}
+                network={network}
+                digest={txState.status === "submitted" ? txState.digest : ""}
+                explorerUrl={resultView.explorerUrl}
+                donorPassId={donorPassState.status === "ready" ? donorPassState.passId : null}
+                receivedAtMs={submittedAt}
+                donorName={receiptForm.anonymous ? null : receiptForm.donorName.trim() || null}
+                onBack={() => setReceiptPhase("complete")}
+                locale={locale}
+            />
+        );
+
     // embedded モード（/donate/[eventId] など）ではページ chrome を描画せず
     // フォーム部分だけ返す。背景・SiteTopbar・緊急バナー・ヒーローは呼び出し側が用意する。
+    // 送金成功後は完了/領収書ビューへ切り替える（chrome は親が温存）。
     if (embedded) {
-        return donateForm;
+        return txState.status === "submitted" ? completionScreen : donateForm;
+    }
+
+    // 送金成功後はヒーロー/メトリクスを置き換えて完了/領収書を全画面で出す。
+    if (txState.status === "submitted") {
+        return (
+            <>
+                <div className="watercolor-bg receipt-bg" />
+                <div className="app">
+                    <SiteTopbar active="donate" locale={locale} />
+                    <main className="page donate-page">{completionScreen}</main>
+                </div>
+            </>
+        );
     }
 
     return (

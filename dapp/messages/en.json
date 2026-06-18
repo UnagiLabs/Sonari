@@ -505,6 +505,52 @@
             "options": {
                 "earthquake": "Earthquake"
             }
+        },
+        "complete": {
+            "eyebrow": "DONATION COMPLETE",
+            "title": "Thank you for your support.",
+            "body": "Your support has been recorded on-chain. You can issue a receipt (donation certificate) addressed as below.",
+            "amountLabel": "Amount received",
+            "destinationLabel": "Destination",
+            "txDigestLabel": "Transaction digest",
+            "explorerLink": "Open in explorer →",
+            "issueTitle": "Issue a receipt",
+            "issueBody": "Enter the name (addressee) to print on the receipt.",
+            "nameLabel": "Receipt addressee · Name",
+            "namePlaceholder": "e.g. Jane Doe / Acme Co.",
+            "anonymous": "Issue anonymously",
+            "anonymousHint": "The receipt will show \"Anonymous Donor\".",
+            "issueButton": "Issue receipt",
+            "printHint": "After issuing, use your browser's print to save as PDF or print.",
+            "viewDashboard": "View dashboard",
+            "backHome": "Back to home"
+        },
+        "receipt": {
+            "brandTagline": "TRANSPARENT RELIEF PROTOCOL",
+            "heading": "Donation Receipt",
+            "headingEn": "IMPACT RECEIPT",
+            "numberLabel": "No.",
+            "amountLabel": "AMOUNT RECEIVED",
+            "certify": "This certifies that the donation above was duly received into Sonari's transparent relief fund. Allocations and receipts are all verifiable on-chain.",
+            "received": "RECEIVED",
+            "destination": "DESTINATION",
+            "networkLabel": "NETWORK",
+            "donor": "DONOR",
+            "anonymous": "Anonymous Donor",
+            "txDigest": "TX DIGEST",
+            "donorPassLabel": "DONORPASS",
+            "scanHint": "Scan to verify on-chain",
+            "verifiedSeal": "VERIFIED ON SUI · TRANSPARENT RELIEF · ",
+            "disclaimer": "This document is a proof of receipt based on on-chain records. DonorPass records contribution history only and does not guarantee claim rights, payment priority, or tax deduction.",
+            "print": "Print",
+            "savePdf": "Save as PDF",
+            "back": "← Back to donate",
+            "explorerLink": "View in explorer →",
+            "network": {
+                "mainnet": "Sui Mainnet",
+                "testnet": "Sui Testnet",
+                "localnet": "Localnet"
+            }
         }
     },
     "home": {
