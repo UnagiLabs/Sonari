@@ -1,26 +1,20 @@
 "use client";
 
 import { useCurrentClient } from "@mysten/dapp-kit-react";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { readClaimCampaigns } from "./claim/claim-campaigns";
+import { type ClaimCampaignState, readClaimCampaigns } from "./claim/claim-campaigns";
 import { createClaimReadClient } from "./claim/claim-read-client";
 import { readDonateEnvConfig } from "./donate/donate-config";
-import { readDonateDestinations } from "./donate/donate-destinations";
-import {
-    type DonateDestinationReadState,
-    selectEmergencyBannerCampaign,
-} from "./donate/donate-view-state";
+import { selectEmergencyBannerFromClaimCampaigns } from "./donate/donate-view-state";
 import { EmergencyBanner } from "./donate/emergency-banner";
 import type { EmergencyBannerCampaign } from "./donate/emergency-banner-state";
 import { useClaimBannerCta } from "./home-claim-banner";
 import { SiteTopbar } from "./i18n/site-topbar";
 import { buildDisasterPoolViews, type DisasterPoolView } from "./pools/disaster-pool-view-model";
 import type { SonariLocale } from "./register/wizard/locale";
-import { readWalletNetwork, resolveGrpcBaseUrl } from "./wallet/wallet-network";
 
 type IconName =
     | "arrowRight"
@@ -312,86 +306,51 @@ function HomeEmergencyBannerView({
     );
 }
 
-// 本番ホームの緊急バナー。チェーンからキャンペーンを読み、実施中のものだけ表示する。
-// 取得は donate ページと同じ readDonateDestinations を使う。読み込み中・失敗・
-// 該当なしのときは selectEmergencyBannerCampaign が null を返し、バナーは出ない（fail-close）。
+// 本番ホームの緊急バナー。チェーンから災害 Campaign を読み、実施中のものだけ表示する。
+// FeaturedPools と同じ readClaimCampaigns を使い、バナーに災害イベント名（title）を出す。
+// CampaignCreated イベントだけでは title を取れないため DisasterEvent 紐付け済みの
+// ClaimCampaignState から選ぶ。読み込み中・失敗・該当なしのときは選定が null を返し、
+// バナーは出ない（fail-close）。
 function HomeEmergencyBanner() {
     const t = useTranslations("home");
-    const network = readWalletNetwork();
     // 受け取り導線の判定は寄付バナーの取得とは独立。接続済み・登録済み・claim window
     // 開のキャンペーンがあるときだけ「受け取る」主ボタンを足す（バナーは 1 枠のまま）。
     const claimCta = useClaimBannerCta();
-    const [state, setState] = useState<DonateDestinationReadState>({
-        status: "loading",
-        campaigns: [],
-        categories: [],
-        errorMessage: null,
-    });
+    const suiClient = useCurrentClient();
+    const client = useMemo(() => createClaimReadClient(suiClient), [suiClient]);
+    const [campaigns, setCampaigns] = useState<readonly ClaimCampaignState[]>([]);
 
     useEffect(() => {
         // funding package 未設定では実施中キャンペーンを判定できないため非表示にする。
         const envConfigResult = readDonateEnvConfig();
         if (envConfigResult.kind !== "ok") {
-            setState({
-                status: "error",
-                campaigns: [],
-                categories: [],
-                errorMessage: "NEXT_PUBLIC_SONARI_FUNDING_PACKAGE_ID is required.",
-            });
+            setCampaigns([]);
             return;
         }
-        const fundingPackageId = envConfigResult.config.fundingPackageId;
-
-        const client = new SuiJsonRpcClient({ network, url: resolveGrpcBaseUrl(network) });
+        const packageId = envConfigResult.config.fundingPackageId;
         let cancelled = false;
-        setState({ status: "loading", campaigns: [], categories: [], errorMessage: null });
+        setCampaigns([]);
 
-        void (async () => {
-            try {
-                const result = await readDonateDestinations(client, {
-                    packageId: fundingPackageId,
-                });
+        readClaimCampaigns(client, { packageId, nowMs: Date.now() })
+            .then((result) => {
                 if (cancelled) {
                     return;
                 }
-                if (result.kind === "ok") {
-                    setState({
-                        status: "ready",
-                        campaigns: result.campaigns,
-                        categories: result.categories,
-                        errorMessage: null,
-                    });
-                    return;
+                setCampaigns(result.kind === "ok" ? result.campaigns : []);
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setCampaigns([]);
                 }
-                setState({
-                    status: "error",
-                    campaigns: [],
-                    categories: [],
-                    errorMessage: result.message,
-                });
-            } catch (error) {
-                if (cancelled) {
-                    return;
-                }
-                setState({
-                    status: "error",
-                    campaigns: [],
-                    categories: [],
-                    errorMessage:
-                        error instanceof Error
-                            ? error.message
-                            : "Failed to load emergency campaign.",
-                });
-            }
-        })();
+            });
 
         return () => {
             cancelled = true;
         };
-    }, [network]);
+    }, [client]);
 
     // 現在時刻で実施中判定する。該当が無ければ null になりバナーは非表示。
-    const campaign = selectEmergencyBannerCampaign(state, BigInt(Date.now()));
+    const campaign = selectEmergencyBannerFromClaimCampaigns(campaigns, BigInt(Date.now()));
     const primaryAction =
         claimCta !== null
             ? { href: `/claim?campaign=${claimCta.campaignId}`, label: t("emergencyClaimCta") }

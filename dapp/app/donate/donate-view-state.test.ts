@@ -7,12 +7,44 @@ import {
     findActiveEmergencyCampaign,
     isDonateSubmitDisabled,
     selectEmergencyBannerCampaign,
+    selectEmergencyBannerFromClaimCampaigns,
     buildCategoryListItems,
     type DonateDonorPassReadState,
     type DonateDestinationReadState,
     type DonateTxState,
 } from "./donate-view-state";
+import type { ClaimCampaignState } from "../claim/claim-campaigns";
 import type { CampaignDestination, CategoryDestination } from "./donate-destinations";
+
+function makeClaimCampaign(overrides: Partial<ClaimCampaignState> = {}): ClaimCampaignState {
+    return {
+        campaignId: "0xcampaign",
+        disasterEventId: "0xevent",
+        eventUid: `0x${"cd".repeat(32)}`,
+        eventRevision: 1,
+        affectedCellsRoot: `0x${"ef".repeat(32)}`,
+        title: "M 6.3 - 260 km SSE of Dunhuang, China",
+        region: "260 km SSE of Dunhuang, China",
+        severityBand: 2,
+        affectedCellCount: "113",
+        donationEndMs: "9999999999999",
+        claimEndMs: "9999999999999",
+        censusSet: true,
+        floorBudgetReturned: false,
+        claimWindowOpen: true,
+        floorClaimAvailable: true,
+        payoutFinalized: false,
+        currentRound: "0",
+        roundFinalizedAtMs: "0",
+        roundIntervalMs: "100",
+        balanceUsdc: 0,
+        totalDonatedUsdc: 0,
+        totalPaidUsdc: 0,
+        closed: false,
+        paused: false,
+        ...overrides,
+    };
+}
 
 const readyDestinationState: DonateDestinationReadState = {
     status: "ready",
@@ -576,5 +608,37 @@ describe("isDonateSubmitDisabled", () => {
                 isInFlight: true,
             }),
         ).toBe(true);
+    });
+});
+
+describe("selectEmergencyBannerFromClaimCampaigns", () => {
+    it("実施中の Campaign の災害イベント名（title）を label に使う", () => {
+        const campaign = makeClaimCampaign({
+            campaignId: "0xc1",
+            title: "M 6.3 - 260 km SSE of Dunhuang, China",
+            donationEndMs: "9999999999999",
+        });
+        expect(selectEmergencyBannerFromClaimCampaigns([campaign], 1000n)).toEqual({
+            id: "0xc1",
+            label: "M 6.3 - 260 km SSE of Dunhuang, China",
+        });
+    });
+
+    it("寄付受付が終了（donationEndMs <= now）なら null を返す", () => {
+        const expired = makeClaimCampaign({ donationEndMs: "500" });
+        expect(selectEmergencyBannerFromClaimCampaigns([expired], 1000n)).toBeNull();
+    });
+
+    it("0 件なら null を返す", () => {
+        expect(selectEmergencyBannerFromClaimCampaigns([], 1000n)).toBeNull();
+    });
+
+    it("受付中が複数あるとき先頭を選ぶ", () => {
+        const first = makeClaimCampaign({ campaignId: "0xa", title: "First" });
+        const second = makeClaimCampaign({ campaignId: "0xb", title: "Second" });
+        expect(selectEmergencyBannerFromClaimCampaigns([first, second], 1000n)).toEqual({
+            id: "0xa",
+            label: "First",
+        });
     });
 });
