@@ -538,6 +538,12 @@
             "statusActive": "稼働中",
             "balance": "プール残高",
             "affectedCells": "被災セル数",
+            "status": {
+                "active": "受付中",
+                "ended": "寄付終了",
+                "paused": "一時停止",
+                "closed": "クローズ"
+            },
             "empty": "現在アクティブな災害救援プールはありません。",
             "error": "災害特設救援プールを読み込めませんでした。",
             "main": {

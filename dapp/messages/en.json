@@ -538,6 +538,12 @@
             "statusActive": "active",
             "balance": "Pool balance",
             "affectedCells": "Affected cells",
+            "status": {
+                "active": "Active",
+                "ended": "Donation ended",
+                "paused": "Paused",
+                "closed": "Closed"
+            },
             "empty": "No active disaster relief pools at this time.",
             "error": "Could not load disaster relief pools.",
             "main": {

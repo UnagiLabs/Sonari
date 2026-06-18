@@ -566,7 +566,9 @@ function DisasterPoolCard({ view }: { view: DisasterPoolView }) {
                 <div className="icon">
                     <Icon name="bolt" size={20} />
                 </div>
-                <span className="tag tag-ok tag-dot">{status}</span>
+                <span className={`tag tag-dot ${status === "active" ? "tag-ok" : "tag-neutral"}`}>
+                    {t(`status.${status}`)}
+                </span>
             </div>
             <div>
                 <h3>{title}</h3>
